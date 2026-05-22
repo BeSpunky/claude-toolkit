@@ -1,0 +1,9 @@
+{
+  "name": "project-starter",
+  "description": "Scaffold new BeSpunky-standard projects: integrated Nx monorepo + Angular (clean --minimal app) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. Generator-first.",
+  "version": "0.1.0",
+  "author": {
+    "name": "BeSpunky",
+    "url": "https://github.com/BeSpunky"
+  }
+}

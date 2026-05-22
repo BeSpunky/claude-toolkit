@@ -1,0 +1,55 @@
+// BeSpunky-standard devcontainer. Node from the base image; Claude CLI (feature) + Claude VS Code extension.
+{
+  "name": "{{PROJECT}}",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:{{NODE_MAJOR}}",
+
+  "features": {
+    "ghcr.io/devcontainers-extra/features/claude-code": {},
+    "ghcr.io/devcontainers/features/github-cli": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Anthropic.claude-code",
+        "nrwl.angular-console",
+        "Angular.ng-template",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "EditorConfig.EditorConfig",
+        "eamodio.gitlens",
+        "GitHub.vscode-github-actions",
+        "Tobermory.es6-string-html",
+        "christian-kohler.path-intellisense",
+        "formulahendry.auto-rename-tag",
+        "usernamehw.errorlens"
+      ],
+      "settings": {
+        "claude-code.dangerouslySkipPermissions": true,
+        "editor.formatOnSave": false,
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "explicit"
+        },
+        "eslint.validate": ["javascript", "typescript", "html"],
+        "typescript.preferences.importModuleSpecifier": "relative",
+        "typescript.updateImportsOnFileMove.enabled": "always",
+        "files.associations": {
+          "*.mdc": "markdown"
+        }
+      }
+    }
+  },
+
+  "postCreateCommand": "yarn install",
+  "remoteUser": "node",
+  "remoteEnv": {
+    "PATH": "${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",
+    "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached",
+    "source=${localWorkspaceFolderBasename}-node_modules,target=${containerWorkspaceFolder}/node_modules,type=volume",
+    "source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume",
+    "source=${localWorkspaceFolderBasename}-angular,target=${containerWorkspaceFolder}/.angular,type=volume"
+  ]
+}

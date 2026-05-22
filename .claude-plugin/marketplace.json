@@ -1,0 +1,13 @@
+{
+  "name": "claude-toolkit",
+  "owner": "BeSpunky",
+  "description": "BeSpunky's Claude Code skills, subagents and commands. Develop once here; install and continuously upgrade across all projects.",
+  "plugins": [
+    {
+      "name": "project-starter",
+      "source": "./plugins/project-starter",
+      "description": "Scaffold new BeSpunky-standard projects: integrated Nx monorepo + Angular (clean --minimal app, no demo) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. Generator-first.",
+      "version": "0.1.0"
+    }
+  ]
+}

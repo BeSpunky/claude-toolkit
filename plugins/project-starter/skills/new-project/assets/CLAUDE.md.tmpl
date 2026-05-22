@@ -1,0 +1,51 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview / Intentions
+
+<!-- Filled in by the new-project skill from the user's stated intentions. -->
+{{INTENTIONS}}
+
+## Stack
+
+- **Monorepo**: Nx, integrated layout (`apps/` + `libs/`).
+- **Framework**: Angular (clean `--minimal` app; no demo content).
+- **Package manager**: yarn.
+- **Dev environment**: devcontainer on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the base image) with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds.
+
+## Generator-first, manual last
+
+For anything Nx can generate - apps, libraries, components, services, project config - **use the Nx generator (`nx g ...`); never hand-create and fill files.** Before hand-writing anything structural, check what exists: `nx list <plugin>` / `nx g <generator> --help` (or the `nx-generate` skill / the Nx MCP server). Only fall back to manual file creation when no generator covers the task. **Never guess flags** - verify against `--help` / `nx_docs`.
+
+## Common Commands
+
+```bash
+# Generate the next Angular app or library (generator-first!)
+yarn nx g @nx/angular:application apps/<app-name> --minimal
+yarn nx g @nx/angular:library libs/<lib-name>
+
+# Serve / build / test / lint a project
+yarn nx serve <project>
+yarn nx build <project>
+yarn nx test <project>
+yarn nx lint <project>
+
+# Run a target across everything affected by your changes
+yarn nx affected -t build test lint
+```
+
+## Working with Nx
+
+- For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies.
+- When running tasks (build, lint, test, e2e, etc.), always prefer `nx` (`nx run`, `nx run-many`, `nx affected`) over the underlying tooling directly.
+- Prefix nx commands with the workspace package manager (`yarn nx ...`) - avoids the globally installed CLI.
+- You have access to the Nx MCP server and its tools - use them.
+- For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
+- For scaffolding (apps, libs, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
+
+## Conventions
+
+- **Component/Directive prefix**: `{{PREFIX}}` (update as the project grows).
+- **Styling**: SCSS, component-scoped.
+- **Layout**: apps in `apps/`, libraries in `libs/`; one Nx project each.
