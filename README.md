@@ -76,6 +76,13 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
 
 The `new-project` skill then authors a tailored `CLAUDE.md`.
 
+The generated `.devcontainer/devcontainer.json` **pre-installs this marketplace on build** via its
+`postCreateCommand` (`claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install
+project-starter@claude-toolkit --scope project`), so the toolkit's skills/agents are live the moment the
+container comes up. Declaring `enabledPlugins` in settings alone does **not** auto-install — the CLI step
+is what makes it immediate inside the container; on the host, the settings declaration offers a one-click
+install on first run.
+
 > **Generator-first, manual last.** A literal `angular-*` preset always forces a demo app (verified
 > against Nx source), so we use `apps` + `nx add @nx/angular` + a `--minimal` app — the only one-shot
 > path to an Angular workspace with no demo content.

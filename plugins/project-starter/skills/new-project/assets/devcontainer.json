@@ -40,7 +40,7 @@
     }
   },
 
-  "postCreateCommand": "yarn install",
+  "postCreateCommand": "yarn install && (claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install project-starter@claude-toolkit --scope project || echo 'NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run')",
   "remoteUser": "node",
   "remoteEnv": {
     "PATH": "${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",

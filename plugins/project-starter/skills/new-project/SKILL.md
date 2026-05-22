@@ -15,7 +15,7 @@ Scaffold a new project into the projects root (see step 1).
 - **Node from the devcontainer base image, via Docker** - never nvm. The script resolves the newest `mcr.microsoft.com/devcontainers/typescript-node:<major>` tag and uses it both to run the scaffold and as the devcontainer image (single source of truth for Node).
 - **Devcontainer** with the **Claude CLI** (feature) and the **Claude VS Code extension** (`Anthropic.claude-code`), plus the `.claude` persistence mount.
 - **CLAUDE.md** capturing the project's intentions.
-- **bespunky/claude-toolkit** marketplace wired into the new project's `.claude/settings.json`.
+- **bespunky/claude-toolkit** marketplace wired into the new project's `.claude/settings.json` AND pre-installed by the devcontainer's `postCreateCommand` (`claude plugin marketplace add` + `claude plugin install --scope project`), so the toolkit's skills/agents are live the moment the container builds - no manual install. (Declaring `enabledPlugins` alone does not auto-install; the CLI step is what makes it immediate.)
 
 ## Generator-first, manual last (applies to ALL scaffolding)
 
@@ -64,8 +64,8 @@ Write the result to `<project>/CLAUDE.md`.
 
 Tell the user:
 - the absolute path of the new project and the app at `apps/<app-name>`,
-- that the devcontainer ships the Claude CLI + VS Code extension and persists `.claude` (open via "Dev Containers: Reopen in Container"),
-- that `.claude/settings.json` references `bespunky/claude-toolkit`, so every house skill is available inside the project.
+- that the devcontainer ships the Claude CLI + VS Code extension, persists `.claude`, and **pre-installs the bespunky/claude-toolkit plugins on build** - so every house skill/agent is live inside the container with no setup (open via "Dev Containers: Reopen in Container"),
+- that on the host (outside the container), `.claude/settings.json` already declares the marketplace, so Claude offers a one-click install on first run.
 
 ## Notes
 
