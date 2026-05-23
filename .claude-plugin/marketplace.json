@@ -1,6 +1,9 @@
 {
   "name": "claude-toolkit",
-  "owner": "BeSpunky",
+  "owner": {
+    "name": "BeSpunky",
+    "url": "https://github.com/BeSpunky"
+  },
   "description": "BeSpunky's Claude Code skills, subagents and commands. Develop once here; install and continuously upgrade across all projects.",
   "plugins": [
     {
