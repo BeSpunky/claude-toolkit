@@ -39,6 +39,7 @@ yarn nx add @nx/angular
 yarn nx g @nx/angular:application 'apps/$APP' --minimal --style=scss --routing --e2eTestRunner=none
 mkdir -p node_modules/@bespunky
 cp -r /assets/nx-tools node_modules/@bespunky/nx-tools
+node /assets/compile-generators.mjs node_modules/@bespunky/nx-tools
 yarn nx g @bespunky/nx-tools:serve-options --project=$APP
 yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR
 yarn nx g @bespunky/nx-tools:claude-settings"
