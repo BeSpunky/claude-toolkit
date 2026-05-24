@@ -10,7 +10,8 @@
       "source": {
         "source": "github",
         "repo": "BeSpunky/claude-toolkit"
-      }
+      },
+      "autoUpdate": true
     }
   },
   "enabledPlugins": {

@@ -72,7 +72,8 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
    - `yarn create nx-workspace <project> --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive`
    - `yarn nx add @nx/angular`
    - `yarn nx g @nx/angular:application apps/<app> --minimal --style=scss --routing --e2eTestRunner=none`
-3. Writes the files Nx does not own: `.devcontainer/devcontainer.json`, `.claude/settings.json`, `.gitignore` entry.
+   - patches the app's `serve` target with `host: 0.0.0.0` + `poll: 1000` (via `set-serve-options.mjs`, run in-container)
+3. Writes the files Nx does not own: `.devcontainer/devcontainer.json`, `.claude/settings.json` (declares the marketplace with `autoUpdate: true`), `.gitignore` entry.
 
 The `new-project` skill then authors a tailored `CLAUDE.md`.
 

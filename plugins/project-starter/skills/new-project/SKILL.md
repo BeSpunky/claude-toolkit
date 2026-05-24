@@ -12,10 +12,11 @@ Scaffold a new project into the projects root (see step 1).
 - **Nx-first**, created via `yarn create nx-workspace` (latest Nx, no version pinning).
 - **Integrated monorepo** (`apps/` + `libs/`), via `--preset=apps` then `nx add @nx/angular`. (A literal `angular-*` preset always forces a demo app and is verified impossible to suppress; `apps` + `nx add @nx/angular` is the only one-shot Angular-ready path with no demo.)
 - **Angular** wired in, with **one clean `--minimal` app** (no Nx welcome/demo content).
+- **Dev server**: the app's `serve` target gets `host: 0.0.0.0` and `poll: 1000` (reachable from outside the devcontainer; reliable file-watching over WSL/Docker mounts).
 - **Node from the devcontainer base image, via Docker** - never nvm. The script resolves the newest `mcr.microsoft.com/devcontainers/typescript-node:<major>` tag and uses it both to run the scaffold and as the devcontainer image (single source of truth for Node).
 - **Devcontainer** with the **Claude CLI** (feature) and the **Claude VS Code extension** (`Anthropic.claude-code`), plus the `.claude` persistence mount.
 - **CLAUDE.md** capturing the project's intentions.
-- **bespunky/claude-toolkit** marketplace wired into the new project's `.claude/settings.json` AND pre-installed by the devcontainer's `postCreateCommand` (`claude plugin marketplace add` + `claude plugin install --scope project`), so the toolkit's skills/agents are live the moment the container builds - no manual install. (Declaring `enabledPlugins` alone does not auto-install; the CLI step is what makes it immediate.)
+- **bespunky/claude-toolkit** marketplace wired into the new project's `.claude/settings.json` with **`autoUpdate: true`** (toolkit refreshes at startup), AND pre-installed by the devcontainer's `postCreateCommand` (`claude plugin marketplace add` + `claude plugin install --scope project`), so the toolkit's skills/agents are live the moment the container builds - no manual install. (Declaring `enabledPlugins` alone does not auto-install; the CLI step is what makes it immediate. Note: for third-party marketplaces the guaranteed auto-update switch is the `/plugin` UI toggle / managed settings.)
 
 ## Generator-first, manual last (applies to ALL scaffolding)
 

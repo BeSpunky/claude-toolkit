@@ -36,12 +36,13 @@ git config --global init.defaultBranch main
 yarn create nx-workspace '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive
 cd '$PROJECT'
 yarn nx add @nx/angular
-yarn nx g @nx/angular:application 'apps/$APP' --minimal --style=scss --routing --e2eTestRunner=none"
+yarn nx g @nx/angular:application 'apps/$APP' --minimal --style=scss --routing --e2eTestRunner=none
+node /assets/set-serve-options.mjs 'apps/$APP/project.json'"
 
 docker run --rm \
   -u "$(id -u):$(id -g)" \
   -e HOME=/home/node \
-  -v "$PROJECTS_DIR":/work -w /work \
+  -v "$PROJECTS_DIR":/work -v "$ASSETS_DIR":/assets:ro -w /work \
   "$IMAGE" \
   bash -lc "$INNER"
 
