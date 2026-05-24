@@ -56,7 +56,7 @@ Wait for the final `SCAFFOLD_OK <path>` line. First run pulls the base image (a 
 Read `${CLAUDE_SKILL_DIR}/assets/CLAUDE.md.tmpl`. Use it as the base:
 
 - Fill **Project Overview / Intentions** from the user's answer in step 0.
-- Keep the **Architecture-first (non-negotiable)**, **Generator-first**, and **Working with Nx** sections verbatim - the architecture-first directive is the always-on half of the `engineering` plugin and must not be softened or dropped.
+- Keep the **Architect mentality**, **Architecture-first (non-negotiable)**, **Generator-first**, and **Working with Nx** sections verbatim - the architect-mentality and architecture-first directives are the always-on half of the `engineering` plugin and must not be softened or dropped.
 - Set the component/directive prefix to something derived from the project name.
 
 Write the result to `<project>/CLAUDE.md`.

@@ -1,6 +1,6 @@
 {
   "name": "engineering",
-  "description": "BeSpunky engineering skills and agents. Today: architecture-first discipline - solve every feature/bug/change through design and infrastructure (never a patch), fix bugs at the root cause, and design + confirm refactors before implementing. Growing to cover advanced TypeScript, Angular architecture, Nx, and general software-development practices.",
+  "description": "BeSpunky engineering skills and agents. Today: architect-mentality (the stack-agnostic mindset of a great architect - black-box thinking, model the missing concept, refuse false tradeoffs, go the extra mile) and architecture-first (the operational discipline - solve through design not patches, fix the root cause, design + confirm refactors first). Growing to cover advanced TypeScript, Angular architecture, Nx, and general software-development practices.",
   "version": "0.1.0",
   "author": {
     "name": "BeSpunky",

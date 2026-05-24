@@ -8,7 +8,7 @@ This is a **Claude Code plugin marketplace** (a git repo). It currently ships tw
 | Plugin | Provides | Purpose |
 | --- | --- | --- |
 | `project-starter` | skill `new-project` | Scaffold a new BeSpunky-standard project: integrated Nx monorepo + Angular (clean `--minimal` app) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. |
-| `engineering` | skill `architecture-first` (more to come: advanced TypeScript, Angular architecture, Nx, general software dev) | Enforce architecture-first engineering: solve every feature/bug/change through design and infrastructure, **never a patch** (no special-case `if`s, magic values, copy-paste, or flags to route around the design). Fix bugs at the **root cause**; **design + confirm refactors before implementing**. Ships an always-on policy the scaffold bakes into every project's CLAUDE.md. |
+| `engineering` | skills `architect-mentality` + `architecture-first` (more to come: advanced TypeScript, Angular architecture, Nx, general software dev) | **`architect-mentality`** — the stack-agnostic mindset of a great architect (mentality only, no techniques): everything is a black box with deliberate connections, model the missing concept instead of patching, refuse false tradeoffs, go the extra mile, and more. **`architecture-first`** — the operational discipline that enforces it: solve every feature/bug/change through design and infrastructure, **never a patch**; fix bugs at the **root cause**; **design + confirm refactors before implementing**. Ships an always-on policy the scaffold bakes into every project's CLAUDE.md. |
 
 ## Layout
 
@@ -17,8 +17,11 @@ claude-toolkit/
 ├── .claude-plugin/marketplace.json          # lists the plugins in this marketplace
 ├── plugins/engineering/
 │   ├── .claude-plugin/plugin.json
-│   └── skills/architecture-first/
-│       └── SKILL.md                          # architecture-first discipline (loop, root-cause + refactor gates, patch smells, redesign moves)
+│   └── skills/
+│       ├── architect-mentality/
+│       │   └── SKILL.md                      # the architect mindset (mentality only, stack-agnostic): 13 principles
+│       └── architecture-first/
+│           └── SKILL.md                      # architecture-first discipline (loop, root-cause + refactor gates, patch smells, redesign moves)
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
     └── skills/new-project/
@@ -61,24 +64,30 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 }
 ```
 
-Skills are namespaced as `project-starter:new-project` and `engineering:architecture-first`. Scaffolded
+Skills are namespaced as `project-starter:new-project`, `engineering:architect-mentality`, and `engineering:architecture-first`. Scaffolded
 projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
 available inside every new project automatically.
 
-## Architecture-first: the always-on half
+## The always-on half
 
-Installing the `engineering` plugin makes the `architecture-first` skill available — but a skill only
-fires when the model judges it relevant, which isn't enough for a rule that must hold on **every** change.
-So the policy has two halves:
+Installing the `engineering` plugin makes the `architect-mentality` and `architecture-first` skills
+available — but a skill only fires when the model judges it relevant, which isn't enough for a mindset and
+a rule that must hold on **every** change. So the policy has two halves:
 
-1. **Always-on directive in `CLAUDE.md`** — loaded into context every session, so the rule is never out of mind.
-2. **The `architecture-first` skill** — the depth: the full loop, the patch smells to refuse, and the redesign moves.
+1. **Always-on directives in `CLAUDE.md`** — loaded into context every session, so the mindset and the rule are never out of mind.
+2. **The `engineering` skills** — the depth: `architect-mentality` (the full architect mindset) and `architecture-first` (the loop, the patch smells to refuse, the redesign moves).
 
-**New projects** get half (1) automatically — the `new-project` scaffold bakes the directive into the
+**New projects** get half (1) automatically — the `new-project` scaffold bakes both directives into the
 generated `CLAUDE.md` and enables both plugins. **Existing projects** that install the plugin should paste
-the canonical directive below into their `CLAUDE.md` so the rule is always in context:
+the canonical directives below into their `CLAUDE.md` so the mindset and rule are always in context:
 
 ```markdown
+## Architect mentality
+
+Approach every decision — at any scale, from a single function to the whole workspace — as a software architect. Treat **everything as a black box**: a clear boundary, a small deliberate public contract, hidden internals, dependencies received from the outside, and connections to other black boxes only through well-defined, intentionally-directed connection types (dependency injection, parent–child, layered/domain-driven dependency rules). Never reach across a boundary into another box's internals. Model the missing **concept** instead of working around gaps; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the next consumer; lead with *why* and one consistent mental model; and **go the extra mile — always** (find or invent the elegant solution; never settle for the easy-but-complex; *easy ≠ simple*). Be lazy about repetition, relentless about design quality.
+
+For the full mindset, think with the **`engineering:architect-mentality`** skill. It is the *why*; the rule below is the *operational discipline* that enforces it.
+
 ## Architecture-first (non-negotiable)
 
 Every change — feature, bug, edge case, or "quick fix" — is solved through **design and infrastructure, never a patch.** No special-case `if`s keyed on one input/customer/env, no magic values, no copy-paste, no boolean flags to make one unit do two things, no casts to silence a type mismatch, no bumped timeouts to mask a structural problem. **For bugs, find and fix the root cause — never mask the symptom** (no swallowed errors, defaulted bad data, or guards bolted on at the symptom site). When the current design does not account for a requirement, **redesign and refactor** the relevant seam (model the missing concept, extract, decouple, build the missing abstraction, reuse) so the new behavior is a natural case of the design — don't bolt it on. Coupling, duplication, and special-casing must never grow. **If a refactor is needed to lay infrastructure for a feature or to fix a bug, design it first, get confirmation, and only then implement** — never refactor ad hoc mid-edit; if a correct redesign is genuinely large, surface it and its cost rather than patching silently.
