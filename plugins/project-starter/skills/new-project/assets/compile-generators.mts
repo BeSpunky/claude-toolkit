@@ -1,16 +1,15 @@
-// Build bootstrap (NOT generator code): transpile @bespunky/nx-tools' TypeScript generators to JS so Nx
-// can load them - Node refuses to strip types for files under node_modules, so a copied raw-TS plugin
-// won't run. Transpile-only via the workspace's own TypeScript: no type-check, no extra dependencies.
-// This is the one piece that must be plain JS - it bootstraps the TS toolchain it can't yet rely on.
-//
-// Usage (cwd = the Nx workspace root): node compile-generators.mjs <plugin-dir>
+// Build bootstrap (TypeScript ESM): transpile @bespunky/nx-tools' TypeScript generators to JS so Nx can
+// load them - Node refuses to strip types for files under node_modules, so a copied raw-TS plugin won't run.
+// Transpile-only via the workspace's own TypeScript: no type-check, no extra dependencies.
+// This file runs through Node's built-in type-stripping (it lives outside node_modules, where that is allowed).
+// Usage (cwd = the Nx workspace root): node compile-generators.mts <plugin-dir>
 import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
-const pluginDir = process.argv[2];
+const pluginDir: string | undefined = process.argv[2];
 if (!pluginDir) {
-  console.error('Usage: node compile-generators.mjs <plugin-dir>');
+  console.error('Usage: node compile-generators.mts <plugin-dir>');
   process.exit(1);
 }
 
@@ -18,7 +17,7 @@ if (!pluginDir) {
 const require = createRequire(join(process.cwd(), 'noop.js'));
 const ts = require('typescript');
 
-function compileDir(dir) {
+function compileDir(dir: string): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, entry.name);
     if (entry.isDirectory()) {
