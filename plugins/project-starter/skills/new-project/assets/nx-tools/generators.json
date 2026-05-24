@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "generators": {
+    "serve-options": {
+      "factory": "./src/generators/serve-options/generator",
+      "schema": "./src/generators/serve-options/schema.json",
+      "description": "Set BeSpunky house dev-server options (host 0.0.0.0, poll 1000) on a project's serve target."
+    },
+    "devcontainer": {
+      "factory": "./src/generators/devcontainer/generator",
+      "schema": "./src/generators/devcontainer/schema.json",
+      "description": "Generate the BeSpunky-standard .devcontainer/devcontainer.json (Claude CLI + extension, .claude persistence, plugin pre-install)."
+    },
+    "claude-settings": {
+      "factory": "./src/generators/claude-settings/generator",
+      "schema": "./src/generators/claude-settings/schema.json",
+      "description": "Generate .claude/settings.json wiring the claude-toolkit + nx marketplaces (autoUpdate on); keep .claude/data out of git."
+    }
+  }
+}

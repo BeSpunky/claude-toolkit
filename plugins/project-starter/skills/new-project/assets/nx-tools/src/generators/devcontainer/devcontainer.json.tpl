@@ -1,7 +1,7 @@
 // BeSpunky-standard devcontainer. Node from the base image; Claude CLI (feature) + Claude VS Code extension.
 {
-  "name": "{{PROJECT}}",
-  "image": "mcr.microsoft.com/devcontainers/typescript-node:{{NODE_MAJOR}}",
+  "name": "{{name}}",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:{{nodeMajor}}",
 
   "features": {
     "ghcr.io/devcontainers-extra/features/claude-code": {},

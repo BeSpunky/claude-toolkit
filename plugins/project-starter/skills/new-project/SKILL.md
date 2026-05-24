@@ -22,7 +22,7 @@ Scaffold a new project into the projects root (see step 1).
 
 For anything Nx can generate - apps, libraries, components, services, project config - **use the Nx generator (`nx g ...`); never hand-create and fill files.** Before hand-writing anything structural, check what exists: `nx list <plugin>` / `nx g <generator> --help` (or the `nx-generate` skill / the Nx MCP server). Only fall back to manual file creation when no generator covers the task. **Never guess flags** - verify against `--help` / `nx_docs`.
 
-In this skill that means: the workspace, the Angular plugin, and the app all come from generators. The **only** hand-written files are the ones Nx genuinely doesn't own: `.devcontainer/devcontainer.json`, `.claude/settings.json`, and the tailored `CLAUDE.md`.
+In this skill that means: the workspace, the Angular plugin, the app, the serve options, the devcontainer, and the Claude settings all come from generators - the `@nx/*` ones plus the house `@bespunky/nx-tools` generators (`serve-options`, `devcontainer`, `claude-settings`). The **only** non-generated artifact is the tailored `CLAUDE.md`, which the skill authors from the project's intentions.
 
 ## 0. Gather inputs (skip any already provided)
 

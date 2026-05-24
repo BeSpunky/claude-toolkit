@@ -19,10 +19,14 @@ claude-toolkit/
     └── skills/new-project/
         ├── SKILL.md                          # the scaffolding skill (orchestrator)
         └── assets/
-            ├── scaffold.sh                   # nx generators run inside the devcontainer base image (Docker, no nvm)
-            ├── devcontainer.json             # Claude CLI feature + Claude VS Code extension + .claude persistence
-            ├── project-settings.json         # .claude/settings.json wired into new projects
-            └── CLAUDE.md.tmpl                # base CLAUDE.md (generator-first guidance)
+            ├── scaffold.sh                   # thin launcher: resolve Node, docker run, bootstrap + run house generators
+            ├── CLAUDE.md.tmpl                # base CLAUDE.md (generator-first guidance), authored by the skill
+            └── nx-tools/                     # @bespunky/nx-tools — house Nx generators, run post-scaffold
+                ├── generators.json
+                └── src/generators/
+                    ├── serve-options/        # sets serve host 0.0.0.0 + poll 1000
+                    ├── devcontainer/         # writes .devcontainer/devcontainer.json
+                    └── claude-settings/      # writes .claude/settings.json (+ .gitignore)
 ```
 
 To add a skill: `plugins/<plugin>/skills/<name>/SKILL.md`.
@@ -66,16 +70,18 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
 
 ## How the scaffolder works
 
-`scaffold.sh <project> [app]`:
-1. Resolves the newest `mcr.microsoft.com/devcontainers/typescript-node:<major>` tag (Node source — no nvm).
-2. Runs the Nx generators **inside that base image via `docker run`** (as your uid, mounting `~/projects`):
+`scaffold.sh <project> [app]` is a thin launcher; everything runs **inside the base image via `docker run`** (as your uid, mounting `~/projects`) so there's no host Node/nvm dependency:
+1. Resolves the newest `mcr.microsoft.com/devcontainers/typescript-node:<major>` tag (the Node source).
+2. Bootstraps the workspace:
    - `yarn create nx-workspace <project> --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive`
    - `yarn nx add @nx/angular`
    - `yarn nx g @nx/angular:application apps/<app> --minimal --style=scss --routing --e2eTestRunner=none`
-   - patches the app's `serve` target with `host: 0.0.0.0` + `poll: 1000` (via `set-serve-options.mjs`, run in-container)
-3. Writes the files Nx does not own: `.devcontainer/devcontainer.json`, `.claude/settings.json` (declares the marketplace with `autoUpdate: true`), `.gitignore` entry.
+3. Copies `@bespunky/nx-tools` into the workspace's `node_modules` and runs the **house generators** — every config change is Nx-native (devkit `Tree`), no hand-rolled file edits:
+   - `nx g @bespunky/nx-tools:serve-options --project=<app>` → serve `host`/`poll`
+   - `nx g @bespunky/nx-tools:devcontainer --name=<project> --nodeMajor=<major>` → `.devcontainer/devcontainer.json`
+   - `nx g @bespunky/nx-tools:claude-settings` → `.claude/settings.json` (+ `.gitignore`, `.claude/data`)
 
-The `new-project` skill then authors a tailored `CLAUDE.md`.
+The `new-project` skill then authors a tailored `CLAUDE.md` (the one piece that stays contextual, not a template).
 
 The generated `.devcontainer/devcontainer.json` **pre-installs this marketplace on build** via its
 `postCreateCommand` (`claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install

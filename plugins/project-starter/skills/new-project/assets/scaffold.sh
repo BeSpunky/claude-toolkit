@@ -37,7 +37,11 @@ yarn create nx-workspace '$PROJECT' --preset=apps --packageManager=yarn --nxClou
 cd '$PROJECT'
 yarn nx add @nx/angular
 yarn nx g @nx/angular:application 'apps/$APP' --minimal --style=scss --routing --e2eTestRunner=none
-node /assets/set-serve-options.mjs 'apps/$APP/project.json'"
+mkdir -p node_modules/@bespunky
+cp -r /assets/nx-tools node_modules/@bespunky/nx-tools
+yarn nx g @bespunky/nx-tools:serve-options --project=$APP
+yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR
+yarn nx g @bespunky/nx-tools:claude-settings"
 
 docker run --rm \
   -u "$(id -u):$(id -g)" \
@@ -45,12 +49,5 @@ docker run --rm \
   -v "$PROJECTS_DIR":/work -v "$ASSETS_DIR":/assets:ro -w /work \
   "$IMAGE" \
   bash -lc "$INNER"
-
-# --- 3. Host-side files Nx does not own: devcontainer, Claude settings, gitignore ---
-mkdir -p "$TARGET/.devcontainer" "$TARGET/.claude/data"
-sed -e "s/{{PROJECT}}/$PROJECT/g" -e "s/{{NODE_MAJOR}}/$MAJOR/g" \
-  "$ASSETS_DIR/devcontainer.json" > "$TARGET/.devcontainer/devcontainer.json"
-cp "$ASSETS_DIR/project-settings.json" "$TARGET/.claude/settings.json"
-printf '\n# Claude Code local state\n.claude/data/\n' >> "$TARGET/.gitignore"
 
 echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP)"

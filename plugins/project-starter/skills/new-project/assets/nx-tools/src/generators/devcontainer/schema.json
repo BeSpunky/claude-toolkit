@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyDevcontainer",
+  "title": "Generate the BeSpunky devcontainer",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Devcontainer name (usually the project/workspace name).",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "Devcontainer name?"
+    },
+    "nodeMajor": {
+      "type": ["string", "number"],
+      "description": "Node major version for the typescript-node base image tag. Defaults to the running Node major."
+    }
+  },
+  "required": ["name"]
+}
