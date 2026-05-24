@@ -1,6 +1,6 @@
 ---
 name: architect-mentality
-description: The mindset of a great software architect - the values and ways of thinking to adopt BEFORE and WHILE making any design or structural decision, on any stack, language, framework, domain, or project. Use when starting a feature, shaping a function/class/component, drawing a module or library boundary, organizing an app or workspace, choosing between approaches, naming things, deciding what to abstract or decouple, reviewing a design, or whenever you sense a structural decision is being made. This skill is MENTALITY ONLY - no specific techniques. It tells you HOW to think: treat everything as a black box with deliberate, well-defined connections; model the missing concept instead of working around gaps; work smart, not hard; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the consumer; invert control toward pluggable seams; absorb your tools' weaknesses; lead with why and one mental model; preserve understanding and proof; know when not to build; and always go the extra mile.
+description: The mindset of a great software architect - the values and ways of thinking to adopt BEFORE and WHILE making any design or structural decision, on any stack, language, framework, domain, or project. Use when starting a feature, shaping a function/class/component, drawing a module or library boundary, organizing an app or workspace, choosing between approaches, naming things, deciding what to abstract or decouple, deciding where something should live, setting up build/run/dev workflow, reviewing a design, or whenever you sense a structural decision is being made. This skill is MENTALITY ONLY - no specific techniques. It tells you HOW to think: treat everything as a black box with deliberate, well-defined connections; place every element on purpose (never because it merely fits); model the missing concept instead of working around gaps; work smart, not hard; automate every repeated process (never do the same thing by hand twice); concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the consumer; invert control toward pluggable seams; absorb your tools' weaknesses; lead with why and one mental model; preserve understanding and proof; know when not to build; and always go the extra mile.
 ---
 
 # Architect Mentality
@@ -44,7 +44,31 @@ Apply this *fractally*: a workspace is a black box made of libraries; a library 
 
 ---
 
-## 2. Model the missing concept — never work around a gap
+## 2. Place everything on purpose
+
+**Every element exists by intention, never by coincidence. Every line — declarative or imperative — every `if`, every call, every constant, every config value, every abstraction, every injected dependency, every document is there because it is the right thing in the right place. "It fits here" is never a reason.**
+
+**What it means.** Nothing in a well-architected system is present by accident, by habit, or because it happened to be convenient at the moment of typing. Each element has a deliberate reason to exist *and* a deliberate place to live — chosen because that is where it *belongs* (where responsibility for that concern truly sits), not merely where it *works*. "Fits" and "belongs" are different claims: almost anything can be made to fit almost anywhere, which is exactly why "it fits" tells you nothing about whether it's right. So the architect never asks "*can* this go here?" (the answer is almost always yes) — they ask "is *here* the place dedicated to this concern?"
+
+For example: a network/API call can be written directly inside a UI component, and for a small component it will technically "fit" and work. But that is not a purposeful decision — it drops a data-access concern inside a presentation black box and blurs the boundary. The purposeful decision is to place that call where data access *belongs* — in a unit dedicated to it — which the component then depends on. The same test applies to everything: a constant (does it belong here, or in a single source of truth?), a piece of configuration, a guard clause, an abstraction, an import — each lands where its concern lives, on purpose.
+
+This is the discipline that keeps black boxes (principle 1) honest: boundaries hold only if every element is consciously assigned to the box whose responsibility it is. And when you can't find where something belongs, that absence is a signal — a concept or a home is missing, so create it (principle 3) rather than dropping the element wherever it happens to fit.
+
+**Ask yourself.**
+- Why is this here, *specifically*? Can I state the deliberate reason out loud?
+- Is this the place *dedicated* to this concern, or just a place where it happens to work?
+- Am I *choosing* this location, or *defaulting* to it because it's convenient right now?
+- If someone asked "why is this line here?", would my honest answer be "it fit"? (If so, reconsider.)
+
+**Red flags.**
+- "It works here" / "it fits here" offered as the justification for a placement.
+- A concern living inside a box whose responsibility it isn't (data access inside presentation, business rules inside a view, configuration hardcoded at a call site).
+- Elements added where they were convenient to type rather than where they belong.
+- Anything whose purpose and placement you can't explain.
+
+---
+
+## 3. Model the missing concept — never work around a gap
 
 **When the design doesn't account for something, the design is missing a *concept*. Build that concept as a first-class part of the system. Never bolt on a workaround that routes around the gap.**
 
@@ -64,13 +88,13 @@ Apply this *fractally*: a workspace is a black box made of libraries; a library 
 
 ---
 
-## 3. Work smart, not hard
+## 4. Work smart, not hard
 
 **Refuse repetition at the level of *structure*, not just lines of code. If you would build the same shape twice, build the thing that produces the shape instead. And minimize not only today's effort but the cost of every future change.**
 
-**What it means.** A great architect is *strategically* lazy: repetitive, manual, or duplicated work is a design defect to be eliminated, not endured. When two things are the same in essence, that sameness must live in exactly one place, and differences become parameters — never copies. Equally, you design so the *expected* changes — new cases, evolving requirements, changes in the things you depend on — cost as little as possible, and so the **blast radius** of any change stays small and local. Effort invested now to remove future effort is the central trade you are always weighing.
+**What it means.** A great architect is *strategically* lazy: repetitive, manual, or duplicated work is a design defect to be eliminated, not endured. When two things are the same in essence, that sameness must live in exactly one place, and differences become parameters — never copies. Equally, you design so the *expected* changes — new cases, evolving requirements, changes in the things you depend on — cost as little as possible, and so the **blast radius** of any change stays small and local. Effort invested now to remove future effort is the central trade you are always weighing. When the repetition is an *action* you keep performing rather than a *shape* you keep writing, the same instinct applies — as automation (principle 5).
 
-This applies to grunt work and duplication only — **never** to design thinking itself (see principle 13). Be relentlessly lazy about repetition; be relentlessly diligent about design quality.
+This applies to grunt work and duplication only — **never** to design thinking itself (see principle 15). Be relentlessly lazy about repetition; be relentlessly diligent about design quality.
 
 **Ask yourself.**
 - Am I about to create something whose shape already exists? Where should the single source of that shape live?
@@ -84,7 +108,35 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 4. Concentrate complexity; keep the edges simple
+## 5. Automate every repeated process
+
+**Never do the same thing manually twice. The moment an action repeats — a command, a build step, a sync between two places, a manual edit you keep redoing — turn it into something that runs itself, invokable in a single step. This is the anti-repetition instinct of principle 4 extended beyond code to the entire way you work.**
+
+**What it means.** Manual repetition is wasted time, a reliable source of human error, and a sign that a process hasn't been *designed* yet. A great architect treats every repeated action as a candidate for automation: any task worth doing more than once is encoded **once** — as a script, a generated artifact, a runnable target, a pipeline step — and then triggered with a single command, or, better, automatically at the moment it's needed. This is *developer-workflow* design, and it is part of the architecture: how you build, run, generate, verify, deploy, and switch contexts deserves the same care as the code itself. Your time and attention are finite; spending them on something a machine could do reliably is a design failure. Derive from a single source of truth instead of maintaining two things in parallel; make procedures executable instead of remembered.
+
+The instinct shows up at every scale — for example:
+- **Generate from the source of truth; never hand-maintain a mirror.** If the names of the files in a folder must appear and stay current inside a constant, you never keep that list by hand. You make the constant *generated* from the folder and run that generation automatically (for instance, on every build) so it can never drift. The folder is the source of truth; the constant is a derived artifact.
+- **A command you always run becomes a named, runnable target.** If there's an incantation the team keeps typing, it belongs in one runnable script/target with an obvious name — not in everyone's memory or a wiki page.
+- **Context differences become one action, not a remembered recipe.** If launching the app differs by environment — locally, locally against staging, locally against production — nobody should reassemble the right flags from memory each time. Design it so serving for a given environment is a single, unambiguous action.
+
+The test is always: *am I about to spend human effort on something that has a knowable, repeatable procedure?* If the procedure is knowable, the machine should own it.
+
+**Ask yourself.**
+- Have I done this exact thing by hand before? Will I — or someone else — do it again?
+- Is there a source of truth this should be *derived* from, rather than maintained in parallel?
+- Could this be one command, or happen automatically, instead of a remembered sequence of steps?
+- Am I relying on people to *remember* a procedure that the system could *guarantee*?
+
+**Red flags.**
+- The same command, sequence, or manual fix performed by hand more than once.
+- Two places that must be kept in sync by hand (a list, a version, a config mirrored manually).
+- "Just remember to run X first" / "the steps are in the wiki" / tribal knowledge standing in for a process.
+- Environment- or context-specific setup reassembled from memory each time.
+- Onboarding that requires manually performing steps a script could perform.
+
+---
+
+## 6. Concentrate complexity; keep the edges simple
 
 **Necessary complexity should be gathered into one well-contained place at the core, so everything built on top of it stays small, declarative, and obvious.**
 
@@ -102,7 +154,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 5. Refuse false tradeoffs
+## 7. Refuse false tradeoffs
 
 **When you're told you must choose between two things you want, treat it as a problem to dissolve, not a compromise to accept. Look for the design that gives you both.**
 
@@ -120,7 +172,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 6. Abstractions must never trap
+## 8. Abstractions must never trap
 
 **An abstraction should make the common path effortless without ever locking anyone out of the underlying power. Always provide an honest escape hatch.**
 
@@ -138,7 +190,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 7. Design for the consumer
+## 9. Design for the consumer
 
 **The experience of the thing's consumer — the next engineer, the calling code, your future self — is a primary design constraint, not an afterthought.**
 
@@ -156,7 +208,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 8. Define the seam; let others plug in
+## 10. Define the seam; let others plug in
 
 **Prefer designs where a thing declares *what it needs* and is supplied it from the outside, over designs where it reaches out and hard-wires *what it uses*. Own the contract; let the specifics be provided.**
 
@@ -174,7 +226,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 9. Compensate for your materials' weaknesses — proactively
+## 11. Compensate for your materials' weaknesses — proactively
 
 **Know where your tools, platform, runtime, language, and environment are weak or sharp-edged, and absorb those weaknesses into the architecture so consumers never have to think about them.**
 
@@ -192,7 +244,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 10. Lead with *why*, and with one mental model
+## 12. Lead with *why*, and with one mental model
 
 **Anchor every design in the problem it solves and the reasoning behind it, and strive to express the whole system through one small, consistent mental model that's learned once and applied everywhere.**
 
@@ -210,7 +262,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 11. Treat understanding and verification as first-class
+## 13. Treat understanding and verification as first-class
 
 **Preserving *why the system is the way it is*, and proving that it behaves as intended, are part of the architecture — not optional extras done if there's time.**
 
@@ -228,11 +280,11 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 12. Know when *not* to do it
+## 14. Know when *not* to do it
 
 **Restraint is part of design. The decision to *not* build something — or to withhold it until it's right — is as architectural as the decision to build.**
 
-**What it means.** Ambition without discipline produces over-engineering: speculative generality, abstractions with no second use yet, surface and weight added for hypothetical needs. A great architect distinguishes *"this concept is genuinely missing"* (build it — principle 2) from *"this might be nice someday"* (don't, yet). When something isn't ready, isn't justified, or would over-complicate the whole for a fraction's benefit, the mature move is to hold it back — and to record *why* it was withheld, so the judgment isn't lost and can be revisited when the justification actually arrives. This does not conflict with going the extra mile (principle 13): greatness includes the discipline to stop at the right point.
+**What it means.** Ambition without discipline produces over-engineering: speculative generality, abstractions with no second use yet, surface and weight added for hypothetical needs. A great architect distinguishes *"this concept is genuinely missing"* (build it — principle 3) from *"this might be nice someday"* (don't, yet). When something isn't ready, isn't justified, or would over-complicate the whole for a fraction's benefit, the mature move is to hold it back — and to record *why* it was withheld, so the judgment isn't lost and can be revisited when the justification actually arrives. This does not conflict with going the extra mile (principle 15): greatness includes the discipline to stop at the right point.
 
 **Ask yourself.**
 - Is this solving a real, present need, or a hypothetical future one?
@@ -246,7 +298,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 ---
 
-## 13. Go the extra mile — always
+## 15. Go the extra mile — always
 
 **Always aim for the great design, not the convenient one. Be creative, invent when needed, and do the hard thing to get it right. Never settle for a shallow solution because it is easier.**
 
@@ -254,7 +306,7 @@ This applies to grunt work and duplication only — **never** to design thinking
 
 Hold the line on one crucial distinction: **easy is not the same as simple.** *Easy* is low effort for you, now. *Simple* is low complexity for everyone, forever. Easy solutions are very often complex in disguise; simple solutions are usually *hard to find*. Refuse the easy-but-complex; pay the hard cost to reach the simple-and-elegant.
 
-This reconciles cleanly with "work smart, not hard" (principle 3): be lazy about **repetition and grunt work**, and relentless about **design quality**. Never trade the second for the first.
+This reconciles cleanly with "work smart, not hard" (principle 4): be lazy about **repetition and grunt work**, and relentless about **design quality**. Never trade the second for the first.
 
 **Ask yourself.**
 - Is this the great solution, or just the one that makes the problem disappear fastest?
@@ -272,7 +324,7 @@ This reconciles cleanly with "work smart, not hard" (principle 3): be lazy about
 
 ## The through-line
 
-Every principle here is one face of a single commitment: **the design comes first, and it must be genuinely good.** Treat the world as clean black boxes joined by deliberate connections; model what's missing instead of working around it; remove repetition; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for whoever comes next; invert control toward pluggable seams; absorb your tools' weaknesses; lead with *why* and one consistent model; preserve understanding and proof; know when to stop; and always go the extra mile.
+Every principle here is one face of a single commitment: **the design comes first, and it must be genuinely good.** Treat the world as clean black boxes joined by deliberate connections; place every element on purpose, never because it merely fits; model what's missing instead of working around it; remove repetition and automate what repeats; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for whoever comes next; invert control toward pluggable seams; absorb your tools' weaknesses; lead with *why* and one consistent model; preserve understanding and proof; know when to stop; and always go the extra mile.
 
 Techniques are how these get expressed today. The mentality is what makes the techniques good.
 
