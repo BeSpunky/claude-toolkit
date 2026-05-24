@@ -15,7 +15,7 @@
     {
       "name": "engineering",
       "source": "./plugins/engineering",
-      "description": "BeSpunky engineering skills and agents. Today: architecture-first discipline - solve every feature/bug/change through design and infrastructure (never a patch), fix bugs at the root cause, design + confirm refactors first. Growing to cover advanced TypeScript, Angular architecture, Nx, and general software development.",
+      "description": "BeSpunky engineering skills. Agnostic foundation (architect-mentality + architecture-first: solve through design, never a patch; fix the root cause; design + confirm refactors) plus technique domains with progressive-disclosure references: software-design, advanced-typescript, angular-architecture, angular-native-wrappers, nx-monorepo-and-dx.",
       "version": "0.1.0"
     }
   ]

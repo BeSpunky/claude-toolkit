@@ -8,7 +8,7 @@ This is a **Claude Code plugin marketplace** (a git repo). It currently ships tw
 | Plugin | Provides | Purpose |
 | --- | --- | --- |
 | `project-starter` | skill `new-project` | Scaffold a new BeSpunky-standard project: integrated Nx monorepo + Angular (clean `--minimal` app) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. |
-| `engineering` | skills `architect-mentality`, `architecture-first`, `angular-architecture`, `angular-native-wrappers` (more to come: advanced TypeScript, Nx, general software dev) | **Mindset & discipline (agnostic):** `architect-mentality` — the stack-agnostic mindset of a great architect (mentality only, no techniques): everything is a black box with deliberate connections, place everything on purpose, model the missing concept instead of patching, automate every repeated process, go the extra mile, and more. `architecture-first` — the operational discipline that enforces it: solve every change through design, **never a patch**; fix bugs at the **root cause**; **design + confirm refactors before implementing**; ships an always-on policy the scaffold bakes into every project's CLAUDE.md. **Techniques (Angular):** `angular-architecture` — a domain router indexing concrete modern-Angular patterns (DI/providers, lifecycle, SSR/zone, extensibility, projection, API ergonomics), each in an on-demand reference file. `angular-native-wrappers` — wrap an imperative/third-party JS API (maps, editors, charts, players) in idiomatic Angular. |
+| `engineering` | skills `architect-mentality`, `architecture-first`, `software-design`, `advanced-typescript`, `angular-architecture`, `angular-native-wrappers`, `nx-monorepo-and-dx` (extensible over time) | **Mindset & discipline (agnostic):** `architect-mentality` — the stack-agnostic mindset of a great architect (mentality only, no techniques): everything is a black box with deliberate connections, place everything on purpose, model the missing concept instead of patching, automate every repeated process, go the extra mile, and more. `architecture-first` — the operational discipline that enforces it: solve every change through design, **never a patch**; fix bugs at the **root cause**; **design + confirm refactors before implementing**; ships an always-on policy the scaffold bakes into every project's CLAUDE.md. **Techniques (general / agnostic):** `software-design` — the cross-stack toolbox (decoupling & dependency inversion, replace conditionals with structure, duplication & abstraction, domain modeling, errors & boundaries, contracts & API design); the stack skills below specialize it. **Techniques (TypeScript):** `advanced-typescript` — type-system mastery (derive types from types, declaration merging, template-literal & branded types, type-level diagnostics, guards & assertions). **Techniques (Angular):** `angular-architecture` — modern-Angular patterns (DI/providers, lifecycle, SSR/zone, extensibility, projection, API ergonomics). `angular-native-wrappers` — wrap an imperative/third-party JS API in idiomatic Angular. **Techniques (Nx / workspace & DX):** `nx-monorepo-and-dx` — monorepo architecture & developer experience (boundaries & entry points, module-boundary enforcement, caching & task pipeline, generators & automation, testing setup, release/versioning/environments). |
 
 ## Layout
 
@@ -22,6 +22,14 @@ claude-toolkit/
 │       │   └── SKILL.md                      # the architect mindset (mentality only, stack-agnostic): 15 principles
 │       ├── architecture-first/
 │       │   └── SKILL.md                      # architecture-first discipline (loop, root-cause + refactor gates, patch smells, redesign moves)
+│       ├── advanced-typescript/              # DOMAIN skill (router) — TypeScript type-system technique clusters
+│       │   ├── SKILL.md
+│       │   └── reference/                    # one file per cluster, loaded on demand
+│       │       ├── deriving-types-from-types.md
+│       │       ├── declaration-merging.md
+│       │       ├── template-literal-and-branded-types.md
+│       │       ├── type-level-diagnostics.md
+│       │       └── guards-and-assertions.md
 │       ├── angular-architecture/             # DOMAIN skill (router) — modern-Angular technique clusters
 │       │   ├── SKILL.md                      # indexes clusters; links to reference files (progressive disclosure)
 │       │   └── reference/                    # one file per cluster, loaded on demand
@@ -31,8 +39,26 @@ claude-toolkit/
 │       │       ├── extensibility-and-plugins.md
 │       │       ├── content-projection-and-dom-bridging.md
 │       │       └── component-api-ergonomics.md
-│       └── angular-native-wrappers/          # standalone technique — wrap an imperative/3rd-party JS API in Angular
-│           └── SKILL.md
+│       ├── angular-native-wrappers/          # standalone technique — wrap an imperative/3rd-party JS API in Angular
+│       │   └── SKILL.md
+│       ├── nx-monorepo-and-dx/               # DOMAIN skill (router) — monorepo architecture & DX clusters
+│       │   ├── SKILL.md
+│       │   └── reference/                    # one file per cluster, loaded on demand
+│       │       ├── library-boundaries-and-entry-points.md
+│       │       ├── module-boundary-enforcement.md
+│       │       ├── caching-and-task-pipeline.md
+│       │       ├── generators-and-automation.md
+│       │       ├── testing-setup.md
+│       │       └── release-versioning-and-environments.md
+│       └── software-design/                  # DOMAIN skill (router) — general, language-agnostic clusters
+│           ├── SKILL.md
+│           └── reference/                    # one file per cluster, loaded on demand
+│               ├── decoupling-and-dependency-inversion.md
+│               ├── replace-conditionals-with-structure.md
+│               ├── duplication-and-abstraction.md
+│               ├── domain-modeling.md
+│               ├── errors-and-boundaries.md
+│               └── contracts-and-api-design.md
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
     └── skills/new-project/
@@ -75,7 +101,7 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 }
 ```
 
-Skills are namespaced as `project-starter:new-project`, `engineering:architect-mentality`, `engineering:architecture-first`, `engineering:angular-architecture`, and `engineering:angular-native-wrappers`. Scaffolded
+Skills are namespaced as `project-starter:new-project`, `engineering:architect-mentality`, `engineering:architecture-first`, `engineering:advanced-typescript`, `engineering:software-design`, `engineering:advanced-typescript`, `engineering:angular-architecture`, `engineering:angular-native-wrappers`, and `engineering:nx-monorepo-and-dx`. Scaffolded
 projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
 available inside every new project automatically.
 

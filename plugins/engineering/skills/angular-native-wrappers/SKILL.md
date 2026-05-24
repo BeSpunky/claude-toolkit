@@ -1,6 +1,6 @@
 ---
 name: angular-native-wrappers
-description: Wrap an imperative, stateful, or third-party JavaScript API (maps, rich-text editors, charts, video/audio players, canvas/WebGL libraries, native browser APIs) in idiomatic Angular - without hand-writing a pass-through method for every native call and without losing type safety. Use when you must expose a large imperative SDK as Angular components/directives/services with declarative inputs/outputs, lifecycle integration, change-detection efficiency, and DI. Assumes modern Angular (standalone, signals, inject()). For general Angular DI/lifecycle/SSR patterns, use the angular-architecture skill; for the agnostic mindset behind this, see architect-mentality.
+description: Wrap an imperative, stateful, or third-party JavaScript API (maps, rich-text editors, charts, video/audio players, canvas/WebGL libraries, native browser APIs) in idiomatic Angular - without hand-writing a pass-through method for every native call and without losing type safety. Use when you must expose a large imperative SDK as Angular components/directives/services with declarative inputs/outputs, lifecycle integration, change-detection efficiency, and DI. Assumes modern Angular (standalone, signals, inject()). For general Angular DI/lifecycle/SSR patterns, use the angular-architecture skill; for the type-level techniques this relies on (deriving types, declaration merging), see advanced-typescript; for the agnostic mindset behind this, see architect-mentality.
 ---
 
 # Wrapping Imperative APIs in Angular
@@ -59,7 +59,9 @@ export class     GoogleMap extends NativeWrapper<google.maps.Map> {}    // metho
 
 **Why.** *Refuse false tradeoffs* — dynamic delegation **and** full types, not either/or.
 
-**Keep runtime and type exclusions in lockstep:** if you forbid `setMap` at runtime, also `Omit` it from the derived interface, so the compiler blocks what the runtime would reject. (This is deep TypeScript; it will move into the future `advanced-typescript` skill and be cross-linked from here.)
+**Keep runtime and type exclusions in lockstep:** if you forbid `setMap` at runtime, also `Omit` it from the derived interface, so the compiler blocks what the runtime would reject.
+
+> **The type-level machinery here** — deriving a type from another type, declaration merging, and keeping types and runtime in lockstep — lives in depth in the **`advanced-typescript`** skill (`reference/deriving-types-from-types.md`, `reference/declaration-merging.md`). Read those for the full technique; this piece is just its application to a wrapper.
 
 ---
 
