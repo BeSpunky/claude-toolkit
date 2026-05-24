@@ -1,0 +1,9 @@
+{
+  "name": "engineering",
+  "description": "BeSpunky engineering skills and agents. Today: architecture-first discipline - solve every feature/bug/change through design and infrastructure (never a patch), fix bugs at the root cause, and design + confirm refactors before implementing. Growing to cover advanced TypeScript, Angular architecture, Nx, and general software-development practices.",
+  "version": "0.1.0",
+  "author": {
+    "name": "BeSpunky",
+    "url": "https://github.com/BeSpunky"
+  }
+}

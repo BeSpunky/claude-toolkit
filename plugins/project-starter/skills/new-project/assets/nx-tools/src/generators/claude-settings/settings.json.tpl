@@ -16,7 +16,8 @@
   },
   "enabledPlugins": {
     "nx@nx-claude-plugins": true,
-    "project-starter@claude-toolkit": true
+    "project-starter@claude-toolkit": true,
+    "engineering@claude-toolkit": true
   },
   "permissions": {
     "defaultMode": "bypassPermissions"

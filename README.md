@@ -3,24 +3,29 @@
 BeSpunky's **one place** for Claude Code skills, subagents, and commands. Develop them here once,
 install them into any project, and upgrade everywhere with a single update.
 
-This is a **Claude Code plugin marketplace** (a git repo). It currently ships one plugin:
+This is a **Claude Code plugin marketplace** (a git repo). It currently ships two plugins:
 
 | Plugin | Provides | Purpose |
 | --- | --- | --- |
 | `project-starter` | skill `new-project` | Scaffold a new BeSpunky-standard project: integrated Nx monorepo + Angular (clean `--minimal` app) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. |
+| `engineering` | skill `architecture-first` (more to come: advanced TypeScript, Angular architecture, Nx, general software dev) | Enforce architecture-first engineering: solve every feature/bug/change through design and infrastructure, **never a patch** (no special-case `if`s, magic values, copy-paste, or flags to route around the design). Fix bugs at the **root cause**; **design + confirm refactors before implementing**. Ships an always-on policy the scaffold bakes into every project's CLAUDE.md. |
 
 ## Layout
 
 ```
 claude-toolkit/
 ├── .claude-plugin/marketplace.json          # lists the plugins in this marketplace
+├── plugins/engineering/
+│   ├── .claude-plugin/plugin.json
+│   └── skills/architecture-first/
+│       └── SKILL.md                          # architecture-first discipline (loop, root-cause + refactor gates, patch smells, redesign moves)
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
     └── skills/new-project/
         ├── SKILL.md                          # the scaffolding skill (orchestrator)
         └── assets/
             ├── scaffold.sh                   # thin launcher: resolve Node, docker run, bootstrap + run house generators
-            ├── CLAUDE.md.tmpl                # base CLAUDE.md (generator-first guidance), authored by the skill
+            ├── CLAUDE.md.tmpl                # base CLAUDE.md (architecture-first + generator-first guidance), authored by the skill
             └── nx-tools/                     # @bespunky/nx-tools — house Nx generators, run post-scaffold
                 ├── generators.json
                 └── src/generators/
@@ -39,6 +44,7 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 ```
 /plugin marketplace add BeSpunky/claude-toolkit
 /plugin install project-starter@claude-toolkit
+/plugin install engineering@claude-toolkit
 ```
 
 …or add to `~/.claude/settings.json` so every project sees it:
@@ -48,13 +54,37 @@ Register new plugins in `.claude-plugin/marketplace.json`.
   "extraKnownMarketplaces": {
     "claude-toolkit": { "source": { "source": "github", "repo": "BeSpunky/claude-toolkit" } }
   },
-  "enabledPlugins": { "project-starter@claude-toolkit": true }
+  "enabledPlugins": {
+    "project-starter@claude-toolkit": true,
+    "engineering@claude-toolkit": true
+  }
 }
 ```
 
-Skills are namespaced as `project-starter:new-project`. Scaffolded projects already get a
-`.claude/settings.json` referencing this marketplace, so the toolkit's skills are available inside
-every new project automatically.
+Skills are namespaced as `project-starter:new-project` and `engineering:architecture-first`. Scaffolded
+projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
+available inside every new project automatically.
+
+## Architecture-first: the always-on half
+
+Installing the `engineering` plugin makes the `architecture-first` skill available — but a skill only
+fires when the model judges it relevant, which isn't enough for a rule that must hold on **every** change.
+So the policy has two halves:
+
+1. **Always-on directive in `CLAUDE.md`** — loaded into context every session, so the rule is never out of mind.
+2. **The `architecture-first` skill** — the depth: the full loop, the patch smells to refuse, and the redesign moves.
+
+**New projects** get half (1) automatically — the `new-project` scaffold bakes the directive into the
+generated `CLAUDE.md` and enables both plugins. **Existing projects** that install the plugin should paste
+the canonical directive below into their `CLAUDE.md` so the rule is always in context:
+
+```markdown
+## Architecture-first (non-negotiable)
+
+Every change — feature, bug, edge case, or "quick fix" — is solved through **design and infrastructure, never a patch.** No special-case `if`s keyed on one input/customer/env, no magic values, no copy-paste, no boolean flags to make one unit do two things, no casts to silence a type mismatch, no bumped timeouts to mask a structural problem. **For bugs, find and fix the root cause — never mask the symptom** (no swallowed errors, defaulted bad data, or guards bolted on at the symptom site). When the current design does not account for a requirement, **redesign and refactor** the relevant seam (model the missing concept, extract, decouple, build the missing abstraction, reuse) so the new behavior is a natural case of the design — don't bolt it on. Coupling, duplication, and special-casing must never grow. **If a refactor is needed to lay infrastructure for a feature or to fix a bug, design it first, get confirmation, and only then implement** — never refactor ad hoc mid-edit; if a correct redesign is genuinely large, surface it and its cost rather than patching silently.
+
+For any non-trivial change, invoke the **`engineering:architecture-first`** skill before writing code — it carries the full loop, the bug root-cause and refactor gates, the patch smells to refuse, and the redesign moves.
+```
 
 ## Upgrade everywhere
 
@@ -85,8 +115,8 @@ The `new-project` skill then authors a tailored `CLAUDE.md` (the one piece that 
 
 The generated `.devcontainer/devcontainer.json` **pre-installs this marketplace on build** via its
 `postCreateCommand` (`claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install
-project-starter@claude-toolkit --scope project`), so the toolkit's skills/agents are live the moment the
-container comes up. Declaring `enabledPlugins` in settings alone does **not** auto-install — the CLI step
+project-starter@claude-toolkit --scope project && claude plugin install engineering@claude-toolkit
+--scope project`), so the toolkit's skills/agents are live the moment the container comes up. Declaring `enabledPlugins` in settings alone does **not** auto-install — the CLI step
 is what makes it immediate inside the container; on the host, the settings declaration offers a one-click
 install on first run.
 
