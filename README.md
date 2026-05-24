@@ -8,7 +8,7 @@ This is a **Claude Code plugin marketplace** (a git repo). It currently ships tw
 | Plugin | Provides | Purpose |
 | --- | --- | --- |
 | `project-starter` | skill `new-project` | Scaffold a new BeSpunky-standard project: integrated Nx monorepo + Angular (clean `--minimal` app) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. |
-| `engineering` | skills `architect-mentality` + `architecture-first` (more to come: advanced TypeScript, Angular architecture, Nx, general software dev) | **`architect-mentality`** — the stack-agnostic mindset of a great architect (mentality only, no techniques): everything is a black box with deliberate connections, model the missing concept instead of patching, refuse false tradeoffs, go the extra mile, and more. **`architecture-first`** — the operational discipline that enforces it: solve every feature/bug/change through design and infrastructure, **never a patch**; fix bugs at the **root cause**; **design + confirm refactors before implementing**. Ships an always-on policy the scaffold bakes into every project's CLAUDE.md. |
+| `engineering` | skills `architect-mentality`, `architecture-first`, `angular-architecture`, `angular-native-wrappers` (more to come: advanced TypeScript, Nx, general software dev) | **Mindset & discipline (agnostic):** `architect-mentality` — the stack-agnostic mindset of a great architect (mentality only, no techniques): everything is a black box with deliberate connections, place everything on purpose, model the missing concept instead of patching, automate every repeated process, go the extra mile, and more. `architecture-first` — the operational discipline that enforces it: solve every change through design, **never a patch**; fix bugs at the **root cause**; **design + confirm refactors before implementing**; ships an always-on policy the scaffold bakes into every project's CLAUDE.md. **Techniques (Angular):** `angular-architecture` — a domain router indexing concrete modern-Angular patterns (DI/providers, lifecycle, SSR/zone, extensibility, projection, API ergonomics), each in an on-demand reference file. `angular-native-wrappers` — wrap an imperative/third-party JS API (maps, editors, charts, players) in idiomatic Angular. |
 
 ## Layout
 
@@ -19,9 +19,20 @@ claude-toolkit/
 │   ├── .claude-plugin/plugin.json
 │   └── skills/
 │       ├── architect-mentality/
-│       │   └── SKILL.md                      # the architect mindset (mentality only, stack-agnostic): 13 principles
-│       └── architecture-first/
-│           └── SKILL.md                      # architecture-first discipline (loop, root-cause + refactor gates, patch smells, redesign moves)
+│       │   └── SKILL.md                      # the architect mindset (mentality only, stack-agnostic): 15 principles
+│       ├── architecture-first/
+│       │   └── SKILL.md                      # architecture-first discipline (loop, root-cause + refactor gates, patch smells, redesign moves)
+│       ├── angular-architecture/             # DOMAIN skill (router) — modern-Angular technique clusters
+│       │   ├── SKILL.md                      # indexes clusters; links to reference files (progressive disclosure)
+│       │   └── reference/                    # one file per cluster, loaded on demand
+│       │       ├── di-and-providers.md
+│       │       ├── lifecycle-and-reactivity.md
+│       │       ├── ssr-zone-and-change-detection.md
+│       │       ├── extensibility-and-plugins.md
+│       │       ├── content-projection-and-dom-bridging.md
+│       │       └── component-api-ergonomics.md
+│       └── angular-native-wrappers/          # standalone technique — wrap an imperative/3rd-party JS API in Angular
+│           └── SKILL.md
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
     └── skills/new-project/
@@ -64,7 +75,7 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 }
 ```
 
-Skills are namespaced as `project-starter:new-project`, `engineering:architect-mentality`, and `engineering:architecture-first`. Scaffolded
+Skills are namespaced as `project-starter:new-project`, `engineering:architect-mentality`, `engineering:architecture-first`, `engineering:angular-architecture`, and `engineering:angular-native-wrappers`. Scaffolded
 projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
 available inside every new project automatically.
 
