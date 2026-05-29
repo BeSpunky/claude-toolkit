@@ -29,6 +29,7 @@ Read only the cluster(s) you need; don't load them all.
 | **Domain modeling** | `reference/domain-modeling.md` | value objects over primitives, make illegal states unrepresentable, ubiquitous language, bounded contexts, keep the domain infrastructure-free | Model the missing concept · Place everything on purpose |
 | **Errors & boundaries** | `reference/errors-and-boundaries.md` | validate at the edge / trust inside (parse don't validate), model errors deliberately, fail fast & loud, retries/timeouts at the right layer | Compensate for weaknesses · Design for the consumer (+ architecture-first: root cause) |
 | **Contracts & API design** | `reference/contracts-and-api-design.md` | minimal surface, hard-to-misuse APIs, command–query separation, guessable naming/symmetry, honest failure & escape hatch | Design for the consumer · Abstractions must never trap |
+| **Naming** | `reference/naming.md` | name by purpose **not** by architectural role (no `Service`/`Manager`/`Facade`/`Util`…), intention-revealing names, ubiquitous language, symmetric pairs | Design for the consumer · Place everything on purpose · Lead with one mental model |
 
 Read only the one(s) you need.
 

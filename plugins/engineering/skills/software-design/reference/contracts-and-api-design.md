@@ -36,9 +36,11 @@ type Endpoint = { kind: 'tls'; host: string; cert: Cert } | { kind: 'plain'; hos
 
 ## 4. Guessable naming & symmetry
 
-**What.** One naming convention applied everywhere; symmetric operations named symmetrically (`open`/`close`, `add`/`remove`, `subscribe`/`unsubscribe`). Names state intent.
+**What.** One naming convention applied everywhere; symmetric operations named symmetrically (`open`/`close`, `add`/`remove`, `subscribe`/`unsubscribe`). Names state intent — never the architectural role.
 
 **Why.** *Lead with one mental model* — learn the convention once, predict the rest of the API without the reference.
+
+For the deeper naming rules — **name by purpose not architectural role** (no `Service`/`Manager`/`Facade`/`Util`/`Handler`…), intention-revealing names, ubiquitous language — see `naming.md`.
 
 ---
 

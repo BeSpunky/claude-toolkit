@@ -58,7 +58,8 @@ claude-toolkit/
 │               ├── duplication-and-abstraction.md
 │               ├── domain-modeling.md
 │               ├── errors-and-boundaries.md
-│               └── contracts-and-api-design.md
+│               ├── contracts-and-api-design.md
+│               └── naming.md
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
     └── skills/new-project/
