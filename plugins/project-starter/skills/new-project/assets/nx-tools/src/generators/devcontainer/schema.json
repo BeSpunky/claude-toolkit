@@ -13,6 +13,11 @@
     "nodeMajor": {
       "type": ["string", "number"],
       "description": "Node major version for the typescript-node base image tag. Defaults to the running Node major."
+    },
+    "firebase": {
+      "type": "boolean",
+      "description": "Include Firebase CLI + Google Cloud CLI devcontainer features, the toba.vsfire VS Code extension, and the standard Firebase emulator port-forwards (4000, 9099, 8080, 9199, 5001). Opt-in only - never enabled by default.",
+      "default": false
     }
   },
   "required": ["name"]

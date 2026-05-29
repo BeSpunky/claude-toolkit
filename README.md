@@ -155,13 +155,16 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
    - `yarn nx g @nx/angular:application apps/<app> --minimal --style=scss --routing --e2eTestRunner=none`
 3. Copies `@bespunky/nx-tools` into the workspace's `node_modules` and runs the **house generators** — every config change is Nx-native (devkit `Tree`), no hand-rolled file edits:
    - `nx g @bespunky/nx-tools:serve-options --project=<app>` → serve `host: 0.0.0.0` (polling lives in the devcontainer env, since modern Angular's `@angular/build:dev-server` rejects `poll`)
-   - `nx g @bespunky/nx-tools:devcontainer --name=<project> --nodeMajor=<major>` → `.devcontainer/devcontainer.json` (Claude CLI/extension, `.claude` persistence, **`CHOKIDAR_USEPOLLING`/`CHOKIDAR_INTERVAL`** for WSL/Docker file-watching, postCreateCommand pre-installing the toolkit plugins)
+   - `nx g @bespunky/nx-tools:devcontainer --name=<project> --nodeMajor=<major>` `[--firebase=true]` → `.devcontainer/devcontainer.json` (Claude CLI/extension, `.claude` persistence, **`CHOKIDAR_USEPOLLING`/`CHOKIDAR_INTERVAL`** for WSL/Docker file-watching, postCreateCommand pre-installing the toolkit plugins; with `--firebase=true`, adds the Firebase CLI + Google Cloud CLI features, the `toba.vsfire` extension, and emulator port-forwards `[4000, 9099, 8080, 9199, 5001]`)
    - `nx g @bespunky/nx-tools:claude-settings` → `.claude/settings.json` (+ `.gitignore`, `.claude/data`)
+   - **Only with `--firebase`:** `nx g @bespunky/nx-tools:firebase-emulators --project=<app> --workspaceName=<project>` → `firebase.json` (emulator suite + singleProjectMode), `.firebaserc` (default `demo-<name>`), `apps/<app>/src/app/firebase.config.ts` (`provideAppFirebase()` using `ngDevMode` to switch emulator vs prod), best-effort wiring into `app.config.ts`, Nx targets on the app: `emulators` + `emulators:<svc>` (auth/firestore/storage/functions), `serve` rewrapped as an `nx:run-commands` orchestrator running `emulators` + `serve-app` (the renamed Angular dev-server) **in parallel** — so `nx serve <app>` brings up the app and the emulator suite together — and **adds `firebase` + `@angular/fire`** to `package.json`, installed post-commit via Nx's `installPackagesTask`. (No shell-side `yarn add` — the generator owns deps.)
 
-**Repair an existing project** (re-apply the three house generators idempotently — useful if a previous scaffold was incomplete, or after upgrading the toolkit):
+**Firebase support is opt-in.** Pass `--firebase` to `scaffold.sh` to enable the full setup (devcontainer features + emulator config + app `ngDevMode` wiring + Nx targets). Never enabled by default — only when the user explicitly asks for Firebase or the scaffolding agent asks and they say yes.
+
+**Repair an existing project** (re-apply the three house generators idempotently — useful if a previous scaffold was incomplete, or after upgrading the toolkit, or to retrofit `--firebase` onto an existing project):
 
 ```
-bash <path-to>/scaffold.sh --repair <project-path-or-name> [<app-name>]
+bash <path-to>/scaffold.sh --repair [--firebase] <project-path-or-name> [<app-name>]
 ```
 
 The `new-project` skill then authors a tailored `CLAUDE.md` (the one piece that stays contextual, not a template).

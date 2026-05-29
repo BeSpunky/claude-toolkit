@@ -3,20 +3,28 @@
 #
 # Default mode  : full scaffold (Nx + Angular + app + house generators + devcontainer + Claude settings).
 # Repair mode   : re-run ONLY the three house generators on an existing project (all idempotent).
+# Firebase opt-in: when --firebase is passed, the devcontainer gets the Firebase CLI + Google Cloud CLI
+#                  features, the toba.vsfire extension, and emulator port-forwards. NEVER enabled by default.
 #
 # Usage:
-#   scaffold.sh <project-name> [app-name]                  # full scaffold
-#   scaffold.sh --repair <project-path|project-name> [app-name]   # re-apply house generators
+#   scaffold.sh [--firebase] <project-name> [app-name]                       # full scaffold
+#   scaffold.sh --repair [--firebase] <project-path|project-name> [app-name] # re-apply house generators
 #
+# Leading flags (--repair, --firebase) may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 # Node comes from the typescript-node devcontainer base image, run via Docker - NO nvm.
 set -euo pipefail
 
 MODE="scaffold"
-if [ "${1:-}" = "--repair" ]; then
-  MODE="repair"
-  shift
-fi
+FIREBASE=0
+while [ "${1:-}" != "" ]; do
+  case "$1" in
+    --repair)   MODE="repair";   shift;;
+    --firebase) FIREBASE=1;      shift;;
+    --*)        echo "ERROR: unknown flag '$1'" >&2; exit 1;;
+    *)          break;;
+  esac
+done
 
 ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GIT_NAME="$(git config --global user.name 2>/dev/null || whoami)"
@@ -29,13 +37,13 @@ command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
 
 # --- resolve TARGET + PROJECT + APP based on mode ---
 if [ "$MODE" = "scaffold" ]; then
-  PROJECT="${1:?Usage: scaffold.sh <project-name> [app-name]   |   scaffold.sh --repair <project-path|name> [app-name]}"
+  PROJECT="${1:?Usage: scaffold.sh [--firebase] <project-name> [app-name]   |   scaffold.sh --repair [--firebase] <project-path|name> [app-name]}"
   APP="${2:-$PROJECT}"
   PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
   TARGET="$PROJECTS_DIR/$PROJECT"
   [ -e "$TARGET" ] && { echo "ERROR: '$TARGET' already exists. Choose another name (or use --repair)." >&2; exit 1; }
 else
-  TARGET_INPUT="${1:?Usage: scaffold.sh --repair <project-path|project-name> [app-name]}"
+  TARGET_INPUT="${1:?Usage: scaffold.sh --repair [--firebase] <project-path|project-name> [app-name]}"
   if [ -d "$TARGET_INPUT" ]; then
     TARGET="$(cd "$TARGET_INPUT" && pwd)"
   else
@@ -63,6 +71,20 @@ MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/
 [ -n "${MAJOR:-}" ] || MAJOR=24
 IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
 echo "Base image: $IMAGE"
+[ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
+
+# --- devcontainer generator args ---
+DEVCONTAINER_FLAGS=""
+[ "$FIREBASE" = "1" ] && DEVCONTAINER_FLAGS=" --firebase=true"
+
+# --- firebase-emulators block (only when --firebase): scaffold emulator config + Nx targets + app init.
+#     The generator itself adds `firebase` + `@angular/fire` to package.json and runs the package-manager install
+#     post-commit (via installPackagesTask), so versions resolve to current at scaffold time. No shell-side `yarn add`. ---
+FIREBASE_BLOCK=""
+if [ "$FIREBASE" = "1" ]; then
+  FIREBASE_BLOCK="
+yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT"
+fi
 
 # --- house-generators block (used by both modes; idempotent) ---
 HOUSE_BLOCK="rm -rf node_modules/@bespunky/nx-tools
@@ -70,8 +92,8 @@ mkdir -p node_modules/@bespunky
 cp -r /assets/nx-tools node_modules/@bespunky/nx-tools
 node /assets/compile-generators.mts node_modules/@bespunky/nx-tools
 yarn nx g @bespunky/nx-tools:serve-options --project=$APP
-yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR
-yarn nx g @bespunky/nx-tools:claude-settings"
+yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
+yarn nx g @bespunky/nx-tools:claude-settings$FIREBASE_BLOCK"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
@@ -101,7 +123,7 @@ docker run --rm \
   bash -lc "$INNER"
 
 if [ "$MODE" = "scaffold" ]; then
-  echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP)"
+  echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE)"
 else
-  echo "REPAIR_OK $TARGET (image=$IMAGE app=apps/$APP)"
+  echo "REPAIR_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE)"
 fi

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyFirebaseEmulators",
+  "title": "Scaffold Firebase emulator config + Nx targets + app initialization",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "Name of the Angular app to wire (firebase.config.ts is generated under its src/app, and its serve target is wrapped to start the emulator suite).",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "Which app?"
+    },
+    "workspaceName": {
+      "type": "string",
+      "description": "Workspace name used as the demo Firebase project id (`demo-<name>`) in .firebaserc and the emulator config. Defaults to the project name."
+    }
+  },
+  "required": ["project"]
+}

@@ -15,6 +15,11 @@
       "factory": "./src/generators/claude-settings/generator",
       "schema": "./src/generators/claude-settings/schema.json",
       "description": "Generate .claude/settings.json wiring the claude-toolkit + nx marketplaces (autoUpdate on); keep .claude/data out of git."
+    },
+    "firebase-emulators": {
+      "factory": "./src/generators/firebase-emulators/generator",
+      "schema": "./src/generators/firebase-emulators/schema.json",
+      "description": "Scaffold Firebase emulator config + Nx targets + app initialization. Writes firebase.json (emulators block) and .firebaserc (demo-<name>), generates src/app/firebase.config.ts using ngDevMode to switch emulator vs prod, wires app.config.ts, adds `emulators` + `emulators:<svc>` targets, and wraps `serve` to launch the suite alongside the app."
     }
   }
 }
