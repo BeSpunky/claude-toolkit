@@ -1,16 +1,24 @@
 // House generator: scaffold Firebase emulator config + Nx targets + app initialization.
 // Idempotent and safe in --repair mode.
 //
+// IMPORTANT: this generator NEVER writes `.firebaserc`. The cloud-project linkage is the
+// Firebase CLI's responsibility — `firebase use --add` validates against the user's actual
+// account and writes `.firebaserc` properly. Fabricating one here would lie about the cloud
+// state and break `firebase deploy` / `firebase use` the moment the user touches them.
+// Emulators don't need `.firebaserc`: each `firebase emulators:start` Nx target passes
+// `--project=demo-<workspaceName>` explicitly. The `demo-` prefix is Firebase's documented
+// convention for "offline only, no cloud calls," so emulators work without login and without
+// a real GCP project.
+//
 // Writes:
 //   - firebase.json   (workspace root) — emulators config (auth/firestore/storage/functions/ui), singleProjectMode.
-//   - .firebaserc     (workspace root) — default project `demo-<workspaceName>` (Firebase emulator convention).
 //   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase() using `ngDevMode` to switch emulator vs prod.
 //   - apps/<project>/src/app/app.config.ts — best-effort wiring of provideAppFirebase() into providers; warns if unrecognized.
 //   - apps/<project>/project.json targets:
 //       * `serve`              — nx:run-commands orchestrator: emulators + serve-app in parallel.
 //       * `serve-app`          — the original Angular dev-server target (renamed from `serve`).
-//       * `emulators`          — start the whole emulator suite (long-running).
-//       * `emulators:<svc>`    — start one emulator + UI (auth | firestore | storage | functions).
+//       * `emulators`          — start the whole emulator suite under --project=demo-<workspaceName>.
+//       * `emulators:<svc>`    — start one emulator + UI under --project=demo-<workspaceName>.
 import {
   type Tree,
   type GeneratorCallback,
@@ -60,22 +68,19 @@ export default async function firebaseEmulatorsGenerator(
   const appRoot = project.root;
 
   // 1) firebase.json at workspace root (idempotent overwrite to canonical shape).
+  // Note: `.firebaserc` is deliberately NOT generated — see the file header. The Firebase CLI
+  // owns cloud-project linkage (`firebase use --add` after `firebase login`). Emulator targets
+  // pass `--project=demo-<workspaceName>` explicitly, so emulators run without `.firebaserc`.
   tree.write('firebase.json', JSON.stringify(FIREBASE_JSON, null, 2) + '\n');
 
-  // 2) .firebaserc with demo project id (Firebase emulator convention — works without GCP credentials).
-  tree.write(
-    '.firebaserc',
-    JSON.stringify({ projects: { default: `demo-${workspaceName}` } }, null, 2) + '\n'
-  );
-
-  // 3) src/app/firebase.config.ts (don't clobber user edits).
+  // 2) src/app/firebase.config.ts (don't clobber user edits).
   const firebaseConfigPath = `${appRoot}/src/app/firebase.config.ts`;
   if (!tree.exists(firebaseConfigPath)) {
     const tpl = readFileSync(join(__dirname, 'firebase.config.ts.tpl'), 'utf8');
     tree.write(firebaseConfigPath, tpl.split('{{workspaceName}}').join(workspaceName));
   }
 
-  // 4) Best-effort: wire provideAppFirebase() into app.config.ts.
+  // 3) Best-effort: wire provideAppFirebase() into app.config.ts.
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (tree.exists(appConfigPath)) {
     const current = tree.read(appConfigPath, 'utf8') ?? '';
@@ -93,8 +98,10 @@ export default async function firebaseEmulatorsGenerator(
     }
   }
 
-  // 5) Nx targets on the app's project.json.
+  // 4) Nx targets on the app's project.json.
   project.targets ??= {};
+  // `demo-<name>` is Firebase's offline convention — works without login, never calls the cloud.
+  const demoProject = `demo-${workspaceName}`;
 
   // Rename the original `serve` (Angular dev-server) to `serve-app`, then wrap with an orchestrator.
   const existingServe = project.targets.serve;
@@ -113,23 +120,23 @@ export default async function firebaseEmulatorsGenerator(
     };
   }
 
-  // Master `emulators` target — starts the full suite.
+  // Master `emulators` target — starts the full suite under the offline demo project id.
   project.targets.emulators = {
     continuous: true,
     executor: 'nx:run-commands',
     options: {
-      command: 'firebase emulators:start',
+      command: `firebase emulators:start --project=${demoProject}`,
       cwd: '{workspaceRoot}',
     },
   };
 
-  // Per-emulator targets — start just one (+ UI).
+  // Per-emulator targets — start just one (+ UI), same offline demo project id.
   for (const svc of EMULATORS) {
     project.targets[`emulators:${svc}`] = {
       continuous: true,
       executor: 'nx:run-commands',
       options: {
-        command: `firebase emulators:start --only ${svc},ui`,
+        command: `firebase emulators:start --only ${svc},ui --project=${demoProject}`,
         cwd: '{workspaceRoot}',
       },
     };
@@ -137,7 +144,7 @@ export default async function firebaseEmulatorsGenerator(
 
   updateProjectConfiguration(tree, projectName, project);
 
-  // 6) Runtime deps. `latest` resolves to current at install time;
+  // 5) Runtime deps. `latest` resolves to current at install time;
   //    the lockfile pins after install. Re-running is safe (no-op if already present at compatible version).
   addDependenciesToPackageJson(
     tree,

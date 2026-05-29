@@ -5,8 +5,16 @@
 // `ngDevMode` is `true` in dev builds and tree-shaken to `false` in production by `@angular/build`,
 // so the emulator config and the `connect*Emulator(...)` calls are removed from the prod bundle.
 //
-// To deploy against a real project, replace `productionFirebaseConfig` below with your web config
-// (Firebase console -> Project settings -> Your apps -> the web app config object).
+// === To wire a real Firebase project (when you're ready to deploy) ===
+//   1) Log in:                 firebase login
+//   2) Link the project:       firebase use --add        (picks from your account; writes .firebaserc)
+//   3) Fetch the web config:   firebase apps:sdkconfig WEB <appId> --project <projectId>
+//   4) Paste the returned `firebaseConfig` object below into `productionFirebaseConfig`.
+//
+// Do NOT hand-fabricate the production config — the values must match what your Firebase
+// account actually has, and the CLI is the source of truth. The `productionFirebaseConfig`
+// placeholders below are left intentionally empty so a half-wired prod build fails loudly
+// instead of silently pointing at the wrong project.
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
 import { connectAuthEmulator, getAuth, provideAuth } from '@angular/fire/auth';
@@ -16,14 +24,20 @@ import { connectFunctionsEmulator, getFunctions, provideFunctions } from '@angul
 
 declare const ngDevMode: boolean;
 
+// Local emulator config. The `demo-` prefix is Firebase's convention for "offline only,
+// no cloud calls" — it matches the `--project=demo-{{workspaceName}}` flag the Nx
+// `emulators` targets pass, so emulator data and CLI invocations agree on one id.
 const emulatorFirebaseConfig = {
   projectId: 'demo-{{workspaceName}}',
   apiKey: 'demo',
   appId: 'demo',
 };
 
+// TODO: paste your real Firebase web config here, fetched via:
+//   firebase apps:sdkconfig WEB <appId> --project <projectId>
+// (see the file header for the full flow). Leave empty until you actually have a project —
+// an empty prod config fails loudly, which is better than silently pointing at nothing.
 const productionFirebaseConfig = {
-  // TODO: paste your Firebase web config here (Firebase console -> Project settings -> Your apps).
   projectId: '',
   apiKey: '',
   appId: '',

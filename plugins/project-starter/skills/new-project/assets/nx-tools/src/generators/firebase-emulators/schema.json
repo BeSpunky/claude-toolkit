@@ -12,7 +12,7 @@
     },
     "workspaceName": {
       "type": "string",
-      "description": "Workspace name used as the demo Firebase project id (`demo-<name>`) in .firebaserc and the emulator config. Defaults to the project name."
+      "description": "Workspace name used to build the offline emulator project id (`demo-<name>`) — passed via --project to each `firebase emulators:start` Nx target and used inside firebase.config.ts's emulator config. Defaults to the project name. (Not written to .firebaserc — that's the Firebase CLI's responsibility.)"
     }
   },
   "required": ["project"]

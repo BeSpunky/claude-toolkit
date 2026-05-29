@@ -19,7 +19,7 @@
     "firebase-emulators": {
       "factory": "./src/generators/firebase-emulators/generator",
       "schema": "./src/generators/firebase-emulators/schema.json",
-      "description": "Scaffold Firebase emulator config + Nx targets + app initialization. Writes firebase.json (emulators block) and .firebaserc (demo-<name>), generates src/app/firebase.config.ts using ngDevMode to switch emulator vs prod, wires app.config.ts, adds `emulators` + `emulators:<svc>` targets, and wraps `serve` to launch the suite alongside the app."
+      "description": "Scaffold Firebase emulator config + Nx targets + app initialization. Writes firebase.json (emulators block + singleProjectMode); deliberately does NOT write .firebaserc (cloud-project linkage is the Firebase CLI's job — `firebase use --add`). Generates src/app/firebase.config.ts using ngDevMode to switch emulator vs prod, wires app.config.ts, adds `emulators` + `emulators:<svc>` targets (each passes --project=demo-<name> so emulators work without login), and wraps `serve` to launch the suite alongside the app."
     }
   }
 }
