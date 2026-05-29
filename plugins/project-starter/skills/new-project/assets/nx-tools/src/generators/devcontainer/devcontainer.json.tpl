@@ -44,7 +44,11 @@
   "remoteUser": "node",
   "remoteEnv": {
     "PATH": "${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",
-    "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1"
+    "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1",
+    // Reliable file-watching for chokidar-based watchers over WSL/Docker mounts.
+    // (Replaces the legacy `poll` option on serve targets, which the modern @angular/build:dev-server schema rejects.)
+    "CHOKIDAR_USEPOLLING": "true",
+    "CHOKIDAR_INTERVAL": "1000"
   },
   "mounts": [
     "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached",

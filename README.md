@@ -153,9 +153,15 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
    - `yarn nx add @nx/angular`
    - `yarn nx g @nx/angular:application apps/<app> --minimal --style=scss --routing --e2eTestRunner=none`
 3. Copies `@bespunky/nx-tools` into the workspace's `node_modules` and runs the **house generators** — every config change is Nx-native (devkit `Tree`), no hand-rolled file edits:
-   - `nx g @bespunky/nx-tools:serve-options --project=<app>` → serve `host`/`poll`
-   - `nx g @bespunky/nx-tools:devcontainer --name=<project> --nodeMajor=<major>` → `.devcontainer/devcontainer.json`
+   - `nx g @bespunky/nx-tools:serve-options --project=<app>` → serve `host: 0.0.0.0` (polling lives in the devcontainer env, since modern Angular's `@angular/build:dev-server` rejects `poll`)
+   - `nx g @bespunky/nx-tools:devcontainer --name=<project> --nodeMajor=<major>` → `.devcontainer/devcontainer.json` (Claude CLI/extension, `.claude` persistence, **`CHOKIDAR_USEPOLLING`/`CHOKIDAR_INTERVAL`** for WSL/Docker file-watching, postCreateCommand pre-installing the toolkit plugins)
    - `nx g @bespunky/nx-tools:claude-settings` → `.claude/settings.json` (+ `.gitignore`, `.claude/data`)
+
+**Repair an existing project** (re-apply the three house generators idempotently — useful if a previous scaffold was incomplete, or after upgrading the toolkit):
+
+```
+bash <path-to>/scaffold.sh --repair <project-path-or-name> [<app-name>]
+```
 
 The `new-project` skill then authors a tailored `CLAUDE.md` (the one piece that stays contextual, not a template).
 

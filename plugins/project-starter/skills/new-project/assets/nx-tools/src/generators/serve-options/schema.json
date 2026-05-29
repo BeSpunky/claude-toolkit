@@ -12,13 +12,8 @@
     },
     "host": {
       "type": "string",
-      "description": "Dev-server bind host.",
+      "description": "Dev-server bind host (so the server is reachable from outside the devcontainer).",
       "default": "0.0.0.0"
-    },
-    "poll": {
-      "type": "number",
-      "description": "File-watching poll interval in ms (reliable over WSL/Docker mounts).",
-      "default": 1000
     }
   },
   "required": ["project"]
