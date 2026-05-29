@@ -19,10 +19,14 @@ import {
   formatFiles,
   addDependenciesToPackageJson,
   installPackagesTask,
+  applyChangesToString,
+  type StringChange,
+  ChangeType,
   logger,
 } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import * as ts from 'typescript';
 
 interface FirebaseEmulatorsSchema {
   project: string;
@@ -75,7 +79,7 @@ export default async function firebaseEmulatorsGenerator(
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (tree.exists(appConfigPath)) {
     const current = tree.read(appConfigPath, 'utf8') ?? '';
-    const wired = wireProvideAppFirebase(current);
+    const wired = wireProvideAppFirebase(current, appConfigPath);
     if (wired === current) {
       // Already wired or no changes needed.
     } else if (wired) {
@@ -150,36 +154,102 @@ export default async function firebaseEmulatorsGenerator(
 }
 
 /**
- * Best-effort wiring: add `import { provideAppFirebase } from './firebase.config';`
- * and append `provideAppFirebase()` to the providers array.
- * Returns the updated source, the original source (if already wired), or null if the file shape is unexpected.
+ * Wire `provideAppFirebase()` into `appConfig`'s `providers` array, and add the
+ * matching `import` at the top of the file.
+ *
+ * Uses the TypeScript compiler API to locate AST positions (no regex on source —
+ * source code is a tree, not text), then applies non-overlapping text inserts via
+ * `applyChangesToString` so the surrounding formatting is preserved and the
+ * surrounding `formatFiles` polishes the result.
+ *
+ * Returns:
+ *   - the updated source when wiring is applied,
+ *   - the original `source` when the file is already wired (idempotent no-op),
+ *   - `null` when the file shape is unrecognized (no imports, or no
+ *     `appConfig.providers` ArrayLiteral) — the caller logs an actionable warning.
  */
-function wireProvideAppFirebase(source: string): string | null {
-  if (source.includes('provideAppFirebase')) return source; // already wired; no-op
+function wireProvideAppFirebase(source: string, sourcePath: string): string | null {
+  const sf = ts.createSourceFile(
+    sourcePath,
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS
+  );
 
-  // Insert the import after the last existing import statement.
-  const importRegex = /^import .+ from .+;$/gm;
-  let lastImportEnd = -1;
-  let m: RegExpExecArray | null;
-  while ((m = importRegex.exec(source)) !== null) {
-    lastImportEnd = m.index + m[0].length;
+  // Idempotency: any Identifier named `provideAppFirebase` anywhere in the file
+  // (import, call, alias) means this file is already wired — never re-write it.
+  let alreadyWired = false;
+  const detectExisting = (node: ts.Node): void => {
+    if (alreadyWired) return;
+    if (ts.isIdentifier(node) && node.text === 'provideAppFirebase') {
+      alreadyWired = true;
+      return;
+    }
+    ts.forEachChild(node, detectExisting);
+  };
+  detectExisting(sf);
+  if (alreadyWired) return source;
+
+  // Locate the providers ArrayLiteralExpression inside the `appConfig` object literal:
+  //   export const appConfig: ApplicationConfig = { providers: [ ... ], ... };
+  let providersArray: ts.ArrayLiteralExpression | null = null;
+  const findProviders = (node: ts.Node): void => {
+    if (providersArray) return;
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'appConfig' &&
+      node.initializer &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      for (const prop of node.initializer.properties) {
+        if (
+          ts.isPropertyAssignment(prop) &&
+          ts.isIdentifier(prop.name) &&
+          prop.name.text === 'providers' &&
+          ts.isArrayLiteralExpression(prop.initializer)
+        ) {
+          providersArray = prop.initializer;
+          return;
+        }
+      }
+    }
+    ts.forEachChild(node, findProviders);
+  };
+  findProviders(sf);
+  if (!providersArray) return null;
+
+  // Find the last top-level ImportDeclaration so we know where to put our new import.
+  let lastImport: ts.ImportDeclaration | null = null;
+  for (const stmt of sf.statements) {
+    if (ts.isImportDeclaration(stmt)) lastImport = stmt;
+    else break; // imports come first; stop scanning once we hit other top-level statements
   }
-  if (lastImportEnd === -1) return null;
-  const importStmt = `\nimport { provideAppFirebase } from './firebase.config';`;
-  let updated = source.slice(0, lastImportEnd) + importStmt + source.slice(lastImportEnd);
+  if (!lastImport) return null;
 
-  // Append `provideAppFirebase()` inside the providers array. Non-greedy across lines.
-  const providersRegex = /providers\s*:\s*\[([\s\S]*?)\]/;
-  const pm = providersRegex.exec(updated);
-  if (!pm) return null;
-  const inner = pm[1];
-  const trimmedInner = inner.trim();
-  // Strip any trailing comma + whitespace so we don't produce a sparse array (`a,\n  ,\n  provideAppFirebase()`).
-  // Both styles ("a, b" and "a, b,") get the same handling: append ", provideAppFirebase()".
-  const replacement = trimmedInner.length
-    ? `providers: [${inner.replace(/,?\s*$/, '')}, provideAppFirebase()]`
-    : `providers: [provideAppFirebase()]`;
-  updated = updated.slice(0, pm.index) + replacement + updated.slice(pm.index + pm[0].length);
+  // Pick the right separator based on whether the array already has a trailing comma
+  // — the AST's `hasTrailingComma` is the source of truth, no regex on the text.
+  const elements = providersArray.elements;
+  const arrSnippet =
+    elements.length === 0
+      ? 'provideAppFirebase()'
+      : elements.hasTrailingComma
+      ? ' provideAppFirebase(),'
+      : ', provideAppFirebase()';
 
-  return updated;
+  const changes: StringChange[] = [
+    {
+      type: ChangeType.Insert,
+      index: lastImport.getEnd(),
+      text: `\nimport { provideAppFirebase } from './firebase.config';`,
+    },
+    {
+      type: ChangeType.Insert,
+      index: providersArray.getEnd() - 1, // position just before the closing `]`
+      text: arrSnippet,
+    },
+  ];
+
+  return applyChangesToString(source, changes);
 }
