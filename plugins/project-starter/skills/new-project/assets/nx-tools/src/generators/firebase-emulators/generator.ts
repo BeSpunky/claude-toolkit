@@ -174,8 +174,10 @@ function wireProvideAppFirebase(source: string): string | null {
   if (!pm) return null;
   const inner = pm[1];
   const trimmedInner = inner.trim();
+  // Strip any trailing comma + whitespace so we don't produce a sparse array (`a,\n  ,\n  provideAppFirebase()`).
+  // Both styles ("a, b" and "a, b,") get the same handling: append ", provideAppFirebase()".
   const replacement = trimmedInner.length
-    ? `providers: [${inner.replace(/\s*$/, '')}, provideAppFirebase()]`
+    ? `providers: [${inner.replace(/,?\s*$/, '')}, provideAppFirebase()]`
     : `providers: [provideAppFirebase()]`;
   updated = updated.slice(0, pm.index) + replacement + updated.slice(pm.index + pm[0].length);
 
