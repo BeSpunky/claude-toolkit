@@ -28,6 +28,20 @@ For any non-trivial change, invoke the **`engineering:architecture-first`** skil
 - **Package manager**: yarn.
 - **Dev environment**: devcontainer on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the base image) with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds.
 
+{{#firebase}}
+## Firebase
+
+This project was scaffolded with `--firebase`. **Local development uses the emulator suite, offline** — `nx serve <app>` auto-launches the emulators alongside the dev server under the offline project id `demo-<workspaceName>`. No `firebase login`, no cloud project, no `.firebaserc` is needed for development. By design.
+
+**When the user asks to deploy this app — or otherwise connect it to a real Firebase project — walk them through these steps** (from the workspace root inside the devcontainer, where the Firebase CLI is installed):
+
+1. `firebase login` — one-time auth against their Google account (opens a browser).
+2. `firebase use --add` — picks a project from their account and writes `.firebaserc`. If they don't have a project yet, create it first (Firebase console or `firebase projects:create <id>`).
+3. `firebase apps:sdkconfig WEB <appId> --project <projectId>` — prints the real web config.
+4. Paste the returned `firebaseConfig` object into `productionFirebaseConfig` in `apps/<APP>/src/app/firebase.config.ts`.
+
+**Never fabricate `.firebaserc` or the production config** — the Firebase CLI is the source of truth for cloud state. `provideAppFirebase()` throws at bootstrap if production is attempted with an empty config, so silent broken deploys are impossible. The same recipe also lives in the header of `firebase.config.ts` and in the `project-starter:new-project` skill.
+
 ## Generator-first, manual last
 
 For anything Nx can generate - apps, libraries, components, services, project config - **use the Nx generator (`nx g ...`); never hand-create and fill files.** Before hand-writing anything structural, check what exists: `nx list <plugin>` / `nx g <generator> --help` (or the `nx-generate` skill / the Nx MCP server). Only fall back to manual file creation when no generator covers the task. **Never guess flags** - verify against `--help` / `nx_docs`.

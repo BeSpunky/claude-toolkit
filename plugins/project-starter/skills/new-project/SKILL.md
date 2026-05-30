@@ -92,6 +92,7 @@ Read `${CLAUDE_SKILL_DIR}/assets/CLAUDE.md.tmpl`. Use it as the base:
 - Keep the **Architect mentality**, **Architecture-first (non-negotiable)**, **Generator-first**, and **Working with Nx** sections verbatim - the architect-mentality and architecture-first directives are the always-on half of the `engineering` plugin and must not be softened or dropped.
 - Set the component/directive prefix to something derived from the project name.
 - Fill **`{{TOOLKIT_STAMP}}`** with a stamp identifying the toolkit version that scaffolded this project. Read `cat "${CLAUDE_SKILL_DIR}/.claude-plugin/plugin.json"` for the `version`, and if the toolkit is a git checkout, append the short SHA (`git -C "${CLAUDE_SKILL_DIR}" rev-parse --short HEAD 2>/dev/null`). Example: `0.1.0 (git ae5cf49)`. If neither is available, write `unknown`.
+- Process the **`{{#firebase}} … {{/firebase}}`** conditional block: if `--firebase` was used in step 1, **keep the block's content and strip just the markers** (so the Firebase section ships in the project's CLAUDE.md, instructing every future agent session how to wire a real project). If `--firebase` was **not** used, **strip the entire block including markers** (so the unused Firebase section doesn't ship). Don't leave the literal markers in the output.
 
 Write the result to `<project>/CLAUDE.md`.
 
@@ -116,7 +117,8 @@ Before reporting back, confirm each item. **If any check fails, fix it by runnin
 Tell the user:
 - the absolute path of the new project and the app at `apps/<app-name>`,
 - that the devcontainer ships the Claude CLI + VS Code extension, persists `.claude`, and **pre-installs the bespunky/claude-toolkit plugins on build** - so every house skill/agent is live inside the container with no setup (open via "Dev Containers: Reopen in Container"),
-- that on the host (outside the container), `.claude/settings.json` already declares the marketplace, so Claude offers a one-click install on first run.
+- that on the host (outside the container), `.claude/settings.json` already declares the marketplace, so Claude offers a one-click install on first run,
+- **if `--firebase` was used:** explicitly tell the user — verbatim or close to it — *"Local Firebase dev is wired now: `nx serve <app>` brings up the app **and** the emulator suite together, fully offline (no login, no cloud project required). When you're ready to deploy to a real Firebase project, ask me — I'll walk you through `firebase login` → `firebase use --add` → fetching the web config → pasting it into `firebase.config.ts`. It's a 3-command setup, doesn't block dev, and `provideAppFirebase()` will throw at bootstrap if you ever try to ship prod without it filled in — so silent broken deploys are impossible."* The point is to set expectations **now**, while the user is paying attention, so they don't later guess they were supposed to do something.
 
 ## Notes
 

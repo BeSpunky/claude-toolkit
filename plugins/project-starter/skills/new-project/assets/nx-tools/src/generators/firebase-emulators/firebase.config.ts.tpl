@@ -44,6 +44,26 @@ const productionFirebaseConfig = {
 };
 
 export function provideAppFirebase(): EnvironmentProviders {
+  // Fail-loud guard: silently shipping a broken Firebase app is impossible.
+  // Production mode + an unfilled productionFirebaseConfig → bootstrap throws immediately
+  // with the recipe in the error. The check sits inside the `!ngDevMode` branch — kept in
+  // prod, tree-shaken in dev — so there's zero dev-side cost and full prod-side safety.
+  if (
+    !ngDevMode &&
+    (!productionFirebaseConfig.projectId ||
+      !productionFirebaseConfig.apiKey ||
+      !productionFirebaseConfig.appId)
+  ) {
+    throw new Error(
+      '[firebase.config.ts] productionFirebaseConfig is not filled in — cannot bootstrap Firebase for production.\n' +
+        '  To wire a real project (one-time setup):\n' +
+        '    1) firebase login\n' +
+        '    2) firebase use --add                                  (picks from your account; writes .firebaserc)\n' +
+        '    3) firebase apps:sdkconfig WEB <appId> --project <id>  (prints the real web config)\n' +
+        '  Then paste the returned firebaseConfig into productionFirebaseConfig and rebuild.'
+    );
+  }
+
   const firebaseConfig = ngDevMode ? emulatorFirebaseConfig : productionFirebaseConfig;
   return makeEnvironmentProviders([
     provideFirebaseApp(() => initializeApp(firebaseConfig)),
