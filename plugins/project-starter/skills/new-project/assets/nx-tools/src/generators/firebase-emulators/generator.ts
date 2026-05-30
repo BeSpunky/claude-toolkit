@@ -41,17 +41,35 @@ interface FirebaseEmulatorsSchema {
   workspaceName?: string;
 }
 
-const FIREBASE_JSON = {
-  emulators: {
-    auth: { port: 9099 },
-    firestore: { port: 8080 },
-    storage: { port: 9199 },
-    functions: { port: 5001 },
-    hosting: { port: 5000 },
-    ui: { enabled: true, port: 4000 },
-    singleProjectMode: true,
-  },
-};
+// Build firebase.json. The top-level `hosting` block silences the firebase-tools warning
+// "hosting emulator is configured but there is no hosting configuration" AND wires the
+// project for `firebase deploy --only hosting` once the user links a real project via
+// `firebase use --add`. `public` points at the modern Angular application-builder output
+// (the `browser/` subdir under dist).
+//
+// Every emulator binds to `0.0.0.0` (all interfaces) — required when running inside Docker /
+// devcontainers, where the firebase-tools probe (`127.0.0.1:<port>`) otherwise fails with
+// "Port X is not open on localhost (127.0.0.1)" because the emulator bound to ::1 (IPv6) or
+// a container-internal interface only. Binding 0.0.0.0 also makes the emulator UI reachable
+// from the host browser via the existing devcontainer port-forwards.
+function buildFirebaseJson(appName: string) {
+  return {
+    hosting: {
+      public: `dist/apps/${appName}/browser`,
+      ignore: ['firebase.json', '**/.*', '**/node_modules/**'],
+      rewrites: [{ source: '**', destination: '/index.html' }],
+    },
+    emulators: {
+      auth:      { host: '0.0.0.0', port: 9099 },
+      firestore: { host: '0.0.0.0', port: 8080 },
+      storage:   { host: '0.0.0.0', port: 9199 },
+      functions: { host: '0.0.0.0', port: 5001 },
+      hosting:   { host: '0.0.0.0', port: 5000 },
+      ui:        { enabled: true, host: '0.0.0.0', port: 4000 },
+      singleProjectMode: true,
+    },
+  };
+}
 
 const EMULATORS = ['auth', 'firestore', 'storage', 'functions'] as const;
 
@@ -71,7 +89,7 @@ export default async function firebaseEmulatorsGenerator(
   // Note: `.firebaserc` is deliberately NOT generated — see the file header. The Firebase CLI
   // owns cloud-project linkage (`firebase use --add` after `firebase login`). Emulator targets
   // pass `--project=demo-<workspaceName>` explicitly, so emulators run without `.firebaserc`.
-  tree.write('firebase.json', JSON.stringify(FIREBASE_JSON, null, 2) + '\n');
+  tree.write('firebase.json', JSON.stringify(buildFirebaseJson(projectName), null, 2) + '\n');
 
   // 2) src/app/firebase.config.ts (don't clobber user edits).
   const firebaseConfigPath = `${appRoot}/src/app/firebase.config.ts`;
