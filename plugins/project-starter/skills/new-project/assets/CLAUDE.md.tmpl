@@ -40,7 +40,7 @@ This project was scaffolded with `--firebase`. **Local development uses the emul
 3. `firebase apps:sdkconfig WEB <appId> --project <projectId>` — prints the real web config.
 4. Paste the returned `firebaseConfig` object into `productionFirebaseConfig` in `apps/<APP>/src/app/firebase.config.ts`.
 
-**Never fabricate `.firebaserc` or the production config** — the Firebase CLI is the source of truth for cloud state. `provideAppFirebase()` throws at bootstrap if production is attempted with an empty config, so silent broken deploys are impossible. The same recipe also lives in the header of `firebase.config.ts` and in the `project-starter:new-project` skill.
+**Never fabricate `.firebaserc` or the production config** — the Firebase CLI is the source of truth for cloud state. `provideAppFirebase()` throws at bootstrap if production is attempted with an empty config, so silent broken deploys are impossible. Inside the devcontainer, **every interactive terminal shows a self-extinguishing banner** (`tools/firebase-welcome.sh`, sourced via `/etc/profile.d/zz-firebase-welcome.sh`) reminding the user of the recipe until setup is complete — when both `.firebaserc` exists and `productionFirebaseConfig.projectId` is filled, the banner goes silent automatically. The same recipe also lives in the header of `firebase.config.ts` and in the `project-starter:new-project` skill.
 
 ## Generator-first, manual last
 

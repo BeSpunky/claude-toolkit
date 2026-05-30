@@ -80,6 +80,15 @@ export default async function firebaseEmulatorsGenerator(
     tree.write(firebaseConfigPath, tpl.split('{{workspaceName}}').join(workspaceName));
   }
 
+  // 3a) tools/firebase-welcome.sh — self-extinguishing banner that nudges the user
+  //     toward the cloud-linkage steps every time they open a terminal in the devcontainer,
+  //     and goes silent once setup is complete. Sourced by /etc/profile.d/zz-firebase-welcome.sh
+  //     which the devcontainer's postCreateCommand installs (when --firebase=true).
+  //     Always (re)write — small file, our content, no user edits expected.
+  const welcomePath = 'tools/firebase-welcome.sh';
+  const welcomeTpl = readFileSync(join(__dirname, 'firebase-welcome.sh.tpl'), 'utf8');
+  tree.write(welcomePath, welcomeTpl);
+
   // 3) Best-effort: wire provideAppFirebase() into app.config.ts.
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (tree.exists(appConfigPath)) {

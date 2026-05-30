@@ -44,7 +44,7 @@
     }
   },
 
-  "postCreateCommand": "yarn install && (claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install project-starter@claude-toolkit --scope project && claude plugin install engineering@claude-toolkit --scope project || echo 'NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run')",
+  "postCreateCommand": "yarn install && (claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install project-starter@claude-toolkit --scope project && claude plugin install engineering@claude-toolkit --scope project || echo 'NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run'){{#firebase}} && echo '[ -f ${containerWorkspaceFolder}/tools/firebase-welcome.sh ] && source ${containerWorkspaceFolder}/tools/firebase-welcome.sh' | sudo tee /etc/profile.d/zz-firebase-welcome.sh > /dev/null{{/firebase}}",
   "remoteUser": "node",{{#firebase}}
 
   // Firebase emulator port-forwards (added when scaffolded with --firebase).
