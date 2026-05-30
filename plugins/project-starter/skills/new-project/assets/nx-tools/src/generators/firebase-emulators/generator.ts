@@ -21,7 +21,15 @@
 //   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase() using `ngDevMode` to switch emulator vs prod.
 //   - apps/<project>/src/app/app.config.ts — best-effort wiring of provideAppFirebase() into providers; warns if unrecognized.
 //   - apps/<project>/project.json targets:
-//       * `serve`              — nx:run-commands orchestrator: emulators + serve-app in parallel.
+//       * `serve`              — `firebase emulators:exec` wrapper that runs `serve-app` as its
+//                                child. firebase owns the emulator lifecycle: it boots the suite,
+//                                runs the wrapped dev-server, and on shutdown tears down ALL
+//                                emulator JVMs — no orphan Java processes holding ports between
+//                                restarts. ng serve also starts only after emulators are ready,
+//                                so the app doesn't race emulator boot.
+//                                (Earlier shape was parallel `emulators` + `serve-app` via
+//                                nx:run-commands; signal propagation through yarn→nx→firebase→java
+//                                was unreliable and orphaned the Firestore JVM on every kill.)
 //       * `serve-app`          — the original Angular dev-server target (renamed from `serve`).
 //       * `emulators`          — start the whole emulator suite under --project=demo-<workspaceName>.
 //       * `emulators:<svc>`    — start one emulator + UI under --project=demo-<workspaceName>.
@@ -139,19 +147,33 @@ export default async function firebaseEmulatorsGenerator(
   // `demo-<name>` is Firebase's offline convention — works without login, never calls the cloud.
   const demoProject = `demo-${workspaceName}`;
 
-  // Rename the original `serve` (Angular dev-server) to `serve-app`, then wrap with an orchestrator.
+  // Rename the original `serve` (Angular dev-server) to `serve-app` on first wrap, then
+  // (re)write `serve` to the canonical `firebase emulators:exec` wrapper. Always rewriting
+  // the wrapper is what makes `--repair` self-heal: a project scaffolded by an earlier
+  // version of this generator (parallel `emulators` + `serve-app` via nx:run-commands)
+  // is normalized to the current shape on the next run.
+  //
+  // We only rename serve→serve-app when serve-app doesn't already exist — that protects any
+  // user customizations on serve-app across re-runs, and is also the right behavior when an
+  // earlier run already did the rename.
   const existingServe = project.targets.serve;
-  if (existingServe && existingServe.executor !== 'nx:run-commands') {
+  if (
+    existingServe &&
+    existingServe.executor !== 'nx:run-commands' &&
+    !project.targets['serve-app']
+  ) {
     project.targets['serve-app'] = existingServe;
+  }
+  if (project.targets['serve-app']) {
+    // Canonical wrapper: firebase owns the emulator lifecycle, signals propagate cleanly,
+    // no orphan JVMs hold ports between restarts. Single-quoting the inner command keeps
+    // bash from word-splitting the `nx run` argument.
     project.targets.serve = {
       continuous: true,
       executor: 'nx:run-commands',
       options: {
-        commands: [
-          `nx run ${projectName}:emulators`,
-          `nx run ${projectName}:serve-app`,
-        ],
-        parallel: true,
+        command: `firebase emulators:exec --project=${demoProject} 'nx run ${projectName}:serve-app'`,
+        cwd: '{workspaceRoot}',
       },
     };
   }

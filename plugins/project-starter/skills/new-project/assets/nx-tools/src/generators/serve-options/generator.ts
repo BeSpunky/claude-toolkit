@@ -9,12 +9,14 @@
 //
 // Where it routes the option:
 //   - If `serve` is the Angular dev-server directly → set `host` on `serve.options`.
-//   - If `serve` has been wrapped into an `nx:run-commands` orchestrator by the
-//     firebase-emulators generator (the wrapper runs `emulators` + `serve-app` in parallel)
+//   - If `serve` has been wrapped into an `nx:run-commands` invocation by the
+//     firebase-emulators generator (the wrapper invokes `firebase emulators:exec` with
+//     `serve-app` as its child; an older shape used parallel `emulators` + `serve-app` —
+//     both wrap forms route `host` the same way)
 //     → set `host` on `serve-app.options` instead, AND remove any stray `host` from the
 //     wrapper's options. Setting `host` on the wrapper would forward it as `--host=0.0.0.0`
-//     to every parallel command via nx:run-commands' flag-passthrough — breaking
-//     `firebase emulators:start`, which has no `--host` flag.
+//     via nx:run-commands' flag-passthrough — breaking `firebase emulators:exec`, which
+//     has no `--host` flag.
 //
 // This makes the generator safe to re-run on a project at any stage (fresh, wrapped, both).
 import {
