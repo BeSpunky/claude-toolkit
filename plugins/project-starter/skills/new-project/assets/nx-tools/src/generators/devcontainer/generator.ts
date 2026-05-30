@@ -42,4 +42,11 @@ export default async function devcontainerGenerator(
     .join(nodeMajor);
 
   tree.write('.devcontainer/devcontainer.json', content);
+
+  // 3) Companion script — .devcontainer/post-create.sh — owns all multi-step setup
+  //    so devcontainer.json's postCreateCommand stays a one-liner. The script is
+  //    self-adapting (Firebase steps fire only when firebase.json exists at the
+  //    workspace root), so no templating is needed here — it ships verbatim.
+  const postCreate = readFileSync(join(__dirname, 'post-create.sh.tpl'), 'utf8');
+  tree.write('.devcontainer/post-create.sh', postCreate);
 }

@@ -9,11 +9,11 @@
     "ghcr.io/devcontainers/features/github-cli": {}{{#firebase}},
     "ghcr.io/devcontainers-extra/features/firebase-cli": {},
     "ghcr.io/jajera/features/gcloud-cli": {}{{/firebase}}
-    // Note: the JDK required by the Firebase emulators (Firestore / RTDB / Storage all run on
-    // the JVM) is installed via apt in the postCreateCommand below — NOT as a devcontainer
-    // feature. The canonical `ghcr.io/devcontainers/features/java` is SDKMAN-based and
-    // structurally fragile: its install fetches from github.com, which intermittently fails
-    // (curl: TLS errors / "Could not connect to server") on many networks. apt pulls from
+    // Note: the JDK required by the Firebase emulators (Firestore / RTDB / Storage all run
+    // on the JVM) is installed via apt in .devcontainer/post-create.sh — NOT as a
+    // devcontainer feature. The canonical `ghcr.io/devcontainers/features/java` is
+    // SDKMAN-based and structurally fragile (its install fetches from github.com, which
+    // intermittently fails: TLS errors / "Could not connect to server"). apt pulls from
     // Debian's package mirrors which are far more reliable, and apt runs in the container's
     // runtime network stack rather than the buildx build phase.
   },
@@ -51,7 +51,10 @@
     }
   },
 
-  "postCreateCommand": "yarn install && (claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install project-starter@claude-toolkit --scope project && claude plugin install engineering@claude-toolkit --scope project || echo 'NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run'){{#firebase}} && sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends default-jdk-headless && echo '[ -f ${containerWorkspaceFolder}/tools/firebase-welcome.sh ] && source ${containerWorkspaceFolder}/tools/firebase-welcome.sh' | sudo tee /etc/profile.d/zz-firebase-welcome.sh > /dev/null{{/firebase}}",
+  // All post-create setup (yarn install, claude-toolkit plugin pre-install, Firebase
+  // prerequisites when firebase.json is present) lives in .devcontainer/post-create.sh
+  // so this stays a one-liner. The script is self-adapting — no mustache conditional needed.
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "node",{{#firebase}}
 
   // Firebase emulator port-forwards (added when scaffolded with --firebase).
