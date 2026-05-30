@@ -8,20 +8,14 @@
     "ghcr.io/devcontainers-extra/features/claude-code": {},
     "ghcr.io/devcontainers/features/github-cli": {}{{#firebase}},
     "ghcr.io/devcontainers-extra/features/firebase-cli": {},
-    "ghcr.io/jajera/features/gcloud-cli": {},
-    // Required by the Firebase emulator suite — Firestore, Realtime Database, and Storage
-    // emulators all run on the JVM. Without this, `firebase emulators:start` fails with the
-    // generic "An unexpected error has occurred." (cleanup message: "Shutting down emulators.").
-    // jdkDistro "tem" = Eclipse Temurin (Adoptium) — the de facto standard OpenJDK
-    // distribution, more broadly mirrored than the SDKMAN default "ms" (Microsoft's build),
-    // which intermittently TLS-fails during install. Gradle/Maven aren't needed — we only
-    // run the bundled emulator JARs.
-    "ghcr.io/devcontainers/features/java:1": {
-      "version": "21",
-      "jdkDistro": "tem",
-      "installGradle": "false",
-      "installMaven": "false"
-    }{{/firebase}}
+    "ghcr.io/jajera/features/gcloud-cli": {}{{/firebase}}
+    // Note: the JDK required by the Firebase emulators (Firestore / RTDB / Storage all run on
+    // the JVM) is installed via apt in the postCreateCommand below — NOT as a devcontainer
+    // feature. The canonical `ghcr.io/devcontainers/features/java` is SDKMAN-based and
+    // structurally fragile: its install fetches from github.com, which intermittently fails
+    // (curl: TLS errors / "Could not connect to server") on many networks. apt pulls from
+    // Debian's package mirrors which are far more reliable, and apt runs in the container's
+    // runtime network stack rather than the buildx build phase.
   },
 
   "customizations": {
@@ -57,7 +51,7 @@
     }
   },
 
-  "postCreateCommand": "yarn install && (claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install project-starter@claude-toolkit --scope project && claude plugin install engineering@claude-toolkit --scope project || echo 'NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run'){{#firebase}} && echo '[ -f ${containerWorkspaceFolder}/tools/firebase-welcome.sh ] && source ${containerWorkspaceFolder}/tools/firebase-welcome.sh' | sudo tee /etc/profile.d/zz-firebase-welcome.sh > /dev/null{{/firebase}}",
+  "postCreateCommand": "yarn install && (claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install project-starter@claude-toolkit --scope project && claude plugin install engineering@claude-toolkit --scope project || echo 'NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run'){{#firebase}} && sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends default-jdk-headless && echo '[ -f ${containerWorkspaceFolder}/tools/firebase-welcome.sh ] && source ${containerWorkspaceFolder}/tools/firebase-welcome.sh' | sudo tee /etc/profile.d/zz-firebase-welcome.sh > /dev/null{{/firebase}}",
   "remoteUser": "node",{{#firebase}}
 
   // Firebase emulator port-forwards (added when scaffolded with --firebase).
