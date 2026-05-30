@@ -12,9 +12,13 @@
     // Required by the Firebase emulator suite — Firestore, Realtime Database, and Storage
     // emulators all run on the JVM. Without this, `firebase emulators:start` fails with the
     // generic "An unexpected error has occurred." (cleanup message: "Shutting down emulators.").
-    // Gradle/Maven aren't needed — we only run the bundled emulator JARs.
+    // jdkDistro "tem" = Eclipse Temurin (Adoptium) — the de facto standard OpenJDK
+    // distribution, more broadly mirrored than the SDKMAN default "ms" (Microsoft's build),
+    // which intermittently TLS-fails during install. Gradle/Maven aren't needed — we only
+    // run the bundled emulator JARs.
     "ghcr.io/devcontainers/features/java:1": {
       "version": "21",
+      "jdkDistro": "tem",
       "installGradle": "false",
       "installMaven": "false"
     }{{/firebase}}
