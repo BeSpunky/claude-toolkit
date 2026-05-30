@@ -55,17 +55,28 @@
   // prerequisites when firebase.json is present) lives in .devcontainer/post-create.sh
   // so this stays a one-liner. The script is self-adapting — no mustache conditional needed.
   "postCreateCommand": "bash .devcontainer/post-create.sh",
-  "remoteUser": "node",{{#firebase}}
+  "remoteUser": "node",
 
-  // Firebase emulator port-forwards (added when scaffolded with --firebase).
-  "forwardPorts": [4000, 9099, 8080, 9199, 5001],
+  // No `forwardPorts` — VS Code auto-detects every container binding and forwards
+  // each to a free host port. Essential when running multiple devcontainers in
+  // parallel: explicit `forwardPorts` would all claim the same host port and
+  // collide; auto-forward picks a unique free port per container (visible in the
+  // Ports panel). `portsAttributes` labels still apply to auto-detected ports;
+  // `onAutoForward` controls per-port notification behavior — backend emulators
+  // are silenced (you rarely click into them), the dev server opens in the
+  // preview pane.
   "portsAttributes": {
-    "4000": { "label": "Firebase Emulator UI" },
-    "9099": { "label": "Auth Emulator" },
-    "8080": { "label": "Firestore Emulator" },
-    "9199": { "label": "Storage Emulator" },
-    "5001": { "label": "Functions Emulator" }
-  },{{/firebase}}
+    "4200": { "label": "Angular Dev Server", "onAutoForward": "openPreview" }{{#firebase}},
+    "4000": { "label": "Firebase Emulator UI", "onAutoForward": "notify" },
+    "9099": { "label": "Auth Emulator", "onAutoForward": "silent" },
+    "8080": { "label": "Firestore Emulator", "onAutoForward": "silent" },
+    "9150": { "label": "Firestore WebSocket", "onAutoForward": "silent" },
+    "9199": { "label": "Storage Emulator", "onAutoForward": "silent" },
+    "5001": { "label": "Functions Emulator", "onAutoForward": "silent" }{{/firebase}}
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "silent"
+  },
   "remoteEnv": {
     "PATH": "${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",
     "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1",

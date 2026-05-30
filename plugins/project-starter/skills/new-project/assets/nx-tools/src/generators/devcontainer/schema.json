@@ -16,7 +16,7 @@
     },
     "firebase": {
       "type": "boolean",
-      "description": "Include Firebase CLI + Google Cloud CLI devcontainer features, the toba.vsfire VS Code extension, and the standard Firebase emulator port-forwards (4000, 9099, 8080, 9199, 5001). Opt-in only - never enabled by default.",
+      "description": "Include Firebase CLI + Google Cloud CLI devcontainer features, the toba.vsfire VS Code extension, and labeled portsAttributes for the Firebase emulator suite (4000 UI, 9099 Auth, 8080 Firestore, 9150 ws, 9199 Storage, 5001 Functions). No explicit forwardPorts — VS Code auto-forwards each binding to a free host port so multiple devcontainers can run in parallel without collision. Opt-in only - never enabled by default.",
       "default": false
     }
   },

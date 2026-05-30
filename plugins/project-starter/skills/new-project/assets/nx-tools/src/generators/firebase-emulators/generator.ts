@@ -67,7 +67,9 @@ interface FirebaseEmulatorsSchema {
 // inside Docker / devcontainers, where the firebase-tools probe (`127.0.0.1:<port>`) otherwise
 // fails with "Port X is not open on localhost (127.0.0.1)" because the emulator bound to ::1
 // (IPv6) or a container-internal interface only. Binding 0.0.0.0 also makes the emulator UI
-// reachable from the host browser via the existing devcontainer port-forwards.
+// reachable from the host browser via VS Code's auto-forwarding (the devcontainer
+// has no explicit `forwardPorts` — auto-detection picks a free host port per binding
+// so parallel devcontainers don't collide).
 function buildFirebaseJson() {
   return {
     emulators: {

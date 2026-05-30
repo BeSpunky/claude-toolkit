@@ -4,7 +4,10 @@
 # Default mode  : full scaffold (Nx + Angular + app + house generators + devcontainer + Claude settings).
 # Repair mode   : re-run ONLY the three house generators on an existing project (all idempotent).
 # Firebase opt-in: when --firebase is passed, the devcontainer gets the Firebase CLI + Google Cloud CLI
-#                  features, the toba.vsfire extension, and emulator port-forwards. NEVER enabled by default.
+#                  features, the toba.vsfire extension, and labeled portsAttributes for the emulator
+#                  suite. (No explicit forwardPorts — VS Code auto-detects and forwards each binding to
+#                  a free host port, so multiple devcontainers can run in parallel without collision.)
+#                  NEVER enabled by default.
 #
 # Usage:
 #   scaffold.sh [--firebase] <project-name> [app-name]                       # full scaffold
