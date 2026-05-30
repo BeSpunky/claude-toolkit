@@ -8,7 +8,16 @@
     "ghcr.io/devcontainers-extra/features/claude-code": {},
     "ghcr.io/devcontainers/features/github-cli": {}{{#firebase}},
     "ghcr.io/devcontainers-extra/features/firebase-cli": {},
-    "ghcr.io/jajera/features/gcloud-cli": {}{{/firebase}}
+    "ghcr.io/jajera/features/gcloud-cli": {},
+    // Required by the Firebase emulator suite — Firestore, Realtime Database, and Storage
+    // emulators all run on the JVM. Without this, `firebase emulators:start` fails with the
+    // generic "An unexpected error has occurred." (cleanup message: "Shutting down emulators.").
+    // Gradle/Maven aren't needed — we only run the bundled emulator JARs.
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21",
+      "installGradle": "false",
+      "installMaven": "false"
+    }{{/firebase}}
   },
 
   "customizations": {
