@@ -1,6 +1,6 @@
 ---
 name: architect-mentality
-description: The mindset of a great software architect - the values and ways of thinking to adopt BEFORE and WHILE making any design or structural decision, on any stack, language, framework, domain, or project. Use when starting a feature, shaping a function/class/component, drawing a module or library boundary, organizing an app or workspace, choosing between approaches, naming things, deciding what to abstract or decouple, deciding where something should live, setting up build/run/dev workflow, reviewing a design, or whenever you sense a structural decision is being made. This skill is MENTALITY ONLY - no specific techniques. It tells you HOW to think: treat everything as a black box with deliberate, well-defined connections; place every element on purpose (never because it merely fits); model the missing concept instead of working around gaps; work smart, not hard; automate every repeated process (never do the same thing by hand twice); concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the consumer; invert control toward pluggable seams; absorb your tools' weaknesses; lead with why and one mental model; preserve understanding and proof; know when not to build; and always go the extra mile.
+description: The mindset of a great software architect - the values and ways of thinking to adopt BEFORE and WHILE making any design or structural decision, on any stack, language, framework, domain, or project. Use when starting a feature, shaping a function/class/component, drawing a module or library boundary, organizing an app or workspace, choosing between approaches, naming things, deciding what to abstract or decouple, deciding where something should live, setting up build/run/dev workflow, reviewing a design, interpreting an open-ended user request, or whenever you sense a structural decision is being made. This skill is MENTALITY ONLY - no specific techniques. It tells you HOW to think: treat everything as a black box with deliberate, well-defined connections; place every element on purpose (never because it merely fits); model the missing concept instead of working around gaps; work smart, not hard; automate every repeated process (never do the same thing by hand twice); concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the consumer; invert control toward pluggable seams; absorb your tools' weaknesses; lead with why and one mental model; preserve understanding and proof; know when not to build; build for the goal not the brief (read intent over literal words); and always go the extra mile.
 ---
 
 # Architect Mentality
@@ -322,9 +322,42 @@ This reconciles cleanly with "work smart, not hard" (principle 4): be lazy about
 
 ---
 
+## 16. Build for the goal, not the brief
+
+**A request is a pointer to a goal — never confuse the pointer with the destination.** Open-ended tasks describe a slice; you build the outcome the user is reaching toward through that slice. The brief names one ingredient; deliver the whole thing.
+
+**What it means.** Open-ended requests are invitations to *think with* the user about the outcome, not narrow specifications to satisfy literally. A great architect reads each request twice: once for **what it says**, once for **what it's trying to achieve**. The literal reading is the surface; the intent is the iceberg. Match the iceberg — name the surrounding pieces the request implied but didn't enumerate, generalize the example to its class (*"here"* → *"every place this concern lives"*), connect resources that obviously belong together to answer the underlying question, anticipate the immediate follow-up requests and answer them now. Then ship the complete picture, not the literal sliver.
+
+This is not "do extra random stuff." It's "deliver what the request was actually about." Three patterns recur:
+
+1. **A request names one feature → ship the feature *and everything around it that makes it usable.*** A feature with no surroundings (no search, no empty state, no obvious next action, no way back) is a feature that doesn't get used. The surroundings were implied by *"feature"*; deliver them.
+2. **A request points at one instance → handle the *class*.** If the user says "fix the friction here," they mean the friction *pattern*, not literally that one spot. Find every place the same pattern lives and resolve all of them — or at least name them and ask, never silently do only the named one.
+3. **A request asks to bridge A to B without fully specifying B → figure out the right B from context.** When the destination isn't pre-specified, that's not a blocker — it's a design question you can usually answer by reasoning over the data and sources at hand. Often the answer is *"pick the best candidate"* or *"surface a small ranked set."* The user wanted the *outcome of the bridge*, not a placeholder.
+
+The opposite — taking each request literally and shipping the minimum — produces a system of disconnected scraps. Each task ships on its own; the *product* doesn't get built. The user keeps coming back to ask for the obvious follow-ups they thought you'd see, and over time the trust erodes: they stop expecting initiative and start over-specifying every detail — which is exactly the work great engineering is supposed to save them from.
+
+**Own the outcome, not the task.** The user gave you a brief because they trust you to read the goal inside it. Honor that trust by delivering the goal.
+
+**Ask yourself.**
+- What is the user actually trying to build, enable, or change? State it in one sentence before touching code.
+- Where else does this concern live? If they pointed at one instance, what's the *class* of place it applies to?
+- What does the user need *around* this to actually use it? Don't ship a building with no doors.
+- What are the immediate follow-up requests they'd send next? Can I include them now and save the round-trip?
+- Have I confused the *words they used* with the *goal those words pointed at*?
+- Is there an ambiguity I'm tempted to ask about that I could resolve by reasoning over the context — and confirm in the result rather than asking up front?
+
+**Red flags.**
+- Shipping the literal task as worded when the goal clearly implies more — and offering *"they didn't ask for that"* as the justification.
+- Treating the user's example as the boundary instead of as a representative (*"they only mentioned the X case, so I only handled X"*).
+- A series of small tasks completed in isolation, each fine on its own, with the overall product no closer to being good.
+- A response shaped like *"I did exactly what you said"* instead of *"here's the thing you wanted, built well."*
+- Asking ten clarifying questions when the goal is plain and the right move is to make smart calls and confirm them in the result.
+
+---
+
 ## The through-line
 
-Every principle here is one face of a single commitment: **the design comes first, and it must be genuinely good.** Treat the world as clean black boxes joined by deliberate connections; place every element on purpose, never because it merely fits; model what's missing instead of working around it; remove repetition and automate what repeats; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for whoever comes next; invert control toward pluggable seams; absorb your tools' weaknesses; lead with *why* and one consistent model; preserve understanding and proof; know when to stop; and always go the extra mile.
+Every principle here is one face of a single commitment: **the design comes first, and it must be genuinely good.** Treat the world as clean black boxes joined by deliberate connections; place every element on purpose, never because it merely fits; model what's missing instead of working around it; remove repetition and automate what repeats; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for whoever comes next; invert control toward pluggable seams; absorb your tools' weaknesses; lead with *why* and one consistent model; preserve understanding and proof; know when to stop; **build for the goal, not the brief** — read each request for its outcome, not its literal words; and always go the extra mile.
 
 Techniques are how these get expressed today. The mentality is what makes the techniques good.
 
