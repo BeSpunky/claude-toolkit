@@ -5,11 +5,15 @@
 // `ngDevMode` is `true` in dev builds and tree-shaken to `false` in production by `@angular/build`,
 // so the emulator config and the `connect*Emulator(...)` calls are removed from the prod bundle.
 //
-// === To wire a real Firebase project (when you're ready to deploy) ===
-//   1) Log in:                 firebase login
-//   2) Link the project:       firebase use --add        (picks from your account; writes .firebaserc)
-//   3) Fetch the web config:   firebase apps:sdkconfig WEB <appId> --project <projectId>
-//   4) Paste the returned `firebaseConfig` object below into `productionFirebaseConfig`.
+// === To wire a real Firebase project (App Hosting — the framework-aware product) ===
+//   1) Log in:                       firebase login
+//   2) Link the project:             firebase use --add                                            (picks from your account; writes .firebaserc)
+//   3) Create the App Hosting backend: firebase apphosting:backends:create --project <projectId>     (one-time; interactive)
+//   4) Fetch the web config:         firebase apps:sdkconfig WEB <appId> --project <projectId>      (for client-side SDK init below)
+//   5) Paste the returned `firebaseConfig` object below into `productionFirebaseConfig`.
+//
+// After the backend exists, App Hosting deploys are GitHub-driven (push to the configured branch).
+// App Hosting build/runtime config lives in `apphosting.yaml` at the workspace root.
 //
 // Do NOT hand-fabricate the production config — the values must match what your Firebase
 // account actually has, and the CLI is the source of truth. The `productionFirebaseConfig`

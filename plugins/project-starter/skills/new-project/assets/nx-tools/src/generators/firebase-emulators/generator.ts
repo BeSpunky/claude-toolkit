@@ -11,7 +11,13 @@
 // a real GCP project.
 //
 // Writes:
-//   - firebase.json   (workspace root) — emulators config (auth/firestore/storage/functions/ui), singleProjectMode.
+//   - firebase.json     (workspace root) — emulator suite config (auth/firestore/storage/functions/ui),
+//                        singleProjectMode, all emulators bound to 0.0.0.0 for Docker/devcontainer compatibility.
+//                        NO top-level `hosting` block — the BeSpunky default is Firebase App Hosting
+//                        (framework-aware), whose config lives in apphosting.yaml.
+//   - apphosting.yaml   (workspace root) — Firebase App Hosting deploy config. Starter ships empty
+//                        with commented examples; users fill in runConfig / env / scripts as needed.
+//                        Created only if absent (preserves user edits on --repair).
 //   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase() using `ngDevMode` to switch emulator vs prod.
 //   - apps/<project>/src/app/app.config.ts — best-effort wiring of provideAppFirebase() into providers; warns if unrecognized.
 //   - apps/<project>/project.json targets:
@@ -41,30 +47,26 @@ interface FirebaseEmulatorsSchema {
   workspaceName?: string;
 }
 
-// Build firebase.json. The top-level `hosting` block silences the firebase-tools warning
-// "hosting emulator is configured but there is no hosting configuration" AND wires the
-// project for `firebase deploy --only hosting` once the user links a real project via
-// `firebase use --add`. `public` points at the modern Angular application-builder output
-// (the `browser/` subdir under dist).
+// Build firebase.json. NOTE: no top-level `hosting` block, and no `hosting` emulator entry —
+// the BeSpunky default is Firebase **App Hosting** (the framework-aware product), not classic
+// static Hosting. App Hosting configuration lives in `apphosting.yaml` at the workspace root
+// (generated separately); firebase.json plays no documented role in App Hosting deploys.
+// Users who want the App Hosting emulator for production-parity local serve can run
+// `firebase init apphosting` — it generates the correct `emulators.apphosting.startCommand`
+// for the detected framework, which our generator can't sensibly hard-code.
 //
-// Every emulator binds to `0.0.0.0` (all interfaces) — required when running inside Docker /
-// devcontainers, where the firebase-tools probe (`127.0.0.1:<port>`) otherwise fails with
-// "Port X is not open on localhost (127.0.0.1)" because the emulator bound to ::1 (IPv6) or
-// a container-internal interface only. Binding 0.0.0.0 also makes the emulator UI reachable
-// from the host browser via the existing devcontainer port-forwards.
-function buildFirebaseJson(appName: string) {
+// Every backend-service emulator binds to `0.0.0.0` (all interfaces) — required when running
+// inside Docker / devcontainers, where the firebase-tools probe (`127.0.0.1:<port>`) otherwise
+// fails with "Port X is not open on localhost (127.0.0.1)" because the emulator bound to ::1
+// (IPv6) or a container-internal interface only. Binding 0.0.0.0 also makes the emulator UI
+// reachable from the host browser via the existing devcontainer port-forwards.
+function buildFirebaseJson() {
   return {
-    hosting: {
-      public: `dist/apps/${appName}/browser`,
-      ignore: ['firebase.json', '**/.*', '**/node_modules/**'],
-      rewrites: [{ source: '**', destination: '/index.html' }],
-    },
     emulators: {
       auth:      { host: '0.0.0.0', port: 9099 },
       firestore: { host: '0.0.0.0', port: 8080 },
       storage:   { host: '0.0.0.0', port: 9199 },
       functions: { host: '0.0.0.0', port: 5001 },
-      hosting:   { host: '0.0.0.0', port: 5000 },
       ui:        { enabled: true, host: '0.0.0.0', port: 4000 },
       singleProjectMode: true,
     },
@@ -89,7 +91,14 @@ export default async function firebaseEmulatorsGenerator(
   // Note: `.firebaserc` is deliberately NOT generated — see the file header. The Firebase CLI
   // owns cloud-project linkage (`firebase use --add` after `firebase login`). Emulator targets
   // pass `--project=demo-<workspaceName>` explicitly, so emulators run without `.firebaserc`.
-  tree.write('firebase.json', JSON.stringify(buildFirebaseJson(projectName), null, 2) + '\n');
+  tree.write('firebase.json', JSON.stringify(buildFirebaseJson(), null, 2) + '\n');
+
+  // 1b) apphosting.yaml at workspace root — Firebase App Hosting's deploy config.
+  //     Don't clobber user edits; only write if absent.
+  if (!tree.exists('apphosting.yaml')) {
+    const appHostingTpl = readFileSync(join(__dirname, 'apphosting.yaml.tpl'), 'utf8');
+    tree.write('apphosting.yaml', appHostingTpl);
+  }
 
   // 2) src/app/firebase.config.ts (don't clobber user edits).
   const firebaseConfigPath = `${appRoot}/src/app/firebase.config.ts`;
