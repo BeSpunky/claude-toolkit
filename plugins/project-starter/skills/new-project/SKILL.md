@@ -85,6 +85,24 @@ bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" --repair [--firebase] <PROJECT_PAT
 
 (Through WSL on Windows hosts, wrap as in step 1.) `--firebase` and `--repair` may be combined to retrofit Firebase support onto an existing project. If repair errors with "node_modules/.bin/nx not found," run `yarn install` in the project first, then re-run.
 
+### 1b. `--repair` does NOT touch `CLAUDE.md` — read this before assuming it does
+
+**`scaffold.sh --repair` preserves `CLAUDE.md` verbatim. It is the only artifact `--repair` will not regenerate.** Reason: `CLAUDE.md` carries the user's project intentions — auto-rewriting from the template would clobber custom edits. The generators run by `--repair` (`serve-options`, `devcontainer`, `claude-settings`, `playwright`, optionally `firebase-emulators`) touch `project.json`, `.devcontainer/*`, `.claude/settings.json`, `package.json`, and the Firebase config files — never `CLAUDE.md`.
+
+This produces an **asymmetry** that bites on toolkit upgrades:
+
+| What | How it gets to a project | Retrofitted by `--repair`? |
+|---|---|---|
+| Generator outputs (configs, mounts, scripts, deps) | Generators (idempotent rewrites) | **Yes** — `--repair` re-runs them. |
+| In-context `CLAUDE.md` sections (Architect mentality, Architecture-first, Firebase recipe, Playwright brief, etc.) | Step 2 of THIS skill, from `CLAUDE.md.tmpl` | **No** — hand-merge per step 2 below. |
+
+**When you should hand-merge sections into an existing `CLAUDE.md`:**
+1. After running `--repair` on a project scaffolded with an older toolkit version, and the verify checklist (step 3) flags missing CLAUDE.md sections.
+2. After running `--repair --firebase` to add Firebase, since the Firebase recipe section in CLAUDE.md (the connect-to-real-project walkthrough) is only added by step 2 of this skill, not by `--repair`.
+3. After any toolkit upgrade that added new always-on guidance to `CLAUDE.md.tmpl` (e.g. the Playwright brief shipped with the `browser-automation` plugin).
+
+How to do it: read the current `${CLAUDE_SKILL_DIR}/assets/CLAUDE.md.tmpl`, identify sections missing from the project's `CLAUDE.md` (everything except the user's intentions and conventions), and merge them in — preserving the user's custom content. If the project's existing intentions are well-developed, leave them; only insert the missing always-on sections.
+
 ## 2. Author a tailored CLAUDE.md
 
 Read `${CLAUDE_SKILL_DIR}/assets/CLAUDE.md.tmpl`. Use it as the base:
@@ -140,6 +158,8 @@ bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" --repair --firebase <PROJECT_PATH_
 (Wrap with `wsl.exe bash -lc '…'` on Windows hosts, as in step 1.) This re-runs the four house generators idempotently on the existing project; the `firebase-emulators` generator writes `firebase.json` (does **not** write `.firebaserc` — see below), generates `apps/<APP>/src/app/firebase.config.ts` (only if absent — your edits are preserved), best-effort-wires `app.config.ts`, adds the `emulators` / `emulators:<svc>` Nx targets (each passes `--project=demo-<workspaceName>`), (re)writes `serve` to the canonical `firebase emulators:exec` wrapper running `serve-app` (also self-heals projects scaffolded with the older parallel orchestrator), and updates `package.json` (the post-commit `installPackagesTask` runs install). The `devcontainer` generator simultaneously adds the Firebase CLI + Google Cloud CLI features, the `toba.vsfire` extension, and labeled `portsAttributes` for the emulator suite (no explicit `forwardPorts` — VS Code auto-forwards to free host ports so parallel devcontainers don't collide). **Rebuild the devcontainer** afterwards (VS Code → *Dev Containers: Rebuild Container*) to materialize the new features.
 
 After the retrofit, run step 3 (Verify) against the project — every check that mentions "if `--firebase` was used" must pass. If `app.config.ts` couldn't be auto-wired, the generator logged a warning; add `provideAppFirebase()` to its providers array by hand.
+
+**Also hand-merge the Firebase section into the project's `CLAUDE.md`.** `--repair` doesn't touch `CLAUDE.md` (see §1b above), so the connect-to-a-real-project recipe + the App Hosting walkthrough that the template carries inside `{{#firebase}}...{{/firebase}}` won't appear automatically. Open `${CLAUDE_SKILL_DIR}/assets/CLAUDE.md.tmpl`, copy the rendered Firebase block, and paste it into the project's `CLAUDE.md` at the same position (between the Stack section and the Generator-first section). Same applies to any other always-on sections the toolkit grew since the project was originally scaffolded — e.g. the Playwright brief.
 
 ### Recipe: connect a real Firebase project (App Hosting)
 

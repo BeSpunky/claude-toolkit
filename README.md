@@ -162,11 +162,13 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
 
 **Firebase support is opt-in.** Pass `--firebase` to `scaffold.sh` to enable the full setup (devcontainer features + emulator config + app `ngDevMode` wiring + Nx targets). Never enabled by default — only when the user explicitly asks for Firebase or the scaffolding agent asks and they say yes.
 
-**Repair an existing project** (re-apply the three house generators idempotently — useful if a previous scaffold was incomplete, or after upgrading the toolkit, or to retrofit `--firebase` onto an existing project):
+**Repair an existing project** (re-apply the house generators idempotently — useful if a previous scaffold was incomplete, or after upgrading the toolkit, or to retrofit `--firebase` onto an existing project):
 
 ```
 bash <path-to>/scaffold.sh --repair [--firebase] <project-path-or-name> [<app-name>]
 ```
+
+**Important: `--repair` does NOT touch `CLAUDE.md`.** It's the one artifact preserved verbatim, because it carries the user's project intentions — auto-rewriting would clobber custom edits. Everything else (devcontainer files, `.claude/settings.json`, `project.json`, `package.json` devDeps, Firebase config files) gets brought up to current spec by the generators. After a `--repair` against a project scaffolded with an older toolkit version, hand-merge any new always-on sections (Firebase recipe, Playwright brief, etc.) from `assets/CLAUDE.md.tmpl` into the project's `CLAUDE.md` — see the `project-starter:new-project` skill's §1b for the recipe.
 
 The `new-project` skill then authors a tailored `CLAUDE.md` (the one piece that stays contextual, not a template).
 
