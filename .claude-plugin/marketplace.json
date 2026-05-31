@@ -17,6 +17,12 @@
       "source": "./plugins/engineering",
       "description": "BeSpunky engineering skills. Agnostic foundation (architect-mentality + architecture-first: solve through design, never a patch; fix the root cause; design + confirm refactors) plus technique domains with progressive-disclosure references: software-design, advanced-typescript, angular-architecture, angular-native-wrappers, nx-monorepo-and-dx.",
       "version": "0.1.0"
+    },
+    {
+      "name": "browser-automation",
+      "source": "./plugins/browser-automation",
+      "description": "Drive a real browser via Playwright (Chromium, pre-installed in BeSpunky devcontainers) — verify UI behavior end-to-end, reproduce bugs in the running app, capture before/after screenshots, scrape rendered DOM, generate test scaffolds via codegen. Loaded by default in scaffolded projects.",
+      "version": "0.1.0"
     }
   ]
 }
