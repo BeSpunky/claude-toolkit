@@ -51,28 +51,32 @@ export function provideAppFirebase(): EnvironmentProviders {
     provideFirebaseApp(() => initializeApp(environment.firebase)),
     provideAuth(() => {
       const auth = getAuth();
-      if (!environment.production) {
+      // `&& environment.emulators` narrows the optional so the access below
+      // is type-safe — and in prod (where `emulators` is omitted from the env
+      // file) DCE strips this whole block on the `!environment.production`
+      // literal-false.
+      if (!environment.production && environment.emulators) {
         connectAuthEmulator(auth, environment.emulators.auth, { disableWarnings: true });
       }
       return auth;
     }),
     provideFirestore(() => {
       const db = getFirestore();
-      if (!environment.production) {
+      if (!environment.production && environment.emulators) {
         connectFirestoreEmulator(db, environment.emulators.firestore.host, environment.emulators.firestore.port);
       }
       return db;
     }),
     provideStorage(() => {
       const storage = getStorage();
-      if (!environment.production) {
+      if (!environment.production && environment.emulators) {
         connectStorageEmulator(storage, environment.emulators.storage.host, environment.emulators.storage.port);
       }
       return storage;
     }),
     provideFunctions(() => {
       const functions = getFunctions();
-      if (!environment.production) {
+      if (!environment.production && environment.emulators) {
         connectFunctionsEmulator(functions, environment.emulators.functions.host, environment.emulators.functions.port);
       }
       return functions;

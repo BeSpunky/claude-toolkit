@@ -4,11 +4,14 @@
 // branch unreachable" warnings in firebase.config.ts, and adding a new
 // `environment.staging.ts` later is a one-line change.
 //
-// Emulator endpoints are kept on the type even in production: the prod
-// environment file ships the same shape (just unused), which lets the build
-// switch files without changing types. The emulator wiring is gated behind
-// `!environment.production` in firebase.config.ts, so @angular/build
-// tree-shakes those branches out of the prod bundle.
+// `emulators` is OPTIONAL. The production environment omits it entirely —
+// emulator endpoints have no meaning in prod, and any string/number literals
+// inside the `environment` const get baked into the prod bundle as data
+// (DCE strips dead code paths, not unreachable property values on a live
+// object), so carrying them would leak local dev addresses into shipped
+// artifacts. firebase.config.ts narrows the optional behind
+// `if (!environment.production && environment.emulators) { ... }` so the
+// access is type-safe and only the dev bundle ever sees the property.
 export interface Environment {
   production: boolean;
   firebase: {
@@ -16,7 +19,7 @@ export interface Environment {
     apiKey: string;
     appId: string;
   };
-  emulators: {
+  emulators?: {
     auth: string;
     firestore: { host: string; port: number };
     storage: { host: string; port: number };

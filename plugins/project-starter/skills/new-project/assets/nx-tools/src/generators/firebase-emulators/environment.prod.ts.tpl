@@ -21,22 +21,19 @@
 // the error) instead of silently pointing at the wrong project.
 import type { Environment } from './environment.interface';
 
+// No `emulators` block. The Environment interface marks it optional precisely
+// so the prod file can omit it. Reason: even though firebase.config.ts's
+// `connect*Emulator(...)` calls are dead code in prod (DCE strips them via the
+// `!environment.production` gate), the emulator string/number LITERALS would
+// still ship as part of this const object — DCE removes unreachable code, not
+// unreachable property values on a live exported object. Omitting the block
+// means there's literally nothing about local dev addresses in the production
+// bundle.
 export const environment: Environment = {
   production: true,
   firebase: {
     projectId: '{{projectId}}',
     apiKey: '{{apiKey}}',
     appId: '{{appId}}',
-  },
-  // Emulator endpoints are kept on the shape so the Environment interface stays
-  // identical across env files (simpler types, no `emulators?:`). They're never
-  // accessed in production — provideAppFirebase() gates emulator wiring behind
-  // `!environment.production`, which @angular/build tree-shakes out of the prod
-  // bundle.
-  emulators: {
-    auth:      'http://localhost:9099',
-    firestore: { host: 'localhost', port: 8080 },
-    storage:   { host: 'localhost', port: 9199 },
-    functions: { host: 'localhost', port: 5001 },
   },
 };
