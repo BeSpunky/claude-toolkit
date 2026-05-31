@@ -6,8 +6,9 @@
 # when this project was scaffolded with --firebase).
 #
 # Prints a banner with the Firebase wiring recipe ONLY when setup is still pending.
-# Once `.firebaserc` exists AND productionFirebaseConfig is filled in, this stays silent.
-# No permanent stale artifact — when there's nothing to nudge, you see nothing.
+# Once `.firebaserc` exists AND at least one app's environment.prod.ts has a non-empty
+# environment.firebase.projectId, this stays silent. No permanent stale artifact — when
+# there's nothing to nudge, you see nothing.
 
 _fb_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)"
 
@@ -15,12 +16,14 @@ _fb_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)"
 [ -f "$_fb_root/firebase.json" ] || return 0 2>/dev/null
 
 _fb_setup_pending() {
-  # Pending if .firebaserc is missing OR no app's productionFirebaseConfig has a non-empty projectId.
+  # Pending if .firebaserc is missing OR no app's environment.prod.ts has a non-empty
+  # environment.firebase.projectId.
   [ -f "$_fb_root/.firebaserc" ] || return 0
-  for f in "$_fb_root"/apps/*/src/app/firebase.config.ts; do
+  for f in "$_fb_root"/apps/*/src/environments/environment.prod.ts; do
     [ -f "$f" ] || continue
-    # Extract the productionFirebaseConfig literal and look for a non-empty projectId.
-    if sed -n '/productionFirebaseConfig[[:space:]]*=/,/^};/p' "$f" \
+    # Look for environment.firebase.projectId with a non-empty string literal.
+    # Scoped to the `firebase: { ... }` block to avoid false positives elsewhere.
+    if sed -n '/firebase[[:space:]]*:[[:space:]]*{/,/}/p' "$f" \
         | grep -qE "projectId:[[:space:]]*['\"][^'\"]+['\"]"; then
       return 1  # at least one app is fully wired — done
     fi
@@ -36,7 +39,7 @@ if _fb_setup_pending; then
   printf '    2) \033[1mfirebase use --add\033[0m                                            (picks a project from your account; writes .firebaserc)\n'
   printf '    3) \033[1mfirebase apphosting:backends:create --project <projectId>\033[0m       (one-time: creates the App Hosting backend; interactive — picks region, optionally links a GitHub repo)\n'
   printf '    4) \033[1mfirebase apps:sdkconfig WEB <appId> --project <projectId>\033[0m       (prints the real web config for client-side SDK init)\n'
-  printf '    5) Paste the returned firebaseConfig into productionFirebaseConfig in apps/<app>/src/app/firebase.config.ts\n'
+  printf '    5) Paste the returned firebaseConfig fields into `firebase` in apps/<app>/src/environments/environment.prod.ts\n'
   printf '  After the backend exists, App Hosting deploys are GitHub-driven (push to the configured branch).\n'
   printf '  Or just ask Claude to walk you through it.\n\n'
 fi

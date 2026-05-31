@@ -1,24 +1,21 @@
 // Firebase initialization for the app.
-// Uses Angular's `ngDevMode` global to point at the local emulator suite during dev
-// (started automatically by `nx serve`) and at your real Firebase project in production builds.
 //
-// `ngDevMode` is `true` in dev builds and tree-shaken to `false` in production by `@angular/build`,
-// so the emulator config and the `connect*Emulator(...)` calls are removed from the prod bundle.
+// Switches between the local emulator suite (dev) and a real Firebase project
+// (prod) by reading from `src/environments/environment.ts` — Angular's
+// canonical environment-files pattern. The build swaps environment.ts →
+// environment.prod.ts in production via project.json's
+// `targets.build.configurations.production.fileReplacements`.
 //
-// === To wire a real Firebase project (App Hosting — the framework-aware product) ===
-//   1) Log in:                       firebase login
-//   2) Link the project:             firebase use --add                                            (picks from your account; writes .firebaserc)
-//   3) Create the App Hosting backend: firebase apphosting:backends:create --project <projectId>     (one-time; interactive)
-//   4) Fetch the web config:         firebase apps:sdkconfig WEB <appId> --project <projectId>      (for client-side SDK init below)
-//   5) Paste the returned `firebaseConfig` object below into `productionFirebaseConfig`.
+// Tree-shaking: `environment.production` is a literal `false` in the dev file
+// and a literal `true` in the prod file. @angular/build (esbuild-based)
+// evaluates the conditions in this file against the bundled environment
+// constant and removes the dead branches — so the `connect*Emulator(...)`
+// calls and emulator endpoints disappear from the prod bundle, and the
+// fail-loud guard below disappears from the dev bundle.
 //
-// After the backend exists, App Hosting deploys are GitHub-driven (push to the configured branch).
-// App Hosting build/runtime config lives in `apphosting.yaml` at the workspace root.
-//
-// Do NOT hand-fabricate the production config — the values must match what your Firebase
-// account actually has, and the CLI is the source of truth. The `productionFirebaseConfig`
-// placeholders below are left intentionally empty so a half-wired prod build fails loudly
-// instead of silently pointing at the wrong project.
+// To wire a real project, edit `apps/<app>/src/environments/environment.prod.ts`
+// — that file ships the step-by-step recipe in its header. This file is
+// generator-owned; never edit it by hand.
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
 import { connectAuthEmulator, getAuth, provideAuth } from '@angular/fire/auth';
@@ -26,69 +23,58 @@ import { connectFirestoreEmulator, getFirestore, provideFirestore } from '@angul
 import { connectStorageEmulator, getStorage, provideStorage } from '@angular/fire/storage';
 import { connectFunctionsEmulator, getFunctions, provideFunctions } from '@angular/fire/functions';
 
-declare const ngDevMode: boolean;
-
-// Local emulator config. The `demo-` prefix is Firebase's convention for "offline only,
-// no cloud calls" — it matches the `--project=demo-{{workspaceName}}` flag the Nx
-// `emulators` targets pass, so emulator data and CLI invocations agree on one id.
-const emulatorFirebaseConfig = {
-  projectId: 'demo-{{workspaceName}}',
-  apiKey: 'demo',
-  appId: 'demo',
-};
-
-// TODO: paste your real Firebase web config here, fetched via:
-//   firebase apps:sdkconfig WEB <appId> --project <projectId>
-// (see the file header for the full flow). Leave empty until you actually have a project —
-// an empty prod config fails loudly, which is better than silently pointing at nothing.
-const productionFirebaseConfig = {
-  projectId: '',
-  apiKey: '',
-  appId: '',
-};
+import { environment } from '../environments/environment';
 
 export function provideAppFirebase(): EnvironmentProviders {
-  // Fail-loud guard: silently shipping a broken Firebase app is impossible.
-  // Production mode + an unfilled productionFirebaseConfig → bootstrap throws immediately
-  // with the recipe in the error. The check sits inside the `!ngDevMode` branch — kept in
-  // prod, tree-shaken in dev — so there's zero dev-side cost and full prod-side safety.
+  // Fail-loud guard for production builds with an unfilled web config —
+  // ships only in the prod bundle (the `environment.production` literal is
+  // `true` after fileReplacements), so a half-wired deploy throws at bootstrap
+  // with the recipe in the error. In dev bundles `environment.production` is
+  // `false` → DCE removes the whole block, zero dev-side cost.
   if (
-    !ngDevMode &&
-    (!productionFirebaseConfig.projectId ||
-      !productionFirebaseConfig.apiKey ||
-      !productionFirebaseConfig.appId)
+    environment.production &&
+    (!environment.firebase.projectId ||
+      !environment.firebase.apiKey ||
+      !environment.firebase.appId)
   ) {
     throw new Error(
-      '[firebase.config.ts] productionFirebaseConfig is not filled in — cannot bootstrap Firebase for production.\n' +
+      '[firebase.config.ts] environment.firebase is not filled in — cannot bootstrap Firebase for production.\n' +
         '  To wire a real project (one-time setup):\n' +
         '    1) firebase login\n' +
         '    2) firebase use --add                                  (picks from your account; writes .firebaserc)\n' +
         '    3) firebase apps:sdkconfig WEB <appId> --project <id>  (prints the real web config)\n' +
-        '  Then paste the returned firebaseConfig into productionFirebaseConfig and rebuild.'
+        '  Paste the returned firebaseConfig fields into apps/<app>/src/environments/environment.prod.ts and rebuild.'
     );
   }
 
-  const firebaseConfig = ngDevMode ? emulatorFirebaseConfig : productionFirebaseConfig;
   return makeEnvironmentProviders([
-    provideFirebaseApp(() => initializeApp(firebaseConfig)),
+    provideFirebaseApp(() => initializeApp(environment.firebase)),
     provideAuth(() => {
       const auth = getAuth();
-      if (ngDevMode) connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+      if (!environment.production) {
+        connectAuthEmulator(auth, environment.emulators.auth, { disableWarnings: true });
+      }
       return auth;
     }),
     provideFirestore(() => {
       const db = getFirestore();
-      if (ngDevMode) connectFirestoreEmulator(db, 'localhost', 8080);
+      if (!environment.production) {
+        connectFirestoreEmulator(db, environment.emulators.firestore.host, environment.emulators.firestore.port);
+      }
       return db;
     }),
     provideStorage(() => {
       const storage = getStorage();
-      if (ngDevMode) connectStorageEmulator(storage, 'localhost', 9199);
+      if (!environment.production) {
+        connectStorageEmulator(storage, environment.emulators.storage.host, environment.emulators.storage.port);
+      }
       return storage;
     }),
     provideFunctions(() => {
       const functions = getFunctions();
-      if (ngDevMode) connectFunctionsEmulator(functions, 'localhost', 5001);
+      if (!environment.production) {
+        connectFunctionsEmulator(functions, environment.emulators.functions.host, environment.emulators.functions.port);
+      }
       return functions;
     }),
   ]);

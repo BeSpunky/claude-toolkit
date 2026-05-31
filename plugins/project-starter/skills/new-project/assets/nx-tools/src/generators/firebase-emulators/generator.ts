@@ -18,7 +18,13 @@
 //   - apphosting.yaml   (workspace root) — Firebase App Hosting deploy config. Starter ships empty
 //                        with commented examples; users fill in runConfig / env / scripts as needed.
 //                        Created only if absent (preserves user edits on --repair).
-//   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase() using `ngDevMode` to switch emulator vs prod.
+//   - apps/<project>/src/environments/environment.interface.ts — shared Environment shape.
+//   - apps/<project>/src/environments/environment.ts — dev/emulator config (default).
+//   - apps/<project>/src/environments/environment.prod.ts — production config (placeholders;
+//     gets migrated values from a legacy firebase.config.ts when --repair --firebase runs).
+//   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase() that reads from
+//     `environment` and gates emulator wiring on `!environment.production`. Always rewritten
+//     to the canonical shape; user-customizable values live in the env files now.
 //   - apps/<project>/src/app/app.config.ts — best-effort wiring of provideAppFirebase() into providers; warns if unrecognized.
 //   - apps/<project>/project.json targets:
 //       * `serve`              — `firebase emulators:exec` wrapper that runs `serve-app` as its
@@ -110,11 +116,89 @@ export default async function firebaseEmulatorsGenerator(
     tree.write('apphosting.yaml', appHostingTpl);
   }
 
-  // 2) src/app/firebase.config.ts (don't clobber user edits).
+  // 2) Environment files — Angular's canonical environments pattern.
+  //    - `environment.interface.ts` is the shared shape (always rewrite — generator-owned,
+  //      no user values inside).
+  //    - `environment.ts` is the dev/emulator default (only write if absent — preserves any
+  //      user-customized emulator endpoints across re-runs).
+  //    - `environment.prod.ts` is the production target (only write if absent — preserves the
+  //      user's real Firebase web config across re-runs). If the project still has a legacy
+  //      firebase.config.ts with a non-empty `productionFirebaseConfig`, we migrate those
+  //      values into the new environment.prod.ts before writing it, so `--repair --firebase`
+  //      against an old project doesn't drop a real production config on the floor.
+  const envDir = `${appRoot}/src/environments`;
+  const envInterfacePath = `${envDir}/environment.interface.ts`;
+  const envDevPath = `${envDir}/environment.ts`;
+  const envProdPath = `${envDir}/environment.prod.ts`;
   const firebaseConfigPath = `${appRoot}/src/app/firebase.config.ts`;
-  if (!tree.exists(firebaseConfigPath)) {
-    const tpl = readFileSync(join(__dirname, 'firebase.config.ts.tpl'), 'utf8');
-    tree.write(firebaseConfigPath, tpl.split('{{workspaceName}}').join(workspaceName));
+
+  tree.write(
+    envInterfacePath,
+    readFileSync(join(__dirname, 'environment.interface.ts.tpl'), 'utf8')
+  );
+
+  if (!tree.exists(envDevPath)) {
+    const tpl = readFileSync(join(__dirname, 'environment.ts.tpl'), 'utf8');
+    tree.write(envDevPath, tpl.split('{{workspaceName}}').join(workspaceName));
+  }
+
+  if (!tree.exists(envProdPath)) {
+    // Migration: if the project still has the legacy firebase.config.ts shape
+    // with a populated `productionFirebaseConfig`, carry those values into the
+    // new environment.prod.ts. Empty placeholders stay empty (their job is to
+    // make a half-wired prod build fail loud).
+    const migrated = tree.exists(firebaseConfigPath)
+      ? extractLegacyProdConfig(tree.read(firebaseConfigPath, 'utf8') ?? '')
+      : { projectId: '', apiKey: '', appId: '' };
+    if (migrated.projectId || migrated.apiKey || migrated.appId) {
+      logger.info(
+        `[firebase-emulators] Migrated productionFirebaseConfig from ${firebaseConfigPath} into ${envProdPath} ` +
+        `(legacy shape detected). Verify the new file before committing.`
+      );
+    }
+    const tpl = readFileSync(join(__dirname, 'environment.prod.ts.tpl'), 'utf8');
+    tree.write(
+      envProdPath,
+      tpl
+        .split('{{projectId}}').join(migrated.projectId)
+        .split('{{apiKey}}').join(migrated.apiKey)
+        .split('{{appId}}').join(migrated.appId)
+    );
+  }
+
+  // 2b) src/app/firebase.config.ts — write whenever it's absent, and (re)write
+  //     when we detect the LEGACY ngDevMode-and-two-consts shape (so --repair
+  //     self-heals old projects into the environment-files shape). Once a file
+  //     is on the modern shape (i.e. it imports from '../environments/environment'),
+  //     leave it alone — the user may have added app-specific customizations
+  //     to providers (e.g. `initializeFirestore` options, extra `messagingSenderId`
+  //     fields, custom emulator wiring). Clobbering those silently every
+  //     `--repair --firebase` would burn users.
+  //
+  //     The "modern" detection is intentionally lenient: any file that already
+  //     imports the env via the canonical relative path counts as "user-owned
+  //     from here on" — even if the user has reshaped the providers list.
+  const existingFirebaseConfig = tree.exists(firebaseConfigPath)
+    ? tree.read(firebaseConfigPath, 'utf8') ?? ''
+    : null;
+  const isLegacyShape =
+    existingFirebaseConfig !== null &&
+    (existingFirebaseConfig.includes('productionFirebaseConfig') ||
+      existingFirebaseConfig.includes('emulatorFirebaseConfig') ||
+      existingFirebaseConfig.includes('declare const ngDevMode')) &&
+    !existingFirebaseConfig.includes(`from '../environments/environment'`);
+  if (existingFirebaseConfig === null || isLegacyShape) {
+    if (isLegacyShape) {
+      logger.info(
+        `[firebase-emulators] Rewriting ${firebaseConfigPath} from the legacy ngDevMode shape ` +
+        `to the environment-files shape. Any custom provider wiring in the legacy file is gone — ` +
+        `port it onto the new shape by hand if needed.`
+      );
+    }
+    tree.write(
+      firebaseConfigPath,
+      readFileSync(join(__dirname, 'firebase.config.ts.tpl'), 'utf8')
+    );
   }
 
   // 3a) tools/firebase-welcome.sh — self-extinguishing banner that nudges the user
@@ -200,6 +284,39 @@ export default async function firebaseEmulatorsGenerator(
         cwd: '{workspaceRoot}',
       },
     };
+  }
+
+  // 4b) Register the environment-files fileReplacement on the production build
+  //     configuration. This is what makes the Angular build swap
+  //     `environment.ts` → `environment.prod.ts` when you run `nx build <app>`
+  //     (production is the default build configuration on the app target).
+  //
+  //     Idempotent: we only append the entry if it's not already in the list.
+  //     We touch `targets.build.configurations.production` exactly — never
+  //     `build.options` or other configurations — so a user who's added their
+  //     own staging configuration with their own fileReplacements is unaffected.
+  const buildTarget = project.targets.build as
+    | { configurations?: Record<string, { fileReplacements?: Array<{ replace: string; with: string }> }> }
+    | undefined;
+  if (buildTarget) {
+    buildTarget.configurations ??= {};
+    buildTarget.configurations.production ??= {};
+    const prodCfg = buildTarget.configurations.production;
+    const replacement = {
+      replace: envDevPath,
+      with: envProdPath,
+    };
+    const existing = Array.isArray(prodCfg.fileReplacements) ? prodCfg.fileReplacements : [];
+    const alreadyPresent = existing.some(
+      (entry) => entry?.replace === replacement.replace && entry?.with === replacement.with
+    );
+    prodCfg.fileReplacements = alreadyPresent ? existing : [...existing, replacement];
+  } else {
+    logger.warn(
+      `[firebase-emulators] No \`build\` target on project \`${projectName}\` — skipped registering the environment-files fileReplacement. ` +
+      `Add it manually to the production build configuration: ` +
+      `{ "replace": "${envDevPath}", "with": "${envProdPath}" }`
+    );
   }
 
   updateProjectConfiguration(tree, projectName, project);
@@ -319,4 +436,76 @@ function wireProvideAppFirebase(source: string, sourcePath: string): string | nu
   ];
 
   return applyChangesToString(source, changes);
+}
+
+/**
+ * Extract the field values of the legacy `productionFirebaseConfig` const from
+ * an old-shape firebase.config.ts (the pre-environment-files version that
+ * carried the two-consts-plus-ngDevMode pattern).
+ *
+ * Used by the generator's migration path: when `--repair --firebase` runs on a
+ * project that still has the legacy file, we don't want to drop the user's
+ * real production config on the floor — those values get carried into the new
+ * `environment.prod.ts` before the legacy file is overwritten with the new
+ * structural shape.
+ *
+ * Uses the TypeScript compiler API (no regex on source — source code is a tree,
+ * not text) to find the `productionFirebaseConfig` variable declaration and
+ * read the three string fields. Returns empty strings for any field that's
+ * absent, non-literal, or itself an empty string — same shape as the template's
+ * placeholders, so missing values stay missing.
+ *
+ * Returns `{ projectId: '', apiKey: '', appId: '' }` when the source is the new
+ * shape (no `productionFirebaseConfig` const) — the caller treats all-empty as
+ * "no migration needed."
+ */
+function extractLegacyProdConfig(source: string): { projectId: string; apiKey: string; appId: string } {
+  const empty = { projectId: '', apiKey: '', appId: '' };
+  if (!source.includes('productionFirebaseConfig')) return empty;
+
+  const sf = ts.createSourceFile(
+    'firebase.config.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS
+  );
+
+  let prodObject: ts.ObjectLiteralExpression | null = null;
+  const findProd = (node: ts.Node): void => {
+    if (prodObject) return;
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'productionFirebaseConfig' &&
+      node.initializer &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      prodObject = node.initializer;
+      return;
+    }
+    ts.forEachChild(node, findProd);
+  };
+  findProd(sf);
+  if (!prodObject) return empty;
+
+  const readField = (name: string): string => {
+    for (const prop of prodObject!.properties) {
+      if (
+        ts.isPropertyAssignment(prop) &&
+        ts.isIdentifier(prop.name) &&
+        prop.name.text === name &&
+        ts.isStringLiteral(prop.initializer)
+      ) {
+        return prop.initializer.text;
+      }
+    }
+    return '';
+  };
+
+  return {
+    projectId: readField('projectId'),
+    apiKey: readField('apiKey'),
+    appId: readField('appId'),
+  };
 }
