@@ -29,7 +29,8 @@ yarn install
 echo "[post-create] pre-installing claude-toolkit plugins"
 if claude plugin marketplace add BeSpunky/claude-toolkit \
     && claude plugin install project-starter@claude-toolkit --scope project \
-    && claude plugin install engineering@claude-toolkit --scope project; then
+    && claude plugin install engineering@claude-toolkit --scope project \
+    && claude plugin install browser-automation@claude-toolkit --scope project; then
   echo "[post-create] claude-toolkit plugins installed at project scope"
 else
   echo "[post-create] NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run"
@@ -52,6 +53,25 @@ if [ -f "$WS/firebase.json" ]; then
   echo "[ -f $WS/tools/firebase-welcome.sh ] && source $WS/tools/firebase-welcome.sh" \
     | sudo tee /etc/profile.d/zz-firebase-welcome.sh > /dev/null
   echo "[post-create] Firebase prerequisites ready"
+fi
+
+# --- 4. Playwright prerequisites (auto-detected via @playwright/test in package.json) ---
+# Chromium binary + the apt libs Chromium needs (fonts, libnss3, libatk, …).
+# `playwright install --with-deps chromium` does both: it downloads the browser
+# into ~/.cache/ms-playwright (mounted as a per-workspace volume by the
+# devcontainer generator, so rebuilds reuse the cached browser) and invokes
+# sudo internally for the apt step. The typescript-node base image grants
+# passwordless sudo to the `node` user, so no prompt.
+#
+# Self-adapting: fires only when the workspace already declares @playwright/test
+# in package.json (the `@bespunky/nx-tools:playwright` generator adds it). So
+# the same script works whether or not Playwright was opted in at scaffold time
+# — adding `@playwright/test` later and rebuilding picks it up on the next
+# post-create.
+if grep -q '"@playwright/test"' package.json 2>/dev/null; then
+  echo "[post-create] @playwright/test detected — installing Chromium + system deps"
+  yarn playwright install --with-deps chromium
+  echo "[post-create] Playwright prerequisites ready"
 fi
 
 echo "[post-create] done"

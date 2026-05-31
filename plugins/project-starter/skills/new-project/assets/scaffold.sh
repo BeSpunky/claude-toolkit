@@ -96,7 +96,8 @@ cp -r /assets/nx-tools node_modules/@bespunky/nx-tools
 node /assets/compile-generators.mts node_modules/@bespunky/nx-tools
 yarn nx g @bespunky/nx-tools:serve-options --project=$APP
 yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
-yarn nx g @bespunky/nx-tools:claude-settings$FIREBASE_BLOCK"
+yarn nx g @bespunky/nx-tools:claude-settings
+yarn nx g @bespunky/nx-tools:playwright$FIREBASE_BLOCK"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e

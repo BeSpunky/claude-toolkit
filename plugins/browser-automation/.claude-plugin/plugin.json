@@ -1,0 +1,9 @@
+{
+  "name": "browser-automation",
+  "description": "BeSpunky browser-automation skills. Currently ships the `playwright` skill — drive a real browser (load, click, type, screenshot, scrape) when you need to verify UI behavior end-to-end, reproduce a bug in the running app, or generate repeatable browser scripts. Enabled by default in BeSpunky devcontainers, which pre-install Playwright + Chromium so the skill is ready the moment the container opens. Grows over time with adjacent skills (visual regression, codegen workflows, …).",
+  "version": "0.1.0",
+  "author": {
+    "name": "BeSpunky",
+    "url": "https://github.com/BeSpunky"
+  }
+}

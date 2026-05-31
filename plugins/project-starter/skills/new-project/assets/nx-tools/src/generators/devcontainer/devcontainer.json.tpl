@@ -89,6 +89,11 @@
     "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached",
     "source=${localWorkspaceFolderBasename}-node_modules,target=${containerWorkspaceFolder}/node_modules,type=volume",
     "source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume",
-    "source=${localWorkspaceFolderBasename}-angular,target=${containerWorkspaceFolder}/.angular,type=volume"
+    "source=${localWorkspaceFolderBasename}-angular,target=${containerWorkspaceFolder}/.angular,type=volume",
+    // Playwright browser binaries (~150 MB Chromium). Mounted as a per-workspace
+    // volume so rebuilds reuse the cached browser instead of re-downloading on
+    // every postCreate. Populated by post-create.sh when @playwright/test is in
+    // package.json.
+    "source=${localWorkspaceFolderBasename}-playwright-cache,target=/home/node/.cache/ms-playwright,type=volume"
   ]
 }

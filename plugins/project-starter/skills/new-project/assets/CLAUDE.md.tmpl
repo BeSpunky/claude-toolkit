@@ -75,6 +75,14 @@ yarn nx affected -t build test lint
 - For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
 - For scaffolding (apps, libs, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
 
+## Playwright (available out of the box)
+
+This devcontainer ships with **Chromium + Playwright pre-installed** (the devcontainer's `post-create.sh` runs `playwright install --with-deps chromium` when it detects `@playwright/test` in `package.json`, and the browser binary is cached in a per-workspace volume so rebuilds don't re-download). You can drive a real browser from a Bash script today — no `playwright install`, no apt step, no `sudo`.
+
+Use Playwright whenever you need to **observe** or **drive** the running app instead of reasoning about source: verify a UI change end-to-end, reproduce a user-reported bug in the actual browser, capture before/after screenshots, scrape Angular-rendered output, or generate test scaffolding via codegen. Always headless — there is no display in the container.
+
+For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` / `Claude_in_Chrome` MCPs, how to write a headless script, how to capture and feed back screenshots, common pitfalls), invoke the **`browser-automation:playwright`** skill before reaching for any browser-side check.
+
 ## Conventions
 
 - **Component/Directive prefix**: `{{PREFIX}}` (update as the project grows).
