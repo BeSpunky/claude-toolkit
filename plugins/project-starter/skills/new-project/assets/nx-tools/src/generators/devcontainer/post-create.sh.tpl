@@ -17,6 +17,20 @@ set -euo pipefail
 # Devcontainer-cli runs postCreateCommand from the workspace root.
 WS="$(pwd)"
 
+# --- 0. Reclaim /home/node/.cache ownership ---
+# Docker creates intermediate mount-point directories as root. When the
+# devcontainer mounts a volume to /home/node/.cache/ms-playwright (the
+# Playwright browser cache), Docker creates the parent /home/node/.cache
+# as root:root — so any tool running as `node` that later wants to mkdir
+# a sibling under /home/node/.cache hits EACCES (firebase-tools' emulator
+# JAR cache is the loud one; yarn/npm caches break silently). This
+# chowns just the parent dir, leaving the mounted volume's contents
+# untouched. Idempotent: skipped when already node-owned.
+if [ -d /home/node/.cache ] && [ "$(stat -c %U /home/node/.cache)" != "node" ]; then
+  echo "[post-create] reclaiming /home/node/.cache ownership for node user"
+  sudo chown node:node /home/node/.cache
+fi
+
 # --- 1. Workspace deps ---
 echo "[post-create] yarn install"
 yarn install
