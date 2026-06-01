@@ -1,0 +1,9 @@
+{
+  "name": "product-ux",
+  "description": "BeSpunky product & UX design skills. keep-users-oriented: whenever you make someone wait or move them through a process, answer the three questions - what is the expected result, where am I in the process, what is the next step - and pick the right feedback for deterministic vs nondeterministic processes. A universal service-design principle, expressed primarily through software UI (loading/progress, async ops, multi-step flows, long-running jobs, notifications, optimistic UI).",
+  "version": "0.1.0",
+  "author": {
+    "name": "BeSpunky",
+    "url": "https://github.com/BeSpunky"
+  }
+}

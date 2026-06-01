@@ -3,11 +3,12 @@
 BeSpunky's **one place** for Claude Code skills, subagents, and commands. Develop them here once,
 install them into any project, and upgrade everywhere with a single update.
 
-This is a **Claude Code plugin marketplace** (a git repo). It currently ships two plugins:
+This is a **Claude Code plugin marketplace** (a git repo). It currently ships these plugins:
 
 | Plugin | Provides | Purpose |
 | --- | --- | --- |
 | `project-starter` | skill `new-project` | Scaffold a new BeSpunky-standard project: integrated Nx monorepo + Angular (clean `--minimal` app) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. |
+| `product-ux` | skill `keep-users-oriented` | **Experience design:** whenever you make someone wait or move them through a process, answer the three questions — *expected result? where am I? next step?* — and pick the right feedback (deterministic → steps/progress; nondeterministic → estimate + notify). A universal service-design principle, expressed primarily through software UI (loading/progress, async, multi-step flows, long-running jobs, notifications, optimistic UI). |
 | `engineering` | skills `architect-mentality`, `architecture-first`, `software-design`, `advanced-typescript`, `angular-architecture`, `angular-native-wrappers`, `nx-monorepo-and-dx` (extensible over time) | **Mindset & discipline (agnostic):** `architect-mentality` — the stack-agnostic mindset of a great architect (mentality only, no techniques): everything is a black box with deliberate connections, place everything on purpose, model the missing concept instead of patching, automate every repeated process, go the extra mile, and more. `architecture-first` — the operational discipline that enforces it: solve every change through design, **never a patch**; fix bugs at the **root cause**; **design + confirm refactors before implementing**; ships an always-on policy the scaffold bakes into every project's CLAUDE.md. **Techniques (general / agnostic):** `software-design` — the cross-stack toolbox (decoupling & dependency inversion, replace conditionals with structure, duplication & abstraction, domain modeling, errors & boundaries, contracts & API design); the stack skills below specialize it. **Techniques (TypeScript):** `advanced-typescript` — type-system mastery (derive types from types, declaration merging, template-literal & branded types, type-level diagnostics, guards & assertions). **Techniques (Angular):** `angular-architecture` — modern-Angular patterns (DI/providers, lifecycle, SSR/zone, extensibility, projection, API ergonomics). `angular-native-wrappers` — wrap an imperative/third-party JS API in idiomatic Angular. **Techniques (Nx / workspace & DX):** `nx-monorepo-and-dx` — monorepo architecture & developer experience (boundaries & entry points, module-boundary enforcement, caching & task pipeline, generators & automation, testing setup, release/versioning/environments). |
 
 ## Layout
@@ -60,6 +61,10 @@ claude-toolkit/
 │               ├── errors-and-boundaries.md
 │               ├── contracts-and-api-design.md
 │               └── naming.md
+├── plugins/product-ux/
+│   ├── .claude-plugin/plugin.json
+│   └── skills/keep-users-oriented/
+│       └── SKILL.md                      # the three-questions principle: keep anyone who waits/steps-through oriented (deterministic → steps; nondeterministic → estimate + notify)
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
     └── skills/new-project/
@@ -86,6 +91,7 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 /plugin marketplace add BeSpunky/claude-toolkit
 /plugin install project-starter@claude-toolkit
 /plugin install engineering@claude-toolkit
+/plugin install product-ux@claude-toolkit
 ```
 
 …or add to `~/.claude/settings.json` so every project sees it:
@@ -97,12 +103,13 @@ Register new plugins in `.claude-plugin/marketplace.json`.
   },
   "enabledPlugins": {
     "project-starter@claude-toolkit": true,
-    "engineering@claude-toolkit": true
+    "engineering@claude-toolkit": true,
+    "product-ux@claude-toolkit": true
   }
 }
 ```
 
-Skills are namespaced as `project-starter:new-project`, `engineering:architect-mentality`, `engineering:architecture-first`, `engineering:advanced-typescript`, `engineering:software-design`, `engineering:advanced-typescript`, `engineering:angular-architecture`, `engineering:angular-native-wrappers`, and `engineering:nx-monorepo-and-dx`. Scaffolded
+Skills are namespaced as `project-starter:new-project`, `product-ux:keep-users-oriented`, `engineering:architect-mentality`, `engineering:architecture-first`, `engineering:advanced-typescript`, `engineering:software-design`, `engineering:advanced-typescript`, `engineering:angular-architecture`, `engineering:angular-native-wrappers`, and `engineering:nx-monorepo-and-dx`. Scaffolded
 projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
 available inside every new project automatically.
 

@@ -18,7 +18,8 @@
     "nx@nx-claude-plugins": true,
     "project-starter@claude-toolkit": true,
     "engineering@claude-toolkit": true,
-    "browser-automation@claude-toolkit": true
+    "browser-automation@claude-toolkit": true,
+    "product-ux@claude-toolkit": true
   },
   "permissions": {
     "defaultMode": "bypassPermissions"

@@ -23,6 +23,12 @@
       "source": "./plugins/browser-automation",
       "description": "Drive a real browser via Playwright (Chromium, pre-installed in BeSpunky devcontainers) — verify UI behavior end-to-end, reproduce bugs in the running app, capture before/after screenshots, scrape rendered DOM, generate test scaffolds via codegen. Loaded by default in scaffolded projects.",
       "version": "0.1.0"
+    },
+    {
+      "name": "product-ux",
+      "source": "./plugins/product-ux",
+      "description": "BeSpunky product & UX design skills. keep-users-oriented: whenever you make someone wait or move them through a process, answer the three questions — what is the expected result, where am I, what is the next step — and pick the right feedback for deterministic (steps/progress) vs nondeterministic (estimate + notify) processes. A universal service-design principle, expressed primarily through software UI (loading/progress, async, multi-step flows, long-running jobs, notifications, optimistic UI).",
+      "version": "0.1.0"
     }
   ]
 }
