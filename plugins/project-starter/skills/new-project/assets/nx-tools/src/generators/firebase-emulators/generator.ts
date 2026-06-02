@@ -233,35 +233,42 @@ export default async function firebaseEmulatorsGenerator(
   // `demo-<name>` is Firebase's offline convention — works without login, never calls the cloud.
   const demoProject = `demo-${workspaceName}`;
 
-  // Rename the original `serve` (Angular dev-server) to `serve-app` on first wrap, then
-  // (re)write `serve` to the canonical `firebase emulators:exec` wrapper. Always rewriting
-  // the wrapper is what makes `--repair` self-heal: a project scaffolded by an earlier
-  // version of this generator (parallel `emulators` + `serve-app` via nx:run-commands)
-  // is normalized to the current shape on the next run.
+  // `serve` IS the Angular dev-server — we neither rename nor wrap it. Composition is done the
+  // Nx way, via continuous-task orchestration (Nx 21+): `serve` declares a dependency on the
+  // continuous `emulators` task (defined below), so `nx serve <app>` boots the emulator suite
+  // alongside the dev-server as a single Nx task graph, and Nx tears both down together on
+  // exit. The Nx task runner — not a nested `firebase emulators:exec` shell — owns both
+  // lifecycles, so there is no detached process tree to orphan emulator JVMs that hold ports
+  // and the Nx task lock (the failure mode of the old wrapper: a closed terminal left an
+  // orphan holding the lock, and the next `serve` hung forever on "Waiting for … in another
+  // nx process").
   //
-  // We only rename serve→serve-app when serve-app doesn't already exist — that protects any
-  // user customizations on serve-app across re-runs, and is also the right behavior when an
-  // earlier run already did the rename.
-  const existingServe = project.targets.serve;
+  // Self-heal older projects (`--repair`): an earlier generator version renamed the dev-server
+  // to `serve-app` and parked an `nx:run-commands` wrapper/orchestrator at `serve`. Restore
+  // the real dev-server back to `serve` — carrying any user customizations — and drop the now
+  // redundant `serve-app`.
   if (
-    existingServe &&
-    existingServe.executor !== 'nx:run-commands' &&
-    !project.targets['serve-app']
+    project.targets.serve?.executor === 'nx:run-commands' &&
+    project.targets['serve-app']
   ) {
-    project.targets['serve-app'] = existingServe;
+    project.targets.serve = project.targets['serve-app'];
+    delete project.targets['serve-app'];
   }
-  if (project.targets['serve-app']) {
-    // Canonical wrapper: firebase owns the emulator lifecycle, signals propagate cleanly,
-    // no orphan JVMs hold ports between restarts. Single-quoting the inner command keeps
-    // bash from word-splitting the `nx run` argument.
-    project.targets.serve = {
-      continuous: true,
-      executor: 'nx:run-commands',
-      options: {
-        command: `firebase emulators:exec --project=${demoProject} 'nx run ${projectName}:serve-app'`,
-        cwd: '{workspaceRoot}',
-      },
-    };
+
+  // Wire the dev-server to the emulators continuous task. Idempotent: add the dependency only
+  // if it isn't already declared (in either the `'emulators'` string or `{ target }` form).
+  const serveTarget = project.targets.serve;
+  if (serveTarget) {
+    serveTarget.continuous = true;
+    serveTarget.dependsOn ??= [];
+    const dependsOnEmulators = serveTarget.dependsOn.some(
+      (dep) =>
+        dep === 'emulators' ||
+        (typeof dep === 'object' && dep !== null && dep.target === 'emulators')
+    );
+    if (!dependsOnEmulators) {
+      serveTarget.dependsOn.push('emulators');
+    }
   }
 
   // Master `emulators` target — starts the full suite under the offline demo project id.

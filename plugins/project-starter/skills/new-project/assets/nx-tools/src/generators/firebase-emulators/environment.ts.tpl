@@ -4,8 +4,8 @@
 // `targets.build.configurations.production.fileReplacements`.
 //
 // Points the app at the local Firebase emulator suite, which `nx serve` boots
-// automatically via `firebase emulators:exec`. No real cloud project, login,
-// or `.firebaserc` needed.
+// automatically via the `emulators` continuous task (serve's `dependsOn`). No real
+// cloud project, login, or `.firebaserc` needed.
 import type { Environment } from './environment.interface';
 
 export const environment: Environment = {

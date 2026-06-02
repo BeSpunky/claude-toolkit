@@ -8,17 +8,18 @@
 // which is respected by any chokidar-based watcher across both old and new Angular builders.
 //
 // Where it routes the option:
-//   - If `serve` is the Angular dev-server directly → set `host` on `serve.options`.
-//   - If `serve` has been wrapped into an `nx:run-commands` invocation by the
-//     firebase-emulators generator (the wrapper invokes `firebase emulators:exec` with
-//     `serve-app` as its child; an older shape used parallel `emulators` + `serve-app` —
-//     both wrap forms route `host` the same way)
-//     → set `host` on `serve-app.options` instead, AND remove any stray `host` from the
-//     wrapper's options. Setting `host` on the wrapper would forward it as `--host=0.0.0.0`
-//     via nx:run-commands' flag-passthrough — breaking `firebase emulators:exec`, which
-//     has no `--host` flag.
+//   - Normal case — `serve` is the Angular dev-server directly (the current firebase shape
+//     wires emulators via `serve.dependsOn`, leaving `serve` itself as the dev-server)
+//     → set `host` on `serve.options`.
+//   - Legacy wrapper — a project scaffolded by an older firebase-emulators generator parked an
+//     `nx:run-commands` wrapper at `serve` with the real dev-server renamed to `serve-app`
+//     → set `host` on `serve-app.options` instead, AND strip any stray `host` from the
+//     wrapper's options. (Setting `host` on the wrapper would forward it as `--host=0.0.0.0`
+//     via nx:run-commands' flag-passthrough.) If serve-options runs before firebase-emulators
+//     un-wraps such a project, `host` lands on `serve-app`, which firebase-emulators then
+//     restores back to `serve` — so the option survives the migration regardless of order.
 //
-// This makes the generator safe to re-run on a project at any stage (fresh, wrapped, both).
+// This makes the generator safe to re-run on a project at any stage (fresh, legacy-wrapped).
 import {
   type Tree,
   readProjectConfiguration,
