@@ -8,24 +8,35 @@
 #                  suite. (No explicit forwardPorts — VS Code auto-detects and forwards each binding to
 #                  a free host port, so multiple devcontainers can run in parallel without collision.)
 #                  NEVER enabled by default.
+# GitHub repo    : full scaffold creates a PRIVATE GitHub repo via `gh` and pushes to it. This runs
+#                  host-side AFTER the Docker scaffold (gh auth lives on the host, not in the bare base
+#                  image). Skipped gracefully (local repo only) when gh is missing/unauthenticated.
+#                  Opt out with --no-github. Repair mode never touches the remote.
+#                  Why a repo always: Firebase App Hosting deploys are GitHub-driven — linking the repo
+#                  at `firebase apphosting:backends:create` is what makes Firebase provision its own
+#                  Cloud Build CI/CD. We generate NO deploy workflow; the repo existing from minute one
+#                  is what lets Firebase's native mechanism take over (so we never track its evolving
+#                  deploy methodology). Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
-#   scaffold.sh [--firebase] <project-name> [app-name]                       # full scaffold
+#   scaffold.sh [--firebase] [--no-github] <project-name> [app-name]         # full scaffold
 #   scaffold.sh --repair [--firebase] <project-path|project-name> [app-name] # re-apply house generators
 #
-# Leading flags (--repair, --firebase) may be given in any order.
+# Leading flags (--repair, --firebase, --no-github) may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 # Node comes from the typescript-node devcontainer base image, run via Docker - NO nvm.
 set -euo pipefail
 
 MODE="scaffold"
 FIREBASE=0
+GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
 while [ "${1:-}" != "" ]; do
   case "$1" in
-    --repair)   MODE="repair";   shift;;
-    --firebase) FIREBASE=1;      shift;;
-    --*)        echo "ERROR: unknown flag '$1'" >&2; exit 1;;
-    *)          break;;
+    --repair)     MODE="repair"; shift;;
+    --firebase)   FIREBASE=1;    shift;;
+    --no-github)  GITHUB=0;      shift;;
+    --*)          echo "ERROR: unknown flag '$1'" >&2; exit 1;;
+    *)            break;;
   esac
 done
 
@@ -108,7 +119,12 @@ yarn create nx-workspace '$PROJECT' --preset=apps --packageManager=yarn --nxClou
 cd '$PROJECT'
 yarn nx add @nx/angular
 yarn nx g @nx/angular:application 'apps/$APP' --minimal --style=scss --routing --e2eTestRunner=none
-$HOUSE_BLOCK"
+$HOUSE_BLOCK
+# Commit the full scaffold. \`yarn create nx-workspace\` made an initial commit, but the
+# house generators + dep installs ran after it — capture them so the host-side push (gh repo
+# create --source --push) ships a clean, complete tree on \`main\`.
+git add -A
+git commit -m 'chore: scaffold BeSpunky project (Nx + Angular + house generators)' || true"
 else
   INNER="set -e
 cd '$PROJECT'
@@ -126,8 +142,37 @@ docker run --rm \
   "$IMAGE" \
   bash -lc "$INNER"
 
+# --- create + push a private GitHub repo (scaffold mode only; gh auth lives on the host) ---
+# Runs OUTSIDE Docker: the bare typescript-node base image has neither `gh` nor the host's
+# auth. The repo is what lets Firebase App Hosting take over CI/CD — linking it at
+# `firebase apphosting:backends:create` makes Firebase provision its own Cloud Build deploys
+# (so we generate no workflow files). Non-Firebase projects just get a remote to push to.
+# Never fail the scaffold over a missing/unauthenticated gh — the local repo already exists.
+GITHUB_RESULT=""
+if [ "$MODE" = "scaffold" ] && [ "$GITHUB" = "1" ]; then
+  if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+    GITHUB_RESULT="GITHUB_SKIP: gh not found or not authenticated — local repo only (run 'gh auth login', then 'gh repo create $PROJECT --private --source \"$TARGET\" --remote=origin --push')"
+    echo "$GITHUB_RESULT" >&2
+  elif git -C "$TARGET" remote get-url origin >/dev/null 2>&1; then
+    GITHUB_RESULT="GITHUB_SKIP: 'origin' remote already set on $TARGET — left as-is"
+    echo "$GITHUB_RESULT" >&2
+  else
+    echo "Creating private GitHub repo '$PROJECT' and pushing..."
+    if gh repo create "$PROJECT" --private --source "$TARGET" --remote=origin --push; then
+      REPO_URL="$(gh repo view "$PROJECT" --json url -q .url 2>/dev/null || echo '')"
+      GITHUB_RESULT="GITHUB_OK ${REPO_URL:-$PROJECT}"
+      echo "$GITHUB_RESULT"
+    else
+      GITHUB_RESULT="GITHUB_SKIP: 'gh repo create' failed — local repo intact; create the remote manually"
+      echo "$GITHUB_RESULT" >&2
+    fi
+  fi
+elif [ "$MODE" = "scaffold" ]; then
+  GITHUB_RESULT="GITHUB_SKIP: --no-github"
+fi
+
 if [ "$MODE" = "scaffold" ]; then
-  echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE)"
+  echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE github=$GITHUB) ${GITHUB_RESULT:-}"
 else
   echo "REPAIR_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE)"
 fi

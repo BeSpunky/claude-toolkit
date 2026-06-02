@@ -8,7 +8,11 @@
 #
 # Deploy flow (after `firebase login` + `firebase use --add`):
 #   firebase apphosting:backends:create --project <projectId>     # one-time: creates the backend
-# After that, App Hosting deploys are GitHub-driven (push to the configured branch).
+# This workspace was scaffolded with a GitHub repo already created — LINK IT when prompted by
+# backends:create. That linkage IS the deploy CI: Firebase provisions its own Cloud Build
+# pipeline and auto-deploys on every push to the configured branch. We deliberately ship no
+# GitHub Actions deploy workflow — Firebase owns and maintains that config, so this scaffold
+# never goes stale against Firebase's deploy methodology.
 # See the SKILL.md "Connect a real Firebase project" recipe in the project-starter
 # new-project skill for the full flow.
 

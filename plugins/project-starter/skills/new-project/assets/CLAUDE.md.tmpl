@@ -37,13 +37,16 @@ This project was scaffolded with `--firebase`. **Local development uses the emul
 
 1. `firebase login` — one-time auth against their Google account (opens a browser).
 2. `firebase use --add` — picks a project from their account and writes `.firebaserc`. If they don't have a project yet, create it first (Firebase console or `firebase projects:create <id>`).
-3. `firebase apphosting:backends:create --project <projectId>` — one-time: creates the App Hosting backend (interactive — picks region, optionally links a GitHub repo for source-driven deploys).
+3. `firebase apphosting:backends:create --project <projectId>` — one-time: creates the App Hosting backend (interactive — picks region and **links a GitHub repo**). **Link the repo this project was scaffolded with** — that linkage is what sets up deploy CI: Firebase provisions its own Cloud Build pipeline and auto-deploys on every push to the configured branch.
 4. `firebase apps:sdkconfig WEB <appId> --project <projectId>` — prints the real web config for client-side SDK init.
 5. Paste the returned `firebaseConfig` fields into `firebase` in **`apps/<APP>/src/environments/environment.prod.ts`** — the production environment file, which the Angular build swaps in for `environment.ts` via `project.json`'s `targets.build.configurations.production.fileReplacements` (Angular's canonical environment-files pattern). Never edit `apps/<APP>/src/app/firebase.config.ts` — that's structural code the generator owns end-to-end.
 
 After the backend is created, **App Hosting deploys are GitHub-driven**: pushing to the configured branch triggers a Cloud Build → Cloud Run deploy. Tweak build/runtime behavior in `apphosting.yaml` at the workspace root.
 
+**The CI/deploy pipeline is Firebase's, not ours.** This project ships **no GitHub Actions deploy workflow** — linking the repo at step 3 hands CI/CD to Firebase's GitHub integration, which creates and maintains the Cloud Build config. That's deliberate: it means deploys keep working as Firebase evolves its mechanism, with nothing in this repo to update. (The project's GitHub repo is created automatically at scaffold time, so it already exists to be linked.)
+
 **Never fabricate `.firebaserc` or the production config** — the Firebase CLI is the source of truth for cloud state. `provideAppFirebase()` throws at bootstrap if production is attempted with an empty `environment.firebase`, so silent broken deploys are impossible. Inside the devcontainer, **every interactive terminal shows a self-extinguishing banner** (`tools/firebase-welcome.sh`, sourced via `/etc/profile.d/zz-firebase-welcome.sh`) reminding the user of the recipe until setup is complete — when both `.firebaserc` exists and `environment.firebase.projectId` in `environment.prod.ts` is filled, the banner goes silent automatically. The same recipe also lives in the header of `environment.prod.ts` and in the `project-starter:new-project` skill.
+{{/firebase}}
 
 ## Generator-first, manual last
 

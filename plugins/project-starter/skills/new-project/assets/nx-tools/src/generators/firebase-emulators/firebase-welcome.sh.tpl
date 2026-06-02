@@ -37,10 +37,11 @@ if _fb_setup_pending; then
   printf '  When you are ready to wire a real Firebase project (App Hosting — the framework-aware product):\n'
   printf '    1) \033[1mfirebase login\033[0m\n'
   printf '    2) \033[1mfirebase use --add\033[0m                                            (picks a project from your account; writes .firebaserc)\n'
-  printf '    3) \033[1mfirebase apphosting:backends:create --project <projectId>\033[0m       (one-time: creates the App Hosting backend; interactive — picks region, optionally links a GitHub repo)\n'
+  printf '    3) \033[1mfirebase apphosting:backends:create --project <projectId>\033[0m       (one-time: creates the App Hosting backend; interactive — LINK THIS REPO so deploys auto-run on push)\n'
   printf '    4) \033[1mfirebase apps:sdkconfig WEB <appId> --project <projectId>\033[0m       (prints the real web config for client-side SDK init)\n'
   printf '    5) Paste the returned firebaseConfig fields into `firebase` in apps/<app>/src/environments/environment.prod.ts\n'
-  printf '  After the backend exists, App Hosting deploys are GitHub-driven (push to the configured branch).\n'
+  printf '  Linking the repo at step 3 is the deploy CI: Firebase wires its own Cloud Build pipeline (no workflow file in this repo).\n'
+  printf '  After that, App Hosting deploys are GitHub-driven — push to the configured branch and it builds + deploys.\n'
   printf '  Or just ask Claude to walk you through it.\n\n'
 fi
 
