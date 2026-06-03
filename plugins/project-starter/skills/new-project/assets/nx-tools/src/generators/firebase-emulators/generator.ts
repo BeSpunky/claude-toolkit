@@ -26,6 +26,10 @@
 //     `environment` and gates emulator wiring on `!environment.production`. Always rewritten
 //     to the canonical shape; user-customizable values live in the env files now.
 //   - apps/<project>/src/app/app.config.ts — best-effort wiring of provideAppFirebase() into providers; warns if unrecognized.
+//   - tools/reap-emulators.sh — frees the configured emulator ports before each start, so an
+//                        orphaned emulator JVM left by an ungraceful death (closed terminal,
+//                        container stop, SIGKILL) doesn't block the next `emulators:start`.
+//                        Prepended to every `emulators*` target command.
 //   - apps/<project>/project.json targets:
 //       * `serve`              — `firebase emulators:exec` wrapper that runs `serve-app` as its
 //                                child. firebase owns the emulator lifecycle: it boots the suite,
@@ -210,6 +214,16 @@ export default async function firebaseEmulatorsGenerator(
   const welcomeTpl = readFileSync(join(__dirname, 'firebase-welcome.sh.tpl'), 'utf8');
   tree.write(welcomePath, welcomeTpl);
 
+  // 3b) tools/reap-emulators.sh — reclaim the emulator ports before each start. The emulator
+  //     JVM (Firestore/Storage) survives an ungraceful death of its parent (closed terminal/IDE
+  //     window, container stop, OOM, SIGKILL) — re-parented to PID 1, still holding its port —
+  //     so the next `emulators:start` fails with "Port NNNN is not open". No in-process trap can
+  //     cover SIGKILL/container-restart, so we reclaim ports on START instead of tearing down on
+  //     exit. Prepended to every `emulators*` target command below. Always (re)write — our
+  //     content, no user edits expected.
+  const reapPath = 'tools/reap-emulators.sh';
+  tree.write(reapPath, readFileSync(join(__dirname, 'reap-emulators.sh.tpl'), 'utf8'));
+
   // 3) Best-effort: wire provideAppFirebase() into app.config.ts.
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (tree.exists(appConfigPath)) {
@@ -271,12 +285,16 @@ export default async function firebaseEmulatorsGenerator(
     }
   }
 
+  // Every emulators target reclaims its ports first (see tools/reap-emulators.sh). `&&` not `;`
+  // so a reaper failure surfaces instead of racing a half-freed port into `emulators:start`.
+  const reap = 'bash tools/reap-emulators.sh &&';
+
   // Master `emulators` target — starts the full suite under the offline demo project id.
   project.targets.emulators = {
     continuous: true,
     executor: 'nx:run-commands',
     options: {
-      command: `firebase emulators:start --project=${demoProject}`,
+      command: `${reap} firebase emulators:start --project=${demoProject}`,
       cwd: '{workspaceRoot}',
     },
   };
@@ -287,7 +305,7 @@ export default async function firebaseEmulatorsGenerator(
       continuous: true,
       executor: 'nx:run-commands',
       options: {
-        command: `firebase emulators:start --only ${svc},ui --project=${demoProject}`,
+        command: `${reap} firebase emulators:start --only ${svc},ui --project=${demoProject}`,
         cwd: '{workspaceRoot}',
       },
     };
