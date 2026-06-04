@@ -97,18 +97,30 @@ DEVCONTAINER_FLAGS=""
 FIREBASE_BLOCK=""
 if [ "$FIREBASE" = "1" ]; then
   FIREBASE_BLOCK="
-yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT"
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT"
 fi
 
 # --- house-generators block (used by both modes; idempotent) ---
-HOUSE_BLOCK="rm -rf node_modules/@bespunky/nx-tools
-mkdir -p node_modules/@bespunky
-cp -r /assets/nx-tools node_modules/@bespunky/nx-tools
-node /assets/compile-generators.mts node_modules/@bespunky/nx-tools
-yarn nx g @bespunky/nx-tools:serve-options --project=$APP
-yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
-yarn nx g @bespunky/nx-tools:claude-settings
-yarn nx g @bespunky/nx-tools:playwright$FIREBASE_BLOCK"
+# @bespunky/nx-tools is bundled scaffold-time tooling: we copy it into node_modules but never
+# declare it in package.json (it must not ship in the generated project). The cost of that is
+# that every 'yarn install' prunes it. The playwright and firebase-emulators generators each run
+# installPackagesTask as their post-commit step, so an install fires mid-sequence and deletes
+# nx-tools out from under whatever generator runs next. So we compile ONE copy into a stage dir
+# and re-establish it before EVERY generator via ensure_nx_tools. This is robust to the order and
+# count of install-triggering generators; reordering alone is NOT, since with two of them the one
+# that runs second would still find nx-tools already pruned.
+HOUSE_BLOCK="rm -rf /tmp/bespunky-nx-tools
+cp -r /assets/nx-tools /tmp/bespunky-nx-tools
+node /assets/compile-generators.mts /tmp/bespunky-nx-tools
+ensure_nx_tools() {
+  rm -rf node_modules/@bespunky/nx-tools
+  mkdir -p node_modules/@bespunky
+  cp -r /tmp/bespunky-nx-tools node_modules/@bespunky/nx-tools
+}
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright$FIREBASE_BLOCK"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
