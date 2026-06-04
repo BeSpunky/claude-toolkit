@@ -154,6 +154,18 @@ docker run --rm \
   "$IMAGE" \
   bash -lc "$INNER"
 
+# --- normalize ownership back to the invoking host user (both modes) ---
+# Some Docker backends (notably Docker Desktop's WSL2 integration) leave freshly created files
+# owned by root despite the `-u` flag above, which makes every later host-side operation
+# (git, yarn, the Claude CLI) fail with permission errors. A throwaway ROOT container hands the
+# whole project tree back to the host uid:gid — the only context that can chown root-owned files
+# without host sudo. Idempotent: a no-op when files are already user-owned. Runs before the gh
+# push so git operations on the tree don't hit permission errors.
+docker run --rm \
+  -v "$PROJECTS_DIR":/work -w /work \
+  "$IMAGE" \
+  chown -R "$(id -u):$(id -g)" "/work/$PROJECT"
+
 # --- create + push a private GitHub repo (scaffold mode only; gh auth lives on the host) ---
 # Runs OUTSIDE Docker: the bare typescript-node base image has neither `gh` nor the host's
 # auth. The repo is what lets Firebase App Hosting take over CI/CD — linking it at
