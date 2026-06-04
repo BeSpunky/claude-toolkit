@@ -8,7 +8,7 @@ This is a **Claude Code plugin marketplace** (a git repo). It currently ships th
 | Plugin | Provides | Purpose |
 | --- | --- | --- |
 | `project-starter` | skill `new-project` | Scaffold a new BeSpunky-standard project: integrated Nx monorepo + Angular (clean `--minimal` app) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. |
-| `product-ux` | skill `keep-users-oriented` | **Experience design:** whenever you make someone wait or move them through a process, answer the three questions — *expected result? where am I? next step?* — and pick the right feedback (deterministic → steps/progress; nondeterministic → estimate + notify). A universal service-design principle, expressed primarily through software UI (loading/progress, async, multi-step flows, long-running jobs, notifications, optimistic UI). |
+| `product-ux` | skills `keep-users-oriented`, `envision-the-experience`, `realize-the-vision` | **Experience design.** `keep-users-oriented` — whenever you make someone wait or move them through a process, answer the three questions — *expected result? where am I? next step?* — and pick the right feedback (deterministic → steps/progress; nondeterministic → estimate + notify). A universal service-design principle, expressed primarily through software UI (loading/progress, async, multi-step flows, long-running jobs, notifications, optimistic UI). **The experiential pair:** `envision-the-experience` — the upstream **visioning** move: imagine the *world* an interface lives in (its feeling, place, metaphor) before any layout or component, and design every element as a native inhabitant of that world — *the screen is a place, not a page.* Interrogate every element the spec names (a "menu" might become a sunflower whose petals you pick), speak in sensory non-technical language that names no implementation, keep immersive from becoming busy (restraint over spectacle), and produce a **Vision** (exploring several rival worlds, then committing to one — the single place visioning fans out). `realize-the-vision` — the downstream **building** half: the craftsman that turns a Vision into a real, running interface by **researching the truest, soundest means before writing any code** — reads the Vision as a contract, surveys the field (GSAP, Motion, three.js/R3F/angular-three, Web Animations, CSS scroll-driven animations, View Transitions, Lottie/Rive, Canvas/SVG/WebGL, Web Audio, haptics) and its caveats (jank, layout thrash, reduced-motion, accessibility, mobile), **knows when to build in code vs. when to source an asset** — figurative/photoreal art (a couple kissing, a landscape) is generated, licensed, or downloaded, never hand-coded into path-soup (with licensing, review, and art-direction) — chooses deliberately for the vision *and* the constraints, designs + confirms the architecture before building, and verifies against the feeling in the running app. **Fans out across subagents** (research lanes, asset candidates, independent regions, verification lenses) against the Vision as shared contract, always converging on a coherence pass. A **router** over a reference library of technique clusters. |
 | `engineering` | skills `architect-mentality`, `architecture-first`, `software-design`, `advanced-typescript`, `angular-architecture`, `angular-native-wrappers`, `nx-monorepo-and-dx` (extensible over time) | **Mindset & discipline (agnostic):** `architect-mentality` — the stack-agnostic mindset of a great architect (mentality only, no techniques): everything is a black box with deliberate connections, place everything on purpose, model the missing concept instead of patching, automate every repeated process, go the extra mile, and more. `architecture-first` — the operational discipline that enforces it: solve every change through design, **never a patch**; fix bugs at the **root cause**; **design + confirm refactors before implementing**; ships an always-on policy the scaffold bakes into every project's CLAUDE.md. **Techniques (general / agnostic):** `software-design` — the cross-stack toolbox (decoupling & dependency inversion, replace conditionals with structure, duplication & abstraction, domain modeling, errors & boundaries, contracts & API design); the stack skills below specialize it. **Techniques (TypeScript):** `advanced-typescript` — type-system mastery (derive types from types, declaration merging, template-literal & branded types, type-level diagnostics, guards & assertions). **Techniques (Angular):** `angular-architecture` — modern-Angular patterns (DI/providers, lifecycle, SSR/zone, extensibility, projection, API ergonomics). `angular-native-wrappers` — wrap an imperative/third-party JS API in idiomatic Angular. **Techniques (Nx / workspace & DX):** `nx-monorepo-and-dx` — monorepo architecture & developer experience (boundaries & entry points, module-boundary enforcement, caching & task pipeline, generators & automation, testing setup, release/versioning/environments). |
 
 ## Layout
@@ -63,8 +63,22 @@ claude-toolkit/
 │               └── naming.md
 ├── plugins/product-ux/
 │   ├── .claude-plugin/plugin.json
-│   └── skills/keep-users-oriented/
-│       └── SKILL.md                      # the three-questions principle: keep anyone who waits/steps-through oriented (deterministic → steps; nondeterministic → estimate + notify)
+│   └── skills/
+│       ├── keep-users-oriented/
+│       │   └── SKILL.md                  # the three-questions principle: keep anyone who waits/steps-through oriented (deterministic → steps; nondeterministic → estimate + notify)
+│       ├── envision-the-experience/       # the visioning half of the experiential pair
+│       │   └── SKILL.md                  # imagine the world before the widgets (the screen is a place, not a page); interrogate every element, name no implementation, restraint over spectacle → a Vision realize-the-vision later builds
+│       └── realize-the-vision/            # DOMAIN skill (router) — the building half: research the truest means BEFORE coding, then build & verify against the feeling
+│           ├── SKILL.md                  # craftsman mentality + research-first method; routes to the reference clusters below
+│           └── reference/                 # one file per technique family, loaded on demand
+│               ├── motion-and-timelines.md
+│               ├── 3d-spatial-and-webgl.md
+│               ├── scroll-and-cinematic.md
+│               ├── svg-canvas-and-generative.md
+│               ├── sourcing-and-generating-assets.md   # build vs. source: when to generate/license/download an asset vs. hand-code it; licensing, review, art-direction
+│               ├── performance-and-budgets.md
+│               ├── accessibility-reduced-motion-and-fallbacks.md
+│               └── sound-and-haptics.md
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
     └── skills/new-project/
@@ -109,7 +123,7 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 }
 ```
 
-Skills are namespaced as `project-starter:new-project`, `product-ux:keep-users-oriented`, `engineering:architect-mentality`, `engineering:architecture-first`, `engineering:advanced-typescript`, `engineering:software-design`, `engineering:advanced-typescript`, `engineering:angular-architecture`, `engineering:angular-native-wrappers`, and `engineering:nx-monorepo-and-dx`. Scaffolded
+Skills are namespaced as `project-starter:new-project`, `product-ux:keep-users-oriented`, `product-ux:envision-the-experience`, `product-ux:realize-the-vision`, `engineering:architect-mentality`, `engineering:architecture-first`, `engineering:advanced-typescript`, `engineering:software-design`, `engineering:advanced-typescript`, `engineering:angular-architecture`, `engineering:angular-native-wrappers`, and `engineering:nx-monorepo-and-dx`. Scaffolded
 projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
 available inside every new project automatically.
 

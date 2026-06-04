@@ -1,0 +1,147 @@
+---
+name: realize-the-vision
+description: The craftsman that turns a Vision (the experiential spec produced by `envision-the-experience`) into a real, running interface — by researching the truest, soundest means BEFORE writing a line of implementation. Use whenever you are about to build, prototype, or technically realize a distinctive/immersive/experiential UI — animation, motion, depth or 3D, scroll-choreography, cinematic transitions, generative or hand-drawn visuals, sound, haptics — or whenever you must choose the tools, frameworks, libraries, rendering approach, or architecture for an interface whose feeling matters. This skill does NOT jump to code. It reads the Vision as a contract (the *feeling* is what must survive, not any particular widget), translates that feeling into what it technically demands, then RESEARCHES the field — surveying the means that could produce it, weighing their tradeoffs, nuances, and caveats — and only then chooses deliberately, fitted to the vision AND the real constraints (performance budget, accessibility, target devices, the team's stack, long-term maintainability), never by default, fashion, or familiarity. It is the experienced practitioner who knows the landscape (GSAP, Motion, three.js / React-Three-Fiber / angular-three, Web Animations API, CSS scroll-driven animations, View Transitions, Lottie/Rive, Canvas/SVG/WebGL/WebGPU, Web Audio, the Vibration API) and its footguns (jank, layout thrash, main-thread blocking, vestibular harm, missing reduced-motion fallbacks, broken keyboard/screen-reader semantics under custom visuals) — and compensates for them up front. It also knows the boundary of what code (and an LLM) builds *well* versus what must be *sourced* — generated, downloaded, licensed, or commissioned: figurative or photoreal art (a couple kissing, a landscape, a mascot, a textured hero) is acquired from image/video/3D generation, stock, or open icon/SVG/illustration/Lottie/3D-model libraries, never hand-coded into grotesque path-soup — and it handles that path's caveats (licensing and commercial rights, reviewing every generated asset for artifacts/bias/tone, art-directing it to the Vision's world, optimizing its weight, giving it accessible meaning), often composing sourced assets with coded behavior. It designs the architecture and confirms it before implementing (architecture-first), wraps imperative libraries behind clean Angular seams (angular-native-wrappers), and verifies the built result against the *feeling* in the running app, not merely that it renders. Where work is genuinely independent it fans out across subagents — researching the means, sourcing asset candidates, building independent regions, and running verification lenses concurrently — always against the Vision as the shared contract, and always converging on a coherence pass so the parallel pieces add up to one feeling (never fanning out the parts that must know the whole — the rhythm, palette, motion language, and emotional arc). Routes to a reference library (motion & timelines; depth/3D/spatial; scroll & cinematic; SVG/canvas/generative; build-vs-source / sourcing & generating assets; performance & budgets; accessibility/reduced-motion/fallbacks; sound & haptics) — read only the cluster you need. The downstream *building* half of `product-ux:envision-the-experience` (the upstream *visioning* half); a direct expression of `engineering:architect-mentality` and `engineering:architecture-first`.
+---
+
+# Realize the Vision
+
+A master craftsman does not start cutting the moment they're handed a drawing. They study it. They ask what the piece needs to *be* — its weight, its joinery, the wood that will hold the form — and they choose chisel and technique to serve *that*, drawing on a lifetime of knowing the field and still checking it against this particular piece. The skill is not in reaching for a familiar tool fast; it's in choosing the **right** means for **this** thing, and knowing the caveats before they bite.
+
+**This skill is that craftsman — for interfaces.** It takes a **Vision** (the experiential spec from `envision-the-experience`) and makes it real. But it earns the word *realize*: it does **not** jump to implementation. It first understands what the Vision demands, **researches the means that could honor it**, and only then chooses tools, libraries, architecture, and technique — deliberately, fitted to the feeling and to the real constraints.
+
+The companion skill imagines the world and names no implementation, on purpose — so the imagination stays free. This skill is where implementation enters, and it enters **as a servant of the feeling, never its master.** The Vision is the contract; how it's built is internals (`architect-mentality` principle 1) — free to be anything, *as long as it honors the feeling*.
+
+---
+
+## The one discipline: research before you reach
+
+Everything here reduces to a single move, and it's the opposite of what a hurried builder does. **Understand what the feeling demands, survey the means that could produce it, then choose — before you write a line.**
+
+The lazy path reaches first and asks later: grab the library you used last time, the framework you know best, the first approach that comes to mind, and bend the Vision to fit it. The feeling quietly dies in the gap between "what the Vision asked for" and "what was easy in the tool I grabbed." A breathing, drifting world becomes a static page with a fade, because the fade was one line and the drift was unfamiliar.
+
+The craftsman runs it the other way — and *being* experienced is not an excuse to skip the survey, it's what makes the survey fast and sharp:
+
+1. **Read the Vision as a contract.** Extract the four beats — the world & feeling, the user & context, what lives on the screen & how it behaves, the emotional arc. Find the **one feeling** that must survive contact with reality. That feeling is non-negotiable; everything else is means.
+
+2. **Translate the feeling into technical demands.** What does *this* experience actually require? Motion and timing? Depth and perspective? Scroll-driven choreography? Generative or hand-drawn visuals? Sound, haptics? Name the demands in plain terms before naming any tool — "things drift slowly and respond to the cursor," "the story unfolds as you scroll," "a single object turns in 3D space," "it should feel hand-painted, never gridded."
+
+3. **Research the means — survey, don't snatch.** For each demand, lay out the candidate techniques and tools and weigh them: what each is *for*, its strengths, its cost (bundle, complexity, performance), its caveats and footguns. Know the landscape *and still check it for this case* — the right tool last time may be wrong this time. And ask the prior question for each demand: should this be **built in code at all, or sourced** — generated, downloaded, licensed, commissioned? (See *Build or source* below.) The reference library is your field knowledge; read the cluster that fits the demand.
+
+4. **Choose deliberately — fit to the vision AND the constraints.** The means must serve the feeling, but also the **real constraints**: the performance budget, accessibility, the target devices (test the mid-range phone, not your laptop), the team's stack (the BeSpunky house stack is Angular + Nx — prefer means that integrate cleanly, and wrap imperative libraries behind Angular seams), and what the team can maintain. Never choose by default, fashion, or familiarity. State *why* this means, for this feeling, under these constraints (`architect-mentality` principle 12 — lead with *why*).
+
+5. **Anticipate the caveats and compensate up front.** Every technique has sharp edges — main-thread jank, layout thrash, vestibular harm, missing `prefers-reduced-motion` fallbacks, broken keyboard/screen-reader semantics under custom visuals, mobile touch and battery, browser support gaps. The craftsman maps these *before* building and designs so consumers never meet them (`architect-mentality` principle 11 — compensate for your materials' weaknesses). The accessibility and performance clusters are not optional polish; they are part of choosing the means.
+
+6. **Design the architecture, confirm, then build.** This is an `architecture-first` change: design the seams (where the animation lives, how the 3D scene is owned and torn down, how the imperative library is wrapped, where complexity concentrates so the edges stay simple), confirm the approach, *then* implement. Don't refactor or re-architect ad hoc mid-build.
+
+7. **Build with fidelity — then verify against the feeling.** Implementation is done when it *evokes what the Vision promised*, not when it renders without error. Run it in the real app (use the `browser-automation` plugin / the preview tools), on real devices, with reduced-motion on and off, with a keyboard, and ask: *does this feel like the world the Vision described?* If not, it isn't finished.
+
+---
+
+## Build or source — knowing which to do
+
+Code is one family of means, not the only one. Some things the Vision asks for should be **built**; some should be **acquired** — generated, downloaded, licensed, or commissioned. Confusing the two is one of the most common ways a Vision dies in the build.
+
+A coding agent — and code itself — is a *material with weaknesses* (`architect-mentality` principle 11). It is superb at the systematic, parametric, interactive, and responsive: layouts, controls, motion, geometry, generative pattern, anything that must answer to data, state, or input. It is poor at hand-authoring **figurative, photoreal, or richly illustrative art.** Asked to draw "a couple kissing" in SVG, an LLM produces grotesque path-soup — heroic effort, ugly result. **Recognizing that boundary is craft, not failure.** The honest move is to stop coding and source the asset from where it's made well.
+
+- **Build in code when** the thing is systematic, interactive, stateful, data-driven, themeable, or genuinely simple geometry/iconography — anything that must respond, scale, animate, or stay in sync with logic.
+- **Source / acquire when** the thing is figurative, photoreal, artistically specific, or production-grade craft (a kiss, a landscape, a mascot, a real photograph, a designer's illustration, a textured hero) — where hand-coding would be ugly, unmaintainable, or simply beyond what code (and an LLM) makes *nicely*, and a better-made version can be generated, downloaded, or licensed.
+
+The acquisition channels are effectively infinite — AI image / video / 3D generation, free and paid stock, open icon and SVG libraries, illustration sets, Lottie/Rive marketplaces, 3D-model libraries, fonts, audio libraries. Choosing among them and handling their caveats — **licensing and commercial rights, reviewing every generated asset for artifacts/bias/tone, art-directing it to the Vision's world, optimizing its weight, giving it accessible meaning** — is its own field of craft: read `reference/sourcing-and-generating-assets.md`.
+
+Two truths keep this honest:
+
+- **The asset enters through a seam** (`architect-mentality` principles 1 & 10). The component doesn't care whether the kiss is a generated image, a licensed SVG, or a short video — *build-vs-source is an internal decision behind a clean boundary*, swappable later without touching the rest.
+- **Build and source compose.** The truest result is often *both*: source the figurative asset, then bring it to life with code — grade it to the palette, reveal it on scroll, drift it with parallax, mask it into the world. The craftsman directs sourced material *and* codes its behavior.
+
+And know the third option: **when neither code nor generation reaches the quality the feeling demands, say so** — flag that a human designer, illustrator, or photographer should make this. Knowing when not to build *and* when not to auto-generate is the same discipline (`architect-mentality` principle 14).
+
+---
+
+## Refuse the false tradeoff: feeling vs. soundness
+
+The tempting framing is "immersive **or** performant," "expressive **or** accessible," "cinematic **or** maintainable." Treat it as a problem to dissolve, not a compromise to accept (`architect-mentality` principle 7). Almost always, the **right technique gives you both** — compositor-only animation is *both* lush and 60fps; a reduced-motion fallback keeps the meaning *and* protects the vulnerable; a well-wrapped 3D scene is *both* immersive and cleanly torn down.
+
+When a Vision genuinely collides with a hard constraint — an effect that cannot be made accessible, a richness no device budget can carry — the craftsman does **neither** of the two failures:
+
+- **Never silently betray the Vision** by flattening it to whatever was easy and calling it done.
+- **Never blindly implement** something that janks on real phones or harms people with vestibular disorders.
+
+Instead: find the means that preserves the *feeling* within the constraint (often the feeling survives a gentler form — less motion, slower, leaning on light and color instead of movement), and **surface the tension** — name the conflict, the options, and the recommendation. The feeling is the contract; honoring it sometimes means rendering it differently than first imagined, *on purpose and out loud*, never by quiet surrender.
+
+---
+
+## Parallelize against the contract
+
+A built experience is large — research, assets, regions, checks — and much of it can run in parallel. But creative work carries a unity requirement most parallel work doesn't: it must add up to *one* feeling. So the rule is **fan out the work, converge on the feeling** — and what makes that safe is the Vision itself.
+
+The Vision is the shared contract (the feeling + four beats). Every parallel worker honors it, which is exactly what keeps independent work from drifting into a patchwork (`architect-mentality` #1 & #10 — the contract is public; the workers are interchangeable internals). Fan out where work is genuinely independent; never fan out the parts that must know the whole.
+
+**Safe to parallelize:**
+- **Research the means** — survey each demand concurrently (a lane each for motion, 3D, scroll, assets, performance, accessibility), then converge the findings into one set of choices. (Step 3 run as a sweep instead of in series.)
+- **Source candidates** — generate or fetch several asset candidates at once, then review and select one against license, tone, and the world.
+- **Independent regions** — distinct, non-overlapping parts of the build can proceed in parallel (in isolation), *provided* each builds against the same Vision.
+- **Verification lenses** — run the checks concurrently and adversarially: does it honor the feeling? hold 60fps on a mid-range phone? operate by keyboard and screen reader? respect reduced-motion? is every asset license-clean? Each lens is independent — run them at once.
+
+**Never parallelize** the parts where a piece must know the whole — the global rhythm, the shared palette and motion language, the emotional arc, anything that *defines* coherence. Split those and you get five worlds stitched together.
+
+**The convergence is mandatory.** Every fan-out ends in a coherence pass — a synthesis (for research and assets) or a "do the pieces add up to one feeling?" critic (for parallel-built regions and verification). Fan-out *without* convergence is the box-and-text patchwork in disguise: technically complete, experientially incoherent. Coherence is the one thing you can't parallelize away — the barrier you always pay (`architect-mentality` #12 — one mental model; #15 — go the extra mile to make it whole).
+
+Keep this principle-level: orchestrate it with whatever fan-out/parallel tooling the environment offers, but the discipline is the same everywhere — *one contract out, many workers, one feeling back.*
+
+---
+
+## How to use this skill — the reference library
+
+The SKILL above is the **mentality and method**; the references are the **field knowledge** — the craftsman's deep familiarity with each family of means, its tooling, nuances, and caveats. Use them like the `software-design` toolbox:
+
+1. From the Vision's demands (step 2 above), identify which **cluster(s)** apply.
+2. **Read the matching `reference/<file>.md`** — what the means are, what each is for, how to choose, the caveats and footguns, the house-stack (Angular/Nx) notes, and when *not* to use it.
+3. Choose and build per the seven-step method. Read only the cluster(s) you need — don't load them all.
+
+| Cluster | Reference | Covers | Serves (architect-mentality) |
+| --- | --- | --- | --- |
+| **Motion & timelines** | `reference/motion-and-timelines.md` | CSS transitions/keyframes, Web Animations API, Motion (fka Framer Motion), GSAP + timelines, FLIP, View Transitions API, easing & choreography, orchestrating sequences | Compensate for weaknesses · Concentrate complexity |
+| **Depth, 3D & spatial** | `reference/3d-spatial-and-webgl.md` | three.js, React-Three-Fiber, angular-three (NGT), WebGL/WebGPU & shaders, perspective/parallax depth, lighting, scene ownership & teardown, when 3D is wrong | Define the seam · Know when not to do it |
+| **Scroll & cinematic** | `reference/scroll-and-cinematic.md` | CSS scroll-driven animations (scroll/view-timeline), GSAP ScrollTrigger, pinning & parallax, scrollytelling, cinematic page/route transitions | Design for the consumer · Compensate for weaknesses |
+| **Drawing: SVG, canvas & generative** | `reference/svg-canvas-and-generative.md` | SVG (paths, morphing, filters), Canvas 2D, generative/particle systems, Lottie & Rive, procedural & hand-drawn aesthetics, when each beats the others | Model the missing concept · Place everything on purpose |
+| **Build vs. source: sourcing & generating assets** | `reference/sourcing-and-generating-assets.md` | when to build in code vs. acquire; AI image/video/3D generation; free & paid stock; open icon/SVG/illustration/Lottie/3D-model/font/audio libraries; licensing & commercial rights; reviewing & art-directing generated assets; optimizing weight; composing sourced + coded; commissioning a human | Compensate for weaknesses · Know when not to do it |
+| **Performance & budgets** | `reference/performance-and-budgets.md` | 60fps & the frame budget, compositor-only properties, avoiding layout thrash, main-thread vs. GPU, bundle budgets, profiling, mid-range-device reality | Compensate for weaknesses · Concentrate complexity |
+| **Accessibility, reduced-motion & fallbacks** | `reference/accessibility-reduced-motion-and-fallbacks.md` | `prefers-reduced-motion`, vestibular safety, focus & keyboard under custom visuals, screen-reader semantics for non-conventional UI, progressive enhancement & honest fallbacks | Design for the consumer · Abstractions must never trap |
+| **Sound & haptics** | `reference/sound-and-haptics.md` | Web Audio API, sound design & ambient audio, the Vibration API, when sound/haptics serve the feeling, autoplay & consent, muting & preferences | Design for the consumer · Know when not to do it |
+
+---
+
+## Ask yourself
+
+- Have I read the Vision and named the **one feeling** that must survive — before choosing any tool?
+- Did I **research the means** for this feeling, or reach for the library/framework I already know? Can I name the candidates I weighed and *why* I rejected them?
+- Is my choice fitted to the **constraints** — performance budget, accessibility, target devices, the house stack (Angular/Nx), maintainability — not just to the feeling in isolation?
+- For each element the Vision demands, did I ask whether to **build it in code or source it** — and am I about to hand-code figurative/photoreal art an LLM will turn into path-soup?
+- For every **sourced or generated asset**: did I verify its **license** (commercial use, attribution, modification), **review it** for artifacts/bias/tone (especially in a sensitive context), **art-direct it to the world**, and **optimize its weight and give it accessible meaning**?
+- Have I mapped this technique's **caveats** (jank, layout thrash, reduced-motion, keyboard/screen-reader, mobile/battery, browser support) and compensated *before* building?
+- Did I **design the architecture and confirm it** before implementing, rather than wiring it up ad hoc — with imperative libraries wrapped behind a clean seam?
+- When feeling and a hard constraint collided, did I **dissolve the tradeoff** with a better technique — or, if truly stuck, preserve the feeling in a gentler form and **surface the tension** instead of silently surrendering?
+- Did I verify the built result **against the feeling**, in the running app, on a real device, with reduced-motion on and a keyboard — not just confirm it renders?
+- Where can I **fan out** the work (research lanes, asset candidates, independent regions, verification lenses) against the Vision — and have I planned the **coherence pass** that converges it back to one feeling? Am I careful *not* to parallelize the parts that must know the whole?
+
+## Red flags
+
+- **Jumping to code** — picking a library and starting to build before reading the Vision or researching the means.
+- **Reaching for the familiar** — "I'll use X because I always do," with no survey of what this feeling actually needs.
+- **The feeling lost in translation** — a drifting, breathing, cinematic Vision shipped as a static page with one fade, because that's what was easy.
+- **Caveats discovered late** — reduced-motion, jank on mid-range phones, broken keyboard nav, or autoplay audio found in QA instead of designed for up front.
+- **Animating the wrong properties** — width/height/top/left/margin in hot paths (layout thrash) instead of compositor-only transform/opacity.
+- **Imperative libraries wired raw** — GSAP/three.js reaching into the framework's internals with no seam, no teardown, no `runOutsideAngular`, leaking on destroy.
+- **Hand-coding what should be sourced** — heroic SVG attempts at figurative/photoreal art (a person, a face, a landscape) that come out as grotesque path-soup, instead of generating, licensing, or downloading a proper asset.
+- **An unverified or wrong license** on a shipped asset, or a generated image **never reviewed** for artifacts, bias, or tone — a legal and trust landmine, worst of all in a sensitive context (a couples app, a grief app).
+- **A sourced asset that betrays the world** — an off-brand stock photo or mismatched illustration that clashes with the Vision's feeling, no better than ugly code.
+- **Spectacle that janks** — heavy effects that betray the feeling by stuttering; immersion that costs the user a smooth, usable interface.
+- **Silent betrayal or blind harm** — flattening the Vision to what was easy, *or* shipping something that janks/harms because "the Vision said so." Neither is craft.
+- **"It renders" mistaken for "it's done"** — never verified against the actual feeling, on real devices, in real conditions.
+- **Fan-out with no convergence** — research lanes, asset candidates, or independently-built regions stitched together with no coherence pass, producing a technically-complete patchwork that betrays the one feeling. Or the opposite: parallelizing the parts that define coherence (rhythm, palette, motion language, arc) and getting five worlds in one screen.
+
+---
+
+> **Origin.** This skill is the downstream, *building* half of experience design — it takes a **Vision** and makes it real. Its companion, `product-ux:envision-the-experience`, is the upstream *visioning* half that decides **what the experience should be**, naming no implementation. The two are a matched pair, cleanly separated: the Vision is the **contract** (the feeling), this skill chooses and builds the **internals** (the means) — and may render the feeling differently than first imagined, on purpose, when constraints demand, but never abandons it.
+
+> **Related.** A direct expression of `engineering:architect-mentality` — *build for the goal, not the brief* (honor the feeling, not the literal widget), *compensate for your materials' weaknesses* (map each technique's footguns and absorb them), *define the seam* (wrap imperative libraries cleanly), *refuse false tradeoffs* (immersive *and* sound), *concentrate complexity* (the hard rendering paid for once, edges kept simple), *know when not to* (the quiet means is sometimes the truest), *go the extra mile* (research the right means, don't snatch the familiar one). Governed by `engineering:architecture-first` — design the seam and confirm before implementing. Leans on `engineering:software-design` (decoupling, contracts) and, on the house stack, `engineering:angular-architecture` and `engineering:angular-native-wrappers` (wrapping GSAP/three.js/imperative APIs in idiomatic Angular) and `engineering:nx-monorepo-and-dx` (where the experience code lives). Verify the result in the running app with the `browser-automation` plugin / preview tools.
