@@ -98,8 +98,29 @@ if grep -q '"@playwright/test"' package.json 2>/dev/null; then
     echo "[post-create] reclaiming /home/node/.cache/ms-playwright volume ownership for node user"
     sudo chown -R node:node /home/node/.cache/ms-playwright
   fi
-  yarn playwright install --with-deps chromium
-  echo "[post-create] Playwright prerequisites ready"
+  # The browser binary is a large download from cdn.playwright.dev. WSL+Docker DNS is
+  # intermittently flaky (getaddrinfo ENOTFOUND on an otherwise-working network — apt and the
+  # rest of post-create succeed, then this one host fails to resolve), and Playwright's own
+  # retries fire too fast to outlast the blip. Without this, a single hiccup would abort the
+  # whole post-create (set -e) and leave the container half-provisioned. So retry with backoff,
+  # and if it still fails, warn LOUDLY but do NOT fail the build — everything else (deps,
+  # plugins, Firebase) is ready and the user can finish this one step once the network settles
+  # (same best-effort stance as the claude-toolkit plugin pre-install above).
+  pw_ok=0
+  for attempt in 1 2 3; do
+    if yarn playwright install --with-deps chromium; then pw_ok=1; break; fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "[post-create] Playwright browser install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+      sleep $((attempt * 10))
+    fi
+  done
+  if [ "$pw_ok" = 1 ]; then
+    echo "[post-create] Playwright prerequisites ready"
+  else
+    echo "[post-create] WARNING: Playwright browser install failed after 3 attempts — likely a transient network/DNS issue."
+    echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
+    echo "[post-create]            yarn playwright install --with-deps chromium"
+  fi
 fi
 
 echo "[post-create] done"
