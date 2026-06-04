@@ -85,6 +85,19 @@ fi
 # post-create.
 if grep -q '"@playwright/test"' package.json 2>/dev/null; then
   echo "[post-create] @playwright/test detected — installing Chromium + system deps"
+  # Reclaim the Playwright cache VOLUME mount point. The browser cache is a
+  # per-workspace Docker volume mounted at /home/node/.cache/ms-playwright, and
+  # Docker creates fresh named-volume mount points as root:root. Step 0 chowns the
+  # parent /home/node/.cache (so sibling caches like firebase's JAR cache work) but
+  # deliberately leaves the volume's contents untouched — so the mount point itself
+  # stays root-owned and `playwright install`, running as `node`, hits EACCES the
+  # first time it mkdirs inside it (the __dirlock lock dir). Guarded on ownership:
+  # runs only on a fresh (empty → instant) volume, no-op on rebuilds where the
+  # cache is already node-owned and populated.
+  if [ -d /home/node/.cache/ms-playwright ] && [ "$(stat -c %U /home/node/.cache/ms-playwright)" != "node" ]; then
+    echo "[post-create] reclaiming /home/node/.cache/ms-playwright volume ownership for node user"
+    sudo chown -R node:node /home/node/.cache/ms-playwright
+  fi
   yarn playwright install --with-deps chromium
   echo "[post-create] Playwright prerequisites ready"
 fi
