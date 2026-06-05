@@ -18,7 +18,7 @@ The tell: if hand-coding it would be a *heroic effort with an ugly result* — t
 
 | Channel | What it's for | Strengths | Caveats |
 | --- | --- | --- | --- |
-| **AI image generation** | Bespoke, on-brand, novel stills (the kiss in *your* style, a unique hero) | Infinite specificity; fast; matched to the Vision | Artifacts (hands, faces, text, anatomy); hard to keep a *set* consistent; **IP/ownership murky & jurisdiction-dependent**; bias; cost; **must review every output** |
+| **AI image generation** | Bespoke, on-style, novel stills (the kiss in *your* style, a unique hero) | Infinite specificity; fast; matched to the Vision and Look | Artifacts (hands, faces, text, anatomy); hard to keep a *set* consistent; **IP/ownership murky & jurisdiction-dependent**; bias; cost; **must review every output** |
 | **AI video generation** | Short ambient loops, hero clips, motion impossible to film or code | Striking motion without a shoot | Heavy files; limited length/control; cost; licensing/ownership unclear; review |
 | **AI 3D generation** (text/image-to-3D) | Quick props/assets for a 3D scene | Fast rough models | Topology/quality varies; usually needs cleanup; pairs with `3d-spatial-and-webgl.md` |
 | **Free stock photo/video** (Unsplash, Pexels, Pixabay) | Real photography/footage at no cost | High quality; generous licenses | Generic/overused looks; licenses still have *terms*; representation & consent of subjects |
