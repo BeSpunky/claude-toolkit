@@ -21,6 +21,12 @@ Every change — feature, bug, edge case, or "quick fix" — is solved through *
 
 For any non-trivial change, invoke the **`engineering:architecture-first`** skill before writing code — it carries the full loop, the bug root-cause and refactor gates, the patch smells to refuse, and the redesign moves.
 
+## Redesign means rethink
+
+When asked to **redesign** any UI — a layout, screen, page, component, or flow — treat it as a **complete creative reconception from scratch**, never a modification or reskin of what exists. The existing implementation has **zero design authority**: do **not** read it to inform the new design, and don't even look at it before conceiving the new one. Reconceive the **form** from the intent, the requirements, and the feeling; honor the **purpose** (what the thing is for, its data and functionality), which comes from the spec and the user — never reverse-engineered from the old layout. Read the existing code **only after** the new design exists — to plan what to clean up, overwrite, or migrate, and to confirm what functionality must survive — then build the new design cleanly and **remove the old**. (A *targeted tweak* — "move this button", "change this colour" — is **not** a redesign; don't inflate it into one.)
+
+For any redesign, invoke the **`product-ux:redesign-means-rethink`** skill — the entry gate to the experience-design trio (`envision-the-experience` → `stage-the-vision` → `realize-the-vision`, run from scratch).
+
 ## Stack
 
 - **Monorepo**: Nx, integrated layout (`apps/` + `libs/`).
