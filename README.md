@@ -85,6 +85,7 @@ claude-toolkit/
 │               ├── svg-canvas-and-generative.md
 │               ├── sourcing-and-generating-assets.md   # build vs. source: when to generate/license/download an asset vs. hand-code it; licensing, review, art-direction
 │               ├── performance-and-budgets.md
+│               ├── responsive-and-adaptive-layout.md   # engineer each moment's per-form-factor staging: fluid/container queries, responsive images & art-direction, touch vs pointer, mobile viewport; re-compose, never shrink
 │               ├── accessibility-reduced-motion-and-fallbacks.md
 │               └── sound-and-haptics.md
 └── plugins/project-starter/

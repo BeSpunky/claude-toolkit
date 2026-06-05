@@ -41,7 +41,7 @@ A Vision hits **four beats**. They are fixed; *how* you write each one is open �
 
 1. **The world & the feeling.** Where are we? What is this place, and what is the single emotional truth of being in it? Paint it — the light, the air, the mood, the metaphor that holds it all together. If a stranger read only this beat, they should *feel* the app before knowing a thing it does.
 
-2. **The user & the context.** Who enters this place, in what moment of their life, reaching for what? What is this app *to them*? What must the design honor or protect (their grief, their excitement, their kids' short attention, their need to trust you with money)? This beat keeps the world honest — it's why the feeling is *this* feeling and not a pretty mood pasted on.
+2. **The user & the context.** Who enters this place, in what moment of their life, reaching for what? What is this app *to them*? What must the design honor or protect (their grief, their excitement, their kids' short attention, their need to trust you with money)? **Include *where and how* they experience it** — phone in hand in bed, desktop at work, a big shared screen, one-handed, outdoors in glare — because the device is part of the moment, and the feeling must hold on whatever screen they actually use (most often a phone). This beat keeps the world honest — it's why the feeling is *this* feeling and not a pretty mood pasted on.
 
 3. **What lives on the screen, and how it behaves.** The inhabitants of the world — *not* "components." What do you see first; what draws the eye; what can you touch, and what happens when you do; what is large and what is quiet; how is it arranged in space. And the life of it: still or moving, how it enters, how it responds to you, to scrolling, to time. Conventional words are allowed here ("a button," "a list") — but only after you've decided they're the *truest* form, and you describe what they actually look and feel like in *this* world, never as bare nouns.
 
@@ -129,6 +129,7 @@ Same method every time: feeling → world → what is this element *in* that wor
 - Did I describe the **experience** (sensory, spatial, emotional) and name **no implementation** — keeping the vision free and the builder free?
 - Have I walked the **arc** — arrival to departure — so the feeling holds and builds, not just one pretty snapshot?
 - Would this interface be unmistakably **this app's**, or could it belong to any product on earth?
+- Have I named the real **device-context(s)** the human is in — and does the feeling hold on the screen they actually use (usually a phone), not just a wide desktop?
 - Did I imagine **more than one world** before committing — and choose or synthesize the truest — or settle for the first that came to mind?
 - Is the world **grounded in something real** (the real human, moment, and context — plus any existing material the project happens to have), or spun from what "an app like this" conjures? And have I sent it to **`stage-the-vision`** to become the Staging (bold, web-native art) before any high-fidelity build — rather than letting the build leap from feeling to pixels?
 
@@ -142,6 +143,7 @@ Same method every time: feeling → world → what is this element *in* that wor
 - The opposite: **defaulting to the safe, generic layout** and calling it "clean," when the context was crying out for something truer.
 - A Vision **clotted with implementation** — markup, styling, framework names, mechanics — shackling the imagination and the builder both.
 - A design that **could belong to any app** — no world, no context, no feeling that makes it *this* product's.
+- A world imagined **only for a wide desktop screen** while the human is most likely on a phone — the feeling won't survive the device it's actually met on.
 - Treating the four beats as **four boxes to fill** with a sentence each, rather than as a vision to paint.
 - A world **invented from a model's associations** rather than grounded in the real human and context (and any existing material) — or a Vision **handed straight to the build**, skipping the Staging (`stage-the-vision`) and letting the builder fill the visual vacuum with its default taste.
 
