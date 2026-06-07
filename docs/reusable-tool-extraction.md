@@ -165,8 +165,16 @@ The mechanism does **not** reinvent publishing — it uses the shared workspace'
 - **Phase 4 ✅ (distribution)** — `@bespunky/nx-tools` made **publishable** (compiled JS via `compile-generators.mts`; `files`/`publishConfig` set) + a Docker publish script (`tools/publish-nx-tools/`, user-run with npm auth). The scaffold's `HOUSE_BLOCK` (so both scaffold **and** `--repair`) adds `@bespunky/nx-tools` as a **devDep**, so it survives `yarn install` and the generators run natively in any project's devcontainer. The `architecture-first` skill already references "the house mechanism" generically.
   - **Bootstrapping:** publish first (`tools/publish-nx-tools/publish.sh`), then new projects get the devDep automatically and existing ones via `scaffold.sh --repair`.
 
-## 8. Status
+## 8. Status — end-to-end tested ✅
 
-The full loop exists in code (`mark-extractable` → `extract-tool` → `nx release` → `adopt-extracted`) and distribution is wired. **Remaining before it's real:** (1) run `publish.sh` to put `@bespunky/nx-tools@0.1.0` on npm; (2) an **end-to-end test** — mark a real lib, extract, release, adopt — which will shake out the untested codepaths (the import codemod, the peerDeps inference, the `nx g` scaffolding flags).
+Run in Docker against throwaway Nx workspaces (source project + a stand-in shared workspace):
+
+- **`mark-extractable`** ✅ — tagged the lib (project-crystal: tag in `package.json`) and wrote a correct `extraction.json` (proposed package, deps, framework versions, entry, `kind`).
+- **`extract-tool`** ✅ — scaffolded `@bespunky/greet` via `nx g @nx/js:library`, copied the source, set `package.json` (version `0.0.1`, deps, `publishConfig` public), flipped the marker to `ingested`.
+- **`adopt-extracted`** ✅ — rewrote the consumer's import to the package, added the dep, set status `adopting`; `--finalize` planned the local-lib deletion ("loop closed"). The `yarn add` correctly 404'd (the package isn't published) — the verify gate working.
+
+**Bug found & fixed by the e2e:** `adopt-extracted`'s import codemod only checked tsconfig path aliases, so it missed **project-crystal / package-based** workspaces (libs resolved by their `package.json` name). Now it rewrites *both* the tsconfig alias and the lib's package name.
+
+**Only steps requiring real npm remain unexercised** (can't publish in a test): the actual `nx release` publish, the real `yarn add` resolving from npm, and a post-adopt build. The surrounding logic is validated.
 
 *(Registry wiring is no longer a phase — projects consume `@bespunky/*` from public npm, per the `nx-enso` precedent. A Verdaccio dev-loop would be a separate optional enhancement.)*

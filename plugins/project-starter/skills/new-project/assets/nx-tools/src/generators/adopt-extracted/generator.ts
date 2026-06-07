@@ -79,7 +79,13 @@ export default async function adoptExtractedGenerator(
     );
   }
 
-  const alias = findAlias(tree, project.root, project.sourceRoot);
+  // The local import specifier(s) to rewrite away from. Classic Nx workspaces use a tsconfig
+  // path alias; project-crystal / package-based workspaces resolve the lib by its package.json
+  // name. Cover both.
+  const tsAlias = findAlias(tree, project.root, project.sourceRoot);
+  const libPkg = readJsonSafe(tree, joinPathFragments(project.root, 'package.json'));
+  const libName = typeof libPkg.name === 'string' ? libPkg.name : undefined;
+  const rewriteAliases = [...new Set([tsAlias, libName].filter(Boolean))] as string[];
 
   // ---- Step 2: finalize (delete the now-unused local lib) ----
   if (options.finalize) {
@@ -94,9 +100,9 @@ export default async function adoptExtractedGenerator(
     removeProjectConfiguration(tree, options.lib);
     tree.delete(project.root);
     const tsPath = tsconfigPath(tree);
-    if (alias && tsPath) {
+    if (tsAlias && tsPath) {
       updateJson(tree, tsPath, (json) => {
-        if (json.compilerOptions?.paths) delete json.compilerOptions.paths[alias];
+        if (json.compilerOptions?.paths) delete json.compilerOptions.paths[tsAlias];
         return json;
       });
     }
@@ -132,24 +138,29 @@ export default async function adoptExtractedGenerator(
     return installCallback;
   }
 
-  // Default: rewrite imports from the local alias to the package, keep the lib for now.
-  if (alias) {
-    const re = new RegExp("(['\"`])" + escapeRegExp(alias) + "(/[^'\"`]*)?\\1", 'g');
+  // Default: rewrite imports from the local specifier(s) to the package, keep the lib for now.
+  if (rewriteAliases.length) {
+    const regexes = rewriteAliases.map(
+      (a) => new RegExp("(['\"`])" + escapeRegExp(a) + "(/[^'\"`]*)?\\1", 'g')
+    );
     let changed = 0;
     visitNotIgnoredFiles(tree, '.', (file) => {
       if (!file.endsWith('.ts') || file.startsWith(project.root)) return;
       const content = tree.read(file, 'utf-8');
-      if (!content || !content.includes(alias)) return;
-      const updated = content.replace(re, (_m, q: string, sub = '') => `${q}${packageName}${sub ?? ''}${q}`);
+      if (!content) return;
+      let updated = content;
+      for (const re of regexes) {
+        updated = updated.replace(re, (_m, q: string, sub = '') => `${q}${packageName}${sub ?? ''}${q}`);
+      }
       if (updated !== content) {
         tree.write(file, updated);
         changed++;
       }
     });
-    logger.info(`Rewrote imports "${alias}" → "${packageName}" in ${changed} file(s).`);
+    logger.info(`Rewrote imports (${rewriteAliases.join(', ')}) → "${packageName}" in ${changed} file(s).`);
   } else {
     logger.warn(
-      `Could not find a tsconfig path alias for "${options.lib}" — rewrite skipped. Update imports to "${packageName}" by hand.`
+      `Could not determine the local import specifier for "${options.lib}" — rewrite skipped. Update imports to "${packageName}" by hand.`
     );
   }
 
