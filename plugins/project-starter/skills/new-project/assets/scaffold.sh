@@ -120,7 +120,12 @@ ensure_nx_tools() {
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright$FIREBASE_BLOCK"
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright$FIREBASE_BLOCK
+# Persist @bespunky/nx-tools as a real devDependency so the house generators (including the
+# reusable-tool extraction generators mark-extractable / adopt-extracted) survive 'yarn install'
+# and stay runnable in the project's devcontainer. Graceful until the package is first published
+# (see tools/publish-nx-tools); once published, --repair adds it to existing projects.
+yarn add -D @bespunky/nx-tools@^0.1.0 || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e

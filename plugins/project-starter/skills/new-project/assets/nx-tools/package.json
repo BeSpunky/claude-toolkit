@@ -1,7 +1,15 @@
 {
   "name": "@bespunky/nx-tools",
-  "version": "0.0.0",
-  "private": true,
-  "description": "BeSpunky house Nx generators used during scaffolding.",
-  "generators": "./generators.json"
+  "version": "0.1.0",
+  "description": "BeSpunky house Nx generators: project scaffolding (serve-options, devcontainer, claude-settings, firebase-emulators, playwright) and reusable-tool extraction (mark-extractable, adopt-extracted).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BeSpunky/claude-toolkit",
+    "directory": "plugins/project-starter/skills/new-project/assets/nx-tools"
+  },
+  "keywords": ["nx", "nx-plugin", "generators", "bespunky"],
+  "generators": "./generators.json",
+  "files": ["generators.json", "src/**/*.js", "src/**/*.json"],
+  "publishConfig": { "access": "public" }
 }
