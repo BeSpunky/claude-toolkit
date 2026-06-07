@@ -55,7 +55,7 @@ This SKILL is the force, the bar, and the ping-pong. The references are the craf
 
 | Cluster | Reference | Covers |
 | --- | --- | --- |
-| **Friction & flow** | `reference/friction-and-flow.md` | every tap/scroll/decision/field/wait is a cost; the direct path to the goal; remove steps; smart defaults & anticipation; progressive disclosure; no hoops |
+| **Friction & flow** | `reference/friction-and-flow.md` | every tap/scroll/decision/field/wait is a cost; the direct path to the goal; remove steps; smart defaults & anticipation; **never make an important feature depend on user-maintained state** (tracking apps excepted); progressive disclosure; no hoops |
 | **Facilitating input** | `reference/facilitating-input.md` | think about the *experience of entering each data type*; interrogate the friction of the default control tap-by-tap; design the common adjustment; **invent a novel control when the data deserves it** (the genius art, with `stage-the-vision`); validate it's truly usable & accessible, not a gimmick |
 | **Clarity & cognitive load** | `reference/clarity-and-cognitive-load.md` | always-understandable; recognition over recall; one primary action; obvious affordances; honest labels; information architecture; never make them think |
 | **Errors & recovery** | `reference/errors-and-recovery.md` | prevent first; when validation fails be *informative* (what's wrong, why, how to fix — never "invalid"); **carry the user to the problem** (scroll into view / "take me there", focus the control); no dead ends; extrapolate to any failure |
@@ -77,6 +77,7 @@ This SKILL is the force, the bar, and the ping-pong. The references are the craf
 - Does it feel **instant and alive** — reacting the moment it's touched, dragged things following the finger, never hanging (heavy work runs async/background), loading instantly (no/short-live splash, sized placeholders)?
 - Is every change **continuous** — smooth transitions everywhere (routes, states, menus, lists, list→detail), no abrupt layout shifts as content loads, the mobile keyboard handled — so nothing ever makes the user ask "what just happened?"
 - Did I pick the **lowest-friction control** for each input (visible-and-immediate chips/toggles over click-to-reveal selects for short lists), and does the process not even *look* tiring?
+- Does any **important feature depend on user-maintained state** — value gated behind the user telling the app something and keeping it current? Unless this is a tracking app, derive/detect/default it instead; reserve user-set state for bonus, presentational extras.
 - For each data type, did I **interrogate the friction of entering it** and design the right control — even **inventing a novel one** when no standard control is good enough (then validating it's truly usable and accessible)?
 - When something goes wrong (validation, a failure), is the user told **what's wrong, why, and how to fix it** — and **carried to the problem** (scrolled into view / "take me there", the control focused) — never left guessing or hunting?
 - Am I holding the **hard bar** — astonishing to use — or settling for "usable enough" because the design is pretty?
@@ -88,6 +89,7 @@ This SKILL is the force, the bar, and the ping-pong. The references are the craf
 - **Art taxing the use** — scroll-jacking, transitions that delay every action, an artful nav nobody finds, a hero that buries the CTA, motion between the user and their goal.
 - **Impress-once, annoy-forever** — a gimmick that delights the first time and obstructs every time after.
 - **Hoops & tedium** — unnecessary steps, screens, modals, fields; making the user work or wait without reason.
+- **Important feature gated on user-maintained state** — a core capability that only works once the user has fed the app some state and keeps it current (outside a tracking app, where logging *is* the concept); user-set state belongs only on low-value, presentational, or bonus features.
 - **Designed for a desk** — ignoring thumbs, one-handedness, distraction, interruptions, and bad connections.
 - **"Usable enough"** — settling below great UX because the look is strong; or sacrificing the use to protect the art (outside a declared pure-art mission).
 - **Hanging the UX / non-instant** — a tap that does nothing for a beat, a blocked UI during heavy work (instead of async/background), a draggable that lags the finger, a static splash where the skeletal UI could show.

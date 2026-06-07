@@ -21,6 +21,15 @@ Does it make life easy? Every tap, scroll, decision, field, and wait the user mu
 - **Anticipate the next need** and have it ready (the likely next field focused, the probable action pre-surfaced, the data already loaded).
 - **Remember, don't re-ask.** Never make the user supply what you already know or could derive.
 
+## Don't make the user maintain state
+
+The user's effort isn't only the taps in a flow — it's the *ongoing burden* of keeping the app fed with information about themselves and their situation. A feature that only works once the user has told it something — and keeps telling it as life changes — taxes them forever, not once. **Unless the app's whole point is tracking, an important feature must never depend on or require the user to input and maintain state.**
+
+- **Classify before you lean on user state.** An **important feature** — high value, part of the app's core concept or goal — must deliver its value *without* the user maintaining anything. Its worth can't be gated behind "first tell us X, and keep X current." Make it derive, detect, default, or infer the state instead of asking the human to curate it.
+- **Optional features may rely on user-supplied state.** A feature that's low-value, *presentational rather than operational*, or an outright bonus may ask the user to set a state — "I'm tired", "we had a newborn", "money's tight", "ran 3km today" — **because if they never set it, nothing important breaks; they just miss a nicety.** The state is opt-in seasoning, not a load-bearing input.
+- **The test:** if the user stops maintaining the state, does a *core* feature stop delivering its value? If yes, you've made an important feature depend on self-maintenance — redesign it so the value flows without it. If only a bonus quietly dims, that's fine.
+- **The tracking exception.** When maintaining state *is* the concept — a habit tracker, food log, budget, journal, where logging is the value the user came for — the input isn't a tax, it's the product. There, required state is legitimate; make the entering of it astonishing (`facilitating-input.md`) rather than trying to remove it.
+
 ## Progressive disclosure
 
 - Show what's needed *now*; reveal complexity only when asked. A simple surface over deep capability beats a wall of every option at once.
@@ -53,3 +62,4 @@ Walk one real person from intent to done. Mark every place they have to **work, 
 - **Value-gating** — walls (signup, tours, consent) before the user gets anything.
 - **Clean over effortless** — hiding the primary action to make the screen pretty.
 - **Over-asking** — fields, confirmations, and decisions the flow doesn't need.
+- **Important feature gated on user-maintained state** — a core capability that only works once the user has told the app something and keeps it current (outside a tracking app, where logging *is* the point). Derive/detect/default it instead, and reserve user-set state for bonus, presentational extras.
