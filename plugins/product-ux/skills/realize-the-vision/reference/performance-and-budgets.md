@@ -23,6 +23,13 @@ Immersion that stutters betrays the feeling. A 60fps fade beats a 30fps spectacl
 - **Don't ship a sledgehammer for a tack** — a CSS transition or tiny SVG often replaces a whole library. Reach for the lightest means that honors the feeling.
 - **Assets are part of the budget** — compress textures/models/video; provide modern formats; stream or progressively load big media (with an in-world loading moment — `keep-users-oriented`).
 
+## Never hang the UI; keep the layout stable
+
+Two UX non-negotiables that live at the build layer (the *why* is in `astonishing-to-use`):
+
+- **Never block the main thread.** Long or heavy work runs **async or in a Web Worker / background task** so taps, scrolls, and typing never freeze. Reflect the user's action **optimistically** and reconcile after; pair with `keep-users-oriented` for progress/notify. A frozen UI is a defect, not a wait.
+- **Zero layout shift (CLS ≈ 0).** Reserve the correct **position and size** for anything loading (a sized skeleton, fixed image/media dimensions, font fallbacks that don't reflow) so nothing jumps when it lands. Lazy modules show a sized placeholder, never a blank that later shoves the page.
+
 ## Measure — don't guess
 
 - Profile with the browser's **Performance panel** and the **FPS/rendering** tools; watch for long tasks, forced reflows, dropped frames.

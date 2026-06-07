@@ -28,6 +28,7 @@ Engineering the Staging so each moment holds across every viewport, orientation,
 - **Re-compose, don't shrink.** The cardinal sin: a desktop layout crammed into a phone. If the Staging called for a phone re-staging, *build that* — a different structure, not a squeeze. Genericness and brokenness both live in the shrink.
 - **Mobile-first.** Author base styles for the small screen and add complexity upward (`min-width`) — most audiences are mobile, and it forces the hard canvas first.
 - **The `100vh` bug** — mobile browser chrome makes `100vh` overflow; use `dvh`/`svh`.
+- **The on-screen keyboard** — focusing an input pops the keyboard and resizes the viewport, shifting the layout. Keep the focused field **visible** (scroll it into view above the keyboard), keep it **editable**, don't let the rest of the layout scramble, and restore on dismiss (the `visualViewport` API helps). A keyboard hiding the field being typed in is a classic failure — `astonishing-to-use`'s continuity cluster.
 - **Hover is not universal** — never hide essential actions or info behind `:hover`; provide a touch-reachable path.
 - **Touch targets & spacing** — finger-sized hit areas; don't port mouse-precise targets to touch.
 - **Breakpoint-itis** — many arbitrary device-width breakpoints are a smell; prefer fluid + container queries and break only where the design demands.

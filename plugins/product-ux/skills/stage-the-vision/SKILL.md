@@ -58,6 +58,14 @@ The gate is sharp: **if you collapsed a real phenomenon to a single primitive, s
 
 ---
 
+## Reconcile with the use — the ping-pong
+
+A staged moment can be breathtaking and *miserable to use* — a scroll-jacked hero that fights the thumb, a transition that delays every tap, an artful nav nobody can find, a spectacle that buries the thing the user came for. Beauty is only half of great design; the **use** is the co-equal other half. So a concept is not done when it's striking — it's done when it's striking **and** astonishing to use.
+
+This is a **ping-pong with `astonishing-to-use`, not a one-way check.** Pressure each moment against the use (does this make the user work, wait, guess, hunt, or fight?), then **re-conceive** to dissolve the friction *without going generic* — the best resolutions make the art *carry* the function (the cinematic reveal *is* the navigation; the beautiful transition *covers* a real load; the bold hero *contains* the primary action). Volley until both are great. The mission sets who leads (utility → use leads; brand/art → concept leads, then pressure-tested) — but it is always a loop, and you **never** sacrifice the use to protect the art (outside a declared pure-art piece). See `astonishing-to-use` (and its *reconciling art & use* cluster).
+
+---
+
 ## The Staging — what this skill produces
 
 **The Staging** is the artifact: a creative, web-native, art-level spec the builder can realize and two builders would realize recognizably the same. It carries:
@@ -111,6 +119,7 @@ The SKILL above is the method; the references are the craft. Read only the clust
 - Is it **bold but not loud** — one concept, restraint, a limited palette — or spectacle reswinging toward garish?
 - Did I **stage each moment across form factors, mobile-first** — so it holds or *transforms* on a phone (with a touch-native form for any pointer interaction) — or only for desktop, to be shrunk?
 - Did I **decompose each moment to physical truth** (light, shadow, material, depth, form, texture as they really behave) — or **collapse a real phenomenon to a lone primitive** (warm light → a gradient, depth → a box-shadow, glass → a flat fill)?
+- Did I **ping-pong each moment against the use** (`astonishing-to-use`) — re-conceiving where the art taxes the user (scroll-fighting, transition delays, hidden nav, buried action) so it's striking **and** effortless — or just make it beautiful and assume it's usable?
 - Did I let an **outside eye judge it for beauty** at low fidelity, or am I about to **self-certify** the art and ship it?
 - Is each moment described so `realize` can engineer it — concrete, web-native — while I left the *how* (libraries, CSS, perf) to `realize`?
 
@@ -124,6 +133,7 @@ The SKILL above is the method; the references are the craft. Read only the clust
 - **Bold becoming loud** — spectacle, maximal effects, garish saturation chasing "striking"; the card-grid failure in a louder costume.
 - **Designing only for desktop** — no phone staging conceived, so the moment breaks or cramps when shrunk onto the screen most people actually use.
 - **Symbolic substitution** — a real phenomenon (light, depth, material, texture) collapsed to a single primitive (a gradient, a box-shadow, a flat fill) with no physical model behind it; the reason "warm light" never looks like warm light.
+- **Beautiful but taxing to use** — a moment that fights the thumb, delays the task, hides the action, or impresses once and annoys forever, shipped with no ping-pong against `astonishing-to-use`. Striking is only half; the use must be astonishing too.
 - **Self-certified art** — declaring the moments "stunning/cinematic" with no outside eye and no low-fidelity comparison.
 - **Hand-coding the art that should be sourced** — a hero illustration or character forced out of code/weak taste instead of generated, licensed, or commissioned and directed by the Staging.
 

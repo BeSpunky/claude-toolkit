@@ -32,6 +32,10 @@ The Vision usually hands you a metaphor in words ("a home," "the turning light,"
 
 The concept is the whole; the **moments** are how it plays across the screen and the scroll — the hero, the reveal, the transitions, the living details (`composition-and-cinematic-staging.md`). Invent the concept first; the moments are its scenes. A screen with no concept is a pile of moments that don't add up; a concept with no moments is a poster that never moves.
 
+## Inventing isn't only visual — invent the interactions too
+
+The same genius that invents a striking *image* invents striking *interactions and controls* — how the user acts, not only what they see. When a data type or an action is painful through standard controls, inventing a novel control (a pull-to-adjust handle, a control that springs back to centre) is as much *the art* as any hero shot. This is the ping-pong with use: `astonishing-to-use`'s **facilitating-input** cluster identifies the input friction and demands a better control; you invent its artful, physical *form*; the use is then validated. Bold inventions of interaction are part of the genius — make them, then make them genuinely usable.
+
 ## Pitfalls
 
 - **Settling for the first, safe idea** — the model's average; competent, forgettable.

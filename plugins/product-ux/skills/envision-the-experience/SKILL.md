@@ -130,6 +130,7 @@ Same method every time: feeling → world → what is this element *in* that wor
 - Have I walked the **arc** — arrival to departure — so the feeling holds and builds, not just one pretty snapshot?
 - Would this interface be unmistakably **this app's**, or could it belong to any product on earth?
 - Have I named the real **device-context(s)** the human is in — and does the feeling hold on the screen they actually use (usually a phone), not just a wide desktop?
+- Have I **ping-ponged the world against the use** (`astonishing-to-use`)? A world can be beautiful to imagine and miserable to operate — it must be both astonishing to *feel* and astonishing to *use*, the mission setting who leads.
 - Did I imagine **more than one world** before committing — and choose or synthesize the truest — or settle for the first that came to mind?
 - Is the world **grounded in something real** (the real human, moment, and context — plus any existing material the project happens to have), or spun from what "an app like this" conjures? And have I sent it to **`stage-the-vision`** to become the Staging (bold, web-native art) before any high-fidelity build — rather than letting the build leap from feeling to pixels?
 
@@ -144,6 +145,7 @@ Same method every time: feeling → world → what is this element *in* that wor
 - A Vision **clotted with implementation** — markup, styling, framework names, mechanics — shackling the imagination and the builder both.
 - A design that **could belong to any app** — no world, no context, no feeling that makes it *this* product's.
 - A world imagined **only for a wide desktop screen** while the human is most likely on a phone — the feeling won't survive the device it's actually met on.
+- A world that's **beautiful to imagine but hard or annoying to use** — conceived with no ping-pong against `astonishing-to-use`. The feeling is only half of great design; the *use* is the co-equal other half.
 - Treating the four beats as **four boxes to fill** with a sentence each, rather than as a vision to paint.
 - A world **invented from a model's associations** rather than grounded in the real human and context (and any existing material) — or a Vision **handed straight to the build**, skipping the Staging (`stage-the-vision`) and letting the builder fill the visual vacuum with its default taste.
 
