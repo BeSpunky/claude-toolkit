@@ -30,6 +30,11 @@
       "factory": "./src/generators/mark-extractable/generator",
       "schema": "./src/generators/mark-extractable/schema.json",
       "description": "Mark an existing Nx library as a reusable-tool extraction candidate: add the `reusable-tool:extraction-candidate` tag and write an extraction.json marker (proposed @bespunky package name, kind, declared deps, and installed framework version ranges) so the host-side extract-tool can lift it into the shared workspace later. Sandbox-safe (touches only this workspace). PREREQUISITE: structure the generic code into its own clean Nx library first — this marks it, it doesn't abstract it."
+    },
+    "adopt-extracted": {
+      "factory": "./src/generators/adopt-extracted/generator",
+      "schema": "./src/generators/adopt-extracted/schema.json",
+      "description": "Close the extraction loop: replace a local library (already published as @bespunky/<name>) with the public-npm package. Honours verify-then-delete — the default run adds the package + rewrites imports but keeps the lib; build to verify, then re-run with --finalize to remove the now-unused local lib. --keepShim instead leaves the lib as a thin re-export for staged migration."
     }
   }
 }

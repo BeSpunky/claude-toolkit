@@ -113,14 +113,17 @@ Lift a candidate from a project into the shared workspace as a publishable packa
 - **Code:** `tools/extract-tool/` (`.sh` launcher + `.mjs` logic).
 - ⚠️ **Untested end-to-end** (no marked candidate exists yet); built to the house `scaffold.sh` Docker pattern.
 
-### 4c. `adopt-extracted` — generator, in project (needs registry)
+### 4c. `adopt-extracted` — generator, in project — ✅ BUILT (Phase 3)
 
-Replace the local lib with the published package; close the loop.
+Replace the local lib with the published public-npm package; close the loop. Runs as a normal generator inside the project's own workspace. Honours **verify-then-delete** (decision #3) as a **two-step** flow, since a generator can't install-build-then-conditionally-delete in one pass:
 
-- **Options:** `--package @scope/name[@version]`, `--lib <local>` (default: match by `proposedPackage`), `--keep-shim` (default false).
-- **Pre:** package published & reachable from the project's registry; local `extraction.json.status` is `ingested`.
-- **Steps:** (1) install the package (`yarn add @bespunky/<name>` — from public npm; no project registry config needed, per the `nx-enso` precedent §6); (2) **rewrite imports** from the local path alias → package name across the project (codemod — ts-morph); (3) remove the local lib (project, path alias, `extraction.json`) — *or*, with `--keep-shim`, replace its `index.ts` with `export * from '@scope/name'` for a transition; (4) build/test to verify.
-- **Result:** project consumes the package; single source of truth now in the shared workspace.
+- **Options:** `lib` (required), `package` (default from the marker's `ingestedPackage`/`proposedPackage`), `version` (default `latest`), `finalize` (the delete step), `keepShim`.
+- **Step 1** — `adopt-extracted <lib>`: adds the package dependency (`yarn add @bespunky/<name>` from public npm — no registry wiring, per the `nx-enso` precedent §6), **rewrites imports** from the local TS path alias → the package (best-effort module-specifier codemod), and **keeps the local lib**; marker → `adopting`.
+- **Verify** — build the project to confirm the package works.
+- **Step 2** — `adopt-extracted <lib> --finalize`: confirms the dep is present, then **removes the local lib** (project, files, tsconfig path alias). Loop closed.
+- **`--keepShim`** — one-step staged migration instead: the lib becomes `export * from '@bespunky/<name>'` and stays; old import paths keep working.
+- **Code:** `nx-tools/src/generators/adopt-extracted/`.
+- ⚠️ **Untested end-to-end**; the import codemod is best-effort — review the diff and the build before `--finalize`.
 
 ---
 
@@ -158,7 +161,7 @@ The mechanism does **not** reinvent publishing — it uses the shared workspace'
 
 - **Phase 1 ✅** — marker convention (the explicit tag + `extraction.json`) + `mark-extractable` generator. Sandbox-safe.
 - **Phase 2 ✅** — the `extract-tool` host tool (Docker launcher + `.mjs`: scaffold the `@bespunky/<name>` package via `@nx/js:lib` / `@nx/angular:library`, copy source, set deps/peerDeps, mark `ingested`). Publish stays the existing `nx release`.
-- **Phase 3** — `adopt-extracted` generator: `yarn add @bespunky/<name>` (public npm — no registry wiring), **verify it resolves/builds**, then import-codemod + remove the local lib.
+- **Phase 3 ✅** — `adopt-extracted` generator: two-step verify-then-delete — add + import-codemod (keep lib) → build to verify → `--finalize` removes the local lib. `--keepShim` for staged migration.
 - **Phase 4** — scaffold integration (ship the new generators into projects via `nx-tools`), docs, and the skill's reference to the workflow.
 
 *(Registry wiring is no longer a phase — projects consume `@bespunky/*` from public npm, per the `nx-enso` precedent. A Verdaccio dev-loop would be a separate optional enhancement.)*

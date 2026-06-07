@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyAdoptExtracted",
+  "title": "Adopt an extracted package back into the project",
+  "description": "Replace a local library (previously marked by mark-extractable and published as @bespunky/<name>) with the published npm package, closing the extraction loop. Default flow honours verify-then-delete (decision #3): the first run adds the package + rewrites imports but KEEPS the local lib; you build to verify the package works; then re-run with --finalize to remove the now-unused local lib. Use --keepShim to instead leave the lib as a thin re-export of the package (staged migration).",
+  "type": "object",
+  "properties": {
+    "lib": {
+      "type": "string",
+      "description": "The local library project to adopt away (replace with the published package).",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "Which local library is being replaced by the published package?"
+    },
+    "package": {
+      "type": "string",
+      "description": "Published package name (e.g. @bespunky/<name>). Defaults to the lib's extraction.json ingestedPackage/proposedPackage."
+    },
+    "version": {
+      "type": "string",
+      "description": "npm version range to install.",
+      "default": "latest"
+    },
+    "finalize": {
+      "type": "boolean",
+      "default": false,
+      "description": "Step 2: remove the now-unused local library. Run this only AFTER building to verify the published package works."
+    },
+    "keepShim": {
+      "type": "boolean",
+      "default": false,
+      "description": "Instead of rewrite + delete, replace the local library's entry with `export * from '<package>'` and keep it (staged migration). One step, no finalize."
+    }
+  },
+  "required": ["lib"]
+}
