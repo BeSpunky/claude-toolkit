@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyMarkExtractable",
+  "title": "Mark a library as a reusable-tool extraction candidate",
+  "description": "Tag an existing Nx library as generic enough to extract into the shared @bespunky libraries, and write the extraction.json marker the host-side extract-tool reads later. PREREQUISITE: the generic code must already live in its own clean Nx library — scaffold it with `nx g @nx/js:lib` / `@nx/angular:library` and move the code in first; recognising and abstracting the tool is your architecture-first judgment, this generator only marks it.",
+  "type": "object",
+  "properties": {
+    "lib": {
+      "type": "string",
+      "description": "Name of the existing Nx library to mark as an extraction candidate.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "Which library is generic enough to extract?"
+    },
+    "summary": {
+      "type": "string",
+      "description": "One line: what the tool is and why it's generic.",
+      "x-prompt": "One-line summary (what it is, why it's generic):"
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Why it's generic enough to extract into a shared library (optional, longer)."
+    },
+    "package": {
+      "type": "string",
+      "description": "Proposed published package name, e.g. @bespunky/<name>. Defaults to <scope>/<lib name>."
+    },
+    "scope": {
+      "type": "string",
+      "description": "npm scope for the proposed package.",
+      "default": "@bespunky"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["auto", "js", "angular"],
+      "default": "auto",
+      "description": "Library kind. 'auto' detects from the project's build executor and dependencies."
+    }
+  },
+  "required": ["lib"]
+}

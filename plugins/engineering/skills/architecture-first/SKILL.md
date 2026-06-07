@@ -67,12 +67,29 @@ Then:
 ## Redesign moves — the only acceptable answers to "the design doesn't handle X"
 
 - **Model the concept.** The thing you wanted to `if` on is usually a missing domain concept. Give it a type / state / strategy and let the system dispatch on it.
-- **Extract.** Pull shared logic into one unit with a single responsibility; call it from every site instead of duplicating.
+- **Extract.** Pull shared logic into one unit with a single responsibility; call it from every site instead of duplicating. When the piece is generic across *projects*, not just this codebase, extract it into a shared reusable library — see *Extract reusable tools*.
 - **Decouple.** Replace a direct dependency or internal reach-in with an explicit interface/port; depend on the abstraction.
 - **Build the missing infrastructure.** If you keep wanting to patch the same gap, the gap *is* a missing capability — build it once, properly, and route everyone through it.
 - **Invert dependencies.** Push policy out to the edges; keep the core depending only on abstractions.
 - **Unify.** Collapse parallel near-duplicate paths into one path parameterized **by data, not by a boolean**.
 - **Make state explicit.** Replace scattered flags with a single source of truth or a state machine.
+
+## Extract reusable tools — and know where they belong
+
+Architecture-first looks **beyond the current change and the current project.** While building infrastructure or a feature, watch for a piece — a component, directive, service, pipe, utility, type, or chunk of logic — that is **generic enough to serve *other* projects, not just this one.** The moment you catch yourself building something that isn't really *this project's* concern, that's the signal: *"this is generic enough to extract into a reusable library."* Leaving it inlined is cross-project duplication waiting to happen — the next project re-implements it from scratch.
+
+This is the **Extract** redesign move applied across the org, not just within one codebase. Treat it as a design move:
+
+1. **Recognize** the genericity — the piece has no project-specific coupling, or its project-specific parts can be cleanly parameterized/injected out.
+2. **Abstract it well** — a clean boundary, a small deliberate contract, dependencies received from outside (`architect-mentality` — *everything is a black box*, *design for the consumer*), so it stands alone, knowing nothing of the project it came from.
+3. **Place it on purpose** — and *where* depends on what you can reach. **Check which context you're in first.**
+
+**The placement bends to your access:**
+
+- **You can reach the shared libraries and other projects** (a context where the whole workspace is visible). Then do the full move: extract the piece into the **shared-library destination** as a properly-abstracted, **versioned** package; publish it; and adopt it back into the projects that need it. **Extract → abstract → publish → consume.**
+- **You are sandboxed to one project** (e.g. inside its DevContainer — only this workspace is visible). You **cannot** reach the shared libraries or other projects, and must not pretend to. Do the honest half: **abstract it cleanly *in place*** as a self-contained, **extraction-ready** library within this workspace, and **stage it as an explicit extraction candidate** so it gets lifted later from a context that *can* reach across projects. **Never** silently inline generic code; **never** claim to have published what you couldn't reach.
+
+The recognition instinct is **always-on** — every time you write something, ask whether it's really *this* project's or the *org's*. The destination, the tooling, and the cross-context hand-off are **the house's extraction mechanism** — not this skill's to hardcode; this skill owns the *discipline* (recognize, abstract, place on purpose, never inline-and-forget), and the mechanism owns the *where and how*.
 
 ## Principles (tech-agnostic)
 
@@ -100,6 +117,7 @@ These sentences mean the design is missing something — never act on them, run 
 - New behavior is reachable as a natural case of the design, **without** a flag.
 - Any refactor was designed and confirmed before implementation.
 - Coupling and duplication did not increase.
+- Any code generic enough to serve other projects was **extracted to the shared libraries** (when reachable) or made extraction-ready and **staged as a candidate** (when sandboxed) via the house mechanism — never left inlined.
 
 ## Keeping the rule always-on in a project
 

@@ -25,6 +25,11 @@
       "factory": "./src/generators/playwright/generator",
       "schema": "./src/generators/playwright/schema.json",
       "description": "Add @playwright/test as a devDependency so the devcontainer's post-create.sh installs Chromium + apt deps on container build. The browser binary lives in a per-workspace Docker volume so rebuilds don't re-download. Pairs with the `browser-automation:playwright` skill which describes how to use it. Always-on for BeSpunky projects — no opt-in flag."
+    },
+    "mark-extractable": {
+      "factory": "./src/generators/mark-extractable/generator",
+      "schema": "./src/generators/mark-extractable/schema.json",
+      "description": "Mark an existing Nx library as a reusable-tool extraction candidate: add the `reusable-tool:extraction-candidate` tag and write an extraction.json marker (proposed @bespunky package name, kind, declared deps, and installed framework version ranges) so the host-side extract-tool can lift it into the shared workspace later. Sandbox-safe (touches only this workspace). PREREQUISITE: structure the generic code into its own clean Nx library first — this marks it, it doesn't abstract it."
     }
   }
 }

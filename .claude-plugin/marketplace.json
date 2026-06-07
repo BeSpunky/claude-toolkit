@@ -10,13 +10,13 @@
       "name": "project-starter",
       "source": "./plugins/project-starter",
       "description": "Scaffold new BeSpunky-standard projects: integrated Nx monorepo + Angular (clean --minimal app, no demo) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. Generator-first.",
-      "version": "0.2.0"
+      "version": "0.3.0"
     },
     {
       "name": "engineering",
       "source": "./plugins/engineering",
       "description": "BeSpunky engineering skills. Agnostic foundation (architect-mentality + architecture-first: solve through design, never a patch; fix the root cause; design + confirm refactors) plus technique domains with progressive-disclosure references: software-design, advanced-typescript, angular-architecture, angular-native-wrappers, nx-monorepo-and-dx.",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     {
       "name": "browser-automation",

@@ -94,10 +94,13 @@ This is the discipline that keeps black boxes (principle 1) honest: boundaries h
 
 **What it means.** A great architect is *strategically* lazy: repetitive, manual, or duplicated work is a design defect to be eliminated, not endured. When two things are the same in essence, that sameness must live in exactly one place, and differences become parameters — never copies. Equally, you design so the *expected* changes — new cases, evolving requirements, changes in the things you depend on — cost as little as possible, and so the **blast radius** of any change stays small and local. Effort invested now to remove future effort is the central trade you are always weighing. When the repetition is an *action* you keep performing rather than a *shape* you keep writing, the same instinct applies — as automation (principle 5).
 
+This anti-repetition instinct reaches **across projects**, too. When a piece you're building is generic enough to serve *other* projects — not just this one — it belongs in a shared, reusable library, not trapped in this codebase, where the next project would only re-implement it. Recognize it as you write (*"this is generic enough to extract"*), abstract it as a clean black box, and extract it; the operational *where* — and how it bends to whether you can reach other projects — lives in `architecture-first`'s *Extract reusable tools*.
+
 This applies to grunt work and duplication only — **never** to design thinking itself (see principle 15). Be relentlessly lazy about repetition; be relentlessly diligent about design quality.
 
 **Ask yourself.**
 - Am I about to create something whose shape already exists? Where should the single source of that shape live?
+- Is this piece really *this project's* concern, or generic enough to extract into a shared reusable library other projects could use?
 - What is likely to change here later, and how do I make that change cheap and local?
 - If something I depend on changes, how much of my work must change? Can I make that nearly zero?
 
