@@ -4,6 +4,14 @@
 // branch unreachable" warnings in firebase.config.ts, and adding a new
 // `environment.staging.ts` later is a one-line change.
 //
+// `authDomain` is required for any OAuth provider sign-in (popup and redirect
+// both refuse to run without it — including against the Auth emulator). It's
+// optional in the type only so older user-owned environment files keep
+// compiling across `--repair`; every generated file fills it in.
+//
+// `messagingSenderId` / `vapidKey` are only needed for FCM web push — add them
+// to environment.prod.ts (from `firebase apps:sdkconfig`) when the app uses it.
+//
 // `emulators` is OPTIONAL. The production environment omits it entirely —
 // emulator endpoints have no meaning in prod, and any string/number literals
 // inside the `environment` const get baked into the prod bundle as data
@@ -18,6 +26,9 @@ export interface Environment {
     projectId: string;
     apiKey: string;
     appId: string;
+    authDomain?: string;
+    messagingSenderId?: string;
+    vapidKey?: string;
   };
   emulators?: {
     auth: string;

@@ -57,14 +57,23 @@
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "node",
 
-  // No `forwardPorts` — VS Code auto-detects every container binding and forwards
-  // each to a free host port. Essential when running multiple devcontainers in
-  // parallel: explicit `forwardPorts` would all claim the same host port and
-  // collide; auto-forward picks a unique free port per container (visible in the
-  // Ports panel). `portsAttributes` labels still apply to auto-detected ports;
-  // `onAutoForward` controls per-port notification behavior — backend emulators
-  // are silenced (you rarely click into them), the dev server opens in the
-  // preview pane.
+{{#firebase}}  // Forward the dev server + Firebase emulator ports to the SAME host port. This is
+  // REQUIRED for the app to work in a *host* browser: the page loads over forwarded
+  // :4200, then the Firebase SDK *inside that page* calls the emulators at the
+  // hardcoded localhost:9099 / localhost:8080 (environment.ts) — addresses that only
+  // resolve from the host if those container ports are forwarded to the identical
+  // host port. Auto-forward alone may map a container port to a *different* free host
+  // port, which the browser SDK can't discover → the page hammers localhost:9099 and
+  // gets ERR_CONNECTION_REFUSED (auth token refresh fails → Firestore writes hang).
+  //
+  // Tradeoff: running SEVERAL Firebase devcontainers in parallel collides on these
+  // host ports. If you ever do, remap one container's ports here AND in
+  // environment.ts + firebase.json together (they must agree). For the normal
+  // single-container case, same-port is correct.
+  "forwardPorts": [4200, 4000, 9099, 8080, 9150, 9199, 5001],
+{{/firebase}}  // `portsAttributes` labels the (forwarded or auto-detected) ports; `onAutoForward`
+  // controls per-port notification behavior — backend emulators are silenced (you
+  // rarely click into them), the dev server opens in the preview pane.
   "portsAttributes": {
     "4200": { "label": "Angular Dev Server", "onAutoForward": "openPreview" }{{#firebase}},
     "4000": { "label": "Firebase Emulator UI", "onAutoForward": "notify" },

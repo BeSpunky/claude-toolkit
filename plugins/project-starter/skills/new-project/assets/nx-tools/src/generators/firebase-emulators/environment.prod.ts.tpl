@@ -35,5 +35,10 @@ export const environment: Environment = {
     projectId: '{{projectId}}',
     apiKey: '{{apiKey}}',
     appId: '{{appId}}',
+    // Required for OAuth provider sign-in (Google, etc.) — popup and redirect
+    // flows both refuse to run without it. `firebase apps:sdkconfig` returns it.
+    authDomain: '{{authDomain}}',
+    // Only for FCM web push — add `messagingSenderId` (from sdkconfig) and
+    // `vapidKey` (Console → Cloud Messaging → Web Push certificates) if used.
   },
 };

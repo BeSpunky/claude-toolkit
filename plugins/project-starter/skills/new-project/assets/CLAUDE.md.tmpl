@@ -37,7 +37,27 @@ For any redesign, invoke the **`product-ux:redesign-means-rethink`** skill — t
 {{#firebase}}
 ## Firebase
 
-This project was scaffolded with `--firebase`. **Local development uses the emulator suite, offline** — `nx serve <app>` auto-launches the emulators alongside the dev server under the offline project id `demo-<workspaceName>`. No `firebase login`, no cloud project, no `.firebaserc` is needed for development. By design.
+This project was scaffolded with `--firebase`. **Local development uses the emulator suite, offline** — `nx serve <app>` runs the workspace-level `firebase:emulators` task and the dev server (`<app>:serve-app`) in parallel, under the offline project id `demo-<workspaceName>`. No `firebase login`, no cloud project, no `.firebaserc` is needed for development. By design. (`nx run <app>:serve-app` alone serves without emulators; the Nx TUI is disabled in `nx.json` so both tasks stream plain prefixed logs and one Ctrl+C stops the run.)
+
+### Cloud Functions (apps/functions)
+
+Cloud Functions are a first-class Nx app: `nx build functions` (esbuild) bundles `apps/functions/src/main.ts` into `dist/apps/functions` with a generated deploy-manifest `package.json`; the emulator and `firebase deploy` both consume that dist output (`firebase.json` → `functions.source`). Runtime deps (`firebase-admin`/`firebase-functions`) live at the **workspace root** — no per-project `node_modules`. Deploy with `nx run functions:deploy`. **Platform firewall (ESLint-enforced):** `platform:web` projects must never import `firebase-admin`/`firebase-functions`; `platform:server` projects (`functions`, `firebase`) must never import `firebase`/`@angular/*`. Tag new libraries accordingly.
+
+### Emulator seeds, caching & reset (no re-onboarding each serve)
+
+The emulators **persist and seed their data**. The launch path is `tools/emulators.sh` (all `firebase:emulators*` targets funnel through it): it reaps stale processes, primes the **gitignored working dir** `.emulator-data/` from a seed, then starts the suite with `--import .emulator-data` and (full runs only) `--export-on-exit .emulator-data`. So session + data **cache across serves**: onboard once, stay in. Sign in with a seeded email and the Auth emulator matches the existing account by email — you inherit the seeded uid and its docs.
+
+- **Seeds** are committed, known-good worlds under `tools/emulator-seeds/` (see its README for the catalog). They are **generated artifacts**, never hand-edited.
+- **Reset (on-call):** `yarn nx run firebase:reset` — takes effect on the next serve. Add `reset:<seed>` targets in `firebase/project.json` for extra worlds.
+- **Rebuild seeds:** `yarn nx run firebase:seed:build`.
+
+**Directive — the seed is part of the schema contract.** The seeds' single source of truth is the **declarative** `tools/seed/world.mjs` (a description of accounts + Firestore docs, applied by a generic encoder — adding a field/collection/world is purely additive; the build orchestrator derives the seed list from it). **Whenever a Firestore document shape changes or a feature gains a backend, update the matching world in `world.mjs` and rebuild, committing `tools/emulator-seeds/`** — so the seed never drifts from the code.
+
+### Auth gotchas (devcontainer)
+
+- `environment.ts` ships an `authDomain` — required for any OAuth provider sign-in (popup *and* redirect refuse without it, even against the Auth emulator). Don't remove it.
+- Inside a devcontainer, prefer **`signInWithRedirect`** over popup for OAuth — popups fail with `Sending authEvent failed` across the forwarded-port boundary.
+- The VS Code **Simple Browser cannot complete OAuth** flows; verify sign-in in a real host browser. The devcontainer forwards the dev server + emulator ports to the **same host ports** (`forwardPorts`) precisely so a host browser works — if you re-port an emulator, update `firebase.json`, `environment.ts`, AND `.devcontainer/devcontainer.json` together.
 
 **When the user asks to deploy this app — or otherwise connect it to a real Firebase project — walk them through these steps** (from the workspace root inside the devcontainer, where the Firebase CLI is installed). The BeSpunky default is Firebase **App Hosting** (framework-aware; config in `apphosting.yaml`), not classic static Hosting:
 

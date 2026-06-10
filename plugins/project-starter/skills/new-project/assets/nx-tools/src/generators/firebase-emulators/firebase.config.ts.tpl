@@ -35,7 +35,10 @@ export function provideAppFirebase(): EnvironmentProviders {
     environment.production &&
     (!environment.firebase.projectId ||
       !environment.firebase.apiKey ||
-      !environment.firebase.appId)
+      !environment.firebase.appId ||
+      // authDomain is part of the web config and required for any OAuth
+      // provider sign-in (popup and redirect both refuse without it).
+      !environment.firebase.authDomain)
   ) {
     throw new Error(
       '[firebase.config.ts] environment.firebase is not filled in — cannot bootstrap Firebase for production.\n' +

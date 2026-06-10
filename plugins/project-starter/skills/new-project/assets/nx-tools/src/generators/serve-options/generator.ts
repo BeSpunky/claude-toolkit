@@ -8,18 +8,18 @@
 // which is respected by any chokidar-based watcher across both old and new Angular builders.
 //
 // Where it routes the option:
-//   - Normal case — `serve` is the Angular dev-server directly (the current firebase shape
-//     wires emulators via `serve.dependsOn`, leaving `serve` itself as the dev-server)
-//     → set `host` on `serve.options`.
-//   - Legacy wrapper — a project scaffolded by an older firebase-emulators generator parked an
-//     `nx:run-commands` wrapper at `serve` with the real dev-server renamed to `serve-app`
-//     → set `host` on `serve-app.options` instead, AND strip any stray `host` from the
-//     wrapper's options. (Setting `host` on the wrapper would forward it as `--host=0.0.0.0`
-//     via nx:run-commands' flag-passthrough.) If serve-options runs before firebase-emulators
-//     un-wraps such a project, `host` lands on `serve-app`, which firebase-emulators then
-//     restores back to `serve` — so the option survives the migration regardless of order.
+//   - Plain case — `serve` is the Angular dev-server directly (no Firebase, or a fresh
+//     scaffold before firebase-emulators runs) → set `host` on `serve.options`.
+//   - Firebase shape — the firebase-emulators generator parks an `nx:run-commands`
+//     orchestrator at `serve` (running `firebase:emulators` + `serve-app` in parallel)
+//     with the real dev-server at `serve-app` → set `host` on `serve-app.options` instead,
+//     AND strip any stray `host` from the orchestrator's options. (Setting `host` on a
+//     run-commands target would forward it as `--host=0.0.0.0` via flag-passthrough.)
+//     If serve-options runs before firebase-emulators reshapes a fresh project, `host`
+//     lands on `serve`, which firebase-emulators then MOVES to `serve-app` wholesale —
+//     so the option survives the migration regardless of order.
 //
-// This makes the generator safe to re-run on a project at any stage (fresh, legacy-wrapped).
+// This makes the generator safe to re-run on a project at any stage (fresh, firebase-shaped).
 import {
   type Tree,
   readProjectConfiguration,
@@ -42,12 +42,12 @@ export default async function serveOptionsGenerator(
   project.targets ??= {};
 
   const serve = project.targets.serve;
-  const isWrapper = serve?.executor === 'nx:run-commands';
+  const isOrchestrator = serve?.executor === 'nx:run-commands';
 
-  if (isWrapper && project.targets['serve-app']) {
-    // Wrapped form: actual dev-server lives at `serve-app`.
-    // 1) Clean any stray `host` off the wrapper (left by an earlier run of this generator
-    //    that didn't yet know about the wrap), so nx:run-commands stops forwarding it.
+  if (isOrchestrator && project.targets['serve-app']) {
+    // Firebase shape: actual dev-server lives at `serve-app`.
+    // 1) Clean any stray `host` off the orchestrator (left by an earlier run of this
+    //    generator that didn't yet know the shape), so nx:run-commands stops forwarding it.
     if (serve.options && 'host' in serve.options) {
       delete (serve.options as Record<string, unknown>).host;
     }
@@ -55,8 +55,8 @@ export default async function serveOptionsGenerator(
     const serveApp = project.targets['serve-app'];
     serveApp.options = { ...serveApp.options, host };
   } else {
-    // Unwrapped form: `serve` IS the Angular dev-server (firebase not opted in, or first run
-    //   before firebase-emulators wraps it).
+    // Plain form: `serve` IS the Angular dev-server (firebase not opted in, or first run
+    //   before firebase-emulators reshapes it).
     project.targets.serve ??= {};
     project.targets.serve.options = { ...project.targets.serve.options, host };
   }

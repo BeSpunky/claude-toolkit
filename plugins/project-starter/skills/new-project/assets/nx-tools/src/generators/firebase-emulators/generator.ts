@@ -1,51 +1,80 @@
-// House generator: scaffold Firebase emulator config + Nx targets + app initialization.
+// House generator: scaffold Firebase emulator config + Cloud Functions + Nx targets + app initialization.
 // Idempotent and safe in --repair mode.
 //
 // IMPORTANT: this generator NEVER writes `.firebaserc`. The cloud-project linkage is the
 // Firebase CLI's responsibility — `firebase use --add` validates against the user's actual
 // account and writes `.firebaserc` properly. Fabricating one here would lie about the cloud
 // state and break `firebase deploy` / `firebase use` the moment the user touches them.
-// Emulators don't need `.firebaserc`: each `firebase emulators:start` Nx target passes
+// Emulators don't need `.firebaserc`: the launch script (tools/emulators.sh) passes
 // `--project=demo-<workspaceName>` explicitly. The `demo-` prefix is Firebase's documented
 // convention for "offline only, no cloud calls," so emulators work without login and without
 // a real GCP project.
 //
 // Writes:
 //   - firebase.json     (workspace root) — emulator suite config (auth/firestore/storage/functions/ui),
-//                        singleProjectMode, all emulators bound to 0.0.0.0 for Docker/devcontainer compatibility.
-//                        NO top-level `hosting` block — the BeSpunky default is Firebase App Hosting
-//                        (framework-aware), whose config lives in apphosting.yaml.
+//                        singleProjectMode, all emulators bound to 0.0.0.0 for Docker/devcontainer
+//                        compatibility, AND a `functions` block pointing at the built Nx output
+//                        (dist/apps/functions). The functions block is REQUIRED: configuring the
+//                        functions emulator with no backend behind it makes `emulators:start`
+//                        fatally abort. The generator asserts the `emulators` + `functions` keys
+//                        and preserves any other top-level keys the user added (firestore rules,
+//                        storage rules, …). NO top-level `hosting` block — the BeSpunky default is
+//                        Firebase App Hosting (framework-aware), whose config lives in apphosting.yaml.
 //   - apphosting.yaml   (workspace root) — Firebase App Hosting deploy config. Starter ships empty
-//                        with commented examples; users fill in runConfig / env / scripts as needed.
-//                        Created only if absent (preserves user edits on --repair).
-//   - apps/<project>/src/environments/environment.interface.ts — shared Environment shape.
-//   - apps/<project>/src/environments/environment.ts — dev/emulator config (default).
-//   - apps/<project>/src/environments/environment.prod.ts — production config (placeholders;
-//     gets migrated values from a legacy firebase.config.ts when --repair --firebase runs).
-//   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase() that reads from
-//     `environment` and gates emulator wiring on `!environment.production`. Always rewritten
-//     to the canonical shape; user-customizable values live in the env files now.
-//   - apps/<project>/src/app/app.config.ts — best-effort wiring of provideAppFirebase() into providers; warns if unrecognized.
-//   - tools/reap-emulators.sh — frees the configured emulator ports before each start, so an
-//                        orphaned emulator JVM left by an ungraceful death (closed terminal,
-//                        container stop, SIGKILL) doesn't block the next `emulators:start`.
-//                        Prepended to every `emulators*` target command.
+//                        with commented examples. Created only if absent (preserves user edits).
+//   - .gitignore        — emulator debug logs (*-debug.log) + the working data dir (/.emulator-data).
+//   - nx.json           — `tui.enabled = false`: the interactive TUI multiplexes the continuous
+//                        `serve` + `firebase:emulators` pair into a redrawing multi-pane terminal
+//                        that's awkward for humans and agents alike; plain streamed, prefixed logs
+//                        and a single Ctrl+C are the right dev loop here.
+//   - apps/<project>/src/environments/* — Angular environment-files pattern (see section 2).
+//   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase() (see section 2b).
+//   - apps/functions/   — Cloud Functions as a first-class Nx app: esbuild-bundled to
+//                        dist/apps/functions with a generated deploy-manifest package.json;
+//                        runtime deps (firebase-admin/firebase-functions) live at the WORKSPACE
+//                        ROOT (no per-project node_modules); lints via the workspace flat config.
+//                        Source files are written only if absent (the user owns their functions);
+//                        project.json's build/lint/deploy targets are generator-owned (re-asserted),
+//                        extra targets are preserved.
+//   - firebase/project.json — the emulator suite as its own workspace-level Nx project (it's a
+//                        workspace concept, not an app concern): `emulators` (full suite, dependsOn
+//                        functions:build), `emulators:<svc>` (one + UI), `seed:build`, `reset`.
+//                        All funnel through tools/emulators.sh. Generator-owned targets are
+//                        re-asserted; user-added targets (e.g. `reset:<seed>`) are preserved.
+//   - tools/emulators.sh — the single launch path: reap → prime → start, importing the gitignored
+//                        .emulator-data/ working dir and (full runs only) exporting back on a clean
+//                        exit, so session + data survive every serve. Focused `--only` runs
+//                        import-only (a partial export would clobber the other services' data).
+//   - tools/emulator-data.sh — owns the working-dir ↔ committed-seeds lifecycle: `ensure` (prime
+//                        from the default seed when empty) and `reset [<seed>]` (on-call wipe).
+//   - tools/seed/{world.mjs,build.mjs} + tools/seed/build-seeds.sh — declarative seed worlds
+//                        (world.mjs is USER-OWNED once written — it models the app's schema) and
+//                        the one-command rebuild (`nx run firebase:seed:build`) that exports each
+//                        world into tools/emulator-seeds/<name>/ (committed, generated artifacts).
+//   - tools/reap-emulators.sh — verified port + process reclaim before each start: pass 0 kills
+//                        orphaned emulator JVMs by cache path (catches fallback-port and
+//                        alive-but-unbound orphans), pass 1 polls the configured ports until they
+//                        are ACTUALLY free (SIGTERM → grace → SIGKILL), so an ungraceful prior
+//                        death (closed terminal, container stop, SIGKILL) can't break the next start.
+//   - tools/firebase-welcome.sh — self-extinguishing cloud-linkage banner (see section 3a).
 //   - apps/<project>/project.json targets:
-//       * `serve`              — `firebase emulators:exec` wrapper that runs `serve-app` as its
-//                                child. firebase owns the emulator lifecycle: it boots the suite,
-//                                runs the wrapped dev-server, and on shutdown tears down ALL
-//                                emulator JVMs — no orphan Java processes holding ports between
-//                                restarts. ng serve also starts only after emulators are ready,
-//                                so the app doesn't race emulator boot.
-//                                (Earlier shape was parallel `emulators` + `serve-app` via
-//                                nx:run-commands; signal propagation through yarn→nx→firebase→java
-//                                was unreliable and orphaned the Firestore JVM on every kill.)
-//       * `serve-app`          — the original Angular dev-server target (renamed from `serve`).
-//       * `emulators`          — start the whole emulator suite under --project=demo-<workspaceName>.
-//       * `emulators:<svc>`    — start one emulator + UI under --project=demo-<workspaceName>.
+//       * `serve`     — an nx:run-commands orchestrator running `firebase:emulators` and
+//                       `<project>:serve-app` in parallel. One command, one Ctrl+C, and
+//                       `serve-app` stays runnable ALONE (emulator-free — e.g. an offline
+//                       configuration). This replaced the earlier `serve.dependsOn=['emulators']`
+//                       continuous-task wiring: with the suite extracted to the workspace-level
+//                       `firebase` project, the orchestrator is the battle-tested shape (and the
+//                       generator self-heals the dependsOn form into it).
+//       * `serve-app` — the real Angular dev-server target.
+//   - root eslint.config.mjs — best-effort insertion of the `platform:` dependency-constraint
+//                       firewall: `platform:web` bans firebase-admin/firebase-functions imports,
+//                       `platform:server` bans firebase/@angular. The app is tagged platform:web,
+//                       functions + firebase are tagged platform:server.
 import {
   type Tree,
   type GeneratorCallback,
+  type TargetConfiguration,
+  type ProjectConfiguration,
   readProjectConfiguration,
   updateProjectConfiguration,
   formatFiles,
@@ -54,6 +83,9 @@ import {
   applyChangesToString,
   type StringChange,
   ChangeType,
+  readJson,
+  writeJson,
+  updateJson,
   logger,
 } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
@@ -65,35 +97,50 @@ interface FirebaseEmulatorsSchema {
   workspaceName?: string;
 }
 
-// Build firebase.json. NOTE: no top-level `hosting` block, and no `hosting` emulator entry —
-// the BeSpunky default is Firebase **App Hosting** (the framework-aware product), not classic
-// static Hosting. App Hosting configuration lives in `apphosting.yaml` at the workspace root
-// (generated separately); firebase.json plays no documented role in App Hosting deploys.
-// Users who want the App Hosting emulator for production-parity local serve can run
-// `firebase init apphosting` — it generates the correct `emulators.apphosting.startCommand`
-// for the detected framework, which our generator can't sensibly hard-code.
-//
-// Every backend-service emulator binds to `0.0.0.0` (all interfaces) — required when running
-// inside Docker / devcontainers, where the firebase-tools probe (`127.0.0.1:<port>`) otherwise
-// fails with "Port X is not open on localhost (127.0.0.1)" because the emulator bound to ::1
-// (IPv6) or a container-internal interface only. Binding 0.0.0.0 also makes the emulator UI
-// reachable from the host browser via VS Code's auto-forwarding (the devcontainer
-// has no explicit `forwardPorts` — auto-detection picks a free host port per binding
-// so parallel devcontainers don't collide).
-function buildFirebaseJson() {
+const EMULATORS = ['auth', 'firestore', 'storage', 'functions'] as const;
+
+// The canonical `emulators` block. Every backend-service emulator binds to `0.0.0.0`
+// (all interfaces) — required when running inside Docker / devcontainers, where the
+// firebase-tools probe (`127.0.0.1:<port>`) otherwise fails with "Port X is not open on
+// localhost (127.0.0.1)" because the emulator bound to ::1 (IPv6) or a container-internal
+// interface only.
+function canonicalEmulatorsBlock() {
   return {
-    emulators: {
-      auth:      { host: '0.0.0.0', port: 9099 },
-      firestore: { host: '0.0.0.0', port: 8080 },
-      storage:   { host: '0.0.0.0', port: 9199 },
-      functions: { host: '0.0.0.0', port: 5001 },
-      ui:        { enabled: true, host: '0.0.0.0', port: 4000 },
-      singleProjectMode: true,
-    },
+    auth:      { host: '0.0.0.0', port: 9099 },
+    firestore: { host: '0.0.0.0', port: 8080 },
+    storage:   { host: '0.0.0.0', port: 9199 },
+    functions: { host: '0.0.0.0', port: 5001 },
+    ui:        { enabled: true, host: '0.0.0.0', port: 4000 },
+    singleProjectMode: true,
   };
 }
 
-const EMULATORS = ['auth', 'firestore', 'storage', 'functions'] as const;
+// The canonical `functions` block — REQUIRED whenever the functions emulator is configured:
+// without a functions backend behind it, `firebase emulators:start` fatally aborts. The
+// source points at the BUILT Nx output (dist/apps/functions, which carries a generated
+// package.json), and predeploy routes lint + build through Nx so `firebase deploy` and
+// `nx run functions:deploy` take the same path.
+function canonicalFunctionsBlock() {
+  return [
+    {
+      source: 'dist/apps/functions',
+      codebase: 'default',
+      disallowLegacyRuntimeConfig: true,
+      ignore: ['node_modules', '.git', 'firebase-debug.log', 'firebase-debug.*.log', '*.local'],
+      predeploy: ['yarn nx lint functions', 'yarn nx build functions'],
+    },
+  ];
+}
+
+// .gitignore additions (idempotency marker: `/.emulator-data`).
+const GITIGNORE_BLOCK = `# Firebase emulator-generated logs (firebase-debug.log, firestore-debug.log, ui-debug.log, …)
+*-debug.log
+firebase-debug.*.log
+
+# The emulator working data — the cache \`nx serve\` imports/exports each run. Ephemeral and
+# machine-local; the committed seed worlds live in tools/emulator-seeds/ (see its README).
+/.emulator-data
+`;
 
 export default async function firebaseEmulatorsGenerator(
   tree: Tree,
@@ -107,17 +154,43 @@ export default async function firebaseEmulatorsGenerator(
   const project = readProjectConfiguration(tree, projectName);
   const appRoot = project.root;
 
-  // 1) firebase.json at workspace root (idempotent overwrite to canonical shape).
-  // Note: `.firebaserc` is deliberately NOT generated — see the file header. The Firebase CLI
-  // owns cloud-project linkage (`firebase use --add` after `firebase login`). Emulator targets
-  // pass `--project=demo-<workspaceName>` explicitly, so emulators run without `.firebaserc`.
-  tree.write('firebase.json', JSON.stringify(buildFirebaseJson(), null, 2) + '\n');
+  const substitute = (tpl: string) => tpl.split('{{workspaceName}}').join(workspaceName);
+  const template = (name: string) => readFileSync(join(__dirname, name), 'utf8');
+
+  // 1) firebase.json at workspace root. The `emulators` and `functions` keys are
+  //    generator-owned (asserted to canonical on every run); any other top-level keys the
+  //    user added (firestore/storage rules paths, …) are preserved.
+  //    Note: `.firebaserc` is deliberately NOT generated — see the file header.
+  const firebaseJson: Record<string, unknown> = tree.exists('firebase.json')
+    ? readJson(tree, 'firebase.json')
+    : {};
+  firebaseJson.emulators = canonicalEmulatorsBlock();
+  firebaseJson.functions = canonicalFunctionsBlock();
+  writeJson(tree, 'firebase.json', firebaseJson);
 
   // 1b) apphosting.yaml at workspace root — Firebase App Hosting's deploy config.
   //     Don't clobber user edits; only write if absent.
   if (!tree.exists('apphosting.yaml')) {
-    const appHostingTpl = readFileSync(join(__dirname, 'apphosting.yaml.tpl'), 'utf8');
-    tree.write('apphosting.yaml', appHostingTpl);
+    tree.write('apphosting.yaml', template('apphosting.yaml.tpl'));
+  }
+
+  // 1c) .gitignore — emulator debug logs + the working data dir. Without these,
+  //     firebase-debug.log / firestore-debug.log pile up untracked at the workspace
+  //     root and the (machine-local) .emulator-data/ cache risks being committed.
+  const gitignore = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
+  if (!gitignore.includes('/.emulator-data')) {
+    tree.write('.gitignore', `${gitignore.trimEnd()}\n\n${GITIGNORE_BLOCK}`);
+  }
+
+  // 1d) nx.json — disable the interactive TUI. It multiplexes the continuous
+  //     `serve` + `firebase:emulators` pair into one redrawing multi-pane terminal that's
+  //     awkward to drive (for humans and agents); disabled, Nx streams plain, scrollable,
+  //     prefixed logs and a single Ctrl+C stops the whole run.
+  if (tree.exists('nx.json')) {
+    updateJson(tree, 'nx.json', (json) => {
+      json.tui = { ...(json.tui ?? {}), enabled: false };
+      return json;
+    });
   }
 
   // 2) Environment files — Angular's canonical environments pattern.
@@ -136,14 +209,10 @@ export default async function firebaseEmulatorsGenerator(
   const envProdPath = `${envDir}/environment.prod.ts`;
   const firebaseConfigPath = `${appRoot}/src/app/firebase.config.ts`;
 
-  tree.write(
-    envInterfacePath,
-    readFileSync(join(__dirname, 'environment.interface.ts.tpl'), 'utf8')
-  );
+  tree.write(envInterfacePath, template('environment.interface.ts.tpl'));
 
   if (!tree.exists(envDevPath)) {
-    const tpl = readFileSync(join(__dirname, 'environment.ts.tpl'), 'utf8');
-    tree.write(envDevPath, tpl.split('{{workspaceName}}').join(workspaceName));
+    tree.write(envDevPath, substitute(template('environment.ts.tpl')));
   }
 
   if (!tree.exists(envProdPath)) {
@@ -153,20 +222,20 @@ export default async function firebaseEmulatorsGenerator(
     // make a half-wired prod build fail loud).
     const migrated = tree.exists(firebaseConfigPath)
       ? extractLegacyProdConfig(tree.read(firebaseConfigPath, 'utf8') ?? '')
-      : { projectId: '', apiKey: '', appId: '' };
+      : { projectId: '', apiKey: '', appId: '', authDomain: '' };
     if (migrated.projectId || migrated.apiKey || migrated.appId) {
       logger.info(
         `[firebase-emulators] Migrated productionFirebaseConfig from ${firebaseConfigPath} into ${envProdPath} ` +
         `(legacy shape detected). Verify the new file before committing.`
       );
     }
-    const tpl = readFileSync(join(__dirname, 'environment.prod.ts.tpl'), 'utf8');
     tree.write(
       envProdPath,
-      tpl
+      template('environment.prod.ts.tpl')
         .split('{{projectId}}').join(migrated.projectId)
         .split('{{apiKey}}').join(migrated.apiKey)
         .split('{{appId}}').join(migrated.appId)
+        .split('{{authDomain}}').join(migrated.authDomain)
     );
   }
 
@@ -199,10 +268,7 @@ export default async function firebaseEmulatorsGenerator(
         `port it onto the new shape by hand if needed.`
       );
     }
-    tree.write(
-      firebaseConfigPath,
-      readFileSync(join(__dirname, 'firebase.config.ts.tpl'), 'utf8')
-    );
+    tree.write(firebaseConfigPath, template('firebase.config.ts.tpl'));
   }
 
   // 3a) tools/firebase-welcome.sh — self-extinguishing banner that nudges the user
@@ -210,105 +276,94 @@ export default async function firebaseEmulatorsGenerator(
   //     and goes silent once setup is complete. Sourced by /etc/profile.d/zz-firebase-welcome.sh
   //     which the devcontainer's postCreateCommand installs (when --firebase=true).
   //     Always (re)write — small file, our content, no user edits expected.
-  const welcomePath = 'tools/firebase-welcome.sh';
-  const welcomeTpl = readFileSync(join(__dirname, 'firebase-welcome.sh.tpl'), 'utf8');
-  tree.write(welcomePath, welcomeTpl);
+  tree.write('tools/firebase-welcome.sh', template('firebase-welcome.sh.tpl'));
 
-  // 3b) tools/reap-emulators.sh — reclaim the emulator ports before each start. The emulator
-  //     JVM (Firestore/Storage) survives an ungraceful death of its parent (closed terminal/IDE
-  //     window, container stop, OOM, SIGKILL) — re-parented to PID 1, still holding its port —
-  //     so the next `emulators:start` fails with "Port NNNN is not open". No in-process trap can
-  //     cover SIGKILL/container-restart, so we reclaim ports on START instead of tearing down on
-  //     exit. Prepended to every `emulators*` target command below. Always (re)write — our
-  //     content, no user edits expected.
-  const reapPath = 'tools/reap-emulators.sh';
-  tree.write(reapPath, readFileSync(join(__dirname, 'reap-emulators.sh.tpl'), 'utf8'));
-
-  // 3) Best-effort: wire provideAppFirebase() into app.config.ts.
-  const appConfigPath = `${appRoot}/src/app/app.config.ts`;
-  if (tree.exists(appConfigPath)) {
-    const current = tree.read(appConfigPath, 'utf8') ?? '';
-    const wired = wireProvideAppFirebase(current, appConfigPath);
-    if (wired === current) {
-      // Already wired or no changes needed.
-    } else if (wired) {
-      tree.write(appConfigPath, wired);
-    } else {
-      logger.warn(
-        `[firebase-emulators] Could not auto-wire ${appConfigPath}. ` +
-        `Add \`import { provideAppFirebase } from './firebase.config';\` and ` +
-        `include \`provideAppFirebase()\` in your providers array manually.`
-      );
-    }
+  // 3b) The emulator tooling scripts. All generator-owned (always rewritten) EXCEPT
+  //     tools/seed/world.mjs and tools/emulator-seeds/README.md, which model the APP'S data
+  //     and are user-owned once written:
+  //       - tools/reap-emulators.sh   — verified process+port reclaim before each start.
+  //       - tools/emulators.sh        — the single launch path: reap → prime → start
+  //                                     (import .emulator-data; export-on-exit on full runs).
+  //       - tools/emulator-data.sh    — working-dir lifecycle: ensure / reset [<seed>].
+  //       - tools/seed/build-seeds.sh — rebuild every committed seed from world.mjs.
+  //       - tools/seed/build.mjs      — the per-world command emulators:exec runs.
+  //       - tools/seed/world.mjs      — the DECLARATIVE seed worlds (user-owned: it mirrors
+  //                                     the app's real document shapes; written only if absent).
+  //       - tools/emulator-seeds/README.md — seed catalog + usage (user-extended; if absent).
+  tree.write('tools/reap-emulators.sh', template('reap-emulators.sh.tpl'));
+  tree.write('tools/emulators.sh', substitute(template('emulators.sh.tpl')));
+  tree.write('tools/emulator-data.sh', template('emulator-data.sh.tpl'));
+  tree.write('tools/seed/build-seeds.sh', substitute(template('seed-build-seeds.sh.tpl')));
+  tree.write('tools/seed/build.mjs', template('seed-build.mjs.tpl'));
+  if (!tree.exists('tools/seed/world.mjs')) {
+    tree.write('tools/seed/world.mjs', substitute(template('seed-world.mjs.tpl')));
   }
+  if (!tree.exists('tools/emulator-seeds/README.md')) {
+    tree.write('tools/emulator-seeds/README.md', template('emulator-seeds-README.md.tpl'));
+  }
+
+  // 3c) Cloud Functions as a first-class Nx app (apps/functions). REQUIRED for the emulator
+  //     suite to boot at all: firebase.json configures the functions emulator, and a configured
+  //     functions emulator with no backend behind it fatally aborts `emulators:start`.
+  //     Source files (manifest package.json, tsconfigs, main.ts) are written only if absent —
+  //     the user owns their functions code. The project.json's build/lint/deploy targets are
+  //     generator-owned (re-asserted); any extra targets the user added are preserved.
+  ensureFunctionsProject(tree);
+
+  // 3d) The emulator suite as its own workspace-level Nx project (firebase/project.json) —
+  //     the emulators are a workspace concept, not an app concern. Generator-owned targets
+  //     are re-asserted; user-added targets (e.g. `reset:<seed>` for extra worlds) survive.
+  ensureFirebaseProject(tree);
 
   // 4) Nx targets on the app's project.json.
   project.targets ??= {};
-  // `demo-<name>` is Firebase's offline convention — works without login, never calls the cloud.
-  const demoProject = `demo-${workspaceName}`;
+  const targets = project.targets;
 
-  // `serve` IS the Angular dev-server — we neither rename nor wrap it. Composition is done the
-  // Nx way, via continuous-task orchestration (Nx 21+): `serve` declares a dependency on the
-  // continuous `emulators` task (defined below), so `nx serve <app>` boots the emulator suite
-  // alongside the dev-server as a single Nx task graph, and Nx tears both down together on
-  // exit. The Nx task runner — not a nested `firebase emulators:exec` shell — owns both
-  // lifecycles, so there is no detached process tree to orphan emulator JVMs that hold ports
-  // and the Nx task lock (the failure mode of the old wrapper: a closed terminal left an
-  // orphan holding the lock, and the next `serve` hung forever on "Waiting for … in another
-  // nx process").
+  // The app is browser code — tag it so the platform firewall (4c) applies.
+  ensureTag(project, 'platform:web');
+
+  // `serve` is an nx:run-commands ORCHESTRATOR running the `firebase:emulators` continuous
+  // task and the real dev-server (`serve-app`) in parallel: one command, one Ctrl+C, both
+  // lifecycles owned by the same Nx run — and `serve-app` stays independently runnable
+  // (emulator-free dev, e.g. an offline build configuration).
   //
-  // Self-heal older projects (`--repair`): an earlier generator version renamed the dev-server
-  // to `serve-app` and parked an `nx:run-commands` wrapper/orchestrator at `serve`. Restore
-  // the real dev-server back to `serve` — carrying any user customizations — and drop the now
-  // redundant `serve-app`.
-  if (
-    project.targets.serve?.executor === 'nx:run-commands' &&
-    project.targets['serve-app']
-  ) {
-    project.targets.serve = project.targets['serve-app'];
-    delete project.targets['serve-app'];
+  // Self-heals every earlier generation on --repair:
+  //   - serve IS the dev-server (fresh scaffold, or the previous `dependsOn: ['emulators']`
+  //     wiring) → move it to `serve-app` (stripping the emulators dependsOn) and park the
+  //     orchestrator at `serve`.
+  //   - serve is the ancient `firebase emulators:exec` wrapper around an existing `serve-app`
+  //     → overwrite `serve` with the orchestrator.
+  //   - already on the orchestrator shape → idempotent re-assert.
+  const isRunCommands = (t?: TargetConfiguration) => t?.executor === 'nx:run-commands';
+  if (targets.serve && !isRunCommands(targets.serve)) {
+    stripEmulatorsDependsOn(targets.serve);
+    targets.serve.continuous = true;
+    targets['serve-app'] = targets.serve;
+  } else if (targets['serve-app']) {
+    stripEmulatorsDependsOn(targets['serve-app']);
+    targets['serve-app'].continuous = true;
   }
-
-  // Wire the dev-server to the emulators continuous task. Idempotent: add the dependency only
-  // if it isn't already declared (in either the `'emulators'` string or `{ target }` form).
-  const serveTarget = project.targets.serve;
-  if (serveTarget) {
-    serveTarget.continuous = true;
-    serveTarget.dependsOn ??= [];
-    const dependsOnEmulators = serveTarget.dependsOn.some(
-      (dep) =>
-        dep === 'emulators' ||
-        (typeof dep === 'object' && dep !== null && dep.target === 'emulators')
-    );
-    if (!dependsOnEmulators) {
-      serveTarget.dependsOn.push('emulators');
-    }
-  }
-
-  // Every emulators target reclaims its ports first (see tools/reap-emulators.sh). `&&` not `;`
-  // so a reaper failure surfaces instead of racing a half-freed port into `emulators:start`.
-  const reap = 'bash tools/reap-emulators.sh &&';
-
-  // Master `emulators` target — starts the full suite under the offline demo project id.
-  project.targets.emulators = {
-    continuous: true,
-    executor: 'nx:run-commands',
-    options: {
-      command: `${reap} firebase emulators:start --project=${demoProject}`,
-      cwd: '{workspaceRoot}',
-    },
-  };
-
-  // Per-emulator targets — start just one (+ UI), same offline demo project id.
-  for (const svc of EMULATORS) {
-    project.targets[`emulators:${svc}`] = {
+  if (targets['serve-app']) {
+    targets.serve = {
       continuous: true,
       executor: 'nx:run-commands',
       options: {
-        command: `${reap} firebase emulators:start --only ${svc},ui --project=${demoProject}`,
-        cwd: '{workspaceRoot}',
+        parallel: true,
+        commands: ['nx run firebase:emulators', `nx run ${projectName}:serve-app`],
       },
     };
+  } else {
+    logger.warn(
+      `[firebase-emulators] No dev-server target found on project \`${projectName}\` (neither \`serve\` nor \`serve-app\`) — ` +
+      `skipped wiring the serve orchestrator. Add a dev-server target, then re-run --repair --firebase.`
+    );
+  }
+
+  // The per-app `emulators*` targets of earlier generations moved to the workspace-level
+  // `firebase` project — drop them from the app so there's exactly one home.
+  delete targets.emulators;
+  for (const svc of EMULATORS) {
+    delete targets[`emulators:${svc}`];
   }
 
   // 4b) Register the environment-files fileReplacement on the production build
@@ -320,7 +375,7 @@ export default async function firebaseEmulatorsGenerator(
   //     We touch `targets.build.configurations.production` exactly — never
   //     `build.options` or other configurations — so a user who's added their
   //     own staging configuration with their own fileReplacements is unaffected.
-  const buildTarget = project.targets.build as
+  const buildTarget = targets.build as
     | { configurations?: Record<string, { fileReplacements?: Array<{ replace: string; with: string }> }> }
     | undefined;
   if (buildTarget) {
@@ -346,12 +401,75 @@ export default async function firebaseEmulatorsGenerator(
 
   updateProjectConfiguration(tree, projectName, project);
 
-  // 5) Runtime deps. `latest` resolves to current at install time;
-  //    the lockfile pins after install. Re-running is safe (no-op if already present at compatible version).
+  // 4c) Best-effort: the `platform:` dependency-constraint firewall in the root flat
+  //     ESLint config. Server-only SDKs (firebase-admin/firebase-functions pull in Node
+  //     natives and admin credentials) must never reach browser code; the browser SDK and
+  //     Angular must never reach the functions runtime.
+  const eslintConfigPath = 'eslint.config.mjs';
+  if (tree.exists(eslintConfigPath)) {
+    const current = tree.read(eslintConfigPath, 'utf8') ?? '';
+    const patched = addPlatformBoundaries(current, eslintConfigPath);
+    if (patched === current) {
+      // Already present — idempotent no-op.
+    } else if (patched) {
+      tree.write(eslintConfigPath, patched);
+    } else {
+      logger.warn(
+        `[firebase-emulators] Could not auto-insert the platform: dependency constraints into ${eslintConfigPath}. ` +
+        `Add these entries to the @nx/enforce-module-boundaries depConstraints array manually:\n` +
+        `  { sourceTag: 'platform:web', bannedExternalImports: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*'] },\n` +
+        `  { sourceTag: 'platform:server', bannedExternalImports: ['firebase', 'firebase/*', '@angular/*'] }`
+      );
+    }
+  }
+
+  // 5) Best-effort: wire provideAppFirebase() into app.config.ts.
+  const appConfigPath = `${appRoot}/src/app/app.config.ts`;
+  if (tree.exists(appConfigPath)) {
+    const current = tree.read(appConfigPath, 'utf8') ?? '';
+    const wired = wireProvideAppFirebase(current, appConfigPath);
+    if (wired === current) {
+      // Already wired or no changes needed.
+    } else if (wired) {
+      tree.write(appConfigPath, wired);
+    } else {
+      logger.warn(
+        `[firebase-emulators] Could not auto-wire ${appConfigPath}. ` +
+        `Add \`import { provideAppFirebase } from './firebase.config';\` and ` +
+        `include \`provideAppFirebase()\` in your providers array manually.`
+      );
+    }
+  }
+
+  // 6) Runtime + build deps. `latest` resolves to current at install time; the lockfile pins
+  //    after install. Existing entries are never overwritten (preserves user pins on --repair).
+  //      - firebase / @angular/fire          — the browser SDK (dependencies).
+  //      - firebase-admin / firebase-functions — the Cloud Functions runtime, at the WORKSPACE
+  //        ROOT (no per-project node_modules; local build/lint/emulate resolve from root).
+  //        Keep these aligned with apps/functions/package.json (the deploy manifest).
+  //      - @nx/esbuild — the functions build executor, pinned to the workspace's own Nx
+  //        version (Nx plugin packages must move in lockstep with `nx` itself).
+  const rootPkg = readJson(tree, 'package.json') as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const missing = (deps: Record<string, string>) =>
+    Object.fromEntries(
+      Object.entries(deps).filter(
+        ([name]) => !rootPkg.dependencies?.[name] && !rootPkg.devDependencies?.[name]
+      )
+    );
+  const nxVersion =
+    rootPkg.devDependencies?.['nx'] ?? rootPkg.dependencies?.['nx'] ?? 'latest';
   addDependenciesToPackageJson(
     tree,
-    { 'firebase': 'latest', '@angular/fire': 'latest' },
-    /* devDependencies */ {}
+    missing({
+      'firebase': 'latest',
+      '@angular/fire': 'latest',
+      'firebase-admin': '^13.6.0',
+      'firebase-functions': '^7.0.0',
+    }),
+    missing({ '@nx/esbuild': nxVersion })
   );
 
   await formatFiles(tree);
@@ -360,6 +478,246 @@ export default async function firebaseEmulatorsGenerator(
   return () => {
     installPackagesTask(tree);
   };
+}
+
+/** Ensure a tag is present on a project configuration (idempotent). */
+function ensureTag(project: ProjectConfiguration, tag: string): void {
+  project.tags ??= [];
+  if (!project.tags.includes(tag)) {
+    project.tags.push(tag);
+  }
+}
+
+/**
+ * Strip any emulator wiring from a target's `dependsOn` — the previous generator
+ * generation declared `serve.dependsOn = ['emulators']` (later `{ projects: ['firebase'],
+ * target: 'emulators' }`); on the orchestrator shape that wiring lives in the `serve`
+ * orchestrator's parallel commands instead.
+ */
+function stripEmulatorsDependsOn(target: TargetConfiguration): void {
+  if (!target.dependsOn) return;
+  target.dependsOn = target.dependsOn.filter((dep) => {
+    const depTarget = typeof dep === 'string' ? dep : dep?.target;
+    return depTarget !== 'emulators';
+  });
+  if (target.dependsOn.length === 0) {
+    delete target.dependsOn;
+  }
+}
+
+/**
+ * Merge generator-owned targets into a project.json-style config file, preserving any
+ * user-added targets and tags. Writes the file when absent.
+ */
+function ensureProjectFile(
+  tree: Tree,
+  path: string,
+  canonical: {
+    name: string;
+    projectType: 'application' | 'library';
+    sourceRoot?: string;
+    tags: string[];
+    targets: Record<string, TargetConfiguration>;
+  },
+  schemaRelativePrefix: string
+): void {
+  if (!tree.exists(path)) {
+    writeJson(tree, path, {
+      name: canonical.name,
+      $schema: `${schemaRelativePrefix}node_modules/nx/schemas/project-schema.json`,
+      projectType: canonical.projectType,
+      ...(canonical.sourceRoot ? { sourceRoot: canonical.sourceRoot } : {}),
+      tags: canonical.tags,
+      targets: canonical.targets,
+    });
+    return;
+  }
+  updateJson(tree, path, (json) => {
+    json.tags ??= [];
+    for (const tag of canonical.tags) {
+      if (!json.tags.includes(tag)) json.tags.push(tag);
+    }
+    json.targets = { ...(json.targets ?? {}), ...canonical.targets };
+    return json;
+  });
+}
+
+/** Cloud Functions as a first-class Nx app at apps/functions. */
+function ensureFunctionsProject(tree: Tree): void {
+  const root = 'apps/functions';
+
+  // Source files: user-owned once written (the manifest's deps, the functions code, and the
+  // compiler options are all things a project legitimately evolves).
+  const ifAbsent = (path: string, templateName: string) => {
+    if (!tree.exists(path)) {
+      tree.write(path, readFileSync(join(__dirname, templateName), 'utf8'));
+    }
+  };
+  ifAbsent(`${root}/package.json`, 'functions-package.json.tpl');
+  ifAbsent(`${root}/tsconfig.json`, 'functions-tsconfig.json.tpl');
+  ifAbsent(`${root}/tsconfig.app.json`, 'functions-tsconfig.app.json.tpl');
+  ifAbsent(`${root}/src/main.ts`, 'functions-main.ts.tpl');
+
+  ensureProjectFile(
+    tree,
+    `${root}/project.json`,
+    {
+      name: 'functions',
+      projectType: 'application',
+      sourceRoot: `${root}/src`,
+      tags: ['platform:server'],
+      targets: {
+        // esbuild-bundle to dist/apps/functions with a generated package.json (merging the
+        // manifest's deps + the built `main` entry) — that dist output is what firebase.json's
+        // `functions.source` points at, for both the emulator and `firebase deploy`.
+        build: {
+          executor: '@nx/esbuild:esbuild',
+          outputs: ['{options.outputPath}'],
+          options: {
+            outputPath: 'dist/apps/functions',
+            main: `${root}/src/main.ts`,
+            tsConfig: `${root}/tsconfig.app.json`,
+            platform: 'node',
+            format: ['cjs'],
+            bundle: true,
+            thirdParty: false,
+            generatePackageJson: true,
+            deleteOutputPath: true,
+            esbuildOptions: { outExtension: { '.js': '.js' } },
+          },
+        },
+        // Lints via the workspace flat config — no per-project ESLint island.
+        lint: { executor: '@nx/eslint:lint' },
+        deploy: {
+          executor: 'nx:run-commands',
+          dependsOn: ['build'],
+          options: { command: 'firebase deploy --only functions', cwd: '{workspaceRoot}' },
+        },
+      },
+    },
+    '../../'
+  );
+}
+
+/** The emulator suite as its own workspace-level Nx project (firebase/project.json). */
+function ensureFirebaseProject(tree: Tree): void {
+  const emulatorsTarget = (only?: string): TargetConfiguration => ({
+    continuous: true,
+    executor: 'nx:run-commands',
+    options: {
+      command: `bash tools/emulators.sh${only ? ` --only ${only},ui` : ''}`,
+      cwd: '{workspaceRoot}',
+    },
+  });
+  const dependsOnFunctionsBuild = [{ projects: ['functions'], target: 'build' }];
+
+  ensureProjectFile(
+    tree,
+    'firebase/project.json',
+    {
+      name: 'firebase',
+      projectType: 'application',
+      tags: ['platform:server'],
+      targets: {
+        // The full suite. Depends on the functions build: firebase.json points the functions
+        // emulator at dist/apps/functions, so the backend must exist before the suite boots.
+        emulators: { ...emulatorsTarget(), dependsOn: dependsOnFunctionsBuild },
+        'emulators:auth': emulatorsTarget('auth'),
+        'emulators:firestore': emulatorsTarget('firestore'),
+        'emulators:storage': emulatorsTarget('storage'),
+        'emulators:functions': { ...emulatorsTarget('functions'), dependsOn: dependsOnFunctionsBuild },
+        // Rebuild the committed seeds from tools/seed/world.mjs (run after schema changes).
+        'seed:build': {
+          executor: 'nx:run-commands',
+          options: { command: 'bash tools/seed/build-seeds.sh', cwd: '{workspaceRoot}' },
+        },
+        // On-call reset to the default pristine world (takes effect on the next serve).
+        // Add `reset:<seed>` siblings here for extra worlds — they survive --repair.
+        reset: {
+          executor: 'nx:run-commands',
+          options: { command: 'bash tools/emulator-data.sh reset', cwd: '{workspaceRoot}' },
+        },
+      },
+    },
+    '../'
+  );
+}
+
+/**
+ * Insert the `platform:` dependency constraints into the root flat ESLint config's
+ * `depConstraints` array (the `@nx/enforce-module-boundaries` rule).
+ *
+ * Uses the TypeScript compiler API to locate the array (no regex on source — source code
+ * is a tree, not text), then applies a text insert via `applyChangesToString` so the
+ * surrounding formatting is preserved and `formatFiles` polishes the result.
+ *
+ * Returns:
+ *   - the updated source when the constraints are inserted,
+ *   - the original `source` when they're already present (idempotent no-op),
+ *   - `null` when no `depConstraints` array literal is found — the caller logs an
+ *     actionable warning with the manual snippet.
+ */
+function addPlatformBoundaries(source: string, sourcePath: string): string | null {
+  // Idempotency: the tag literal anywhere in the file means the firewall is already declared.
+  if (source.includes('platform:web') || source.includes('platform:server')) {
+    return source;
+  }
+
+  const sf = ts.createSourceFile(
+    sourcePath,
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.JS
+  );
+
+  let constraintsArray: ts.ArrayLiteralExpression | null = null;
+  const findConstraints = (node: ts.Node): void => {
+    if (constraintsArray) return;
+    if (
+      ts.isPropertyAssignment(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'depConstraints' &&
+      ts.isArrayLiteralExpression(node.initializer)
+    ) {
+      constraintsArray = node.initializer;
+      return;
+    }
+    ts.forEachChild(node, findConstraints);
+  };
+  findConstraints(sf);
+  if (!constraintsArray) return null;
+
+  const found: ts.ArrayLiteralExpression = constraintsArray;
+  const snippet =
+    `// by platform: the server-only Firebase Admin/Functions SDKs belong to Cloud\n` +
+    `// Functions alone — they must never reach browser/SSR Angular code (they pull in\n` +
+    `// Node-native modules and admin credentials). Symmetrically, the browser Firebase\n` +
+    `// SDK and Angular have no place in the functions runtime.\n` +
+    `{\n` +
+    `  sourceTag: 'platform:web',\n` +
+    `  bannedExternalImports: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*'],\n` +
+    `},\n` +
+    `{\n` +
+    `  sourceTag: 'platform:server',\n` +
+    `  bannedExternalImports: ['firebase', 'firebase/*', '@angular/*'],\n` +
+    `},`;
+  const elements = found.elements;
+  const text =
+    elements.length === 0
+      ? snippet
+      : elements.hasTrailingComma
+      ? `\n${snippet}`
+      : `,\n${snippet}`;
+
+  const changes: StringChange[] = [
+    {
+      type: ChangeType.Insert,
+      index: found.getEnd() - 1, // position just before the closing `]`
+      text,
+    },
+  ];
+  return applyChangesToString(source, changes);
 }
 
 /**
@@ -428,6 +786,9 @@ function wireProvideAppFirebase(source: string, sourcePath: string): string | nu
   };
   findProviders(sf);
   if (!providersArray) return null;
+  // Alias to a const: TS can't track the closure assignment above, so a const pins
+  // the narrowed type for the uses below.
+  const providers: ts.ArrayLiteralExpression = providersArray;
 
   // Find the last top-level ImportDeclaration so we know where to put our new import.
   let lastImport: ts.ImportDeclaration | null = null;
@@ -439,7 +800,7 @@ function wireProvideAppFirebase(source: string, sourcePath: string): string | nu
 
   // Pick the right separator based on whether the array already has a trailing comma
   // — the AST's `hasTrailingComma` is the source of truth, no regex on the text.
-  const elements = providersArray.elements;
+  const elements = providers.elements;
   const arrSnippet =
     elements.length === 0
       ? 'provideAppFirebase()'
@@ -455,7 +816,7 @@ function wireProvideAppFirebase(source: string, sourcePath: string): string | nu
     },
     {
       type: ChangeType.Insert,
-      index: providersArray.getEnd() - 1, // position just before the closing `]`
+      index: providers.getEnd() - 1, // position just before the closing `]`
       text: arrSnippet,
     },
   ];
@@ -476,16 +837,21 @@ function wireProvideAppFirebase(source: string, sourcePath: string): string | nu
  *
  * Uses the TypeScript compiler API (no regex on source — source code is a tree,
  * not text) to find the `productionFirebaseConfig` variable declaration and
- * read the three string fields. Returns empty strings for any field that's
+ * read the string fields. Returns empty strings for any field that's
  * absent, non-literal, or itself an empty string — same shape as the template's
  * placeholders, so missing values stay missing.
  *
- * Returns `{ projectId: '', apiKey: '', appId: '' }` when the source is the new
- * shape (no `productionFirebaseConfig` const) — the caller treats all-empty as
+ * Returns all-empty when the source is the new shape (no
+ * `productionFirebaseConfig` const) — the caller treats all-empty as
  * "no migration needed."
  */
-function extractLegacyProdConfig(source: string): { projectId: string; apiKey: string; appId: string } {
-  const empty = { projectId: '', apiKey: '', appId: '' };
+function extractLegacyProdConfig(source: string): {
+  projectId: string;
+  apiKey: string;
+  appId: string;
+  authDomain: string;
+} {
+  const empty = { projectId: '', apiKey: '', appId: '', authDomain: '' };
   if (!source.includes('productionFirebaseConfig')) return empty;
 
   const sf = ts.createSourceFile(
@@ -532,5 +898,6 @@ function extractLegacyProdConfig(source: string): { projectId: string; apiKey: s
     projectId: readField('projectId'),
     apiKey: readField('apiKey'),
     appId: readField('appId'),
+    authDomain: readField('authDomain'),
   };
 }
