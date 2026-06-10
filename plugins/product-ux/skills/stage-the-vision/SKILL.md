@@ -82,7 +82,7 @@ It still names no engineering — no libraries, no CSS, no performance budget. I
 
 ## How to stage a vision
 
-1. **Read the feeling** and the Vision's four beats; name the one feeling the art must carry.
+1. **Read the feeling** and the Vision's five beats; name the one feeling the art must carry. The anchor beat tells you the app's real surfaces and moments — those are the stages you have to dress; never stage a moment the app doesn't have, or skip a surface it does.
 2. **Find the bold concept** — the single striking visual idea that *is* this feeling. Generate several daring options; choose the most striking-yet-true. Don't settle for the first safe one.
 3. **Invent the moments** — in web-native art language, the concrete beats that deliver the concept across the screen/scroll: the hero, the reveal, the transition, the living detail. Describe each like a shot.
 4. **Compose and stage each moment** — focal point, scale, negative space, the surprise, the framing and pacing. Direct the *structure*, not just the skin. And **stage it across form factors, mobile-first**: the phone is the hard canvas most of the audience uses, so the moment must hold — or *transform* — there, not just shrink (a wide hero may become a full-bleed portrait; a pointer interaction needs a touch-native form).
