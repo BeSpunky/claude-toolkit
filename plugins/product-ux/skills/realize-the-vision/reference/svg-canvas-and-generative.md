@@ -31,6 +31,7 @@ When the Vision asks for *drawn* things — a shape that isn't a rectangle, a ha
 - **Respect reduced motion and performance.** Particle systems and looping generative art must throttle/pause off-screen, cap particle counts on weak devices, and offer a still fallback.
 - **Lottie/Rive weight.** Audit JSON/asset size; lazy-load; don't ship a 2MB animation for a checkmark — a tiny SVG/CSS tick is truer and lighter.
 - **Crispness:** size SVGs by the box, mind `viewBox`; for canvas, scale the backing store by `devicePixelRatio` or it blurs on retina.
+- **Soft light must blend continuously — no concentric rings.** Rendering a glow as a few *stacked discrete gradient layers* (a core, a mid, a bloom) shows their seams as **"circle-in-circle-in-circle" banding** — and it gets *worse as the radius grows* (so it's most visible on large/desktop renders). Real light has no rings. Make the falloff continuous: a smooth/exponential alpha curve with many stops (or a function, not 3–4 hard layers), add a touch of **noise/dither** to break the remaining quantization (8-bit gradients band on dark backgrounds especially), and keep it **scale-invariant** so it stays smooth at any size. The decomposition into layers is a *mental* model; the *render* must read as one seamless light, not its layers.
 
 ## On the house stack (Angular / Nx)
 
