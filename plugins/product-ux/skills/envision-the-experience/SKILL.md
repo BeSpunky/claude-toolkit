@@ -92,6 +92,8 @@ So hold two truths together:
 
 The test is never "is this fancy?" It's **"does every choice serve the one feeling, and would a person in this exact moment be served by it?"** Purpose decides. Whimsy that serves the feeling is craft; whimsy that serves itself is noise. Immersion is *coherence and fitness*, not quantity of effects.
 
+**Watch utility elements especially — and when one keeps failing, rethink *where it lives*, not just its shape.** Plain wayfinding (a nav, a menu, a tab bar) is the most tempting place to force a world-metaphor and the place it most often reads as **kitsch** — "they tried to be creative and failed." Two moves keep it honest. (1) *Restraint:* navigation can be quietly excellent — elegant, legible, near-conventional, world-native through tone, light, type, and spacing rather than a literal cute shape (a "petal," a "doorway") bolted on by reflex. The mission leads (`astonishing-to-use`): utility wayfinding wants UX-led calm, and the art is spent on the charged moments, not the menu. (2) *Relocate, don't restyle:* if a navigation keeps failing as a forced motif, the fix is usually not the Nth shape — it's that *a separate control is the wrong model here at all*. Interrogate where "the ways you can go" truly live in this world: often they are better **woven into the world's central act or relationship** (you reach a place *through* the heart of the world — the thing the two people do, the fire they tend) than placed as a discrete bar at the edge. The menu was a pointer to "how do I move between the practices," and in a strong world the answer can be an act, not a widget.
+
 ---
 
 ## How to turn requirements into a Vision
