@@ -87,6 +87,8 @@ This SKILL is the force, the bar, and the ping-pong. The references are the craf
 - **Concept never pressured by use** — a beautiful design shipped with no ping-pong; usability assumed.
 - **One-way check** — "design it, then we'll UX-test it" — instead of a loop that re-conceives.
 - **Art taxing the use** — scroll-jacking, transitions that delay every action, an artful nav nobody finds, a hero that buries the CTA, motion between the user and their goal.
+- **A beautiful mood that doesn't say what to do** — a screen (a *home/landing* most of all) that's evocative and lovely but leaves the person asking "what is this? what's the main thing? what do I do? is this interactive, or that?" No clear **primary action**, ambiguous **hierarchy**, unclear what's tappable. Beauty without this clarity is half a design; for a home or utility surface the *use* must lead.
+- **Placement for balance, not purpose** — a focal element set off-centre "to balance the layout," so it reads as *arbitrary* ("why is it there — is it even the focus?"). Placement must express hierarchy and function, never just compose the picture.
 - **Impress-once, annoy-forever** — a gimmick that delights the first time and obstructs every time after.
 - **Hoops & tedium** — unnecessary steps, screens, modals, fields; making the user work or wait without reason.
 - **Important feature gated on user-maintained state** — a core capability that only works once the user has fed the app some state and keeps it current (outside a tracking app, where logging *is* the concept); user-set state belongs only on low-value, presentational, or bonus features.
