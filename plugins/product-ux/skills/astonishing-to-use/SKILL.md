@@ -37,11 +37,15 @@ This is `architect-mentality` #7 — **refuse the false tradeoff.** "Beautiful o
 
 **The use and the look refine each other in a loop, not a one-way check.** A concept is conceived, then pressured by UX (where does this make the user work, wait, guess, or detour?), then the concept is *re-conceived* to dissolve that friction *without* going generic, then pressured again — round after round until both are great. It is genuinely chicken-and-egg; what matters is that you *keep volleying*.
 
-**The mission sets who serves first:**
+**The mission sets who leads — name it the *Lead Force*, decide it, record it.** Which force leads is not a vibe you carry in your head; it is a **decision** — *the Lead Force* — made from the mission and *written down* (in the brief, by `distill-the-brief`) so it is set once at the right altitude instead of re-litigated every round. Three settings:
 
-- **UX-led** (utility, productivity, transactional, safety-critical, accessibility-critical): start from the tasks and flows — make the use effortless first — then bring the artistic concept to make it astonishing *without ever taxing the use*. `ux → concept → ux`.
-- **Concept-led** (brand, marketing, art, immersive storytelling, a "moment"): start from the bold concept and feeling, then **pressure-test it hard against use** and re-conceive until it's also effortless. `concept → ux → reconcept → ux`.
-- **Most things**: a real back-and-forth, several rounds, neither permanently in the lead.
+- **Use-led (app-y)** (utility, productivity, transactional, safety-critical, accessibility-critical): start from the tasks and flows — make the use effortless first — then bring the artistic concept to make it astonishing *without ever taxing the use*. `ux → concept → ux`.
+- **Concept-led (dreamy)** (brand, marketing, art, immersive storytelling, a "moment"): start from the bold concept and feeling, then **pressure-test it hard against use** and re-conceive until it's also effortless. `concept → ux → reconcept → ux`.
+- **Balanced**: a real back-and-forth, several rounds, neither permanently in the lead.
+
+**Decide the Lead Force from the job, never the type.** What sets it is the **job in the moment** (accomplish a task under load vs. be moved/immersed), the **stakes** (money, safety, grief, conflict → clarity; brand, discovery, celebration → immersion), the **frequency** (daily tool → restraint; once-seen → spectrum allowed), and the **device & ergonomics** (thumb-bound, hurried, in glare). App *type* is only a loose prior, **never a lookup** — the same type spans the whole axis (Amazon vs. a perfume house; Wordle vs. *Journey*), so "it's a shop, so app-y" is the catalogue-by-reflex error the trio exists to refuse.
+
+**The Lead Force composes — it is not one coarse dial.** It can differ surface to surface across a product, and even *within* one surface: a **dreamy heart can wear an app-y shell** (an immersive world whose *wayfinding* is a calm, findable app shell). So the question is never just "how dreamy vs app-y overall" but "which force leads *here*, in *this* part" — set per part, and let them compose.
 
 **When to stop:** when both forces are great *and* neither can be improved without harming the other. If you hit a genuine wall where beauty and ease truly conflict, that is the signal to **invent** — a different concept or interaction that gives both (refuse the tradeoff) — not to quietly sacrifice the use. **You never settle below great UX to protect the art.** (If the mission is genuinely art-over-use — a pure art piece — say so explicitly; it is the rare exception, not the default.)
 
@@ -71,7 +75,7 @@ This SKILL is the force, the bar, and the ping-pong. The references are the craf
 
 - Have I judged this by **how it's used**, not only how it looks — run the four questions (easy? understandable? hoops/boring/annoying? delightful) on the real person and device?
 - Did I **ping-pong** the concept against UX — or just conceive something beautiful and hope it's usable? How many rounds, and did *both* end up great?
-- Did I let the **mission set the order** (UX-led vs concept-led vs back-and-forth), or default to art-first by reflex?
+- Did I read the brief's **Lead Force** (use-led / art-led / balanced) and let it set the order — decided from the *job, stakes, frequency, device*, **not** the app *type* — rather than defaulting to art-first by reflex? And did I check whether the lead **differs within the surface** (a dreamy heart can wear an app-y shell)?
 - Where does the artful choice **tax the use** (extra taps, waits, hidden actions, scroll-fighting, gimmicks)? Have I dissolved that *without* going generic — or quietly sacrificed the ease?
 - Is this designed for the **real moment and body** (thumb, one-handed, distracted, bad signal) — or an idealized focused user at a desk?
 - Does it feel **instant and alive** — reacting the moment it's touched, dragged things following the finger, never hanging (heavy work runs async/background), loading instantly (no/short-live splash, sized placeholders)?
@@ -97,6 +101,7 @@ This SKILL is the force, the bar, and the ping-pong. The references are the craf
 - **Important feature gated on user-maintained state** — a core capability that only works once the user has fed the app some state and keeps it current (outside a tracking app, where logging *is* the concept); user-set state belongs only on low-value, presentational, or bonus features.
 - **Designed for a desk** — ignoring thumbs, one-handedness, distraction, interruptions, and bad connections.
 - **"Usable enough"** — settling below great UX because the look is strong; or sacrificing the use to protect the art (outside a declared pure-art mission).
+- **Lead Force read off the app *type*** ("it's a shop, so app-y") instead of the job/stakes/frequency/device — or treated as one coarse overall dial when the lead should differ across and within surfaces (a dreamy heart wearing an app-y shell).
 - **Hanging the UX / non-instant** — a tap that does nothing for a beat, a blocked UI during heavy work (instead of async/background), a draggable that lags the finger, a static splash where the skeletal UI could show.
 - **Abrupt layout shifts** — content popping in and shoving the layout (CLS), hard route swaps, lists blinking instead of animating in/out, the keyboard hiding the focused field; the "what just happened? / where am I?" interface.
 - **High-friction input by reflex** — a select for a 3-item choice, a wall of fields that *looks* tiring, the wrong control for the data, or the default widget dropped in without feeling the pain of using it (when a tailored or invented control would dissolve it).
