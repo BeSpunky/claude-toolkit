@@ -138,6 +138,8 @@ When in doubt about a cut, an altitude, or whether something is a need or a solu
 - A surface brief written in **ignorance of its context** (a screen from another product), or a context written in **ignorance of its surfaces** (an empty shell).
 - **Constraints that are solutions** ("use a bottom sheet") kept as if they were requirements.
 - Quietly **resolving a real ambiguity** (a cut, an altitude, a need-vs-solution call) by guessing, when the right move was to ask — and everything downstream inherited the guess.
+- A node that **confesses two design problems but folds them "settled"** — two who-it's-fors, two feelings, or a **mode-split Lead Force** (e.g. a calm/ambient mode *and* an acute/use-led mode) carried in one node, especially when the source itself flags it open. By the grain test that is two envision-able moments: **cut it, or flag it open — never silently fold it.**
+- **Provenance or process-chatter in the envision-input** — commit SHAs, "Status: draft", "forms stripped: …", or a header doctrine block addressed to the reviewer, living in the brief tree `envision` reads. That belongs in conclusions/manifest; the brief carries only the design problems, in the designer's-facing voice.
 
 ---
 
