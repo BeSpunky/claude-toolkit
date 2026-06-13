@@ -66,6 +66,14 @@ This is a **ping-pong with `astonishing-to-use`, not a one-way check.** Pressure
 
 ---
 
+## Stage to the Lead Force — and let the register follow the *surface*, not the world
+
+The brief carries a **Lead Force** per surface (set by `distill`, governed by `astonishing-to-use`): which co-equal force leads *here* — the **use** (app-y) or the **art** (dreamy) — and why. **Read it, and stage to it.** A use-led surface is staged for *clarity*: a legible primary action, an obvious hierarchy, affordances that announce themselves as interactive, plain labels — the art elevating the use, never taxing it (the bold moment is spent on the charged beats, not the wayfinding). An art-led surface earns the immersive hero. Same skill, two registers — chosen from the brief, not by reflex.
+
+**The trap to refuse: "native to the world" is about MATERIALS, not REGISTER.** A surface that inhabits an englobing world (a room in an app, handed the world as context) must share the world's *palette, metaphor, materials, and motion language* so it's unmistakably one product. But its **register follows its own Lead Force, not the world's.** A use-led room inside an art-led world keeps the world's warm light and ember palette (coherence) yet is staged **app-y and clear** — legible, findable, structured — and is *not* re-skinned with the world's immersive, atmospheric, low-legibility treatment. Inheriting the world's *register* (rather than just its materials) is how a whole tree of distinct surfaces collapses into one dreamy, undifferentiated, unusable skin, every room's own mission erased. **Share the world's coherence kit; lead with the surface's Lead Force.** (When you're handed a realized world as reference, take its materials and metaphor — never its register; the register is the surface's to set.)
+
+---
+
 ## The Staging — what this skill produces
 
 **The Staging** is the artifact: a creative, web-native, art-level spec the builder can realize and two builders would realize recognizably the same. It carries:
