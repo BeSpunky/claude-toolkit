@@ -2,6 +2,16 @@
 
 Is it understandable? At every moment the user should know **what this is, what they can do, and what will happen** — without stopping to figure it out. Thinking is effort; confusion is friction of the worst kind. Astonishing-to-use design is *obvious*.
 
+## Calm by default — the screen reads in one glance
+
+A screen can be perfectly labelled, perfectly hierarchical *per element*, and still **exhaust** the user — because too much is asking to be read *at once*. The felt experience of clutter is a stream of involuntary questions: *should I read this? and that? am I missing something if I don't? is that button important? what does that circle do?* Each one is a micro-decision the design failed to make *for* the user. **Calm is the resting state of a great app; density is earned, never the default.** A real app is easy to read — never a cockpit of competing labels, dots, and controls.
+
+- **One thing to attend to first, and the eye knows it.** Not just one primary *action* (below) — one primary *thing to read*. Everything else is visibly ranked: clearly secondary, or clearly ambient. The user should never have to *survey* the screen to find where to look.
+- **Every visible element declares whether it matters.** If it's on screen, its importance must be legible at a glance — essential reads as essential, optional as optional, ambient as ignorable. The anxiety of "am I missing something?" is the signal this failed: the design left the triage to the user.
+- **No element of ambiguous purpose.** "What does that circle do?" is a defect, not a charming mystery. Every shape that draws the eye must be self-evidently *something* — a control, a piece of content, or plainly decoration — never an undecodable token the user must stop and decode. A pretty dot that means nothing is clutter wearing the costume of intent.
+- **Show this moment's job; let the rest recede or wait.** Progressive disclosure isn't only for *choices* — it's for *everything not needed now*. Collapse, defer, or quiet whatever this moment isn't about. The full feature set on one screen proves nothing; the legible moment is the product.
+- **The calm test.** Beyond the five-second clarity test below: glance at the screen and watch your *own* reaction. If it's "wait — what am I meant to look at? do I need to read all this? what are these for?", the screen is cluttered, however beautiful or well-labelled each part is. A calm screen answers "where do I look" *before* you ask.
+
 ## Never make them think
 
 - **Self-evident, not just learnable.** The best interfaces don't need to be taught — meaning, affordance, and consequence read at a glance. If you have to explain it, the design is doing too little.
@@ -43,3 +53,5 @@ Show a screen to someone for five seconds: can they say what it is, what they'd 
 - **Schema-shaped UI** — labels and groupings that mirror the backend, not the user.
 - **Hidden state** — no feedback on selection, loading, error, or empty.
 - **Choice overload** — every option shown at once because cutting felt risky.
+- **Equal-weight everything** — a field of elements at the same visual importance, so the user must read each to learn which matter; the screen does no triage and hands its cognitive load to the user.
+- **Decorative tokens that read as controls** — ambient dots/shapes/glows placed where the eye expects meaning, so attention is wasted decoding what does nothing ("what does that circle do?").
