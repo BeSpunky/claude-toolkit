@@ -39,6 +39,8 @@ A moment is not staged for "the screen" — it's staged for the *range* of scree
 - **Orientation & the fold.** Portrait vs. landscape can change the whole composition; say what each is when it matters.
 - **Per-device weight is an art decision too.** When a moment is too heavy for a weak phone (a 3D spectacle, full-bleed video), the *lighter* phone staging is yours to design — a still, a simpler reveal — not a silent omission `realize` has to invent. (`bold ≠ loud`, meeting the device.)
 
+- **Every state re-owes the wide frame.** A moment with states (a panel open, a hero playing, a payoff reached, controls collapsed) doesn't compose for the width *once* at rest and let the rest fall back to a phone column. Each state re-composes for the wide canvas — re-filling its opposite region (a reserved quiet lane for status, the hero owning its full-width budget), never inheriting the phone "below the object" stack into a narrow gap that leaves most of the frame dead. Carry the wide staging *per state*, not just for first paint.
+
 Carry, for each key moment, *what it is on a phone and what it is on a wide screen* — so `realize` engineers a re-composition, never a squeeze.
 
 ## Pitfalls

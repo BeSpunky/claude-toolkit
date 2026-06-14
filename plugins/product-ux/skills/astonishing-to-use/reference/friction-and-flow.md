@@ -51,6 +51,10 @@ The *control* matters as much as the field count. A native **select box is high 
 - **Match the control to the data and the context**, choosing for *least friction*, not habit. The goal: the user sees their choices and acts at once, never operates a control to *discover* what's inside it.
 - **When no existing control is low-friction enough for the data, *invent* one.** Choosing the best widget is the floor; designing — or inventing — a control tailored to the data type (and the way the world hasn't seen) is the ceiling. See `facilitating-input.md`.
 
+## A gesture owes an outcome
+
+An embodied or signature act — the real finger-gesture (drag, press, draw, place) the design chooses *over* a plain tap — is right to be the default even on functional, use-led surfaces, not only expressive ones. But the gesture is still part of a **flow**, and a flow must reach somewhere: the act must **land**. It opens, sends, selects, settles, commits — or leaves an honest, persisting trace (even an unscored one). A gesture that fires a transient glow or toast and decays back to the resting state with *nothing* selected, sent, or persisted is **decoration you perform** — the "then what?" failure at the level of the whole act: it costs real effort and returns no result. Keep the embodied gesture, and make sure it changes something the user can see still changed after it ends.
+
 ## The flow test
 
 Walk one real person from intent to done. Mark every place they have to **work, wait, decide, or backtrack**. Each mark is friction to remove or justify. If the path has hoops, it fails — no matter how it looks.

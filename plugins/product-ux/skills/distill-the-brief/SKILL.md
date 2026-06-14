@@ -28,6 +28,8 @@ So you run it the other way:
 
 **Distilling is subtraction of the answer and recovery of the question.** You keep the ache, the intent, the feeling, the genuine functional requirements, and the load-bearing constraints. You drop the form. (`architect-mentality`: *build for the goal, not the brief* — the literal words are a pointer to an outcome.)
 
+You also drop the source's **working names** — a feature's internal codename, a solution's working title. A name a team coined for *their* answer is solution residue: it carries the old form's framing and quietly re-anchors `envision` on it. Name each node by the *problem* it is, in plain designer-facing language, not by the label the dossier gave its proposed thing.
+
 ---
 
 ## Find the altitude
@@ -54,6 +56,8 @@ Cutting at the joints is not slicing into arbitrary pieces. It is two moves held
 **2. Model the englobing context — and design it *for* its children.** Surfaces are never a flat list of unrelated screens. There is an **app / world / module that contains them**, and that container is *itself a design problem* — often the most important one. Its brief is not "a nav bar"; it is the **spine and the world the surfaces inhabit**: the through-line feeling that makes them one product, how a person moves between them, what is shared across them (an identity, a timeline, a state), how the whole *composes* — and how it behaves as one thing (when it recedes, when it bridges, when it foregrounds a surface). Crucially, the context brief is framed **with its children in mind**: it exists to make them cohere, so you write it knowing what must live inside it, never bottom-up from one room. (`architect-mentality`: *model the missing concept* — the container is a real concept with its own contract, not the gap between the screens; *concentrate complexity so the edges stay simple* — the context holds what's shared so each surface stays clean.)
 
 This is the move a flat decomposition misses and the reason splitting doesn't fragment: **you emit a tree, not a list.** A context at the root, the surfaces native to it as children, each child knowing the world it belongs to. A surface designed in ignorance of its context becomes a screen from a different app; a context designed in ignorance of its surfaces becomes an empty shell. The tree keeps them coherent — one world, many native inhabitants.
+
+**The grain test is yours to run on every non-obvious cut — not only the ones the source confessed.** A source flags a few seams as open; the rest it states as settled. But splitting one surface out of another, or lifting a shared concern into its own node, is *your* call, and a cut the source presents as obvious can still fail the test. So run the test — *is this genuinely two envision-able moments, or one?* — on **every** non-obvious cut you make, and flag open any that fails it, *regardless of whether the source marked it open.* The doubt that matters is the distiller's, not the source's.
 
 (How deep the tree goes is itself a grain decision: a small app may be one context and a handful of surfaces; a large one may have sub-contexts — a module that is a world within the world. Cut only as fine as the design problems genuinely differ. Over-splitting manufactures coordination cost; under-splitting hands `envision` more than one mind can hold.)
 
@@ -116,6 +120,7 @@ When in doubt about a cut, an altitude, or whether something is a need or a solu
 - Did I hand `envision` the **problem**, or did I smuggle in a **solution** the dossier had already guessed? For every "how" in the intake, did I recover the "what" under it and drop the "how"?
 - Is each brief at the right **altitude** — could `envision` imagine more than one genuinely different world from it (not too low), and could a design be judged *wrong* against it (not too high)?
 - Did I decide the **grain** on purpose — naming what is one design problem and what is many, and cutting the surfaces at real seams (where the experience changes character), not arbitrary slices?
+- Did I run **my own grain test on every non-obvious cut** — splitting one node out of another, lifting a shared concern into its own — and **flag open** any that fails it, even where the source presented the cut as settled? And did I **strip the source's working names** so no internal codename re-anchors `envision` on the old form?
 - Did I **model the englobing context as its own design problem**, framed *for* its children — its feeling, spine, and composition — rather than leaving a flat list of unrelated screens?
 - Does every surface **know its context**, and does the context **account for every surface**? Read top to bottom, does the tree describe **one product**?
 - Did I set each node's **Lead Force** (use-led / art-led / balanced) from the real drivers — the *job, stakes, frequency, device* — and *not* from the kind of app, letting it differ across (and within) surfaces rather than applying one flat dial?
@@ -138,8 +143,8 @@ When in doubt about a cut, an altitude, or whether something is a need or a solu
 - A surface brief written in **ignorance of its context** (a screen from another product), or a context written in **ignorance of its surfaces** (an empty shell).
 - **Constraints that are solutions** ("use a bottom sheet") kept as if they were requirements.
 - Quietly **resolving a real ambiguity** (a cut, an altitude, a need-vs-solution call) by guessing, when the right move was to ask — and everything downstream inherited the guess.
-- A node that **confesses two design problems but folds them "settled"** — two who-it's-fors, two feelings, or a **mode-split Lead Force** (e.g. a calm/ambient mode *and* an acute/use-led mode) carried in one node, especially when the source itself flags it open. By the grain test that is two envision-able moments: **cut it, or flag it open — never silently fold it.**
-- **Provenance or process-chatter in the envision-input** — commit SHAs, "Status: draft", "forms stripped: …", or a header doctrine block addressed to the reviewer, living in the brief tree `envision` reads. That belongs in conclusions/manifest; the brief carries only the design problems, in the designer's-facing voice.
+- A node that **confesses two design problems but folds them "settled"** — two who-it's-fors, two feelings, or a **mode-split Lead Force** (e.g. a calm/ambient mode *and* an acute/use-led mode) carried in one node. By the grain test that is two envision-able moments: **cut it, or flag it open — never silently fold it.** And the trigger is the **distiller's grain test on every non-obvious cut**, not the source's confession: a cut the source presented as obvious that fails the test gets flagged open just the same.
+- **Provenance, process-chatter, or working names in the envision-input** — commit SHAs, "Status: draft", "forms stripped: …", a header doctrine block addressed to the reviewer, or the source's internal codename / working title for a feature, living in the brief tree `envision` reads. Provenance belongs in conclusions/manifest; a working name is solution residue that re-anchors the old form. The brief carries only the design problems, named by what they *are*, in the designer's-facing voice.
 
 ---
 
