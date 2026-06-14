@@ -39,6 +39,20 @@ Devices are not one canvas at different widths — they are different *contexts*
 - **Sun, motion, noise.** Readable in glare (contrast, size); usable in motion (no precision required); doesn't depend on sound.
 - **Battery & data.** Heavy, always-animating, always-fetching designs cost the user real battery and data — a hidden tax on use (ties to `realize`'s performance cluster).
 
+## The use-situation — design the act, not the abstract feature
+
+The body and the moment are one half of "the real context"; the other half is the **lived situation** the act happens inside. An interface feature is not a free-floating capability with a control bolted on — it is a **real act a real person does, in a real moment, for a real reason, to or with a real other party, knowing real things, producing a real effect the other feels.** When a design models the *capability* (a toggle to pick a "mode", a button for an action offered at any time) instead of the lived *situation*, the result is something no one would actually use the way it's built — technically present, humanly inert.
+
+Five things every real situation has, and the design must answer each:
+
+- **Trigger / occasion** — what just happened that brings someone here to do *this*, *now*? An act with no real occasion reads "out of the blue" and lands as random. Map each act to its occasion: **responsive** (it follows a need, a request, a rupture, an external event) or **informed-proactive** (it follows *noticing* or *knowing* something about the other). If you can't name the occasion, the feature is a capability in search of a moment.
+- **Direction & parties** — *who acts toward whom.* A directed act between specific entities is naturally controlled **by those entities** — you act on your own representation, or on the other's — not by an abstract mode-switch. The relationship and the parties **are** the interface; reaching for a toggle/segmented-control to *pick the direction* is the generic-app reflex standing in for the act itself.
+- **What the actor knows** — proactive care or action is hollow without context; it must be fed by what is **honestly known** (the system's real signals), and that knowledge makes the act *specific*. Acts are not silos; they form a system informed by real context, each one knowing what came before.
+- **What the recipient feels** — an act delivered out of context lands as confusing or *pressuring*, not as care. The far half of the act — how it arrives on the other side — is part of the design, not an afterthought.
+- **Natural sequence** — real interactions are ordered: one shares → the other responds; a need is signalled → help follows. Never present every capability as an always-available cold button; follow the real flow.
+
+**The test:** *"would a real person actually do this — here, now, this way — and what real-life situation does it mirror?"* If the honest answer is "no one would do this cold," or "you'd do this in person and never reach for an app," the feature is mis-conceived. Redesign the **situation**, not the pixels — model the trigger, the parties, the knowledge, the felt effect, and the order, and the right control usually falls out of it (often *no* mode-toggle at all).
+
 ## The context test
 
 Picture the actual use: a tired person, one thumb, half-watching, on a slow train. Walk your design through *that*. If it only works for the focused desktop user, it's designed for the demo, not the life.
@@ -50,3 +64,4 @@ Picture the actual use: a tired person, one thumb, half-watching, on a slow trai
 - **State loss on interruption** — coming back resets the task.
 - **Demo-conditions design** — only holds up with full attention, big screen, fast network.
 - **Ignoring the felt state** — adding pressure (timers, nags) to a user who's already stretched.
+- **Abstract-feature design** — modelling the *capability* (a mode-toggle, an always-available cold button) instead of the lived act with its trigger, parties, knowledge, felt effect, and order — so no one would actually use it the way it's built.
