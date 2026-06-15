@@ -70,6 +70,21 @@ Instead: find the means that preserves the *feeling* within the constraint (ofte
 
 ---
 
+## Simulate the phenomenon — never fake it with a gradient
+
+The deepest reason model-made UI reads as cheap and noisy is a single move: it **fakes** a premium effect with a formless approximation instead of **simulating** the actual phenomenon. A glow becomes a radial gradient painted behind the element — light with no form. "Glass" becomes a blur plus a white overlay — no refraction. "Depth" becomes a drop shadow — no occlusion, no falloff. The approximation is fast and it is always wrong, because it ignores form, light, and physics; the eye reads the absence instantly even when it can't name it.
+
+The craftsman does the opposite: **simulate the phenomenon the Staging calls for, so the effect respects form, light, and physics.** This is the same `research before you reach` discipline aimed at *rendering* — research the truest, soundest means to reconstruct the real effect, then build that, never the formless stand-in. The web is far more capable here than its defaults suggest; the means exist:
+
+- **Light that respects form.** Real light is shaped by the geometry it falls on — normals, ambient occlusion, soft contact shadows, a falloff that follows the subject. Light an element from its *form* (e.g. a depth/normal map driving a fragment shader, or coordinated layers under one coherent light model), not a radial glow stamped behind it. **Formless glow everywhere is the tell of faked light.**
+- **Real refraction and living edges.** True glass *refracts* — it bends what is behind it; faking it with blur-plus-overlay never reads as glass. The web's master key is SVG displacement maps (`feImage` → `feDisplacementMap`) applied as a `backdrop-filter`: a *gradient* displacement map bends the backdrop like real glass (offset the R/G/B channels independently for chromatic aberration), and an animated *noise* map gives an electric or liquid living edge.
+- **Hard optical masks.** SVG threshold/knockout filters (`feColorMatrix` luminance → `feComponentTransfer`) cut text-as-a-window, hard mattes, and halftone — real optical operations, not painted fakes.
+- **Motion as a real engine, not a JS scroll listener.** Drive motion with the platform: typed, animatable custom properties (`@property`), scroll- and view-timelines (`scroll()`/`animation-timeline`/`timeline-scope`), hand-authored `linear()` spring easings, `sin()`/`pow()` math, pointer-reactive custom properties, `mask-composite` to isolate a border ring, and the View Transitions API for continuity.
+
+These are **examples of real engines, not a checklist.** The rule is what matters: for each physical effect the Staging names, **research and build the real simulation of the phenomenon — never a formless gradient/blur/overlay stand-in.** (The drawing and motion reference clusters carry the concrete engines.)
+
+---
+
 ## Parallelize against the contract
 
 A built experience is large — research, assets, regions, checks — and much of it can run in parallel. But creative work carries a unity requirement most parallel work doesn't: it must add up to *one* feeling. So the rule is **fan out the work, converge on the feeling** — and what makes that safe is the Vision itself.
@@ -125,6 +140,7 @@ The SKILL above is the **mentality and method**; the references are the **field 
 - Have I mapped this technique's **caveats** (jank, layout thrash, reduced-motion, keyboard/screen-reader, mobile/battery, browser support) and compensated *before* building?
 - Am I **engineering each moment's per-form-factor staging** — fluid/container-query layout, touch vs. pointer, mobile viewport and weight — *re-composing* per the Staging rather than shrinking one desktop layout onto a phone?
 - For each **physical phenomenon** the Staging decomposed (light, depth, material, texture), am I **rendering it faithfully** — coordinated layers under one coherent light model, a shader, or a *sourced real asset* — rather than substituting a **lone primitive** (one gradient, one box-shadow, one flat fill) that will never read as real?
+- For each premium effect, am I **simulating the phenomenon** (light shaped by form, real refraction via a displacement map, true occlusion) — or **faking it** with a formless stand-in (a radial glow with no form, "glass" that is only blur + a white overlay, "depth" that is only a drop shadow)? Did I research the real web-native engine for it?
 - Does the build deliver the **UX non-negotiables** (`astonishing-to-use`) — **instant & never-hanging** (heavy work off the main thread / async / background, optimistic UI), **instant load** (lazy + correctly-*sized* skeletons, no or short-and-live splash), **smooth transitions everywhere** (View Transitions for routes & shared elements, FLIP for list add/remove/reorder), and **zero abrupt layout shift** (space reserved for async content, the mobile keyboard handled)?
 - Did I **design the architecture and confirm it** before implementing, rather than wiring it up ad hoc — with imperative libraries wrapped behind a clean seam?
 - When feeling and a hard constraint collided, did I **dissolve the tradeoff** with a better technique — or, if truly stuck, preserve the feeling in a gentler form and **surface the tension** instead of silently surrendering?
@@ -145,6 +161,7 @@ The SKILL above is the **mentality and method**; the references are the **field 
 - **Animating the wrong properties** — width/height/top/left/margin in hot paths (layout thrash) instead of compositor-only transform/opacity.
 - **Shrinking instead of re-composing** — cramming the desktop layout onto a phone, breaking the moment on the screen most people use; or hiding essential actions behind `:hover` where there's no cursor; or `100vh` overflowing under mobile browser chrome.
 - **A real phenomenon rendered as a lone primitive** — the Staging's decomposed warm light shipped as one flat gradient, depth as one box-shadow, a material as a flat fill — instead of a faithful reconstruction (coordinated layers under one coherent light model, a shader) or a sourced real asset (a photograph of real light). The reason it never reads as real.
+- **A premium effect faked with a gradient/blur/overlay instead of simulated** — a glow that is a radial gradient with no form, "glass" that is just blur plus a white overlay (no refraction), "depth" that is just a drop shadow (no occlusion or falloff). The formless approximation the model reaches for by default; simulate the actual phenomenon (light shaped by form, a displacement-map refraction, true occlusion) instead.
 - **Build-side UX failures** — a blocked main thread during heavy work (instead of async/background + optimistic UI); a bare spinner or blank for a lazy module instead of a sized skeleton; hard route/state swaps with no transition; content that pops in and shifts the layout (CLS); the mobile keyboard hiding the focused field. (See `astonishing-to-use`'s responsiveness and continuity clusters.)
 - **A rest state below the find-floor** — it renders, but at rest the interactive object/hero is so dim it reads as empty or unloaded. The resting frame is the one most people see first; tune resting intensity above the legibility/find-floor, don't defer all light to interaction.
 - **A shipped type error** — `design.ts` that *renders* at runtime but does not type-check; the dev server raises a transient error overlay on rebuild that lands on every version's route and corrupts their shots. Type-clean is not optional — verify the build, never just the render.

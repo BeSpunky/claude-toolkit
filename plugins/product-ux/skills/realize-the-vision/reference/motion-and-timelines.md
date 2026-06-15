@@ -31,6 +31,19 @@ How things move, enter, leave, and transition over time. Motion is the most comm
 - **Easing carries the feeling** — linear feels mechanical; the right cubic-bezier/spring *is* the personality. Match easing to the Vision (a playful overshoot vs. a calm ease-out are different worlds).
 - **Don't over-animate** — motion everywhere is the box-and-text failure in a costume. Every movement must earn its place by serving the one feeling.
 
+## The platform as a motion engine — before reaching for JS
+
+Much of what people reach for a library or a scroll listener to do is now **native CSS**, running off the main thread. Prefer these real engines over a JS approximation:
+
+- **Typed, animatable custom properties** — `@property --x { syntax: '<number>'; inherits: false; initial-value: 0 }` makes a custom property *interpolatable*, so you can animate gradients, angles, and derived values that plain variables can't.
+- **Scroll- and state-driven CSS** — `scroll()`/`view()` timelines, `animation-timeline`, and `timeline-scope` tie motion to scroll position or element visibility with **no JS scroll listener** (see `scroll-and-cinematic.md`).
+- **Hand-authored springs and math** — author a spring as a `linear()` easing (sampled keyframes) instead of pulling in a physics lib; use `sin()`/`cos()`/`pow()` in `calc()` for organic, looping, or staggered motion.
+- **Pointer-reactive properties** — feed pointer position into custom properties and let CSS react (a spotlight, a tilt, a parallax that follows the cursor) without a render loop.
+- **`mask-composite`** — isolate a single border ring or compose masks for reveal/gradient-border effects in pure CSS.
+- **View Transitions API** — continuity between states/routes as one morph (above).
+
+The rule: research the **native** engine for the motion the Staging calls for before adding a dependency or a scroll handler — the platform is usually both lighter and smoother.
+
 ## On the house stack (Angular / Nx)
 
 - Modern Angular leans on **native CSS + Web Animations API**; `@angular/animations` is comparatively heavy and de-emphasized — reach for it only when its trigger/state ergonomics genuinely fit.

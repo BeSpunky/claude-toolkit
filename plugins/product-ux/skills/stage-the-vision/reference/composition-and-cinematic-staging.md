@@ -9,6 +9,12 @@ The deepest reason a design feels like "a div, a div with rounded corners, a top
 - The reflexive skeletons to refuse on sight: hero-split-plus-two-buttons, the row of N equal cards, top-bar-plus-centered-bands, and their trend-skinned twin, the blob cluster. Equal boxes in a line is almost never the truest structure — only the easiest.
 - Derive structure from the concept and the Vision's spatial language. "Doorways seen from an entry hall" is a composition (paths sensed at different depths from a vantage), not three cards. "Received, not navigated" centers a face and a promise and subordinates the ways-deeper — not a nav bar of equal links.
 
+## Escape generic *vertically*, not *horizontally*
+
+The way out of boxy, generic UI is almost never a *bizarre new structure*. Invented weird layouts read as **arbitrary** — creativity performed, not earned. The reliable escape is **vertical**: take the **familiar, needed primitive** the moment actually calls for — a card, a toggle, an accordion, a nav, a select, a loader — and **elevate it with one deeply-mastered technique**, plus genuine character and (where apt) a configurable range. *Depth of craft on a known thing beats novelty of layout.* Mastering the ordinary thing reads as **premium**; inventing an odd thing to seem creative reads as **noise**.
+
+So when a screen feels generic, don't reach sideways for a stranger shape — reach **down** into the one primitive it needs and make *that* extraordinary: the toggle with real physical motion and weight, the accordion whose reveal is choreographed, the select that opens like a considered object. (This is not licence to keep the *generic skeleton* — a flat field of equal cards is still wrong; it's licence to take the *right* primitive and master it rather than swap it for an arbitrary one.)
+
 ## Composition craft — what makes a single frame art
 
 - **One dominant focal point.** The eye must land somewhere first, on purpose. Competing equal elements read as generic; a clear focus reads as designed.
@@ -46,6 +52,7 @@ Carry, for each key moment, *what it is on a phone and what it is on a wide scre
 ## Pitfalls
 
 - **Restyling and calling it redesign** — the skeleton survives; the genericness survives.
+- **Escaping generic *horizontally*** — inventing a weird, unfamiliar structure to seem creative instead of taking the *needed* primitive and mastering it; the oddness reads as arbitrary, not premium. Go *vertical* (depth of craft on the known thing), not *sideways* (novelty of layout).
 - **Designing for desktop and letting it shrink** — no phone staging conceived, so the moment breaks or cramps on the screen most people use.
 - **Timid scale** — everything medium-sized and centered; no focal point, no drama.
 - **Space starvation** — cramming; no room for the eye, so nothing reads as important.

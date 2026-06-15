@@ -38,6 +38,16 @@ When the Vision asks for *drawn* things — a shape that isn't a rectangle, a ha
 - **An opening/entrance must have real depth — not a flat fill.** A "doorway," "portal," "well", or "threshold" is a *way in*: render the space/dark or light *beyond* it, a lit edge or rim, an interior that recedes — so it reads as enterable. A flat shape filled with a gradient is a *stain*, not an opening; give it an inside.
 - **Build UI chrome in the right medium — controls are DOM/CSS, not painted into the canvas.** Use the canvas for the *world* (the light, the scene, the generative art) and **real DOM/CSS for the interface on top of it** — buttons, labels, menus, fields, links. Hand-drawing a "button" into the bitmap gives a basic, **dated** result (a flat rounded rect with a border) and forfeits accessibility, hit-testing, focus, and text crispness. Layer modern, accessible HTML controls over the canvas (the world shows through behind them) — that's how you get *contemporary*, app-grade chrome *and* a cinematic world at once. Reserve canvas-drawn "controls" for when the control genuinely *is* the world (a coal you drag); ordinary buttons and nav are DOM.
 
+## Simulating optical phenomena with SVG filters
+
+Don't fake a premium optical effect with a gradient/blur/overlay — **simulate the phenomenon** with a real filter primitive, so it respects form and physics. SVG filters are the web's optical workbench:
+
+- **Refraction / distortion → displacement maps** (`feImage` → `feDisplacementMap`). The master key for real glass. Feed a *map* image and displace the source (or the **backdrop**, via `backdrop-filter`) by its pixel values: a smooth **gradient** map bends what's behind it like a lens (drive the R/G/B channels with slightly different scales for genuine **chromatic aberration** at the edges) — real refraction, not blur-plus-overlay. An animated **noise** map (`feTurbulence`) gives a living, electric/liquid distorting edge.
+- **Knockout / threshold / text-as-a-window** (`feColorMatrix` luminance → `feComponentTransfer`). Collapse to a hard luminance matte: cut text or a shape into a window onto the layer behind, build a hard mask, or step it into a **halftone**. A real optical operation, not a painted approximation.
+- **Form-shaped light** — light driven by the subject's geometry (a depth/normal map into a fragment shader, or `feDiffuseLighting`/`feSpecularLighting` over a height field) reads as light *on a form*; a radial gradient stamped behind the element does not. Pair with the continuous-falloff rules above.
+
+Caveats: filters can be expensive (they rasterize a region every frame when animated — keep the filter region tight, prefer compositor properties for the *motion*, throttle/pause off-screen); `backdrop-filter` support and stacking-context behavior vary, so provide a graceful fallback; and give the filtered graphic accessible meaning (the filter is skin over a real DOM/SVG element).
+
 ## On the house stack (Angular / Nx)
 
 - **Inline SVG** binds naturally to templates/signals — animate via CSS or a wrapped GSAP timeline.

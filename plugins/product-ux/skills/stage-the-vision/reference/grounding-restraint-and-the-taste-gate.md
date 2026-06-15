@@ -19,6 +19,17 @@ The single discipline that keeps "make it striking" from becoming "make it garis
 - **Earn every effect.** Each motion, gradient, 3D moment must serve the one feeling. Whimsy that serves the feeling is art; whimsy that serves itself is noise.
 - **The generative-cliché check.** Mesh/aurora gradients, blobs, glassmorphism, breathing pools, frosted floating cards — interrogate these exactly like card grids. "Is this *this* project's, or is it 2021's?" Escaping one trend into another is not originality.
 
+## Build on a reusable system — not a from-scratch one-off
+
+Exceptional, *prolific* work stays coherent and premium because it sits on a **reusable system**, not because each screen is reinvented from zero. The surface has a foundation — and every moment is expressed *through* it:
+
+- **A real type scale.** A modular or fluid ramp (a deliberate set of sizes/weights with a ratio), not sizes picked per element. Type-as-image still draws from the same ramp.
+- **A disciplined colour system.** A perceptual palette with light/dark handled as a system (not two unrelated themes), contrast spent on a budget — coherent by construction (sampled from real material above).
+- **A motion vocabulary.** A small set of named, reusable behaviours (the world's easing, its enter/exit, its weight) — so motion reads as one hand, not a reel of unrelated effects.
+- **A consistent character.** One voice across type, colour, motion, and ornament — the throughline that makes distinct moments feel like one product.
+
+**Stage the surface's *system* first, then express each moment through it** — rather than repainting from zero each screen. A one-off with *no* shared system reads as **amateur even when individual screens are nice**: the seams show, nothing compounds, and coherence is left to luck. (This is the same kit that the SKILL's control-layer coherence hands *down* from the englobing context to every surface — the system is what makes a whole tree feel like one premium product.)
+
 ## The taste gate — an outside eye, judging for beauty
 
 The most important defense, because the model's own taste is the thing that failed:
@@ -40,3 +51,4 @@ The chosen, grounded, restrained Staging is **confirmed before the high-fidelity
 - **Trend-by-reflex** — reaching for the impressive default (organic/aurora/glass) and feeling creative.
 - **Overriding an existing identity when one exists** — a louder look than the real one because it "sings." (When none exists, just don't invent one to override.)
 - **Building high-fidelity before the Staging is confirmed** — architecture-first violated in the design layer.
+- **A from-scratch one-off** — every screen repainted from zero with no shared type scale, colour system, motion vocabulary, or consistent character; reads as amateur even when individual screens are nice, because nothing compounds and the seams show.
