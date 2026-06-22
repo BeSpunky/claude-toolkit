@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyPublishableLib",
+  "title": "Create a house-standard publishable library",
+  "description": "Scaffold a publishable @bespunky library — an Angular (ng-packagr/FESM) lib by default, or a plain-TS (@nx/js, bundler tsc) lib with --nonAngular — that builds to dist/<directory>, tests on Vitest, links via workspaces (workspace:*) + project references, and is independently releasable via `nx release` with a git-tag version baseline.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The name of the library. Also seeds the default importPath (@bespunky/<name>) and directory (packages/<name>).",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What name would you like to use for the library?",
+      "pattern": "^[a-zA-Z].*$"
+    },
+    "importPath": {
+      "type": "string",
+      "description": "The npm import path used to consume the library, like `@bespunky/my-lib`. Must be a valid npm package name. Defaults to `@bespunky/<name>`.",
+      "x-priority": "important"
+    },
+    "directory": {
+      "type": "string",
+      "description": "Workspace-relative directory where the library is placed. Honors the house layout (libsDir: packages). Defaults to `packages/<name>`.",
+      "x-priority": "important"
+    },
+    "prefix": {
+      "type": "string",
+      "format": "html-selector",
+      "description": "The prefix to apply to generated component selectors. Ignored for --nonAngular libraries.",
+      "default": "bs",
+      "alias": "p"
+    },
+    "style": {
+      "type": "string",
+      "description": "The file extension or preprocessor to use for component styles. Use `none` for a non-component library. Ignored for --nonAngular libraries.",
+      "enum": ["scss", "css", "none"],
+      "default": "scss"
+    },
+    "nonAngular": {
+      "type": "boolean",
+      "description": "Generate a plain-TypeScript library (delegates to @nx/js with bundler `tsc`; no ng-package.json, no Angular-specific config) instead of an Angular library. Used for the agnostic leaves (typescript-utils, rxjs).",
+      "default": false
+    },
+    "tags": {
+      "type": "string",
+      "description": "Comma-separated tags applied to the library (used for module-boundary linting)."
+    },
+    "workspaceDeps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Sibling @bespunky package names to add to this library's own package.json as `\"@bespunky/<dep>\": \"workspace:*\"` dependencies (the workspaces + project-references linking model). Provide the short name (e.g. `rxjs`), not the scoped import path."
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip formatting files.",
+      "default": false,
+      "x-priority": "internal"
+    }
+  },
+  "required": ["name"]
+}
