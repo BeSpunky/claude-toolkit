@@ -83,6 +83,41 @@ The craftsman does the opposite: **simulate the phenomenon the Staging calls for
 
 These are **examples of real engines, not a checklist.** The rule is what matters: for each physical effect the Staging names, **research and build the real simulation of the phenomenon — never a formless gradient/blur/overlay stand-in.** (The drawing and motion reference clusters carry the concrete engines.)
 
+And four disciplines decide whether a *simulated* render still reads real or still reads "generated":
+
+- **Decompose every element to EQUAL depth.** The eye grades the whole frame by its *weakest* element: one phenomenon faked or shallowly-decomposed (a flat fill where everything else is simulated) drags the entire scene back to "fake," however good the rest. Don't decompose the hero deeply and wave the supporting phenomena through — the holdout is always the thing you decomposed least.
+- **A reflective, translucent, or lit surface's realism is mostly *what it reflects*, not the surface itself.** A calm water, glass, a polished floor is largely a (distorted) image of its environment — so build the *environment it samples* (a structured sky, the light sources, the room), not just the surface. A surface mirroring a flat fill reads generated no matter how good its detail; give it something real to reflect.
+- **Simulate at the phenomenon's TRUE INTENSITY — restraint is part of simulation.** "Simulate it" is *not* "add maximal detail." A calm, quiet, distant, or secondary phenomenon is *calm*; over-cooking it (more octaves, particles, glow) is as fake as faking it and reads busy/dirty. The model's reflex is to ADD; the craft is usually to SUBTRACT (`stage`'s **bold ≠ loud**, at the render layer). And a *transition / connective / ambient* element must **recede** — it's done when it disappears into its job, not when it's elaborated into a feature.
+- **Know the procedural TELLS — the eye flags two master signatures as artificial: REGULARITY and ISOTROPY.** Any *periodic function* in the visible signal betrays the synthesizer; any *isotropic* field reads as blobs.
+
+  | Tell (reads fake) | Cause | Cure |
+  |---|---|---|
+  | flat / dead | a lone primitive *as* a phenomenon (gradient = light, flat fill = water) | decompose & simulate it |
+  | a **lattice / diamond grid** | a *product of two periodic signals* (`sin × sin` = crossed gratings) | never multiply periodic signals; drive it from noise |
+  | a **ladder / train-rails** | *regularly-spaced* structure (even `d·k` fronts; a periodic brightness on a streak) | irregular spacing — noise-perturbed or noise-driven |
+  | **oily blobs / puddle loops** | *isotropic* value noise (round closed contours) | for anything directional (waves, grain, flow) use **anisotropic** noise — irregular *and* directional |
+  | small residual ladders | even noise has a characteristic cell pitch | a low-frequency **domain warp** to displace positions |
+  | loop contours on a lit surface | *2D isotropic* noise inside a *brightness* layer | make the bright layer follow the structure (anisotropic/aligned), not free 2D noise |
+
+  The rule under the table: **natural = irregular (→ noise, never a bare periodic function) and, for anything directional, anisotropic.** Keep periodic functions out of any signal the eye will scan for pattern.
+
+---
+
+## Verify by looking — and debug by isolation
+
+A built visual is **unjudged until its pixels are seen.** "It renders / it type-checks" is the *floor*, never "done" — and the model **cannot self-certify its own visuals**: it will describe a flat-gradient placeholder as "a living, simulated scene" with total confidence. So realization is not write-then-hope; it is a tight cycle:
+
+1. **Render and capture** the actual result — a screenshot from the running app (`browser-automation`).
+2. **Look at the real pixels, magnified** — zoom into the regions that carry the effect. Artifacts hide at fit-to-screen and scream at 200%; the model's confidence about *un-looked-at* output is worthless evidence.
+3. **Critique against the Staging**, with an outside eye (the user's, or an honest comparison to the great work it adapts) — *is it good* is never the model's own call.
+4. **Fix, and repeat** until it lands.
+
+**When an artifact appears, find it by ISOLATION — never by blind parameter-tuning.** A composited render is layers (a base, a shading pass, a highlight, an overlay). The fatal trap is to *guess* which layer is responsible and tune it: tuning the wrong layer can never fix the artifact, *feels* like progress, and is the canonical "going in circles." Instead **binary-search the layers** — disable/zero them one at a time until the artifact disappears; that layer is the source — and only then fix it. (This is `architecture-first`'s *find the root cause, never mask the symptom*, aimed at pixels.)
+
+**Decode the felt complaint into the layer and the math** — a visual metaphor is a free diagnosis. *"It looks like oil"* → isotropic, no direction → needs anisotropy. *"A ladder / train-rails"* → a periodic/regular signal → kill the periodicity. *"Only the bottom half"* → a depth-dependent term is responsible. The artifact's **appearance** names its cause; **where** it appears names its source. Translate before you touch a parameter.
+
+**And know when to stop.** Past the asymptote, each further touch is a fresh chance to *re-introduce* a fixed artifact. "Authentic / great enough" beats "perfect" once iteration risk exceeds the gain — lock the good state and protect it.
+
 ---
 
 ## Parallelize against the contract
@@ -146,6 +181,11 @@ The SKILL above is the **mentality and method**; the references are the **field 
 - Did I **design the architecture and confirm it** before implementing, rather than wiring it up ad hoc — with imperative libraries wrapped behind a clean seam?
 - When feeling and a hard constraint collided, did I **dissolve the tradeoff** with a better technique — or, if truly stuck, preserve the feeling in a gentler form and **surface the tension** instead of silently surrendering?
 - Did I verify the built result **against the feeling**, in the running app, on a real device, with reduced-motion on and a keyboard — not just confirm it renders?
+- Did I **look at the actual pixels, magnified**, in the regions that carry the effect — not just confirm it renders, and not trust my own *description* of the output?
+- When an artifact appeared, did I **isolate it** (binary-search the layers to find the source) before touching any parameter — or blind-tune a guessed layer and go in circles? Did I **decode the felt complaint** (its look + where it appears) into the responsible layer/math?
+- Did I **decompose every phenomenon to equal depth**, give every reflective/lit surface a real **environment** to mirror, and **simulate at the true intensity** (calm is calm; a transition recedes) — rather than over-cooking, or letting one weak element drag the frame down?
+- Is any visible signal built from a **periodic function** (a bare sine, even spacing, `sin×sin`) that will read as a regular pattern, when natural irregularity wants **noise** (anisotropic for directional things)?
+- Have I hit **diminishing returns** — now risking re-introducing a fixed artifact — and should I lock the good state instead of polishing on?
 - Where can I **fan out** the work (research lanes, asset candidates, independent regions, verification lenses) against the Vision — and have I planned the **coherence pass** that converges it back to one feeling? Am I careful *not* to parallelize the parts that must know the whole?
 
 ## Red flags
@@ -156,6 +196,11 @@ The SKILL above is the **mentality and method**; the references are the **field 
 - **Trend-by-reflex, either flavour** — card grids/dashboards *or* blobs/aurora-gradients/glassmorphism/frosted-cards/breathing-pools/hero-plus-two-buttons. "Is this *this* product's, or 2021's?"
 - **Overriding an existing identity when one exists** — inventing a louder/more-saturated look than the real one because it "sings." (When there's none, just don't invent one to override.)
 - **Self-certified aesthetics** — declaring your own output "stunning/cinematic" and shipping it, with no outside eye, no low-fidelity comparison, no check against the Staging.
+- **Pixels never looked at (or never zoomed)** — shipping on "it renders / it type-checks", or on the model's *description* of its own output, with no magnified screenshot of the regions that carry the effect. The model is blind to its own visual artifacts; un-looked-at output is unjudged.
+- **Blind-tuning instead of isolating** — chasing an artifact by tweaking parameters of a *guessed* layer instead of binary-searching the layers to find which one produces it. The "going in circles" failure: tuning the wrong layer is zero progress that feels like progress.
+- **Over-cooked, not over-faked** — a calm/quiet/secondary phenomenon rendered busy (more octaves, particles, glow, ornament), reading dirty and synthetic. Simulating at too-high an intensity is as fake as a flat stand-in; a transition/ambient element elaborated into a feature is the same error (abusing the signature effect).
+- **A periodic function in a signal the eye scans for pattern** — a bare `sin`, evenly-spaced fronts, or `sin × sin` — producing the lattice / ladder / train-rail tells. Regularity reads synthetic; drive natural structure from noise (anisotropic for anything directional), and break residual regularity with a domain warp.
+- **One element decomposed deeply while the rest are faked** — the weakest-decomposed phenomenon drags the whole frame to "generated," however good the hero. (And a reflective/lit surface built with no real *environment* to mirror reads generated no matter how good its surface detail.)
 - **Reaching for the familiar** — "I'll use X because I always do," with no survey of what this feeling actually needs.
 - **The feeling lost in translation** — a drifting, breathing, cinematic Vision shipped as a static page with one fade, because that's what was easy.
 - **Caveats discovered late** — reduced-motion, jank on mid-range phones, broken keyboard nav, or autoplay audio found in QA instead of designed for up front.

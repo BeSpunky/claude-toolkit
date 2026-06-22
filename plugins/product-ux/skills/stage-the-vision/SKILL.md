@@ -56,6 +56,12 @@ The artist's move is the opposite: **decompose the thing into its real constitue
 
 The gate is sharp: **if you collapsed a real phenomenon to a single primitive, stop and decompose it.** A primitive may appear *inside* a faithful reconstruction (a gradient as one layer of a real light build), never as the lone stand-in. And stay at the art level — the physical *truth and how it looks*, not the CSS; `realize` reproduces it with coordinated layers under one coherent light model, a shader, or a *sourced real asset* (a photograph of real light beats any gradient). Depth: `reference/decompose-to-physical-truth.md`.
 
+Three corollaries decide whether the *decomposition itself* holds up:
+
+- **Decompose every phenomenon to EQUAL depth.** The eye grades the whole moment by its *weakest* element: one phenomenon left as a primitive while the rest are richly decomposed drags the entire image back to "fake." Brief the supporting phenomena — the surround, the secondary light, the material the hero sits on — as carefully as the hero; the holdout is always the one decomposed least.
+- **A reflective, translucent, or lit surface is mostly *what it reflects*.** Calm water, glass, a polished floor is largely a (distorted) image of its environment — so the brief must decompose the *environment it samples* (the sky and its structure, the light sources, the room), not just the surface. A surface mirroring "a flat fill" can never read real; give it a real environment to reflect.
+- **Decompose at the phenomenon's TRUE INTENSITY.** Physical truth includes *amount*: a calm sea is calm, a distant thing faint, a secondary thing quiet. Briefing a phenomenon as more dramatic than it is leads `realize` to over-cook it, which reads as fake as a primitive (**bold ≠ loud**, applied to decomposition). And a *transition / connective / ambient* element is decomposed to **recede** — it serves by disappearing into its job, never staged as a feature.
+
 ---
 
 ## Reconcile with the use — the ping-pong
@@ -176,6 +182,8 @@ The SKILL above is the method; the references are the craft. Read only the clust
 - **Bold becoming loud** — spectacle, maximal effects, garish saturation chasing "striking"; the card-grid failure in a louder costume.
 - **Designing only for desktop** — no phone staging conceived, so the moment breaks or cramps when shrunk onto the screen most people actually use.
 - **Symbolic substitution** — a real phenomenon (light, depth, material, texture) collapsed to a single primitive (a gradient, a box-shadow, a flat fill) with no physical model behind it; the reason "warm light" never looks like warm light.
+- **The weakest element betrays the moment** — the hero decomposed to physical truth while a supporting phenomenon (the surround, the ground, the secondary light) is left a flat primitive; the eye grades the whole image by its faked element. (And a reflective surface decomposed without its *reflected environment* — a flat fill to mirror — reads generated however good the surface.)
+- **Over-decomposed into spectacle** — a calm / secondary / transition phenomenon briefed as more intense than it is, so `realize` over-cooks it busy and synthetic. Decompose at the true intensity; a connective element recedes.
 - **Beautiful but taxing to use** — a moment that fights the thumb, delays the task, hides the action, or impresses once and annoys forever, shipped with no ping-pong against `astonishing-to-use`. Striking is only half; the use must be astonishing too.
 - **Self-certified art** — declaring the moments "stunning/cinematic" with no outside eye and no low-fidelity comparison.
 - **Hand-coding the art that should be sourced** — a hero illustration or character forced out of code/weak taste instead of generated, licensed, or commissioned and directed by the Staging.
