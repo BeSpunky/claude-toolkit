@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyWikiSummary",
+  "title": "Generate a wiki summary.json",
+  "description": "Devkit port of the legacy `generate-wiki-summary.js` script. Walks a wiki folder via the Nx Tree (dry-run-safe, never raw fs) and (re)writes `<wikiFolder>/summary.json` — an ordered tree of `{ title, file, children? }` nodes. Markdown docs are ordered by a per-folder `.order` file (LF/CRLF-tolerant) and a folder contributes `children` only when a sibling `<folder>.md` doc exists.",
+  "type": "object",
+  "properties": {
+    "wikiFolder": {
+      "type": "string",
+      "description": "Workspace-relative path to the wiki folder to summarise. Honors the house layout — typically `packages/<lib>/wiki`. `summary.json` is written at `<wikiFolder>/summary.json`.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "Which wiki folder should be summarised (e.g. packages/<lib>/wiki)?"
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip formatting files.",
+      "default": false,
+      "x-priority": "internal"
+    }
+  },
+  "required": ["wikiFolder"]
+}
