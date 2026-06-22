@@ -43,6 +43,14 @@ while [ "${1:-}" != "" ]; do
   esac
 done
 
+# Nx release channel for the workspace create + the `nx add @nx/angular` step. Empty = latest stable.
+# Set NX_CHANNEL=next to honor the Nx-lag rule: scaffold on a beta Nx that supports a NEWER Angular
+# major than the latest *stable* Nx admits (e.g. Angular 22 on the Nx 23.1-beta line, when stable
+# @nx/angular still peers @angular/build <22). Then `nx migrate` to stable Nx once it ships support.
+NX_CHANNEL="${NX_CHANNEL:-}"
+NX_TAG=""
+[ -n "$NX_CHANNEL" ] && NX_TAG="@$NX_CHANNEL"
+
 ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GIT_NAME="$(git config --global user.name 2>/dev/null || whoami)"
 GIT_EMAIL="$(git config --global user.email 2>/dev/null || echo "$(whoami)@localhost")"
@@ -88,6 +96,7 @@ MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/
 [ -n "${MAJOR:-}" ] || MAJOR=24
 IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
 echo "Base image: $IMAGE"
+[ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
 
 # --- devcontainer generator args ---
@@ -123,6 +132,7 @@ ensure_nx_tools() {
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright$FIREBASE_BLOCK
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (including the
 # reusable-tool extraction generators mark-extractable / adopt-extracted) survive 'yarn install'
@@ -135,9 +145,9 @@ if [ "$MODE" = "scaffold" ]; then
 git config --global user.name '$GIT_NAME'
 git config --global user.email '$GIT_EMAIL'
 git config --global init.defaultBranch main
-yarn create nx-workspace '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive
+yarn create nx-workspace${NX_TAG} '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive
 cd '$PROJECT'
-yarn nx add @nx/angular
+yarn nx add @nx/angular${NX_TAG}
 yarn nx g @nx/angular:application 'apps/$APP' --minimal --style=scss --routing --e2eTestRunner=none
 $HOUSE_BLOCK
 # Commit the full scaffold. \`yarn create nx-workspace\` made an initial commit, but the
