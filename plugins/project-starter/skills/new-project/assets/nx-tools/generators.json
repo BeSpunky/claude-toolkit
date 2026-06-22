@@ -16,6 +16,11 @@
       "schema": "./src/generators/claude-settings/schema.json",
       "description": "Generate .claude/settings.json wiring the claude-toolkit + nx marketplaces (autoUpdate on); keep .claude/data out of git."
     },
+    "angular-ai": {
+      "factory": "./src/generators/angular-ai/generator",
+      "schema": "./src/generators/angular-ai/schema.json",
+      "description": "Wire Angular's official AI tooling into the project. Writes project-scoped .mcp.json declaring the Angular CLI MCP server (`npx -y @angular/cli mcp`, always-latest) with its DEFAULT knowledge tools (get_best_practices, search_documentation, find_examples, ai_tutor, onpush_zoneless_migration); the experimental exec tools (build/devserver/test/e2e) are deliberately omitted because an integrated Nx workspace has no root angular.json and Nx owns those targets. Merges into any existing .mcp.json (preserves user-added servers). The Angular agent skills (angular-developer, angular-new-app) are NOT vendored here — post-create.sh fetches them fresh from github.com/angular/skills into .claude/skills/ on every container build; this generator just keeps that cache out of git."
+    },
     "firebase-emulators": {
       "factory": "./src/generators/firebase-emulators/generator",
       "schema": "./src/generators/firebase-emulators/schema.json",
@@ -35,6 +40,31 @@
       "factory": "./src/generators/adopt-extracted/generator",
       "schema": "./src/generators/adopt-extracted/schema.json",
       "description": "Close the extraction loop: replace a local library (already published as @bespunky/<name>) with the public-npm package. Honours verify-then-delete — the default run adds the package + rewrites imports but keeps the lib; build to verify, then re-run with --finalize to remove the now-unused local lib. --keepShim instead leaves the lib as a thin re-export for staged migration."
+    },
+    "navigation-core": {
+      "factory": "./src/generators/navigation-core/generator",
+      "schema": "./src/generators/navigation-core/schema.json",
+      "description": "Scaffold the self-contained navigation-core kernel — the reusable base that domain-specific navigation builds on (the engineering:typed-reactive-navigation pattern). VENDORS navigation-x verbatim (@bespunky/angular-zen/router-x/navigation): routeConfigFor / provideRouterX / useNavigationX / RouteComposer / strong Router typing (the auto-derived typed navigator). On top, BeSpunky reusable additions navigation-x doesn't yet ship: the BsNavLink directive that AUGMENTS Angular RouterLink via hostDirectives (inherits the real href + every RouterLink feature — queryParams/fragment/target/relative/RouterLinkActive — and adds only a typed composer binding + a `navigated` telemetry seam; it does not reimplement RouterLink), useNavigationLinks (the composer-value twin of useNavigationX, for binding links), RouteState (URL read-side signals), a typed EventBus + bindEvents, and navigation middleware. Files are copied byte-for-byte (no tokens, no formatting) to stay faithful to upstream; treat lib/* except extras/ as vendored. Adds @bespunky/typescript-utils (the kernel's type-util dependency). Run once per workspace: `nx g @bespunky/nx-tools:navigation-core [--directory=...]` (default libs/navigation-core/src)."
+    },
+    "domain-navigation": {
+      "factory": "./src/generators/domain-navigation/generator",
+      "schema": "./src/generators/domain-navigation/schema.json",
+      "description": "Scaffold a domain's THIN navigation config — the per-domain layer of the engineering:typed-reactive-navigation pattern, on top of the navigation-core kernel (run `nx g @bespunky/nx-tools:navigation-core` once first). Emits ONLY what is domain-specific: the typed route tree (routeConfigFor<Entity>().route(... as const)), the entity + event union + a domain EventBus<Event> subclass, the navigation file (useNavigationX/useNavigationLinks wrappers + the PURE event->navigator mapper + binding + provideX), and domain selectors extending RouteState. The composer, auto-derived navigator, the BsNavLink directive (real href so copy-link/open-in-new-tab survive), the event bus and the selectors base are INHERITED from navigation-core — never regenerated. After running, point the `@navigation-core` import at your lib (path alias or relative). Run as `nx g @bespunky/nx-tools:domain-navigation <domain> [--directory=...]`; files land in <directory|libs/<name>/src/lib>/navigation/."
+    },
+    "publishable-lib": {
+      "factory": "./src/generators/publishable-lib/generator",
+      "schema": "./src/generators/publishable-lib/schema.json",
+      "description": "Scaffold a BeSpunky-standard publishable library. Delegates to @nx/angular:library (or @nx/js:library when --nonAngular) then post-processes to the house standard: ng-packagr FESM2022 build to dist/{projectRoot}, Vitest unit tests (unitTestRunner vitest-angular), a per-project `nx release` block (version.currentVersionResolver git-tag + fallbackCurrentVersionResolver disk) and nx-release-publish.packageRoot dist/{projectRoot}, modern nested ng-package.json (entryFile src/index.ts, NO umdModuleIds), standalone-only (skipModule), prefix bs. Authors the lib's OWN package.json (incl. any workspace:* sibling deps) and adds the ./<dir>/<name> entry to the root tsconfig.json references[] — linking is package-manager workspaces (workspace:*) + TS project references, NO tsconfig.base.json path aliases (nx sync maintains references). --nonAngular switches to a plain-TS @nx/js:tsc library with NO ng-package.json (typescript-utils/rxjs). Never touches nx.json (root release/releaseTag config is Foundation's job)."
+    },
+    "secondary-entrypoint": {
+      "factory": "./src/generators/secondary-entrypoint/generator",
+      "schema": "./src/generators/secondary-entrypoint/schema.json",
+      "description": "Add a secondary entry point to a publishable library: packages/<lib>/<name>/{ng-package.json (entryFile src/index.ts), src/index.ts}, resolving as the @bespunky/<lib>/<name> subpath under the package-manager workspace symlink (workspaces + project references — NO tsconfig.base.json path alias). Generalized from xpand's design-system-secondary-entrypoint: delegates to @nx/angular's librarySecondaryEntryPointGenerator (skipModule), STRIPS any tsconfig.base.json path alias the base generator adds, and normalizes the nested ng-package.json. --component=standalone optionally scaffolds a standalone component and re-exports it; default --component=none leaves an empty src/index.ts the consumer fills. Suite is standalone-only (no scam)."
+    },
+    "wiki-summary": {
+      "factory": "./src/generators/wiki-summary/generator",
+      "schema": "./src/generators/wiki-summary/schema.json",
+      "description": "Regenerate a library wiki's summary.json index (the compodoc `includes` SUMMARY). Devkit port of the legacy generate-wiki-summary Node script: walks the wiki folder via the Nx Tree (dry-run-safe, not raw fs), honoring per-folder .order files (split on /\\r?\\n/ — LF/CRLF-tolerant, fixing the old CRLF-only bug), building an ordered tree of { title, file, children? } where title = filename with dashes replaced by spaces and a folder gets children only when a sibling <folder>.md exists. Default wikiFolder packages/<lib>/wiki. Intended to also be wired as a Nx target in the docs build so summary.json regenerates in CI."
     }
   }
 }

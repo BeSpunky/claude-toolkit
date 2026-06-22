@@ -1,7 +1,7 @@
 {
   "name": "@bespunky/nx-tools",
   "version": "0.1.0",
-  "description": "BeSpunky house Nx generators: project scaffolding (serve-options, devcontainer, claude-settings, firebase-emulators, playwright) and reusable-tool extraction (mark-extractable, adopt-extracted).",
+  "description": "BeSpunky house Nx generators: project scaffolding (serve-options, devcontainer, claude-settings, angular-ai, firebase-emulators, playwright), code scaffolding (navigation-core, domain-navigation), and reusable-tool extraction (mark-extractable, adopt-extracted).",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -10,6 +10,17 @@
   },
   "keywords": ["nx", "nx-plugin", "generators", "bespunky"],
   "generators": "./generators.json",
-  "files": ["generators.json", "src/**/*.js", "src/**/*.json"],
+  "peerDependencies": {
+    "@nx/devkit": ">= 23.0.0",
+    "@nx/angular": ">= 23.0.0",
+    "@nx/js": ">= 23.0.0",
+    "@nx/eslint": ">= 23.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@nx/angular": { "optional": true },
+    "@nx/js": { "optional": true },
+    "@nx/eslint": { "optional": true }
+  },
+  "files": ["generators.json", "src/**/*.js", "src/**/*.json", "src/**/*.tpl", "src/**/*.template"],
   "publishConfig": { "access": "public" }
 }
