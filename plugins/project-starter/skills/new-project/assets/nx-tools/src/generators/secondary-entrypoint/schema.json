@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkySecondaryEntrypoint",
+  "title": "Add a publishable secondary entry-point to a library",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Name of the new secondary entry-point (the deep-import subpath), e.g. `testing` or `router-x`. Resolves as `<package>/<name>` once published or symlinked.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What is the entry-point name (the subpath, e.g. `testing`)?"
+    },
+    "library": {
+      "type": "string",
+      "description": "The library project this secondary entry-point is added to (creates the nested `<lib>/<name>/{ng-package.json, src/index.ts}`).",
+      "x-prompt": "Which library does this entry-point belong to?",
+      "x-dropdown": "projects"
+    },
+    "component": {
+      "type": "string",
+      "description": "How to scaffold a component for the new entry-point.\n'standalone' generates a standalone component re-exported from src/index.ts.\n'none' generates no component and leaves src/index.ts empty (the consumer fills it).",
+      "default": "none",
+      "x-prompt": {
+        "message": "Scaffold a component inside the entry-point?",
+        "type": "list",
+        "items": [
+          { "value": "none", "label": "No component (empty src/index.ts)" },
+          { "value": "standalone", "label": "Generate a standalone component" }
+        ]
+      }
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip running Prettier over the touched files.",
+      "default": false
+    }
+  },
+  "required": ["name", "library"]
+}
