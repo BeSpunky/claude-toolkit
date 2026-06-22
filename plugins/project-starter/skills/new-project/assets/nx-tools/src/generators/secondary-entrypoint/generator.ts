@@ -74,6 +74,16 @@ export async function secondaryEntrypointGenerator(
     skipModule: true,
   });
 
+  // 1b) RESET the parent lib's tsconfig.lib.json include/exclude to the sane root-entry shape.
+  //     The delegated @nx/angular generator APPENDS the new entry's deep glob to these arrays on
+  //     every run — and (observed on @nx/angular 23.1) cumulatively/cartesian: N secondary entries
+  //     explode into thousands of globs (a multi-MB tsconfig), which TS then compiles into a regex
+  //     past V8's nesting limit ("error TS500: Invalid regular expression", the ng-packagr build
+  //     dies — worst on 4-segment-deep entries like `router-x/navigation/zod`). ng-packagr discovers
+  //     secondary entries via their own nested ng-package.json, so the ROOT tsconfig only needs the
+  //     root entry's src. Resetting here makes the generator idempotent and bloat-proof.
+  resetLibTsConfig(tree, libraryRoot);
+
   const entryRoot = joinPathFragments(libraryRoot, options.name);
 
   // 2) STRIP the tsconfig.base.json path alias if the base generator added one.
@@ -143,6 +153,23 @@ export async function secondaryEntrypointGenerator(
 }
 
 export default secondaryEntrypointGenerator;
+
+/**
+ * Reset the parent library's tsconfig.lib.json include/exclude to the canonical root-entry shape.
+ * See the call site (step 1b): the delegated secondary-entry generator bloats these arrays
+ * cartesian-style across runs, eventually producing a multi-MB tsconfig whose globs compile to a
+ * regex past V8's nesting limit. ng-packagr builds secondary entries via their own ng-package.json,
+ * so the root tsconfig only needs `src/**` (the root entry). No-op when the file is absent.
+ */
+function resetLibTsConfig(tree: Tree, libraryRoot: string): void {
+  const tsLibPath = joinPathFragments(libraryRoot, 'tsconfig.lib.json');
+  if (!tree.exists(tsLibPath)) return;
+  updateJson(tree, tsLibPath, (json) => {
+    json.include = ['src/**/*.ts'];
+    json.exclude = ['src/**/*.spec.ts', 'src/**/*.test.ts'];
+    return json;
+  });
+}
 
 /**
  * Read the parent library's published package name (e.g. `@bespunky/angular-zen`) from its
