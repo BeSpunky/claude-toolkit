@@ -9,13 +9,15 @@
 // ng-packagr auto-discovers nested `ng-package.json` files by filesystem scan, so the new
 // entry becomes the `<package>/<name>` deep-import subpath with no extra registration.
 //
-// LINKING MODEL (the suite's one decision that shapes this generator):
-//   The BeSpunky suite links in-repo via package-manager WORKSPACES + project references —
-//   NOT `tsconfig.base.json` path aliases. The published package's subpath export resolves
-//   the deep import; in-repo it resolves via the package symlink's subpath. Therefore, if the
-//   delegated @nx/angular generator adds a `tsconfig.base.json` `paths` entry for the new
-//   subpath, this generator STRIPS it (see stripTsConfigPath) so the two linking models don't
-//   coexist and fight. We deliberately do NOT add any path alias of our own.
+// LINKING MODEL (DECIDED 2026-06-22 — the suite's one decision that shapes this generator):
+//   The BeSpunky suite links in-repo via `tsconfig.base.json` PATH ALIASES, NOT package-manager
+//   workspaces + project references. The deep import `@bespunky/<lib>/<subpath>` resolves through
+//   the `compilerOptions.paths` entry that the delegated @nx/angular generator (via addPathMapping)
+//   writes for the new subpath. That alias is therefore the ONLY in-repo resolution channel for the
+//   entry — so we KEEP it. (An earlier revision stripped it under a stale workspaces+references
+//   assumption; that strip step is now gone.) Deleting it would break editor/type resolution of the
+//   deep import by construction (ts(2307)). We deliberately do NOT add an alias of our own — the
+//   base generator's addPathMapping already wrote the correct one.
 //
 // This generator is a content-agnostic entry creator. It delegates the structural work to
 // @nx/angular's `librarySecondaryEntryPointGenerator`, then normalizes the result and (only on
@@ -74,25 +76,23 @@ export async function secondaryEntrypointGenerator(
     skipModule: true,
   });
 
-  // 1b) RESET the parent lib's tsconfig.lib.json include/exclude to the sane root-entry shape.
+  // 1b) RESET the parent lib's tsconfig.lib.json include/exclude to the bounded house shape.
   //     The delegated @nx/angular generator APPENDS the new entry's deep glob to these arrays on
   //     every run — and (observed on @nx/angular 23.1) cumulatively/cartesian: N secondary entries
   //     explode into thousands of globs (a multi-MB tsconfig), which TS then compiles into a regex
   //     past V8's nesting limit ("error TS500: Invalid regular expression", the ng-packagr build
-  //     dies — worst on 4-segment-deep entries like `router-x/navigation/zod`). ng-packagr discovers
-  //     secondary entries via their own nested ng-package.json, so the ROOT tsconfig only needs the
-  //     root entry's src. Resetting here makes the generator idempotent and bloat-proof.
+  //     dies — worst on 4-segment-deep entries like `router-x/navigation/zod`). We replace that
+  //     growing list with a FIXED-SIZE pair of globs that still covers the primary src AND every
+  //     secondary-entry src (so the editor can resolve `@bespunky/*` on the PATHS model — see
+  //     resetLibTsConfig). Resetting here makes the generator idempotent and bloat-proof.
   resetLibTsConfig(tree, libraryRoot);
 
   const entryRoot = joinPathFragments(libraryRoot, options.name);
 
-  // 2) STRIP the tsconfig.base.json path alias if the base generator added one.
-  //    See the LINKING MODEL note at the top of this file.
-  // ASSUMPTION (verify in Docker): whether @nx/angular 23.1's secondary-entry-point generator
-  //    writes a `tsconfig.base.json` `paths` entry at all. Older lines did; recent Nx (Project
-  //    Crystal / TS-solution setups) may not, or may write to a different tsconfig. This strip
-  //    is defensive and idempotent — it's a no-op when no such entry exists.
-  stripTsConfigPath(tree, packageName, options.name);
+  // 2) KEEP the tsconfig.base.json path alias the base generator added for the new subpath.
+  //    See the LINKING MODEL note at the top of this file: on the PATHS model that
+  //    `@bespunky/<lib>/<subpath>` alias is the ONLY in-repo resolution channel for the deep
+  //    import, so deleting it would break type resolution (ts(2307)). We deliberately leave it.
 
   // 3) Normalize the nested ng-package.json to the house shape. ng-packagr accepts `{}` for a
   //    secondary entry, but we keep the explicit entryFile so the contract is visible and stable
@@ -155,18 +155,35 @@ export async function secondaryEntrypointGenerator(
 export default secondaryEntrypointGenerator;
 
 /**
- * Reset the parent library's tsconfig.lib.json include/exclude to the canonical root-entry shape.
+ * Reset the parent library's tsconfig.lib.json include/exclude to the canonical BOUNDED shape.
  * See the call site (step 1b): the delegated secondary-entry generator bloats these arrays
  * cartesian-style across runs, eventually producing a multi-MB tsconfig whose globs compile to a
- * regex past V8's nesting limit. ng-packagr builds secondary entries via their own ng-package.json,
- * so the root tsconfig only needs `src/**` (the root entry). No-op when the file is absent.
+ * regex past V8's nesting limit. We defeat that bloat by RESETTING to a fixed-size glob set on
+ * every run — but the set must still cover every source the editor needs to type-check.
+ *
+ * The two include globs are deliberate and fixed-size (no per-entry accumulation, so they can NOT
+ * reintroduce the cartesian TS500 bloat):
+ *   - `src/**\/*.ts`     → the PRIMARY entry's sources (the root `src/`).
+ *   - `**\/src/**\/*.ts` → EVERY secondary-entry's sources, which sit in their OWN `src/` beside the
+ *                          primary one (e.g. `reactive-input/shared/src/`, `router-x/navigation/src/`).
+ * Without the second glob those nested sources fall outside the lib's TS project, so the editor
+ * can't resolve `@bespunky/*` imports inside them → ts(2307). On the PATHS linking model that is a
+ * broken link, so the bounded include is what makes a multi-entry lib editor-correct. No-op when
+ * the file is absent.
  */
 function resetLibTsConfig(tree: Tree, libraryRoot: string): void {
   const tsLibPath = joinPathFragments(libraryRoot, 'tsconfig.lib.json');
   if (!tree.exists(tsLibPath)) return;
   updateJson(tree, tsLibPath, (json) => {
-    json.include = ['src/**/*.ts'];
-    json.exclude = ['src/**/*.spec.ts', 'src/**/*.test.ts'];
+    json.include = ['src/**/*.ts', '**/src/**/*.ts'];
+    json.exclude = [
+      'src/**/*.spec.ts',
+      '**/src/**/*.spec.ts',
+      'src/**/*.test.ts',
+      '**/src/**/*.test.ts',
+      '**/*.stories.ts',
+      '**/storybook/**',
+    ];
     return json;
   });
 }
@@ -198,33 +215,4 @@ function assertLibraryGeneratedByNx(library: string): void {
       `(or the house \`publishable-lib\` generator). The entry was still created, but verify ` +
       `the library is publishable.`
   );
-}
-
-/**
- * Remove the `tsconfig.base.json` `paths` entry for `<packageName>/<entryName>` if the delegated
- * generator added one. The suite links via workspaces + project references, so a path alias here
- * would be a competing (and stale) resolution mechanism. Idempotent and shape-tolerant: a no-op
- * when there is no `tsconfig.base.json`, no `compilerOptions.paths`, or no matching key.
- *
- * ASSUMPTION (verify in Docker): the alias key the base generator would write is exactly
- *   `<packageName>/<entryName>`. If @nx/angular 23.1 doesn't add a path at all (likely on a
- *   TS-solution / Project-Crystal workspace), this function simply never finds a key to delete.
- */
-function stripTsConfigPath(tree: Tree, packageName: string, entryName: string): void {
-  const tsConfigPath = 'tsconfig.base.json';
-  if (!tree.exists(tsConfigPath)) return;
-
-  const aliasKey = `${packageName}/${entryName}`;
-  updateJson(tree, tsConfigPath, (json) => {
-    const paths = json?.compilerOptions?.paths as Record<string, unknown> | undefined;
-    if (paths && Object.prototype.hasOwnProperty.call(paths, aliasKey)) {
-      delete paths[aliasKey];
-      logger.info(
-        `[secondary-entrypoint] Removed the \`${aliasKey}\` tsconfig.base.json path alias added ` +
-          `by the base generator. The suite links via workspaces + project references; the deep ` +
-          `import resolves through the package's subpath export, not a tsconfig path.`
-      );
-    }
-    return json;
-  });
 }
