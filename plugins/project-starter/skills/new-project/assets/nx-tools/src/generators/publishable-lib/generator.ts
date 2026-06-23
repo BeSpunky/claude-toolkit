@@ -17,7 +17,10 @@
 //   5. Author the workspaces+references links: add any --workspaceDeps as `workspace:*` deps to
 //      the lib's own package.json, and add a `{ path: ./<directory> }` entry to the ROOT
 //      tsconfig.json references[] (NOT tsconfig.base.json — base holds compilerOptions only).
-//   6. Return an installPackagesTask callback so the workspace re-links after generation.
+//   6. Mark TEST-ONLY peers (vitest, …) `{ optional: true }` in peerDependenciesMeta on the lib's
+//      own package.json, so consumers don't get unmet-peer warnings for a test framework the base
+//      generator declared as a hard peerDependency but they never run.
+//   7. Return an installPackagesTask callback so the workspace re-links after generation.
 //
 // Linking model (DECIDED 2026-06-22): Nx package-manager workspaces (`workspace:*`) + TS project
 // references, NOT tsconfig.base.json path aliases. The generator authors per-lib deps + the root
@@ -40,6 +43,13 @@ import type { PublishableLibGeneratorSchema } from './schema';
 // The npm scope every BeSpunky package lives under. Used to build the default importPath
 // and to expand --workspaceDeps short names into scoped package names.
 const SCOPE = '@bespunky';
+
+// Test-only peers the base @nx generators declare as HARD peerDependencies (the chosen
+// unitTestRunner pulls these in). A consumer of the published library never runs its tests, so a
+// hard peer here yields a bogus unmet-peer warning for every consumer. We mark each one
+// `{ optional: true }` via peerDependenciesMeta — the shape @bespunky/angular-zen already uses.
+// Extend this set if a future runner adds more test-framework peers.
+const TEST_ONLY_PEERS = ['vitest'];
 
 export default async function publishableLibGenerator(
   tree: Tree,
@@ -135,11 +145,15 @@ export default async function publishableLibGenerator(
   }
   addRootTsConfigReference(tree, projectRoot);
 
+  // 6) Mark test-only peers (vitest, …) optional so consumers don't get unmet-peer warnings for
+  //    a test framework they never run. The base generator emits these as HARD peerDependencies.
+  markTestPeersOptional(tree, projectRoot);
+
   if (!skipFormat) {
     await formatFiles(tree);
   }
 
-  // 6) Re-link the workspace after generation. `true` runs the install always (not just on a
+  // 7) Re-link the workspace after generation. `true` runs the install always (not just on a
   //    package.json change) so the new `workspace:*` symlinks are created.
   return () => installPackagesTask(tree, true);
 }
@@ -248,6 +262,44 @@ function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[]): void
       dependencies[scoped] ??= 'workspace:*';
     }
     json.dependencies = dependencies;
+    return json;
+  });
+}
+
+/**
+ * Mark every TEST-ONLY peer (see `TEST_ONLY_PEERS`) the base generator declared as a hard
+ * `peerDependency` as `{ optional: true }` in the lib's `peerDependenciesMeta` — the shape
+ * `@bespunky/angular-zen` already uses. Without this, every consumer of the published library
+ * gets a bogus unmet-peer warning for a test framework it never runs.
+ *
+ * Only marks peers that are ACTUALLY declared (so we never invent a meta entry for a runner the
+ * lib doesn't use), and never clobbers an existing `peerDependenciesMeta` entry. No-ops cleanly
+ * when the lib has no package.json or declares none of the test-only peers.
+ */
+function markTestPeersOptional(tree: Tree, projectRoot: string): void {
+  const pkgPath = `${projectRoot}/package.json`;
+  if (!tree.exists(pkgPath)) {
+    logger.warn(
+      `[publishable-lib] No package.json at ${pkgPath} — skipped marking test-only peers ` +
+      `optional. Verify the base generator emitted a lib package.json.`
+    );
+    return;
+  }
+
+  updateJson(tree, pkgPath, (json: Record<string, unknown>) => {
+    const peerDependencies = (json.peerDependencies as Record<string, string>) ?? {};
+    const declaredTestPeers = TEST_ONLY_PEERS.filter((peer) => peer in peerDependencies);
+    if (declaredTestPeers.length === 0) {
+      return json;
+    }
+
+    const peerDependenciesMeta = {
+      ...((json.peerDependenciesMeta as Record<string, { optional?: boolean }>) ?? {}),
+    };
+    for (const peer of declaredTestPeers) {
+      peerDependenciesMeta[peer] = { ...peerDependenciesMeta[peer], optional: true };
+    }
+    json.peerDependenciesMeta = peerDependenciesMeta;
     return json;
   });
 }
