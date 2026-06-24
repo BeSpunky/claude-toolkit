@@ -18,8 +18,9 @@ export interface PublishableLibGeneratorSchema {
   /** Comma-separated Nx tags applied to the library. */
   tags?: string;
   /**
-   * Sibling @bespunky package names to add to this lib's own package.json as
-   * `"@bespunky/<dep>": "workspace:*"` dependencies (the workspaces+references linking model).
+   * Sibling @bespunky package names to declare as cross-lib deps on this lib's own package.json,
+   * as real caret ranges (`"@bespunky/<dep>": "^<sibling version>"`). The published-consumer
+   * contract only — in-repo resolution is the tsconfig.base.json path alias; never `workspace:*`.
    */
   workspaceDeps?: string[];
   /** Skip running formatFiles at the end. Default false. */

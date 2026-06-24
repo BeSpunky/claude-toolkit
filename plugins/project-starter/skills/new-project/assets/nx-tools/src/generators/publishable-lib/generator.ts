@@ -2,7 +2,8 @@
 //
 // Delegate-then-post-process (the xpand design-system-library idiom, stripped of every
 // design-system specific — no storybook, tailwind, styleIncludePaths, sass exports, file: deps):
-//   1. Delegate the actual library scaffold to the appropriate base generator:
+//   1. Delegate the actual library scaffold to the appropriate base generator (which, via
+//      addPathMapping, writes the lib's `tsconfig.base.json` path alias — the in-repo channel):
 //        - Angular (default) → `@nx/angular/generators` libraryGenerator with
 //          publishable+buildable+standalone+skipModule, Vitest, eslint, strict.
 //        - --nonAngular      → `@nx/js` libraryGenerator with bundler `tsc` (plain-TS leaves
@@ -14,17 +15,22 @@
 //      nx.json and is Foundation's job — this generator NEVER touches nx.json.
 //   4. (Angular only) Normalize the root ng-package.json to the modern nested-entrypoint shape:
 //      { $schema, dest: <relative-to-dist>, lib: { entryFile: 'src/index.ts' } }, no umdModuleIds.
-//   5. Author the workspaces+references links: add any --workspaceDeps as `workspace:*` deps to
-//      the lib's own package.json, and add a `{ path: ./<directory> }` entry to the ROOT
-//      tsconfig.json references[] (NOT tsconfig.base.json — base holds compilerOptions only).
+//   5. Declare the published-consumer cross-lib deps: add any --workspaceDeps to the lib's own
+//      package.json as REAL caret ranges (`^<sibling's current version>`, read from the sibling's
+//      package.json in the tree). These are the publish contract only — in-repo resolution is the
+//      tsconfig.base.json path alias the base generator already wrote (we never touch that). NO
+//      `workspace:*`, and NO root tsconfig.json reference: the paths model uses neither.
 //   6. Mark TEST-ONLY peers (vitest, …) `{ optional: true }` in peerDependenciesMeta on the lib's
 //      own package.json, so consumers don't get unmet-peer warnings for a test framework the base
 //      generator declared as a hard peerDependency but they never run.
-//   7. Return an installPackagesTask callback so the workspace re-links after generation.
+//   7. Return an installPackagesTask callback so the workspace re-installs after generation.
 //
-// Linking model (DECIDED 2026-06-22): Nx package-manager workspaces (`workspace:*`) + TS project
-// references, NOT tsconfig.base.json path aliases. The generator authors per-lib deps + the root
-// references entry; `nx sync` maintains the rest.
+// Linking model (DECIDED 2026-06-22): the suite links in-repo via `tsconfig.base.json` PATH
+// ALIASES — NOT Nx package-manager workspaces (`workspace:*`) or TS project references. The base
+// generator's addPathMapping writes that alias (the only in-repo resolution channel); we leave it
+// untouched. Cross-lib deps are declared on the lib's own package.json as REAL version ranges
+// (`^<sibling version>`) purely as the published-consumer contract — `nx release` with
+// `updateDependents:auto` then maintains those ranges on publish.
 import {
   type Tree,
   type GeneratorCallback,
@@ -43,6 +49,11 @@ import type { PublishableLibGeneratorSchema } from './schema';
 // The npm scope every BeSpunky package lives under. Used to build the default importPath
 // and to expand --workspaceDeps short names into scoped package names.
 const SCOPE = '@bespunky';
+
+// Where a sibling lib lives in the workspace, given its short name. Mirrors the `directory`
+// default (`packages/<name>`); used to read the sibling's current version when declaring it as a
+// cross-lib dependency range.
+const siblingPackageJsonPath = (shortName: string): string => `packages/${shortName}/package.json`;
 
 // Test-only peers the base @nx generators declare as HARD peerDependencies (the chosen
 // unitTestRunner pulls these in). A consumer of the published library never runs its tests, so a
@@ -138,12 +149,12 @@ export default async function publishableLibGenerator(
     normalizeRootNgPackage(tree, projectRoot);
   }
 
-  // 5) Linking model: workspace:* sibling deps on the lib's own package.json + the root
-  //    tsconfig references entry.
+  // 5) Declare any cross-lib deps on the lib's own package.json as REAL caret ranges (the
+  //    published-consumer contract). In-repo resolution is the tsconfig.base.json path alias the
+  //    base generator already wrote — there is no root tsconfig.json / project-references step.
   if (options.workspaceDeps?.length) {
     addWorkspaceDeps(tree, projectRoot, options.workspaceDeps);
   }
-  addRootTsConfigReference(tree, projectRoot);
 
   // 6) Mark test-only peers (vitest, …) optional so consumers don't get unmet-peer warnings for
   //    a test framework they never run. The base generator emits these as HARD peerDependencies.
@@ -153,8 +164,9 @@ export default async function publishableLibGenerator(
     await formatFiles(tree);
   }
 
-  // 7) Re-link the workspace after generation. `true` runs the install always (not just on a
-  //    package.json change) so the new `workspace:*` symlinks are created.
+  // 7) Re-install after generation. `true` runs the install always (not just on a package.json
+  //    change) so the new lib's runtime deps are resolved into node_modules. (In-repo linking is
+  //    the tsconfig.base.json path alias — there are no `workspace:*` symlinks to create.)
   return () => installPackagesTask(tree, true);
 }
 
@@ -241,9 +253,18 @@ function normalizeRootNgPackage(tree: Tree, projectRoot: string): void {
 }
 
 /**
- * Add each sibling package as a `"@bespunky/<dep>": "workspace:*"` dependency on the library's OWN
- * package.json (the workspaces linking model). Idempotent: never overwrites an existing entry.
- * Accepts short names (`rxjs`) — scoped names (`@bespunky/rxjs`) are also tolerated.
+ * Declare each sibling package as a cross-lib dependency on the library's OWN package.json, as a
+ * REAL caret range (`"@bespunky/<dep>": "^<sibling's current version>"`). This is the
+ * published-consumer contract only — in-repo resolution is the tsconfig.base.json path alias the
+ * base generator already wrote. On publish, `nx release` (`updateDependents:auto`) maintains the
+ * range. NO `workspace:*` is ever emitted (yarn-1 rejects it under `nx release publish`).
+ *
+ * The sibling's version is read from its own package.json in the tree (`packages/<dep>/package.json`).
+ * When the sibling isn't in the tree (its package.json is missing or carries no version), we fall
+ * back to `^0.0.1` and warn, rather than crash — the coordinator can correct the range later.
+ *
+ * Idempotent: never overwrites an existing entry. Accepts short names (`rxjs`); scoped names
+ * (`@bespunky/rxjs`) are also tolerated (the short name is recovered for the version lookup).
  */
 function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[]): void {
   const pkgPath = `${projectRoot}/package.json`;
@@ -258,12 +279,34 @@ function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[]): void
   updateJson(tree, pkgPath, (json: Record<string, unknown>) => {
     const dependencies = { ...((json.dependencies as Record<string, string>) ?? {}) };
     for (const dep of deps) {
-      const scoped = dep.startsWith(`${SCOPE}/`) ? dep : `${SCOPE}/${dep}`;
-      dependencies[scoped] ??= 'workspace:*';
+      const shortName = dep.startsWith(`${SCOPE}/`) ? dep.slice(SCOPE.length + 1) : dep;
+      const scoped    = `${SCOPE}/${shortName}`;
+      dependencies[scoped] ??= `^${siblingVersion(tree, shortName)}`;
     }
     json.dependencies = dependencies;
     return json;
   });
+}
+
+/**
+ * Read a sibling lib's current `version` from its package.json in the tree (the value a caret range
+ * pins against). Falls back to `0.0.1` (and warns) when the sibling's package.json is absent or
+ * declares no version — the cross-lib dep is still declared, just against a maiden-version baseline.
+ */
+function siblingVersion(tree: Tree, shortName: string): string {
+  const siblingPath = siblingPackageJsonPath(shortName);
+  if (tree.exists(siblingPath)) {
+    const version = readJson<Record<string, unknown>>(tree, siblingPath).version;
+    if (typeof version === 'string' && version.length > 0) {
+      return version;
+    }
+  }
+
+  logger.warn(
+    `[publishable-lib] Could not read a version for sibling "${SCOPE}/${shortName}" at ${siblingPath} — ` +
+    `declared the cross-lib dependency as "^0.0.1". Adjust the range once the sibling exists.`
+  );
+  return '0.0.1';
 }
 
 /**
@@ -300,37 +343,6 @@ function markTestPeersOptional(tree: Tree, projectRoot: string): void {
       peerDependenciesMeta[peer] = { ...peerDependenciesMeta[peer], optional: true };
     }
     json.peerDependenciesMeta = peerDependenciesMeta;
-    return json;
-  });
-}
-
-/**
- * Add `{ "path": "./<projectRoot>" }` to the ROOT tsconfig.json `references[]` (NOT
- * tsconfig.base.json — base holds compilerOptions only). Creates the array if missing; idempotent
- * (won't duplicate an existing reference to the same path). Tolerates the `./`-prefixed or bare
- * form already present.
- */
-function addRootTsConfigReference(tree: Tree, projectRoot: string): void {
-  const rootTsConfigPath = 'tsconfig.json';
-  if (!tree.exists(rootTsConfigPath)) {
-    logger.warn(
-      `[publishable-lib] No root tsconfig.json found — skipped adding a project reference for ` +
-      `${projectRoot}. The workspaces+references linking model expects one at the workspace root.`
-    );
-    return;
-  }
-
-  const refPath = `./${projectRoot}`;
-  updateJson(tree, rootTsConfigPath, (json: Record<string, unknown>) => {
-    const references = Array.isArray(json.references)
-      ? (json.references as Array<{ path?: string }>)
-      : [];
-    const normalize = (p?: string) => (p ?? '').replace(/^\.\//, '').replace(/\/$/, '');
-    const already = references.some((ref) => normalize(ref?.path) === normalize(refPath));
-    if (!already) {
-      references.push({ path: refPath });
-    }
-    json.references = references;
     return json;
   });
 }
