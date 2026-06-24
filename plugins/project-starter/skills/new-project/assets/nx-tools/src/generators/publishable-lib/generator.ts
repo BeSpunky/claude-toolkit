@@ -20,6 +20,9 @@
 //      package.json in the tree). These are the publish contract only — in-repo resolution is the
 //      tsconfig.base.json path alias the base generator already wrote (we never touch that). NO
 //      `workspace:*`, and NO root tsconfig.json reference: the paths model uses neither.
+//      (Angular libs ALSO list each cross-lib dep in ng-package.json `allowedNonPeerDependencies` —
+//      ng-packagr HARD-FAILS the build on any `dependencies` entry that is neither a peerDependency
+//      nor explicitly allowed there. Mirrors the house convention, e.g. @bespunky/angular-cdk.)
 //   6. Mark TEST-ONLY peers (vitest, …) `{ optional: true }` in peerDependenciesMeta on the lib's
 //      own package.json, so consumers don't get unmet-peer warnings for a test framework the base
 //      generator declared as a hard peerDependency but they never run.
@@ -153,7 +156,7 @@ export default async function publishableLibGenerator(
   //    published-consumer contract). In-repo resolution is the tsconfig.base.json path alias the
   //    base generator already wrote — there is no root tsconfig.json / project-references step.
   if (options.workspaceDeps?.length) {
-    addWorkspaceDeps(tree, projectRoot, options.workspaceDeps);
+    addWorkspaceDeps(tree, projectRoot, options.workspaceDeps, nonAngular);
   }
 
   // 6) Mark test-only peers (vitest, …) optional so consumers don't get unmet-peer warnings for
@@ -266,7 +269,7 @@ function normalizeRootNgPackage(tree: Tree, projectRoot: string): void {
  * Idempotent: never overwrites an existing entry. Accepts short names (`rxjs`); scoped names
  * (`@bespunky/rxjs`) are also tolerated (the short name is recovered for the version lookup).
  */
-function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[]): void {
+function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[], nonAngular: boolean): void {
   const pkgPath = `${projectRoot}/package.json`;
   if (!tree.exists(pkgPath)) {
     logger.warn(
@@ -276,14 +279,52 @@ function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[]): void
     return;
   }
 
+  const scopedNames: string[] = [];
   updateJson(tree, pkgPath, (json: Record<string, unknown>) => {
     const dependencies = { ...((json.dependencies as Record<string, string>) ?? {}) };
     for (const dep of deps) {
       const shortName = dep.startsWith(`${SCOPE}/`) ? dep.slice(SCOPE.length + 1) : dep;
       const scoped    = `${SCOPE}/${shortName}`;
       dependencies[scoped] ??= `^${siblingVersion(tree, shortName)}`;
+      scopedNames.push(scoped);
     }
     json.dependencies = dependencies;
+    return json;
+  });
+
+  // Angular libs only: ng-packagr HARD-FAILS the build on any `dependencies` entry that is neither
+  // a peerDependency nor listed in ng-package.json `allowedNonPeerDependencies` ("Dependency X must
+  // be explicitly allowed…"). Allowlist each cross-lib dep so a generated lib actually builds —
+  // mirroring the house convention (@bespunky/angular-cdk lists its @bespunky deps there).
+  // Non-Angular @nx/js libs have no ng-package.json and no such rule.
+  if (!nonAngular) {
+    allowNonPeerDeps(tree, projectRoot, scopedNames);
+  }
+}
+
+/**
+ * Add each scoped dependency to the Angular library's ng-package.json `allowedNonPeerDependencies`
+ * (ng-packagr's escape hatch for `dependencies` that aren't peerDependencies). Creates the array if
+ * absent, de-duplicates, and preserves any entries already there (e.g. `zod`, `vitest`). Warns —
+ * rather than crashing — if no ng-package.json was emitted (an Angular build would then reject the
+ * deps, but the generator shouldn't be the thing that throws).
+ */
+function allowNonPeerDeps(tree: Tree, projectRoot: string, scopedDeps: string[]): void {
+  const ngPackagePath = `${projectRoot}/ng-package.json`;
+  if (!tree.exists(ngPackagePath)) {
+    logger.warn(
+      `[publishable-lib] No ng-package.json at ${ngPackagePath} — could not allow non-peer deps ` +
+      `(${scopedDeps.join(', ')}); an Angular build will reject them. Verify the publishable Angular output.`
+    );
+    return;
+  }
+
+  updateJson(tree, ngPackagePath, (json: Record<string, unknown>) => {
+    const allowed = new Set<string>([
+      ...((json.allowedNonPeerDependencies as string[]) ?? []),
+      ...scopedDeps,
+    ]);
+    json.allowedNonPeerDependencies = [...allowed];
     return json;
   });
 }
