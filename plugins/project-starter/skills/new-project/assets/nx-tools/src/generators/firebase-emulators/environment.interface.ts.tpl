@@ -1,8 +1,6 @@
 // Shape every environment file must satisfy. Kept as a real interface (not
-// inferred from one file) so TypeScript sees the same widened types in both
-// environment.ts and environment.prod.ts — no "literal `false` makes this
-// branch unreachable" warnings in firebase.config.ts, and adding a new
-// `environment.staging.ts` later is a one-line change.
+// inferred from one file) so TypeScript sees the same widened types in
+// environment.ts, environment.no-emulators.ts and environment.prod.ts.
 //
 // `authDomain` is required for any OAuth provider sign-in (popup and redirect
 // both refuse to run without it — including against the Auth emulator). It's
@@ -10,16 +8,18 @@
 // compiling across `--repair`; every generated file fills it in.
 //
 // `messagingSenderId` / `vapidKey` are only needed for FCM web push — add them
-// to environment.prod.ts (from `firebase apps:sdkconfig`) when the app uses it.
+// to the real-project environment files (from `firebase apps:sdkconfig`) when used.
 //
-// `emulators` is OPTIONAL. The production environment omits it entirely —
-// emulator endpoints have no meaning in prod, and any string/number literals
-// inside the `environment` const get baked into the prod bundle as data
-// (DCE strips dead code paths, not unreachable property values on a live
-// object), so carrying them would leak local dev addresses into shipped
-// artifacts. firebase.config.ts narrows the optional behind
-// `if (!environment.production && environment.emulators) { ... }` so the
-// access is type-safe and only the dev bundle ever sees the property.
+// `emulators` is PER-SERVICE and the whole block is OPTIONAL (environment.prod.ts
+// and environment.no-emulators.ts omit it → every service talks to the real backend).
+// Each service that CAN be emulated carries its local endpoint AND its committed
+// `default` (whether it's emulated out of the box). The endpoint is always present
+// even when `default` is false, so a runtime `?emulate=<service>` override can turn
+// it on too. firebase.config.ts resolves `default ⊕ runtime-override` (see
+// src/app/emulator-overrides.ts) and connects each service to its emulator only when
+// the result is ON — and only in dev. A service that resolves OFF (or has no entry
+// here) uses the real project in `firebase`, so fill that with real/STAGING
+// credentials before turning one off.
 export interface Environment {
   production: boolean;
   firebase: {
@@ -31,9 +31,9 @@ export interface Environment {
     vapidKey?: string;
   };
   emulators?: {
-    auth: string;
-    firestore: { host: string; port: number };
-    storage: { host: string; port: number };
-    functions: { host: string; port: number };
+    auth?: { url: string; default: boolean };
+    firestore?: { host: string; port: number; default: boolean };
+    storage?: { host: string; port: number; default: boolean };
+    functions?: { host: string; port: number; default: boolean };
   };
 }

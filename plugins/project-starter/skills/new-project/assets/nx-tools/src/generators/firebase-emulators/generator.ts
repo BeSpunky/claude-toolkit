@@ -27,8 +27,14 @@
 //                        `serve` + `firebase:emulators` pair into a redrawing multi-pane terminal
 //                        that's awkward for humans and agents alike; plain streamed, prefixed logs
 //                        and a single Ctrl+C are the right dev loop here.
-//   - apps/<project>/src/environments/* — Angular environment-files pattern (see section 2).
-//   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase() (see section 2b).
+//   - apps/<project>/src/environments/* — Angular environment-files pattern (see section 2):
+//                        environment.ts (per-service emulator toggle via the EMULATE map),
+//                        environment.no-emulators.ts (no emulators — served by serve-no-emulators),
+//                        environment.prod.ts, environment.interface.ts.
+//   - apps/<project>/src/app/firebase.config.ts — provideAppFirebase(), gating EACH service on
+//                        committed-default ⊕ runtime-override (see section 2b).
+//   - apps/<project>/src/app/emulator-overrides.ts — the per-session ?emulate=/?real=/localStorage
+//                        resolver firebase.config.ts applies (generator-owned).
 //   - apps/functions/   — Cloud Functions as a first-class Nx app: esbuild-bundled to
 //                        dist/apps/functions with a generated deploy-manifest package.json;
 //                        runtime deps (firebase-admin/firebase-functions) live at the WORKSPACE
@@ -57,15 +63,18 @@
 //                        are ACTUALLY free (SIGTERM → grace → SIGKILL), so an ungraceful prior
 //                        death (closed terminal, container stop, SIGKILL) can't break the next start.
 //   - tools/firebase-welcome.sh — self-extinguishing cloud-linkage banner (see section 3a).
-//   - apps/<project>/project.json targets:
-//       * `serve`     — an nx:run-commands orchestrator running `firebase:emulators` and
-//                       `<project>:serve-app` in parallel. One command, one Ctrl+C, and
-//                       `serve-app` stays runnable ALONE (emulator-free — e.g. an offline
-//                       configuration). This replaced the earlier `serve.dependsOn=['emulators']`
-//                       continuous-task wiring: with the suite extracted to the workspace-level
-//                       `firebase` project, the orchestrator is the battle-tested shape (and the
-//                       generator self-heals the dependsOn form into it).
-//       * `serve-app` — the real Angular dev-server target.
+//   - apps/<project>/project.json targets (TWO serve modes — local dev is not forced through emulators):
+//       * `serve`              — an nx:run-commands orchestrator running `firebase:emulators` and
+//                                `<project>:serve-no-emulators` in parallel. One command, one Ctrl+C —
+//                                the full local Firebase stack (the default `nx serve <app>`). This
+//                                replaced the earlier `serve.dependsOn=['emulators']` continuous-task
+//                                wiring: with the suite extracted to the workspace-level `firebase`
+//                                project, the orchestrator is the battle-tested shape (and the
+//                                generator self-heals the dependsOn form into it).
+//       * `serve-no-emulators` — the app dev-server ALONE, no emulators (`nx run <app>:serve-no-emulators`):
+//                                the first-class emulator-free serve, composed by the orchestrator
+//                                above (single dev-server definition). Renamed from the prior
+//                                `serve-app`/`serve-standalone`.
 //   - root eslint.config.mjs — best-effort insertion of the `platform:` dependency-constraint
 //                       firewall: `platform:web` bans firebase-admin/firebase-functions imports,
 //                       `platform:server` bans firebase/@angular. The app is tagged platform:web,
@@ -193,27 +202,58 @@ export default async function firebaseEmulatorsGenerator(
     });
   }
 
-  // 2) Environment files — Angular's canonical environments pattern.
-  //    - `environment.interface.ts` is the shared shape (always rewrite — generator-owned,
-  //      no user values inside).
-  //    - `environment.ts` is the dev/emulator default (only write if absent — preserves any
-  //      user-customized emulator endpoints across re-runs).
-  //    - `environment.prod.ts` is the production target (only write if absent — preserves the
-  //      user's real Firebase web config across re-runs). If the project still has a legacy
-  //      firebase.config.ts with a non-empty `productionFirebaseConfig`, we migrate those
-  //      values into the new environment.prod.ts before writing it, so `--repair --firebase`
-  //      against an old project doesn't drop a real production config on the floor.
+  // 2) Environment files — Angular's environment-files pattern, per-service emulator-aware.
+  //    - `environment.interface.ts`  — shared shape (always rewrite — generator-owned, no user values).
+  //    - `environment.ts`            — dev defaults + the per-service emulator toggle (write if absent;
+  //                                    the legacy single-string-emulators shape is migrated to the new
+  //                                    per-service-`default` shape).
+  //    - `environment.no-emulators.ts` — the no-emulator dev env served by `serve-no-emulators` (write
+  //                                    if absent — carries the user's real/staging web config).
+  //    - `environment.prod.ts`       — production target (write if absent; legacy productionFirebaseConfig
+  //                                    is migrated in before writing).
   const envDir = `${appRoot}/src/environments`;
   const envInterfacePath = `${envDir}/environment.interface.ts`;
   const envDevPath = `${envDir}/environment.ts`;
+  const envNoEmulatorsPath = `${envDir}/environment.no-emulators.ts`;
   const envProdPath = `${envDir}/environment.prod.ts`;
   const firebaseConfigPath = `${appRoot}/src/app/firebase.config.ts`;
+  const emulatorOverridesPath = `${appRoot}/src/app/emulator-overrides.ts`;
 
   tree.write(envInterfacePath, template('environment.interface.ts.tpl'));
 
-  if (!tree.exists(envDevPath)) {
+  // environment.ts — write if absent; migrate the LEGACY emulators shape (each service was a bare
+  // endpoint with no per-service `default`) to the new per-service-toggle shape. The dev env carries
+  // demo credentials (regenerated identically), so the rewrite is safe; warn in case the user
+  // customized emulator ports there.
+  const existingDevEnv = tree.exists(envDevPath) ? tree.read(envDevPath, 'utf8') ?? '' : null;
+  const devEnvIsLegacy =
+    existingDevEnv !== null && existingDevEnv.includes('emulators') && !existingDevEnv.includes('default:');
+  if (existingDevEnv === null || devEnvIsLegacy) {
+    if (devEnvIsLegacy) {
+      logger.info(
+        `[firebase-emulators] Upgrading ${envDevPath} to the per-service emulator-toggle shape ` +
+        `(each emulator now carries a \`default\` flag, toggled by the EMULATE map). Re-check any custom ` +
+        `emulator ports you set there.`
+      );
+    }
     tree.write(envDevPath, substitute(template('environment.ts.tpl')));
   }
+
+  // environment.no-emulators.ts — the no-emulator dev env `serve-no-emulators` compiles. User-owned
+  // once written (their real/staging web config). First migrate the interim `environment.standalone.ts`
+  // name to it (preserving content), then write the default only if neither exists.
+  const envInterimStandalone = `${envDir}/environment.standalone.ts`;
+  if (tree.exists(envInterimStandalone) && !tree.exists(envNoEmulatorsPath)) {
+    tree.write(envNoEmulatorsPath, tree.read(envInterimStandalone, 'utf8') ?? '');
+    tree.delete(envInterimStandalone);
+  }
+  if (!tree.exists(envNoEmulatorsPath)) {
+    tree.write(envNoEmulatorsPath, template('environment.no-emulators.ts.tpl'));
+  }
+
+  // emulator-overrides.ts — the pure per-session override resolver (?emulate=/?real=/localStorage).
+  // Generator-owned glue, no user values — always rewritten so fixes propagate.
+  tree.write(emulatorOverridesPath, template('emulator-overrides.ts.tpl'));
 
   if (!tree.exists(envProdPath)) {
     // Migration: if the project still has the legacy firebase.config.ts shape
@@ -239,33 +279,36 @@ export default async function firebaseEmulatorsGenerator(
     );
   }
 
-  // 2b) src/app/firebase.config.ts — write whenever it's absent, and (re)write
-  //     when we detect the LEGACY ngDevMode-and-two-consts shape (so --repair
-  //     self-heals old projects into the environment-files shape). Once a file
-  //     is on the modern shape (i.e. it imports from '../environments/environment'),
-  //     leave it alone — the user may have added app-specific customizations
-  //     to providers (e.g. `initializeFirestore` options, extra `messagingSenderId`
-  //     fields, custom emulator wiring). Clobbering those silently every
-  //     `--repair --firebase` would burn users.
-  //
-  //     The "modern" detection is intentionally lenient: any file that already
-  //     imports the env via the canonical relative path counts as "user-owned
-  //     from here on" — even if the user has reshaped the providers list.
+  // 2b) src/app/firebase.config.ts — write whenever it's absent, and (re)write when we detect a
+  //     LEGACY shape, so --repair self-heals old projects:
+  //       - the ancient two-consts shape (pre environment-files), detected by its
+  //         `productionFirebaseConfig`/`emulatorFirebaseConfig` consts + no env import; OR
+  //       - any env-files shape behind the CURRENT one: the pre-per-service whole-block gate (no
+  //         `./emulator-overrides` import) OR a per-service file that predates the `ngDevMode`
+  //         tree-shaking gate (so emulator code would ship in prod).
+  //     A file that imports `./emulator-overrides` AND uses `ngDevMode` is current → left alone (the
+  //     user may have added provider customizations). NOTE: an upgrade rewrite DOES replace a
+  //     customized outdated file; we log a loud warning so it can be re-applied.
   const existingFirebaseConfig = tree.exists(firebaseConfigPath)
     ? tree.read(firebaseConfigPath, 'utf8') ?? ''
     : null;
-  const isLegacyShape =
+  const importsEnv =
+    existingFirebaseConfig !== null && existingFirebaseConfig.includes(`from '../environments/environment'`);
+  const importsOverrides = existingFirebaseConfig?.includes('./emulator-overrides') ?? false;
+  const usesNgDevMode = existingFirebaseConfig?.includes('ngDevMode') ?? false;
+  const isAncientShape =
     existingFirebaseConfig !== null &&
     (existingFirebaseConfig.includes('productionFirebaseConfig') ||
-      existingFirebaseConfig.includes('emulatorFirebaseConfig') ||
-      existingFirebaseConfig.includes('declare const ngDevMode')) &&
-    !existingFirebaseConfig.includes(`from '../environments/environment'`);
-  if (existingFirebaseConfig === null || isLegacyShape) {
-    if (isLegacyShape) {
+      existingFirebaseConfig.includes('emulatorFirebaseConfig')) &&
+    !importsEnv;
+  // Outdated env-files shape: missing the per-service resolver OR the ngDevMode prod-DCE gate.
+  const isOutdatedEnvShape = importsEnv && (!importsOverrides || !usesNgDevMode);
+  if (existingFirebaseConfig === null || isAncientShape || isOutdatedEnvShape) {
+    if (isAncientShape || isOutdatedEnvShape) {
       logger.info(
-        `[firebase-emulators] Rewriting ${firebaseConfigPath} from the legacy ngDevMode shape ` +
-        `to the environment-files shape. Any custom provider wiring in the legacy file is gone — ` +
-        `port it onto the new shape by hand if needed.`
+        `[firebase-emulators] Rewriting ${firebaseConfigPath} to the current per-service emulator shape ` +
+        `(per-service gating + the ngDevMode tree-shaking guard, so no emulator code ships in prod). Any ` +
+        `custom provider wiring in the old file is replaced — re-apply it onto the new shape by hand if needed.`
       );
     }
     tree.write(firebaseConfigPath, template('firebase.config.ts.tpl'));
@@ -322,39 +365,73 @@ export default async function firebaseEmulatorsGenerator(
   // The app is browser code — tag it so the platform firewall (4c) applies.
   ensureTag(project, 'platform:web');
 
-  // `serve` is an nx:run-commands ORCHESTRATOR running the `firebase:emulators` continuous
-  // task and the real dev-server (`serve-app`) in parallel: one command, one Ctrl+C, both
-  // lifecycles owned by the same Nx run — and `serve-app` stays independently runnable
-  // (emulator-free dev, e.g. an offline build configuration).
+  // Two serve targets, by design — so local dev is NOT forced through the emulators:
+  //   * `serve`              — an nx:run-commands ORCHESTRATOR running the `firebase:emulators`
+  //                            continuous task and the app dev-server (`serve-no-emulators`) in
+  //                            parallel: one command, one Ctrl+C, the full local Firebase stack.
+  //                            This is the default `nx serve <app>`.
+  //   * `serve-no-emulators` — the app dev-server ALONE, no emulators (host 0.0.0.0). The first-class
+  //                            "serve without emulators" target: `nx run <app>:serve-no-emulators`
+  //                            (e.g. against a real/staging backend, or pure UI work). It compiles
+  //                            `environment.no-emulators.ts` (no emulators block) by DEFAULT; the
+  //                            orchestrator runs the same target with `--configuration=development`
+  //                            (environment.ts, emulators). One dev-server definition, two build envs.
   //
   // Self-heals every earlier generation on --repair:
+  //   - legacy dev-server target names `serve-app` and `serve-standalone` → renamed to `serve-no-emulators`.
   //   - serve IS the dev-server (fresh scaffold, or the previous `dependsOn: ['emulators']`
-  //     wiring) → move it to `serve-app` (stripping the emulators dependsOn) and park the
+  //     wiring) → move it to `serve-no-emulators` (stripping the emulators dependsOn) and park the
   //     orchestrator at `serve`.
-  //   - serve is the ancient `firebase emulators:exec` wrapper around an existing `serve-app`
+  //   - serve is the ancient `firebase emulators:exec` wrapper around an existing dev-server
   //     → overwrite `serve` with the orchestrator.
   //   - already on the orchestrator shape → idempotent re-assert.
   const isRunCommands = (t?: TargetConfiguration) => t?.executor === 'nx:run-commands';
+  // Migrate the legacy dev-server target names to the public `serve-no-emulators` (carries host +
+  // options since it's the same object reference).
+  for (const legacy of ['serve-app', 'serve-standalone']) {
+    if (targets[legacy] && !targets['serve-no-emulators']) {
+      targets['serve-no-emulators'] = targets[legacy];
+      delete targets[legacy];
+    }
+  }
   if (targets.serve && !isRunCommands(targets.serve)) {
     stripEmulatorsDependsOn(targets.serve);
     targets.serve.continuous = true;
-    targets['serve-app'] = targets.serve;
-  } else if (targets['serve-app']) {
-    stripEmulatorsDependsOn(targets['serve-app']);
-    targets['serve-app'].continuous = true;
+    targets['serve-no-emulators'] = targets.serve;
+  } else if (targets['serve-no-emulators']) {
+    stripEmulatorsDependsOn(targets['serve-no-emulators']);
+    targets['serve-no-emulators'].continuous = true;
   }
-  if (targets['serve-app']) {
+  if (targets['serve-no-emulators']) {
+    // serve-no-emulators compiles the NO-emulator env (`build:no-emulators` → environment.no-emulators.ts)
+    // BY DEFAULT — so `nx run <app>:serve-no-emulators` never connects to emulators. The orchestrator
+    // runs the SAME target with the emulator env (`--configuration=development` → environment.ts). One
+    // dev-server target, two build envs selected by configuration (see the build configs in step 4b).
+    const noEmu = targets['serve-no-emulators'];
+    // Keep the upstream configs (development/production), drop the interim `standalone` name if we
+    // just migrated from serve-standalone, and (re)assert the `no-emulators` default configuration.
+    const keptConfigs = Object.fromEntries(
+      Object.entries(noEmu.configurations ?? {}).filter(([key]) => key !== 'standalone')
+    );
+    noEmu.configurations = {
+      ...keptConfigs,
+      'no-emulators': { buildTarget: `${projectName}:build:no-emulators` },
+    };
+    noEmu.defaultConfiguration = 'no-emulators';
     targets.serve = {
       continuous: true,
       executor: 'nx:run-commands',
       options: {
         parallel: true,
-        commands: ['nx run firebase:emulators', `nx run ${projectName}:serve-app`],
+        commands: [
+          'nx run firebase:emulators',
+          `nx run ${projectName}:serve-no-emulators --configuration=development`,
+        ],
       },
     };
   } else {
     logger.warn(
-      `[firebase-emulators] No dev-server target found on project \`${projectName}\` (neither \`serve\` nor \`serve-app\`) — ` +
+      `[firebase-emulators] No dev-server target found on project \`${projectName}\` (neither \`serve\` nor \`serve-no-emulators\`) — ` +
       `skipped wiring the serve orchestrator. Add a dev-server target, then re-run --repair --firebase.`
     );
   }
@@ -366,36 +443,48 @@ export default async function firebaseEmulatorsGenerator(
     delete targets[`emulators:${svc}`];
   }
 
-  // 4b) Register the environment-files fileReplacement on the production build
-  //     configuration. This is what makes the Angular build swap
-  //     `environment.ts` → `environment.prod.ts` when you run `nx build <app>`
-  //     (production is the default build configuration on the app target).
-  //
-  //     Idempotent: we only append the entry if it's not already in the list.
-  //     We touch `targets.build.configurations.production` exactly — never
-  //     `build.options` or other configurations — so a user who's added their
-  //     own staging configuration with their own fileReplacements is unaffected.
+  // 4b) Build configurations that select the environment file:
+  //     - `production`    swaps environment.ts → environment.prod.ts (the default `nx build <app>`).
+  //     - `no-emulators`  swaps environment.ts → environment.no-emulators.ts — the no-emulator env
+  //       `serve-no-emulators` compiles by default, so that target never wires emulators. It's derived
+  //       from the `development` configuration (inherits the dev build options — no hardcoding) plus
+  //       the no-emulators fileReplacement.
+  //     We touch only `configurations.production` (de-duplicated) and `configurations['no-emulators']`
+  //     (re-asserted; the interim `standalone` config is dropped) — never `build.options`, so a user's
+  //     own staging config is unaffected.
   const buildTarget = targets.build as
-    | { configurations?: Record<string, { fileReplacements?: Array<{ replace: string; with: string }> }> }
+    | {
+        configurations?: Record<
+          string,
+          { fileReplacements?: Array<{ replace: string; with: string }> } & Record<string, unknown>
+        >;
+      }
     | undefined;
   if (buildTarget) {
     buildTarget.configurations ??= {};
     buildTarget.configurations.production ??= {};
     const prodCfg = buildTarget.configurations.production;
-    const replacement = {
-      replace: envDevPath,
-      with: envProdPath,
-    };
+    const prodReplacement = { replace: envDevPath, with: envProdPath };
     const existing = Array.isArray(prodCfg.fileReplacements) ? prodCfg.fileReplacements : [];
     const alreadyPresent = existing.some(
-      (entry) => entry?.replace === replacement.replace && entry?.with === replacement.with
+      (entry) => entry?.replace === prodReplacement.replace && entry?.with === prodReplacement.with
     );
-    prodCfg.fileReplacements = alreadyPresent ? existing : [...existing, replacement];
+    prodCfg.fileReplacements = alreadyPresent ? existing : [...existing, prodReplacement];
+
+    // `no-emulators` = the dev configuration's options + the no-emulators fileReplacement. Drop the
+    // interim `standalone` config name when migrating a project that still has it.
+    delete buildTarget.configurations['standalone'];
+    const devCfg = { ...(buildTarget.configurations.development ?? {}) };
+    delete devCfg.fileReplacements;
+    buildTarget.configurations['no-emulators'] = {
+      ...devCfg,
+      fileReplacements: [{ replace: envDevPath, with: envNoEmulatorsPath }],
+    };
   } else {
     logger.warn(
-      `[firebase-emulators] No \`build\` target on project \`${projectName}\` — skipped registering the environment-files fileReplacement. ` +
-      `Add it manually to the production build configuration: ` +
-      `{ "replace": "${envDevPath}", "with": "${envProdPath}" }`
+      `[firebase-emulators] No \`build\` target on project \`${projectName}\` — skipped registering the environment-files fileReplacements. ` +
+      `Add them manually: production swaps to environment.prod.ts, and a \`no-emulators\` configuration ` +
+      `swaps "${envDevPath}" → "${envNoEmulatorsPath}".`
     );
   }
 

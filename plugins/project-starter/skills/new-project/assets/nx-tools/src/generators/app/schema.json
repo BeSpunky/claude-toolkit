@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyApp",
+  "title": "Create a house-standard Angular application",
+  "description": "Scaffold a BeSpunky-standard Angular app — the application sibling of publishable-lib. Delegates to @nx/angular:application with the house defaults (minimal, scss, routing, no e2e), then applies the per-app house config the raw generator omits: serve host 0.0.0.0 (reachable from outside the devcontainer) via the serve-options generator, and — when the workspace is a Firebase workspace — the full per-app Firebase wiring (environment files, firebase.config.ts, app.config wiring, production fileReplacements, platform:web tag, serve orchestrator) via the firebase-emulators generator. Firebase is self-detecting: an explicit --firebase wins (the scaffolder's first app, created before firebase.json exists), otherwise it is inferred from firebase.json at the workspace root — so a second app added to a Firebase workspace is configured identically to the first with no flag. This is the single command for adding any further app to a BeSpunky workspace; never reach for the raw @nx/angular:application generator, which leaves the per-app config out.",
+  "type": "object",
+  "properties": {
+    "directory": {
+      "type": "string",
+      "description": "Workspace-relative directory for the app, e.g. `apps/<name>`. The project name defaults to the directory's last segment.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "Where should the app live (e.g. apps/<name>)?"
+    },
+    "name": {
+      "type": "string",
+      "description": "Explicit project name. Defaults to the directory's last segment (matching @nx/angular)."
+    },
+    "firebase": {
+      "type": "boolean",
+      "description": "Apply the per-app Firebase wiring. When omitted, auto-detected from the presence of firebase.json at the workspace root (so apps added to a Firebase workspace get wired automatically). Pass explicitly only to force it on a workspace that doesn't yet have firebase.json (the scaffolder's first app) or to override detection."
+    },
+    "style": {
+      "type": "string",
+      "description": "The file extension or preprocessor to use for component styles.",
+      "enum": ["scss", "css", "sass", "less"],
+      "default": "scss"
+    },
+    "workspaceName": {
+      "type": "string",
+      "description": "Override the workspace identity that seeds the emulators' offline `demo-<workspaceName>` project id. Defaults to the workspace root directory name — correct in every normal case; do not pass it unless retargeting.",
+      "x-priority": "internal"
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip formatting files.",
+      "default": false,
+      "x-priority": "internal"
+    }
+  },
+  "required": ["directory"]
+}

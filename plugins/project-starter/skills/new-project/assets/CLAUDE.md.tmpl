@@ -37,7 +37,30 @@ For any redesign, invoke the **`product-ux:redesign-means-rethink`** skill — t
 {{#firebase}}
 ## Firebase
 
-This project was scaffolded with `--firebase`. **Local development uses the emulator suite, offline** — `nx serve <app>` runs the workspace-level `firebase:emulators` task and the dev server (`<app>:serve-app`) in parallel, under the offline project id `demo-<workspaceName>`. No `firebase login`, no cloud project, no `.firebaserc` is needed for development. By design. (`nx run <app>:serve-app` alone serves without emulators; the Nx TUI is disabled in `nx.json` so both tasks stream plain prefixed logs and one Ctrl+C stops the run.)
+This project was scaffolded with `--firebase`. **Two serve modes — local dev is not forced through the emulators:**
+
+| Command | What it does |
+| --- | --- |
+| `nx serve <app>` | App **+ emulator suite**, in parallel, offline (project id `demo-<workspaceName>`). The full local Firebase stack. No `firebase login` / cloud project / `.firebaserc` needed — by design. |
+| `nx run <app>:serve-no-emulators` | App **alone, no emulators** (e.g. pure UI work, or running against a real/staging backend). |
+| `nx run firebase:emulators` | The emulator suite **alone** (restart/run it independently of the app). |
+
+`serve` is an `nx:run-commands` orchestrator that **composes** `serve-no-emulators` (one dev-server definition, not two). The Nx TUI is disabled in `nx.json` so both tasks stream plain prefixed logs and one Ctrl+C stops the run.
+
+### Per-service emulator toggling
+
+You don't have to emulate everything or nothing — each Firebase service is independently emulated-or-real, so you can run e.g. **Firestore on the emulator but real Auth**.
+
+- **Committed default (whole team):** the `EMULATE` map at the top of `apps/<app>/src/environments/environment.ts`. Flip any service to `false`, save, the dev server hot-reloads (~1s).
+- **Per session (just you, no rebuild):** override via URL query or localStorage —
+  - `?emulate=firestore,storage` → ONLY these emulated this tab (others real); `all` / `none` work too
+  - `?real=auth` → force Auth to the real backend this tab
+  - `localStorage.setItem('emulate','firestore')` → persist per browser (`removeItem('emulate')` to drop it)
+  - precedence (later wins): committed default **<** localStorage **<** URL query
+
+**Turning a service real needs real credentials.** A service resolved to real uses the `firebase` block of the active environment file — the `demo-<workspaceName>` values only work against the emulator. Fill `firebase` with your real/**staging** web config (never production for anything you write to). The resolver is `apps/<app>/src/app/emulator-overrides.ts` (generator-owned); `firebase.config.ts` applies `committed-default ⊕ override` per service, gated on `ngDevMode` — Angular's dev-mode flag, which the optimizer folds to `false` in production builds, so the resolver, the per-service wiring, every `connect*Emulator(...)` call, and all emulator addresses are tree-shaken out of the prod artifact. (Firebase's own SDK still carries its internal emulator support — that's library code, not ours.)
+
+`nx run <app>:serve-no-emulators` is the extreme of the same knob: it serves the app with **no** emulator suite booted and **every** service real (it compiles `environment.no-emulators.ts`, which has no emulators block).
 
 ### Cloud Functions (apps/functions)
 
@@ -82,7 +105,12 @@ For anything Nx can generate - apps, libraries, components, services, project co
 
 ```bash
 # Generate the next Angular app or library (generator-first!)
-yarn nx g @nx/angular:application apps/<app-name> --minimal
+# Apps go through the HOUSE generator, never raw @nx/angular:application. It applies the
+# BeSpunky per-app config the raw generator omits — dev-server host 0.0.0.0, and (when this
+# is a Firebase workspace, auto-detected from firebase.json) the full per-app Firebase wiring.
+# Same one command, same code path the scaffolder used for the first app, so a second app is
+# configured identically. No flags needed; Firebase is detected automatically.
+yarn nx g @bespunky/nx-tools:app apps/<app-name>
 yarn nx g @nx/angular:library libs/<lib-name>
 
 # Serve / build / test / lint a project
@@ -103,6 +131,13 @@ yarn nx affected -t build test lint
 - You have access to the Nx MCP server and its tools - use them.
 - For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
 - For scaffolding (apps, libs, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
+
+## Angular AI tooling (MCP + agent skills)
+
+This project ships Angular's official AI tooling, wired in two layers that complement each other:
+
+- **Angular CLI MCP server** — declared in project-scoped `.mcp.json` (`npx -y @angular/cli mcp`, always the latest CLI, no version to maintain). It exposes Angular's **knowledge tools**: `get_best_practices`, `search_documentation`, `find_examples`, `ai_tutor`, and `onpush_zoneless_migration`. **Treat these as the source of truth for current Angular guidance** — signals, `linkedSignal`, `resource`, Signal Forms, the built-in control flow, zoneless/OnPush, SSR, ARIA — rather than training-data recall, which lags the framework. The server's *experimental* exec tools (`build`, `devserver.*`, `test`, `e2e`) are deliberately **not** enabled: this is an integrated Nx workspace with **no root `angular.json`**, so those tools (which read `angular.json` and shell out to `ng build`/`ng serve`) can't function here and would only pull you off the Nx-owned targets. Build / serve / test verification belongs to **Nx** (`yarn nx build|serve|test`) and the Playwright skill — never the Angular CLI directly.
+- **Angular agent skills** — `angular-developer` and `angular-new-app` are fetched fresh from `github.com/angular/skills` into `.claude/skills/` on every container build (gitignored — a refreshable cache that tracks upstream, never a vendored fork). They load automatically and carry idiomatic, version-aware Angular patterns. **One reconciliation:** those skills are Angular-CLI-centric (they reach for `ng new` / `ng generate`); in this workspace you **always go through Nx instead** — `yarn nx g @nx/angular:application|library|component …`, `yarn nx build|serve|test` — per **Generator-first** above. Take their *Angular* guidance; ignore their *`ng` invocation* mechanics.
 
 ## Playwright (available out of the box)
 
