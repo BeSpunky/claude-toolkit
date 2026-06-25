@@ -46,28 +46,27 @@ export default async function serveOptionsGenerator(
   const serve = project.targets.serve;
   const isOrchestrator = serve?.executor === 'nx:run-commands';
 
-  // The emulator-free app dev-server target the orchestrator composes. `serve-no-emulators` is the
-  // current name; `serve-standalone` and `serve-app` are legacy names (firebase-emulators renames
-  // them) — tolerate all three so host lands correctly whether serve-options runs before or after
-  // that rename migration.
-  const devServerName = project.targets['serve-no-emulators']
-    ? 'serve-no-emulators'
-    : project.targets['serve-standalone']
-    ? 'serve-standalone'
-    : project.targets['serve-app']
-    ? 'serve-app'
-    : null;
+  // The app dev-server target(s) the orchestrator composes. The Firebase shape has TWO —
+  // `serve-with-emulators` and `serve-no-emulators` — each a real @angular/build:dev-server; older
+  // shapes had a single inner dev-server (`serve-no-emulators`/`serve-standalone`/`serve-app`).
+  // Tolerate them all so host lands correctly whether serve-options runs before or after the
+  // firebase-emulators reshape.
+  const devServerNames = ['serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app'].filter(
+    (name) => project.targets[name]
+  );
 
-  if (isOrchestrator && devServerName) {
-    // Firebase shape: the actual dev-server lives at serve-no-emulators (or a legacy name).
+  if (isOrchestrator && devServerNames.length > 0) {
+    // Firebase shape: the real dev-server(s) live alongside the orchestrator.
     // 1) Clean any stray `host` off the orchestrator (left by an earlier run of this
     //    generator that didn't yet know the shape), so nx:run-commands stops forwarding it.
     if (serve.options && 'host' in serve.options) {
       delete (serve.options as Record<string, unknown>).host;
     }
-    // 2) Apply host to the real dev-server target.
-    const devServer = project.targets[devServerName];
-    devServer.options = { ...devServer.options, host };
+    // 2) Apply host to every app dev-server target.
+    for (const name of devServerNames) {
+      const devServer = project.targets[name];
+      devServer.options = { ...devServer.options, host };
+    }
   } else {
     // Plain form: `serve` IS the Angular dev-server (firebase not opted in, or first run
     //   before firebase-emulators reshapes it).

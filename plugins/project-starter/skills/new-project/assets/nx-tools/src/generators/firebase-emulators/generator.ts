@@ -63,18 +63,18 @@
 //                        are ACTUALLY free (SIGTERM → grace → SIGKILL), so an ungraceful prior
 //                        death (closed terminal, container stop, SIGKILL) can't break the next start.
 //   - tools/firebase-welcome.sh — self-extinguishing cloud-linkage banner (see section 3a).
-//   - apps/<project>/project.json targets (TWO serve modes — local dev is not forced through emulators):
-//       * `serve`              — an nx:run-commands orchestrator running `firebase:emulators` and
-//                                `<project>:serve-no-emulators` in parallel. One command, one Ctrl+C —
-//                                the full local Firebase stack (the default `nx serve <app>`). This
-//                                replaced the earlier `serve.dependsOn=['emulators']` continuous-task
-//                                wiring: with the suite extracted to the workspace-level `firebase`
-//                                project, the orchestrator is the battle-tested shape (and the
-//                                generator self-heals the dependsOn form into it).
-//       * `serve-no-emulators` — the app dev-server ALONE, no emulators (`nx run <app>:serve-no-emulators`):
-//                                the first-class emulator-free serve, composed by the orchestrator
-//                                above (single dev-server definition). Renamed from the prior
-//                                `serve-app`/`serve-standalone`.
+//   - apps/<project>/project.json targets (THREE single-purpose serve targets — local dev is not
+//     forced through the emulators, and no target carries a confusing "other-mode" config):
+//       * `serve`                — an nx:run-commands orchestrator running `firebase:emulators` and
+//                                  `<project>:serve-with-emulators` in parallel. One command, one
+//                                  Ctrl+C — the full local Firebase stack (the default `nx serve`).
+//                                  Replaced the earlier `serve.dependsOn=['emulators']` wiring (the
+//                                  generator self-heals that form into it).
+//       * `serve-with-emulators` — the app dev-server pinned to the emulator env (build:development).
+//                                  The inner target the orchestrator composes.
+//       * `serve-no-emulators`   — the app dev-server pinned to the no-emulator env (build:no-emulators):
+//                                  `nx run <app>:serve-no-emulators`. Both dev-servers pin their env
+//                                  in `options.buildTarget` with NO `configurations` of their own.
 //   - root eslint.config.mjs — best-effort insertion of the `platform:` dependency-constraint
 //                       firewall: `platform:web` bans firebase-admin/firebase-functions imports,
 //                       `platform:server` bans firebase/@angular. The app is tagged platform:web,
@@ -365,73 +365,65 @@ export default async function firebaseEmulatorsGenerator(
   // The app is browser code — tag it so the platform firewall (4c) applies.
   ensureTag(project, 'platform:web');
 
-  // Two serve targets, by design — so local dev is NOT forced through the emulators:
-  //   * `serve`              — an nx:run-commands ORCHESTRATOR running the `firebase:emulators`
-  //                            continuous task and the app dev-server (`serve-no-emulators`) in
-  //                            parallel: one command, one Ctrl+C, the full local Firebase stack.
-  //                            This is the default `nx serve <app>`.
-  //   * `serve-no-emulators` — the app dev-server ALONE, no emulators (host 0.0.0.0). The first-class
-  //                            "serve without emulators" target: `nx run <app>:serve-no-emulators`
-  //                            (e.g. against a real/staging backend, or pure UI work). It compiles
-  //                            `environment.no-emulators.ts` (no emulators block) by DEFAULT; the
-  //                            orchestrator runs the same target with `--configuration=development`
-  //                            (environment.ts, emulators). One dev-server definition, two build envs.
+  // Three serve targets, each doing exactly ONE thing — no sub-configurations to confuse:
+  //   * `serve`                — an nx:run-commands ORCHESTRATOR running `firebase:emulators` and the
+  //                              app dev-server (`serve-with-emulators`) in parallel: one command, one
+  //                              Ctrl+C, the full local Firebase stack. The default `nx serve <app>`.
+  //   * `serve-with-emulators` — the app dev-server pinned to the emulator env (build:development →
+  //                              environment.ts). The inner target the orchestrator composes; also
+  //                              runnable alone once the suite is up.
+  //   * `serve-no-emulators`   — the app dev-server pinned to the no-emulator env (build:no-emulators →
+  //                              environment.no-emulators.ts): `nx run <app>:serve-no-emulators`, the
+  //                              app against a real/staging backend (or pure UI work).
+  // Both dev-servers pin their env via `options.buildTarget` and carry NO `configurations`, so neither
+  // is ever asked to serve the OTHER mode (a `no-emulators` target can't have a "serve with emulators"
+  // config, and vice-versa).
   //
-  // Self-heals every earlier generation on --repair:
-  //   - legacy dev-server target names `serve-app` and `serve-standalone` → renamed to `serve-no-emulators`.
-  //   - serve IS the dev-server (fresh scaffold, or the previous `dependsOn: ['emulators']`
-  //     wiring) → move it to `serve-no-emulators` (stripping the emulators dependsOn) and park the
-  //     orchestrator at `serve`.
-  //   - serve is the ancient `firebase emulators:exec` wrapper around an existing dev-server
-  //     → overwrite `serve` with the orchestrator.
-  //   - already on the orchestrator shape → idempotent re-assert.
+  // Self-heals every earlier generation on --repair: the app dev-server is found under whatever name a
+  // prior generation gave it — a fresh @nx/angular `serve`, or a legacy inner target (`serve-app`,
+  // `serve-standalone`, or the old `serve-no-emulators` that doubled as the orchestrator's inner
+  // dev-server with development/production/no-emulators configs) — and reshaped into the trio above;
+  // the legacy/duplicate names and their stale configs are dropped.
   const isRunCommands = (t?: TargetConfiguration) => t?.executor === 'nx:run-commands';
-  // Migrate the legacy dev-server target names to the public `serve-no-emulators` (carries host +
-  // options since it's the same object reference).
-  for (const legacy of ['serve-app', 'serve-standalone']) {
-    if (targets[legacy] && !targets['serve-no-emulators']) {
-      targets['serve-no-emulators'] = targets[legacy];
-      delete targets[legacy];
+  // Locate the app dev-server (@angular/build:dev-server) under any historical name, or the fresh
+  // `serve` before it becomes the orchestrator.
+  let devServer: TargetConfiguration | undefined;
+  for (const name of ['serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app']) {
+    if (targets[name] && !isRunCommands(targets[name])) {
+      devServer = targets[name];
+      break;
     }
   }
-  if (targets.serve && !isRunCommands(targets.serve)) {
-    stripEmulatorsDependsOn(targets.serve);
-    targets.serve.continuous = true;
-    targets['serve-no-emulators'] = targets.serve;
-  } else if (targets['serve-no-emulators']) {
-    stripEmulatorsDependsOn(targets['serve-no-emulators']);
-    targets['serve-no-emulators'].continuous = true;
+  if (!devServer && targets.serve && !isRunCommands(targets.serve)) {
+    devServer = targets.serve;
   }
-  if (targets['serve-no-emulators']) {
-    // serve-no-emulators compiles the NO-emulator env (`build:no-emulators` → environment.no-emulators.ts)
-    // BY DEFAULT — so `nx run <app>:serve-no-emulators` never connects to emulators. The orchestrator
-    // runs the SAME target with the emulator env (`--configuration=development` → environment.ts). One
-    // dev-server target, two build envs selected by configuration (see the build configs in step 4b).
-    const noEmu = targets['serve-no-emulators'];
-    // Keep the upstream configs (development/production), drop the interim `standalone` name if we
-    // just migrated from serve-standalone, and (re)assert the `no-emulators` default configuration.
-    const keptConfigs = Object.fromEntries(
-      Object.entries(noEmu.configurations ?? {}).filter(([key]) => key !== 'standalone')
-    );
-    noEmu.configurations = {
-      ...keptConfigs,
-      'no-emulators': { buildTarget: `${projectName}:build:no-emulators` },
-    };
-    noEmu.defaultConfiguration = 'no-emulators';
+  if (devServer) {
+    stripEmulatorsDependsOn(devServer);
+    const host = (devServer.options as { host?: string } | undefined)?.host ?? '0.0.0.0';
+    // One clean dev-server per env: the build configuration is pinned in `options.buildTarget`, with
+    // NO `configurations` of its own. Preserves any other dev-server options the user added.
+    const devServerFor = (buildConfig: string): TargetConfiguration => ({
+      continuous: true,
+      executor: devServer!.executor,
+      options: { ...(devServer!.options ?? {}), buildTarget: `${projectName}:build:${buildConfig}`, host },
+    });
+    // Drop every legacy/duplicate dev-server name (and their stale configs), then assert the trio.
+    for (const name of ['serve-app', 'serve-standalone', 'serve-with-emulators', 'serve-no-emulators']) {
+      delete targets[name];
+    }
+    targets['serve-with-emulators'] = devServerFor('development');
+    targets['serve-no-emulators'] = devServerFor('no-emulators');
     targets.serve = {
       continuous: true,
       executor: 'nx:run-commands',
       options: {
         parallel: true,
-        commands: [
-          'nx run firebase:emulators',
-          `nx run ${projectName}:serve-no-emulators --configuration=development`,
-        ],
+        commands: ['nx run firebase:emulators', `nx run ${projectName}:serve-with-emulators`],
       },
     };
   } else {
     logger.warn(
-      `[firebase-emulators] No dev-server target found on project \`${projectName}\` (neither \`serve\` nor \`serve-no-emulators\`) — ` +
+      `[firebase-emulators] No app dev-server target found on project \`${projectName}\` — ` +
       `skipped wiring the serve orchestrator. Add a dev-server target, then re-run --repair --firebase.`
     );
   }

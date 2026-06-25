@@ -45,7 +45,7 @@ This project was scaffolded with `--firebase`. **Two serve modes — local dev i
 | `nx run <app>:serve-no-emulators` | App **alone, no emulators** (e.g. pure UI work, or running against a real/staging backend). |
 | `nx run firebase:emulators` | The emulator suite **alone** (restart/run it independently of the app). |
 
-`serve` is an `nx:run-commands` orchestrator that **composes** `serve-no-emulators` (one dev-server definition, not two). The Nx TUI is disabled in `nx.json` so both tasks stream plain prefixed logs and one Ctrl+C stops the run.
+`serve` is an `nx:run-commands` orchestrator that runs the emulator suite alongside **`serve-with-emulators`** (the app dev-server pinned to the emulator env). Each serve target does exactly one thing — `serve-with-emulators` always emulates, `serve-no-emulators` never does — so neither carries a confusing "other-mode" configuration. The Nx TUI is disabled in `nx.json` so both tasks stream plain prefixed logs and one Ctrl+C stops the run.
 
 ### Per-service emulator toggling
 
