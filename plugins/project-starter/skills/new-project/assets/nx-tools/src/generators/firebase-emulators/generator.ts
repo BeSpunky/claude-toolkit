@@ -296,13 +296,16 @@ export default async function firebaseEmulatorsGenerator(
     existingFirebaseConfig !== null && existingFirebaseConfig.includes(`from '../environments/environment'`);
   const importsOverrides = existingFirebaseConfig?.includes('./emulator-overrides') ?? false;
   const usesNgDevMode = existingFirebaseConfig?.includes('ngDevMode') ?? false;
+  // The dev guard (real-service-with-demo-config) is identified by its `usingDemoConfig` local.
+  const hasDevGuard = existingFirebaseConfig?.includes('usingDemoConfig') ?? false;
   const isAncientShape =
     existingFirebaseConfig !== null &&
     (existingFirebaseConfig.includes('productionFirebaseConfig') ||
       existingFirebaseConfig.includes('emulatorFirebaseConfig')) &&
     !importsEnv;
-  // Outdated env-files shape: missing the per-service resolver OR the ngDevMode prod-DCE gate.
-  const isOutdatedEnvShape = importsEnv && (!importsOverrides || !usesNgDevMode);
+  // Outdated env-files shape: missing the per-service resolver, the ngDevMode prod-DCE gate, OR the
+  // dev guard that catches a real-service-with-demo-config mistake.
+  const isOutdatedEnvShape = importsEnv && (!importsOverrides || !usesNgDevMode || !hasDevGuard);
   if (existingFirebaseConfig === null || isAncientShape || isOutdatedEnvShape) {
     if (isAncientShape || isOutdatedEnvShape) {
       logger.info(

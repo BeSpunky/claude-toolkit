@@ -82,6 +82,30 @@ export function provideAppFirebase(): EnvironmentProviders {
     );
   }
 
+  // Dev guard: a service set to REAL (auth: false in the EMULATE map, or ?real=/?emulate= at runtime)
+  // talks to the real Firebase backend, which needs real credentials. The `demo` placeholder only
+  // works against the emulators, so a real service + demo config fails cryptically
+  // (`auth/api-key-not-valid`, etc.). Catch it at bootstrap with an actionable message. Dev-only
+  // (`ngDevMode` → tree-shaken from prod, where the prod guard above covers config correctness).
+  if (ngDevMode) {
+    const usingDemoConfig =
+      environment.firebase.apiKey === 'demo' || environment.firebase.projectId.startsWith('demo-');
+    const realServices = (['auth', 'firestore', 'storage', 'functions'] as EmulatorService[]).filter(
+      (service) => !emulate[service]
+    );
+    if (usingDemoConfig && realServices.length > 0) {
+      throw new Error(
+        `[firebase.config.ts] ${realServices.join(', ')} ${realServices.length > 1 ? 'are' : 'is'} set to use the REAL ` +
+          `Firebase backend, but environment.ts still has the demo config (apiKey: 'demo'). The demo values only work ` +
+          `against the emulators, so the real backend rejects them (e.g. auth/api-key-not-valid).\n` +
+          `  Fill the \`firebase\` block in src/environments/environment.ts with your real/STAGING web config:\n` +
+          `    firebase login\n` +
+          `    firebase apps:sdkconfig WEB <appId> --project <your-staging-project>\n` +
+          `  …or keep emulating the service (set it back to true in the EMULATE map / drop the ?real=/?emulate= override).`
+      );
+    }
+  }
+
   return makeEnvironmentProviders([
     provideFirebaseApp(() => initializeApp(environment.firebase)),
     provideAuth(() => {
