@@ -85,8 +85,11 @@ export function provideAppFirebase(): EnvironmentProviders {
   // Dev guard: a service set to REAL (auth: false in the EMULATE map, or ?real=/?emulate= at runtime)
   // talks to the real Firebase backend, which needs real credentials. The `demo` placeholder only
   // works against the emulators, so a real service + demo config fails cryptically
-  // (`auth/api-key-not-valid`, etc.). Catch it at bootstrap with an actionable message. Dev-only
-  // (`ngDevMode` → tree-shaken from prod, where the prod guard above covers config correctness).
+  // (`auth/api-key-not-valid`, etc.). Surface it at bootstrap with a LOUD, actionable console error —
+  // deliberately NOT a throw: bricking the whole dev app over one misconfigured service is worse than
+  // the cryptic error it replaces. The app still loads; the developer sees exactly what to fix. Dev-only
+  // (`ngDevMode` → tree-shaken from prod, where the separate prod guard above DOES throw to stop a
+  // broken deploy).
   if (ngDevMode) {
     const usingDemoConfig =
       environment.firebase.apiKey === 'demo' || environment.firebase.projectId.startsWith('demo-');
@@ -94,7 +97,7 @@ export function provideAppFirebase(): EnvironmentProviders {
       (service) => !emulate[service]
     );
     if (usingDemoConfig && realServices.length > 0) {
-      throw new Error(
+      console.error(
         `[firebase.config.ts] ${realServices.join(', ')} ${realServices.length > 1 ? 'are' : 'is'} set to use the REAL ` +
           `Firebase backend, but environment.ts still has the demo config (apiKey: 'demo'). The demo values only work ` +
           `against the emulators, so the real backend rejects them (e.g. auth/api-key-not-valid).\n` +
