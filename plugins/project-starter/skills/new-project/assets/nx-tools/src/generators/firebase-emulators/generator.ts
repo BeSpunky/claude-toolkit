@@ -5,10 +5,12 @@
 // Firebase CLI's responsibility — `firebase use --add` validates against the user's actual
 // account and writes `.firebaserc` properly. Fabricating one here would lie about the cloud
 // state and break `firebase deploy` / `firebase use` the moment the user touches them.
-// Emulators don't need `.firebaserc`: the launch script (tools/emulators.sh) passes
-// `--project=demo-<workspaceName>` explicitly. The `demo-` prefix is Firebase's documented
-// convention for "offline only, no cloud calls," so emulators work without login and without
-// a real GCP project.
+// Emulators don't need `.firebaserc`: the launch script (tools/emulators.sh) passes `--project`
+// explicitly, DERIVING it from the app's environment.ts (its single source of truth) and falling
+// back to `demo-<workspaceName>`. The `demo-` prefix is Firebase's documented convention for
+// "offline only, no cloud calls," so emulators work without login and without a real GCP project;
+// deriving the id keeps the emulator suite and the client on the same project once any service
+// goes real (singleProjectMode), instead of the emulator staying pinned to demo- and drifting.
 //
 // Writes:
 //   - firebase.json     (workspace root) — emulator suite config (auth/firestore/storage/functions/ui),
@@ -337,7 +339,13 @@ export default async function firebaseEmulatorsGenerator(
   //                                     the app's real document shapes; written only if absent).
   //       - tools/emulator-seeds/README.md — seed catalog + usage (user-extended; if absent).
   tree.write('tools/reap-emulators.sh', template('reap-emulators.sh.tpl'));
-  tree.write('tools/emulators.sh', substitute(template('emulators.sh.tpl')));
+  // emulators.sh derives its --project from the app's dev env file at serve time (single source
+  // of truth), so point {{appEnvPath}} at THIS app's environment.ts. One suite = one project
+  // (singleProjectMode), so it follows the primary app this workspace was wired with.
+  tree.write(
+    'tools/emulators.sh',
+    substitute(template('emulators.sh.tpl')).split('{{appEnvPath}}').join(envDevPath),
+  );
   tree.write('tools/emulator-data.sh', template('emulator-data.sh.tpl'));
   tree.write('tools/seed/build-seeds.sh', substitute(template('seed-build-seeds.sh.tpl')));
   tree.write('tools/seed/build.mjs', template('seed-build.mjs.tpl'));

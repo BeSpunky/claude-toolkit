@@ -25,9 +25,29 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 DATA_DIR="$ROOT/.emulator-data"
-# `demo-` is Firebase's documented convention for "offline only, no cloud calls" — no
-# login, no .firebaserc, no real GCP project needed. Must match environment.ts.
-PROJECT="demo-{{workspaceName}}"
+
+# The emulator suite MUST run under the SAME projectId the app's client uses. The moment any
+# service is switched to real (e.g. real Auth), that real `projectId` is used for ALL services
+# (singleProjectMode) — so a still-emulated Firestore/Storage launched under a DIFFERENT project
+# id hits a mismatch and silently falls back to offline. The projectId has ONE source of truth —
+# the app's environment.ts — so we DERIVE it here rather than hardcode a copy that drifts.
+# `demo-` is Firebase's "offline only, no cloud project needed" convention and the safe fallback
+# when no env file is found. One suite = one project (singleProjectMode), so it follows the
+# PRIMARY app this workspace was wired with; set FIREBASE_EMULATOR_PROJECT for anything unusual.
+# (Seeds are always built under demo-{{workspaceName}} — see tools/seed/build-seeds.sh — and import
+# fine under a derived real id because singleProjectMode collapses project ids.)
+#   Precedence:  FIREBASE_EMULATOR_PROJECT (override)  >  environment.ts  >  demo-{{workspaceName}}
+ENV_FILE="$ROOT/{{appEnvPath}}"
+derive_project() {
+  [[ -f "$ENV_FILE" ]] || return 1
+  local id
+  # Anchor to the field (line, after indent, begins with `projectId:`) so a comment that merely
+  # mentions `projectId:` — comments start with `//` — can't shadow the real value.
+  id="$(grep -oE "^[[:space:]]*projectId:[[:space:]]*[\"'][^\"']+" "$ENV_FILE" | head -1 | sed -E "s/.*[\"']//")"
+  [[ -n "$id" ]] && printf '%s' "$id"
+}
+PROJECT="${FIREBASE_EMULATOR_PROJECT:-$(derive_project || echo demo-{{workspaceName}})}"
+echo "[emulators] project: $PROJECT" >&2
 
 # Pass through an optional `--only <list>` (the focused targets use it); its presence
 # is also what flips persistence off (see header).

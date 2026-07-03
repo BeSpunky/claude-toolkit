@@ -24,10 +24,11 @@ const EMULATE = {
 
 export const environment: Environment = {
   production: false,
-  // `demo-` is Firebase's convention for "offline only, no cloud calls" — it matches the
-  // `--project=demo-{{workspaceName}}` flag tools/emulators.sh passes, so emulator data and CLI
-  // invocations agree on one id. Replace with your real/STAGING web config the moment you turn any
-  // service to real (above) — the demo values only work against the emulators.
+  // `demo-` is Firebase's convention for "offline only, no cloud calls." tools/emulators.sh
+  // DERIVES the emulator suite's `--project` from this very `projectId` (its single source of
+  // truth), so the emulators and the client always agree on one id — even after you fill in a real
+  // one below. Replace with your real/STAGING web config the moment you turn any service to real
+  // (above) — the demo values only work against the emulators.
   firebase: {
     projectId: 'demo-{{workspaceName}}',
     apiKey: 'demo',
