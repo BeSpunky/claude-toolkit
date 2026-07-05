@@ -70,6 +70,17 @@ done
 bash "$ROOT/tools/reap-emulators.sh"
 bash "$ROOT/tools/emulator-data.sh" ensure
 
+# Local Functions secrets: the Functions emulator reads `.secret.local` from the loaded bundle
+# (firebase.json → dist/apps/functions), but the file lives with the app source
+# (apps/functions/.secret.local, gitignored). It is deliberately NOT a build asset — Nx skips
+# gitignored assets anyway, and routing a secret through build outputs would persist it into the
+# Nx cache. Copy it into place at launch, so it stays a runtime concern of the emulator alone.
+# (Re-run the suite after a functions rebuild — `deleteOutputPath` wipes dist.)
+SECRETS_FILE="$ROOT/apps/functions/.secret.local"
+if [ -f "$SECRETS_FILE" ] && [ -d "$ROOT/dist/apps/functions" ]; then
+  cp "$SECRETS_FILE" "$ROOT/dist/apps/functions/.secret.local"
+fi
+
 # Only import when the working dir is actually primed — `--import` on a missing dir is
 # a hard error. On a brand-new clone with no seeds built yet, we start fresh and (when
 # persisting) the clean exit writes the first export, so the next serve has data to import.

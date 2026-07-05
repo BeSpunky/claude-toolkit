@@ -41,9 +41,10 @@
 //                        dist/apps/functions with a generated deploy-manifest package.json;
 //                        runtime deps (firebase-admin/firebase-functions) live at the WORKSPACE
 //                        ROOT (no per-project node_modules); lints via the workspace flat config.
-//                        Source files are written only if absent (the user owns their functions);
-//                        project.json's build/lint/deploy targets are generator-owned (re-asserted),
-//                        extra targets are preserved.
+//                        Source files (+ .secret.local.example, the secrets shape doc) are written
+//                        only if absent (the user owns their functions); project.json's build / lint /
+//                        deploy / push-secrets targets are generator-owned (re-asserted), extra
+//                        targets are preserved.
 //   - firebase/project.json — the emulator suite as its own workspace-level Nx project (it's a
 //                        workspace concept, not an app concern): `emulators` (full suite, dependsOn
 //                        functions:build), `emulators:<svc>` (one + UI), `seed:build`, `reset`.
@@ -64,6 +65,10 @@
 //                        alive-but-unbound orphans), pass 1 polls the configured ports until they
 //                        are ACTUALLY free (SIGTERM → grace → SIGKILL), so an ungraceful prior
 //                        death (closed terminal, container stop, SIGKILL) can't break the next start.
+//   - tools/push-secrets.sh — push apps/functions/.secret.local (KEY=VALUE) into Google Secret
+//                        Manager for the deploy project (prod counterpart of the emulator's local
+//                        .secret.local injection); each value goes via stdin, never a cmdline/log.
+//                        Nx target: functions:push-secrets.
 //   - tools/firebase-welcome.sh — self-extinguishing cloud-linkage banner (see section 3a).
 //   - apps/<project>/project.json targets (THREE single-purpose serve targets — local dev is not
 //     forced through the emulators, and no target carries a confusing "other-mode" config):
@@ -153,6 +158,14 @@ firebase-debug.*.log
 /.emulator-data
 `;
 
+// Local Functions secrets ignore — kept separate from GITIGNORE_BLOCK (its own idempotency
+// marker) so a project already past the emulator block self-heals to ignore .secret.local on --repair.
+const SECRET_GITIGNORE_BLOCK = `# Local Cloud Functions secrets — the gitignored source for \`nx run functions:push-secrets\`
+# (which sets them in Google Secret Manager for production) and the emulator's local injection.
+# The committed apps/functions/.secret.local.example documents the shape.
+apps/functions/.secret.local
+`;
+
 export default async function firebaseEmulatorsGenerator(
   tree: Tree,
   options: FirebaseEmulatorsSchema
@@ -191,6 +204,12 @@ export default async function firebaseEmulatorsGenerator(
   const gitignore = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
   if (!gitignore.includes('/.emulator-data')) {
     tree.write('.gitignore', `${gitignore.trimEnd()}\n\n${GITIGNORE_BLOCK}`);
+  }
+  // Secret ignore — separate marker so an older-scaffold project (already past the emulator
+  // block above) still self-heals to ignore apps/functions/.secret.local on --repair.
+  const gitignoreNow = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
+  if (!gitignoreNow.includes('apps/functions/.secret.local')) {
+    tree.write('.gitignore', `${gitignoreNow.trimEnd()}\n\n${SECRET_GITIGNORE_BLOCK}`);
   }
 
   // 1d) nx.json — disable the interactive TUI. It multiplexes the continuous
@@ -347,6 +366,12 @@ export default async function firebaseEmulatorsGenerator(
     substitute(template('emulators.sh.tpl')).split('{{appEnvPath}}').join(envDevPath),
   );
   tree.write('tools/emulator-data.sh', template('emulator-data.sh.tpl'));
+  // Push local Functions secrets to Google Secret Manager (prod counterpart of the emulator's
+  // local .secret.local injection). Derives the deploy project from the app's environment.prod.ts.
+  tree.write(
+    'tools/push-secrets.sh',
+    template('push-secrets.sh.tpl').split('{{appEnvProdPath}}').join(envProdPath),
+  );
   tree.write('tools/seed/build-seeds.sh', substitute(template('seed-build-seeds.sh.tpl')));
   tree.write('tools/seed/build.mjs', template('seed-build.mjs.tpl'));
   if (!tree.exists('tools/seed/world.mjs')) {
@@ -649,6 +674,9 @@ function ensureFunctionsProject(tree: Tree): void {
   ifAbsent(`${root}/tsconfig.json`, 'functions-tsconfig.json.tpl');
   ifAbsent(`${root}/tsconfig.app.json`, 'functions-tsconfig.app.json.tpl');
   ifAbsent(`${root}/src/main.ts`, 'functions-main.ts.tpl');
+  // The committed shape doc for local Functions secrets (.secret.local itself is gitignored).
+  // User-owned once written — it grows with each `defineSecret` the functions add.
+  ifAbsent(`${root}/.secret.local.example`, 'functions-secret.local.example.tpl');
 
   ensureProjectFile(
     tree,
@@ -684,6 +712,12 @@ function ensureFunctionsProject(tree: Tree): void {
           executor: 'nx:run-commands',
           dependsOn: ['build'],
           options: { command: 'firebase deploy --only functions', cwd: '{workspaceRoot}' },
+        },
+        // Push apps/functions/.secret.local (KEY=VALUE) into Google Secret Manager for the deploy
+        // project — one source of truth for which secrets exist (tools/push-secrets.sh).
+        'push-secrets': {
+          executor: 'nx:run-commands',
+          options: { command: 'bash tools/push-secrets.sh', cwd: '{workspaceRoot}' },
         },
       },
     },
