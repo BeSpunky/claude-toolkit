@@ -125,7 +125,7 @@ nx run <app>:serve-worktree --portOffset=auto --serveTarget=serve-with-shared-br
 
 - **`post-create.sh.tpl`:** `apt-get install -y x11vnc novnc websockify fluxbox fonts-liberation fonts-noto-color-emoji` + ensure Playwright Chromium. Best-effort with retry (mirrors the Angular-skills fetch block), never fails the build.
 - **`devcontainer` generator + `devcontainer.json.tpl`:** `forwardPorts += 6080`; `portsAttributes["6080"] = { label: "Shared Browser (noVNC)", onAutoForward: "notify" }` (a clickable toast when the stack opens the port — not silent, not intrusive).
-- **`shared-browser` generator (nx-tools):** writes `tools/shared-browser/*`; wires the workspace `shared-browser` lifecycle project; adds `.gitignore` entries (runtime dir / logs / screenshots / any in-workspace state); appends one line to the devcontainer welcome banner (`Shared browser: nx run <app>:serve-with-shared-browser`). The **app generator** wires the per-app `serve-with-shared-browser` target. Runs for every scaffold (no flag) and is `--repair`-idempotent.
+- **`shared-browser` generator (nx-tools):** writes `tools/shared-browser/*`; wires the workspace `shared-browser` lifecycle project; adds a `/.shared-browser` `.gitignore` entry (covers a relocated in-workspace `SB_RUNTIME`). The **app generator** wires the per-app `serve-with-shared-browser` target. Runs for every scaffold (no flag) and is `--repair`-idempotent. *(Follow-up: a self-extinguishing devcontainer welcome-banner line for discoverability — deferred to v2; for now the printed noVNC URL, the `:6080` forward toast, and the skill carry discovery.)*
 
 ---
 
