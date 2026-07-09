@@ -30,7 +30,7 @@ import { connectStorageEmulator, getStorage, provideStorage } from '@angular/fir
 import { connectFunctionsEmulator, getFunctions, provideFunctions } from '@angular/fire/functions';
 
 import { environment } from '../environments/environment';
-import { resolveEmulated, type EmulatorService } from './emulator-overrides';
+import { resolveEmulated, resolvePortOffset, type EmulatorService } from './emulator-overrides';
 
 // Angular's dev-mode flag. The optimizer folds it to a literal `false` in production builds, which
 // is what makes everything emulator-related below tree-shakeable out of prod. Declared locally —
@@ -55,6 +55,25 @@ const emulate: Record<EmulatorService, boolean> = ngDevMode
 // inside the `if (ngDevMode)` blocks below, so it (and `emulate`) tree-shake out of prod too.
 function emulatorFor<S extends EmulatorService>(service: S): EmulatorEndpoints[S] | undefined {
   return emulate[service] ? environment.emulators?.[service] : undefined;
+}
+
+// Per-session emulator PORT OFFSET (0 unless the app was opened with `?portOffset=`). It shifts
+// every emulator port so the app connects to an ISOLATED stack (started by
+// `<app>:serve-worktree --portOffset`) rather than the base ports. DEV ONLY — `ngDevMode` folds to
+// `false` in prod, collapsing this to 0 and tree-shaking `resolvePortOffset` out with the rest.
+const portOffset: number = ngDevMode ? resolvePortOffset() : 0;
+
+// Shift the port inside an emulator URL (Auth is configured by URL, not host+port). Only reached
+// from inside the `if (ngDevMode)` blocks below, so it tree-shakes out of prod.
+function offsetUrl(url: string, offset: number): string {
+  if (!offset) return url;
+  try {
+    const u = new URL(url);
+    if (u.port) u.port = String(Number(u.port) + offset);
+    return u.toString();
+  } catch {
+    return url;
+  }
 }
 
 export function provideAppFirebase(): EnvironmentProviders {
@@ -116,7 +135,7 @@ export function provideAppFirebase(): EnvironmentProviders {
       // `if (ngDevMode)` folds to `if (false)` in prod → this block (and emulatorFor) is stripped.
       if (ngDevMode) {
         const e = emulatorFor('auth');
-        if (e) connectAuthEmulator(auth, e.url, { disableWarnings: true });
+        if (e) connectAuthEmulator(auth, offsetUrl(e.url, portOffset), { disableWarnings: true });
       }
       return auth;
     }),
@@ -124,7 +143,7 @@ export function provideAppFirebase(): EnvironmentProviders {
       const db = getFirestore();
       if (ngDevMode) {
         const e = emulatorFor('firestore');
-        if (e) connectFirestoreEmulator(db, e.host, e.port);
+        if (e) connectFirestoreEmulator(db, e.host, e.port + portOffset);
       }
       return db;
     }),
@@ -132,7 +151,7 @@ export function provideAppFirebase(): EnvironmentProviders {
       const storage = getStorage();
       if (ngDevMode) {
         const e = emulatorFor('storage');
-        if (e) connectStorageEmulator(storage, e.host, e.port);
+        if (e) connectStorageEmulator(storage, e.host, e.port + portOffset);
       }
       return storage;
     }),
@@ -140,7 +159,7 @@ export function provideAppFirebase(): EnvironmentProviders {
       const functions = getFunctions();
       if (ngDevMode) {
         const e = emulatorFor('functions');
-        if (e) connectFunctionsEmulator(functions, e.host, e.port);
+        if (e) connectFunctionsEmulator(functions, e.host, e.port + portOffset);
       }
       return functions;
     }),

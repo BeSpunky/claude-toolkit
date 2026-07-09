@@ -29,19 +29,26 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIREBASE_JSON="$ROOT/firebase.json"
+# Args: [config-path] [isolated]. ISOLATED mode (a port-offset stack from `<app>:serve-worktree`)
+# reclaims ONLY the shifted ports in the given config and SKIPS the global JVM sweep below — because
+# a base emulator suite the developer is running coexists with this one, and both the sweep and the
+# base-port/hub reclaim would kill THAT suite. Default (no args) is the original single-suite reclaim.
+FIREBASE_JSON="${1:-$ROOT/firebase.json}"
+ISOLATED="${2:-}"
 [ -f "$FIREBASE_JSON" ] || exit 0
 
-# Extract configured emulator ports via node (always present in the devcontainer), plus the
-# fixed hub/logging ports. De-duplicated, one per line.
+# Extract configured emulator ports via node (always present in the devcontainer). In full mode add
+# the fixed hub/logging ports (4400/4500) firebase-tools always uses; in isolated mode the config
+# already carries the SHIFTED hub/logging, so add nothing base. De-duplicated, one per line.
 mapfile -t PORTS < <(node -e '
   const fs = require("fs");
   const cfg = (JSON.parse(fs.readFileSync(process.argv[1], "utf8")).emulators) || {};
+  const extra = process.argv[2] === "isolated" ? [] : [4400, 4500];
   const ports = Object.values(cfg)
     .filter((v) => v && typeof v === "object" && typeof v.port === "number")
     .map((v) => v.port);
-  for (const p of new Set([...ports, 4400, 4500])) console.log(p);
-' "$FIREBASE_JSON" 2>/dev/null)
+  for (const p of new Set([...ports, ...extra])) console.log(p);
+' "$FIREBASE_JSON" "$ISOLATED" 2>/dev/null)
 
 [ "${#PORTS[@]}" -eq 0 ] && exit 0
 
@@ -55,17 +62,24 @@ mapfile -t PORTS < <(node -e '
 # on the JVM, and the JVM grandchildren are the orphans that actually linger) — never the
 # firebase-tools node process (handled by the hub/UI ports below) nor our own launch shell, so
 # this can't sabotage the very start it guards.
-EMU_PROC='firebase/emulators/[^[:space:]]+\.jar'
-if pgrep -f "$EMU_PROC" >/dev/null 2>&1; then
-  echo "[reap-emulators] stale emulator process(es) found — sending SIGTERM"
-  pkill -TERM -f "$EMU_PROC" >/dev/null 2>&1 || true
-  for ((tick = 0; tick < 15; tick++)); do
-    pgrep -f "$EMU_PROC" >/dev/null 2>&1 || break
-    sleep 0.1
-  done
+#
+# SKIPPED in isolated mode: this sweep matches EVERY emulator JVM in the container by cache path,
+# with no way to tell the developer's base suite from a stale orphan of this offset stack — so
+# running it would kill the coexisting base suite. An isolated stack relies on its shifted-port
+# reclaim below instead (a prior run of the SAME offset is caught there, by its own ports).
+if [ -z "$ISOLATED" ]; then
+  EMU_PROC='firebase/emulators/[^[:space:]]+\.jar'
   if pgrep -f "$EMU_PROC" >/dev/null 2>&1; then
-    echo "[reap-emulators] stale emulator process(es) still alive — forcing (SIGKILL)"
-    pkill -KILL -f "$EMU_PROC" >/dev/null 2>&1 || true
+    echo "[reap-emulators] stale emulator process(es) found — sending SIGTERM"
+    pkill -TERM -f "$EMU_PROC" >/dev/null 2>&1 || true
+    for ((tick = 0; tick < 15; tick++)); do
+      pgrep -f "$EMU_PROC" >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+    if pgrep -f "$EMU_PROC" >/dev/null 2>&1; then
+      echo "[reap-emulators] stale emulator process(es) still alive — forcing (SIGKILL)"
+      pkill -KILL -f "$EMU_PROC" >/dev/null 2>&1 || true
+    fi
   fi
 fi
 

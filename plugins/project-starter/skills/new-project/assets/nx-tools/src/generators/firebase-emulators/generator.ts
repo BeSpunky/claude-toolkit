@@ -156,6 +156,11 @@ firebase-debug.*.log
 # The emulator working data — the cache \`nx serve\` imports/exports each run. Ephemeral and
 # machine-local; the committed seed worlds live in tools/emulator-seeds/ (see its README).
 /.emulator-data
+
+# Isolated port-offset stacks (\`<app>:serve-worktree --portOffset\`): each gets its own data dir
+# and a generated offset firebase.json. Ephemeral and machine-local.
+/.emulator-data-*
+/.firebase.offset-*.json
 `;
 
 // Local Functions secrets ignore — kept separate from GITIGNORE_BLOCK (its own idempotency
@@ -454,7 +459,15 @@ export default async function firebaseEmulatorsGenerator(
       executor: 'nx:run-commands',
       options: {
         parallel: true,
-        commands: ['nx run firebase:emulators', `nx run ${projectName}:serve-with-emulators`],
+        // The app dev-server port follows PORT_OFFSET (set by `<app>:serve-worktree --portOffset`)
+        // so an isolated serve's app moves in lockstep with its shifted emulator suite; `${…:-0}`
+        // keeps a normal `nx serve` on the base 4200. run-commands runs each command through a
+        // shell, so the `$((…))` arithmetic is evaluated there. (4200 = the Angular dev-server
+        // base port; the whole isolated stack is BASE_PORT + offset.)
+        commands: [
+          'nx run firebase:emulators',
+          `nx run ${projectName}:serve-with-emulators --port=$((4200 + \${PORT_OFFSET:-0}))`,
+        ],
       },
     };
   } else {

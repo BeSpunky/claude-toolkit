@@ -48,10 +48,11 @@ There is usually only **one** set of forwarded dev ports, so exactly one serve o
 ```bash
 <pm> nx run <app>:serve-worktree                            # arrow-key picker of all worktrees → Enter
 <pm> nx run <app>:serve-worktree --worktree=<branch|slug>   # skip the prompt (scripting / non-TTY shells)
+<pm> nx run <app>:serve-worktree --portOffset=auto          # ISOLATED port set — coexists with a running serve
 <pm> nx run <app>:serve-worktree --dryRun                   # print what it would serve, without serving
 ```
 
-It collects every git worktree, lets you pick one (current tree pre-highlighted), installs the worktree's deps if missing, then runs *that worktree's own* `serve` target with the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides applied for you. (Provided by the `@bespunky/nx-tools:serve-worktree` executor, wired onto every app by the house `app` generator.) Outside a scaffolded project, do the `cd` + env-override dance by hand.
+It collects every git worktree, lets you pick one (current tree pre-highlighted), installs the worktree's deps if missing, then runs *that worktree's own* `serve` target with the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides applied for you. (Provided by the `@bespunky/nx-tools:serve-worktree` executor, wired onto every app by the house `app` generator.) **`--portOffset=auto`** isolates it on its own verified-free port block (whole stack — app + any emulator suite — shifts), so it never collides with a server already running; without it, the serve owns the default/forwarded ports (one at a time). See [[local-server-isolation]] for when to isolate. Outside a scaffolded project, do the `cd` + env-override dance by hand.
 
 **Two worktree-serve traps:** (1) a worktree serve often does **not** reliably hot-reload source edits over a container mount — **restart the serve after each edit** rather than trusting HMR (if a change still doesn't show, clear the framework build cache before restarting to force a fresh compile). (2) For a **long-lived** worktree, `git rebase development` *before* serving whenever `development` has moved, so you test against the latest integration, not a stale fork.
 

@@ -26,6 +26,34 @@ cd "$ROOT"
 
 DATA_DIR="$ROOT/.emulator-data"
 
+# Port-offset isolation (PORT_OFFSET, set by `<app>:serve-worktree --portOffset`): shift the WHOLE
+# emulator suite onto a free port block so it COEXISTS with a suite the developer already has up on
+# the base ports — instead of reaping it. We generate an offset copy of firebase.json (every
+# emulator port +OFFSET, INCLUDING the hub/logging ports firebase-tools otherwise fixes at
+# 4400/4500 and would collide on), keep this stack's data in its own dir, and reap ONLY these
+# shifted ports (never the global JVM sweep, which would kill the developer's suite). OFFSET 0 (the
+# default) = the base forwarded stack, entirely unchanged.
+OFFSET="${PORT_OFFSET:-0}"
+CONFIG_ARGS=()
+REAP_ARGS=()
+if [ "$OFFSET" != "0" ]; then
+  echo "[emulators] PORT_OFFSET=$OFFSET — isolated stack (shifted ports + own data dir)" >&2
+  OFFSET_CONFIG="$ROOT/.firebase.offset-$OFFSET.json"
+  node -e '
+    const fs = require("fs"), off = Number(process.argv[2]);
+    const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const e = cfg.emulators || (cfg.emulators = {});
+    for (const k of Object.keys(e)) if (e[k] && typeof e[k].port === "number") e[k].port += off;
+    // hub/logging default to 4400/4500 when unset — pin them shifted so two suites never collide.
+    e.hub = Object.assign({ host: "0.0.0.0" }, e.hub, { port: ((e.hub && e.hub.port) || 4400) + off });
+    e.logging = Object.assign({ host: "0.0.0.0" }, e.logging, { port: ((e.logging && e.logging.port) || 4500) + off });
+    fs.writeFileSync(process.argv[3], JSON.stringify(cfg, null, 2));
+  ' "$ROOT/firebase.json" "$OFFSET" "$OFFSET_CONFIG"
+  CONFIG_ARGS=(--config "$OFFSET_CONFIG")
+  REAP_ARGS=("$OFFSET_CONFIG" isolated)
+  DATA_DIR="$ROOT/.emulator-data-$OFFSET"
+fi
+
 # The emulator suite MUST run under the SAME projectId the app's client uses. The moment any
 # service is switched to real (e.g. real Auth), that real `projectId` is used for ALL services
 # (singleProjectMode) — so a still-emulated Firestore/Storage launched under a DIFFERENT project
@@ -67,8 +95,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-bash "$ROOT/tools/reap-emulators.sh"
-bash "$ROOT/tools/emulator-data.sh" ensure
+bash "$ROOT/tools/reap-emulators.sh" "${REAP_ARGS[@]}"
+if [ "$OFFSET" = "0" ]; then
+  bash "$ROOT/tools/emulator-data.sh" ensure
+elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ] \
+  && [ -f "$ROOT/tools/emulator-seeds/default/firebase-export-metadata.json" ]; then
+  # Prime THIS isolated stack's own data dir from the default seed once — a known world, without
+  # touching (or importing from) the base stack's .emulator-data.
+  cp -r "$ROOT/tools/emulator-seeds/default" "$DATA_DIR"
+  echo "[emulators] isolated data dir primed from the 'default' seed: $DATA_DIR" >&2
+fi
 
 # Local Functions secrets: the Functions emulator reads `.secret.local` from the loaded bundle
 # (firebase.json → dist/apps/functions), but the file lives with the app source
@@ -105,7 +141,7 @@ IMPORT_ARGS=()
 EXPORT_ARGS=()
 [ "$PERSIST" -eq 1 ] && EXPORT_ARGS=(--export-on-exit "$DATA_DIR")
 
-exec firebase emulators:start \
+exec firebase "${CONFIG_ARGS[@]}" emulators:start \
   --project="$PROJECT" \
   "${ONLY_ARGS[@]}" \
   "${IMPORT_ARGS[@]}" \

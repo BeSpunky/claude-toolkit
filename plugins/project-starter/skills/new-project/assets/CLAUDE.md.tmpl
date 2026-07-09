@@ -127,10 +127,11 @@ After the backend is created, **App Hosting deploys are GitHub-driven**: pushing
 ```bash
 yarn nx run <app>:serve-worktree                            # arrow-key picker of all worktrees → Enter
 yarn nx run <app>:serve-worktree --worktree=<branch|slug>   # skip the prompt (scripting / non-TTY)
+yarn nx run <app>:serve-worktree --portOffset=auto          # ISOLATED: own port set, coexists with a running serve
 yarn nx run <app>:serve-worktree --dryRun                   # print what it would serve, without serving
 ```
 
-It points the single set of forwarded dev ports at the chosen worktree — installing its deps and applying the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you. (Provided by the `@bespunky/nx-tools:serve-worktree` executor. A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.)
+It installs the worktree's deps and applies the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you. **`--portOffset=auto` isolates the serve** — the whole stack (app dev-server{{#firebase}} **and** the emulator suite{{/firebase}}) shifts onto a stable, verified-free port block derived from the worktree, so it never collides with a server you're running on the default/forwarded ports. Without it, the serve takes the default (forwarded) ports — one serve at a time. (Provided by the `@bespunky/nx-tools:serve-worktree` executor. A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.){{#firebase}} When isolated, open the app at the printed **`?portOffset=N`** URL so its client connects to the shifted emulator ports.{{/firebase}}
 
 ## Generator-first, manual last
 
@@ -181,6 +182,13 @@ This devcontainer ships with **Chromium + Playwright pre-installed** (the devcon
 Use Playwright whenever you need to **observe** or **drive** the running app instead of reasoning about source: verify a UI change end-to-end, reproduce a user-reported bug in the actual browser, capture before/after screenshots, scrape Angular-rendered output, or generate test scaffolding via codegen. Always headless — there is no display in the container.
 
 For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` / `Claude_in_Chrome` MCPs, how to write a headless script, how to capture and feed back screenshots, common pitfalls), invoke the **`browser-automation:playwright`** skill before reaching for any browser-side check.
+
+## Local servers — never clobber a running server (non-negotiable)
+
+**When you start a server to test a change, you MUST bind it to a random free port — never the default (`4200`{{#firebase}}, or the emulator ports `8080`/`9099`/…{{/firebase}}) or any container-forwarded port.** Those belong to whatever server the developer launched manually; grabbing them fails, silently attaches, or forces a disruptive restart. You verify **headless** (Playwright reaches any `localhost:<port>` directly), so you never need the forwarded ports — a random port costs nothing. Read the bound URL from the server's own startup output and point your browser there; tear the server down when done, and **never kill a server you didn't start** to free a port. Full rules — invoke the **`workflow:local-server-isolation`** skill.
+{{#firebase}}
+The emulator suite is the trap: `tools/emulators.sh` **reaps existing emulator processes** on launch, so a plain `nx serve` to test would kill the developer's running suite (a random *app* port doesn't prevent that). The clean fix is **`yarn nx run <app>:serve-worktree --portOffset=auto`** — it shifts the entire stack (app + emulators, incl. the hub/logging ports) onto a free block and reaps only *its own* shifted ports, so it coexists with the developer's suite instead of killing it. Then open the app at the printed `?portOffset=N` URL. (Or, if you only changed the app: reuse the running suite by serving the app alone on a random port pointed at it.) Never boot a colliding suite on the base ports.
+{{/firebase}}
 
 ## Conventions
 

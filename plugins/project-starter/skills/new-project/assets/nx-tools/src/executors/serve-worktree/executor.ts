@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import type { ServeWorktreeExecutorSchema } from './schema';
 import { runServe } from './serve-process';
+import { resolvePortOffset, BASE_APP_PORT } from './port-offset';
 import {
   collectWorktrees,
   matchWorktree,
@@ -65,26 +66,57 @@ const runExecutor: PromiseExecutor<ServeWorktreeExecutorSchema> = async (
   // which caches a single workspace root across trees, resolves back to the main tree
   // and serves the wrong source); NX_DAEMON=false stops that daemon from cross-talking
   // between trees.
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     NX_DAEMON: 'false',
     NX_WORKSPACE_ROOT_PATH: chosen.path,
   };
+  const args = ['run', target];
+
+  // Port-offset isolation: shift this serve's whole stack onto a free port block so it never
+  // collides with a server already running (the developer's on the default/forwarded ports, or
+  // another session's). PORT_OFFSET is the single knob both consumers read — tools/emulators.sh
+  // (offsets the emulator suite) and the `serve` orchestrator (offsets the app dev-server port).
+  // A Firebase workspace is detected by firebase.json in the worktree: there the orchestrator
+  // applies the offset itself, so we only set the env; a plain workspace has no orchestrator, so
+  // we pass --port to its dev-server directly.
+  const offset = await resolvePortOffset(options.portOffset, worktreeKey(chosen));
+  const isFirebase = existsSync(join(chosen.path, 'firebase.json'));
+  const appPort = BASE_APP_PORT + offset;
+  let openUrl: string | undefined;
+  if (offset > 0) {
+    env.PORT_OFFSET = String(offset);
+    if (!isFirebase) args.push(`--port=${appPort}`);
+    // A Firebase app must be opened WITH the ?portOffset param so its client connects to the
+    // shifted emulator ports (the app reads it via emulator-overrides.ts); a plain app just needs
+    // the shifted dev-server port.
+    openUrl = isFirebase ? `http://localhost:${appPort}/?portOffset=${offset}` : `http://localhost:${appPort}/`;
+  }
 
   if (options.dryRun) {
     logger.info('[serve-worktree] DRY RUN — would serve:');
     logger.info(`  worktree : ${worktreeLabel(chosen)}`);
-    logger.info(`  command  : ${nxBin} run ${target}`);
+    logger.info(`  command  : ${nxBin} ${args.join(' ')}`);
     logger.info(`  cwd      : ${chosen.path}`);
-    logger.info(`  env      : NX_DAEMON=false NX_WORKSPACE_ROOT_PATH=${chosen.path}`);
+    logger.info(
+      `  env      : NX_DAEMON=false NX_WORKSPACE_ROOT_PATH=${chosen.path}` +
+        (offset > 0 ? ` PORT_OFFSET=${offset}` : ''),
+    );
+    if (offset > 0) logger.info(`  isolated : offset ${offset} — open ${openUrl}`);
     return { success: true };
   }
 
   logger.info(`[serve-worktree] Serving ${target} from ${worktreeLabel(chosen)}`);
+  if (openUrl) logger.info(`[serve-worktree] Isolated on port offset ${offset} — open ${openUrl}`);
 
   // Hand off to the serve-process lifecycle, which owns graceful Ctrl+C shutdown.
-  return await runServe({ command: nxBin, args: ['run', target], cwd: chosen.path, env });
+  return await runServe({ command: nxBin, args, cwd: chosen.path, env });
 };
+
+/** The stable identity of a worktree for deriving its port block — its branch, else its path. */
+function worktreeKey(w: Worktree): string {
+  return w.branch ?? w.path;
+}
 
 /**
  * Resolve the worktrees down to the single one to serve:

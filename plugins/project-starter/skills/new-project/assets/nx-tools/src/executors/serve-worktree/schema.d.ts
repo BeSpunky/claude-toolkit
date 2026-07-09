@@ -10,4 +10,6 @@ export interface ServeWorktreeExecutorSchema {
   install?: boolean;
   /** Print the resolved worktree + command without installing or serving. Default false. */
   dryRun?: boolean;
+  /** Isolate on an own port set: 'auto' (stable per-worktree, verified free), a pinned integer, or '0'/undefined for the base stack. */
+  portOffset?: string;
 }

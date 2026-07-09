@@ -27,6 +27,10 @@
       "type": "boolean",
       "description": "Print the resolved worktree and the command that would run, without installing or serving.",
       "default": false
+    },
+    "portOffset": {
+      "type": "string",
+      "description": "Isolate this serve on its own port set so it never collides with a server already running (the developer's on the default/forwarded ports, or another session's). 'auto' picks a stable, verified-free port block derived from the worktree (same worktree → same ports; whole Firebase stack — app + emulators — shifts by the offset); a positive integer pins a specific offset; omit or '0' for the base/forwarded stack. When isolating a Firebase app, open it with the printed `?portOffset=` URL so the app connects to the shifted emulator ports."
     }
   },
   "required": []

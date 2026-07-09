@@ -76,3 +76,31 @@ export function resolveEmulated(
   apply(fromQuery(win)); // URL query — wins
   return result;
 }
+
+/**
+ * Resolve the emulator PORT OFFSET for this session — the amount added to every emulator port so
+ * the app connects to an ISOLATED stack (started by `<app>:serve-worktree --portOffset`) instead
+ * of the base ports. Read from `?portOffset=<n>` (or localStorage `portOffset`); 0 when absent or
+ * invalid. Precedence: URL query > localStorage > 0. Browser/SSR-safe (no `window` → 0), and — like
+ * the emulate resolver — only consulted behind `ngDevMode`, so it tree-shakes out of prod.
+ */
+export function resolvePortOffset(
+  win: Window | undefined = typeof window === 'undefined' ? undefined : window
+): number {
+  if (!win) return 0;
+  const read = (v: string | null | undefined): number => {
+    const n = Number((v ?? '').trim());
+    return Number.isInteger(n) && n > 0 ? n : 0;
+  };
+  try {
+    const fromUrl = read(new URLSearchParams(win.location?.search ?? '').get('portOffset'));
+    if (fromUrl) return fromUrl;
+  } catch {
+    // location/URLSearchParams can throw in exotic embeddings — fall through to storage.
+  }
+  try {
+    return read(win.localStorage?.getItem('portOffset'));
+  } catch {
+    return 0;
+  }
+}
