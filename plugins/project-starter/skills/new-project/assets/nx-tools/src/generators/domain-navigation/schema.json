@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyDomainNavigation",
+  "title": "Scaffold a domain's typed, reactive navigation set (route registry + navigation service + selectors + event bus + binding)",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Domain name (e.g. orders). Used to name the services and files.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What domain is this navigation for?"
+    },
+    "directory": {
+      "type": "string",
+      "description": "Where to create the navigation folder (a `navigation/` directory is created inside). Defaults to libs/<name>/src/lib."
+    }
+  },
+  "required": ["name"]
+}

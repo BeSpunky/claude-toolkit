@@ -46,7 +46,10 @@ echo "Base image: $IMAGE"
 INNER="set -e
 rm -rf /tmp/pub && cp -r /assets/nx-tools /tmp/pub
 cd /tmp/pub
-npm install --no-save --no-audit --no-fund --silent typescript
+# Pin to TypeScript 5.x: compile-generators.mts uses the classic compiler API (ts.transpileModule /
+# ts.ModuleKind), which the native-port TypeScript 7.x package no longer exposes from its main entry
+# (an unpinned 'typescript' now resolves to 7.x → 'Cannot read properties of undefined (ModuleKind)').
+npm install --no-save --no-audit --no-fund --silent 'typescript@^5'
 node /assets/compile-generators.mts /tmp/pub
 echo '--- package contents (npm pack --dry-run) ---'
 npm publish $DRY"
