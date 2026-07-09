@@ -16,6 +16,11 @@
       "schema": "./src/generators/worktree-serve/schema.json",
       "description": "Add a `serve-worktree` target to a project (wires the @bespunky/nx-tools:serve-worktree executor). The per-app sibling of serve-options — applied by the house `app` generator to every app (first and later) and re-asserted by `scaffold.sh --repair` — so an in-flight git worktree can be served without merging it back (`nx run <project>:serve-worktree`, arrow-key picker or --worktree=<branch|path>). Deploy-/framework-agnostic: delegates to the project's own `serve` target (plain Angular dev-server or the Firebase orchestrator), so it runs for all projects. Idempotent."
     },
+    "serve-with-shared-browser": {
+      "factory": "./src/generators/serve-with-shared-browser/generator",
+      "schema": "./src/generators/serve-with-shared-browser/schema.json",
+      "description": "Add a `serve-with-shared-browser` target to a project — an nx:run-commands orchestrator (continuous, parallel) that runs the project's own `serve` alongside the shared co-driven browser navigating to it (`nx run <project>:serve-with-shared-browser`). The per-app sibling of worktree-serve: applied by the house `app` generator to every app (first and later) and re-asserted by `scaffold.sh --repair`. Consumes the workspace-level `shared-browser` tooling (the CLI at tools/shared-browser/shared-browser); the nav command follows PORT_OFFSET so an isolated worktree serve is navigated to on its shifted port. Idempotent."
+    },
     "devcontainer": {
       "factory": "./src/generators/devcontainer/generator",
       "schema": "./src/generators/devcontainer/schema.json",
@@ -40,6 +45,11 @@
       "factory": "./src/generators/playwright/generator",
       "schema": "./src/generators/playwright/schema.json",
       "description": "Add @playwright/test as a devDependency so the devcontainer's post-create.sh installs Chromium + apt deps on container build. The browser binary lives in a per-workspace Docker volume so rebuilds don't re-download. Pairs with the `browser-automation:playwright` skill which describes how to use it. Always-on for BeSpunky projects — no opt-in flag."
+    },
+    "shared-browser": {
+      "factory": "./src/generators/shared-browser/generator",
+      "schema": "./src/generators/shared-browser/schema.json",
+      "description": "Install the always-on shared, co-driven browser tooling — the workspace-level sibling of firebase-emulators' tooling. Writes the shared-browser CLI (tools/shared-browser/shared-browser, chmod +x) and its Node/CDP helpers (attach.mjs, verify.mjs, recorder.mjs) into tools/shared-browser/, and registers the workspace Nx project `shared-browser` with the lifecycle targets up|down|status|restart|clean|url|logs (each an nx:run-commands running `bash tools/shared-browser/shared-browser <verb>`). The shared browser is ONE headed Chromium on a virtual display (Xvfb), co-driven by a human over noVNC (:6080, the only forwarded port) and by an agent over CDP (:9223, loopback), so a change can be verified live in the same browser both watch. Workspace-level and always-on (no inputs) — generated once per workspace from scaffold.sh's WORKSPACE_GEN_BLOCK in both the scaffold and --repair paths. Idempotent + --repair-safe: every generator-owned file is rewritten on each run. Per-app consumption is the serve-with-shared-browser target (wired by the `app` generator)."
     },
     "mark-extractable": {
       "factory": "./src/generators/mark-extractable/generator",

@@ -165,6 +165,7 @@ WORKSPACE_GEN_BLOCK="ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer 
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
 # for adding further apps, plus the reusable-tool extraction generators mark-extractable /
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
@@ -204,7 +205,8 @@ $STAGE_BLOCK
 # Repair re-applies the per-app house config to the EXISTING app (the \`app\` generator CREATES
 # apps; it is not the heal path), then the workspace-level generators. All idempotent.
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-serve --project=$APP$REPAIR_FIREBASE_BLOCK
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-serve --project=$APP
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-with-shared-browser --project=$APP$REPAIR_FIREBASE_BLOCK
 $WORKSPACE_GEN_BLOCK"
 fi
 

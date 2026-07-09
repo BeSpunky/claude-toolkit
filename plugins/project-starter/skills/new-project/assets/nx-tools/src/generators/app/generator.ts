@@ -40,6 +40,7 @@ import {
 import { basename } from 'node:path';
 import serveOptionsGenerator from '../serve-options/generator';
 import worktreeServeGenerator from '../worktree-serve/generator';
+import serveWithSharedBrowserGenerator from '../serve-with-shared-browser/generator';
 import firebaseEmulatorsGenerator from '../firebase-emulators/generator';
 
 interface AppGeneratorSchema {
@@ -102,6 +103,12 @@ export default async function appGenerator(
   //     served without merging it back. Deploy-/framework-agnostic (delegates to this project's
   //     own `serve`), so it applies to every app regardless of the Firebase opt-in below.
   await worktreeServeGenerator(tree, { project: projectName });
+
+  // 2c) Per-app house config: the `serve-with-shared-browser` target — an orchestrator that runs
+  //     this app's `serve` alongside the always-on shared browser navigating to it. Framework-agnostic
+  //     (delegates to this project's own `serve`), so it applies to every app; the workspace-level
+  //     `shared-browser` generator (run once per workspace from scaffold.sh) provides the CLI it drives.
+  await serveWithSharedBrowserGenerator(tree, { project: projectName });
 
   // 3) Firebase per-app wiring — explicit flag wins; otherwise auto-detect a Firebase workspace.
   const firebase = options.firebase ?? tree.exists('firebase.json');

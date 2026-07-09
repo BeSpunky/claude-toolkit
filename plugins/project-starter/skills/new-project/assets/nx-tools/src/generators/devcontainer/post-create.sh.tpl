@@ -168,4 +168,64 @@ if grep -q '"@angular/core"' package.json 2>/dev/null; then
   fi
 fi
 
+# --- 6. Shared-browser prerequisites (ALWAYS-ON — provisioned in EVERY BeSpunky devcontainer) ---
+# The claude-toolkit "shared-browser" capability (tools/shared-browser, started ON DEMAND)
+# runs a headed Chromium on a virtual X display and streams it to the human over noVNC on
+# :6080. The stack starts lazily, but its OS deps are installed ALWAYS — so any container can
+# co-drive a browser with no rebuild. Deps: x11vnc (VNC server) + novnc/websockify (the
+# noVNC web client + WS↔TCP bridge) + fluxbox (a minimal WM so Chromium gets a window frame)
+# + fonts (liberation + color-emoji so rendered pages and screenshots look right).
+#
+# UNCONDITIONAL by design: this fires on every scaffold — it is NOT gated on --firebase,
+# @playwright/test, or any other flag (unlike steps 3–5). Best-effort with retry: apt mirrors
+# and cdn.playwright.dev are both occasionally flaky over WSL+Docker DNS, so a transient
+# failure must only WARN — never abort post-create (set -e) and leave the container
+# half-provisioned (same stance as the Playwright and Angular-skills steps above).
+echo "[post-create] provisioning shared-browser prerequisites (xvfb/x11vnc/novnc/websockify/fluxbox/fonts + Chromium)"
+sb_apt_ok=0
+for attempt in 1 2 3; do
+  if sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 curl fonts-liberation fonts-noto-color-emoji; then
+    sb_apt_ok=1; break
+  fi
+  if [ "$attempt" -lt 3 ]; then
+    echo "[post-create] shared-browser apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+    sleep $((attempt * 10))
+  fi
+done
+if [ "$sb_apt_ok" = 1 ]; then
+  echo "[post-create] shared-browser apt deps ready"
+else
+  echo "[post-create] WARNING: shared-browser apt deps failed after 3 attempts — likely a transient network issue."
+  echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
+  echo "[post-create]            sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 curl fonts-liberation fonts-noto-color-emoji"
+fi
+
+# Ensure a Playwright Chromium binary exists for the shared browser to launch (the CLI resolves
+# it at runtime via whichever of playwright / playwright-core / @playwright/test is installed).
+# Step 4 already fetched it when @playwright/test is in package.json — so here we only install
+# if it is still MISSING, avoiding a redundant ~150 MB download. Best-effort + retry; a failure
+# only warns (the shared-browser CLI's own guard also runs `npx playwright install chromium` on
+# first `up` if it is absent, so this is provisioning-ahead, not a hard requirement).
+if [ -d /home/node/.cache/ms-playwright ] && \
+   find /home/node/.cache/ms-playwright -maxdepth 1 -type d -name 'chromium-*' 2>/dev/null | grep -q .; then
+  echo "[post-create] shared-browser: Playwright Chromium already present — skipping install"
+else
+  echo "[post-create] shared-browser: Playwright Chromium not found — installing"
+  sb_pw_ok=0
+  for attempt in 1 2 3; do
+    if npx --yes playwright install chromium; then sb_pw_ok=1; break; fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "[post-create] shared-browser Chromium install attempt $attempt/3 failed (often transient DNS); retrying in $((attempt * 10))s..."
+      sleep $((attempt * 10))
+    fi
+  done
+  if [ "$sb_pw_ok" = 1 ]; then
+    echo "[post-create] shared-browser: Playwright Chromium ready"
+  else
+    echo "[post-create] WARNING: shared-browser Chromium install failed after 3 attempts — likely a transient network issue."
+    echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
+    echo "[post-create]            npx playwright install chromium"
+  fi
+fi
+
 echo "[post-create] done"
