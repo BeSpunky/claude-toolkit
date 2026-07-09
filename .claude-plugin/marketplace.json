@@ -27,8 +27,8 @@
     {
       "name": "browser-automation",
       "source": "./plugins/browser-automation",
-      "description": "Drive a real browser via Playwright (Chromium, pre-installed in BeSpunky devcontainers) — verify UI behavior end-to-end, reproduce bugs in the running app, capture before/after screenshots, scrape rendered DOM, generate test scaffolds via codegen. Loaded by default in scaffolded projects.",
-      "version": "0.1.0"
+      "description": "Two ways to drive a real browser. playwright: HEADLESS Playwright (Chromium, pre-installed) for solo automated verification, bug repro, before/after screenshots, DOM scraping, codegen. shared-browser: one in-container Chromium a human WATCHES via noVNC (forwarded :6080) while Claude drives it via loopback CDP — co-debugging and live in-place CSS/DOM verification with measured proof, with the fix ported to source and confirmed after reload. A decision tree keeps them distinct. Loaded by default in scaffolded projects.",
+      "version": "0.2.0"
     },
     {
       "name": "product-ux",

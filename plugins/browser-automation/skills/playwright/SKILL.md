@@ -21,9 +21,10 @@ This devcontainer ships with **Chromium + Playwright system deps pre-installed**
 |---|---|
 | `mcp__Claude_Preview__*` | Quick check of the current Angular dev server inside VS Code. Auto-connected, takes screenshots and inspects with zero setup. **Prefer this for "does this page render?"** |
 | `mcp__Claude_in_Chrome__*` | Cross-app flows in real Chrome with the user's session (logging into a SaaS, filling a form on a third-party site). |
-| **Playwright (this skill)** | Repeatable scripts, headless runs in CI shape, multi-step flows, generating test code, scraping at scale, anything you want to keep as a file. |
+| **`shared-browser` skill** | The human wants to **watch / co-drive**, OR in-place **visual / CSS-DOM verification with measured proof** (getComputedStyle/overflow, before/after) on one live browser you both drive. |
+| **Playwright (this skill)** | **Solo automated checks** — repeatable scripts, headless runs in CI shape, multi-step flows, generating test code, scraping at scale, anything you want to keep as a file. |
 
-If the preview MCP is connected and the question is "does the local app look right?", use that. Use Playwright when you need a **script artifact** or the preview can't drive the flow you need.
+If the preview MCP is connected and the question is "does the local app look right?", use that. Use Playwright when you need a **script artifact** or the preview can't drive the flow you need. **For co-driving with a human present, or in-place visual verification, use the `shared-browser` skill; use this (headless Playwright) for solo automated checks.**
 
 ## Headless only
 
