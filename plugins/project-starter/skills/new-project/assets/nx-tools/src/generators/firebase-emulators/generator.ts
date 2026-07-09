@@ -245,7 +245,17 @@ export default async function firebaseEmulatorsGenerator(
   const firebaseConfigPath = `${appRoot}/src/app/firebase.config.ts`;
   const emulatorOverridesPath = `${appRoot}/src/app/emulator-overrides.ts`;
 
-  tree.write(envInterfacePath, template('environment.interface.ts.tpl'));
+  // The shared Environment shape — WRITE-IF-ABSENT (not a blind rewrite). Projects legitimately
+  // EXTEND this interface: they complete the `firebase` block with the keys their app uses and add
+  // app-specific top-level fields (e.g. a `google: { oauthClientId }` block for Calendar OAuth).
+  // Those are real per-project values, so overwriting the file every run would silently drop them
+  // (and break the app's types). New scaffolds get the full standard shape from the template; an
+  // existing project owns and keeps its own. (If the toolkit ever changes the shared shape itself,
+  // that migration is hand-merged, like the CLAUDE.md sections — the same reason environment.ts /
+  // environment.prod.ts are also write-if-absent.)
+  if (!tree.exists(envInterfacePath)) {
+    tree.write(envInterfacePath, template('environment.interface.ts.tpl'));
+  }
 
   // environment.ts — write if absent; migrate the LEGACY emulators shape (each service was a bare
   // endpoint with no per-service `default`) to the new per-service-toggle shape. The dev env carries
@@ -716,6 +726,11 @@ function ensureFunctionsProject(tree: Tree): void {
             thirdParty: false,
             generatePackageJson: true,
             deleteOutputPath: true,
+            // Copy the committed public-params file beside the bundle. apps/functions/.env holds
+            // PUBLIC (non-secret) function params and is a build asset (secrets go through
+            // .secret.local / Secret Manager, never here). Without this the deploy/emulator bundle
+            // ships without .env and the functions lose their params at runtime.
+            assets: [{ glob: '.env', input: root, output: '.' }],
             esbuildOptions: { outExtension: { '.js': '.js' } },
           },
         },

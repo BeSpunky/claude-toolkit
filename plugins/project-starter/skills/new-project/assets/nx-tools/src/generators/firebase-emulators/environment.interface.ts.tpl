@@ -27,9 +27,14 @@ export interface Environment {
     apiKey: string;
     appId: string;
     authDomain?: string;
+    storageBucket?: string;
     messagingSenderId?: string;
+    measurementId?: string;
     vapidKey?: string;
   };
+  // This interface is app-owned after the first scaffold (the generator writes it only if absent):
+  // add app-specific top-level fields here freely — e.g. `google?: { oauthClientId: string }` for a
+  // Google API (Calendar) OAuth client id. They survive `--repair`.
   emulators?: {
     auth?: { url: string; default: boolean };
     firestore?: { host: string; port: number; default: boolean };
