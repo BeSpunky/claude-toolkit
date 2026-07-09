@@ -1,6 +1,6 @@
 ---
 name: branch-and-release
-description: The BeSpunky git methodology — how work flows from idea to production. Use at the START of any request (the relevance check runs before you design, read code, or edit), when opening or serving a git worktree, when branching, when integrating/merging a finished feature, and on any promotion or release phrasing ("done / verified", "go to staging", "go live / ship it / release / deploy to prod / cut a version"). A one-way promotion pipeline across four branches (feature → development → staging → main), unrelated work isolated in per-feature worktrees off the integration branch, rebase-and-re-verify at the single divergence point, and three human-gated promotions. Deploy bindings (which branch deploys where) are per-project and live in the project's CLAUDE.md; this skill is the durable method behind them.
+description: The BeSpunky git methodology — how work flows from idea to production. Use at the START of any request (the relevance check runs before you design, read code, or edit), when opening or serving a git worktree, when branching, whenever you are about to commit work in progress, when integrating/merging a finished feature, and on any promotion or release phrasing ("done / verified", "go to staging", "go live / ship it / release / deploy to prod / cut a version"). A one-way promotion pipeline across four branches (feature → development → staging → main), unrelated work isolated in per-feature worktrees off the integration branch, small committed increments as you work in the worktree (not one big commit at the end), rebase-and-re-verify at the single divergence point, and three human-gated promotions. Deploy bindings (which branch deploys where) are per-project and live in the project's CLAUDE.md; this skill is the durable method behind them.
 ---
 
 # Branch & release workflow (non-negotiable)
@@ -40,6 +40,18 @@ NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$(pwd)" <pm> nx <target> <project>
 ```
 
 The symptom that catches it: a deliberately-failing canary test in the worktree never fails; the spec count doesn't change after you edit specs. `.claude/worktrees/` is gitignored; clean up any stray package-manager store the worktree install drops at the repo root.
+
+## Commit small increments as you go (inside the worktree)
+
+**Work in a series of small, committed steps on the feature branch — never accumulate one large uncommitted pile that you commit all at once at the end.** After each *coherent, working* unit — a passing test, a completed sub-step, a green refactor, a fixed edge case — commit it with a clear message describing that step. Aim for commits that each leave the branch in a working state and read as one idea.
+
+Why it matters:
+- **Every commit is a restore point.** A wrong turn costs you one small step to undo (`git revert`/`reset` that commit), not a day of tangled work.
+- **The branch's history tells the story** of how the change was built — reviewable step by step, not as one opaque blob.
+- **Rebasing stays cheap.** The divergence-point rule below rebases the feature onto current `development` before merging; small, coherent commits make any conflict local to one step instead of one giant hard-to-resolve diff.
+- **`development` still sees one unit.** The `git merge --no-ff` at the "feature done" gate groups all these commits under a single merge commit, so `development`'s history stays clean and the whole feature reverts in one command (`git revert -m 1`) — you get granular *and* grouped, not one or the other.
+
+Practical rhythm: make the change → verify it → **commit** → repeat. Don't wait for "the whole feature" to commit; commit the moment a piece stands on its own. Tidy only if needed (an interactive rebase before promotion), but small-as-you-go is the default, not a cleanup afterthought.
 
 ## Serving an in-flight worktree — without merging it back
 

@@ -105,6 +105,7 @@ After the backend is created, **App Hosting deploys are GitHub-driven**: pushing
 
 - **Step 0, every request — decide related vs. unrelated BEFORE touching anything.** Consciously judge whether the request continues the *current* worktree's in-flight work or is something else (a different feature/bug, tooling, docs). **Related** → keep working in the current tree. **Unrelated** → **open a new worktree off `development` and do all of it there** — don't ask, and don't "just start" in the current tree meaning to relocate later. This classification is a precondition for touching files, never a cleanup step; never pile unrelated changes onto an in-flight branch.
 - **Never commit directly onto `development`, `staging`, or `main`** — they advance only by merging the branch directly upstream, so promotions stay clean fast-forwards.
+- **Commit small increments as you work in the worktree** — after each coherent, working step (a passing test, a completed sub-step), not one giant commit at the end. Each commit is a restore point and keeps rebases cheap; the `--no-ff` merge into `development` groups them into one revertable unit, so you get granular *and* grouped.
 - **Nothing promotes on its own.** Only the relevance check + worktree creation are automatic; every downstream move (feature→`development`, `development`→`staging`, `staging`→`main`) waits on your explicit signal.
 
 **The four branches** — work flows one way, `feature` → `development` → `staging` → `main`, each a strict ancestor of the next:
