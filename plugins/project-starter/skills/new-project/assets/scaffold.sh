@@ -157,21 +157,22 @@ ensure_nx_tools() {
 }"
 
 # --- per-workspace house generators (used by both modes; idempotent; run once per workspace) ---
-# The PER-APP generators (serve-options, firebase-emulators) are deliberately NOT here: in scaffold
-# mode the `app` generator applies them to the new app; in repair mode they run explicitly against
-# the existing app (see each mode's INNER below). These four are workspace-level — identical in both
-# modes regardless of how many apps the workspace has.
+# The PER-APP generators (serve, serve-options, firebase-emulators) are deliberately NOT here: in
+# scaffold mode the `app` generator applies them to the new app; in repair mode they run explicitly
+# against the existing app (see each mode's INNER below). These workspace-level ones are identical in
+# both modes regardless of how many apps the workspace has.
 WORKSPACE_GEN_BLOCK="ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
 # for adding further apps, plus the reusable-tool extraction generators mark-extractable /
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
 # until the package is first published (see tools/publish-nx-tools); once published, --repair adds
 # it to existing projects.
-yarn add -D @bespunky/nx-tools@^0.2.0 || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
+yarn add -D @bespunky/nx-tools@^0.3.0 || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
@@ -204,9 +205,8 @@ fi
 $STAGE_BLOCK
 # Repair re-applies the per-app house config to the EXISTING app (the \`app\` generator CREATES
 # apps; it is not the heal path), then the workspace-level generators. All idempotent.
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-serve --project=$APP
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-with-shared-browser --project=$APP$REPAIR_FIREBASE_BLOCK
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve --project=$APP
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP$REPAIR_FIREBASE_BLOCK
 $WORKSPACE_GEN_BLOCK"
 fi
 

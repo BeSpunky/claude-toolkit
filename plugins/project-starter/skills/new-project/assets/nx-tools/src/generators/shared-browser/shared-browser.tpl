@@ -64,6 +64,7 @@ LOGS="$SB_RUNTIME/logs"
 SHOTS="$LOGS/screenshots"                                  # verify.mjs writes before/after PNGs here
 EVENTS="$LOGS/events.jsonl"                                # recorder stream
 LOCK="$SB_RUNTIME/up.lock"
+OBSERVE="$SB_RUNTIME/observe-only"                         # presence = observe-only (human is driving; attach/verify/navigate refuse to drive)
 
 # Where the sibling helpers live, and the workspace root (for Node module resolution — gotcha #3).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,6 +89,11 @@ pid_file() { printf '%s/%s.pid' "$SB_RUNTIME" "$1"; }
 log_file() { if [ "$1" = recorder ]; then printf '%s/recorder.out' "$LOGS"; else printf '%s/%s.log' "$LOGS" "$1"; fi; }
 
 ensure_dirs() { mkdir -p "$SB_RUNTIME" "$PROFILE" "$LOGS" "$SHOTS"; }
+
+# observe-only: a lock file in SB_RUNTIME. While present, the human is driving over noVNC and every
+# automated driver (this CLI's navigate, and attach.mjs/verify.mjs) REFUSES to navigate/click/type — so
+# Claude can yield the shared window for interactive steps (OAuth, a captcha) and resume afterwards.
+observe_active() { [ -f "$OBSERVE" ]; }
 
 # ── Per-component identity: the owned port (if any) and a cmdline SIGNATURE ───────────────────────────
 # The signature is a fixed substring that appears in the process's /proc/<pid>/cmdline. We match by
@@ -408,13 +414,20 @@ cmd_navigate() {
   done
   [ -n "$url" ] || die "navigate: --url=<u> is required"
 
+  # observe-only: the human is driving — do NOT steal the window. Non-fatal (return 0) so a co-served
+  # `serve` isn't torn down; the human navigates manually, or Claude runs `resume` then re-navigates.
+  if observe_active; then
+    err "observe-only — human is driving; skipping navigate to $url (run: shared-browser resume)"
+    return 0
+  fi
+
   cmd_up                                                   # ensure the stack is up (idempotent)
 
   if [ "$wait" -eq 1 ]; then
     say "waiting for $url to answer (timeout ${SB_WAIT_TIMEOUT}s)…"
     if ! wait_for_url "$url"; then
-      # NON-FATAL by design: `serve-with-shared-browser` runs this navigate in a parallel run-commands
-      # alongside `serve`. A non-zero exit here would tear down the co-served `serve`. So when the app
+      # NON-FATAL by design: the `serve` target's shared-browser layer runs this navigate in a parallel run-commands
+      # alongside the app dev-server. A non-zero exit here would tear down the co-served dev-server. So when the app
       # never comes up, WARN and leave the browser running — exit 0. Only a genuine hard failure (stack
       # failing to come `up`, above) is fatal.
       err "app not reachable after ${SB_WAIT_TIMEOUT}s — leaving the browser up; navigate manually when ready"
@@ -470,16 +483,18 @@ cmd_status() {
   local json=0
   [ "${1:-}" = "--json" ] && json=1
 
-  local vnc web cdp up comp state first
+  local vnc web cdp up comp state first observe
   port_listening "$SB_VNC" && vnc=true || vnc=false
   port_listening "$SB_WEB" && web=true || web=false
   port_listening "$SB_CDP" && cdp=true || cdp=false
   up=false
   { [ "$vnc" = true ] && [ "$web" = true ] && [ "$cdp" = true ]; } && up=true
+  observe_active && observe=true || observe=false
 
   if [ "$json" -eq 1 ]; then
     printf '{'
     printf '"up":%s,' "$up"
+    printf '"observeOnly":%s,' "$observe"
     printf '"ports":{"vnc":%s,"web":%s,"cdp":%s},' "$vnc" "$web" "$cdp"
     printf '"components":{'
     first=1
@@ -495,6 +510,7 @@ cmd_status() {
     printf '}\n'
   else
     printf 'shared-browser status: %s\n' "$([ "$up" = true ] && echo UP || echo DOWN)"
+    printf '  %-11s %s\n' 'mode' "$([ "$observe" = true ] && echo 'observe-only (human is driving)' || echo 'co-drive (automation may drive)')"
     for comp in "${START_ORDER[@]}" recorder; do
       component_running "$comp" && state='up' || state='down'
       printf '  %-11s %s\n' "$comp" "$state"
@@ -508,6 +524,20 @@ cmd_status() {
 }
 
 cmd_url() { printf '%s\n' "$NOVNC_URL"; }
+
+# Hand the shared window to the human: set the observe-only lock so every automated driver stands down.
+cmd_observe() {
+  ensure_dirs
+  printf 'observe-only set at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OBSERVE"
+  ok "observe-only ON — human is driving; automation will not navigate/click/type. Watch at $NOVNC_URL"
+  ok "  hand back with: shared-browser resume"
+}
+
+# Take the shared window back: clear the observe-only lock so automation may drive again.
+cmd_resume() {
+  rm -f "$OBSERVE"
+  ok "observe-only OFF — automation may drive the shared browser again."
+}
 
 cmd_logs() {
   local a comp="" since="" level=""
@@ -592,7 +622,9 @@ shared-browser — a browser a human and Claude drive together (in-container).
 USAGE
   shared-browser up                              start missing components, readiness-gate, auto-start recorder, print noVNC URL
   shared-browser navigate --url=<u> [--wait]     ensure up; (optionally wait for <u>); drive the shared browser to it via CDP
-  shared-browser status [--json]                 per-component up/down + ports + URL (machine-readable with --json)
+  shared-browser observe                         hand the shared window to the human — automation stands down (no navigate/click/type)
+  shared-browser resume                          take the window back — automation may drive again
+  shared-browser status [--json]                 per-component up/down + ports + observe-only mode + URL (machine-readable with --json)
   shared-browser url                             print the noVNC URL (for scripting)
   shared-browser logs [component] [--since=<ts>] [--level=<lvl>]
                                                  tail a component log (xvfb|fluxbox|chrome|x11vnc|websockify),
@@ -613,6 +645,8 @@ main() {
   case "$verb" in
     up)                 cmd_up "$@" ;;
     navigate)           cmd_navigate "$@" ;;
+    observe)            cmd_observe ;;
+    resume)             cmd_resume ;;
     status)             cmd_status "$@" ;;
     url)                cmd_url ;;
     logs)               cmd_logs "$@" ;;

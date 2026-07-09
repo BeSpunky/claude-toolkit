@@ -8,20 +8,16 @@
 // which is respected by any chokidar-based watcher across both old and new Angular builders.
 //
 // Where it routes the option:
-//   - Plain case — `serve` is the Angular dev-server directly (no Firebase, or a fresh
-//     scaffold before firebase-emulators runs) → set `host` on `serve.options`.
-//   - Firebase shape — the firebase-emulators generator parks an `nx:run-commands`
-//     orchestrator at `serve` (running `firebase:emulators` + `serve-no-emulators` in parallel)
-//     with the real dev-server at `serve-no-emulators` → set `host` on `serve-no-emulators.options`
-//     instead, AND strip any stray `host` from the orchestrator's options. (Setting `host` on a
-//     run-commands target would forward it as `--host=0.0.0.0` via flag-passthrough.)
-//     If serve-options runs before firebase-emulators reshapes a fresh project, `host`
-//     lands on `serve`, which firebase-emulators then MOVES to `serve-no-emulators` wholesale —
-//     so the option survives the migration regardless of order. (The legacy dev-server names
-//     `serve-standalone` and `serve-app` are also tolerated, in case serve-options runs before the
-//     rename migration.)
+//   - House shape — the app dev-server is the `dev-server` leaf (created by the `serve` generator) and
+//     `serve` is the @bespunky/nx-tools:serve composer → set `host` on `dev-server.options`, and strip
+//     any stray `host` off the composing `serve` target (a run-commands/composer target would forward
+//     it as `--host=…` via flag-passthrough).
+//   - Plain case — `serve` is still the raw Angular dev-server (a fresh scaffold before the `serve`
+//     generator runs) → set `host` on `serve.options`.
 //
-// This makes the generator safe to re-run on a project at any stage (fresh, firebase-shaped).
+// Legacy dev-server names (`serve-with-emulators`, `serve-no-emulators`, `serve-standalone`,
+// `serve-app`) are also tolerated so `--repair` on an older project still lands `host` correctly,
+// whichever stage its serve targets are in. Safe to re-run at any stage.
 import {
   type Tree,
   readProjectConfiguration,
@@ -42,36 +38,35 @@ export default async function serveOptionsGenerator(
 
   const project = readProjectConfiguration(tree, options.project);
   project.targets ??= {};
+  const targets = project.targets;
 
-  const serve = project.targets.serve;
-  const isOrchestrator = serve?.executor === 'nx:run-commands';
+  const serve = targets.serve;
+  // A composing `serve` (the nx-tools serve executor, or a legacy run-commands orchestrator) must NOT
+  // carry `host` — it would be forwarded to a child as a flag.
+  const serveIsComposer =
+    serve?.executor === '@bespunky/nx-tools:serve' || serve?.executor === 'nx:run-commands';
 
-  // The app dev-server target(s) the orchestrator composes. The Firebase shape has TWO —
-  // `serve-with-emulators` and `serve-no-emulators` — each a real @angular/build:dev-server; older
-  // shapes had a single inner dev-server (`serve-no-emulators`/`serve-standalone`/`serve-app`).
-  // Tolerate them all so host lands correctly whether serve-options runs before or after the
-  // firebase-emulators reshape.
-  const devServerNames = ['serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app'].filter(
-    (name) => project.targets[name]
+  // Every name the real app dev-server can live under, current-first. The house `dev-server` leaf wins;
+  // the legacy Firebase inner targets are tolerated for --repair on older projects.
+  const devServerNames = ['dev-server', 'serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app'].filter(
+    (name) => targets[name]
   );
 
-  if (isOrchestrator && devServerNames.length > 0) {
-    // Firebase shape: the real dev-server(s) live alongside the orchestrator.
-    // 1) Clean any stray `host` off the orchestrator (left by an earlier run of this
-    //    generator that didn't yet know the shape), so nx:run-commands stops forwarding it.
-    if (serve.options && 'host' in serve.options) {
+  if (devServerNames.length > 0) {
+    // House / Firebase shape: the real dev-server(s) live alongside the composing serve.
+    // 1) Clean any stray `host` off the composer (left by an earlier run that didn't yet know the shape).
+    if (serveIsComposer && serve?.options && 'host' in serve.options) {
       delete (serve.options as Record<string, unknown>).host;
     }
-    // 2) Apply host to every app dev-server target.
+    // 2) Apply host to every real dev-server target.
     for (const name of devServerNames) {
-      const devServer = project.targets[name];
+      const devServer = targets[name];
       devServer.options = { ...devServer.options, host };
     }
   } else {
-    // Plain form: `serve` IS the Angular dev-server (firebase not opted in, or first run
-    //   before firebase-emulators reshapes it).
-    project.targets.serve ??= {};
-    project.targets.serve.options = { ...project.targets.serve.options, host };
+    // Plain form: `serve` IS the Angular dev-server (before the `serve` generator reshapes it).
+    targets.serve ??= {};
+    targets.serve.options = { ...targets.serve.options, host };
   }
 
   updateProjectConfiguration(tree, options.project, project);

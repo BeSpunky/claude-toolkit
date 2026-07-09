@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 
 /**
  * A single git worktree, distilled from `git worktree list --porcelain` into
@@ -111,19 +111,50 @@ export function worktreeLabel(w: Worktree): string {
 }
 
 /**
- * Resolve a free-text `query` (branch name or path) to worktrees.
+ * Coerce an arbitrary string into a valid DNS label (lowercase, `[a-z0-9-]`, no leading/trailing
+ * hyphen, ≤ 63 chars). The serve stack addresses each tree by a pretty `<slug>.localhost` domain
+ * (proxied to its dev-server port), and `*.localhost` hostnames must be DNS labels; a slash-carrying
+ * branch (`feat/foo`) or an odd directory name would otherwise be an invalid host.
+ */
+export function toDnsLabel(input: string): string {
+  const label = input
+    .toLowerCase()
+    .replace(/\//g, '-')
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63)
+    .replace(/-+$/g, '');
+  return label || 'app';
+}
+
+/**
+ * The DNS-safe slug that names a tree's pretty domain and its port block key:
+ *   - the MAIN tree → the workspace name (its serve owns the base host, `<workspaceName>.localhost`).
+ *   - a worktree    → its branch (slashes flattened) else its directory basename.
+ * Always a valid DNS label.
+ */
+export function worktreeSlug(w: Worktree, workspaceName: string): string {
+  if (w.isMain) return toDnsLabel(workspaceName);
+  return toDnsLabel(w.branch ?? basename(w.path));
+}
+
+/**
+ * Resolve a free-text `query` (branch name, slug, or path) to worktrees.
  * Exact branch/path matches win outright; otherwise a loose match (substring
- * branch, path suffix, or directory basename) is used. Returns every match so
- * the caller can distinguish "none" from "ambiguous".
+ * branch, path suffix, directory basename, or the derived DNS slug) is used.
+ * Returns every match so the caller can distinguish "none" from "ambiguous".
  */
 export function matchWorktree(worktrees: Worktree[], query: string): Worktree[] {
   const q = query.trim();
   const exact = worktrees.filter((w) => w.branch === q || resolve(w.path) === resolve(q));
   if (exact.length) return exact;
+  const qSlug = toDnsLabel(q);
   return worktrees.filter(
     (w) =>
       (w.branch !== undefined && w.branch.includes(q)) ||
       w.path.endsWith(q) ||
-      w.path.split('/').pop() === q,
+      basename(w.path) === q ||
+      toDnsLabel(w.branch ?? basename(w.path)) === qSlug,
   );
 }

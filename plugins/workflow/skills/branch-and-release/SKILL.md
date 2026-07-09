@@ -55,18 +55,17 @@ Practical rhythm: make the change → verify it → **commit** → repeat. Don't
 
 ## Serving an in-flight worktree — without merging it back
 
-There is usually only **one** set of forwarded dev ports, so exactly one serve owns them at a time; testing a feature means pointing that single serve at its worktree. In **BeSpunky-scaffolded (Nx) projects** the `serve-worktree` target does this for you — run it from anywhere:
+Testing a feature means serving *its* worktree — and in **BeSpunky-scaffolded (Nx) projects** the single `serve` target does this for you from anywhere, no merge required:
 
 ```bash
-<pm> nx run <app>:serve-worktree                            # arrow-key picker of all worktrees → Enter
-<pm> nx run <app>:serve-worktree --worktree=<branch|slug>   # skip the prompt (scripting / non-TTY shells)
-<pm> nx run <app>:serve-worktree --portOffset=auto          # ISOLATED port set — coexists with a running serve
-<pm> nx run <app>:serve-worktree --dryRun                   # print what it would serve, without serving
+<pm> nx serve <app> --worktree=<branch|slug>                     # serve a tree you're not in (omit --worktree = current cwd tree)
+<pm> nx serve <app> --worktree=<branch|slug> --portOffset=auto   # explicit auto-offset (already the default for a worktree)
+<pm> nx serve <app> --worktree=<branch|slug> --dryRun            # print what it would serve, without serving
 ```
 
-It collects every git worktree, lets you pick one (current tree pre-highlighted), installs the worktree's deps if missing, then runs *that worktree's own* `serve` target with the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides applied for you. (Provided by the `@bespunky/nx-tools:serve-worktree` executor, wired onto every app by the house `app` generator.) **`--portOffset=auto`** isolates it on its own verified-free port block (whole stack — app + any emulator suite — shifts), so it never collides with a server already running; without it, the serve owns the default/forwarded ports (one at a time). See [[local-server-isolation]] for when to isolate. Outside a scaffolded project, do the `cd` + env-override dance by hand.
+It resolves the worktree (current cwd tree if `--worktree` is omitted; accepts a branch, slug, or path), installs that tree's deps if missing, then serves *its own* source with the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides applied for you — app dev-server + optional emulators + optional shared browser, all under one Ctrl+C. (Provided by the `@bespunky/nx-tools:serve` executor, wired onto every app by the house `app` generator.) **Port isolation is now automatic per worktree:** the main tree serves on the base/forwarded ports (`--portOffset=0`), while each *worktree* gets a stable, verified-free offset block derived from the tree — so a worktree serve never collides with a server already running (the whole stack, app + any emulator suite, shifts together). Because the ports are shifted (and not forwarded), each worktree is reached at a pretty **`http://<slug>.localhost`** domain (via the `worktree-domains` proxy) and watched live in the shared co-driven browser on **noVNC :6080**. Pin a block by hand with `--portOffset=<int>` if you must. See [[local-server-isolation]] for when to isolate. Outside a scaffolded project, do the `cd` + env-override dance by hand.
 
-**Two worktree-serve traps:** (1) a worktree serve often does **not** reliably hot-reload source edits over a container mount — **restart the serve after each edit** rather than trusting HMR (if a change still doesn't show, clear the framework build cache before restarting to force a fresh compile). (2) For a **long-lived** worktree, `git rebase development` *before* serving whenever `development` has moved, so you test against the latest integration, not a stale fork.
+**Two worktree serve traps:** (1) a worktree serve often does **not** reliably hot-reload source edits over a container mount — **restart the serve after each edit** rather than trusting HMR (if a change still doesn't show, clear the framework build cache before restarting to force a fresh compile). (2) For a **long-lived** worktree, `git rebase development` *before* serving whenever `development` has moved, so you test against the latest integration, not a stale fork.
 
 ## The single divergence point — integrate in the feature, never on the shared branch
 

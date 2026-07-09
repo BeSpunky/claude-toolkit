@@ -1,6 +1,6 @@
 ---
 name: shared-browser
-description: One live browser that you and the human drive together — the human WATCHES and clicks it in a normal host tab (over noVNC); you attach over loopback CDP to navigate, mutate DOM/CSS, and read console/network on the SAME instance, at the same time. Use whenever the human wants to watch or co-drive a browser, when you need in-place visual / CSS-DOM verification with MEASURED proof (getComputedStyle, getBoundingClientRect, overflow, before/after screenshots), when reproducing a user-reported bug live with a human present, or when pairing on a flow while you observe the rendered DOM, console, and network. Triggers — "watch me do this", "let's debug this together", "open it so I can see", "co-drive", "verify this CSS fix in the running app", "reproduce the bug with me", "check both themes / responsive in the real view", "why is this overflowing", "pair on this flow". NOT for pure solo headless automation with no human watching — use `browser-automation:playwright` for that.
+description: One live browser that you and the human drive together — the human WATCHES and clicks it in a normal host tab (over noVNC); you attach over loopback CDP to navigate, mutate DOM/CSS, and read console/network on the SAME instance, at the same time. Use whenever the human wants to watch or co-drive a browser, when you need in-place visual / CSS-DOM verification with MEASURED proof (getComputedStyle, getBoundingClientRect, overflow, before/after screenshots), when reproducing a user-reported bug live with a human present, when a real login must happen in the running app (OAuth / captcha) and you need the human to complete it while you observe, or when pairing on a flow while you observe the rendered DOM, console, and network. Triggers — "watch me do this", "let's debug this together", "open it so I can see", "co-drive", "verify this CSS fix in the running app", "reproduce the bug with me", "log me in / do the OAuth so I can watch", "check both themes / responsive in the real view", "why is this overflowing", "pair on this flow". NOT for pure solo headless automation with no human watching — use `browser-automation:playwright` for that.
 ---
 
 # Shared Co-Driven Browser (`shared-browser`)
@@ -20,23 +20,26 @@ Only `6080` is forwarded. CDP (`9223`) and VNC (`5900`) bind loopback only.
 
 ## Decision tree — which browser tool? (read this first)
 
-The single most important seam — it prevents tool sprawl. Pick by *who is watching and what proof you need*.
+The single most important seam — it prevents tool sprawl. Pick by *who is watching, what state you need, and what proof*.
 
 | Situation | Tool |
 |---|---|
-| Pure automated check, **no human watching**, headless is fine | **`browser-automation:playwright`** (headless script artifact) |
-| Human wants to **watch / co-drive**, OR in-place **visual / CSS-DOM verify with measured proof** | **`shared-browser`** (this skill) |
-| Quick static preview of a **file / artifact** | `Claude_Preview` MCP |
-| Must use the human's **real logged-in profile** (their live cookies/sessions) | **Approach A** escape hatch — documented, opt-in, NOT the default (see below) |
+| **Interactive / shared / stateful** work in the running app — the human watches or co-drives, a real login is in play (**OAuth**, captcha), a session must persist across steps, or it's "**look at what I'm seeing**" | **`shared-browser`** (this skill) — one live Chromium in the container; you attach over CDP |
+| In-place **visual / CSS-DOM verify with measured proof** (`getComputedStyle` / `getBoundingClientRect` / overflow) | **`shared-browser`** (this skill) |
+| **Scripted / automated / CI** check — no human watching, headless is fine, you want a repeatable file artifact | **`browser-automation:playwright`** (headless script) |
+| Quick static preview of a **file / artifact** (no running app, no container browser) | `Claude_Preview` MCP |
+| Must use the human's **real logged-in profile** (their live host cookies/sessions) | **Approach A** escape hatch — documented, opt-in, NOT the default (see below) |
 
-If nobody is watching and you just need a screenshot or a scrape from a script, that's `playwright`. The moment the human wants to *see it happen*, or you need `getComputedStyle`/`getBoundingClientRect`/overflow numbers to *prove* a visual fix, it's `shared-browser`.
+**The host-side browser MCPs drop out for in-container work.** `claude-in-chrome` and the host `Claude_Preview` drive a browser on the *host* — they can't see or touch the app running inside this devcontainer (a worktree's shifted ports aren't even forwarded out). For anything against the running app *in here* it's the shared browser (interactive) or Playwright (scripted); reach for a host MCP only when the target genuinely lives on the host.
+
+If nobody is watching and you just need a screenshot or a scrape from a script, that's `playwright`. The moment the human wants to *see it happen*, a real login is in play, or you need `getComputedStyle`/`getBoundingClientRect`/overflow numbers to *prove* a visual fix, it's `shared-browser`.
 
 ## The flow
 
 ```
-1. nx run <app>:serve-with-shared-browser        # serve + shared-browser up + auto-navigate, one command
-   (or, standalone:  tools/shared-browser/shared-browser up)
-2. Hand the human the printed noVNC URL           # they open it in a host tab and watch
+1. nx serve <app>                                 # serve + shared-browser up + auto-navigate, one command (browser ON by default)
+   (--no-shared-browser skips it; standalone:  tools/shared-browser/shared-browser up)
+2. Hand the human the printed noVNC URL           # http://localhost:6080 — they open it in a host tab and watch
 3. Attach:  withPage(fn)  (preferred, leak-proof) # attach() is the raw escape hatch
 4. Drive / observe                                # navigate, fill, mutate, measure, read recorder
 5. Detach:  browser.close()                       # DETACHES only — does NOT close the shared browser
@@ -44,7 +47,7 @@ If nobody is watching and you just need a screenshot or a scrape from a script, 
 
 - `up` is **idempotent** and **readiness-gated** — it blocks until `5900/6080/9223` are listening, auto-starts the recorder, and prints the noVNC URL. Never attach to a half-up stack; `status --json` is the machine-readable preflight.
 - **`withPage(fn)` is the default** — it attaches, runs `fn(page)`, and **detaches even on throw** (leak-proof). Raw `attach()` is the escape hatch for long-lived sessions; if you use it you own the `browser.close()`.
-- `attach({ pageUrl })` selects a tab by URL pattern; `pages()` lists open tabs. **Default is the *first* open tab, which may not be the one the human is looking at** — in a multi-tab co-drive, call `pages()` and target the right one with `pageUrl` rather than assuming.
+- `attach({ pageUrl })` selects a tab by URL pattern; `pages()` lists open tabs. **Default is the *first* open tab, which may not be the one the human is looking at** — in a multi-tab co-drive, call `pages()` and target the right one with `pageUrl` rather than assuming. Each worktree serves under its own pretty **`<slug>.localhost`** host, so address a specific worktree's tab by that hostname — `attach({ pageUrl: 'feature-x.localhost' })` — not by port (offset ports aren't forwarded, and several tabs may share bare `localhost`).
 
 ## The verify loop (the headline use)
 
@@ -82,6 +85,7 @@ tools/shared-browser/shared-browser logs --since=<ts> --level=<lvl>   # read the
 
 Co-driving is **turn-taking**, not a fight for the cursor.
 
+- **Enter observe-only before an interactive hand-off.** When the human must do something only they can — a real **OAuth** sign-in, a captcha, entering credentials — run **`shared-browser observe`** *first*. Attach/verify/recorder then **refuse to navigate/click/type** (they log "observe-only — human is driving"), so you can't move the view under their hands mid-flow. Run **`shared-browser resume`** once they're done; `shared-browser status` shows the current mode. (Real Google OAuth only completes on the **main-tree serve at `http://localhost:4200`** — the sole registered origin; emulator auth works on any tree/origin.)
 - **Observe and read while the human drives.** Default to watching (DOM/recorder) rather than grabbing control.
 - **Announce before you navigate or mutate** — "I'm going to inject a style / navigate to X" — so the view never changes under their hands.
 - **Never yank the view mid-interaction.** Wait for a natural handoff.
@@ -89,28 +93,30 @@ Co-driving is **turn-taking**, not a fight for the cursor.
 
 ## Composition (the big payoff, one line)
 
-`serve-with-shared-browser` composes with the worktree/offset stack. `serve-worktree` already takes `--serveTarget`, so:
+It's all folded into `nx serve` now — the shared browser comes up and is navigated **by default**, and `--worktree` composes the worktree/offset stack:
 
 ```
-nx run <app>:serve-worktree --portOffset=auto --serveTarget=serve-with-shared-browser
+nx serve <app> --worktree=<branch|slug>
 ```
 
-= **isolated worktree** (code) + **offset port stack** (emulators/app) + **shared browser navigated to the offset URL**, human watching over noVNC. The navigate URL is offset-aware for free (`http://localhost:$((4200 + ${PORT_OFFSET:-0}))`). Worktree isolates the code, the offset isolates the ports, `serve-with-shared-browser` co-drives the result.
+= **isolated worktree** (code) + **its own offset port block** (app + emulators) + the **shared browser navigated to the worktree's `<slug>.localhost` domain**, human watching over noVNC. The worktree isolates the code, the offset isolates the ports, and because a worktree's shifted ports **aren't forwarded**, the shared browser (`:6080`) is the *only* way to view a worktree serve. `--no-shared-browser` opts out of the browser layer; `--port-offset` pins the block.
 
 ## CLI reference — `tools/shared-browser/shared-browser`
 
 | Verb | Does |
 |---|---|
 | `up` | Start missing components (Xvfb→fluxbox→Chromium→x11vnc→websockify), readiness-gate `5900/6080/9223`, auto-start recorder, print noVNC URL. Idempotent, `flock`-serialized, reaps stale-by-PID+cmdline before starting. |
-| `navigate --url=<u> [--wait]` | Ensure up; with `--wait`, poll `<u>` until it answers; navigate the shared browser via CDP. (The single primitive `serve-with-shared-browser` composes — there is no `codrive` verb.) |
-| `status [--json]` | Per-component up/down + ports + URL. `--json` = machine-readable preflight. |
+| `navigate --url=<u> [--wait]` | Ensure up; with `--wait`, poll `<u>` until it answers; navigate the shared browser via CDP. (The single primitive the `serve` executor composes when it brings the browser up — there is no `codrive` verb.) |
+| `observe` | Enter **observe-only** — attach/verify/recorder refuse to navigate/click/type and log "observe-only — human is driving". Use before handing the human an interactive step (OAuth / captcha). Flag persists in `SB_RUNTIME`. |
+| `resume` | Clear observe-only — Claude may drive again. |
+| `status [--json]` | Per-component up/down + ports + URL, **and the observe-only mode**. `--json` = machine-readable preflight. |
 | `url` | Print the noVNC URL (scripting). |
 | `logs [component] [--since=<ts>] [--level=<lvl>]` | Tail a component log, or the filtered recorder JSONL. |
 | `down` | Graceful `SIGTERM`→`SIGKILL` via PID files; verify ports freed. **Never pattern-kills.** |
 | `restart` | `down` + `up` (recycle Chromium when the view gets sluggish / RSS climbs). |
 | `clean` | Wipe profile + logs + screenshots — reset to a fresh session. |
 
-**Workspace Nx targets** (thin wrappers over the CLI): `shared-browser:up | down | status | restart | clean | url | logs`. Per-app: **`serve-with-shared-browser`** (serve + navigate `--wait`, parallel + continuous).
+**Workspace Nx targets** (thin wrappers over the CLI): `shared-browser:up | down | status | restart | clean | url | logs`. The per-app **`serve`** target brings the browser up and navigates it as part of `nx serve <app>` (unless `--no-shared-browser`).
 
 ## Helper signatures — `tools/shared-browser/*.mjs`
 

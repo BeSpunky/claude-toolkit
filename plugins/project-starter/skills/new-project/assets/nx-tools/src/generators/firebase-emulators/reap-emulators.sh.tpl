@@ -29,7 +29,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Args: [config-path] [isolated]. ISOLATED mode (a port-offset stack from `<app>:serve-worktree`)
+# Args: [config-path] [isolated]. ISOLATED mode (a port-offset stack from `<app>:serve --portOffset`)
 # reclaims ONLY the shifted ports in the given config and SKIPS the global JVM sweep below — because
 # a base emulator suite the developer is running coexists with this one, and both the sweep and the
 # base-port/hub reclaim would kill THAT suite. Default (no args) is the original single-suite reclaim.

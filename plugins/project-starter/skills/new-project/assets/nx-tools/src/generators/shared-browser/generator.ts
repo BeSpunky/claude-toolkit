@@ -9,7 +9,7 @@
 // can be verified live in the same browser both watch. Full design: docs/shared-browser-DESIGN.md.
 //
 // Why workspace-level (not per-app): the shared browser is a single workspace-wide resource, not an
-// app concern — every app's `serve-with-shared-browser` target (wired per-app by the `app` generator)
+// app concern — every app's `serve` target shared-browser layer (wired per-app by the `app` generator)
 // drives this same browser. So it is generated ONCE per workspace, from scaffold.sh's
 // WORKSPACE_GEN_BLOCK (unconditional in both the scaffold and the --repair path — it's always-on).
 //

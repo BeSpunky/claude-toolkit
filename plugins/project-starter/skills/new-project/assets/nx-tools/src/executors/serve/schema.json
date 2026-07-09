@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "version": 2,
+  "title": "Serve executor",
+  "description": "The house dev loop: compose the app dev-server with the optional Firebase emulator suite and the optional shared co-driven browser (up + pretty-domain route + navigate) under ONE graceful Ctrl+C. Serves the current git worktree by default, or any chosen worktree (--worktree=<branch|slug|path>) without merging it back — the main tree always owns the base/forwarded ports (offset 0), each worktree an isolated, stable, verified-free port block (--portOffset). A missing shared-browser dependency WARNs and is skipped, never failing the serve.",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "Project whose dev-server to run. Defaults to the project this executor target is attached to."
+    },
+    "emulators": {
+      "type": "boolean",
+      "description": "Run the Firebase emulator suite (`firebase:emulators`) alongside the app dev-server. No-op when the resolved tree has no firebase.json. `--no-emulators` also opens the app with `?emulate=none`, so every service resolves to the real backend.",
+      "default": true
+    },
+    "sharedBrowser": {
+      "type": "boolean",
+      "description": "Bring up the always-on shared co-driven browser (noVNC on :6080) and navigate it to the app, so a human and an agent watch the change in the same browser. `--no-shared-browser` serves headless (open the app in your own tab). A missing browser dependency is warned and skipped — it never fails the serve.",
+      "default": true
+    },
+    "configuration": {
+      "type": "string",
+      "description": "The dev-server build configuration, forwarded to `<app>:dev-server --configuration`.",
+      "default": "development"
+    },
+    "worktree": {
+      "type": "string",
+      "description": "Which git worktree to serve. Omit to serve the current cwd's tree; pass a value to match by branch name, DNS slug, or path; pass an empty value in an interactive terminal to pick one from an arrow-key prompt."
+    },
+    "portOffset": {
+      "type": "string",
+      "description": "Isolate the whole stack (app dev-server + emulator suite) on its own port block so it never collides with a server already running. 'auto' pins the MAIN tree to offset 0 (the base/forwarded ports — real Google OAuth lives here) and gives each worktree a stable, verified-free block; a positive integer pins a specific offset; '0' forces the base stack.",
+      "default": "auto"
+    },
+    "install": {
+      "type": "boolean",
+      "description": "Run 'yarn install' in the chosen worktree when it has no node_modules (worktrees start empty).",
+      "default": true
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "Print the resolved tree, offset, app port, slug, each composed layer, and the URLs that would open — without installing, serving, or touching the browser.",
+      "default": false
+    }
+  },
+  "required": []
+}

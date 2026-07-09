@@ -11,12 +11,16 @@
 //      raw `nx g @nx/angular:application` call AND in the project's CLAUDE.md "add another app"
 //      snippet; both now point here, so the app shape is defined in exactly one place.
 //   2. Compose the house per-app generators against the freshly-created project:
-//        - serve-options (always)        — host 0.0.0.0, so the dev server is reachable from
-//                                          outside the devcontainer.
+//        - serve (always)                — the unified `serve` composing target + its `dev-server` leaf
+//                                          (dev-server + optional emulators + optional shared browser,
+//                                          for the current or a chosen worktree, under one Ctrl+C) and
+//                                          the dev-only worktree tab label. Runs BEFORE serve-options.
+//        - serve-options (always)        — host 0.0.0.0 on the `dev-server` leaf, so the dev server is
+//                                          reachable from outside the devcontainer.
 //        - firebase-emulators (when the workspace is a Firebase workspace) — environment files,
 //                                          firebase.config.ts, app.config wiring, the production
-//                                          fileReplacements, the platform:web tag, and the serve
-//                                          orchestrator. This is the per-app slice that a raw
+//                                          fileReplacements, the platform:web tag, and the emulator
+//                                          suite. This is the per-app slice that a raw
 //                                          `nx g @nx/angular:application` leaves out entirely.
 //
 // Two decisions make a later app correct-by-construction:
@@ -39,8 +43,7 @@ import {
 } from '@nx/devkit';
 import { basename } from 'node:path';
 import serveOptionsGenerator from '../serve-options/generator';
-import worktreeServeGenerator from '../worktree-serve/generator';
-import serveWithSharedBrowserGenerator from '../serve-with-shared-browser/generator';
+import serveGenerator from '../serve/generator';
 import firebaseEmulatorsGenerator from '../firebase-emulators/generator';
 
 interface AppGeneratorSchema {
@@ -96,19 +99,21 @@ export default async function appGenerator(
   // the getProjects() fallback covers any Nx version that derives a different name from the path.
   const projectName = resolveEmittedProjectName(tree, options.directory, options.name);
 
-  // 2) Per-app house config: make the dev server reachable from outside the devcontainer.
+  // workspaceName is a WORKSPACE identity, not an app one — resolved ONCE from the workspace root, never
+  // the new app's name (see the file header). It seeds the emulators' demo project id and the tab
+  // label's base-host sentinel.
+  const workspaceName = options.workspaceName ?? basename(tree.root);
+
+  // 2) Per-app house config: the unified `serve` target + its `dev-server` leaf (the composing executor
+  //    plus the real @angular/build:dev-server it drives), and the dev-only worktree tab label. Framework-
+  //    agnostic — the worktree and shared-browser axes are flags on the one serve — so it applies to
+  //    every app regardless of the Firebase opt-in below. MUST run before serve-options, which routes
+  //    `host` onto the `dev-server` leaf this creates.
+  await serveGenerator(tree, { project: projectName, workspaceName });
+
+  // 2b) Per-app house config: make the dev server reachable from outside the devcontainer (host 0.0.0.0
+  //     on the `dev-server` leaf).
   await serveOptionsGenerator(tree, { project: projectName });
-
-  // 2b) Per-app house config: the `serve-worktree` target, so an in-flight git worktree can be
-  //     served without merging it back. Deploy-/framework-agnostic (delegates to this project's
-  //     own `serve`), so it applies to every app regardless of the Firebase opt-in below.
-  await worktreeServeGenerator(tree, { project: projectName });
-
-  // 2c) Per-app house config: the `serve-with-shared-browser` target — an orchestrator that runs
-  //     this app's `serve` alongside the always-on shared browser navigating to it. Framework-agnostic
-  //     (delegates to this project's own `serve`), so it applies to every app; the workspace-level
-  //     `shared-browser` generator (run once per workspace from scaffold.sh) provides the CLI it drives.
-  await serveWithSharedBrowserGenerator(tree, { project: projectName });
 
   // 3) Firebase per-app wiring — explicit flag wins; otherwise auto-detect a Firebase workspace.
   const firebase = options.firebase ?? tree.exists('firebase.json');
@@ -117,7 +122,7 @@ export default async function appGenerator(
     firebaseCallback =
       (await firebaseEmulatorsGenerator(tree, {
         project: projectName,
-        workspaceName: options.workspaceName ?? basename(tree.root),
+        workspaceName,
       })) ?? noop;
   }
 

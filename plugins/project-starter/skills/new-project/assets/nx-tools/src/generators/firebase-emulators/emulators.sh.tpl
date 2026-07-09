@@ -26,7 +26,7 @@ cd "$ROOT"
 
 DATA_DIR="$ROOT/.emulator-data"
 
-# Port-offset isolation (PORT_OFFSET, set by `<app>:serve-worktree --portOffset`): shift the WHOLE
+# Port-offset isolation (PORT_OFFSET, set by `<app>:serve --portOffset`): shift the WHOLE
 # emulator suite onto a free port block so it COEXISTS with a suite the developer already has up on
 # the base ports — instead of reaping it. We generate an offset copy of firebase.json (every
 # emulator port +OFFSET, INCLUDING the hub/logging ports firebase-tools otherwise fixes at
@@ -118,7 +118,7 @@ fi
 # launch WITHOUT the secret (failing e.g. an OAuth code→token exchange with "client_secret is
 # missing"). Resolve it as a cascade: the current tree's own file wins (a worktree may still drop
 # in its own), else fall back to the MAIN worktree's copy (git lists it first). So serving ANY
-# worktree — `nx serve` here or `<app>:serve-worktree` — reuses the one secret the main tree
+# worktree — `nx serve` here or `<app>:serve --worktree` — reuses the one secret the main tree
 # holds, with no per-worktree setup.
 SECRETS_FILE="$ROOT/apps/functions/.secret.local"
 if [ ! -f "$SECRETS_FILE" ]; then

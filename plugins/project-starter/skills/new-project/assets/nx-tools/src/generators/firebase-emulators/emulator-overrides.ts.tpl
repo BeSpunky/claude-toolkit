@@ -6,6 +6,11 @@
 //
 // Sources, later wins:  committed default (environment.ts EMULATE)  <  localStorage  <  URL query.
 //   ?emulate=firestore,storage   → ONLY these services emulated this session (others real). `all`/`none` work.
+//   ?emulate=none  /  ?real=all  → GO FULLY REAL: every service resolves to the real backend (the
+//                                  `firebase` block in environment.ts). This is how `serve --no-emulators`
+//                                  makes the app run against the real project — a runtime override, not a
+//                                  build/env variant. (Verified supported: parseList('none') → empty set,
+//                                  parseList('all') → all services; see parseList + apply() below.)
 //   ?real=auth                   → force these services to the REAL backend this session.
 //   localStorage.setItem('emulate','firestore');  localStorage.setItem('real','auth');   // persists per browser
 //   localStorage.removeItem('emulate');  // drop the override, fall back to the committed defaults
@@ -79,7 +84,7 @@ export function resolveEmulated(
 
 /**
  * Resolve the emulator PORT OFFSET for this session — the amount added to every emulator port so
- * the app connects to an ISOLATED stack (started by `<app>:serve-worktree --portOffset`) instead
+ * the app connects to an ISOLATED stack (started by `<app>:serve --portOffset`) instead
  * of the base ports. Read from `?portOffset=<n>` (or localStorage `portOffset`); 0 when absent or
  * invalid. Precedence: URL query > localStorage > 0. Browser/SSR-safe (no `window` → 0), and — like
  * the emulate resolver — only consulted behind `ngDevMode`, so it tree-shakes out of prod.

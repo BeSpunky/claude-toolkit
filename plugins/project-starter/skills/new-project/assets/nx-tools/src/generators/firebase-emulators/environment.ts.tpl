@@ -1,10 +1,13 @@
-// Default (dev) environment — used by `nx serve <app>`, which boots the local emulator suite
-// alongside the dev server (the `serve` orchestrator runs `firebase:emulators` + the app in
-// parallel). No real cloud project, login, or `.firebaserc` is needed when every service is emulated.
+// Default (dev) environment — used by `nx serve <app>`, whose `serve` executor runs the app
+// dev-server + the local emulator suite (`firebase:emulators`) in parallel. No real cloud project,
+// login, or `.firebaserc` is needed when every service is emulated.
 //
-// Build-time swaps (Angular's environment-files pattern, via project.json fileReplacements):
-//   - `nx build <app>` (production)            → environment.prod.ts
-//   - `nx run <app>:serve-no-emulators`        → environment.no-emulators.ts (no emulators booted)
+// Going all-real is a RUNTIME choice, not a separate env file: append `?emulate=none` (or `?real=all`)
+// to the URL — every service then resolves to the `firebase` block below — and `serve --no-emulators`
+// skips booting the suite. See src/app/emulator-overrides.ts.
+//
+// Build-time swap (Angular's environment-files pattern, via project.json fileReplacements):
+//   - `nx build <app>` (production)  → environment.prod.ts
 import type { Environment } from './environment.interface';
 
 // ── Per-service emulator toggle (committed default for the whole team) ───────────────────────────

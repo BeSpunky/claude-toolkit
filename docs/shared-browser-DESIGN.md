@@ -2,6 +2,16 @@
 
 Response to `crushit/BRIEF-shared-codriven-browser.md`. This is the implementation plan for approval.
 
+## Update — serve unification, worktree domains, observe-only (supersedes the serve/composition layers below)
+
+The `serve-with-shared-browser` target and the separate `serve-worktree` executor named throughout this record have since been **folded into one public `@bespunky/nx-tools:serve` executor**. The current surface (canonical in the scaffolded project's `CLAUDE.md` and in `browser-automation:shared-browser`):
+
+- **Unified `serve`.** `nx serve <app>` composes the app `dev-server` + shared browser (up + navigated) — plus the emulator suite in a Firebase workspace — under one Ctrl+C. Flags: `--no-shared-browser`, `--no-emulators`, `--worktree=<branch|slug|path>`, `--port-offset=auto|<n>`, `--configuration=production|development`, `--dry-run`. Main tree → offset 0 (`localhost:4200`); each worktree → its own stable, verified-free offset block. The retired `serve-with-shared-browser` / `serve-worktree` / `serve-with-emulators` / `serve-no-emulators` targets no longer exist; Layer 3 and the composition one-liner below are historical.
+- **Pretty worktree domains.** A new `worktree-domains` generator writes `tools/worktree-domains/` — an in-container `*.localhost` proxy (register/unregister/list/reconcile) that routes `<slug>.localhost` → `127.0.0.1:<appPort>`, listening on loopback `:80`, **not forwarded** (`*.localhost` auto-resolves in Chromium; it proxies websockets for HMR). The `serve` executor registers the route on start and unregisters on teardown. Each worktree tab gets a per-worktree title + tinted favicon (dev-only, hostname-derived). Because a worktree's offset ports aren't forwarded, its serve is **`:6080`-only** — viewable solely through the shared browser.
+- **Observe-only mode.** The `shared-browser` CLI gains `observe` / `resume`, and `status` reports the mode; the flag persists in `SB_RUNTIME`. `attach.mjs` / `verify.mjs` / the recorder honor it and refuse to navigate/click/type while set. Claude enters observe-only before handing the human an interactive step (real OAuth / captcha) and resumes after. Real Google OAuth is pinned to the main-tree serve on `localhost:4200` (the only registered origin); emulator auth works on any tree/origin.
+
+The layers below are preserved as the original design record; where they mention `serve-with-shared-browser` or `serve-worktree`, read the unified `serve` above.
+
 ## Locked decisions (from discussion)
 - **Home:** fold into the **existing `browser-automation` plugin** (skill) + **project-starter** (provisioning + generator). No new plugin.
 - **Availability:** deps **installed always** in every BeSpunky devcontainer; the stack **starts on demand** (lazy).

@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema",
   "executors": {
-    "serve-worktree": {
-      "implementation": "./src/executors/serve-worktree/executor",
-      "schema": "./src/executors/serve-worktree/schema.json",
-      "description": "Serve an in-flight git worktree without merging it back. Collects `git worktree list`, lets you pick one (arrow keys + Enter; the current tree pre-highlighted; or pass --worktree=<branch|path> for scripting), runs `yarn install` there if it has no node_modules yet, then runs THAT worktree's own serve target (whatever `serve` resolves to — a plain Angular dev-server or a Firebase emulators + dev-server orchestrator) with the mandatory NX_WORKSPACE_ROOT_PATH / NX_DAEMON=false overrides applied, so Nx serves the worktree's source rather than silently falling back to the main tree's. There is only one set of forwarded dev ports, so exactly one serve owns them at a time; this points that single serve at the chosen worktree. --dryRun prints what it would serve without serving."
+    "serve": {
+      "implementation": "./src/executors/serve/executor",
+      "schema": "./src/executors/serve/schema.json",
+      "description": "The house dev loop as ONE composing executor: run the app's `dev-server` leaf plus — on a Firebase tree — the `firebase:emulators` suite, plus (by default) the shared co-driven browser navigated to the app, all under a single graceful Ctrl+C across N children. Serves the current git worktree, or any chosen one (--worktree=<branch|slug|path>), without merging it back: the MAIN tree always owns the base/forwarded ports (offset 0 — real Google OAuth lives here), each worktree an isolated, stable, verified-free port block (--portOffset auto) so its whole stack (app + emulators) shifts in lockstep and never collides. Each worktree is reached at a pretty `<slug>.localhost` domain (via tools/worktree-domains) with the noVNC viewer on :6080. Flags: --no-emulators (skip the suite; open the app with ?emulate=none for real services), --no-shared-browser (serve headless), --configuration, --install, --dryRun. A missing shared-browser dependency WARNs and is skipped — it never fails the serve. Replaces the old serve-worktree executor and folds in the serve-with-shared-browser orchestration."
     }
   }
 }

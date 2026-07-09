@@ -3,15 +3,16 @@
 // Reads `src/environments/environment.ts` (Angular's environment-files pattern) and connects each
 // service to the local emulator or the real backend, PER SERVICE. The build swaps the environment
 // file via project.json fileReplacements:
-//   - production               → environment.prod.ts        (no emulators; real project)
-//   - serve-no-emulators         → environment.no-emulators.ts  (no emulators; real project)
-//   - dev (default / nx serve) → environment.ts             (per-service emulator defaults)
+//   - production               → environment.prod.ts   (no emulators; real project)
+//   - dev (default / nx serve) → environment.ts        (per-service emulator defaults)
 //
 // Which services are emulated is `committed default ⊕ per-session override`:
 //   - committed default: each `environment.emulators.<service>.default` (the EMULATE map in
 //     environment.ts).
 //   - per-session override: `?emulate=`/`?real=` in the URL or localStorage — see
-//     src/app/emulator-overrides.ts. Lets you run e.g. Firestore emulated + real Auth without a rebuild.
+//     src/app/emulator-overrides.ts. Lets you run e.g. Firestore emulated + real Auth without a rebuild,
+//     or go FULLY real with `?emulate=none` / `?real=all` (every service → the `firebase` block; this is
+//     what `serve --no-emulators` relies on — there's no separate no-emulators env file or build config).
 //
 // Tree-shaking: EVERY emulator concern here is gated on `ngDevMode` — Angular's dev-mode flag, which
 // the optimizer folds to a literal `false` in production builds. That collapses the emulate
@@ -59,7 +60,7 @@ function emulatorFor<S extends EmulatorService>(service: S): EmulatorEndpoints[S
 
 // Per-session emulator PORT OFFSET (0 unless the app was opened with `?portOffset=`). It shifts
 // every emulator port so the app connects to an ISOLATED stack (started by
-// `<app>:serve-worktree --portOffset`) rather than the base ports. DEV ONLY — `ngDevMode` folds to
+// `<app>:serve --portOffset`) rather than the base ports. DEV ONLY — `ngDevMode` folds to
 // `false` in prod, collapsing this to 0 and tree-shaking `resolvePortOffset` out with the rest.
 const portOffset: number = ngDevMode ? resolvePortOffset() : 0;
 

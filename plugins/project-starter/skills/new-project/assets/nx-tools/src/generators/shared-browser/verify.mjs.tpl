@@ -17,6 +17,19 @@ import fs from 'node:fs';
 const RUNTIME = process.env.SB_RUNTIME || `${process.env.XDG_RUNTIME_DIR || '/tmp'}/shared-browser`;
 const SCREENSHOTS = `${RUNTIME}/logs/screenshots`;
 
+// observe-only: while this lock exists (set by `shared-browser observe`), the human is driving the
+// shared window over noVNC. The verify helpers that MUTATE the page (inject styles, set vars/theme,
+// resize, force pseudo-states, run a mutate callback) stand down so automation can't fight the human;
+// the pure-read helpers (measure) stay available. Cleared by `shared-browser resume`.
+const OBSERVE_LOCK = `${RUNTIME}/observe-only`;
+function assertNotObserving() {
+  if (fs.existsSync(OBSERVE_LOCK)) {
+    const msg = 'observe-only — human is driving';
+    console.error(`[shared-browser] ${msg} (refusing to drive the page; run \`shared-browser resume\` to hand back to Claude)`);
+    throw new Error(msg);
+  }
+}
+
 const VIEWPORTS = {
   mobile: { w: 390, h: 844 },
   tablet: { w: 820, h: 1180 },
@@ -25,6 +38,7 @@ const VIEWPORTS = {
 
 /** Inject an ephemeral <style> and return a handle whose remove() deletes it. */
 export async function injectStyle(page, css) {
+  assertNotObserving();
   const handle = await page.addStyleTag({ content: css });
   return {
     async remove() {
@@ -35,6 +49,7 @@ export async function injectStyle(page, css) {
 
 /** Set a CSS custom property on `selector` (default :root). `name` may omit the -- prefix. */
 export async function setCssVar(page, name, value, selector = ':root') {
+  assertNotObserving();
   const prop = name.startsWith('--') ? name : `--${name}`;
   await page.evaluate(
     ({ selector, prop, value }) => {
@@ -92,6 +107,7 @@ export async function measure(page, selector) {
  * { before, after } absolute paths. Read the PNGs back by those paths.
  */
 export async function screenshotPair(page, name, mutate) {
+  if (typeof mutate === 'function') assertNotObserving();   // the before/after shots are reads; the mutate drives
   fs.mkdirSync(SCREENSHOTS, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safe = String(name).replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'shot';
@@ -107,6 +123,7 @@ export async function screenshotPair(page, name, mutate) {
 
 /** Emulate prefers-color-scheme AND set document.documentElement.dataset.theme. */
 export async function theme(page, mode) {
+  assertNotObserving();
   if (mode !== 'dark' && mode !== 'light') {
     throw new Error(`theme: mode must be 'dark' or 'light', got "${mode}".`);
   }
@@ -118,6 +135,7 @@ export async function theme(page, mode) {
 
 /** Resize the viewport by preset (mobile|tablet|desktop) or explicit { w, h }. */
 export async function viewport(page, preset) {
+  assertNotObserving();
   const size = typeof preset === 'string' ? VIEWPORTS[preset] : preset;
   if (!size || typeof size.w !== 'number' || typeof size.h !== 'number') {
     throw new Error(`viewport: expected 'mobile'|'tablet'|'desktop' or { w, h }, got ${JSON.stringify(preset)}.`);
@@ -134,6 +152,7 @@ export async function viewport(page, preset) {
  * (it clears the state and detaches the session). Cleared automatically on navigation.
  */
 export async function pseudo(page, selector, state) {
+  assertNotObserving();
   const pseudoClass = String(state).replace(/^:/, '');
   const session = await page.context().newCDPSession(page);
   await session.send('DOM.enable');
@@ -161,6 +180,7 @@ export async function pseudo(page, selector, state) {
  * per-edge deltas. All-zero deltas mean the mutation caused no layout shift.
  */
 export async function layoutShift(page, selector, mutate) {
+  if (typeof mutate === 'function') assertNotObserving();   // the measurements are reads; the mutate drives
   const before = (await measure(page, selector)).rect;
   if (typeof mutate === 'function') await mutate();
   const after = (await measure(page, selector)).rect;

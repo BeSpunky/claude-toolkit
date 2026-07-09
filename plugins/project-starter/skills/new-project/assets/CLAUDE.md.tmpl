@@ -34,18 +34,48 @@ For any redesign, invoke the **`product-ux:redesign-means-rethink`** skill — t
 - **Package manager**: yarn.
 - **Dev environment**: devcontainer on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the base image) with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds.
 
+## Serving the app
+
+`nx serve <app>` is the one command for local dev — a single **`@bespunky/nx-tools:serve`** orchestrator that composes, in parallel under one Ctrl+C:
+
+- the **app dev-server** (the `dev-server` target → `@angular/build:dev-server`, host `0.0.0.0`), and
+- the **shared co-driven browser** — a real Chromium *inside the container* that it brings up and navigates to your app, so you and Claude watch and drive the same instance together{{#firebase}}, and
+- the **Firebase emulator suite** (this is a Firebase workspace — see below){{/firebase}}.
+
+It auto-derives a **port offset** from the tree you're in — the **main tree is always offset 0** (app on `http://localhost:4200`); each git worktree gets its own stable, verified-free port block — and registers a pretty **`<slug>.localhost`** domain for the app.
+
+| Flag | Effect |
+| --- | --- |
+| `--configuration=production\|development` | dev-server variant (Angular's canonical env-file replacements; default `development`). |
+| `--no-shared-browser` | serve without bringing up / navigating the shared browser. |
+| `--worktree=<branch\|slug\|path>` | serve a worktree you're **not** cwd'd into (see *Serving an in-flight worktree* below). Omit → current tree; pass it empty in a TTY → interactive picker. |
+| `--port-offset=auto\|<n>` | `auto` (default) derives the block from the tree; `0` pins the base ports; an int pins a specific block. |
+{{#firebase}}| `--no-emulators` | serve the app **alone**, every Firebase service resolved **real** (`?emulate=none`) — no suite booted. |
+{{/firebase}}| `--dry-run` | print the resolved tree, offset, port, slug, layers, and URLs — run nothing. |
+
+### Two ways to view the running app
+
+1. **The shared browser (default, blessed)** — a real containerized Chromium you watch over **noVNC at `http://localhost:6080`** in any host tab; Claude attaches to the *same* instance over loopback CDP to co-drive. This surface works for **every** tree — main and worktrees alike.
+2. **A host browser tab on `http://localhost:4200`** (escape hatch, **main tree only**) — only the base `4200`{{#firebase}} (+ emulator){{/firebase}} ports are forwarded out of the container. **Worktree serves are `:6080`-only**: their shifted ports are not forwarded, so you reach them through the shared browser, never a host tab.
+
+Each worktree serve gets a pretty **`<slug>.localhost`** domain (auto-resolved inside Chromium, routed by the in-container proxy) plus a **per-worktree tab title and tinted favicon**, so several co-driven worktrees stay visually distinct.
+
+### Observe-only etiquette (co-driving)
+
+The shared browser is one instance you and Claude share. Before Claude asks *you* to complete an interactive step it can't do for you — a real OAuth sign-in, a captcha, anything needing your credentials — it runs **`shared-browser observe`** so its own automation refuses to navigate/click/type and won't move the view under your hands; it runs **`shared-browser resume`** once you're done. Full co-drive mechanics live in the **`browser-automation:shared-browser`** skill.
+
 {{#firebase}}
 ## Firebase
 
-This project was scaffolded with `--firebase`. **Two serve modes — local dev is not forced through the emulators:**
+This project was scaffolded with `--firebase`, so **`nx serve <app>` boots the emulator suite alongside the app** (and the shared browser) — offline, no `firebase login` / cloud project / `.firebaserc` needed (project id derived from `environment.ts` — `demo-<workspaceName>` by default). **Local dev is not forced through the emulators** — tune what's emulated with one flag, or with the per-service knobs below:
 
 | Command | What it does |
 | --- | --- |
-| `nx serve <app>` | App **+ emulator suite**, in parallel, offline (project id derived from `environment.ts` — `demo-<workspaceName>` by default). The full local Firebase stack. No `firebase login` / cloud project / `.firebaserc` needed — by design. |
-| `nx run <app>:serve-no-emulators` | App **alone, no emulators** (e.g. pure UI work, or running against a real/staging backend). |
+| `nx serve <app>` | App **+ emulator suite + shared browser**, in parallel, offline. The full local Firebase stack. |
+| `nx serve <app> --no-emulators` | App **alone, no emulators** — every service resolved real (`?emulate=none`); e.g. pure UI work, or a real/staging backend. |
 | `nx run firebase:emulators` | The emulator suite **alone** (restart/run it independently of the app). |
 
-`serve` is an `nx:run-commands` orchestrator that runs the emulator suite alongside **`serve-with-emulators`** (the app dev-server pinned to the emulator env). Each serve target does exactly one thing — `serve-with-emulators` always emulates, `serve-no-emulators` never does — so neither carries a confusing "other-mode" configuration. The Nx TUI is disabled in `nx.json` so both tasks stream plain prefixed logs and one Ctrl+C stops the run.
+The `@bespunky/nx-tools:serve` executor runs the emulator suite alongside the app `dev-server` (pinned to the emulator env by default) as one parallel run. The Nx TUI is disabled in `nx.json` so both stream plain prefixed logs and one Ctrl+C stops everything.
 
 ### Per-service emulator toggling
 
@@ -60,7 +90,7 @@ You don't have to emulate everything or nothing — each Firebase service is ind
 
 **Turning a service real needs real credentials.** A service resolved to real uses the `firebase` block of the active environment file — the `demo-<workspaceName>` values only work against the emulator. Fill `firebase` with your real/**staging** web config (`firebase apps:sdkconfig WEB <appId> --project <staging>`; never production for anything you write to). **If you forget, a dev-only `ngDevMode` guard (stripped from prod) logs a loud `firebase.config.ts` console error at bootstrap** naming the real-but-demo-configured services — so the cause is up front instead of only a cryptic `auth/api-key-not-valid` later. It logs rather than throws: the app still loads (one misconfigured service shouldn't brick the whole dev app), but that service won't authenticate against the real backend until you fill in real config. One coupled caveat, now handled for you: a real `projectId` is then also used by any *still-emulated* services (`singleProjectMode`), so the emulator suite must run under it too — `tools/emulators.sh` does this automatically by deriving its `--project` from `environment.ts` (override with `FIREBASE_EMULATOR_PROJECT`). The resolver is `apps/<app>/src/app/emulator-overrides.ts` (generator-owned); `firebase.config.ts` applies `committed-default ⊕ override` per service, gated on `ngDevMode` — Angular's dev-mode flag, which the optimizer folds to `false` in production builds, so the resolver, the per-service wiring, every `connect*Emulator(...)` call, and all emulator addresses are tree-shaken out of the prod artifact. (Firebase's own SDK still carries its internal emulator support — that's library code, not ours.)
 
-`nx run <app>:serve-no-emulators` is the extreme of the same knob: it serves the app with **no** emulator suite booted and **every** service real (it compiles `environment.no-emulators.ts`, which has no emulators block).
+`nx serve <app> --no-emulators` is the extreme of the same knob: **no** emulator suite booted and **every** service real. It carries `?emulate=none` to the app (the `emulator-overrides.ts` resolver maps `none` / `real=all` → all services real) and, like the per-service toggles above, resolves each service against `environment.ts`'s `firebase` block — the same "go real" path, no separate `no-emulators` environment file or build configuration.
 
 ### Cloud Functions (apps/functions)
 
@@ -78,11 +108,17 @@ The emulators **persist and seed their data**. The launch path is `tools/emulato
 
 **Directive — the seed is part of the schema contract.** The seeds' single source of truth is the **declarative** `tools/seed/world.mjs` (a description of accounts + Firestore docs, applied by a generic encoder — adding a field/collection/world is purely additive; the build orchestrator derives the seed list from it). **Whenever a Firestore document shape changes or a feature gains a backend, update the matching world in `world.mjs` and rebuild, committing `tools/emulator-seeds/`** — so the seed never drifts from the code.
 
-### Auth gotchas (devcontainer)
+### Auth in the devcontainer (the good news)
 
-- `environment.ts` ships an `authDomain` — required for any OAuth provider sign-in (popup *and* redirect refuse without it, even against the Auth emulator). Don't remove it.
-- Inside a devcontainer, prefer **`signInWithRedirect`** over popup for OAuth — popups fail with `Sending authEvent failed` across the forwarded-port boundary.
-- The VS Code **Simple Browser cannot complete OAuth** flows; verify sign-in in a real host browser. The devcontainer forwards the dev server + emulator ports to the **same host ports** (`forwardPorts`) precisely so a host browser works — if you re-port an emulator, update `firebase.json`, `environment.ts`, AND `.devcontainer/devcontainer.json` together.
+The shared co-driven browser is **real Chromium with a real window manager**, running inside the container and hitting **container-localhost directly** — so the old devcontainer OAuth pain is *gone*, and the previous "prefer redirect / popups fail" guidance no longer applies:
+
+- **`signInWithPopup` works**, and so do redirect flows. There's no forwarded-port origin boundary between the browser and the app any more, so the `Sending authEvent failed` popup failure is gone — you don't have to prefer `signInWithRedirect`.
+- **`environment.ts` still ships an `authDomain`** — required for any OAuth provider sign-in (popup *and* redirect refuse without it, even against the Auth emulator). Don't remove it.
+- **VS Code Simple Browser / a host browser are now only *viewers*** of the shared browser over noVNC (`:6080`) — they no longer have to *complete* the OAuth flow themselves; the containerized Chromium does. They stay fine for viewing.
+- **Emulator auth works from anywhere** — any origin, any tree, including the pretty `<slug>.localhost` domains and offset ports.
+- **Real Google OAuth is pinned to the main-tree serve on `http://localhost:4200`.** That exact origin/redirect URI is the one registered in the Google OAuth client; worktree offset ports and the `<slug>.localhost` domains are **not** registered, so real Google sign-in only works on the main tree at `:4200`. To enable it, add `http://localhost:4200` to both **Authorized JavaScript origins** and **Authorized redirect URIs** on the OAuth 2.0 client in Google Cloud. For worktrees, use the Auth **emulator** (it authenticates anywhere).
+
+The devcontainer forwards the base dev-server + emulator ports to the **same host ports** (`forwardPorts`) — if you re-port an emulator, update `firebase.json`, `environment.ts`, AND `.devcontainer/devcontainer.json` together. When Claude needs *you* to complete a real OAuth sign-in in the shared browser, it enters **observe-only** (`shared-browser observe`) first so it won't move the view under you, and **resumes** after.
 
 **When the user asks to deploy this app — or otherwise connect it to a real Firebase project — walk them through these steps** (from the workspace root inside the devcontainer, where the Firebase CLI is installed). The BeSpunky default is Firebase **App Hosting** (framework-aware; config in `apphosting.yaml`), not classic static Hosting:
 
@@ -123,16 +159,16 @@ After the backend is created, **App Hosting deploys are GitHub-driven**: pushing
 **Deploy binding (this project):** none yet — no deploy target is wired. `staging` and `main` are promotion checkpoints kept ready to bind to a deploy mechanism (Firebase App Hosting, a CI workflow, a container push, …): bind it to fire on push to `staging` for staging and `main` for production. Until then the pipeline is pure branch hygiene.
 {{/firebase}}
 
-**Serving an in-flight worktree** — this workspace ships a `serve-worktree` target (wired onto every app), so an in-flight feature is testable in the real app before it's promoted, without merging it back:
+**Serving an in-flight worktree** — the same `nx serve <app>` serves a tree you're **not** cwd'd into via `--worktree`, so an in-flight feature is testable in the real app before it's promoted, without merging it back:
 
 ```bash
-yarn nx run <app>:serve-worktree                            # arrow-key picker of all worktrees → Enter
-yarn nx run <app>:serve-worktree --worktree=<branch|slug>   # skip the prompt (scripting / non-TTY)
-yarn nx run <app>:serve-worktree --portOffset=auto          # ISOLATED: own port set, coexists with a running serve
-yarn nx run <app>:serve-worktree --dryRun                   # print what it would serve, without serving
+nx serve <app>                              # serve the tree you're in (main → base ports; a worktree → its own offset block)
+nx serve <app> --worktree=<branch|slug>     # serve another worktree (pass --worktree empty in a TTY for an arrow-key picker)
+nx serve <app> --port-offset=auto           # ISOLATED: own verified-free port block, coexists with a running serve
+nx serve <app> --dry-run                    # print what it would serve, without serving
 ```
 
-It installs the worktree's deps and applies the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you. **`--portOffset=auto` isolates the serve** — the whole stack (app dev-server{{#firebase}} **and** the emulator suite{{/firebase}}) shifts onto a stable, verified-free port block derived from the worktree, so it never collides with a server you're running on the default/forwarded ports. Without it, the serve takes the default (forwarded) ports — one serve at a time. (Provided by the `@bespunky/nx-tools:serve-worktree` executor. A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.){{#firebase}} When isolated, open the app at the printed **`?portOffset=N`** URL so its client connects to the shifted emulator ports.{{/firebase}}
+It installs the worktree's deps on first serve and applies the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you. A worktree serve shifts the **whole stack** (app dev-server{{#firebase}} **and** the emulator suite{{/firebase}}) onto the worktree's stable, verified-free offset block, so it never collides with a server on the base/forwarded ports. **A worktree serve is `:6080`-only** — its shifted ports aren't forwarded, so watch it in the shared browser over noVNC (the executor navigates it to the worktree's pretty `<slug>.localhost` domain), not a host tab. (A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.)
 
 ## Generator-first, manual last
 
@@ -188,7 +224,7 @@ For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` /
 
 **When you start a server to test a change, you MUST bind it to a random free port — never the default (`4200`{{#firebase}}, or the emulator ports `8080`/`9099`/…{{/firebase}}) or any container-forwarded port.** Those belong to whatever server the developer launched manually; grabbing them fails, silently attaches, or forces a disruptive restart. You verify **headless** (Playwright reaches any `localhost:<port>` directly), so you never need the forwarded ports — a random port costs nothing. Read the bound URL from the server's own startup output and point your browser there; tear the server down when done, and **never kill a server you didn't start** to free a port. Full rules — invoke the **`workflow:local-server-isolation`** skill.
 {{#firebase}}
-The emulator suite is the trap: `tools/emulators.sh` **reaps existing emulator processes** on launch, so a plain `nx serve` to test would kill the developer's running suite (a random *app* port doesn't prevent that). The clean fix is **`yarn nx run <app>:serve-worktree --portOffset=auto`** — it shifts the entire stack (app + emulators, incl. the hub/logging ports) onto a free block and reaps only *its own* shifted ports, so it coexists with the developer's suite instead of killing it. Then open the app at the printed `?portOffset=N` URL. (Or, if you only changed the app: reuse the running suite by serving the app alone on a random port pointed at it.) Never boot a colliding suite on the base ports.
+The emulator suite is the trap: `tools/emulators.sh` **reaps existing emulator processes** on launch, so serving on the base ports (`--port-offset=0`, i.e. the main tree) would kill the developer's running suite (a random *app* port alone doesn't prevent that). The clean fix is to serve **from your feature worktree** — `nx serve <app>` there auto-offsets the entire stack (app + emulators, incl. the hub/logging ports) onto a free block and reaps only *its own* shifted ports, so it coexists with the developer's suite instead of killing it. Watch it in the shared browser over noVNC (`:6080`). (Or, if you only changed the app: reuse the running suite by serving the app alone against it — `--no-emulators` on a shifted block.) Never boot a colliding suite on the base ports.
 {{/firebase}}
 
 ## Conventions

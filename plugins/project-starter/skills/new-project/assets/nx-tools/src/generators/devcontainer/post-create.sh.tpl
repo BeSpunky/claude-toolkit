@@ -174,7 +174,10 @@ fi
 # :6080. The stack starts lazily, but its OS deps are installed ALWAYS — so any container can
 # co-drive a browser with no rebuild. Deps: x11vnc (VNC server) + novnc/websockify (the
 # noVNC web client + WS↔TCP bridge) + fluxbox (a minimal WM so Chromium gets a window frame)
-# + fonts (liberation + color-emoji so rendered pages and screenshots look right).
+# + fonts (liberation + color-emoji so rendered pages and screenshots look right). Also procps
+# (sysctl) — the worktree-domains proxy (tools/worktree-domains) lowers this container's
+# net.ipv4.ip_unprivileged_port_start so its Node reverse proxy can bind the privileged :80 as
+# the non-root `node` user, giving each worktree a pretty http://<slug>.localhost/ domain.
 #
 # UNCONDITIONAL by design: this fires on every scaffold — it is NOT gated on --firebase,
 # @playwright/test, or any other flag (unlike steps 3–5). Best-effort with retry: apt mirrors
@@ -184,7 +187,7 @@ fi
 echo "[post-create] provisioning shared-browser prerequisites (xvfb/x11vnc/novnc/websockify/fluxbox/fonts + Chromium)"
 sb_apt_ok=0
 for attempt in 1 2 3; do
-  if sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 curl fonts-liberation fonts-noto-color-emoji; then
+  if sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 procps curl fonts-liberation fonts-noto-color-emoji; then
     sb_apt_ok=1; break
   fi
   if [ "$attempt" -lt 3 ]; then
@@ -197,7 +200,7 @@ if [ "$sb_apt_ok" = 1 ]; then
 else
   echo "[post-create] WARNING: shared-browser apt deps failed after 3 attempts — likely a transient network issue."
   echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
-  echo "[post-create]            sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 curl fonts-liberation fonts-noto-color-emoji"
+  echo "[post-create]            sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 procps curl fonts-liberation fonts-noto-color-emoji"
 fi
 
 # Ensure a Playwright Chromium binary exists for the shared browser to launch (the CLI resolves

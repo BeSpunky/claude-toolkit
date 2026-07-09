@@ -13,7 +13,25 @@
 // Playwright is resolved from whichever package the workspace installed
 // (playwright / playwright-core / @playwright/test), so this file has no hard dependency.
 
+import { existsSync } from 'node:fs';
+
 const CDP_URL = 'http://127.0.0.1:9223';
+
+// observe-only: while this lock exists (set by `shared-browser observe`), the human is driving the
+// shared window over noVNC. Attaching to DRIVE it is refused so automation can't fight the human —
+// e.g. Claude yields for an OAuth/captcha step, then runs `shared-browser resume`. The lock lives in
+// SB_RUNTIME (the CLI exports it); resolve the SAME base so an override never splits the stack.
+const SB_RUNTIME = process.env.SB_RUNTIME || `${process.env.XDG_RUNTIME_DIR || '/tmp'}/shared-browser`;
+const OBSERVE_LOCK = `${SB_RUNTIME}/observe-only`;
+
+/** Throw (and log) when observe-only is set, so attach/withPage refuse to hand back a drivable page. */
+function assertNotObserving() {
+  if (existsSync(OBSERVE_LOCK)) {
+    const msg = 'observe-only — human is driving';
+    console.error(`[shared-browser] ${msg} (refusing to attach; run \`shared-browser resume\` to hand back to Claude)`);
+    throw new Error(msg);
+  }
+}
 
 /** Resolve the Playwright `chromium` object from whichever package is installed. */
 async function loadChromium() {
@@ -53,6 +71,7 @@ function matchesUrl(url, pattern) {
  * On failure the CDP session is detached before throwing, so no session leaks.
  */
 export async function attach({ cdp = CDP_URL, pageUrl } = {}) {
+  assertNotObserving();                          // observe-only → the human is driving; don't take the window
   const chromium = await loadChromium();
   const browser = await chromium.connectOverCDP(cdp);
 
