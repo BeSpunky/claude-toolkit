@@ -76,7 +76,22 @@ bash "$ROOT/tools/emulator-data.sh" ensure
 # gitignored assets anyway, and routing a secret through build outputs would persist it into the
 # Nx cache. Copy it into place at launch, so it stays a runtime concern of the emulator alone.
 # (Re-run the suite after a functions rebuild — `deleteOutputPath` wipes dist.)
+#
+# `.secret.local` is a CLONE-level resource, not a per-worktree one: it's gitignored, so a
+# freshly-created git worktree never receives a copy — and its emulated functions would then
+# launch WITHOUT the secret (failing e.g. an OAuth code→token exchange with "client_secret is
+# missing"). Resolve it as a cascade: the current tree's own file wins (a worktree may still drop
+# in its own), else fall back to the MAIN worktree's copy (git lists it first). So serving ANY
+# worktree — `nx serve` here or `<app>:serve-worktree` — reuses the one secret the main tree
+# holds, with no per-worktree setup.
 SECRETS_FILE="$ROOT/apps/functions/.secret.local"
+if [ ! -f "$SECRETS_FILE" ]; then
+  MAIN_WORKTREE="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -1)"
+  if [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && [ -f "$MAIN_WORKTREE/apps/functions/.secret.local" ]; then
+    echo "[emulators] .secret.local absent in this worktree; using the main worktree's copy: $MAIN_WORKTREE" >&2
+    SECRETS_FILE="$MAIN_WORKTREE/apps/functions/.secret.local"
+  fi
+fi
 if [ -f "$SECRETS_FILE" ] && [ -d "$ROOT/dist/apps/functions" ]; then
   cp "$SECRETS_FILE" "$ROOT/dist/apps/functions/.secret.local"
 fi

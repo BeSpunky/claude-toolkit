@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "executors": {
+    "serve-worktree": {
+      "implementation": "./src/executors/serve-worktree/executor",
+      "schema": "./src/executors/serve-worktree/schema.json",
+      "description": "Serve an in-flight git worktree without merging it back. Collects `git worktree list`, lets you pick one (arrow keys + Enter; the current tree pre-highlighted; or pass --worktree=<branch|path> for scripting), runs `yarn install` there if it has no node_modules yet, then runs THAT worktree's own serve target (whatever `serve` resolves to — a plain Angular dev-server or a Firebase emulators + dev-server orchestrator) with the mandatory NX_WORKSPACE_ROOT_PATH / NX_DAEMON=false overrides applied, so Nx serves the worktree's source rather than silently falling back to the main tree's. There is only one set of forwarded dev ports, so exactly one serve owns them at a time; this points that single serve at the chosen worktree. --dryRun prints what it would serve without serving."
+    }
+  }
+}

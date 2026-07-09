@@ -13,6 +13,12 @@
       "version": "0.6.0"
     },
     {
+      "name": "workflow",
+      "source": "./plugins/workflow",
+      "description": "BeSpunky ways-of-working: the process, order, and methodology of how work moves from idea to production — independent of what's being built. branch-and-release: the house git methodology — a one-way promotion pipeline across four branches (feature → development → staging → main, each a strict ancestor of the next), unrelated work isolated in per-feature git worktrees off the integration branch (with the Nx-workspace-root override that stops tooling silently targeting the main tree), the relevance check that runs before touching any file, rebase-and-re-verify at the single divergence point (feature → development), and three human-gated promotions (feature done → development; go to staging; go live → main). Deploy bindings are a per-project parameter in the project's CLAUDE.md; the skill carries the durable method. Enabled by default in scaffolded projects.",
+      "version": "0.1.0"
+    },
+    {
       "name": "engineering",
       "source": "./plugins/engineering",
       "description": "BeSpunky engineering skills. Agnostic foundation (architect-mentality + architecture-first: solve through design, never a patch; fix the root cause; design + confirm refactors) plus technique domains with progressive-disclosure references: software-design, advanced-typescript, angular-architecture, angular-native-wrappers, nx-monorepo-and-dx.",

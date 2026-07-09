@@ -99,6 +99,39 @@ After the backend is created, **App Hosting deploys are GitHub-driven**: pushing
 **Never fabricate `.firebaserc` or the production config** — the Firebase CLI is the source of truth for cloud state. `provideAppFirebase()` throws at bootstrap if production is attempted with an empty `environment.firebase`, so silent broken deploys are impossible. Inside the devcontainer, **every interactive terminal shows a self-extinguishing banner** (`tools/firebase-welcome.sh`, sourced via `/etc/profile.d/zz-firebase-welcome.sh`) reminding the user of the recipe until setup is complete — when both `.firebaserc` exists and `environment.firebase.projectId` in `environment.prod.ts` is filled, the banner goes silent automatically. The same recipe also lives in the header of `environment.prod.ts` and in the `project-starter:new-project` skill.
 {{/firebase}}
 
+## Branch & release workflow (non-negotiable)
+
+**You MUST invoke the `workflow:branch-and-release` skill before any git branch, worktree, integration, promotion, or release action — this is mandatory, not a recommendation.** The skill is the operative procedure (the relevance check, per-feature git worktrees + the Nx-root override, the rebase-and-re-verify divergence rule, and the three human-gated promotions with their exact commands), not a reference to consult when convenient. Performing any of those steps from memory — skipping the skill — is a process violation; the skill is the always-on, **auto-updating** source of truth and supersedes any recollection of the flow. The project-specific parameters below are what it reads. The always-on *rules* it enforces:
+
+- **Step 0, every request — decide related vs. unrelated BEFORE touching anything.** Consciously judge whether the request continues the *current* worktree's in-flight work or is something else (a different feature/bug, tooling, docs). **Related** → keep working in the current tree. **Unrelated** → **open a new worktree off `development` and do all of it there** — don't ask, and don't "just start" in the current tree meaning to relocate later. This classification is a precondition for touching files, never a cleanup step; never pile unrelated changes onto an in-flight branch.
+- **Never commit directly onto `development`, `staging`, or `main`** — they advance only by merging the branch directly upstream, so promotions stay clean fast-forwards.
+- **Nothing promotes on its own.** Only the relevance check + worktree creation are automatic; every downstream move (feature→`development`, `development`→`staging`, `staging`→`main`) waits on your explicit signal.
+
+**The four branches** — work flows one way, `feature` → `development` → `staging` → `main`, each a strict ancestor of the next:
+
+| Branch | Role |
+| --- | --- |
+| `development` | integration — all ongoing/finished work not yet promoted |
+| `staging` | pre-production / release-candidate line |
+| `main` | production / released line |
+
+{{#firebase}}
+**Deploy binding (this project):** `staging` and `main` each track a Firebase App Hosting environment — pushing either triggers an auto-rollout (`staging` → staging, `main` → production). `development` tracks **no** environment, so pushing it does **not** deploy. (Production is `main`; App Hosting's prod backend tracks it — "master" in conversation means `main` here.) The topology is set up when the repo is linked at `firebase apphosting:backends:create` (see the Firebase deploy recipe above).
+{{/firebase}}
+{{^firebase}}
+**Deploy binding (this project):** none yet — no deploy target is wired. `staging` and `main` are promotion checkpoints kept ready to bind to a deploy mechanism (Firebase App Hosting, a CI workflow, a container push, …): bind it to fire on push to `staging` for staging and `main` for production. Until then the pipeline is pure branch hygiene.
+{{/firebase}}
+
+**Serving an in-flight worktree** — this workspace ships a `serve-worktree` target (wired onto every app), so an in-flight feature is testable in the real app before it's promoted, without merging it back:
+
+```bash
+yarn nx run <app>:serve-worktree                            # arrow-key picker of all worktrees → Enter
+yarn nx run <app>:serve-worktree --worktree=<branch|slug>   # skip the prompt (scripting / non-TTY)
+yarn nx run <app>:serve-worktree --dryRun                   # print what it would serve, without serving
+```
+
+It points the single set of forwarded dev ports at the chosen worktree — installing its deps and applying the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you. (Provided by the `@bespunky/nx-tools:serve-worktree` executor. A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.)
+
 ## Generator-first, manual last
 
 For anything Nx can generate - apps, libraries, components, services, project config - **use the Nx generator (`nx g ...`); never hand-create and fill files.** Before hand-writing anything structural, check what exists: `nx list <plugin>` / `nx g <generator> --help` (or the `nx-generate` skill / the Nx MCP server). Only fall back to manual file creation when no generator covers the task. **Never guess flags** - verify against `--help` / `nx_docs`.

@@ -39,6 +39,7 @@ import {
 } from '@nx/devkit';
 import { basename } from 'node:path';
 import serveOptionsGenerator from '../serve-options/generator';
+import worktreeServeGenerator from '../worktree-serve/generator';
 import firebaseEmulatorsGenerator from '../firebase-emulators/generator';
 
 interface AppGeneratorSchema {
@@ -96,6 +97,11 @@ export default async function appGenerator(
 
   // 2) Per-app house config: make the dev server reachable from outside the devcontainer.
   await serveOptionsGenerator(tree, { project: projectName });
+
+  // 2b) Per-app house config: the `serve-worktree` target, so an in-flight git worktree can be
+  //     served without merging it back. Deploy-/framework-agnostic (delegates to this project's
+  //     own `serve`), so it applies to every app regardless of the Firebase opt-in below.
+  await worktreeServeGenerator(tree, { project: projectName });
 
   // 3) Firebase per-app wiring — explicit flag wins; otherwise auto-detect a Firebase workspace.
   const firebase = options.firebase ?? tree.exists('firebase.json');

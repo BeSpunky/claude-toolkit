@@ -18,6 +18,7 @@
     "nx@nx-claude-plugins": true,
     "project-starter@claude-toolkit": true,
     "engineering@claude-toolkit": true,
+    "workflow@claude-toolkit": true,
     "browser-automation@claude-toolkit": true,
     "product-ux@claude-toolkit": true
   },

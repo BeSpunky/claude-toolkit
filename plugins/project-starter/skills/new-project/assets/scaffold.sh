@@ -203,7 +203,8 @@ fi
 $STAGE_BLOCK
 # Repair re-applies the per-app house config to the EXISTING app (the \`app\` generator CREATES
 # apps; it is not the heal path), then the workspace-level generators. All idempotent.
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP$REPAIR_FIREBASE_BLOCK
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-serve --project=$APP$REPAIR_FIREBASE_BLOCK
 $WORKSPACE_GEN_BLOCK"
 fi
 

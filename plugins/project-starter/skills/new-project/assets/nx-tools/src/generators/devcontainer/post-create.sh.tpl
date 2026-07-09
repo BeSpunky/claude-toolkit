@@ -44,6 +44,7 @@ echo "[post-create] pre-installing claude-toolkit plugins"
 if claude plugin marketplace add BeSpunky/claude-toolkit \
     && claude plugin install project-starter@claude-toolkit --scope project \
     && claude plugin install engineering@claude-toolkit --scope project \
+    && claude plugin install workflow@claude-toolkit --scope project \
     && claude plugin install browser-automation@claude-toolkit --scope project \
     && claude plugin install product-ux@claude-toolkit --scope project; then
   echo "[post-create] claude-toolkit plugins installed at project scope"
