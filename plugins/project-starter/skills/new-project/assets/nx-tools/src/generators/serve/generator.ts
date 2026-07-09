@@ -49,6 +49,11 @@ const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
 // Every historical name the app dev-server may hide under (a fresh @nx/angular `serve`, or a legacy
 // Firebase inner target) — consolidated into the single `dev-server` leaf.
 const LEGACY_DEV_SERVER_NAMES = ['dev-server', 'serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app'];
+// Retired PER-APP targets the unified serve subsumes — deleted on every run so a --repair'd project is
+// left with just `serve` + `dev-server`. `serve-worktree`'s executor (@bespunky/nx-tools:serve-worktree)
+// was renamed to `serve` in 0.3.0, so the old target now dangles at a non-existent executor;
+// `serve-with-shared-browser`'s serve+navigate is now the serve executor's default shared-browser layer.
+const RETIRED_SERVE_TARGETS = ['serve-worktree', 'serve-with-shared-browser'];
 
 export default async function serveGenerator(tree: Tree, options: ServeSchema): Promise<void> {
   const projectName = options.project;
@@ -79,6 +84,8 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   // then assert the leaf + composer. The `serve` slot is reclaimed by the composer below.
   for (const name of LEGACY_DEV_SERVER_NAMES) delete targets[name];
   if (targets.serve?.executor === DEV_SERVER_EXECUTOR) delete targets.serve;
+  // Heal the retired per-app targets the unified serve replaces (dangling executor / redundant orchestrator).
+  for (const name of RETIRED_SERVE_TARGETS) delete targets[name];
 
   // The `dev-server` leaf — the real Angular dev-server the composer drives. Env pinned via
   // configurations (development default / production), host applied so it's reachable from outside the
