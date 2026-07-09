@@ -1,7 +1,7 @@
 {
   "name": "@bespunky/nx-tools",
-  "version": "0.1.0",
-  "description": "BeSpunky house Nx generators: project scaffolding (serve-options, devcontainer, claude-settings, angular-ai, firebase-emulators, playwright), code scaffolding (navigation-core, domain-navigation), and reusable-tool extraction (mark-extractable, adopt-extracted); plus the serve-worktree executor (serve an in-flight git worktree without merging back).",
+  "version": "0.2.0",
+  "description": "BeSpunky house Nx generators: project scaffolding (serve-options, worktree-serve, serve-with-shared-browser, shared-browser, devcontainer, claude-settings, angular-ai, firebase-emulators, playwright), code scaffolding (navigation-core, domain-navigation), and reusable-tool extraction (mark-extractable, adopt-extracted); plus the serve-worktree executor (serve an in-flight git worktree without merging back — with --portOffset whole-stack isolation).",
   "license": "MIT",
   "repository": {
     "type": "git",

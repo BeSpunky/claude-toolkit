@@ -171,7 +171,7 @@ ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
 # until the package is first published (see tools/publish-nx-tools); once published, --repair adds
 # it to existing projects.
-yarn add -D @bespunky/nx-tools@^0.1.0 || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
+yarn add -D @bespunky/nx-tools@^0.2.0 || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
