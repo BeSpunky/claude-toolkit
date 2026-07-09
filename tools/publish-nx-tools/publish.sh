@@ -15,8 +15,21 @@
 # Bump the version in assets/nx-tools/package.json before a real publish.
 set -euo pipefail
 
+# Args: --dry-run (validate only), --otp <code> / --otp=<code> (2FA one-time password).
+# If the npm account has "require 2FA for write actions" on, a real publish needs an OTP — BUT the
+# publish runs after ~15s of staging/compile, so a 30s TOTP code can expire mid-run. The robust fix
+# is an npm AUTOMATION token (or a granular token that bypasses 2FA) in ~/.npmrc: then no --otp is
+# needed and this script publishes unattended.
 DRY=""
-[ "${1:-}" = "--dry-run" ] && DRY="--dry-run"
+OTP=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY="--dry-run"; shift;;
+    --otp)     OTP="--otp=$2"; shift 2;;
+    --otp=*)   OTP="$1"; shift;;
+    *) echo "ERROR: unknown argument: $1" >&2; exit 2;;
+  esac
+done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ASSETS_DIR="$REPO_ROOT/plugins/project-starter/skills/new-project/assets"
@@ -52,7 +65,7 @@ cd /tmp/pub
 npm install --no-save --no-audit --no-fund --silent 'typescript@^5'
 node /assets/compile-generators.mts /tmp/pub
 echo '--- package contents (npm pack --dry-run) ---'
-npm publish $DRY"
+npm publish $DRY $OTP"
 
 NPMRC_MOUNT=()
 [ -f "$NPMRC" ] && NPMRC_MOUNT=(-v "$NPMRC":/home/node/.npmrc:ro)
