@@ -68,6 +68,12 @@ else
 fi
 
 ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Pin the workspace's @bespunky/nx-tools to the SAME version the staged generators come from (read from
+# the source package.json), so the installed runtime executors can never lag the applied project.json
+# shape — a 0.x MINOR bump (e.g. 0.3→0.4) would otherwise fall outside a hard-coded caret and silently
+# leave the project on the previous executor. Derived, never hand-maintained.
+NX_TOOLS_VERSION="$(grep -m1 '"version"' "$ASSETS_DIR/nx-tools/package.json" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+[ -n "$NX_TOOLS_VERSION" ] || NX_TOOLS_VERSION="0.4.0"
 GIT_NAME="$(git config --global user.name 2>/dev/null || whoami)"
 GIT_EMAIL="$(git config --global user.email 2>/dev/null || echo "$(whoami)@localhost")"
 
@@ -172,7 +178,7 @@ ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
 # until the package is first published (see tools/publish-nx-tools); once published, --repair adds
 # it to existing projects.
-yarn add -D @bespunky/nx-tools@^0.3.0 || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
+yarn add -D @bespunky/nx-tools@^$NX_TOOLS_VERSION || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
