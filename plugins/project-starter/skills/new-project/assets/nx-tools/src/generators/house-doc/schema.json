@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "version": 2,
+  "title": "House doc generator",
+  "description": "Write the generated HOUSE.md house-conventions reference and keep the bounded pointer to it in CLAUDE.md. Generator-owned: HOUSE.md is rewritten every run; only the marker-delimited pointer block in CLAUDE.md is touched.",
+  "type": "object",
+  "properties": {
+    "firebase": {
+      "type": "boolean",
+      "description": "Render the Firebase sections of HOUSE.md. Defaults to auto-detect (firebase.json at the workspace root)."
+    }
+  },
+  "required": []
+}

@@ -51,6 +51,11 @@
       "schema": "./src/generators/worktree-domains/schema.json",
       "description": "Install the workspace-level worktree-domains proxy + route registry (the sibling of shared-browser). Writes the CLI (tools/worktree-domains/worktree-domains, chmod +x) and its self-contained Node reverse proxy (proxy.mjs — Node built-ins only, no npm/apt dep), and registers the workspace Nx project `worktree-domains` with the housekeeping targets list|reconcile|status|logs|stop. One tiny proxy on 127.0.0.1:80 (loopback, container-internal, NOT forwarded) fronts every worktree's dev-server: a browser hitting http://<slug>.localhost/ (Chromium auto-resolves any *.localhost to loopback — no DNS/hosts) is routed by the leading DNS label to 127.0.0.1:<port> per the slug→port registry, and WebSocket upgrades are proxied so Angular/Vite HMR survives. The `serve` executor drives it per-serve via `worktree-domains register <slug> <port>` / `unregister <slug>` (idempotent; starts the proxy if down). Workspace-level and always-on — generated once per workspace from scaffold.sh's WORKSPACE_GEN_BLOCK. Idempotent + --repair-safe: every generator-owned file is rewritten on each run."
     },
+    "house-doc": {
+      "factory": "./src/generators/house-doc/generator",
+      "schema": "./src/generators/house-doc/schema.json",
+      "description": "Write the generated HOUSE.md — the toolkit-owned house reference (architecture directives, branch/release workflow, serving, worktrees, Firebase, Nx, shared browser, Playwright), rewritten every run to match the installed @bespunky/nx-tools — and keep a bounded, marker-delimited pointer to it in CLAUDE.md (the only part of CLAUDE.md it touches). Moves the volatile house guidance OUT of the hand-owned CLAUDE.md (where --repair can't reach it and it went stale) into a repairable doc. Workspace-level, always-on; idempotent (HOUSE.md fully rewritten; the pointer upserted between its markers)."
+    },
     "mark-extractable": {
       "factory": "./src/generators/mark-extractable/generator",
       "schema": "./src/generators/mark-extractable/schema.json",

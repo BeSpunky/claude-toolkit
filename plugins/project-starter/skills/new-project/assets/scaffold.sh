@@ -173,6 +173,7 @@ ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:house-doc
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
 # for adding further apps, plus the reusable-tool extraction generators mark-extractable /
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
