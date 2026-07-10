@@ -360,7 +360,17 @@ cmd_up() {
   # 5. websockify + noVNC static client — the ONLY forwarded port. Bind loopback (127.0.0.1:$SB_WEB);
   #    VS Code's port-forward reaches it over localhost. Target the loopback VNC port.
   if ! component_running websockify; then
-    spawn websockify websockify --web="$SB_NOVNC_WEB" "127.0.0.1:$SB_WEB" "127.0.0.1:$SB_VNC"
+    # noVNC (the apt package) ships NO index.html, so a bare http://localhost:$SB_WEB/ — exactly what VS
+    # Code's forwarded-port "open in browser" gives you — renders a directory listing instead of the
+    # client. Serve from a runtime web root that mirrors the noVNC assets and adds an index.html that
+    # redirects to vnc.html WITH the autoconnect params, so however the port is opened it lands live.
+    local webroot="$SB_RUNTIME/novnc-web"
+    if [ ! -e "$webroot/vnc.html" ]; then
+      mkdir -p "$webroot"
+      cp -r "$SB_NOVNC_WEB"/. "$webroot"/ 2>/dev/null || true
+    fi
+    printf '<!doctype html><meta http-equiv="refresh" content="0; url=vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true">\n' > "$webroot/index.html"
+    spawn websockify websockify --web="$webroot" "127.0.0.1:$SB_WEB" "127.0.0.1:$SB_VNC"
     STARTED+=(websockify)
   else say "websockify already running"; fi
 

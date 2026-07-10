@@ -9,9 +9,10 @@
 //
 // Where it routes the option:
 //   - House shape — the app dev-server is the `dev-server` leaf (created by the `serve` generator) and
-//     `serve` is the @bespunky/nx-tools:serve composer → set `host` on `dev-server.options`, and strip
-//     any stray `host` off the composing `serve` target (a run-commands/composer target would forward
-//     it as `--host=…` via flag-passthrough).
+//     `serve` is the @bespunky/nx-tools:serve composer → set `host` on the `dev-server` leaf AND on
+//     `serve` (the composer DELEGATES host to the dev-server via `--host`, so it belongs there too).
+//   - Legacy exception — a `nx:run-commands` orchestrator at `serve` must NOT carry `host` (it would be
+//     forwarded to a child as a bare `--host=…` flag), so strip it there.
 //   - Plain case — `serve` is still the raw Angular dev-server (a fresh scaffold before the `serve`
 //     generator runs) → set `host` on `serve.options`.
 //
@@ -41,10 +42,8 @@ export default async function serveOptionsGenerator(
   const targets = project.targets;
 
   const serve = targets.serve;
-  // A composing `serve` (the nx-tools serve executor, or a legacy run-commands orchestrator) must NOT
-  // carry `host` — it would be forwarded to a child as a flag.
-  const serveIsComposer =
-    serve?.executor === '@bespunky/nx-tools:serve' || serve?.executor === 'nx:run-commands';
+  const serveIsNxToolsComposer = serve?.executor === '@bespunky/nx-tools:serve';
+  const serveIsLegacyOrchestrator = serve?.executor === 'nx:run-commands';
 
   // Every name the real app dev-server can live under, current-first. The house `dev-server` leaf wins;
   // the legacy Firebase inner targets are tolerated for --repair on older projects.
@@ -54,11 +53,17 @@ export default async function serveOptionsGenerator(
 
   if (devServerNames.length > 0) {
     // House / Firebase shape: the real dev-server(s) live alongside the composing serve.
-    // 1) Clean any stray `host` off the composer (left by an earlier run that didn't yet know the shape).
-    if (serveIsComposer && serve?.options && 'host' in serve.options) {
+    // 1) A LEGACY run-commands orchestrator at `serve` must not carry `host` — it would be forwarded to a
+    //    child as a bare flag. (The nx-tools:serve composer is the opposite — see (2).)
+    if (serveIsLegacyOrchestrator && serve?.options && 'host' in serve.options) {
       delete (serve.options as Record<string, unknown>).host;
     }
-    // 2) Apply host to every real dev-server target.
+    // 2) The nx-tools:serve composer DELEGATES `host` to the dev-server (forwards `--host`), so `host`
+    //    belongs on it too — assert it (the `serve` generator sets it; this keeps --repair honest).
+    if (serveIsNxToolsComposer && serve) {
+      serve.options = { ...serve.options, host };
+    }
+    // 3) Apply host to every real dev-server target.
     for (const name of devServerNames) {
       const devServer = targets[name];
       devServer.options = { ...devServer.options, host };

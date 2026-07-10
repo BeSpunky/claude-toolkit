@@ -104,11 +104,21 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   // The composing `serve` — one command, one graceful Ctrl+C: dev-server + optional emulators + optional
   // shared browser, for the current worktree or any chosen one. Defaults cover the common case (emulators
   // + shared browser on, auto port offset); flags (`--no-emulators`, `--no-shared-browser`, `--worktree`,
-  // `--portOffset`) tune it.
+  // `--portOffset`, `--configuration`) tune it.
+  //
+  // Enrich, don't hide: `serve` carries the same dev-server delegation options as the leaf (host,
+  // proxyConfig, buildTarget) PLUS the canonical Angular development/production configurations. The
+  // executor forwards them to the `dev-server` leaf it drives — so `nx serve <app> --configuration=production`
+  // is the native Nx config flag, and any dev-server option can be tuned on `serve` directly.
   targets.serve = {
     continuous: true,
     executor: SERVE_EXECUTOR,
-    options: {},
+    options: { ...preserved, buildTarget: `${projectName}:build`, host },
+    configurations: {
+      development: { buildTarget: `${projectName}:build:development` },
+      production: { buildTarget: `${projectName}:build:production` },
+    },
+    defaultConfiguration: 'development',
   };
 
   // LAYER 1: the dev-only worktree tab label. Generator-owned glue (no user values) — always rewritten

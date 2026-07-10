@@ -56,9 +56,9 @@ It auto-derives a **port offset** from the tree you're in — the **main tree is
 ### Two ways to view the running app
 
 1. **The shared browser (default, blessed)** — a real containerized Chromium you watch over **noVNC at `http://localhost:6080`** in any host tab; Claude attaches to the *same* instance over loopback CDP to co-drive. This surface works for **every** tree — main and worktrees alike.
-2. **A host browser tab on `http://localhost:4200`** (escape hatch, **main tree only**) — only the base `4200`{{#firebase}} (+ emulator){{/firebase}} ports are forwarded out of the container. **Worktree serves are `:6080`-only**: their shifted ports are not forwarded, so you reach them through the shared browser, never a host tab.
+2. **A host browser tab** — `:80` (the worktree-domains proxy) and the base `http://localhost:4200`{{#firebase}} (+ emulator){{/firebase}} ports are forwarded, so you can open any tree's app in a host tab: the pretty **`<slug>.localhost`** URL routes through the proxy to whichever tree is served. The **main tree** works fully there.{{#firebase}} For a **worktree**, the app loads but its *shifted emulator ports* aren't forwarded — Firebase calls only connect inside the shared browser (loopback), so use the shared browser for the full worktree experience.{{/firebase}}
 
-Each worktree serve gets a pretty **`<slug>.localhost`** domain (auto-resolved inside Chromium, routed by the in-container proxy) plus a **per-worktree tab title and tinted favicon**, so several co-driven worktrees stay visually distinct.
+Each worktree serve gets a pretty **`<slug>.localhost`** domain (browsers auto-resolve any `*.localhost` to loopback; the in-container proxy on the forwarded `:80` routes it to that tree's app) plus a **per-worktree tab title and tinted favicon**, so several co-driven worktrees stay visually distinct.
 
 ### Observe-only etiquette (co-driving)
 

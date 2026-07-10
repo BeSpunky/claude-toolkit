@@ -69,7 +69,6 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
   const offset = await resolvePortOffset(options.portOffset ?? 'auto', worktreeKey(chosen), chosen.isMain);
   const appPort = BASE_APP_PORT + offset;
   const slug = worktreeSlug(chosen, workspaceName);
-  const configuration = options.configuration ?? 'development';
 
   const isFirebase = existsSync(join(chosen.path, 'firebase.json'));
   const emulatorsOn = options.emulators !== false && isFirebase;
@@ -97,13 +96,25 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
   // The composed long-running children. The app dev-server always; the emulator suite when this is a
   // Firebase tree and emulators aren't disabled. Both run through the tree's own nx binary with the
   // tree-pinning env, so an isolated worktree serve never leaks into the main tree.
-  const children: ServeChild[] = [
-    {
-      label: 'app',
-      command: nxBin,
-      args: ['run', `${project}:dev-server`, `--configuration=${configuration}`, `--port=${appPort}`],
-    },
-  ];
+  //
+  // The app layer DELEGATES to the project's `dev-server` leaf (@angular/build:dev-server), forwarding
+  // serve's dev-server options. `buildTarget` is set by serve's development/production configurations
+  // (→ <app>:build:<config>), so `nx serve <app> --configuration=production` compiles the prod build; the
+  // port is offset-managed. Only options the developer actually set are forwarded — the leaf's own
+  // defaults win otherwise.
+  const appArgs = ['run', `${project}:dev-server`, `--port=${appPort}`];
+  if (options.buildTarget) appArgs.push(`--buildTarget=${options.buildTarget}`);
+  if (options.host) appArgs.push(`--host=${options.host}`);
+  if (options.proxyConfig) appArgs.push(`--proxyConfig=${options.proxyConfig}`);
+  if (options.ssl) appArgs.push('--ssl');
+  if (options.sslCert) appArgs.push(`--sslCert=${options.sslCert}`);
+  if (options.sslKey) appArgs.push(`--sslKey=${options.sslKey}`);
+  if (options.open) appArgs.push('--open');
+  if (options.liveReload === false) appArgs.push('--liveReload=false');
+  if (options.hmr) appArgs.push('--hmr');
+  if (options.poll !== undefined) appArgs.push(`--poll=${options.poll}`);
+
+  const children: ServeChild[] = [{ label: 'app', command: nxBin, args: appArgs }];
   if (emulatorsOn) {
     children.push({ label: 'emulators', command: nxBin, args: ['run', 'firebase:emulators'] });
   }
