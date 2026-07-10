@@ -249,7 +249,7 @@ export default async function firebaseEmulatorsGenerator(
   // Those are real per-project values, so overwriting the file every run would silently drop them
   // (and break the app's types). New scaffolds get the full standard shape from the template; an
   // existing project owns and keeps its own. (If the toolkit ever changes the shared shape itself,
-  // that migration is hand-merged, like the CLAUDE.md sections — the same reason environment.ts /
+  // that migration is a manual per-project step (these files hold real per-project values) — the same reason environment.ts /
   // environment.prod.ts are also write-if-absent.)
   if (!tree.exists(envInterfacePath)) {
     tree.write(envInterfacePath, template('environment.interface.ts.tpl'));
