@@ -127,9 +127,9 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 
 ```
 /plugin marketplace add BeSpunky/claude-toolkit
-/plugin install project-starter@claude-toolkit
-/plugin install engineering@claude-toolkit
-/plugin install product-ux@claude-toolkit
+/plugin install bespunky-project-starter@claude-toolkit
+/plugin install bespunky-engineering@claude-toolkit
+/plugin install bespunky-product-ux@claude-toolkit
 ```
 
 …or add to `~/.claude/settings.json` so every project sees it:
@@ -140,14 +140,14 @@ Register new plugins in `.claude-plugin/marketplace.json`.
     "claude-toolkit": { "source": { "source": "github", "repo": "BeSpunky/claude-toolkit" } }
   },
   "enabledPlugins": {
-    "project-starter@claude-toolkit": true,
-    "engineering@claude-toolkit": true,
-    "product-ux@claude-toolkit": true
+    "bespunky-project-starter@claude-toolkit": true,
+    "bespunky-engineering@claude-toolkit": true,
+    "bespunky-product-ux@claude-toolkit": true
   }
 }
 ```
 
-Skills are namespaced as `project-starter:new-project`, `product-ux:keep-users-oriented`, `product-ux:astonishing-to-use`, `product-ux:redesign-means-rethink`, `product-ux:envision-the-experience`, `product-ux:stage-the-vision`, `product-ux:realize-the-vision`, `engineering:architect-mentality`, `engineering:architecture-first`, `engineering:advanced-typescript`, `engineering:software-design`, `engineering:advanced-typescript`, `engineering:angular-architecture`, `engineering:angular-native-wrappers`, and `engineering:nx-monorepo-and-dx`. Scaffolded
+Skills are namespaced as `bespunky-project-starter:new-project`, `bespunky-product-ux:keep-users-oriented`, `bespunky-product-ux:astonishing-to-use`, `bespunky-product-ux:redesign-means-rethink`, `bespunky-product-ux:envision-the-experience`, `bespunky-product-ux:stage-the-vision`, `bespunky-product-ux:realize-the-vision`, `bespunky-engineering:architect-mentality`, `bespunky-engineering:architecture-first`, `bespunky-engineering:advanced-typescript`, `bespunky-engineering:software-design`, `bespunky-engineering:advanced-typescript`, `bespunky-engineering:angular-architecture`, `bespunky-engineering:angular-native-wrappers`, and `bespunky-engineering:nx-monorepo-and-dx`. Scaffolded
 projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
 available inside every new project automatically.
 
@@ -163,7 +163,7 @@ a rule that must hold on **every** change. So the policy has two halves:
 **New projects** get half (1) automatically — the `new-project` scaffold bakes these directives into the
 generated `CLAUDE.md` and enables the plugins. **Existing projects** that install the plugins should paste
 the canonical directives below into their `CLAUDE.md` so the mindset, the rule, and the redesign discipline
-are always in context (the last pairs with `product-ux:redesign-means-rethink` the same way the first two
+are always in context (the last pairs with `bespunky-product-ux:redesign-means-rethink` the same way the first two
 pair with the `engineering` skills — an always-on directive plus the skill's depth):
 
 ```markdown
@@ -171,19 +171,19 @@ pair with the `engineering` skills — an always-on directive plus the skill's d
 
 Approach every decision — at any scale, from a single function to the whole workspace — as a software architect. Treat **everything as a black box**: a clear boundary, a small deliberate public contract, hidden internals, dependencies received from the outside, and connections to other black boxes only through well-defined, intentionally-directed connection types (dependency injection, parent–child, layered/domain-driven dependency rules). Never reach across a boundary into another box's internals. **Place every element on purpose** — every line, `if`, constant, config, abstraction, and dependency is there deliberately; put each concern where it *belongs* (the place dedicated to it), never merely where it "fits" or happens to work. Model the missing **concept** instead of working around gaps; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the next consumer; lead with *why* and one consistent mental model; and **go the extra mile — always** (find or invent the elegant solution; never settle for the easy-but-complex; *easy ≠ simple*). Be lazy about repetition — **automate every repeated process** (never do the same thing by hand twice; derive from a single source of truth and make it runnable in one step) — and relentless about design quality.
 
-For the full mindset, think with the **`engineering:architect-mentality`** skill. It is the *why*; the rule below is the *operational discipline* that enforces it.
+For the full mindset, think with the **`bespunky-engineering:architect-mentality`** skill. It is the *why*; the rule below is the *operational discipline* that enforces it.
 
 ## Architecture-first (non-negotiable)
 
 Every change — feature, bug, edge case, or "quick fix" — is solved through **design and infrastructure, never a patch.** No special-case `if`s keyed on one input/customer/env, no magic values, no copy-paste, no boolean flags to make one unit do two things, no casts to silence a type mismatch, no bumped timeouts to mask a structural problem. **For bugs, find and fix the root cause — never mask the symptom** (no swallowed errors, defaulted bad data, or guards bolted on at the symptom site). When the current design does not account for a requirement, **redesign and refactor** the relevant seam (model the missing concept, extract, decouple, build the missing abstraction, reuse) so the new behavior is a natural case of the design — don't bolt it on. Coupling, duplication, and special-casing must never grow. **If a refactor is needed to lay infrastructure for a feature or to fix a bug, design it first, get confirmation, and only then implement** — never refactor ad hoc mid-edit; if a correct redesign is genuinely large, surface it and its cost rather than patching silently.
 
-For any non-trivial change, invoke the **`engineering:architecture-first`** skill before writing code — it carries the full loop, the bug root-cause and refactor gates, the patch smells to refuse, and the redesign moves.
+For any non-trivial change, invoke the **`bespunky-engineering:architecture-first`** skill before writing code — it carries the full loop, the bug root-cause and refactor gates, the patch smells to refuse, and the redesign moves.
 
 ## Redesign means rethink
 
 When asked to **redesign** any UI — a layout, screen, page, component, or flow — treat it as a **complete creative reconception from scratch**, never a modification or reskin of what exists. The existing implementation has **zero design authority**: do **not** read it to inform the new design, and don't even look at it before conceiving the new one. Reconceive the **form** from the intent, the requirements, and the feeling; honor the **purpose** (what the thing is for, its data and functionality), which comes from the spec and the user — never reverse-engineered from the old layout. Read the existing code **only after** the new design exists — to plan what to clean up, overwrite, or migrate, and to confirm what functionality must survive — then build the new design cleanly and **remove the old**. (A *targeted tweak* — "move this button", "change this colour" — is **not** a redesign; don't inflate it into one.)
 
-For any redesign, invoke the **`product-ux:redesign-means-rethink`** skill — the entry gate to the experience-design trio (`envision-the-experience` → `stage-the-vision` → `realize-the-vision`, run from scratch).
+For any redesign, invoke the **`bespunky-product-ux:redesign-means-rethink`** skill — the entry gate to the experience-design trio (`envision-the-experience` → `stage-the-vision` → `realize-the-vision`, run from scratch).
 ```
 
 ## Upgrade everywhere
@@ -209,8 +209,8 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
 3. Copies `@bespunky/nx-tools` into the workspace's `node_modules` and runs the **house generators** — every config change is Nx-native (devkit `Tree`), no hand-rolled file edits:
    - `nx g @bespunky/nx-tools:serve-options --project=<app>` → serve `host: 0.0.0.0` (polling lives in the devcontainer env, since modern Angular's `@angular/build:dev-server` rejects `poll`)
    - `nx g @bespunky/nx-tools:devcontainer --name=<project> --nodeMajor=<major>` `[--firebase=true]` → `.devcontainer/devcontainer.json` (Claude CLI/extension, `.claude` persistence, **`CHOKIDAR_USEPOLLING`/`CHOKIDAR_INTERVAL`** for WSL/Docker file-watching, postCreateCommand pre-installing the toolkit plugins; with `--firebase=true`, adds the Firebase CLI + Google Cloud CLI features, the `toba.vsfire` extension, and labeled `portsAttributes` for the emulator suite — but **no explicit `forwardPorts`**: VS Code auto-detects every container binding and forwards each to a free host port, so multiple devcontainers can run in parallel without colliding on the same host port)
-   - `nx g @bespunky/nx-tools:claude-settings` → `.claude/settings.json` (marketplaces + enabled plugins incl. `browser-automation@claude-toolkit`)
-   - `nx g @bespunky/nx-tools:playwright` → adds `@playwright/test` as a devDependency so the devcontainer's `post-create.sh` runs `playwright install --with-deps chromium` (Chromium + apt deps) on container build. Browser binary cached in a per-workspace Docker volume so rebuilds don't re-download. Always-on for BeSpunky projects; pairs with the `browser-automation:playwright` skill (loaded via the plugin) which covers when to choose Playwright vs. the preview / Chrome MCPs and how to write headless scripts.
+   - `nx g @bespunky/nx-tools:claude-settings` → `.claude/settings.json` (marketplaces + enabled plugins incl. `bespunky-browser-automation@claude-toolkit`)
+   - `nx g @bespunky/nx-tools:playwright` → adds `@playwright/test` as a devDependency so the devcontainer's `post-create.sh` runs `playwright install --with-deps chromium` (Chromium + apt deps) on container build. Browser binary cached in a per-workspace Docker volume so rebuilds don't re-download. Always-on for BeSpunky projects; pairs with the `bespunky-browser-automation:playwright` skill (loaded via the plugin) which covers when to choose Playwright vs. the preview / Chrome MCPs and how to write headless scripts.
    - **Only with `--firebase`:** `nx g @bespunky/nx-tools:firebase-emulators --project=<app> --workspaceName=<project>` → `firebase.json` (emulator suite + `singleProjectMode`); **no `.firebaserc`** is fabricated — cloud-project linkage is the Firebase CLI's job (`firebase use --add` after `firebase login`); each emulator Nx target passes `--project=demo-<name>` so emulators work without login or a real project. Generates the env files `apps/<app>/src/environments/{environment.interface.ts, environment.ts, environment.prod.ts}` (Angular's canonical environment-files pattern — emulator config in the dev file, real Firebase web config placeholders in the prod file, shared `Environment` type in the interface; user-customizable values live here, the generator preserves `environment.ts` / `environment.prod.ts` across re-runs), writes `apps/<app>/src/app/firebase.config.ts` to the canonical shape that reads from `environment` and gates emulator wiring behind `!environment.production` (the file is written when absent and rewritten when it detects the legacy `ngDevMode`-and-two-consts shape, so `--repair --firebase` self-heals old projects; once the file is on the env-files shape, `--repair` leaves it alone to preserve any app-specific customizations you've added — custom `messagingSenderId`, `initializeFirestore` options, etc.), registers the `environment.ts` → `environment.prod.ts` `fileReplacements` on the production build configuration (idempotently), self-heals legacy `ngDevMode`-and-two-consts projects on `--repair --firebase` (any populated `productionFirebaseConfig` values are migrated into `environment.prod.ts` before the legacy file is overwritten), best-effort AST wiring into `app.config.ts`, Nx targets on the app: `emulators` (flagged `continuous: true`) + `emulators:<svc>` (auth/firestore/storage/functions) for standalone use, and `serve` — the Angular dev-server itself — given **`dependsOn: ["emulators"]`** so Nx's native continuous-task orchestration (Nx 21+) boots the emulator suite alongside the dev-server as one task graph and tears both down together. `serve` is **not** wrapped in `firebase emulators:exec` or renamed: Nx's task runner owns both lifecycles, so no detached process tree orphans emulator JVMs that hold ports + the Nx task lock between restarts (`--repair` un-wraps the legacy `nx:run-commands` wrapper / `serve-app` shape back to this). `nx serve <app>` brings up the suite + the app in one command; Ctrl-C cleans both up — and **adds `firebase` + `@angular/fire`** to `package.json`, installed post-commit via Nx's `installPackagesTask`. (No shell-side `yarn add` — the generator owns deps.)
 
 **Firebase support is opt-in.** Pass `--firebase` to `scaffold.sh` to enable the full setup (devcontainer features + emulator config + Angular environment files + Nx targets). Never enabled by default — only when the user explicitly asks for Firebase or the scaffolding agent asks and they say yes.
@@ -221,13 +221,13 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
 bash <path-to>/scaffold.sh --repair [--firebase] <project-path-or-name> [<app-name>]
 ```
 
-**Important: `--repair` does NOT touch `CLAUDE.md`.** It's the one artifact preserved verbatim, because it carries the user's project intentions — auto-rewriting would clobber custom edits. Everything else (devcontainer files, `.claude/settings.json`, `project.json`, `package.json` devDeps, Firebase config files) gets brought up to current spec by the generators. After a `--repair` against a project scaffolded with an older toolkit version, hand-merge any new always-on sections (Firebase recipe, Playwright brief, etc.) from `assets/CLAUDE.md.tmpl` into the project's `CLAUDE.md` — see the `project-starter:new-project` skill's §1b for the recipe.
+**Important: `--repair` does NOT touch `CLAUDE.md`.** It's the one artifact preserved verbatim, because it carries the user's project intentions — auto-rewriting would clobber custom edits. Everything else (devcontainer files, `.claude/settings.json`, `project.json`, `package.json` devDeps, Firebase config files) gets brought up to current spec by the generators. After a `--repair` against a project scaffolded with an older toolkit version, hand-merge any new always-on sections (Firebase recipe, Playwright brief, etc.) from `assets/CLAUDE.md.tmpl` into the project's `CLAUDE.md` — see the `bespunky-project-starter:new-project` skill's §1b for the recipe.
 
 The `new-project` skill then authors a tailored `CLAUDE.md` (the one piece that stays contextual, not a template).
 
 The generated `.devcontainer/devcontainer.json` **pre-installs this marketplace on build** via its
 `postCreateCommand` (`claude plugin marketplace add BeSpunky/claude-toolkit && claude plugin install
-project-starter@claude-toolkit --scope project && claude plugin install engineering@claude-toolkit
+bespunky-project-starter@claude-toolkit --scope project && claude plugin install bespunky-engineering@claude-toolkit
 --scope project`), so the toolkit's skills/agents are live the moment the container comes up. Declaring `enabledPlugins` in settings alone does **not** auto-install — the CLI step
 is what makes it immediate inside the container; on the host, the settings declaration offers a one-click
 install on first run.

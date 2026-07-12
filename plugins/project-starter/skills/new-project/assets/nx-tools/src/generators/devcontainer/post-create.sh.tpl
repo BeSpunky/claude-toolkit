@@ -42,11 +42,11 @@ yarn install
 # one-click install on first session instead.
 echo "[post-create] pre-installing claude-toolkit plugins"
 if claude plugin marketplace add BeSpunky/claude-toolkit \
-    && claude plugin install project-starter@claude-toolkit --scope project \
-    && claude plugin install engineering@claude-toolkit --scope project \
-    && claude plugin install workflow@claude-toolkit --scope project \
-    && claude plugin install browser-automation@claude-toolkit --scope project \
-    && claude plugin install product-ux@claude-toolkit --scope project; then
+    && claude plugin install bespunky-project-starter@claude-toolkit --scope project \
+    && claude plugin install bespunky-engineering@claude-toolkit --scope project \
+    && claude plugin install bespunky-workflow@claude-toolkit --scope project \
+    && claude plugin install bespunky-browser-automation@claude-toolkit --scope project \
+    && claude plugin install bespunky-product-ux@claude-toolkit --scope project; then
   echo "[post-create] claude-toolkit plugins installed at project scope"
 else
   echo "[post-create] NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run"

@@ -4,7 +4,7 @@
 
 Turns a generic piece discovered while working *inside* a project into a published, shared `@scope/*` package that the project then consumes back — across the sandbox boundary between an in-project DevContainer and a host that can see all projects.
 
-The toolkit **skill** (`engineering:architecture-first`) owns only the *discipline* (recognize → abstract → place on purpose → never inline-and-forget) and stays generic. **This mechanism** owns the *where and how*, and is house infrastructure (it knows the scope, the shared workspace, the registry).
+The toolkit **skill** (`bespunky-engineering:architecture-first`) owns only the *discipline* (recognize → abstract → place on purpose → never inline-and-forget) and stays generic. **This mechanism** owns the *where and how*, and is house infrastructure (it knows the scope, the shared workspace, the registry).
 
 ---
 

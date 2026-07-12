@@ -48,9 +48,9 @@ The richest results are **sourced + coded**. The couple kissing might be a gener
 
 ## On the house stack (Angular / Nx)
 
-- Place assets under the app's assets path; keep large/experience-heavy media in a **lazy-loaded boundary** so first load isn't taxed (`engineering:nx-monorepo-and-dx`).
+- Place assets under the app's assets path; keep large/experience-heavy media in a **lazy-loaded boundary** so first load isn't taxed (`bespunky-engineering:nx-monorepo-and-dx`).
 - Optimize in the build pipeline (compression, modern formats, responsive variants) rather than committing giant originals.
-- Feed assets to components **through inputs / a clean seam**, so build-vs-source stays an internal decision the component is agnostic to (`engineering:software-design`, `engineering:angular-native-wrappers`).
+- Feed assets to components **through inputs / a clean seam**, so build-vs-source stays an internal decision the component is agnostic to (`bespunky-engineering:software-design`, `bespunky-engineering:angular-native-wrappers`).
 - Record each asset's **source and license** alongside it (a manifest or adjacent note) so provenance is recoverable (`architect-mentality` — preserve understanding).
 
 ## When NOT to (and when to hand it to a human)

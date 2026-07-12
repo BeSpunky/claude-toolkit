@@ -16,11 +16,11 @@
   },
   "enabledPlugins": {
     "nx@nx-claude-plugins": true,
-    "project-starter@claude-toolkit": true,
-    "engineering@claude-toolkit": true,
-    "workflow@claude-toolkit": true,
-    "browser-automation@claude-toolkit": true,
-    "product-ux@claude-toolkit": true
+    "bespunky-project-starter@claude-toolkit": true,
+    "bespunky-engineering@claude-toolkit": true,
+    "bespunky-workflow@claude-toolkit": true,
+    "bespunky-browser-automation@claude-toolkit": true,
+    "bespunky-product-ux@claude-toolkit": true
   },
   "permissions": {
     "defaultMode": "bypassPermissions"

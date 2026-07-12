@@ -1,5 +1,5 @@
 // House generator: scaffold a domain's THIN typed, reactive navigation config —
-// the per-domain layer of the `engineering:typed-reactive-navigation` pattern. The
+// the per-domain layer of the `bespunky-engineering:typed-reactive-navigation` pattern. The
 // reusable kernel (composer, auto-derived navigator, BsNavLink directive, RouteState,
 // EventBus, middleware) lives in `navigation-core` (scaffold it once with
 // `nx g @bespunky/nx-tools:navigation-core`); this generator emits only what is

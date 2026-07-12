@@ -35,8 +35,8 @@ When the Vision asks for a *space* — real depth, an object you turn, a scene y
 ## On the house stack (Angular / Nx)
 
 - Prefer **angular-three (NGT)** for declarative scenes that fit Angular's signals/change detection.
-- If using **three.js directly**, wrap it per `engineering:angular-native-wrappers`: the scene/loop lives in a directive/service, runs `runOutsideAngular`, and disposes everything in `ngOnDestroy`/`DestroyRef`.
-- Keep heavy 3D assets and code in their own **lazy-loaded Nx boundary** so the rest of the app isn't taxed (`engineering:nx-monorepo-and-dx`).
+- If using **three.js directly**, wrap it per `bespunky-engineering:angular-native-wrappers`: the scene/loop lives in a directive/service, runs `runOutsideAngular`, and disposes everything in `ngOnDestroy`/`DestroyRef`.
+- Keep heavy 3D assets and code in their own **lazy-loaded Nx boundary** so the rest of the app isn't taxed (`bespunky-engineering:nx-monorepo-and-dx`).
 
 ## When NOT to
 
