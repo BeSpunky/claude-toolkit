@@ -1,0 +1,9 @@
+{
+  "name": "bespunky",
+  "description": "The BeSpunky toolkit front door. Its one skill, /bespunky:index, is a self-maintaining catalog: it lists every installed toolkit skill (grouped by plugin, each with its /bespunky-… invocation and a one-line 'use when') by reading the live available-skills set, so it never goes stale. All toolkit plugins share the bespunky- namespace prefix, so typing /bespunky in the slash menu filters the autocomplete to the whole toolkit at once — this index plus every skill.",
+  "version": "0.1.0",
+  "author": {
+    "name": "BeSpunky",
+    "url": "https://github.com/BeSpunky"
+  }
+}

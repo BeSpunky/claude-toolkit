@@ -1,5 +1,5 @@
 {
-  "name": "engineering",
+  "name": "bespunky-engineering",
   "description": "BeSpunky engineering skills. Agnostic foundation: architect-mentality (the architect's mindset) and architecture-first (the operational discipline - solve through design not patches, fix the root cause, design + confirm refactors first). Technique domains (hybrid skills with progressive-disclosure reference files): software-design (general/agnostic), advanced-typescript, angular-architecture and angular-native-wrappers, and nx-monorepo-and-dx.",
   "version": "0.2.0",
   "author": {
