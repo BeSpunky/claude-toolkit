@@ -136,6 +136,14 @@ A first-class **staging** environment is opt-in — `scaffold.sh --repair --fire
 **Isolating staging's data** — the `firebase.databaseId` field (in the Environment interface) picks which Firestore database a build targets. Set it (e.g. `databaseId: 'staging'` in `environment.staging.ts`) and `firebase.config.ts` uses `getFirestore(app, databaseId)` instead of the `(default)` DB. To turn it on: create the named DB in the console, set `databaseId`, and add it to `firebase.json`'s `firestore` array (`[{ "database": "(default)", … }, { "database": "staging", … }]`).
 
 > **Caveat — same-project isolation is Firestore-only.** A named database isolates *client-written* data, but Auth users are shared (same project = one user pool), and the single shared Cloud Functions deployment writes via the Admin SDK's default `getFirestore()` → the `(default)` DB, so anything a callable persists still lands in prod. Full isolation (its own Auth pool + functions) needs a **separate Firebase project** — a deliberate step up in operational cost.
+
+### Cloud Functions: callables proxy & region
+
+Callables run through the **dev-server's own origin**, not a directly-dialed emulator port. `environment.ts` marks the functions emulator `proxied: true`, so `firebase.config.ts` connects it to the app's origin and the generated **`apps/<APP>/proxy.conf.mjs`** relays `/<projectId>/**` to the Functions emulator — **shifted by `PORT_OFFSET`**. Two failure classes disappear: a **squatted or forwarded `:5001`** on the host (common on Windows — a squatter that accepts TCP but never answers hangs every callable until the ~70s deadline, while Firestore/Auth stay fine) can't stall callables, and a **worktree can't silently relay its callables to another tree's emulator**. The serve executor auto-wires the proxy for a Firebase serve; pass your own `--proxyConfig` to override, or set `proxied: false` to dial the emulator port directly.
+
+**Region** — pin callables to a region with `firebase.functionsRegion` (e.g. `'europe-west1'`) in an environment file; `firebase.config.ts` reads it for `getFunctions(app, region)`. Like `databaseId`, it's *configuration*, so it never means hand-editing the config file.
+
+**`firebase.config.ts` is generator-owned and rewritten in full on every `--repair`** — it holds no per-project values by design, so there's no "is it customized?" guess to freeze it behind template improvements. Change behavior where it belongs: **config** (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`, functions `proxied`) in `environment.ts` / `environment.<env>.ts`; **providers** in `app.config.ts` beside `provideAppFirebase()`. Editing `firebase.config.ts` directly means the next repair silently reverts it.
 {{/firebase}}
 
 ## Branch & release workflow (non-negotiable)

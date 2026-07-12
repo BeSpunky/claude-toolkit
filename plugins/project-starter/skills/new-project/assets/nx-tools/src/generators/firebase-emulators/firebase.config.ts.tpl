@@ -21,8 +21,16 @@
 // are dead-code-eliminated from the production artifact. We deliberately do NOT gate this on
 // `environment.production`: that's a const-object property the esbuild-based builder does not reliably
 // inline, so it leaves the override resolver in the prod bundle — `ngDevMode` is the only signal the
-// Angular optimizer guarantees to fold. This file is generator-owned; never edit it by hand — change
-// the committed defaults in environment.ts.
+// Angular optimizer guarantees to fold.
+//
+// GENERATOR-OWNED — this file is rewritten IN FULL on every `--repair`, so never edit it by hand: a
+// future repair silently reverts it. It carries no per-project values by design, so everything you'd want
+// to change lives elsewhere:
+//   • per-environment CONFIG (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`,
+//     functions `proxied`) → environment.ts / environment.<env>.ts;
+//   • app-specific PROVIDERS → app.config.ts, added beside `provideAppFirebase()`.
+// Because it holds no config, it is safe to always rewrite — which is exactly what keeps it from silently
+// drifting behind template improvements (there is no "is it customized?" guess to get wrong).
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { getApp, initializeApp, provideFirebaseApp } from '@angular/fire/app';
 import { connectAuthEmulator, getAuth, provideAuth } from '@angular/fire/auth';
@@ -161,10 +169,28 @@ export function provideAppFirebase(): EnvironmentProviders {
       return storage;
     }),
     provideFunctions(() => {
-      const functions = getFunctions();
+      // Optional per-environment callable region (e.g. a staging build pinned to europe-west1). Read
+      // defensively so a project whose interface predates this field still compiles — it's optional config,
+      // not logic. Omitted → the SDK default region.
+      const region = (environment.firebase as { functionsRegion?: string }).functionsRegion;
+      const functions = region ? getFunctions(getApp(), region) : getFunctions();
       if (ngDevMode) {
         const e = emulatorFor('functions');
-        if (e) connectFunctionsEmulator(functions, e.host, e.port + portOffset);
+        if (e) {
+          // Two ways to reach the Functions emulator (see environment.ts's `proxied`):
+          //   • proxied (default for new scaffolds) — connect to the app's OWN origin; the dev-server's
+          //     proxy.conf.mjs relays /<projectId>/** to the emulator, shifted by the same PORT_OFFSET.
+          //     Dodges a squatted/forwarded :5001 on the host and is inherently port-offset-correct, so it
+          //     needs no `portOffset` math here.
+          //   • direct — dial the emulator host:port, shifted by the session port offset.
+          const proxied = (e as { proxied?: boolean }).proxied;
+          if (proxied && typeof window !== 'undefined') {
+            const port = Number(window.location.port) || (window.location.protocol === 'https:' ? 443 : 80);
+            connectFunctionsEmulator(functions, window.location.hostname, port);
+          } else {
+            connectFunctionsEmulator(functions, e.host, e.port + portOffset);
+          }
+        }
       }
       return functions;
     }),

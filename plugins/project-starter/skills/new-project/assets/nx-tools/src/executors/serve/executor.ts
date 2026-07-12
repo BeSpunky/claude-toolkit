@@ -106,6 +106,15 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
   if (options.buildTarget) appArgs.push(`--buildTarget=${options.buildTarget}`);
   if (options.host) appArgs.push(`--host=${options.host}`);
   if (options.proxyConfig) appArgs.push(`--proxyConfig=${options.proxyConfig}`);
+  // A Firebase serve routes Cloud Functions callables through the dev-server's OWN origin (see the app's
+  // generated proxy.conf.mjs): a squatted/forwarded :5001 on the host can't stall callables, and a
+  // worktree's callables reach ITS emulator because the proxy shifts by PORT_OFFSET (set in `env` below).
+  // Auto-wire that proxy when this is a Firebase tree and the developer didn't pass their own --proxyConfig.
+  if (!options.proxyConfig && isFirebase) {
+    const appRoot = context.projectsConfigurations?.projects?.[project]?.root;
+    const proxyConf = appRoot ? join(chosen.path, appRoot, 'proxy.conf.mjs') : undefined;
+    if (proxyConf && existsSync(proxyConf)) appArgs.push(`--proxyConfig=${proxyConf}`);
+  }
   if (options.ssl) appArgs.push('--ssl');
   if (options.sslCert) appArgs.push(`--sslCert=${options.sslCert}`);
   if (options.sslKey) appArgs.push(`--sslKey=${options.sslKey}`);

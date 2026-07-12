@@ -49,6 +49,10 @@ export const environment: Environment = {
     auth: { url: 'http://localhost:9099', default: EMULATE.auth },
     firestore: { host: 'localhost', port: 8080, default: EMULATE.firestore },
     storage: { host: 'localhost', port: 9199, default: EMULATE.storage },
-    functions: { host: 'localhost', port: 5001, default: EMULATE.functions },
+    // `proxied` routes Functions callables through the dev-server's OWN origin (its proxy.conf.mjs relays
+    // them to this emulator, offset-shifted) instead of the browser dialing :5001 — dodging a squatted or
+    // forwarded :5001 on the host (common on Windows) and staying correct under worktree port offsets.
+    // Set false to dial the emulator port directly.
+    functions: { host: 'localhost', port: 5001, default: EMULATE.functions, proxied: true },
   },
 };

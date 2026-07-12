@@ -38,6 +38,11 @@ export interface Environment {
     // reads this to pick `getFirestore(app, databaseId)` vs `getFirestore()`. Requires a matching entry in
     // firebase.json's `firestore` array + the named DB created in the console.
     databaseId?: string;
+    // Cloud Functions callable region (e.g. 'us-central1', 'europe-west1'). Set it so a per-environment
+    // build pins callables to a region; omit → the SDK default. firebase.config.ts reads this to pick
+    // getFunctions(app, region). Configuration, not logic — it's the reason firebase.config.ts (which is
+    // generator-owned and rewritten every --repair) never needs a hand-edit for region.
+    functionsRegion?: string;
   };
   // This interface is app-owned after the first scaffold (the generator writes it only if absent):
   // add app-specific top-level fields here freely — e.g. `google?: { oauthClientId: string }` for a
@@ -46,6 +51,9 @@ export interface Environment {
     auth?: { url: string; default: boolean };
     firestore?: { host: string; port: number; default: boolean };
     storage?: { host: string; port: number; default: boolean };
-    functions?: { host: string; port: number; default: boolean };
+    // `proxied` (functions only): reach the emulator through the dev-server's OWN origin (its
+    // proxy.conf.mjs relays callables, offset-shifted) instead of dialing host:port directly — dodges a
+    // squatted/forwarded :5001 on the host and stays correct under worktree port offsets. Omitted → direct.
+    functions?: { host: string; port: number; default: boolean; proxied?: boolean };
   };
 }

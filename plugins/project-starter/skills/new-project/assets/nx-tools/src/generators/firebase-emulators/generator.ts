@@ -338,43 +338,32 @@ export default async function firebaseEmulatorsGenerator(
     );
   }
 
-  // 2b) src/app/firebase.config.ts — write whenever it's absent, and (re)write when we detect a
-  //     LEGACY shape, so --repair self-heals old projects:
-  //       - the ancient two-consts shape (pre environment-files), detected by its
-  //         `productionFirebaseConfig`/`emulatorFirebaseConfig` consts + no env import; OR
-  //       - any env-files shape behind the CURRENT one: the pre-per-service whole-block gate (no
-  //         `./emulator-overrides` import) OR a per-service file that predates the `ngDevMode`
-  //         tree-shaking gate (so emulator code would ship in prod).
-  //     A file that imports `./emulator-overrides` AND uses `ngDevMode` is current → left alone (the
-  //     user may have added provider customizations). NOTE: an upgrade rewrite DOES replace a
-  //     customized outdated file; we log a loud warning so it can be re-applied.
-  const existingFirebaseConfig = tree.exists(firebaseConfigPath)
-    ? tree.read(firebaseConfigPath, 'utf8') ?? ''
-    : null;
-  const importsEnv =
-    existingFirebaseConfig !== null && existingFirebaseConfig.includes(`from '../environments/environment'`);
-  const importsOverrides = existingFirebaseConfig?.includes('./emulator-overrides') ?? false;
-  const usesNgDevMode = existingFirebaseConfig?.includes('ngDevMode') ?? false;
-  // The dev guard (real-service-with-demo-config) is identified by its `usingDemoConfig` local.
-  const hasDevGuard = existingFirebaseConfig?.includes('usingDemoConfig') ?? false;
-  const isAncientShape =
-    existingFirebaseConfig !== null &&
-    (existingFirebaseConfig.includes('productionFirebaseConfig') ||
-      existingFirebaseConfig.includes('emulatorFirebaseConfig')) &&
-    !importsEnv;
-  // Outdated env-files shape: missing the per-service resolver, the ngDevMode prod-DCE gate, OR the
-  // dev guard that catches a real-service-with-demo-config mistake.
-  const isOutdatedEnvShape = importsEnv && (!importsOverrides || !usesNgDevMode || !hasDevGuard);
-  if (existingFirebaseConfig === null || isAncientShape || isOutdatedEnvShape) {
-    if (isAncientShape || isOutdatedEnvShape) {
-      logger.info(
-        `[firebase-emulators] Rewriting ${firebaseConfigPath} to the current per-service emulator shape ` +
-        `(per-service gating + the ngDevMode tree-shaking guard, so no emulator code ships in prod). Any ` +
-        `custom provider wiring in the old file is replaced — re-apply it onto the new shape by hand if needed.`
-      );
-    }
-    tree.write(firebaseConfigPath, template('firebase.config.ts.tpl'));
+  // 2b) src/app/firebase.config.ts — GENERATOR-OWNED logic, rewritten IN FULL on every run (exactly like
+  //     emulator-overrides.ts above). It carries NO per-project values by design: per-environment config
+  //     (the `firebase` web config, emulator toggles, `databaseId`, `functionsRegion`, functions `proxied`)
+  //     lives in environment.ts, and app-specific PROVIDERS live in app.config.ts beside
+  //     `provideAppFirebase()`. Because there is nothing here to preserve, we don't guess whether the file
+  //     is "customized" — the old marker-sniffing heuristic could not tell a current file from a stale one
+  //     that merely carried the same old markers, so a customized file silently froze and stopped receiving
+  //     template improvements (e.g. the port-offset emulator wiring). Always rewriting removes that whole
+  //     drift class. The file header states the contract; --repair's git backup covers a project that
+  //     edited it anyway. (The legacy prod-config MIGRATION still ran above, off the pre-rewrite contents.)
+  if (tree.exists(firebaseConfigPath)) {
+    logger.info(
+      `[firebase-emulators] Rewrote ${firebaseConfigPath} to the current generator-owned shape (it holds no ` +
+      `per-project values — customize via environment.ts for config, app.config.ts for providers, never this file).`
+    );
   }
+  tree.write(firebaseConfigPath, template('firebase.config.ts.tpl'));
+
+  // 2c) apps/<app>/proxy.conf.mjs — dev-server proxy that relays Functions callables through the app's own
+  //     origin (see the file header). Generator-owned, always rewritten. Baked with THIS app's env path so
+  //     it reads the project id (its single source of truth). The serve executor auto-wires it for a
+  //     Firebase serve when the developer didn't pass their own --proxyConfig.
+  tree.write(
+    `${appRoot}/proxy.conf.mjs`,
+    template('proxy.conf.mjs.tpl').split('{{appEnvPath}}').join(envDevPath)
+  );
 
   // 3a) tools/firebase-welcome.sh — self-extinguishing banner that nudges the user
   //     toward the cloud-linkage steps every time they open a terminal in the devcontainer,
