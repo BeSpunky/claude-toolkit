@@ -13,6 +13,11 @@
     "workspaceName": {
       "type": "string",
       "description": "Workspace name used to build the FALLBACK offline emulator project id (`demo-<name>`). tools/emulators.sh normally DERIVES its --project from the app's environment.ts (single source of truth); this is the fallback when no env file is found, and the demo id seeded into environment.ts / firebase.config.ts. Defaults to the project name. (Not written to .firebaserc — that's the Firebase CLI's responsibility.)"
+    },
+    "staging": {
+      "type": "boolean",
+      "description": "Opt-in: also scaffold a first-class STAGING environment — environment.staging.ts (write-if-absent), a `staging` build configuration (swaps that env file in), and apphosting.staging.yaml (builds `--configuration=staging`) — so the workflow's `staging` App Hosting backend gets its own config/database instead of silently building prod's. Pairs with the `databaseId` field for same-project Firestore isolation. Default false.",
+      "default": false
     }
   },
   "required": ["project"]

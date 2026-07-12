@@ -32,6 +32,12 @@ export interface Environment {
     messagingSenderId?: string;
     measurementId?: string;
     vapidKey?: string;
+    // Named Firestore database to target within the project (Firestore multi-database). Omit → the
+    // project's `(default)` database. Set it (e.g. `'staging'`) so a per-environment build points at an
+    // isolated DB in the SAME project (see environment.staging.ts, added by `--staging`). firebase.config.ts
+    // reads this to pick `getFirestore(app, databaseId)` vs `getFirestore()`. Requires a matching entry in
+    // firebase.json's `firestore` array + the named DB created in the console.
+    databaseId?: string;
   };
   // This interface is app-owned after the first scaffold (the generator writes it only if absent):
   // add app-specific top-level fields here freely — e.g. `google?: { oauthClientId: string }` for a

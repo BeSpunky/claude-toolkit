@@ -108,6 +108,9 @@ import * as ts from 'typescript';
 interface FirebaseEmulatorsSchema {
   project: string;
   workspaceName?: string;
+  // Opt-in: also scaffold the staging environment bundle (environment.staging.ts + a `staging` build
+  // configuration + apphosting.staging.yaml). See schema.json for the rationale.
+  staging?: boolean;
 }
 
 const EMULATORS = ['auth', 'firestore', 'storage', 'functions'] as const;
@@ -199,6 +202,15 @@ export default async function firebaseEmulatorsGenerator(
   if (!tree.exists('apphosting.yaml')) {
     tree.write('apphosting.yaml', template('apphosting.yaml.tpl'));
   }
+  // 1b-staging) Opt-in (--staging): tell the `staging` App Hosting backend to build the Angular `staging`
+  //     configuration (which swaps in environment.staging.ts) instead of the framework-default prod build.
+  //     Write-if-absent (user owns edits). Merged OVER apphosting.yaml for the backend named `staging`.
+  if (options.staging && !tree.exists('apphosting.staging.yaml')) {
+    tree.write(
+      'apphosting.staging.yaml',
+      template('apphosting.staging.yaml.tpl').split('{{projectName}}').join(projectName)
+    );
+  }
 
   // 1c) .gitignore — emulator debug logs + the working data dir. Without these,
   //     firebase-debug.log / firestore-debug.log pile up untracked at the workspace
@@ -240,6 +252,7 @@ export default async function firebaseEmulatorsGenerator(
   const envInterfacePath = `${envDir}/environment.interface.ts`;
   const envDevPath = `${envDir}/environment.ts`;
   const envProdPath = `${envDir}/environment.prod.ts`;
+  const envStagingPath = `${envDir}/environment.staging.ts`;
   const firebaseConfigPath = `${appRoot}/src/app/firebase.config.ts`;
   const emulatorOverridesPath = `${appRoot}/src/app/emulator-overrides.ts`;
 
@@ -307,6 +320,21 @@ export default async function firebaseEmulatorsGenerator(
         .split('{{apiKey}}').join(migrated.apiKey)
         .split('{{appId}}').join(migrated.appId)
         .split('{{authDomain}}').join(migrated.authDomain)
+    );
+  }
+
+  // environment.staging.ts — OPT-IN (--staging). A first-class staging env: write-if-absent, empty
+  // placeholders (fill from `firebase apps:sdkconfig`, like prod). Pairs with the `staging` build
+  // configuration + apphosting.staging.yaml so the staging App Hosting backend builds its OWN
+  // config/database instead of silently building prod's.
+  if (options.staging && !tree.exists(envStagingPath)) {
+    tree.write(
+      envStagingPath,
+      template('environment.staging.ts.tpl')
+        .split('{{projectId}}').join('')
+        .split('{{apiKey}}').join('')
+        .split('{{appId}}').join('')
+        .split('{{authDomain}}').join('')
     );
   }
 
@@ -458,6 +486,23 @@ export default async function firebaseEmulatorsGenerator(
       (entry) => entry?.replace === prodReplacement.replace && entry?.with === prodReplacement.with
     );
     prodCfg.fileReplacements = alreadyPresent ? existing : [...existing, prodReplacement];
+
+    // OPT-IN staging build configuration (--staging): swaps environment.ts → environment.staging.ts, so
+    // `nx build <app> --configuration=staging` (run by apphosting.staging.yaml) compiles the staging env.
+    // Mirrors the production config's other settings (budgets, outputHashing, …) so staging builds like
+    // prod, without overwriting any user tweaks. Idempotent.
+    if (options.staging) {
+      const stagingCfg = (buildTarget.configurations.staging ??= {});
+      for (const [k, v] of Object.entries(prodCfg)) {
+        if (k !== 'fileReplacements' && !(k in stagingCfg)) stagingCfg[k] = v;
+      }
+      const stagingReplacement = { replace: envDevPath, with: envStagingPath };
+      const stExisting = Array.isArray(stagingCfg.fileReplacements) ? stagingCfg.fileReplacements : [];
+      const stPresent = stExisting.some(
+        (entry) => entry?.replace === stagingReplacement.replace && entry?.with === stagingReplacement.with
+      );
+      stagingCfg.fileReplacements = stPresent ? stExisting : [...stExisting, stagingReplacement];
+    }
 
     // Drop the retired build configurations if an older scaffold left them behind.
     delete buildTarget.configurations['no-emulators'];

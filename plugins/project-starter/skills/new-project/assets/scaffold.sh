@@ -38,12 +38,14 @@ set -euo pipefail
 
 MODE="scaffold"
 FIREBASE=0
+STAGING=0  # --staging: also scaffold a first-class staging environment (requires --firebase).
 GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
 BACKUP=1   # repair snapshots the project to a git tag BEFORE mutating; --no-backup opts out.
 while [ "${1:-}" != "" ]; do
   case "$1" in
     --repair)     MODE="repair"; shift;;
     --firebase)   FIREBASE=1;    shift;;
+    --staging)    STAGING=1;     shift;;
     --no-github)  GITHUB=0;      shift;;
     --no-backup)  BACKUP=0;      shift;;
     --*)          echo "ERROR: unknown flag '$1'" >&2; exit 1;;
@@ -136,10 +138,15 @@ DEVCONTAINER_FLAGS=""
 #     installPackagesTask), so versions resolve to current at scaffold time. No shell-side `yarn add`.
 APP_FIREBASE_FLAG="--firebase=false"
 [ "$FIREBASE" = "1" ] && APP_FIREBASE_FLAG="--firebase=true"
+# --staging (opt-in) requires Firebase; it adds environment.staging.ts + a `staging` build config +
+# apphosting.staging.yaml so the workflow's staging App Hosting backend builds its own config/database.
+[ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires --firebase." >&2; exit 1; }
+APP_STAGING_FLAG=""
+[ "$STAGING" = "1" ] && APP_STAGING_FLAG=" --staging=true"
 REPAIR_FIREBASE_BLOCK=""
 if [ "$FIREBASE" = "1" ]; then
   REPAIR_FIREBASE_BLOCK="
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT"
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG"
 fi
 
 # --- house tooling: stage @bespunky/nx-tools (used by both modes) ---
@@ -195,7 +202,7 @@ $STAGE_BLOCK
 # (serve host 0.0.0.0, plus the full Firebase wiring when --firebase=true). This is the SAME one
 # command a developer runs to add any LATER app — first app and Nth app share one code path, so a
 # second app can never silently miss the configuration the first app got.
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG
 $WORKSPACE_GEN_BLOCK
 # Commit the full scaffold. \`yarn create nx-workspace\` made an initial commit, but the
 # house generators + dep installs ran after it — capture them so the host-side push (gh repo

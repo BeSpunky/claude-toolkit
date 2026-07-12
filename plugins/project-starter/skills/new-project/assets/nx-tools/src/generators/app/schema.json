@@ -19,6 +19,10 @@
       "type": "boolean",
       "description": "Apply the per-app Firebase wiring. When omitted, auto-detected from the presence of firebase.json at the workspace root (so apps added to a Firebase workspace get wired automatically). Pass explicitly only to force it on a workspace that doesn't yet have firebase.json (the scaffolder's first app) or to override detection."
     },
+    "staging": {
+      "type": "boolean",
+      "description": "Opt-in (Firebase workspaces): also scaffold a first-class staging environment — environment.staging.ts + a `staging` build configuration + apphosting.staging.yaml — so the workflow's `staging` App Hosting backend builds its own config/database instead of silently building prod's. Forwarded to the firebase-emulators generator. Default false."
+    },
     "style": {
       "type": "string",
       "description": "The file extension or preprocessor to use for component styles.",

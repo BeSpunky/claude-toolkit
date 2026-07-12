@@ -24,7 +24,7 @@
 // Angular optimizer guarantees to fold. This file is generator-owned; never edit it by hand — change
 // the committed defaults in environment.ts.
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
-import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
+import { getApp, initializeApp, provideFirebaseApp } from '@angular/fire/app';
 import { connectAuthEmulator, getAuth, provideAuth } from '@angular/fire/auth';
 import { connectFirestoreEmulator, getFirestore, provideFirestore } from '@angular/fire/firestore';
 import { connectStorageEmulator, getStorage, provideStorage } from '@angular/fire/storage';
@@ -141,7 +141,11 @@ export function provideAppFirebase(): EnvironmentProviders {
       return auth;
     }),
     provideFirestore(() => {
-      const db = getFirestore();
+      // Target a named Firestore database when the environment names one (a per-environment build — e.g.
+      // environment.staging.ts with `databaseId: 'staging'` — isolates that env's client data in the same
+      // project); omitted → the project's `(default)` database.
+      const databaseId = (environment.firebase as { databaseId?: string }).databaseId;
+      const db = databaseId ? getFirestore(getApp(), databaseId) : getFirestore();
       if (ngDevMode) {
         const e = emulatorFor('firestore');
         if (e) connectFirestoreEmulator(db, e.host, e.port + portOffset);

@@ -53,6 +53,8 @@ interface AppGeneratorSchema {
   name?: string;
   // Tri-state Firebase opt-in: true/false override; UNSET → auto-detect from firebase.json.
   firebase?: boolean;
+  // Opt-in (Firebase only): also scaffold the staging environment bundle. Forwarded to firebase-emulators.
+  staging?: boolean;
   // The component/directive style. House default: scss.
   style?: string;
   // Override the resolved workspace identity (internal — the default is correct everywhere).
@@ -123,6 +125,7 @@ export default async function appGenerator(
       (await firebaseEmulatorsGenerator(tree, {
         project: projectName,
         workspaceName,
+        staging: options.staging,
       })) ?? noop;
   }
 
