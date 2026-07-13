@@ -48,7 +48,8 @@ export interface Environment {
   // add app-specific top-level fields here freely — e.g. `google?: { oauthClientId: string }` for a
   // Google API (Calendar) OAuth client id. They survive `--repair`.
   emulators?: {
-    auth?: { url: string; default: boolean };
+    // `proxied` (auth too): reach the emulator through the dev-server's own origin (proxy.conf.mjs relays it).
+    auth?: { url: string; default: boolean; proxied?: boolean };
     firestore?: { host: string; port: number; default: boolean };
     storage?: { host: string; port: number; default: boolean };
     // `proxied` (functions only): reach the emulator through the dev-server's OWN origin (its
