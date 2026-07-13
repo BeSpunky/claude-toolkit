@@ -1,0 +1,52 @@
+// claude-toolkit devcontainer — a plugin-marketplace repo (markdown skills + Node tool scripts),
+// NOT an Nx/Angular app. Trimmed from the BeSpunky project-starter devcontainer generator:
+// dropped everything app/server-shaped (Angular+Nx extensions, worktree-domains :80 proxy,
+// shared-browser noVNC stack, Firebase, dev-server port forwarding, chokidar polling) and
+// kept only what a toolkit author needs: Claude CLI, gh, and the plugins dogfooded LIVE
+// from THIS working tree (see .devcontainer/post-create.sh).
+{
+  "name": "claude-toolkit",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+
+  "features": {
+    "ghcr.io/devcontainers-extra/features/claude-code": {},
+    "ghcr.io/devcontainers/features/github-cli": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Anthropic.claude-code",
+        "DavidAnson.vscode-markdownlint",
+        "EditorConfig.EditorConfig",
+        "eamodio.gitlens",
+        "GitHub.vscode-github-actions",
+        "christian-kohler.path-intellisense",
+        "usernamehw.errorlens"
+      ],
+      "settings": {
+        "claude-code.dangerouslySkipPermissions": true,
+        "editor.formatOnSave": false,
+        // Skills are authored as SKILL.md / *.mdc; treat .mdc as markdown so linting/preview work.
+        "files.associations": {
+          "*.mdc": "markdown"
+        }
+      }
+    }
+  },
+
+  // All setup lives in .devcontainer/post-create.sh so this stays a one-liner.
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "remoteUser": "node",
+
+  "remoteEnv": {
+    "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1"
+  },
+
+  // Persist Claude's auth/config/plugin state across container rebuilds. `.claude/data` is
+  // gitignored (see .gitignore); a committed .gitkeep guarantees the dir exists on fresh
+  // clones so Docker binds a real (node-owned) directory instead of creating a root-owned one.
+  "mounts": [
+    "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached"
+  ]
+}
