@@ -49,12 +49,15 @@ export function isPortFree(port: number): Promise<boolean> {
  * `probe` is injected so the resolution is unit-testable without real sockets.
  */
 export async function resolvePortOffset(
-  spec: string | undefined,
+  spec: string | number | undefined,
   treeKey: string,
   isMain = false,
   probe: (port: number) => Promise<boolean> = isPortFree
 ): Promise<number> {
-  const s = (spec ?? '').trim().toLowerCase();
+  // Coerce to string first: the Nx CLI passes `--portOffset=12000` through as a NUMBER (it coerces
+  // numeric args), while 'auto'/'0' arrive as strings — String() normalizes both so the parse below is
+  // uniform (and .trim()/.toLowerCase() can't blow up on a number).
+  const s = String(spec ?? '').trim().toLowerCase();
   if (s === '' || s === '0') return 0;
 
   if (s !== 'auto') {
