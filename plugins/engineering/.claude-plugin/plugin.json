@@ -1,7 +1,7 @@
 {
   "name": "bespunky-engineering",
-  "description": "BeSpunky engineering skills. Agnostic foundation: architect-mentality (the architect's mindset) and architecture-first (the operational discipline - solve through design not patches, fix the root cause, design + confirm refactors first). Technique domains (hybrid skills with progressive-disclosure reference files): software-design (general/agnostic), advanced-typescript, angular-architecture and angular-native-wrappers, and nx-monorepo-and-dx.",
-  "version": "0.2.0",
+  "description": "BeSpunky engineering skills. Agnostic foundation: architect-mentality (the architect's mindset) and architecture-first (the operational discipline - solve through design not patches, fix the root cause, design + confirm refactors first). Technique domains (hybrid skills with progressive-disclosure reference files): software-design (general/agnostic), advanced-typescript, angular-architecture and angular-native-wrappers, nx-monorepo-and-dx, and resumable-state (every screen resumable - the URL as source of truth for navigational/view state so it's deep-linkable and refresh-safe, and working state deliberately persisted to a chosen home), and typed-reactive-navigation (navigation is never a raw router call - per-domain typed navigation services that take entities not routes, URL-derived route-state selectors as the reactive read side, a domain event bus, and a pure event->command binding; partners resumable-state); both ship the agnostic principle + the Angular realization.",
+  "version": "0.5.0",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"

@@ -27,7 +27,7 @@
     {
       "name": "bespunky-engineering",
       "source": "./plugins/engineering",
-      "description": "BeSpunky engineering skills. Agnostic foundation (architect-mentality + architecture-first: solve through design, never a patch; fix the root cause; design + confirm refactors) plus technique domains with progressive-disclosure references: software-design, advanced-typescript, angular-architecture, angular-native-wrappers, nx-monorepo-and-dx.",
+      "description": "BeSpunky engineering skills. Agnostic foundation (architect-mentality + architecture-first: solve through design, never a patch; fix the root cause; design + confirm refactors) plus technique domains with progressive-disclosure references: software-design, advanced-typescript, angular-architecture, angular-native-wrappers, nx-monorepo-and-dx, resumable-state (every screen deep-linkable & refresh-safe — the URL as source of truth for navigational/view state, working state deliberately persisted to a chosen home), and typed-reactive-navigation (navigation is never a raw router call — typed per-domain navigation services that take entities not routes, URL-derived route-state selectors as the reactive read side, a domain event bus, and a pure event→command binding; partners resumable-state).",
       "version": "0.2.0"
     },
     {
