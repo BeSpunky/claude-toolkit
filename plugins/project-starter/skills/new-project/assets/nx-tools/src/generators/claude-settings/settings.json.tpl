@@ -16,6 +16,7 @@
   },
   "enabledPlugins": {
     "nx@nx-claude-plugins": true,
+    "bespunky@claude-toolkit": true,
     "bespunky-project-starter@claude-toolkit": true,
     "bespunky-engineering@claude-toolkit": true,
     "bespunky-workflow@claude-toolkit": true,

@@ -42,6 +42,7 @@ yarn install
 # one-click install on first session instead.
 echo "[post-create] pre-installing claude-toolkit plugins"
 if claude plugin marketplace add BeSpunky/claude-toolkit \
+    && claude plugin install bespunky@claude-toolkit --scope project \
     && claude plugin install bespunky-project-starter@claude-toolkit --scope project \
     && claude plugin install bespunky-engineering@claude-toolkit --scope project \
     && claude plugin install bespunky-workflow@claude-toolkit --scope project \
