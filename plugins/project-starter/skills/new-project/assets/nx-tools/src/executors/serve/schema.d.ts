@@ -31,8 +31,8 @@ export interface ServeExecutorSchema {
   poll?: number;
   /** Which git worktree to serve. Omitted → the current cwd's tree; a value matches by branch|slug|path; empty in a TTY prompts. */
   worktree?: string;
-  /** Port isolation: 'auto' (main tree → 0; worktree → a stable, verified-free block), a pinned integer, or '0'/undefined for the base stack. Default 'auto'. */
-  portOffset?: string;
+  /** Port isolation: 'auto' (main tree → 0; worktree → a stable, verified-free block), a pinned integer, or '0'/undefined for the base stack. Default 'auto'. Accepts a number too (the Nx CLI coerces `--portOffset=12000` to a number). */
+  portOffset?: string | number;
   /** Run `yarn install` in the chosen worktree when it has no node_modules (worktrees start empty). Default true. */
   install?: boolean;
   /** Print the resolved tree, offset, ports, slug, layers, and URLs without serving. Default false. */

@@ -64,8 +64,8 @@
       "description": "Which git worktree to serve. Omit to serve the current cwd's tree; pass a value to match by branch name, DNS slug, or path; pass an empty value in an interactive terminal to pick one from an arrow-key prompt."
     },
     "portOffset": {
-      "type": "string",
-      "description": "Isolate the whole stack (app dev-server + emulator suite) on its own port block so it never collides with a server already running. 'auto' pins the MAIN tree to offset 0 (the base/forwarded ports — real Google OAuth lives here) and gives each worktree a stable, verified-free block; a positive integer pins a specific offset; '0' forces the base stack.",
+      "type": ["string", "number"],
+      "description": "Isolate the whole stack (app dev-server + emulator suite) on its own port block so it never collides with a server already running. 'auto' pins the MAIN tree to offset 0 (the base/forwarded ports — real Google OAuth lives here) and gives each worktree a stable, verified-free block; a positive integer pins a specific offset; '0' forces the base stack. Accepts a bare number (`--portOffset=12000`) as well as the string forms — the Nx CLI coerces a numeric arg to a number, so string-only would reject it.",
       "default": "auto"
     },
     "install": {
