@@ -144,7 +144,20 @@ export function provideAppFirebase(): EnvironmentProviders {
       // `if (ngDevMode)` folds to `if (false)` in prod → this block (and emulatorFor) is stripped.
       if (ngDevMode) {
         const e = emulatorFor('auth');
-        if (e) connectAuthEmulator(auth, offsetUrl(e.url, portOffset), { disableWarnings: true });
+        if (e) {
+          // proxied (default for new scaffolds) — point the SDK at the app's OWN origin; proxy.conf.mjs
+          // relays the Auth emulator's API prefixes (identitytoolkit / securetoken / googleapis / emulator)
+          // to it, offset-shifted. The host browser then needs only the port the app loaded on, and it's
+          // inherently port-offset-correct (no offset math). This matters MORE than functions: an app
+          // usually gates every route on auth readiness, so a squatted/forwarded :9099 leaves the app blank
+          // AND sign-in hanging — one cause, two faces. direct — dial the emulator's own URL, port-shifted.
+          const proxied = (e as { proxied?: boolean }).proxied;
+          const url =
+            proxied && typeof window !== 'undefined'
+              ? window.location.origin
+              : offsetUrl(e.url, portOffset);
+          connectAuthEmulator(auth, url, { disableWarnings: true });
+        }
       }
       return auth;
     }),

@@ -46,7 +46,11 @@ export const environment: Environment = {
   // EMULATE above; the endpoint is always present so a runtime `?emulate=<service>` can switch a
   // defaulted-off service back on.
   emulators: {
-    auth: { url: 'http://localhost:9099', default: EMULATE.auth },
+    // `proxied` (auth + functions) routes the emulator through the dev-server's OWN origin (proxy.conf.mjs
+    // relays it, offset-shifted) so the host browser needs only the port the app loaded on. It matters MOST
+    // for auth: apps usually gate every route on auth readiness, so a squatted/forwarded :9099 leaves the app
+    // blank AND sign-in hanging. Set false to dial the emulator port directly.
+    auth: { url: 'http://localhost:9099', default: EMULATE.auth, proxied: true },
     firestore: { host: 'localhost', port: 8080, default: EMULATE.firestore },
     storage: { host: 'localhost', port: 9199, default: EMULATE.storage },
     // `proxied` routes Functions callables through the dev-server's OWN origin (its proxy.conf.mjs relays

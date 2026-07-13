@@ -1,6 +1,6 @@
 {
   "name": "@bespunky/nx-tools",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "BeSpunky house Nx generators: project scaffolding (serve, serve-options, shared-browser, devcontainer, claude-settings, angular-ai, firebase-emulators, playwright), code scaffolding (navigation-core, domain-navigation), and reusable-tool extraction (mark-extractable, adopt-extracted); plus the unified `serve` executor — one composing dev loop that runs the app dev-server with the optional Firebase emulator suite and the optional shared co-driven browser (navigated to a pretty <slug>.localhost worktree domain) under a single graceful Ctrl+C, for the current or any chosen git worktree, with whole-stack --portOffset isolation (main tree pinned to the base ports).",
   "license": "MIT",
   "repository": {
