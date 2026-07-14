@@ -13,7 +13,14 @@ The repo is also its own **local marketplace**: `.claude-plugin/marketplace.json
 **Marketplace → plugins → skills.**
 - `.claude-plugin/marketplace.json` (repo root) — the registry: one entry per plugin (`name`, relative `source`, `version`).
 - `plugins/<plugin>/.claude-plugin/plugin.json` — the plugin manifest (`name`, `description`, `version`).
-- `plugins/<plugin>/skills/<skill>/SKILL.md` — a skill. Subagents go at `plugins/<plugin>/agents/<name>.md`, slash commands at `plugins/<plugin>/commands/<name>.md`.
+- `plugins/<plugin>/skills/<skill>/SKILL.md` — a skill. Subagents go at `plugins/<plugin>/agents/<name>.md`, slash commands at `plugins/<plugin>/commands/<name>.md`, hooks at `plugins/<plugin>/hooks/hooks.json`.
+
+**Hooks are the "runs without being chosen" escape hatch.** A skill only fires when Claude judges it relevant, and there is **no plugin-install/update hook event** at all — so anything that must happen *reliably* (not "if the model thinks to") needs a hook. A plugin's hooks run in the sessions of everyone who has that plugin **installed**, i.e. in the consumer's project, not here. `project-starter` uses this: a `SessionStart` hook orders the stamp in the project's `HOUSE.md` header against the installed `@bespunky/nx-tools` version and, when the toolkit has moved on, tells Claude to offer `scaffold.sh --repair`.
+
+Three rules that hook earned the hard way, and that any new hook should keep:
+- **Detect, don't execute.** It *relays a fact*; it never runs the repair (Docker, minutes, rewrites files). A hook that commands the model to act is one compliant model away from doing the thing you refused to automate — and in a headless run there is no one to consent.
+- **Compare what actually drives the output** (`nx-tools`, where the generators live) — *not* the plugin version, which this repo's own convention bumps for a README typo. A notice that fires when nothing would change is a notice everyone learns to ignore.
+- **A stamp is a repo fact; an install is a machine fact.** Order them, don't just diff them: "the project is ahead of this machine" is an ordinary state (a teammate who hasn't updated), and treating it as staleness would push a repair that *downgrades* the project. And keep the stamp somewhere unambiguously committed — `.claude/` is where *local* state lives, so a stamp there is one `.gitignore` line from vanishing.
 
 **The `description` frontmatter of a SKILL.md is load-bearing** — it is the *only* text Claude sees when deciding whether to fire the skill. Writing/editing that description is designing the trigger; it matters as much as the body. Skills cross-reference each other by namespaced id `bespunky-<plugin>:<skill>` (e.g. `bespunky-engineering:architecture-first`).
 

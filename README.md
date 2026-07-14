@@ -164,6 +164,9 @@ claude-toolkit/
 │           └── SKILL.md
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
+    ├── hooks/                                # SessionStart: is this project's house tooling behind the installed plugin?
+    │   ├── hooks.json                        # registers the hook (startup only — a resume is mid-task)
+    │   └── check-house-version.sh            # orders HOUSE.md's stamp vs the installed nx-tools; DETECTS + relays, never runs the repair
     └── skills/new-project/
         ├── SKILL.md                          # the scaffolding skill (orchestrator)
         └── assets/
@@ -179,13 +182,14 @@ claude-toolkit/
                     ├── design-system-styles/ # per-app: sass load path + implicit dependency (cache) + the @use/theme() blocks + provideDesignSystem()
                     ├── ds-component/         # promote a component into the DS as its own secondary entry point
                     ├── devcontainer/         # writes .devcontainer/devcontainer.json
-                    ├── house-doc/            # writes the generated HOUSE.md (the always-on directives) + the CLAUDE.md pointer
-                    └── claude-settings/      # writes .claude/settings.json (+ .gitignore)
+                    ├── house-doc/            # writes the generated HOUSE.md (the always-on directives + the version stamp in its header) + the CLAUDE.md pointer
+                    └── claude-settings/      # MERGES the house keys into .claude/settings.json (+ .gitignore) — the project's own hooks/permissions survive
 ```
 
 To add a skill: `plugins/<plugin>/skills/<name>/SKILL.md`.
 To add a subagent: `plugins/<plugin>/agents/<name>.md`.
 To add a slash command: `plugins/<plugin>/commands/<name>.md`.
+To add a hook: `plugins/<plugin>/hooks/hooks.json` (runs in the sessions of everyone who has the plugin *installed*).
 Register new plugins in `.claude-plugin/marketplace.json`.
 
 ## Install
@@ -316,6 +320,18 @@ bash <path-to>/scaffold.sh --repair [--firebase] <project-path-or-name> [<app-na
 ```
 
 **Important: the house guidance is a generated, repairable `HOUSE.md`.** `--repair` regenerates `HOUSE.md` (architecture directives, branch/release workflow, serving, Firebase, Nx, browser tooling) in full every run and upserts a bounded pointer to it in `CLAUDE.md` — the only part of `CLAUDE.md` it touches. The user's own `CLAUDE.md` content (intentions + conventions) is preserved verbatim. Everything else (devcontainer files, `.claude/settings.json`, `project.json`, `package.json` devDeps, Firebase config files) is brought up to current spec by the generators. So a toolkit upgrade reaches an existing project entirely through `--repair` — **no hand-merge** (see the `bespunky-project-starter:new-project` skill's §1b).
+
+**`.claude/settings.json` is MERGED, not overwritten.** The house re-asserts the keys it owns (marketplaces, `enabledPlugins`, `permissions.defaultMode`) so drift heals; every key it doesn't own — the project's own `hooks`, extra `permissions.allow`, `env`, `statusLine` — survives a repair untouched.
+
+### The repair announces itself (you don't have to remember it)
+
+Claude Code has **no plugin-update hook event**, so `/plugin marketplace update` upgrades the toolkit silently and a project quietly drifts a version behind. `project-starter` closes that gap itself:
+
+- `--repair` **stamps** the project — a marker line in **`HOUSE.md`'s header** (`nx-tools=<v> plugin=<v>`). It lives there because the stamp must reach every clone, and `HOUSE.md` is root-level and unambiguously committed; a stamp under `.claude/` (the conventional home for *local* Claude state) would be one reasonable `.gitignore` line away from vanishing.
+- The plugin ships a **`SessionStart` hook** (`plugins/project-starter/hooks/`). Plugin hooks run in the sessions of everyone who has the plugin *installed* — i.e. in your scaffolded project. It orders the stamped `@bespunky/nx-tools` version against the installed one: **same → silent** (a few small file reads, the common case); **installed is newer → it tells Claude**, who relays it and offers the repair.
+- **It compares `nx-tools`, not the plugin version** — that package is where the generators come from, so it's the only thing that changes what a repair *produces*. A plugin bump that only touches docs regenerates nothing, and demanding a multi-minute repair for it would train everyone to ignore the notice.
+- **Direction matters.** The stamp travels with the repo; the plugin is installed per machine. So a teammate whose plugin is *behind* the project is a normal state, not an error — they're told to run `/plugin marketplace update`, and explicitly told **not** to repair (which would regenerate the project with older generators and stamp it backwards for everyone else).
+- **It detects; it never runs.** A repair needs Docker, pulls a base image, runs the house generators and several installs — minutes, and it rewrites generated files. So the hook emits a statement of fact to relay, never an order to obey: **detection is automatic, execution stays consented.** Decline once and Claude records it in the gitignored `.claude/house-snooze.json`, so you're not asked again for that version. No `HOUSE.md` at the root → not a house project → the hook says nothing.
 
 The `new-project` skill then authors a tailored `CLAUDE.md` (the one piece that stays contextual, not a template).
 

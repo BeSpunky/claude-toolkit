@@ -9,6 +9,20 @@
 //
 // Idempotent + --repair-safe: HOUSE.md is fully rewritten every run; the pointer is upserted between its
 // markers (inserted if absent, replaced/restored if present), so a hand-deleted or edited pointer heals.
+//
+// It also renders the STAMP into HOUSE.md's header — a marker line recording the @bespunky/nx-tools (and,
+// for provenance, the plugin) version this project was last generated with. The stamp exists so that "is
+// this project behind the installed toolkit?" is a FILE READ rather than a five-minute Docker run: it is
+// what lets project-starter's SessionStart hook detect a toolkit upgrade and ask for a repair, instead of
+// speculatively running one.
+//
+// WHY THE STAMP LIVES IN HOUSE.md, and not in a file of its own. The hook's whole premise is that the stamp
+// reaches every clone, so it must be COMMITTED — which rules out `.claude/`, the conventional home for LOCAL
+// Claude state (this project's own generators already gitignore `.claude/data/` and `.claude/skills/`), where
+// one entirely reasonable `.gitignore` line would silently delete the stamp from every other checkout and
+// leave the hook nagging forever with no way to fix it. HOUSE.md is the opposite: root-level, unambiguously
+// committed, generator-owned, rewritten on every repair — and already the file the hook stats to decide
+// whether this is even a house project. One file, one truth, no new gitignore surface.
 import { type Tree, formatFiles } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,6 +30,15 @@ import { join } from 'node:path';
 interface HouseDocSchema {
   // Render the Firebase sections. Default: auto-detect firebase.json at the workspace root.
   firebase?: boolean;
+  // The @bespunky/nx-tools version whose generators are producing this project. Passed by scaffold.sh
+  // (derived from the staged package.json — never hand-maintained). THIS is the version the hook compares:
+  // it is what actually determines the generated output, so it is what a repair can actually change.
+  nxToolsVersion?: string;
+  // The bespunky-project-starter plugin version that shipped those generators. Recorded for provenance but
+  // deliberately NOT what the hook compares — the house convention bumps a plugin's version on ANY change
+  // (a SKILL.md typo, a README line), and demanding a multi-minute Docker repair for a change that
+  // regenerates nothing would train everyone to ignore the notice.
+  pluginVersion?: string;
 }
 
 // The pointer block's bounds. START matches the opening marker's stable prefix (the marker line carries a
@@ -23,15 +46,24 @@ interface HouseDocSchema {
 const START = '<!-- @bespunky/house-tooling:start';
 const END = '<!-- @bespunky/house-tooling:end -->';
 
+// What an unknown version records as. A version is only unknown when a generator is invoked directly
+// (`nx g …:house-doc`) rather than through scaffold.sh; the hook treats it as "can't compare" and — like a
+// missing stamp on a house project — asks for a repair, which is exactly the action that fixes it.
+const UNKNOWN = 'unknown';
+
 export default async function houseDocGenerator(
   tree: Tree,
   options: HouseDocSchema = {},
 ): Promise<void> {
   const firebase = options.firebase ?? tree.exists('firebase.json');
+  const nxTools = options.nxToolsVersion ?? UNKNOWN;
+  const plugin = options.pluginVersion ?? UNKNOWN;
   const tpl = (name: string) => readFileSync(join(__dirname, name), 'utf8');
-  const render = (s: string) => renderConditionals(s, firebase);
+  const render = (s: string) => renderTemplate(s, firebase, nxTools, plugin);
 
-  // 1) The generated reference — rewritten every run (generator-owned; never hand-edited).
+  // 1) The generated reference — rewritten every run (generator-owned; never hand-edited), carrying the
+  //    stamp in its header. No timestamp anywhere: a stamp that changed on every repair would dirty the
+  //    tree (and the git diff) even when the toolkit hadn't moved. Version identity is the whole question.
   tree.write('HOUSE.md', render(tpl('HOUSE.md.tpl')));
 
   // 2) The bounded pointer in CLAUDE.md — the ONLY part of CLAUDE.md this touches. Skip when CLAUDE.md
@@ -44,15 +76,39 @@ export default async function houseDocGenerator(
     if (next !== current) tree.write('CLAUDE.md', next);
   }
 
+  // 3) Keep the hook's SNOOZE file out of git. It records "this developer declined the repair for version
+  //    X" — a per-person, per-machine decision, the exact opposite of the stamp: it must NOT travel to
+  //    other clones, or one person's "not now" would silence the notice for the whole team.
+  ignoreSnoozeFile(tree);
+
   await formatFiles(tree);
 }
 
-/** Minimal mustache-subset renderer: {{#firebase}}…{{/firebase}}, {{^firebase}}…{{/firebase}}, {{TOOLKIT_STAMP}}. */
-function renderConditionals(src: string, firebase: boolean): string {
+/** Minimal mustache-subset renderer: {{#firebase}}…{{/firebase}}, {{^firebase}}…{{/firebase}}, and the stamp tokens. */
+function renderTemplate(
+  src: string,
+  firebase: boolean,
+  nxToolsVersion: string,
+  pluginVersion: string,
+): string {
   return src
     .replace(/\{\{#firebase\}\}([\s\S]*?)\{\{\/firebase\}\}/g, (_m, body) => (firebase ? body : ''))
     .replace(/\{\{\^firebase\}\}([\s\S]*?)\{\{\/firebase\}\}/g, (_m, body) => (firebase ? '' : body))
-    .replace(/\{\{TOOLKIT_STAMP\}\}/g, 'nx-tools');
+    .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
+    .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion);
+}
+
+/** Add the hook's local-only snooze file to .gitignore (idempotent). */
+function ignoreSnoozeFile(tree: Tree): void {
+  const entry = '.claude/house-snooze.json';
+  const gitignore = tree.exists('.gitignore') ? (tree.read('.gitignore', 'utf8') ?? '') : '';
+  if (gitignore.includes(entry)) return;
+
+  const sep = gitignore === '' || gitignore.endsWith('\n') ? '' : '\n';
+  tree.write(
+    '.gitignore',
+    `${gitignore}${sep}\n# Claude Code — this developer's "not now" on a house-tooling repair (local, never shared)\n${entry}\n`,
+  );
 }
 
 /**

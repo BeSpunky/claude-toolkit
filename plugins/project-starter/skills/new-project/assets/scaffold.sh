@@ -76,6 +76,16 @@ ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # leave the project on the previous executor. Derived, never hand-maintained.
 NX_TOOLS_VERSION="$(grep -m1 '"version"' "$ASSETS_DIR/nx-tools/package.json" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
 [ -n "$NX_TOOLS_VERSION" ] || NX_TOOLS_VERSION="0.4.0"
+# The plugin version that ships these assets, read from the manifest three levels up (assets/ lives at
+# <plugin>/skills/new-project/assets). Together with NX_TOOLS_VERSION it is STAMPED into the project by the
+# house-doc generator (into HOUSE.md's header — root-level and committed, so it reaches every clone), which
+# is what lets project-starter's SessionStart hook notice — with a few greps, not a Docker run — that the
+# installed toolkit has moved past this project, and ask for a repair. NX_TOOLS_VERSION is the one the hook
+# actually compares (it determines what the generators produce); PLUGIN_VERSION is provenance. Derived, never
+# hand-maintained; "unknown" if the manifest can't be read (a raw assets checkout), which the hook reads as
+# "behind" and resolves by repairing.
+PLUGIN_VERSION="$(grep -m1 '"version"' "$ASSETS_DIR/../../../.claude-plugin/plugin.json" 2>/dev/null | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+[ -n "$PLUGIN_VERSION" ] || PLUGIN_VERSION="unknown"
 GIT_NAME="$(git config --global user.name 2>/dev/null || whoami)"
 GIT_EMAIL="$(git config --global user.email 2>/dev/null || echo "$(whoami)@localhost")"
 
@@ -188,7 +198,7 @@ ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
 # for every consumer project. Idempotent in --repair (the token file is seeded, never overwritten — a
 # repair must not restore placeholder tokens over the project's real design).
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:design-system --scope=$PROJECT
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:house-doc
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
 # for adding further apps, plus the reusable-tool extraction generators mark-extractable /
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
