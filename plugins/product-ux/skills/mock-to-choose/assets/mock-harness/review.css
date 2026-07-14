@@ -1,0 +1,74 @@
+/**
+ * review.css — the review chrome of the mock harness (pins, popovers, comment mode).
+ * Loaded by every variant AND by the gallery. Never edit per-project: it is harness, not mock.
+ * Deliberately namespaced under .mk-* so it can never collide with the mock's own styles.
+ */
+
+/* An overlay above the mock — pins live here, not inside the mock's elements, so they are
+   never clipped by the mock's overflow and never mutate the mock's layout. */
+.mk-layer {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 0;
+  block-size: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+.mk-layer .mk-pin { pointer-events: auto; }
+
+.mk-pin {
+  position: absolute;
+  margin-block-start: -11px;
+  margin-inline-start: -11px;
+  z-index: 2147483000;
+  inline-size: 22px;
+  block-size: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  font: 600 12px/22px ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
+  color: #fff;
+  background: #7c5cff;                      /* intent — Claude's narration */
+  cursor: help;
+  box-shadow: 0 2px 8px rgb(0 0 0 / .35);
+}
+
+.mk-pin[data-kind="comment"] { background: #ff8a3d; cursor: pointer; }  /* the user's words */
+
+.mk-pop {
+  position: absolute;
+  inset-block-start: 130%;            /* below the pin — the pin sits at an element's top-left,
+                                         so below stays inside the frame; above would clip */
+  inset-inline-start: 0;
+  inline-size: max-content;
+  max-inline-size: min(260px, 70vw);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #14121c;
+  color: #f2f0ff;
+  font: 400 12px/1.45 ui-sans-serif, system-ui, sans-serif;
+  text-align: start;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s;
+}
+
+.mk-pin:hover .mk-pop,
+.mk-pin:focus-visible .mk-pop { opacity: 1; }
+
+body.mk-commenting { cursor: crosshair; }
+body.mk-commenting::after {
+  content: "comment mode — click anything";
+  position: fixed;
+  inset-block-start: 8px;
+  inset-inline-start: 8px;
+  z-index: 9999;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #ff8a3d;
+  color: #14121c;
+  font: 600 11px/1 ui-sans-serif, system-ui, sans-serif;
+}

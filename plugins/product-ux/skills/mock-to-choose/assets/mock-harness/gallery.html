@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mock review</title>
+  <link rel="stylesheet" href="review.css">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px 24px 96px;
+      background: #0d0b14; color: #e9e6f5;
+      font: 400 15px/1.5 ui-sans-serif, system-ui, sans-serif;
+    }
+    header.top { max-width: 1100px; margin: 0 auto 32px; }
+    h1 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #7c5cff; }
+    #question { margin: 0 0 20px; font-size: 26px; line-height: 1.25; font-weight: 600; }
+    .honesty { padding: 14px 18px; border-radius: 12px; background: #17141f; font-size: 13px; color: #b9b2d6; }
+    .honesty strong { display: block; margin-bottom: 6px; color: #e9e6f5; }
+    .honesty ul { margin: 0; padding-left: 18px; }
+    .how { margin-top: 12px; font-size: 13px; color: #8f88ad; }
+    .how kbd { padding: 2px 6px; border-radius: 5px; background: #2a2637; font: inherit; font-size: 12px; }
+
+    #variants { display: flex; gap: 28px; align-items: start; max-width: 1100px; margin: 0 auto; flex-wrap: wrap; }
+    .variant { flex: 1 1 320px; min-width: 300px; }
+    .variant header h2 { margin: 0 0 4px; font-size: 18px; }
+    .variant header p { margin: 0 0 14px; font-size: 13px; color: #8f88ad; }
+    .views { display: flex; flex-direction: column; gap: 18px; }
+    .view { margin: 0; }
+    figcaption { margin-bottom: 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6f688a; display: flex; gap: 10px; align-items: baseline; }
+    .mk-fullsize { color: #7c5cff; text-decoration: none; letter-spacing: 0; text-transform: none; }
+    .mk-fullsize:hover { text-decoration: underline; }
+    .frame-box { overflow: hidden; border-radius: 12px; background: #fff; box-shadow: 0 12px 40px rgb(0 0 0 / .45); }
+    iframe { border: 0; display: block; transform-origin: top left; }
+
+    .bar {
+      position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 10000;
+      display: flex; gap: 12px; align-items: center; justify-content: center;
+      padding: 12px; background: #14121cf2; backdrop-filter: blur(8px);
+      border-top: 1px solid #2a2637; font-size: 13px;
+    }
+    .bar button { border: 0; border-radius: 999px; padding: 8px 14px; cursor: pointer;
+                  background: #2a2637; color: #e9e6f5; font: inherit; }
+    .bar button[aria-pressed="true"] { background: #ff8a3d; color: #14121c; font-weight: 600; }
+    #count { color: #8f88ad; }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <h1>Mock review — nothing here works</h1>
+    <p id="question"></p>
+    <div class="honesty">
+      <strong>What's faked (and why)</strong>
+      <ul id="honesty"></ul>
+    </div>
+    <p class="how">
+      Hover a <b style="color:#7c5cff">purple pin</b> to see what a low-fidelity thing is meant to become.
+      Press <kbd>c</kbd> and click anything to pin a comment to it — an <b style="color:#ff8a3d">orange pin</b> is yours.
+    </p>
+  </header>
+
+  <main id="variants"></main>
+
+  <div class="bar">
+    <span id="count">no comments yet</span>
+    <button type="button" id="comment-toggle" aria-pressed="false">Comment (c)</button>
+    <button type="button" id="export">Copy comments</button>
+    <button type="button" id="clear">Clear</button>
+  </div>
+
+  <script src="gallery.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "$comment": "The manifest — the ONLY thing besides the variant files that Claude writes. The gallery renders whatever this declares.",
+
+  "question": "Which world should this live in? Judge the feeling and the composition — every control is dead and all content is fake.",
+
+  "honesty": [
+    "The light is approximated — the real one is a physically-decomposed layered build.",
+    "The scroll cinematic is shown as a single frame.",
+    "The hero art is a placeholder; judge its size and weight, not the image."
+  ],
+
+  "variants": [
+    { "file": "variants/_template.html", "name": "Concept name", "pitch": "One line: the bold idea, and the feeling it carries." }
+  ],
+
+  "viewports": [
+    { "label": "Phone", "width": 390, "height": 844 },
+    { "label": "Desktop", "width": 1280, "height": 800 }
+  ]
+}

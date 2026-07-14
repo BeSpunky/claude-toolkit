@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>&lt;Concept name&gt;</title>
+
+  <!-- The harness. Two lines, unchanged in every variant. Never edit them. -->
+  <link rel="stylesheet" href="../review.css">
+  <script src="../review.js" defer></script>
+
+  <style>
+    /*
+      EVERYTHING BELOW IS THE MOCK. This is the only part that differs between concepts.
+
+      Shell and presentation only:
+        · layout, composition, palette, type, material, light, atmosphere
+        · NO functionality — dead controls, no state, no routing, no data, no deps
+
+      Heavy concepts are SUGGESTED, not rendered (see reference/cheap-stand-ins.md):
+        · a scroll cinematic  → its single most striking frame, still
+        · a 3D scene          → layered planes; perspective faked with scale + blur
+        · a living background → one static snapshot, or a cheap CSS approximation
+        · physical light      → a good-enough layered approximation, or a real photo
+        · real art            → a placeholder holding the right size, weight, and mood
+
+      Then NARRATE every shortcut with data-note (below) — silence makes low
+      fidelity read as low QUALITY, and the user rejects the shortcut instead of
+      judging the design.
+    */
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+
+  <!--
+    data-note = the sentence you'd say standing in the empty house.
+    Name what the cheap thing STANDS FOR, and what to judge NOW.
+
+    ✅ "The lantern. In the real thing it drifts and dims as you scroll deeper;
+        here it's a static glow — judge where it sits and how much of the frame it owns."
+    ✅ "Sofa goes here, sideways — facing the window, not the room."
+    ✅ "Placeholder art. The real hero is commissioned; judge its SIZE and WEIGHT, not this image."
+    ❌ "Hero section."   ← a label. Explains away no fakery; tells the viewer nothing.
+
+    The concept's one screenshot-worthy thing ALWAYS gets a note.
+  -->
+  <main data-note="Replace me: what does this stand for, and what should they judge right now?">
+    <h1>&lt;the mock&gt;</h1>
+  </main>
+
+</body>
+</html>
