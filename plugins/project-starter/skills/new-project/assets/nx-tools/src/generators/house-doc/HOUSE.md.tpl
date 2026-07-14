@@ -22,12 +22,91 @@ When asked to **redesign** any UI — a layout, screen, page, component, or flow
 
 For any redesign, invoke the **`bespunky-product-ux:redesign-means-rethink`** skill — the entry gate to the experience-design trio (`envision-the-experience` → `stage-the-vision` → `realize-the-vision`, run from scratch).
 
+## Design-system-first (non-negotiable)
+
+Every visual value in this workspace comes from the **design system** (`packages/design-system`) — never from the component you happen to be writing. Before you build any feature UI, **go to the design system first** and compose the screen from its components and its tokens. **Never hardcode a style value:** no raw hex/`rgb()`/`hsl()`, no magic `px`/`rem`, no ad-hoc font stack, weight, shadow, radius, duration or easing. Every colour, space, radius, type step, elevation, border, duration and easing is a **token** — a CSS custom property, consumed through the design system's SASS API (`@use 'design-system/styles' as ds;`) — and a component reads **semantic** tokens (`ds.color('on-surface')`), never a raw primitive. A feature component **composes**; it does not invent appearance (its own SCSS should be little more than layout). **The second occurrence of a UI pattern is a promotion, not a copy-paste** — the moment a card, button, panel, field, or layout shape appears twice, lift it into the design system as a reusable component (`nx g @bespunky/nx-tools:ds-component <name>` — one secondary entry point each), migrate **both** sites onto it, and delete the copies. **When the design system lacks the concept you need, model it** — add the token, add the semantic alias, extend the scale, add the component — and **never** work around the gap with a local override, an `!important`, a `::ng-deep` reaching into another component's internals, a duplicated token, or a one-off `variant` boolean. A gap in the design system is a *design gap*; patching it locally is a patch in CSS clothing, and CSS has no compiler to catch the drift — it compounds silently until "change the brand colour" is a four-hundred-file diff. The design system is the **single source of visual truth**: a re-theme, a rebrand, or a redesign must be a change to **tokens**, not to a thousand component files.
+
+For the discipline in full — the loop, the promotion loop, the styling patches to refuse, and what to do when the design system lacks the concept — invoke the **`bespunky-design-system:design-system-first`** skill; for the technique layer (token taxonomy, CSS custom properties, the SASS API, theming and modes, encapsulation, and the design system's entry points) route through **`bespunky-design-system:design-tokens-and-theming`**.
+
 ## Stack
 
 - **Monorepo**: Nx, integrated layout (`apps/` + `libs/`).
 - **Framework**: Angular (clean `--minimal` app; no demo content).
+- **Design system**: `packages/design-system` — the single source of visual truth (see below).
 - **Package manager**: yarn.
 - **Dev environment**: devcontainer on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the base image) with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds.
+
+## The design system
+
+Where every visual value lives. Read `packages/design-system/STRUCTURE.md` for the full conventions; this is the mechanical how-to.
+
+**Two layers, one truth.** CSS custom properties are the **runtime** layer — they cascade, so switching theme is a *re-binding of tokens*, live, with no rebuild and no second stylesheet. The SASS API is the **author-time** layer — **zero-output** functions, mixins and placeholders that emit no CSS until you call them.
+
+**Summoning it** — one `@use` per file, in the app or in the design system itself:
+
+```scss
+@use 'design-system/styles' as ds;   // the PUBLIC API (styles/_index.scss). Never reach into styles/_core/ or styles/_utils/.
+
+:host {
+  display: grid;
+  gap: ds.space(3);
+  color: ds.color('on-surface');
+  background: ds.color('surface');
+  border-radius: ds.radius('md');
+
+  @include ds.media('md') { gap: ds.space(4); }
+  @include ds.focus-ring();
+}
+```
+
+An unknown token name is a **compile error**, not a silently-empty `var()` — so a typo can't ship.
+
+`@include ds.theme();` is called **exactly once**, from the app's global stylesheet (the generator put it there). It emits the tokens as custom properties on `:root`, one block per mode, and honours `prefers-color-scheme` unless the user has pinned a mode.
+
+**Switching mode at runtime** — a re-binding, not a reload:
+
+```ts
+private readonly theme = inject(DsTheme);      // from the design system's primary entry point
+toggle() { this.theme.mode.set(this.theme.resolved() === 'dark' ? 'light' : 'dark'); }
+```
+
+**Themes** (a brand, a tenant palette, a user-selectable skin) — **a theme is a CSS file, not JavaScript.** Generate it:
+
+```bash
+nx g @bespunky/nx-tools:ds-theme acme    # -> packages/design-system/themes/acme.theme.scss
+```
+
+Fill in the token overrides (authored in SASS, so a typo'd token name is a **build error**):
+
+```scss
+@use '../styles' as ds;
+@include ds.theme-overrides(
+  $light: ('color-primary': #c0392b, 'color-on-primary': #ffffff),
+  $dark:  ('color-primary': #ff8a7a, 'color-on-primary': #1c1c20)
+);
+```
+
+It builds to a standalone `theme-acme.css`. Link it in `index.html` so it applies **before first paint**:
+
+```html
+<link id="ds-theme" rel="stylesheet" href="theme-acme.css">
+```
+
+…and swap it at runtime with one line: `inject(DsRuntimeTheme).use('theme-globex.css')`.
+
+**Why a file and not JS:** a `<link>` in `<head>` is applied before the browser paints, so the brand never flashes in after boot — a JS-applied theme *always* does, because it lands after the bundle executes. You also get browser caching and CDN delivery for free, and the compile-time token guard survives. The only case that genuinely needs JS is a value that doesn't exist until runtime (a colour dragged out of a picker) — that's `DsRuntimeTheme.setTokens()`, and it's the exception, not the default.
+
+A theme can only **re-bind** tokens the design system already declares; it cannot invent new ones (nothing would be reading them).
+
+**Adding a component** — always the generator, never a hand-made folder (the entry-point config *is* the boundary; a hand-made folder resolves in the editor and vanishes on publish):
+
+```bash
+nx g @bespunky/nx-tools:ds-component <name>    # -> packages/design-system/<name>, imports as <package>/<name>
+```
+
+**Adding a token** → `packages/design-system/styles/_core/_tokens.scss`. Colours must be declared in **every** mode — the build fails if one is missing, because a token that exists in light and not in dark is a broken theme.
+
+> **The tokens currently in that file are PLACEHOLDERS with no design authority.** They exist so the library compiles and the app runs on day zero. The design phase (`bespunky-product-ux:stage-the-vision` → `realize-the-vision`) replaces that file wholesale with the real visual system. Do not build a look on top of them, and do not tweak them into one.
 
 ## Serving the app
 

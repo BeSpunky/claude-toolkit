@@ -45,6 +45,7 @@ import { basename } from 'node:path';
 import serveOptionsGenerator from '../serve-options/generator';
 import serveGenerator from '../serve/generator';
 import firebaseEmulatorsGenerator from '../firebase-emulators/generator';
+import designSystemStylesGenerator from '../design-system-styles/generator';
 
 interface AppGeneratorSchema {
   // Workspace-relative directory for the app, e.g. `apps/<name>` (positional arg 0).
@@ -116,6 +117,15 @@ export default async function appGenerator(
   // 2b) Per-app house config: make the dev server reachable from outside the devcontainer (host 0.0.0.0
   //     on the `dev-server` leaf).
   await serveOptionsGenerator(tree, { project: projectName });
+
+  // 2c) Design-system per-app wiring — SELF-DETECTING, exactly like the Firebase wiring below: it finds
+  //     the workspace's design system by its `type:design-system` tag and opens the sass channel (the
+  //     build target's load path, the implicit dependency (cache correctness), and the `@use`/`ds.theme()` blocks in the app's global
+  //     stylesheet). A clean no-op when there is no design system — which is the case for the SCAFFOLDER'S
+  //     FIRST app, created before the DS lib exists; the `design-system` generator wires that one when it
+  //     lands. The pay-off is a LATER app: `nx g @bespunky/nx-tools:app apps/admin` comes out with the
+  //     design system wired, with no flag and no recollection that this workspace has one.
+  await designSystemStylesGenerator(tree, { project: projectName, skipFormat: true });
 
   // 3) Firebase per-app wiring — explicit flag wins; otherwise auto-detect a Firebase workspace.
   const firebase = options.firebase ?? tree.exists('firebase.json');

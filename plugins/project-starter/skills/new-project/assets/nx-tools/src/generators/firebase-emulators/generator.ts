@@ -103,7 +103,12 @@ import {
 } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+// Still needed by this file's OTHER AST routine (the ESLint depConstraints inserter). The app.config
+// `providers` wiring, however, is now shared — see the import below.
 import * as ts from 'typescript';
+// The app.config `providers` wiring is shared with the `serve` and `design-system-styles` generators —
+// it used to be copy-pasted here in full (the same TS-AST walk, three times over).
+import { wireProvider } from '../_utils/wire-provider';
 
 interface FirebaseEmulatorsSchema {
   project: string;
@@ -532,7 +537,10 @@ export default async function firebaseEmulatorsGenerator(
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (tree.exists(appConfigPath)) {
     const current = tree.read(appConfigPath, 'utf8') ?? '';
-    const wired = wireProvideAppFirebase(current, appConfigPath);
+    const wired = wireProvider(current, appConfigPath, {
+      providerFn: 'provideAppFirebase',
+      importFrom: './firebase.config',
+    });
     if (wired === current) {
       // Already wired or no changes needed.
     } else if (wired) {
@@ -822,109 +830,6 @@ function addPlatformBoundaries(source: string, sourcePath: string): string | nul
   return applyChangesToString(source, changes);
 }
 
-/**
- * Wire `provideAppFirebase()` into `appConfig`'s `providers` array, and add the
- * matching `import` at the top of the file.
- *
- * Uses the TypeScript compiler API to locate AST positions (no regex on source —
- * source code is a tree, not text), then applies non-overlapping text inserts via
- * `applyChangesToString` so the surrounding formatting is preserved and the
- * surrounding `formatFiles` polishes the result.
- *
- * Returns:
- *   - the updated source when wiring is applied,
- *   - the original `source` when the file is already wired (idempotent no-op),
- *   - `null` when the file shape is unrecognized (no imports, or no
- *     `appConfig.providers` ArrayLiteral) — the caller logs an actionable warning.
- */
-function wireProvideAppFirebase(source: string, sourcePath: string): string | null {
-  const sf = ts.createSourceFile(
-    sourcePath,
-    source,
-    ts.ScriptTarget.Latest,
-    /* setParentNodes */ true,
-    ts.ScriptKind.TS
-  );
-
-  // Idempotency: any Identifier named `provideAppFirebase` anywhere in the file
-  // (import, call, alias) means this file is already wired — never re-write it.
-  let alreadyWired = false;
-  const detectExisting = (node: ts.Node): void => {
-    if (alreadyWired) return;
-    if (ts.isIdentifier(node) && node.text === 'provideAppFirebase') {
-      alreadyWired = true;
-      return;
-    }
-    ts.forEachChild(node, detectExisting);
-  };
-  detectExisting(sf);
-  if (alreadyWired) return source;
-
-  // Locate the providers ArrayLiteralExpression inside the `appConfig` object literal:
-  //   export const appConfig: ApplicationConfig = { providers: [ ... ], ... };
-  let providersArray: ts.ArrayLiteralExpression | null = null;
-  const findProviders = (node: ts.Node): void => {
-    if (providersArray) return;
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === 'appConfig' &&
-      node.initializer &&
-      ts.isObjectLiteralExpression(node.initializer)
-    ) {
-      for (const prop of node.initializer.properties) {
-        if (
-          ts.isPropertyAssignment(prop) &&
-          ts.isIdentifier(prop.name) &&
-          prop.name.text === 'providers' &&
-          ts.isArrayLiteralExpression(prop.initializer)
-        ) {
-          providersArray = prop.initializer;
-          return;
-        }
-      }
-    }
-    ts.forEachChild(node, findProviders);
-  };
-  findProviders(sf);
-  if (!providersArray) return null;
-  // Alias to a const: TS can't track the closure assignment above, so a const pins
-  // the narrowed type for the uses below.
-  const providers: ts.ArrayLiteralExpression = providersArray;
-
-  // Find the last top-level ImportDeclaration so we know where to put our new import.
-  let lastImport: ts.ImportDeclaration | null = null;
-  for (const stmt of sf.statements) {
-    if (ts.isImportDeclaration(stmt)) lastImport = stmt;
-    else break; // imports come first; stop scanning once we hit other top-level statements
-  }
-  if (!lastImport) return null;
-
-  // Pick the right separator based on whether the array already has a trailing comma
-  // — the AST's `hasTrailingComma` is the source of truth, no regex on the text.
-  const elements = providers.elements;
-  const arrSnippet =
-    elements.length === 0
-      ? 'provideAppFirebase()'
-      : elements.hasTrailingComma
-      ? ' provideAppFirebase(),'
-      : ', provideAppFirebase()';
-
-  const changes: StringChange[] = [
-    {
-      type: ChangeType.Insert,
-      index: lastImport.getEnd(),
-      text: `\nimport { provideAppFirebase } from './firebase.config';`,
-    },
-    {
-      type: ChangeType.Insert,
-      index: providers.getEnd() - 1, // position just before the closing `]`
-      text: arrSnippet,
-    },
-  ];
-
-  return applyChangesToString(source, changes);
-}
 
 /**
  * Extract the field values of the legacy `productionFirebaseConfig` const from

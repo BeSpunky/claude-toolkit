@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyDsTheme",
+  "title": "Add a theme to the design system",
+  "description": "Create a THEME — a brand, a tenant palette, a user-selectable skin (`nx g @bespunky/nx-tools:ds-theme acme` -> packages/design-system/themes/acme.theme.scss, built to a standalone `theme-acme.css`). A theme is a CSS FILE of token overrides, not JavaScript, and that is the whole design: a `<link>` in <head> applies BEFORE first paint (a JS-applied theme lands after the bundle boots, so the user watches the default theme paint and then snap to the brand — a flash no service can fix); the browser caches and CDN-serves it for free; and because the theme is authored in SASS via `ds.theme-overrides()`, the design system's COMPILE-TIME guards survive — an unknown token name is a BUILD ERROR, not a value that silently does nothing at runtime. Emits the same three-part structure the core theme does (`:root`, the per-mode blocks, AND the `prefers-color-scheme` blocks), so an override survives a mode switch and still applies for users on 'system' (the default — the most-missed case in hand-rolled theming). Registers the stylesheet on every Angular app's build with `inject: false` + a `bundleName`, Angular's own mechanism for a compiled-but-not-auto-linked stylesheet, which is what makes it swappable rather than always-on. Swap at runtime with `inject(DsRuntimeTheme).use('theme-acme.css')`. Idempotent: the theme source is seeded and never overwritten (after the first run it is the project's design); the build wiring is re-asserted. A theme can only RE-BIND tokens the design system declares — it cannot introduce new ones, because no component reads them.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The theme name, e.g. `acme` -> `themes/acme.theme.scss` -> `theme-acme.css`.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What is the name of the theme?",
+      "pattern": "^[a-zA-Z].*$"
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip formatting files.",
+      "default": false,
+      "x-priority": "internal"
+    }
+  },
+  "required": ["name"]
+}

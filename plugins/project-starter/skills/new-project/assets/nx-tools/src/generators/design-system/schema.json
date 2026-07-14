@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyDesignSystem",
+  "title": "Create the workspace's design-system library",
+  "description": "Scaffold the design system every BeSpunky project is born with: a publishable library (composed from publishable-lib) carrying the THEMING MECHANISM — design tokens as CSS custom properties (the runtime layer) plus a zero-output SASS API (the author-time layer: token accessors, the theme() emission, mixins, placeholders) — and NOTHING ELSE. Ships zero components and zero opinionated visual styles; token VALUES are loudly-marked placeholders that exist only so the library compiles and the app runs, and are replaced wholesale by the design phase. Also opens the sass channel on every Angular app in the workspace (via design-system-styles) and installs provideDesignSystem() into each app's config. Idempotent: styles/ and src/ are SEEDED (written only if absent, so a --repair never restores placeholder tokens over the project's real design); the config, tags, docs and app wiring are re-asserted on every run.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The library (and Nx project) name. Also seeds the default directory (packages/<name>) and import path (@<scope>/<name>).",
+      "default": "design-system",
+      "x-priority": "important"
+    },
+    "scope": {
+      "type": "string",
+      "description": "The npm scope for the import path, WITHOUT the leading `@` (e.g. `acme` -> `@acme/design-system`). Defaults to the root package.json name. Load-bearing: the underlying publishable-lib generator defaults to the `@bespunky` scope (the toolkit's own), which is wrong for every consumer project.",
+      "x-priority": "important"
+    },
+    "importPath": {
+      "type": "string",
+      "description": "Full override of the npm import path (wins over --scope), e.g. `@acme/design-system`.",
+      "x-priority": "internal"
+    },
+    "directory": {
+      "type": "string",
+      "description": "Workspace-relative directory for the library. Defaults to `packages/<name>`. The app's sass load path is derived from this directory's PARENT, so the in-repo specifier is always `<dir-name>/styles`.",
+      "x-priority": "internal"
+    },
+    "prefix": {
+      "type": "string",
+      "format": "html-selector",
+      "description": "The Angular component-selector prefix for components later promoted into the design system.",
+      "default": "bs"
+    },
+    "tokenPrefix": {
+      "type": "string",
+      "description": "The CSS custom-property namespace: `ds` yields `--ds-color-surface` and the `[data-ds-mode]` theming attribute.",
+      "default": "ds"
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip formatting files.",
+      "default": false,
+      "x-priority": "internal"
+    }
+  },
+  "required": []
+}

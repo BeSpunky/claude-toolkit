@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyDsComponent",
+  "title": "Promote a reusable component into the design system",
+  "description": "Add a component to the design system as its OWN secondary entry point (`nx g @bespunky/nx-tools:ds-component button` -> packages/design-system/button/, imported as `@<scope>/design-system/button`). One entry point per component, so each is independently tree-shakeable, is its own boundary, and never fights over a shared barrel. THIS IS THE ONLY WAY A COMPONENT ENTERS THE DESIGN SYSTEM — hand-creating the folder yields a component that resolves in the editor and vanishes on publish, because the entry-point config IS the boundary. Composes the secondary-entrypoint generator, then applies the design-system specifics: the sass channel into the component's own SCSS (so `@use '<ds>/styles' as ds;` resolves under ng-packagr), a starting SCSS that reads TOKENS rather than inventing values, and an explicit public-API barrel (private members go in a `_`-prefixed folder named for what it holds — `_parts/`, `_material/` — and stay out of index.ts). RUN IT ON THE SECOND OCCURRENCE of a UI pattern — the first time a card lives in the feature that needed it; the second time you promote it, migrate BOTH sites, and delete the copies (see the bespunky-design-system:design-system-first skill).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The component (and entry-point) name, e.g. `button` -> `@<scope>/design-system/button`.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What is the name of the component to promote into the design system?",
+      "pattern": "^[a-zA-Z].*$"
+    },
+    "library": {
+      "type": "string",
+      "description": "Override the target library. Defaults to the workspace's design system (found by its `type:design-system` tag).",
+      "x-priority": "internal"
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip formatting files.",
+      "default": false,
+      "x-priority": "internal"
+    }
+  },
+  "required": ["name"]
+}

@@ -55,6 +55,24 @@ A library is a **black box**: a boundary, a deliberate public contract, hidden i
 
 ---
 
+## 5. Styles are an entry point too
+
+**What.** A design-system library publishes **three kinds** of surface, and each needs its own declared entry point:
+
+- **The SASS API** — a *zero-output* barrel of functions/mixins/placeholders (`@use`-ing it must emit no CSS), plus the one mixin that emits the token block. Published via the package's `exports` map (`"./styles": { "sass": … }`) with the raw `.scss` shipped to `dist` as an asset; resolved **in-repo via a sass load path**, because SASS cannot read `tsconfig` paths and a paths-linked workspace has no `node_modules` symlink for it to find.
+- **The primary TS entry point** — in a design system, deliberately tiny (the theming service, and little else).
+- **One secondary entry point per component** — `@scope/design-system/button` — so each tree-shakes independently and is its own boundary.
+
+And within each, **public vs private is enforced twice**: at the export level (`@forward … show` for SASS, `index.ts` for TS) *and* structurally — the implementation lives in **`_`-prefixed folders named for what they are** (`_core`, `_utils`, `_parts`), never a bucket called `internal`: the `_` already says *private*, so spend the name on saying *what it is*. Adding a member does not publish it — publishing is a deliberate act, performed in the barrel.
+
+**Why.** The same *one folder = one entry point* rule, applied to styling: **the presence of the entry-point config is the only thing that declares the boundary.** A style surface with no declared entry point is not a private API — it is a **global**. And a component folder without an `ng-package.json` resolves in the editor (the path alias sees it) and then **vanishes on publish**, because ng-packagr never knew it existed — a failure that surfaces at a consumer's install, not in your build.
+
+> ⚠️ **The cache trap.** An app consuming a library's SASS through a **load path** creates **no edge in the Nx project graph** on its own (a load path is not a TS import). If nothing else couples them, editing a token does **not** invalidate the app's build cache and Nx replays a stale bundle. Declare the dependency **explicitly** with `implicitDependencies` on the app — a real graph edge, so `nx affected` stays correct — **not** a hand-rolled `inputs` array (which overrides the target's inferred inputs and hard-fails on a workspace missing the named input you referenced).
+
+See `bespunky-design-system:design-tokens-and-theming` → *The DS library — structure & entry points*.
+
+---
+
 ## When NOT to use
 
 Don't split a small, cohesive library into entry points it doesn't need — boundaries cost coordination (`architect-mentality` → *Know when not to do it*). Add an entry point when a part has a genuinely distinct consumer or concern.
