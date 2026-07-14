@@ -25,17 +25,18 @@ Two modes. **Capture** writes the baton; **Resume** picks it up. They share ONE 
 
 ## Where the baton lives
 
-Committed, timestamped, accumulating as a trail — never one file overwritten:
+A baton belongs to **one effort** — so it lives in **that effort's package** ([[feature-package]]: one effort, one slug, one folder). Committed, timestamped, accumulating as a trail — never one file overwritten:
 
-```
-docs/handoffs/<ISO-8601>-<slug>.md      # one baton per capture, e.g. 2026-07-13T0930Z-staging-multidb.md
-docs/handoffs/latest.md                 # a one-line pointer to the current baton + its as-of stamp
+```text
+docs/features/<YYYY-MM-DD>-<slug>/handoffs/<UTC-stamp>.md   # one baton per capture, inside the effort's package
 ```
 
+- **Inside the effort's package** — the same `<slug>` that names the branch (`feat/<slug>`) and the worktree, so Resume lands *among* the effort's other artifacts: its `BRIEF.md`, `VISION.md`, `STAGING.md`, `DECISION.md` are right there beside the baton, not scattered elsewhere in the repo. The baton stops being an island. If the effort has no package yet, create it (`docs/features/<YYYY-MM-DD>-<slug>/`, date from `date -u +%F`).
 - **Committed** — a baton is part of the effort's history and is shareable; it belongs in the repo, on the branch the work lives on (a feature worktree per [[branch-and-release]]).
-- **Timestamped filenames sort chronologically**; `latest.md` is the stable entry point Resume reads first. Capture rewrites `latest.md` to point at the baton it just wrote.
-- Stamp the time from the shell, never guess: `date -u +%Y-%m-%dT%H%MZ`.
+- **Timestamped filenames sort chronologically** within the package: `date -u +%Y-%m-%dT%H%MZ`.
 - Get the anchors from the repo, never from memory: `git rev-parse --short HEAD`, `git branch --show-current`, `git status --porcelain`.
+
+> **No committed "latest" pointer.** A single committed pointer file (`docs/handoffs/latest.md`) that every effort rewrites is an *add/add conflict on every rebase and every promotion* — it plants a guaranteed conflict at the exact gate [[branch-and-release]] designs to be conflict-free — and it isn't even global: a file in the repo is per-branch, so from the main tree it would point at whichever effort merged *last* (usually a finished one), not the live effort. So there is no such file. **Resume computes the baton from the repo instead** (below) — which can never go stale and works from any tree.
 
 ---
 
@@ -115,7 +116,7 @@ Claude begins the next session with **no memory of being corrected**, so uncaptu
   - **Task-local** corrections (only meaningful to *this* effort) → keep in the baton's corrections table.
 - **A repeat is a red flag.** A correction the user had to make **more than once** is a strong durable signal — promote it and place it prominently.
 
-When you finish, **rewrite `docs/handoffs/latest.md`** to point at the new baton, and tell the user the path plus a one-line summary of what you promoted to memory.
+When you finish, **tell the user the baton's full path** (inside the effort's package) plus a one-line summary of what you promoted to memory. There is no pointer file to rewrite — the path is recoverable from the branch (see Resume), so nothing needs to track "latest".
 
 ---
 
@@ -123,7 +124,15 @@ When you finish, **rewrite `docs/handoffs/latest.md`** to point at the new baton
 
 Resume is a **re-grounding, never blind trust.** The baton reflects what was true at its as-of stamp; the world has moved since (the user did things, another session ran, `development` advanced). Run these steps before doing any work:
 
-1. **Load** the baton — follow `docs/handoffs/latest.md` unless the user names a specific one.
+1. **Locate the baton, then load it.** Unless the user names one, compute it from the repo — the newest baton in this effort's package, found from the current branch's slug:
+
+   ```bash
+   slug=$(git branch --show-current | sed 's|^[^/]*/||')          # feat/gift-picker → gift-picker
+   pkg=$(ls -d docs/features/*-"$slug" 2>/dev/null | tail -1)      # newest dated package for this slug
+   ls -t "$pkg"/handoffs/*.md | head -1                            # its latest baton
+   ```
+
+   If you're launched at the repo root with no obvious branch, `git worktree list` enumerates the in-flight efforts, each a `feat/<slug>` tree with its own package. **Then read the package** ([[feature-package]]): the `BRIEF.md` / `VISION.md` / `STAGING.md` / `DECISION.md` sitting beside the baton are this effort's agreed problem, design, and decisions — the baton distils *state*, the package holds the *reasoning*, and re-deriving what's already written there is exactly the waste the baton exists to prevent.
 2. **Verify the anchors.** Do the SHAs, paths, and PRs still exist and match? `git rev-parse`, `test -e`, `git log`. Check the current HEAD/branch against the baton's as-of.
 3. **Report drift** — a short, honest diff of *baton vs. reality*: what still holds, what changed (new commits, moved files, resolved questions), what's now stale. Surface it before proceeding.
 4. **Trust by type.** Facts → verify against the repo. Intentions → re-confirm with the user. Assumptions / "Assumed (unverified)" items → treat as unproven and re-check.

@@ -31,7 +31,10 @@ Before you design, read code, invoke another skill, plan, or make the first edit
 ```bash
 git worktree add .claude/worktrees/<slug> -b <feat|fix>/<slug> development   # ALWAYS base off development
 cd .claude/worktrees/<slug> && <install>                                    # worktrees start with no deps installed
+mkdir -p docs/features/"$(date -u +%F)-<slug>"                             # the effort's package namespace (real once a file lands)
 ```
+
+**The slug you choose here is the effort's identity — use it everywhere.** It names the branch, the worktree, *and* the effort's **package** ([[feature-package]]: `docs/features/<YYYY-MM-DD>-<slug>/`), which holds everything durable the effort produces that isn't code — its brief, vision, staging, decisions, throwaway mocks, and handoff batons. Create it with the tree, not at the end (a doc written afterwards is a memory, and memories are where the reasons go missing), and never invent a second name for the same effort. Skip it only for genuinely trivial work — a package for a typo fix is noise.
 
 **In an Nx workspace, EVERY nx command run from a worktree MUST be prefixed**, or the Nx daemon — which caches **one** workspace root across trees — silently builds/tests/serves the **MAIN** tree's source instead of this worktree's (builds "pass", tests "pass", against unchanged code):
 
@@ -73,7 +76,7 @@ Every promotion *upstream* is conflict-free because each downstream branch is a 
 
 ## Three promotion gates — each waits on an explicit signal; nothing promotes on its own
 
-1. **Feature done** — *on the explicit "done / verified"*: **first `git rebase development` in the worktree and re-verify** (per the divergence-point rule — integration is settled here, in isolation). Then land it with a grouping merge commit (`git switch development && git merge --no-ff <feat|fix>/<slug>`; the merge commit gives a one-command revert via `git revert -m 1`) and push `development`. Finally tear down the worktree (`git worktree remove .claude/worktrees/<slug>` → `git branch -d <feat|fix>/<slug>`, plus `git push origin --delete <branch>` if it was pushed). `development` is the integration line — consult the project's CLAUDE.md for whether pushing it deploys (typically it does not).
+1. **Feature done** — *on the explicit "done / verified"*: **first `git rebase development` in the worktree and re-verify** (per the divergence-point rule — integration is settled here, in isolation). **Then settle the effort's package** ([[feature-package]]): its conclusions (`BRIEF.md`, `VISION.md`, `STAGING.md`, `DECISION.md`, batons) are committed and promote with the code; its throwaway `mocks/` self-ignores and will not. **This is the moment to offer keep-or-bin** for any evidence the user wants to retain — *"keep the mocks as a record, or bin them?"* — because keeping means `git add -f` **before** the merge; after teardown the worktree is gone and so is the folder. Then land it with a grouping merge commit (`git switch development && git merge --no-ff <feat|fix>/<slug>`; the merge commit gives a one-command revert via `git revert -m 1`) and push `development`. Finally tear down the worktree (`git worktree remove .claude/worktrees/<slug>` → `git branch -d <feat|fix>/<slug>`, plus `git push origin --delete <branch>` if it was pushed). `development` is the integration line — consult the project's CLAUDE.md for whether pushing it deploys (typically it does not).
 2. **Go to staging** — *on the explicit "go to staging" signal*: `git switch staging && git merge --ff-only development`, then **push `staging`** (fires whatever the project binds to a `staging` push).
 3. **Go live** — *on any go-live phrasing ("go live", "ship it", "release", "deploy to prod", "cut a version")*: `git switch main && git merge --ff-only staging`, then **push `main`** (fires whatever the project binds to a `main` push).
 
