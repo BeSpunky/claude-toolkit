@@ -57,6 +57,8 @@ Landing never bans abstraction — it *cashes* it. The sunflower stays a sunflow
 
 The deliverable is a **Vision**: a written, sensory, non-technical description of the experience — vivid enough to paint the picture in someone's mind, free enough to let the builder find the best means. It is the *contract* of the experience; the implementation is internals, free to change as long as it honors the Vision. (Black boxes, cleanly separated — `architect-mentality` principle 1.)
 
+**Write it to `VISION.md` in the effort's package** (`bespunky-workflow:feature-package` — `docs/features/<YYYY-MM-DD>-<slug>/`, beside the `BRIEF.md` it answers). It is a *contract*; a contract that exists only in a chat transcript cannot be honored, pointed at, or steered.
+
 A Vision hits **five beats**. They are fixed; *how* you write each one is open — prose, a walk-through, a short film described in words, a letter to the builder, whatever conveys it best. This is guidance, not a form to fill in. Never let the five beats flatten into five boxed headings with a sentence each; that would be the very box-and-text reflex this skill exists to refuse.
 
 1. **The world & the feeling.** Where are we? What is this place, and what is the single emotional truth of being in it? Paint it — the light, the air, the mood, the metaphor that holds it all together. If a stranger read only this beat, they should *feel* the app before knowing a thing it does.

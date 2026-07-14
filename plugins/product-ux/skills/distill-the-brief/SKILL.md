@@ -73,6 +73,8 @@ The discipline: **a brief should feel like the fewest true things that fully fra
 
 The deliverable is a **Brief Tree**: an englobing **context** brief at the root and the **surface** briefs native to it as children (going deeper only where the problems genuinely differ). Each node is a clean **envision-input** — a design problem at the right altitude, solution-free.
 
+**Write it to `BRIEF.md` in the effort's package** (`bespunky-workflow:feature-package` — `docs/features/<YYYY-MM-DD>-<slug>/`, the slug shared with the branch). A brief that lives only in a chat transcript is a brief that will be silently re-guessed by the next person who touches this feature — and everything downstream trusts it.
+
 A single **brief** (context or surface) names, in whatever prose conveys it best — *not* a rigid form:
 
 - **The design problem.** In a line or two: what this surface or context is *for*, in this product and this moment. The question, not the answer.

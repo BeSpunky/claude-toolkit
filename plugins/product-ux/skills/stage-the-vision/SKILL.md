@@ -78,6 +78,8 @@ This is a **ping-pong with `astonishing-to-use`, not a one-way check.** Pressure
 
 It still names no engineering — no libraries, no CSS, no performance budget. It says *what the art is*; `realize` chooses *how to make it*.
 
+**Write it to `STAGING.md` in the effort's package** (`bespunky-workflow:feature-package` — `docs/features/<YYYY-MM-DD>-<slug>/`, beside the `VISION.md` it stages and the `mocks/` that test it). `realize` builds from this file — and from the `DECISION.md` beside it, never from a mock's throwaway code.
+
 ---
 
 ## How to stage a vision
@@ -94,8 +96,8 @@ It still names no engineering — no libraries, no CSS, no performance budget. I
 5. **Decompose each moment to physical truth** — break its real phenomena (light, shadow, material, colour, depth, form, texture) into how they *actually behave*, as a painter's brief; refuse any lone primitive ("warm light" is never just a gradient). This is what makes a moment read as *real* rather than symbolic. **This applies hardest to a metaphor that's also a control** — a "doorway," "portal," "threshold," "well," "shelf." Stage it as the *real, enterable/usable thing*, decomposed: a doorway is an *opening into depth* (dark or light space beyond, a lit threshold, edges, a sense you could step *through*), not a flat silhouette of a door filled with a gradient. A metaphor rendered as its flat outline reads as a **stain/sticker**, not the thing — and a navigation made of stains looks broken and purposeless, however well it's organized. *And when restraint is the right call* (the nav should be quiet, not a literal metaphor — see "Immersive is not busy" in `envision`), the move is **type-as-image**: the refined *word itself* is the element — set with real typographic craft (weight, spacing, a warm glow, the material of the world) so the word *is* the affordance — not a decorative glyph with a label bolted underneath (the glyph carries no meaning the word doesn't, and cheapens it). Elegant type is art; a meaningless dot beside it is clutter.
 6. **Ground it and steal from great work** — anchor in real references (and any existing identity, when present); study and adapt specific great pieces so the moves are excellent, not invented from priors.
 7. **Restrain it** — *bold ≠ loud*: one concept, limited palette, disciplined effects. Cut anything that serves spectacle instead of the feeling.
-8. **Explore at low fidelity; let an outside eye judge for beauty** — 2–3 distinct directions, cheap, compared; the user (or an honest comparison to great work) chooses. Never self-certify the art.
-9. **Confirm and hand off** — commit the Staging, then give it to `realize-the-vision`, which engineers each moment, choosing technical means from its reference clusters.
+8. **Explore at low fidelity; let an outside eye judge for beauty** — 2–3 distinct directions, cheap, compared; the user (or an honest comparison to great work) chooses. Never self-certify the art. **Do this by eye, not on paper: hand the competing concepts to `mock-to-choose`**, which mocks *every* one of them as a cheap, throwaway, shell-only screen and puts them side by side — because a person cannot judge a look by reading a description of it, and a written Staging draws shrugs where a mock draws a verdict. A rejection or a correction comes *back here* (re-conceive the moment), and the mock is re-made cheaply — never polished.
+9. **Confirm and hand off** — commit the Staging *as chosen by the user*, then give it to `realize-the-vision`, which engineers each moment from the Staging (never from the mock's throwaway code), choosing technical means from its reference clusters.
 
 ---
 
@@ -127,7 +129,7 @@ The SKILL above is the method; the references are the craft. Read only the clust
 - Did I **stage each moment across form factors, mobile-first** — so it holds or *transforms* on a phone (with a touch-native form for any pointer interaction) — or only for desktop, to be shrunk?
 - Did I **decompose each moment to physical truth** (light, shadow, material, depth, form, texture as they really behave) — or **collapse a real phenomenon to a lone primitive** (warm light → a gradient, depth → a box-shadow, glass → a flat fill)?
 - Did I **ping-pong each moment against the use** (`astonishing-to-use`) — re-conceiving where the art taxes the user (scroll-fighting, transition delays, hidden nav, buried action) so it's striking **and** effortless — or just make it beautiful and assume it's usable?
-- Did I let an **outside eye judge it for beauty** at low fidelity, or am I about to **self-certify** the art and ship it?
+- Did I let an **outside eye judge it for beauty** at low fidelity — **by eye** (`mock-to-choose`: every concept mocked cheaply, side by side), not by handing the user prose to read — or am I about to **self-certify** the art and ship it?
 - Is each moment described so `realize` can engineer it — concrete, web-native — while I left the *how* (libraries, CSS, perf) to `realize`?
 
 ## Red flags
@@ -149,6 +151,7 @@ The SKILL above is the method; the references are the craft. Read only the clust
 - **Symbolic substitution** — a real phenomenon (light, depth, material, texture) collapsed to a single primitive (a gradient, a box-shadow, a flat fill) with no physical model behind it; the reason "warm light" never looks like warm light.
 - **Beautiful but taxing to use** — a moment that fights the thumb, delays the task, hides the action, or impresses once and annoys forever, shipped with no ping-pong against `astonishing-to-use`. Striking is only half; the use must be astonishing too.
 - **Self-certified art** — declaring the moments "stunning/cinematic" with no outside eye and no low-fidelity comparison.
+- **Asking the user to approve prose** — handing over a written Staging and expecting a verdict on a *look* nobody has seen. Mock the concepts (`mock-to-choose`) and let them point.
 - **Hand-coding the art that should be sourced** — a hero illustration or character forced out of code/weak taste instead of generated, licensed, or commissioned and directed by the Staging.
 
 ---
