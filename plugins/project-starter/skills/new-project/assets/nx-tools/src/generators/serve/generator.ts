@@ -27,15 +27,12 @@ import {
   type TargetConfiguration,
   readProjectConfiguration,
   updateProjectConfiguration,
-  applyChangesToString,
-  type StringChange,
-  ChangeType,
   formatFiles,
   logger,
 } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import * as ts from 'typescript';
+import { wireProvider } from '../_utils/wire-provider';
 
 interface ServeSchema {
   project: string;
@@ -137,7 +134,10 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (tree.exists(appConfigPath)) {
     const current = tree.read(appConfigPath, 'utf8') ?? '';
-    const wired = wireProvider(current, appConfigPath);
+    const wired = wireProvider(current, appConfigPath, {
+      providerFn: 'provideWorktreeTabLabel',
+      importFrom: './worktree-tab-label',
+    });
     if (wired && wired !== current) {
       tree.write(appConfigPath, wired);
     } else if (wired === null) {
@@ -150,90 +150,4 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   }
 
   await formatFiles(tree);
-}
-
-/**
- * Wire `provideWorktreeTabLabel()` into `appConfig`'s `providers` array (+ the matching import).
- *
- * Uses the TypeScript compiler API to locate AST positions (source code is a tree, not text), then
- * applies non-overlapping text inserts via `applyChangesToString` so surrounding formatting survives and
- * `formatFiles` polishes the result. Mirrors the firebase-emulators app.config wiring.
- *
- * Returns the updated source when wiring is applied, the original `source` when already wired
- * (idempotent no-op), or `null` when the file shape is unrecognized (the caller warns).
- */
-function wireProvider(source: string, sourcePath: string): string | null {
-  const sf = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, /* setParentNodes */ true, ts.ScriptKind.TS);
-
-  // Idempotency: any Identifier named `provideWorktreeTabLabel` means the file is already wired.
-  let alreadyWired = false;
-  const detectExisting = (node: ts.Node): void => {
-    if (alreadyWired) return;
-    if (ts.isIdentifier(node) && node.text === 'provideWorktreeTabLabel') {
-      alreadyWired = true;
-      return;
-    }
-    ts.forEachChild(node, detectExisting);
-  };
-  detectExisting(sf);
-  if (alreadyWired) return source;
-
-  // Locate `export const appConfig: ApplicationConfig = { providers: [ ... ] }`.
-  let providersArray: ts.ArrayLiteralExpression | null = null;
-  const findProviders = (node: ts.Node): void => {
-    if (providersArray) return;
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === 'appConfig' &&
-      node.initializer &&
-      ts.isObjectLiteralExpression(node.initializer)
-    ) {
-      for (const prop of node.initializer.properties) {
-        if (
-          ts.isPropertyAssignment(prop) &&
-          ts.isIdentifier(prop.name) &&
-          prop.name.text === 'providers' &&
-          ts.isArrayLiteralExpression(prop.initializer)
-        ) {
-          providersArray = prop.initializer;
-          return;
-        }
-      }
-    }
-    ts.forEachChild(node, findProviders);
-  };
-  findProviders(sf);
-  if (!providersArray) return null;
-  const providers: ts.ArrayLiteralExpression = providersArray;
-
-  // Find the last top-level ImportDeclaration so we know where to put our new import.
-  let lastImport: ts.ImportDeclaration | null = null;
-  for (const stmt of sf.statements) {
-    if (ts.isImportDeclaration(stmt)) lastImport = stmt;
-    else break;
-  }
-  if (!lastImport) return null;
-
-  const elements = providers.elements;
-  const arrSnippet =
-    elements.length === 0
-      ? 'provideWorktreeTabLabel()'
-      : elements.hasTrailingComma
-      ? ' provideWorktreeTabLabel(),'
-      : ', provideWorktreeTabLabel()';
-
-  const changes: StringChange[] = [
-    {
-      type: ChangeType.Insert,
-      index: lastImport.getEnd(),
-      text: `\nimport { provideWorktreeTabLabel } from './worktree-tab-label';`,
-    },
-    {
-      type: ChangeType.Insert,
-      index: providers.getEnd() - 1, // just before the closing `]`
-      text: arrSnippet,
-    },
-  ];
-  return applyChangesToString(source, changes);
 }
