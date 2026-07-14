@@ -43,7 +43,7 @@ Most plugins are pure markdown. `project-starter` also ships an executable **sca
 
 The generators live as TypeScript in the toolkit. Nx can't run raw TS from `node_modules`, so distribution is a separate step:
 - Compile: `assets/compile-generators.mts` (reused by the publisher).
-- Publish `@bespunky/nx-tools` to npm: `tools/publish-nx-tools/publish.sh` (validate first with `--dry-run`; **bump `assets/nx-tools/package.json` version first**). Runs in Docker.
+- Publish `@bespunky/nx-tools` to npm: `tools/publish-nx-tools/publish.sh` (validate first with `--dry-run`; **bump `assets/nx-tools/package.json` version first**). Runs on the **local Node** when it's 22.18+ (the bar is type-stripping for `compile-generators.mts`), falling back to Docker otherwise — Docker was never the requirement, a modern Node was. Force the container with `--docker`. If npm 2FA is on, pass `--otp <code>`, or drop an npm **automation token** in `~/.npmrc` and it publishes unattended.
 
 `tools/extract-tool/` is the cross-workspace half of reusable-tool extraction (`extract-tool.sh --from <project> [--lib <lib>]`), also Docker-run. Background: `docs/reusable-tool-extraction.md`.
 
