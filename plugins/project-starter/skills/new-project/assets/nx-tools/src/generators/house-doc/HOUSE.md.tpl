@@ -181,6 +181,19 @@ nx serve <app> --dry-run                    # print what it would serve, without
 
 It installs the worktree's deps on first serve and applies the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you. A worktree serve shifts the **whole stack** (app dev-server{{#firebase}} **and** the emulator suite{{/firebase}}) onto the worktree's stable, verified-free offset block, so it never collides with a server on the base/forwarded ports. **A worktree serve is `:6080`-only** — its shifted ports aren't forwarded, so watch it in the shared browser over noVNC (the executor navigates it to the worktree's pretty `<slug>.localhost` domain), not a host tab. (A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.)
 
+## A feature is a package (non-negotiable)
+
+**Every effort's durable, non-code output lives in ONE folder, named by the effort's slug — the same slug as its branch and worktree.** Invoke `bespunky-workflow:feature-package` for the method; these rules are always on:
+
+- **The package is `docs/features/<YYYY-MM-DD>-<slug>/`** — created **with** the worktree (same slug, `date -u +%F`), not at the end. Skip it only for genuinely trivial work (a typo fix); a package for nothing is noise.
+- **Everything durable goes in it** — `BRIEF.md`, `VISION.md`, `STAGING.md`, `DECISION.md` (the design quartet), the throwaway `mocks/`, the effort's `handoffs/` batons, research notes, plans. **Never invent another home**: no `NOTES.md` at the repo root, no folder made up on the spot.
+- **Write it AS IT HAPPENS, never afterwards.** A doc written at the end is a memory — reconstructed, tidied, and confidently wrong about exactly the parts that matter (why a design was rejected, which constraint was fatal, what the user actually said).
+- **The conclusion is durable; the evidence is disposable.** Decisions and roads-not-taken are committed and permanent. Mocks, spikes, and scratch are **self-ignoring** (a `.gitignore` containing `*`) and **nothing outside them may ever depend on them** — no route, no import, no asset, no config entry — so they can be deleted without breaking a thing. Bin them by default; keep only when the user says so.
+- **Quote the user's own words.** The sentence in which they chose, rejected, or corrected something is the most valuable line in the package and settles a dozen later arguments. Never paraphrase it away.
+- **Revisiting a feature opens a NEW dated package** with the same slug — read the old one first (it says what was already tried and why), never overwrite it.
+
+The package answers the question the code never can: *six months from now, why was it done this way, and what did we already rule out?*
+
 ## Generator-first, manual last
 
 For anything Nx can generate - apps, libraries, components, services, project config - **use the Nx generator (`nx g ...`); never hand-create and fill files.** Before hand-writing anything structural, check what exists: `nx list <plugin>` / `nx g <generator> --help` (or the `nx-generate` skill / the Nx MCP server). Only fall back to manual file creation when no generator covers the task. **Never guess flags** - verify against `--help` / `nx_docs`.
