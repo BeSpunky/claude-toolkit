@@ -93,8 +93,10 @@ Wait for the final `SCAFFOLD_OK <path>` line. It also reports the GitHub outcome
 If `scaffold.sh` fails partway, **do not improvise the remaining phases by hand** - the house generators encode hard requirements that are easy to miss. Use the script's **repair mode**, which re-runs **only** phases 1.2 and 1.3 on the existing project (all generators are idempotent):
 
 ```
-bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" --repair [--firebase] <PROJECT_PATH_OR_NAME> [<APP_NAME>]
+bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" --repair [--firebase] [--yes] <PROJECT_PATH_OR_NAME> [<APP_NAME>]
 ```
+
+**Repair REFUSES to run unattended — the `--yes` gate.** A repair rewrites generated files, needs a Docker daemon, and takes minutes, so it must never happen because something *inferred* that it should. On a TTY the script prompts a human. With no TTY (your shell), it **aborts** unless `--yes` is passed — and `--yes` *asserts that the user has explicitly agreed in this conversation*. Pass it only when that is true: never to satisfy the gate, never on inferred consent. In CI it refuses outright — no flag can conjure a human. This is what makes "detection is automatic, execution is consented" (§1c) structural rather than a matter of your good behavior.
 
 (Through WSL on Windows hosts, wrap as in step 1.) `--firebase` and `--repair` may be combined to retrofit Firebase support onto an existing project. If repair errors with "node_modules/.bin/nx not found," run `yarn install` in the project first, then re-run.
 

@@ -316,8 +316,10 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
 **Repair an existing project** (re-apply the house generators idempotently — useful if a previous scaffold was incomplete, or after upgrading the toolkit, or to retrofit `--firebase` onto an existing project):
 
 ```
-bash <path-to>/scaffold.sh --repair [--firebase] <project-path-or-name> [<app-name>]
+bash <path-to>/scaffold.sh --repair [--firebase] [--yes] <project-path-or-name> [<app-name>]
 ```
+
+**Repair refuses to run unattended.** It rewrites generated files, needs Docker, and takes minutes — so on a TTY it prompts you, with no TTY (an agent's shell) it aborts unless `--yes` is passed, and in CI it refuses outright. `--yes` *asserts that a human explicitly agreed*; an agent may pass it only after you actually said so. That gate is what makes the hook's "detect, never execute" boundary structural instead of a promise.
 
 **Important: the house guidance is a generated, repairable `HOUSE.md`.** `--repair` regenerates `HOUSE.md` (architecture directives, branch/release workflow, serving, Firebase, Nx, browser tooling) in full every run and upserts a bounded pointer to it in `CLAUDE.md` — the only part of `CLAUDE.md` it touches. The user's own `CLAUDE.md` content (intentions + conventions) is preserved verbatim. Everything else (devcontainer files, `.claude/settings.json`, `project.json`, `package.json` devDeps, Firebase config files) is brought up to current spec by the generators. So a toolkit upgrade reaches an existing project entirely through `--repair` — **no hand-merge** (see the `bespunky-project-starter:new-project` skill's §1b).
 

@@ -23,7 +23,7 @@
 #
 # Usage:
 #   scaffold.sh [--firebase] [--no-github] <project-name> [app-name]                    # full scaffold
-#   scaffold.sh --repair [--firebase] [--no-backup] <project-path|project-name> [app-name] # re-apply house generators
+#   scaffold.sh --repair [--firebase] [--no-backup] [--yes] <project-path|project-name> [app-name]
 #
 # Repair auto-backup: --repair snapshots the project to a git tag (repair-backup-<ts>) BEFORE running
 # any generator, so a regenerated file (e.g. firebase.config.ts) is always recoverable — review with
@@ -31,7 +31,19 @@
 # restore point). If a backup is wanted but impossible (not a git repo) or fails, repair ABORTS rather
 # than change files unprotected. Opt out with --no-backup.
 #
-# Leading flags (--repair, --firebase, --no-github, --no-backup) may be given in any order.
+# Repair CONSENT GATE (--yes): a repair rewrites generated files, needs a Docker daemon, and takes
+# minutes — it must never happen because something *inferred* that it should. The SessionStart hook that
+# detects a stale project deliberately only RELAYS that fact; this gate is what makes that boundary
+# structural rather than a matter of an agent's good behavior:
+#   - on a TTY  : a human is present → prompt, and proceed only on an explicit "yes".
+#   - no TTY    : nobody can be asked (an agent's shell, a script) → REFUSE unless --yes is passed, which
+#                 ASSERTS a human has explicitly agreed in this session. An agent may pass it only after
+#                 the user actually said yes — never to satisfy the gate.
+#   - CI=true   : there is no human to consent, and --yes cannot conjure one → REFUSE unconditionally.
+# Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
+# clobber anything that already exists.
+#
+# Leading flags (--repair, --firebase, --no-github, --no-backup, --yes) may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 # Node comes from the typescript-node devcontainer base image, run via Docker - NO nvm.
 set -euo pipefail
@@ -41,6 +53,7 @@ FIREBASE=0
 STAGING=0  # --staging: also scaffold a first-class staging environment (requires --firebase).
 GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
 BACKUP=1   # repair snapshots the project to a git tag BEFORE mutating; --no-backup opts out.
+CONSENT=0  # --yes: asserts a human explicitly agreed to this repair (see the consent gate above).
 while [ "${1:-}" != "" ]; do
   case "$1" in
     --repair)     MODE="repair"; shift;;
@@ -48,6 +61,7 @@ while [ "${1:-}" != "" ]; do
     --staging)    STAGING=1;     shift;;
     --no-github)  GITHUB=0;      shift;;
     --no-backup)  BACKUP=0;      shift;;
+    --yes|-y)     CONSENT=1;     shift;;
     --*)          echo "ERROR: unknown flag '$1'" >&2; exit 1;;
     *)            break;;
   esac
@@ -89,11 +103,6 @@ PLUGIN_VERSION="$(grep -m1 '"version"' "$ASSETS_DIR/../../../.claude-plugin/plug
 GIT_NAME="$(git config --global user.name 2>/dev/null || whoami)"
 GIT_EMAIL="$(git config --global user.email 2>/dev/null || echo "$(whoami)@localhost")"
 
-# --- guards (apply to both modes) ---
-command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
-docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
-command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
-
 # --- resolve TARGET + PROJECT + APP based on mode ---
 if [ "$MODE" = "scaffold" ]; then
   PROJECT="${1:?Usage: scaffold.sh [--firebase] <project-name> [app-name]   |   scaffold.sh --repair [--firebase] <project-path|name> [app-name]}"
@@ -122,6 +131,47 @@ else
   fi
   APP="${APP:-$PROJECT}"
 fi
+
+# --- repair consent gate (see the header) ---
+# The point of this gate is that it cannot be satisfied by inference. A repair is a real, minutes-long,
+# file-rewriting action; the hook that notices a stale project can only SAY so. Consent has to come from a
+# human, and this is where that is enforced instead of hoped for.
+#
+# It runs FIRST — before the docker/curl guards below, before any network call, before anything is read or
+# written. An unconsented repair must fail for want of CONSENT, not trip over a missing daemon on its way to
+# the same place: "docker not found" would send an agent off to fix Docker and come back, which is precisely
+# the inference this gate exists to stop.
+if [ "$MODE" = "repair" ]; then
+  if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
+    echo "ERROR: refusing to repair in CI — a repair rewrites generated files and no human is here to agree." >&2
+    echo "       Run it locally, review the diff against the backup tag, and commit the result." >&2
+    exit 1
+  fi
+
+  if [ "$CONSENT" != "1" ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      echo "About to repair '$TARGET': re-runs the house generators, REWRITING generated files"
+      echo "(HOUSE.md, .claude/settings.json, .devcontainer/*, serve/worktree/design-system targets)."
+      echo "A pre-repair snapshot is taken first (git tag), unless --no-backup."
+      printf "Proceed? [y/N] "
+      read -r reply
+      case "$reply" in
+        [yY] | [yY][eE][sS]) ;;
+        *) echo "Aborted — nothing was changed." >&2; exit 1 ;;
+      esac
+    else
+      echo "ERROR: refusing to repair without consent — nothing is attached to this shell to ask." >&2
+      echo "       A repair rewrites generated files, needs Docker, and takes several minutes." >&2
+      echo "       If (and ONLY if) the user has explicitly agreed to it, re-run with --yes." >&2
+      exit 1
+    fi
+  fi
+fi
+
+# --- guards (apply to both modes; AFTER the consent gate, so an unconsented repair never gets here) ---
+command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
+command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
 
 # --- resolve newest Node major that has a typescript-node devcontainer image ---
 echo "Resolving latest typescript-node base image..."

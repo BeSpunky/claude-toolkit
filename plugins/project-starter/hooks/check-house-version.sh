@@ -153,10 +153,10 @@ worktree / design-system targets) are stale. Re-applying the house generators is
 repair path of the bespunky-project-starter:new-project skill.
 
 RELAY THIS TO THE USER — do not act on it. Mention it briefly at the start of your reply, before their task,
-and offer the repair. Run it ONLY after they explicitly say yes in this conversation. Never infer consent, and
-if no human answers (a scripted or headless run), do nothing at all: the repair needs Docker, takes several
-minutes, and rewrites generated files (it snapshots to a git tag first, but that is a safety net, not a
-licence). If they decline, record it so they are not asked again for this version — write
+and offer the repair. The repair REFUSES to run unattended: it needs a human's yes, and passing its \`--yes\`
+flag ASSERTS that the user has explicitly agreed in this conversation. Pass it only when that is true — never
+to satisfy the gate, never on inferred consent, and never in a scripted or headless run (there, simply do
+nothing). If they decline, record it so they are not asked again for this version — write
 \`.claude/house-snooze.json\` (gitignored) in the project root, containing exactly:
 { "declinedNxToolsVersion": "$INSTALLED_NX" }
 EOF
