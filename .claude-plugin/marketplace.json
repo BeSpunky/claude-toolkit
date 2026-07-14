@@ -15,8 +15,8 @@
     {
       "name": "bespunky-project-starter",
       "source": "./plugins/project-starter",
-      "description": "Scaffold new BeSpunky-standard projects: integrated Nx monorepo + Angular (clean --minimal app, no demo) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. Generator-first.",
-      "version": "0.7.0"
+      "description": "Scaffold new BeSpunky-standard projects: integrated Nx monorepo + Angular (clean --minimal app, no demo) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. Generator-first. Scaffolded projects stay current on their own: a SessionStart hook diffs the project's house stamp against the installed plugin and offers `scaffold.sh --repair` when the toolkit has moved on.",
+      "version": "0.8.0"
     },
     {
       "name": "bespunky-workflow",
