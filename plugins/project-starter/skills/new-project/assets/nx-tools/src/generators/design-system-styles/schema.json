@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyDesignSystemStyles",
+  "title": "Open the design system's sass channel on an Angular app",
+  "description": "Wire ONE Angular app to the workspace's design system: add the sass load path to the app's build target (stylePreprocessorOptions.includePaths — the only in-repo channel, since the workspace links via tsconfig path aliases and SASS cannot read those), add the design system's styles to the build's `inputs` (CACHE CORRECTNESS: the app reaches the DS through a load path, not a TS import, so the Nx graph sees no edge and would otherwise replay a cached bundle carrying stale tokens), and upsert the `@use '<ds>/styles' as ds;` and `@include ds.theme();` marker blocks into the app's global stylesheet. Self-detecting (finds the design system by its `type:design-system` tag) and a clean no-op when the workspace has none. Composed by both the `design-system` generator (for apps that already exist) and the `app` generator (so a LATER app is wired with no flag). Idempotent and --repair-safe: arrays are merged and de-duplicated, and the stylesheet blocks are upserted between their markers.",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The Angular application to wire.",
+      "$default": { "$source": "projectName" },
+      "x-prompt": "Which application should consume the design system?",
+      "x-priority": "important"
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip formatting files.",
+      "default": false,
+      "x-priority": "internal"
+    }
+  },
+  "required": ["project"]
+}
