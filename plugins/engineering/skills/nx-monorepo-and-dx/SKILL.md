@@ -38,3 +38,4 @@ Read only the one(s) you need.
 - **`architect-mentality`** — the agnostic mindset every technique here expresses (especially *Everything is a black box* and *Automate every repeated process*).
 - **`architecture-first`** — the operational discipline (root-cause, no patches, design-and-confirm refactors) that governs changes inside the workspace.
 - **`project-starter`** (separate plugin) — scaffolds the house Nx standard and ships example house generators.
+- **`bespunky-design-system:design-tokens-and-theming`** (separate plugin) — the styling layer of a publishable design-system library: which entry points it publishes (the SASS API, the primary TS surface, one per component), how public-vs-internal is enforced at both the folder and the export level, and how each is consumed in-repo versus published.
