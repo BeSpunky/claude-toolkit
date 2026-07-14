@@ -180,6 +180,14 @@ ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
+# The design system — the workspace's single source of visual truth, present from moment zero (a design
+# system retrofitted after five screens of hardcoded hex is not a design system, it's an archaeology dig).
+# Runs AFTER the app exists so it can open the sass channel on it; a LATER app wires itself, because the
+# \`app\` generator composes the same per-app design-system-styles generator. --scope is load-bearing: the
+# underlying publishable-lib defaults to the @bespunky npm scope (the toolkit's own), which would be wrong
+# for every consumer project. Idempotent in --repair (the token file is seeded, never overwritten — a
+# repair must not restore placeholder tokens over the project's real design).
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:design-system --scope=$PROJECT
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:house-doc
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
 # for adding further apps, plus the reusable-tool extraction generators mark-extractable /
