@@ -60,6 +60,7 @@ import { basename, dirname, join } from 'node:path';
 import publishableLibGenerator from '../publishable-lib/generator';
 import designSystemStylesGenerator from '../design-system-styles/generator';
 import { findDesignSystem, isAngularApp, DESIGN_SYSTEM_TAG } from '../_utils/design-system';
+import { resolveLibsDir } from '../_utils/workspace-layout';
 
 interface DesignSystemSchema {
   /** The library (and project) name. Defaults to `design-system`. */
@@ -72,7 +73,7 @@ interface DesignSystemSchema {
   scope?: string;
   /** Full override of the import path (wins over `scope`), e.g. `@acme/design-system`. */
   importPath?: string;
-  /** Workspace-relative directory. Defaults to `packages/<name>`. */
+  /** Workspace-relative directory. Defaults to `<detected-libs-dir>/<name>` (see resolveLibsDir). */
   directory?: string;
   /** The Angular component-selector prefix for components promoted into the DS. */
   prefix?: string;
@@ -99,10 +100,20 @@ export default async function designSystemGenerator(
   let installTask: GeneratorCallback = noop;
   const existing = findDesignSystem(tree);
   if (!existing) {
+    // We are about to CREATE a design system. If the workspace already has libraries, one of them may BE
+    // the design system under a name we can't recognise (findDesignSystem keys off the `type:design-system`
+    // tag, falling back only to a library literally named `design-system`). Warn — do NOT guess and adopt:
+    // the tag is the single source of truth, so the safe, reversible fix is for a human to tag the real DS
+    // and re-run, which makes this branch a no-op. Silently creating a second DS is the failure we saw.
+    warnIfDesignSystemMayAlreadyExist(tree);
+
+    // Land the new library where THIS workspace keeps libraries (libs/, packages/, …), not a hardcoded
+    // `packages/`. An explicit --directory still wins.
+    const directory = options.directory ?? `${resolveLibsDir(tree)}/${name}`;
     installTask =
       (await publishableLibGenerator(tree, {
         name,
-        directory: options.directory ?? `packages/${name}`,
+        directory,
         importPath,
         prefix,
         style: 'scss',
@@ -196,6 +207,32 @@ export default async function designSystemGenerator(
   if (!options.skipFormat) await formatFiles(tree);
 
   return installTask;
+}
+
+/**
+ * We're about to CREATE a design system because none was found by tag or by the name `design-system`.
+ * If the workspace already contains libraries, one of them might be the project's real design system
+ * under a different name — in which case creating a fresh one is a DUPLICATE, not a repair (exactly the
+ * failure a `--repair` against a `libs/`-style repo produced). We DETECT and RELAY; we never adopt on a
+ * guess, because the `type:design-system` tag is the single source of truth and the correct fix is a
+ * human tagging the real DS and re-running (which makes DS creation a no-op).
+ *
+ * No-ops silently when the workspace has no libraries (a fresh scaffold — nothing to be confused with).
+ */
+function warnIfDesignSystemMayAlreadyExist(tree: Tree): void {
+  const libraries = [...getProjects(tree)]
+    .filter(([, project]) => project.projectType === 'library')
+    .map(([libName, project]) => `${libName} (${project.root})`);
+
+  if (libraries.length === 0) return;
+
+  logger.warn(
+    `[design-system] No library tagged \`${DESIGN_SYSTEM_TAG}\` (or named \`design-system\`) was found, so a NEW ` +
+      `design system is being created. If one of these existing libraries IS your design system, stop and adopt it ` +
+      `instead of creating a duplicate — add the tag \`${DESIGN_SYSTEM_TAG}\` to its project config and re-run; this ` +
+      `generator will then heal it in place (correct location, no relocation) rather than scaffold a second one:\n` +
+      libraries.map((lib) => `  - ${lib}`).join('\n')
+  );
 }
 
 /**

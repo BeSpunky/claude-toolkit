@@ -7,7 +7,7 @@
   "properties": {
     "name": {
       "type": "string",
-      "description": "The library (and Nx project) name. Also seeds the default directory (packages/<name>) and import path (@<scope>/<name>).",
+      "description": "The library (and Nx project) name. Also seeds the default directory (<detected-libs-dir>/<name>) and import path (@<scope>/<name>).",
       "default": "design-system",
       "x-priority": "important"
     },
@@ -23,7 +23,7 @@
     },
     "directory": {
       "type": "string",
-      "description": "Workspace-relative directory for the library. Defaults to `packages/<name>`. The app's sass load path is derived from this directory's PARENT, so the in-repo specifier is always `<dir-name>/styles`.",
+      "description": "Workspace-relative directory for the library. Defaults to `<libs-dir>/<name>`, where `<libs-dir>` is DETECTED from the workspace: `nx.json` `workspaceLayout.libsDir` if set, else inferred from where existing libraries live (so a `libs/` workspace gets `libs/`), else the house default `packages`. The app's sass load path is derived from this directory's PARENT, so the in-repo specifier is always `<dir-name>/styles`.",
       "x-priority": "internal"
     },
     "prefix": {
