@@ -1,0 +1,3 @@
+// <%= name %> secondary entry-point (<%= packageName %>/<%= name %>).
+// Public surface of this entry-point — re-export what consumers should import here.
+export {};

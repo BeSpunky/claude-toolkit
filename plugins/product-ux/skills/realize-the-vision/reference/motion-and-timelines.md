@@ -48,7 +48,7 @@ The rule: research the **native** engine for the motion the Staging calls for be
 
 - Modern Angular leans on **native CSS + Web Animations API**; `@angular/animations` is comparatively heavy and de-emphasized — reach for it only when its trigger/state ergonomics genuinely fit.
 - **Router-level View Transitions are built in:** `provideRouter(routes, withViewTransitions())` animates route changes with the native API.
-- **Wrap GSAP/imperative engines behind a seam** (`engineering:angular-native-wrappers`): create/kill in a directive or service, run animation outside Angular (`NgZone.runOutsideAngular`) to avoid change-detection thrash, and clean up on destroy (`gsap.context()` + `DestroyRef`/`ngOnDestroy`). Never let the library leak across the component boundary.
+- **Wrap GSAP/imperative engines behind a seam** (`bespunky-engineering:angular-native-wrappers`): create/kill in a directive or service, run animation outside Angular (`NgZone.runOutsideAngular`) to avoid change-detection thrash, and clean up on destroy (`gsap.context()` + `DestroyRef`/`ngOnDestroy`). Never let the library leak across the component boundary.
 
 ## When NOT to
 

@@ -22,10 +22,23 @@ tools/publish-nx-tools/publish.sh --dry-run
 
 # real publish (bump the version in assets/nx-tools/package.json first):
 tools/publish-nx-tools/publish.sh
+
+# npm 2FA on the account? pass a one-time code:
+tools/publish-nx-tools/publish.sh --otp 123456
 ```
 
-Runs in Docker (host Node is too old) with your `~/.npmrc` mounted for auth — **you** run it; it needs
-your npm credentials (the same ones you publish other `@bespunky/*` packages with).
+**You** run it; it needs your npm credentials (the same ones you publish other `@bespunky/*` packages with),
+read from your `~/.npmrc`.
+
+**Where it runs.** Docker was never the requirement — a modern **Node** was, and Docker only existed here to
+supply one. So it now runs **locally when the local Node is 22.18+** (the bar is type-stripping, which
+`compile-generators.mts` needs unflagged), and falls back to the `typescript-node` image otherwise. Force the
+container with `--docker`. Both paths run the same rendered command sequence, so they can't drift.
+
+**2FA.** If the account requires an OTP for writes, a 30-second TOTP code can expire during the staging +
+compile. The native path is faster, which narrows that window but doesn't close it — the robust fix is an npm
+**automation token** (or a granular token that bypasses 2FA) in `~/.npmrc`, after which publishes run unattended
+with no `--otp` at all.
 
 ## Bootstrapping order
 

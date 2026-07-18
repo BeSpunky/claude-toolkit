@@ -1,15 +1,30 @@
 {
   "name": "@bespunky/nx-tools",
-  "version": "0.1.0",
-  "description": "BeSpunky house Nx generators: project scaffolding (serve-options, devcontainer, claude-settings, firebase-emulators, playwright) and reusable-tool extraction (mark-extractable, adopt-extracted).",
+  "version": "0.10.0",
+  "description": "BeSpunky house Nx generators and executors. Generators cover workspace and app scaffolding (app, devcontainer, Claude settings, Playwright, Firebase emulators), the dev loop (serve, shared browser, worktree domains), the design system (tokens, themes, themed components), library authoring (publishable libs, secondary entrypoints, reusable-tool extraction), and app code (navigation, docs). Plus the unified `serve` executor — one composing dev loop that runs the app dev-server with the optional Firebase emulator suite and the optional shared co-driven browser (navigated to a pretty <slug>.localhost worktree domain) under a single graceful Ctrl+C, for the current or any chosen git worktree, with whole-stack --portOffset isolation (main tree pinned to the base ports).",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BeSpunky/claude-toolkit",
+    "url": "git+https://github.com/BeSpunky/claude-toolkit.git",
     "directory": "plugins/project-starter/skills/new-project/assets/nx-tools"
   },
   "keywords": ["nx", "nx-plugin", "generators", "bespunky"],
   "generators": "./generators.json",
-  "files": ["generators.json", "src/**/*.js", "src/**/*.json"],
+  "executors": "./executors.json",
+  "dependencies": {
+    "enquirer": "^2.3.6"
+  },
+  "peerDependencies": {
+    "@nx/devkit": ">= 23.0.0",
+    "@nx/angular": ">= 23.0.0",
+    "@nx/js": ">= 23.0.0",
+    "@nx/eslint": ">= 23.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@nx/angular": { "optional": true },
+    "@nx/js": { "optional": true },
+    "@nx/eslint": { "optional": true }
+  },
+  "files": ["generators.json", "executors.json", "src/**/*.js", "src/**/*.json", "src/**/*.tpl", "src/**/*.template"],
   "publishConfig": { "access": "public" }
 }

@@ -34,7 +34,7 @@ When the Vision's *arc* is driven by movement through the page — the story unf
 ## On the house stack (Angular / Nx)
 
 - Use **`withViewTransitions()`** in the router for cinematic route changes for free.
-- Wrap **ScrollTrigger** per `engineering:angular-native-wrappers` — set up in a directive, `runOutsideAngular`, kill triggers on destroy, refresh on relevant changes.
+- Wrap **ScrollTrigger** per `bespunky-engineering:angular-native-wrappers` — set up in a directive, `runOutsideAngular`, kill triggers on destroy, refresh on relevant changes.
 - Prefer **native scroll-driven CSS / IntersectionObserver** for reveals before adding a library.
 
 ## When NOT to

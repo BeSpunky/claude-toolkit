@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "version": 2,
+  "title": "Serve executor",
+  "description": "The house dev loop: compose the app dev-server with the optional Firebase emulator suite and the optional shared co-driven browser (up + pretty-domain route + navigate) under ONE graceful Ctrl+C. Serves the current git worktree by default, or any chosen worktree (--worktree=<branch|slug|path>) without merging it back — the main tree always owns the base/forwarded ports (offset 0), each worktree an isolated, stable, verified-free port block (--portOffset). A missing shared-browser dependency WARNs and is skipped, never failing the serve. Delegates to the app's `dev-server` leaf (@angular/build:dev-server), forwarding its options (host, proxyConfig, ssl, …); the canonical development/production configurations live on THIS serve target (nx serve <app> --configuration=production).",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "Project whose dev-server to run. Defaults to the project this executor target is attached to."
+    },
+    "emulators": {
+      "type": "boolean",
+      "description": "Run the Firebase emulator suite (`firebase:emulators`) alongside the app dev-server. No-op when the resolved tree has no firebase.json. `--no-emulators` also opens the app with `?emulate=none`, so every service resolves to the real backend.",
+      "default": true
+    },
+    "sharedBrowser": {
+      "type": "boolean",
+      "description": "Bring up the always-on shared co-driven browser (noVNC on :6080) and navigate it to the app, so a human and an agent watch the change in the same browser. `--no-shared-browser` serves headless (open the app in your own tab). A missing browser dependency is warned and skipped — it never fails the serve.",
+      "default": true
+    },
+    "buildTarget": {
+      "type": "string",
+      "description": "The app build target the dev-server compiles. Set by serve's `development`/`production` configurations (→ `<app>:build:<config>`) and forwarded to the `dev-server` leaf; run `nx serve <app> --configuration=production` to pick one."
+    },
+    "host": {
+      "type": "string",
+      "description": "Dev-server host, forwarded to the `dev-server` leaf (default 0.0.0.0 so it's reachable from outside the devcontainer)."
+    },
+    "proxyConfig": {
+      "type": "string",
+      "description": "Proxy config path, forwarded to the `dev-server` leaf."
+    },
+    "ssl": {
+      "type": "boolean",
+      "description": "Serve over HTTPS (forwarded to the dev-server)."
+    },
+    "sslCert": {
+      "type": "string",
+      "description": "SSL certificate path (forwarded to the dev-server)."
+    },
+    "sslKey": {
+      "type": "string",
+      "description": "SSL key path (forwarded to the dev-server)."
+    },
+    "open": {
+      "type": "boolean",
+      "description": "Open the app in a browser on start (forwarded to the dev-server)."
+    },
+    "liveReload": {
+      "type": "boolean",
+      "description": "Toggle live-reload (forwarded to the dev-server)."
+    },
+    "hmr": {
+      "type": "boolean",
+      "description": "Toggle HMR (forwarded to the dev-server)."
+    },
+    "poll": {
+      "type": "number",
+      "description": "File-watch poll interval in ms (forwarded to the dev-server)."
+    },
+    "worktree": {
+      "type": "string",
+      "description": "Which git worktree to serve. Omit to serve the current cwd's tree; pass a value to match by branch name, DNS slug, or path; pass an empty value in an interactive terminal to pick one from an arrow-key prompt."
+    },
+    "portOffset": {
+      "type": ["string", "number"],
+      "description": "Isolate the whole stack (app dev-server + emulator suite) on its own port block so it never collides with a server already running. 'auto' pins the MAIN tree to offset 0 (the base/forwarded ports — real Google OAuth lives here) and gives each worktree a stable, verified-free block; a positive integer pins a specific offset; '0' forces the base stack. Accepts a bare number (`--portOffset=12000`) as well as the string forms — the Nx CLI coerces a numeric arg to a number, so string-only would reject it.",
+      "default": "auto"
+    },
+    "install": {
+      "type": "boolean",
+      "description": "Run 'yarn install' in the chosen worktree when it has no node_modules (worktrees start empty).",
+      "default": true
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "Print the resolved tree, offset, app port, slug, each composed layer, and the URLs that would open — without installing, serving, or touching the browser.",
+      "default": false
+    }
+  },
+  "required": []
+}

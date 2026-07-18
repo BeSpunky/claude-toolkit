@@ -42,10 +42,13 @@ yarn install
 # one-click install on first session instead.
 echo "[post-create] pre-installing claude-toolkit plugins"
 if claude plugin marketplace add BeSpunky/claude-toolkit \
-    && claude plugin install project-starter@claude-toolkit --scope project \
-    && claude plugin install engineering@claude-toolkit --scope project \
-    && claude plugin install browser-automation@claude-toolkit --scope project \
-    && claude plugin install product-ux@claude-toolkit --scope project; then
+    && claude plugin install bespunky@claude-toolkit --scope project \
+    && claude plugin install bespunky-project-starter@claude-toolkit --scope project \
+    && claude plugin install bespunky-engineering@claude-toolkit --scope project \
+    && claude plugin install bespunky-workflow@claude-toolkit --scope project \
+    && claude plugin install bespunky-browser-automation@claude-toolkit --scope project \
+    && claude plugin install bespunky-product-ux@claude-toolkit --scope project \
+    && claude plugin install bespunky-design-system@claude-toolkit --scope project; then
   echo "[post-create] claude-toolkit plugins installed at project scope"
 else
   echo "[post-create] NOTE: Claude plugin pre-install skipped; .claude/settings.json will offer install on first run"
@@ -120,6 +123,113 @@ if grep -q '"@playwright/test"' package.json 2>/dev/null; then
     echo "[post-create] WARNING: Playwright browser install failed after 3 attempts — likely a transient network/DNS issue."
     echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
     echo "[post-create]            yarn playwright install --with-deps chromium"
+  fi
+fi
+
+# --- 5. Angular agent skills (auto-detected via @angular/core in package.json) ---
+# Angular ships official agent skills (angular-developer, angular-new-app) at
+# github.com/angular/skills, authored in Claude's own SKILL.md format (name/description
+# frontmatter + a references/ dir of progressive-disclosure docs). We fetch them FRESH
+# into .claude/skills/ on every container build rather than vendoring copies, so they
+# track upstream Angular with zero maintenance: the skills repo is itself auto-generated
+# from angular/angular, so a fork would silently go stale. The committed `.mcp.json`
+# (Angular CLI MCP server) is the always-current *knowledge* channel; these skills are
+# the always-loaded, triggerable companion. `.claude/skills/` is gitignored (a
+# refreshable cache, like node_modules) — the @bespunky/nx-tools:angular-ai generator
+# added that ignore rule. Best-effort with retry: a network blip never fails the build
+# (same stance as the plugin pre-install and Playwright steps above).
+if grep -q '"@angular/core"' package.json 2>/dev/null; then
+  echo "[post-create] @angular/core detected — fetching Angular agent skills into .claude/skills/"
+  skills_ok=0
+  for attempt in 1 2 3; do
+    ng_skills_tmp="$(mktemp -d)"
+    if git clone --depth 1 --quiet https://github.com/angular/skills "$ng_skills_tmp" 2>/dev/null; then
+      mkdir -p "$WS/.claude/skills"
+      for s in angular-developer angular-new-app; do
+        if [ -d "$ng_skills_tmp/$s" ]; then
+          rm -rf "$WS/.claude/skills/$s"
+          cp -r "$ng_skills_tmp/$s" "$WS/.claude/skills/$s"
+        fi
+      done
+      rm -rf "$ng_skills_tmp"
+      skills_ok=1
+      break
+    fi
+    rm -rf "$ng_skills_tmp"
+    if [ "$attempt" -lt 3 ]; then
+      echo "[post-create] Angular skills fetch attempt $attempt/3 failed (often transient DNS); retrying in $((attempt * 5))s..."
+      sleep $((attempt * 5))
+    fi
+  done
+  if [ "$skills_ok" = 1 ]; then
+    echo "[post-create] Angular agent skills ready (.claude/skills/{angular-developer,angular-new-app})"
+  else
+    echo "[post-create] WARNING: Angular skills fetch failed after 3 attempts — likely a transient network issue."
+    echo "[post-create]          The container is otherwise ready; refetch this one step once the network settles with:"
+    echo "[post-create]            t=\$(mktemp -d); git clone --depth 1 https://github.com/angular/skills \"\$t\" && mkdir -p .claude/skills && cp -r \"\$t\"/angular-developer \"\$t\"/angular-new-app .claude/skills/ && rm -rf \"\$t\""
+  fi
+fi
+
+# --- 6. Shared-browser prerequisites (ALWAYS-ON — provisioned in EVERY BeSpunky devcontainer) ---
+# The claude-toolkit "shared-browser" capability (tools/shared-browser, started ON DEMAND)
+# runs a headed Chromium on a virtual X display and streams it to the human over noVNC on
+# :6080. The stack starts lazily, but its OS deps are installed ALWAYS — so any container can
+# co-drive a browser with no rebuild. Deps: x11vnc (VNC server) + novnc/websockify (the
+# noVNC web client + WS↔TCP bridge) + fluxbox (a minimal WM so Chromium gets a window frame)
+# + fonts (liberation + color-emoji so rendered pages and screenshots look right). Also procps
+# (sysctl) — the worktree-domains proxy (tools/worktree-domains) lowers this container's
+# net.ipv4.ip_unprivileged_port_start so its Node reverse proxy can bind the privileged :80 as
+# the non-root `node` user, giving each worktree a pretty http://<slug>.localhost/ domain.
+#
+# UNCONDITIONAL by design: this fires on every scaffold — it is NOT gated on --firebase,
+# @playwright/test, or any other flag (unlike steps 3–5). Best-effort with retry: apt mirrors
+# and cdn.playwright.dev are both occasionally flaky over WSL+Docker DNS, so a transient
+# failure must only WARN — never abort post-create (set -e) and leave the container
+# half-provisioned (same stance as the Playwright and Angular-skills steps above).
+echo "[post-create] provisioning shared-browser prerequisites (xvfb/x11vnc/novnc/websockify/fluxbox/fonts + Chromium)"
+sb_apt_ok=0
+for attempt in 1 2 3; do
+  if sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 procps curl fonts-liberation fonts-noto-color-emoji; then
+    sb_apt_ok=1; break
+  fi
+  if [ "$attempt" -lt 3 ]; then
+    echo "[post-create] shared-browser apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+    sleep $((attempt * 10))
+  fi
+done
+if [ "$sb_apt_ok" = 1 ]; then
+  echo "[post-create] shared-browser apt deps ready"
+else
+  echo "[post-create] WARNING: shared-browser apt deps failed after 3 attempts — likely a transient network issue."
+  echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
+  echo "[post-create]            sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 procps curl fonts-liberation fonts-noto-color-emoji"
+fi
+
+# Ensure a Playwright Chromium binary exists for the shared browser to launch (the CLI resolves
+# it at runtime via whichever of playwright / playwright-core / @playwright/test is installed).
+# Step 4 already fetched it when @playwright/test is in package.json — so here we only install
+# if it is still MISSING, avoiding a redundant ~150 MB download. Best-effort + retry; a failure
+# only warns (the shared-browser CLI's own guard also runs `npx playwright install chromium` on
+# first `up` if it is absent, so this is provisioning-ahead, not a hard requirement).
+if [ -d /home/node/.cache/ms-playwright ] && \
+   find /home/node/.cache/ms-playwright -maxdepth 1 -type d -name 'chromium-*' 2>/dev/null | grep -q .; then
+  echo "[post-create] shared-browser: Playwright Chromium already present — skipping install"
+else
+  echo "[post-create] shared-browser: Playwright Chromium not found — installing"
+  sb_pw_ok=0
+  for attempt in 1 2 3; do
+    if npx --yes playwright install chromium; then sb_pw_ok=1; break; fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "[post-create] shared-browser Chromium install attempt $attempt/3 failed (often transient DNS); retrying in $((attempt * 10))s..."
+      sleep $((attempt * 10))
+    fi
+  done
+  if [ "$sb_pw_ok" = 1 ]; then
+    echo "[post-create] shared-browser: Playwright Chromium ready"
+  else
+    echo "[post-create] WARNING: shared-browser Chromium install failed after 3 attempts — likely a transient network issue."
+    echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
+    echo "[post-create]            npx playwright install chromium"
   fi
 fi
 

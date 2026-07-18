@@ -30,7 +30,7 @@ The senses past sight. A world can *sound* like somewhere and *feel* like someth
 
 ## On the house stack (Angular / Nx)
 
-- Wrap the **`AudioContext`/audio graph** in a service (`engineering:angular-native-wrappers`): own creation behind a user gesture, expose a small play/mute API, run scheduling `outside` Angular, and dispose on destroy.
+- Wrap the **`AudioContext`/audio graph** in a service (`bespunky-engineering:angular-native-wrappers`): own creation behind a user gesture, expose a small play/mute API, run scheduling `outside` Angular, and dispose on destroy.
 - Keep a single **sound-preference signal/service** (muted? opted-in?) the whole app honors — like the reduced-motion signal — so consent is enforced by design, not per component.
 - Lazy-load audio assets with the immersive feature's Nx boundary; don't tax first load.
 

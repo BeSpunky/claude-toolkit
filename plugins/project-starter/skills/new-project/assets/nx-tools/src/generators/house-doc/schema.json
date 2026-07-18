@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "version": 2,
+  "title": "House doc generator",
+  "description": "Write the generated HOUSE.md house-conventions reference (carrying the toolkit version stamp in its header), and keep the bounded pointer to it in CLAUDE.md. Generator-owned: HOUSE.md is rewritten every run; only the marker-delimited pointer block in CLAUDE.md is touched.",
+  "type": "object",
+  "properties": {
+    "firebase": {
+      "type": "boolean",
+      "description": "Render the Firebase sections of HOUSE.md. Defaults to auto-detect (firebase.json at the workspace root)."
+    },
+    "nxToolsVersion": {
+      "type": "string",
+      "description": "The @bespunky/nx-tools version these generators come from, stamped into HOUSE.md's header. This is the version the SessionStart hook compares — it determines what the generators produce. Passed by scaffold.sh; defaults to 'unknown' on a direct generator call."
+    },
+    "pluginVersion": {
+      "type": "string",
+      "description": "The bespunky-project-starter plugin version that shipped these generators, stamped into HOUSE.md's header for provenance. Deliberately NOT what the hook compares (the house convention bumps it on any change, including ones that regenerate nothing). Passed by scaffold.sh; defaults to 'unknown' on a direct generator call."
+    }
+  },
+  "required": []
+}

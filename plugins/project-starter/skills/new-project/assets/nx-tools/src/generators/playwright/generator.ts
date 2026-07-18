@@ -10,7 +10,7 @@
 //
 // We also do NOT generate a playwright.config.ts or an Nx e2e project. "Ready
 // to use" here means "Claude can run ad-hoc Playwright scripts from Bash the
-// moment the container opens" (see the `browser-automation:playwright` skill).
+// moment the container opens" (see the `bespunky-browser-automation:playwright` skill).
 // If the user wants a real e2e suite, that's a separate, deliberate decision:
 // `nx g @nx/playwright:configuration --project=<app>` does it the Nx-native way.
 //

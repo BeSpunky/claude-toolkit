@@ -1,4 +1,8 @@
 node_modules/
 .DS_Store
 *.log
-.claude/data/
+
+# Claude runtime state (auth/plugins), bind-mounted to /home/node/.claude in the devcontainer.
+# Keep the dir tracked (via .gitkeep) so a fresh clone binds a real node-owned dir, not a root-created one.
+.claude/data/*
+!.claude/data/.gitkeep

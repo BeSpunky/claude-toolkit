@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "executors": {
+    "serve": {
+      "implementation": "./src/executors/serve/executor",
+      "schema": "./src/executors/serve/schema.json",
+      "description": "The house dev loop as ONE composing executor: run the app's `dev-server` leaf plus — on a Firebase tree — the `firebase:emulators` suite, plus (by default) the shared co-driven browser navigated to the app, all under a single graceful Ctrl+C across N children. Serves the current git worktree, or any chosen one (--worktree=<branch|slug|path>), without merging it back: the MAIN tree always owns the base/forwarded ports (offset 0 — real Google OAuth lives here), each worktree an isolated, stable, verified-free port block (--portOffset auto) so its whole stack (app + emulators) shifts in lockstep and never collides. Each worktree is reached at a pretty `<slug>.localhost` domain (via tools/worktree-domains) with the noVNC viewer on :6080. Flags: --no-emulators (skip the suite; open the app with ?emulate=none for real services), --no-shared-browser (serve headless), --configuration, --install, --dryRun. A missing shared-browser dependency WARNs and is skipped — it never fails the serve. Replaces the old serve-worktree executor and folds in the serve-with-shared-browser orchestration."
+    }
+  }
+}

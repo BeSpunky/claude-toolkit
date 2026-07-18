@@ -19,7 +19,7 @@ Immersion that stutters betrays the feeling. A 60fps fade beats a 30fps spectacl
 
 ## Bundle & load budgets
 
-- **Every library is weight.** Motion (~tens of KB), GSAP (~78KB), three.js (large), Lottie JSON (often big). Justify each against the feeling; **lazy-load** experience-heavy code and assets so the first paint isn't taxed (own Nx boundary — `engineering:nx-monorepo-and-dx`).
+- **Every library is weight.** Motion (~tens of KB), GSAP (~78KB), three.js (large), Lottie JSON (often big). Justify each against the feeling; **lazy-load** experience-heavy code and assets so the first paint isn't taxed (own Nx boundary — `bespunky-engineering:nx-monorepo-and-dx`).
 - **Don't ship a sledgehammer for a tack** — a CSS transition or tiny SVG often replaces a whole library. Reach for the lightest means that honors the feeling.
 - **Assets are part of the budget** — compress textures/models/video; provide modern formats; stream or progressively load big media (with an in-world loading moment — `keep-users-oriented`).
 
@@ -40,7 +40,7 @@ Two UX non-negotiables that live at the build layer (the *why* is in `astonishin
 
 - **Run animation loops `outside` Angular** (`NgZone.runOutsideAngular`, or zoneless change detection) so each frame doesn't trigger change detection — a top cause of animation jank in Angular.
 - Keep experience-heavy features in **lazy-loaded routes/boundaries**; use `@defer` for below-the-fold immersive blocks.
-- Wrap imperative engines with proper teardown so dead scenes don't keep burning frames (`engineering:angular-native-wrappers`).
+- Wrap imperative engines with proper teardown so dead scenes don't keep burning frames (`bespunky-engineering:angular-native-wrappers`).
 
 ## When a budget genuinely can't hold the Vision
 

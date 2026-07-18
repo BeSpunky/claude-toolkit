@@ -4,116 +4,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+<!-- @bespunky/house-tooling:start (generated pointer — do not edit between these markers; `scaffold.sh --repair` regenerates it) -->
+## House tooling & conventions → read [`HOUSE.md`](HOUSE.md)
+
+The house **architecture directives** (architect-mentality, **architecture-first**, redesign-means-rethink, **design-system-first**), the **branch & release workflow**, and the mechanical how-to — serve · worktrees{{#firebase}} · Firebase{{/firebase}} · design system · shared browser · generators · Nx · Playwright — live in **[`HOUSE.md`](HOUSE.md)**, a **generator-owned** file regenerated on every `scaffold.sh --repair` to match the installed `@bespunky/nx-tools`. **Never hand-edit `HOUSE.md`.** Its directives are **mandatory, not optional reference — read `HOUSE.md` before you design, style, serve, branch, or drive the browser.**
+<!-- @bespunky/house-tooling:end -->
+
 ## Project Overview / Intentions
 
 <!-- Filled in by the new-project skill from the user's stated intentions. -->
 {{INTENTIONS}}
 
-## Architect mentality
-
-Approach every decision — at any scale, from a single function to the whole workspace — as a software architect. Treat **everything as a black box**: a clear boundary, a small deliberate public contract, hidden internals, dependencies received from the outside, and connections to other black boxes only through well-defined, intentionally-directed connection types (dependency injection, parent–child, layered/domain-driven dependency rules). Never reach across a boundary into another box's internals. **Place every element on purpose** — every line, `if`, constant, config, abstraction, and dependency is there deliberately; put each concern where it *belongs* (the place dedicated to it), never merely where it "fits" or happens to work. Model the missing **concept** instead of working around gaps; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the next consumer; lead with *why* and one consistent mental model; **build for the goal, not the brief** — a request is a pointer to an outcome, so deliver the outcome (including the surrounding pieces the user implied), generalize examples to the class they represent, and resolve ambiguity by reasoning over the context rather than waiting for a fully-specified brief; and **go the extra mile — always** (find or invent the elegant solution; never settle for the easy-but-complex; *easy ≠ simple*). Be lazy about repetition — **automate every repeated process** (never do the same thing by hand twice; derive from a single source of truth and make it runnable in one step) — and relentless about design quality.
-
-For the full mindset, think with the **`engineering:architect-mentality`** skill. It is the *why*; the section below is the *operational rule* that enforces it.
-
-## Architecture-first (non-negotiable)
-
-Every change — feature, bug, edge case, or "quick fix" — is solved through **design and infrastructure, never a patch.** No special-case `if`s keyed on one input/customer/env, no magic values, no copy-paste, no boolean flags to make one unit do two things, no casts to silence a type mismatch, no bumped timeouts to mask a structural problem. **For bugs, find and fix the root cause — never mask the symptom** (no swallowed errors, defaulted bad data, or guards bolted on at the symptom site). When the current design does not account for a requirement, **redesign and refactor** the relevant seam (model the missing concept, extract, decouple, build the missing abstraction, reuse) so the new behavior is a natural case of the design — don't bolt it on. Coupling, duplication, and special-casing must never grow. **If a refactor is needed to lay infrastructure for a feature or to fix a bug, design it first, get confirmation, and only then implement** — never refactor ad hoc mid-edit; if a correct redesign is genuinely large, surface it and its cost rather than patching silently.
-
-For any non-trivial change, invoke the **`engineering:architecture-first`** skill before writing code — it carries the full loop, the bug root-cause and refactor gates, the patch smells to refuse, and the redesign moves.
-
-## Redesign means rethink
-
-When asked to **redesign** any UI — a layout, screen, page, component, or flow — treat it as a **complete creative reconception from scratch**, never a modification or reskin of what exists. The existing implementation has **zero design authority**: do **not** read it to inform the new design, and don't even look at it before conceiving the new one. Reconceive the **form** from the intent, the requirements, and the feeling; honor the **purpose** (what the thing is for, its data and functionality), which comes from the spec and the user — never reverse-engineered from the old layout. Read the existing code **only after** the new design exists — to plan what to clean up, overwrite, or migrate, and to confirm what functionality must survive — then build the new design cleanly and **remove the old**. (A *targeted tweak* — "move this button", "change this colour" — is **not** a redesign; don't inflate it into one.)
-
-For any redesign, invoke the **`product-ux:redesign-means-rethink`** skill — the entry gate to the experience-design trio (`envision-the-experience` → `stage-the-vision` → `realize-the-vision`, run from scratch).
-
-## Stack
-
-- **Monorepo**: Nx, integrated layout (`apps/` + `libs/`).
-- **Framework**: Angular (clean `--minimal` app; no demo content).
-- **Package manager**: yarn.
-- **Dev environment**: devcontainer on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the base image) with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds.
-
-{{#firebase}}
-## Firebase
-
-This project was scaffolded with `--firebase`. **Local development uses the emulator suite, offline** — `nx serve <app>` runs the workspace-level `firebase:emulators` task and the dev server (`<app>:serve-app`) in parallel, under the offline project id `demo-<workspaceName>`. No `firebase login`, no cloud project, no `.firebaserc` is needed for development. By design. (`nx run <app>:serve-app` alone serves without emulators; the Nx TUI is disabled in `nx.json` so both tasks stream plain prefixed logs and one Ctrl+C stops the run.)
-
-### Cloud Functions (apps/functions)
-
-Cloud Functions are a first-class Nx app: `nx build functions` (esbuild) bundles `apps/functions/src/main.ts` into `dist/apps/functions` with a generated deploy-manifest `package.json`; the emulator and `firebase deploy` both consume that dist output (`firebase.json` → `functions.source`). Runtime deps (`firebase-admin`/`firebase-functions`) live at the **workspace root** — no per-project `node_modules`. Deploy with `nx run functions:deploy`. **Platform firewall (ESLint-enforced):** `platform:web` projects must never import `firebase-admin`/`firebase-functions`; `platform:server` projects (`functions`, `firebase`) must never import `firebase`/`@angular/*`. Tag new libraries accordingly.
-
-### Emulator seeds, caching & reset (no re-onboarding each serve)
-
-The emulators **persist and seed their data**. The launch path is `tools/emulators.sh` (all `firebase:emulators*` targets funnel through it): it reaps stale processes, primes the **gitignored working dir** `.emulator-data/` from a seed, then starts the suite with `--import .emulator-data` and (full runs only) `--export-on-exit .emulator-data`. So session + data **cache across serves**: onboard once, stay in. Sign in with a seeded email and the Auth emulator matches the existing account by email — you inherit the seeded uid and its docs.
-
-- **Seeds** are committed, known-good worlds under `tools/emulator-seeds/` (see its README for the catalog). They are **generated artifacts**, never hand-edited.
-- **Reset (on-call):** `yarn nx run firebase:reset` — takes effect on the next serve. Add `reset:<seed>` targets in `firebase/project.json` for extra worlds.
-- **Rebuild seeds:** `yarn nx run firebase:seed:build`.
-
-**Directive — the seed is part of the schema contract.** The seeds' single source of truth is the **declarative** `tools/seed/world.mjs` (a description of accounts + Firestore docs, applied by a generic encoder — adding a field/collection/world is purely additive; the build orchestrator derives the seed list from it). **Whenever a Firestore document shape changes or a feature gains a backend, update the matching world in `world.mjs` and rebuild, committing `tools/emulator-seeds/`** — so the seed never drifts from the code.
-
-### Auth gotchas (devcontainer)
-
-- `environment.ts` ships an `authDomain` — required for any OAuth provider sign-in (popup *and* redirect refuse without it, even against the Auth emulator). Don't remove it.
-- Inside a devcontainer, prefer **`signInWithRedirect`** over popup for OAuth — popups fail with `Sending authEvent failed` across the forwarded-port boundary.
-- The VS Code **Simple Browser cannot complete OAuth** flows; verify sign-in in a real host browser. The devcontainer forwards the dev server + emulator ports to the **same host ports** (`forwardPorts`) precisely so a host browser works — if you re-port an emulator, update `firebase.json`, `environment.ts`, AND `.devcontainer/devcontainer.json` together.
-
-**When the user asks to deploy this app — or otherwise connect it to a real Firebase project — walk them through these steps** (from the workspace root inside the devcontainer, where the Firebase CLI is installed). The BeSpunky default is Firebase **App Hosting** (framework-aware; config in `apphosting.yaml`), not classic static Hosting:
-
-1. `firebase login` — one-time auth against their Google account (opens a browser).
-2. `firebase use --add` — picks a project from their account and writes `.firebaserc`. If they don't have a project yet, create it first (Firebase console or `firebase projects:create <id>`).
-3. `firebase apphosting:backends:create --project <projectId>` — one-time: creates the App Hosting backend (interactive — picks region and **links a GitHub repo**). **Link the repo this project was scaffolded with** — that linkage is what sets up deploy CI: Firebase provisions its own Cloud Build pipeline and auto-deploys on every push to the configured branch.
-4. `firebase apps:sdkconfig WEB <appId> --project <projectId>` — prints the real web config for client-side SDK init.
-5. Paste the returned `firebaseConfig` fields into `firebase` in **`apps/<APP>/src/environments/environment.prod.ts`** — the production environment file, which the Angular build swaps in for `environment.ts` via `project.json`'s `targets.build.configurations.production.fileReplacements` (Angular's canonical environment-files pattern). Never edit `apps/<APP>/src/app/firebase.config.ts` — that's structural code the generator owns end-to-end.
-
-After the backend is created, **App Hosting deploys are GitHub-driven**: pushing to the configured branch triggers a Cloud Build → Cloud Run deploy. Tweak build/runtime behavior in `apphosting.yaml` at the workspace root.
-
-**The CI/deploy pipeline is Firebase's, not ours.** This project ships **no GitHub Actions deploy workflow** — linking the repo at step 3 hands CI/CD to Firebase's GitHub integration, which creates and maintains the Cloud Build config. That's deliberate: it means deploys keep working as Firebase evolves its mechanism, with nothing in this repo to update. (The project's GitHub repo is created automatically at scaffold time, so it already exists to be linked.)
-
-**Never fabricate `.firebaserc` or the production config** — the Firebase CLI is the source of truth for cloud state. `provideAppFirebase()` throws at bootstrap if production is attempted with an empty `environment.firebase`, so silent broken deploys are impossible. Inside the devcontainer, **every interactive terminal shows a self-extinguishing banner** (`tools/firebase-welcome.sh`, sourced via `/etc/profile.d/zz-firebase-welcome.sh`) reminding the user of the recipe until setup is complete — when both `.firebaserc` exists and `environment.firebase.projectId` in `environment.prod.ts` is filled, the banner goes silent automatically. The same recipe also lives in the header of `environment.prod.ts` and in the `project-starter:new-project` skill.
-{{/firebase}}
-
-## Generator-first, manual last
-
-For anything Nx can generate - apps, libraries, components, services, project config - **use the Nx generator (`nx g ...`); never hand-create and fill files.** Before hand-writing anything structural, check what exists: `nx list <plugin>` / `nx g <generator> --help` (or the `nx-generate` skill / the Nx MCP server). Only fall back to manual file creation when no generator covers the task. **Never guess flags** - verify against `--help` / `nx_docs`.
-
-## Common Commands
-
-```bash
-# Generate the next Angular app or library (generator-first!)
-yarn nx g @nx/angular:application apps/<app-name> --minimal
-yarn nx g @nx/angular:library libs/<lib-name>
-
-# Serve / build / test / lint a project
-yarn nx serve <project>
-yarn nx build <project>
-yarn nx test <project>
-yarn nx lint <project>
-
-# Run a target across everything affected by your changes
-yarn nx affected -t build test lint
-```
-
-## Working with Nx
-
-- For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies.
-- When running tasks (build, lint, test, e2e, etc.), always prefer `nx` (`nx run`, `nx run-many`, `nx affected`) over the underlying tooling directly.
-- Prefix nx commands with the workspace package manager (`yarn nx ...`) - avoids the globally installed CLI.
-- You have access to the Nx MCP server and its tools - use them.
-- For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
-- For scaffolding (apps, libs, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
-
-## Playwright (available out of the box)
-
-This devcontainer ships with **Chromium + Playwright pre-installed** (the devcontainer's `post-create.sh` runs `playwright install --with-deps chromium` when it detects `@playwright/test` in `package.json`, and the browser binary is cached in a per-workspace volume so rebuilds don't re-download). You can drive a real browser from a Bash script today — no `playwright install`, no apt step, no `sudo`.
-
-Use Playwright whenever you need to **observe** or **drive** the running app instead of reasoning about source: verify a UI change end-to-end, reproduce a user-reported bug in the actual browser, capture before/after screenshots, scrape Angular-rendered output, or generate test scaffolding via codegen. Always headless — there is no display in the container.
-
-For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` / `Claude_in_Chrome` MCPs, how to write a headless script, how to capture and feed back screenshots, common pitfalls), invoke the **`browser-automation:playwright`** skill before reaching for any browser-side check.
-
 ## Conventions
 
 - **Component/Directive prefix**: `{{PREFIX}}` (update as the project grows).
-- **Styling**: SCSS, component-scoped.
-- **Layout**: apps in `apps/`, libraries in `libs/`; one Nx project each.
+- **Styling**: SCSS — but **every visual value comes from the design system** (`packages/design-system`), never from the component. Summon it with `@use 'design-system/styles' as ds;` and read tokens (`ds.color('on-surface')`, `ds.space(3)`); a component's own SCSS should be little more than layout. See `HOUSE.md` → **Design-system-first**.
+- **Layout**: apps in `apps/`, libraries in `libs/`, publishable libraries (incl. the design system) in `packages/`; one Nx project each.

@@ -57,7 +57,19 @@
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "node",
 
-{{#firebase}}  // Forward the dev server + Firebase emulator ports to the SAME host port. This is
+  // Let the non-root `node` user bind privileged ports: the worktree-domains reverse proxy binds :80 so
+  // each worktree gets a pretty http://<slug>.localhost/ domain. This namespaced sysctl is applied at
+  // container start, so the proxy binds :80 with no runtime sudo.
+  "runArgs": ["--sysctl", "net.ipv4.ip_unprivileged_port_start=0"],
+
+  // Forward :80 (the worktree-domains reverse proxy → pretty http://<slug>.localhost/ URLs, reachable
+  // from a HOST browser too) and the shared-browser noVNC port (6080) in EVERY scaffold. The
+  // shared-browser stack (tools/shared-browser, started on demand) serves its noVNC web client on 6080,
+  // the ONLY shared-browser port forwarded — CDP 9223 and VNC 5900 stay bound to loopback, so full
+  // browser control never leaves the container. Always present, firebase or not; the Firebase
+  // dev-server + emulator ports are appended below when applicable.
+{{#firebase}}  //
+  // Firebase also forwards the dev server + emulator ports to the SAME host port. This is
   // REQUIRED for the app to work in a *host* browser: the page loads over forwarded
   // :4200, then the Firebase SDK *inside that page* calls the emulators at the
   // hardcoded localhost:9099 / localhost:8080 (environment.ts) — addresses that only
@@ -70,11 +82,13 @@
   // host ports. If you ever do, remap one container's ports here AND in
   // environment.ts + firebase.json together (they must agree). For the normal
   // single-container case, same-port is correct.
-  "forwardPorts": [4200, 4000, 9099, 8080, 9150, 9199, 5001],
-{{/firebase}}  // `portsAttributes` labels the (forwarded or auto-detected) ports; `onAutoForward`
+{{/firebase}}  "forwardPorts": [80, 6080{{#firebase}}, 4200, 4000, 9099, 8080, 9150, 9199, 5001{{/firebase}}],
+  // `portsAttributes` labels the (forwarded or auto-detected) ports; `onAutoForward`
   // controls per-port notification behavior — backend emulators are silenced (you
   // rarely click into them), the dev server opens in the preview pane.
   "portsAttributes": {
+    "80": { "label": "Worktree domains (pretty <slug>.localhost URLs)", "onAutoForward": "silent" },
+    "6080": { "label": "Shared Browser (noVNC)", "onAutoForward": "notify" },
     "4200": { "label": "Angular Dev Server", "onAutoForward": "openPreview" }{{#firebase}},
     "4000": { "label": "Firebase Emulator UI", "onAutoForward": "notify" },
     "9099": { "label": "Auth Emulator", "onAutoForward": "silent" },

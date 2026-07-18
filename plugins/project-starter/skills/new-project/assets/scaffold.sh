@@ -22,35 +22,86 @@
 #                  deploy methodology). Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
-#   scaffold.sh [--firebase] [--no-github] <project-name> [app-name]         # full scaffold
-#   scaffold.sh --repair [--firebase] <project-path|project-name> [app-name] # re-apply house generators
+#   scaffold.sh [--firebase] [--no-github] <project-name> [app-name]                    # full scaffold
+#   scaffold.sh --repair [--firebase] [--no-backup] [--yes] <project-path|project-name> [app-name]
 #
-# Leading flags (--repair, --firebase, --no-github) may be given in any order.
+# Repair auto-backup: --repair snapshots the project to a git tag (repair-backup-<ts>) BEFORE running
+# any generator, so a regenerated file (e.g. firebase.config.ts) is always recoverable — review with
+# `git diff <tag>`, restore with `git checkout <tag> -- <path>`. A clean tree needs no tag (HEAD is the
+# restore point). If a backup is wanted but impossible (not a git repo) or fails, repair ABORTS rather
+# than change files unprotected. Opt out with --no-backup.
+#
+# Repair CONSENT GATE (--yes): a repair rewrites generated files, needs a Docker daemon, and takes
+# minutes — it must never happen because something *inferred* that it should. The SessionStart hook that
+# detects a stale project deliberately only RELAYS that fact; this gate is what makes that boundary
+# structural rather than a matter of an agent's good behavior:
+#   - on a TTY  : a human is present → prompt, and proceed only on an explicit "yes".
+#   - no TTY    : nobody can be asked (an agent's shell, a script) → REFUSE unless --yes is passed, which
+#                 ASSERTS a human has explicitly agreed in this session. An agent may pass it only after
+#                 the user actually said yes — never to satisfy the gate.
+#   - CI=true   : there is no human to consent, and --yes cannot conjure one → REFUSE unconditionally.
+# Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
+# clobber anything that already exists.
+#
+# Leading flags (--repair, --firebase, --no-github, --no-backup, --yes) may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 # Node comes from the typescript-node devcontainer base image, run via Docker - NO nvm.
 set -euo pipefail
 
 MODE="scaffold"
 FIREBASE=0
+STAGING=0  # --staging: also scaffold a first-class staging environment (requires --firebase).
 GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
+BACKUP=1   # repair snapshots the project to a git tag BEFORE mutating; --no-backup opts out.
+CONSENT=0  # --yes: asserts a human explicitly agreed to this repair (see the consent gate above).
 while [ "${1:-}" != "" ]; do
   case "$1" in
     --repair)     MODE="repair"; shift;;
     --firebase)   FIREBASE=1;    shift;;
+    --staging)    STAGING=1;     shift;;
     --no-github)  GITHUB=0;      shift;;
+    --no-backup)  BACKUP=0;      shift;;
+    --yes|-y)     CONSENT=1;     shift;;
     --*)          echo "ERROR: unknown flag '$1'" >&2; exit 1;;
     *)            break;;
   esac
 done
 
+# Nx release channel for the workspace create + the `nx add @nx/angular` step. Empty = latest stable.
+# Set NX_CHANNEL=next to honor the Nx-lag rule: scaffold on a beta Nx that supports a NEWER Angular
+# major than the latest *stable* Nx admits (e.g. Angular 22 on the Nx 23.1-beta line, when stable
+# @nx/angular still peers @angular/build <22). Then `nx migrate` to stable Nx once it ships support.
+NX_CHANNEL="${NX_CHANNEL:-}"
+NX_TAG=""
+[ -n "$NX_CHANNEL" ] && NX_TAG="@$NX_CHANNEL"
+# yarn 1.x mishandles `yarn create <pkg>@<tag>` (it tries to run a binary literally named
+# "<pkg>@<tag>" → not found). So use npx for the workspace create when a channel tag is set
+# (npx resolves the dist-tag correctly); the stable path (no tag) keeps the original `yarn create`.
+if [ -n "$NX_TAG" ]; then
+  CREATE_WORKSPACE="npx --yes create-nx-workspace$NX_TAG"
+else
+  CREATE_WORKSPACE="yarn create nx-workspace"
+fi
+
 ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Pin the workspace's @bespunky/nx-tools to the SAME version the staged generators come from (read from
+# the source package.json), so the installed runtime executors can never lag the applied project.json
+# shape — a 0.x MINOR bump (e.g. 0.3→0.4) would otherwise fall outside a hard-coded caret and silently
+# leave the project on the previous executor. Derived, never hand-maintained.
+NX_TOOLS_VERSION="$(grep -m1 '"version"' "$ASSETS_DIR/nx-tools/package.json" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+[ -n "$NX_TOOLS_VERSION" ] || NX_TOOLS_VERSION="0.4.0"
+# The plugin version that ships these assets, read from the manifest three levels up (assets/ lives at
+# <plugin>/skills/new-project/assets). Together with NX_TOOLS_VERSION it is STAMPED into the project by the
+# house-doc generator (into HOUSE.md's header — root-level and committed, so it reaches every clone), which
+# is what lets project-starter's SessionStart hook notice — with a few greps, not a Docker run — that the
+# installed toolkit has moved past this project, and ask for a repair. NX_TOOLS_VERSION is the one the hook
+# actually compares (it determines what the generators produce); PLUGIN_VERSION is provenance. Derived, never
+# hand-maintained; "unknown" if the manifest can't be read (a raw assets checkout), which the hook reads as
+# "behind" and resolves by repairing.
+PLUGIN_VERSION="$(grep -m1 '"version"' "$ASSETS_DIR/../../../.claude-plugin/plugin.json" 2>/dev/null | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+[ -n "$PLUGIN_VERSION" ] || PLUGIN_VERSION="unknown"
 GIT_NAME="$(git config --global user.name 2>/dev/null || whoami)"
 GIT_EMAIL="$(git config --global user.email 2>/dev/null || echo "$(whoami)@localhost")"
-
-# --- guards (apply to both modes) ---
-command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
-docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
-command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
 
 # --- resolve TARGET + PROJECT + APP based on mode ---
 if [ "$MODE" = "scaffold" ]; then
@@ -81,6 +132,47 @@ else
   APP="${APP:-$PROJECT}"
 fi
 
+# --- repair consent gate (see the header) ---
+# The point of this gate is that it cannot be satisfied by inference. A repair is a real, minutes-long,
+# file-rewriting action; the hook that notices a stale project can only SAY so. Consent has to come from a
+# human, and this is where that is enforced instead of hoped for.
+#
+# It runs FIRST — before the docker/curl guards below, before any network call, before anything is read or
+# written. An unconsented repair must fail for want of CONSENT, not trip over a missing daemon on its way to
+# the same place: "docker not found" would send an agent off to fix Docker and come back, which is precisely
+# the inference this gate exists to stop.
+if [ "$MODE" = "repair" ]; then
+  if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
+    echo "ERROR: refusing to repair in CI — a repair rewrites generated files and no human is here to agree." >&2
+    echo "       Run it locally, review the diff against the backup tag, and commit the result." >&2
+    exit 1
+  fi
+
+  if [ "$CONSENT" != "1" ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      echo "About to repair '$TARGET': re-runs the house generators, REWRITING generated files"
+      echo "(HOUSE.md, .claude/settings.json, .devcontainer/*, serve/worktree/design-system targets)."
+      echo "A pre-repair snapshot is taken first (git tag), unless --no-backup."
+      printf "Proceed? [y/N] "
+      read -r reply
+      case "$reply" in
+        [yY] | [yY][eE][sS]) ;;
+        *) echo "Aborted — nothing was changed." >&2; exit 1 ;;
+      esac
+    else
+      echo "ERROR: refusing to repair without consent — nothing is attached to this shell to ask." >&2
+      echo "       A repair rewrites generated files, needs Docker, and takes several minutes." >&2
+      echo "       If (and ONLY if) the user has explicitly agreed to it, re-run with --yes." >&2
+      exit 1
+    fi
+  fi
+fi
+
+# --- guards (apply to both modes; AFTER the consent gate, so an unconsented repair never gets here) ---
+command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
+command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
+
 # --- resolve newest Node major that has a typescript-node devcontainer image ---
 echo "Resolving latest typescript-node base image..."
 MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
@@ -88,58 +180,98 @@ MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/
 [ -n "${MAJOR:-}" ] || MAJOR=24
 IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
 echo "Base image: $IMAGE"
+[ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
 
 # --- devcontainer generator args ---
 DEVCONTAINER_FLAGS=""
 [ "$FIREBASE" = "1" ] && DEVCONTAINER_FLAGS=" --firebase=true"
 
-# --- firebase-emulators block (only when --firebase): scaffold emulator config + Nx targets + app init.
-#     The generator itself adds `firebase` + `@angular/fire` to package.json and runs the package-manager install
-#     post-commit (via installPackagesTask), so versions resolve to current at scaffold time. No shell-side `yarn add`. ---
-FIREBASE_BLOCK=""
+# --- Firebase opt-in plumbing ---
+#   Scaffold mode: the house `app` generator owns the per-app Firebase wiring; we just tell it
+#     whether this is a Firebase workspace. firebase.json doesn't exist yet at first-app time, so
+#     the generator can't auto-detect — pass the answer explicitly (the generator auto-detects only
+#     for LATER apps, when firebase.json is already committed).
+#   Repair mode: the app already exists, so we re-apply the per-app Firebase generator directly to
+#     it (the `app` generator CREATES apps; it is not the heal path). The generator adds `firebase`
+#     + `@angular/fire` to package.json and runs the package-manager install post-commit (via
+#     installPackagesTask), so versions resolve to current at scaffold time. No shell-side `yarn add`.
+APP_FIREBASE_FLAG="--firebase=false"
+[ "$FIREBASE" = "1" ] && APP_FIREBASE_FLAG="--firebase=true"
+# --staging (opt-in) requires Firebase; it adds environment.staging.ts + a `staging` build config +
+# apphosting.staging.yaml so the workflow's staging App Hosting backend builds its own config/database.
+[ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires --firebase." >&2; exit 1; }
+APP_STAGING_FLAG=""
+[ "$STAGING" = "1" ] && APP_STAGING_FLAG=" --staging=true"
+REPAIR_FIREBASE_BLOCK=""
 if [ "$FIREBASE" = "1" ]; then
-  FIREBASE_BLOCK="
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT"
+  REPAIR_FIREBASE_BLOCK="
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG"
 fi
 
-# --- house-generators block (used by both modes; idempotent) ---
+# --- house tooling: stage @bespunky/nx-tools (used by both modes) ---
 # @bespunky/nx-tools is bundled scaffold-time tooling: we copy it into node_modules but never
 # declare it in package.json (it must not ship in the generated project). The cost of that is
-# that every 'yarn install' prunes it. The playwright and firebase-emulators generators each run
-# installPackagesTask as their post-commit step, so an install fires mid-sequence and deletes
-# nx-tools out from under whatever generator runs next. So we compile ONE copy into a stage dir
-# and re-establish it before EVERY generator via ensure_nx_tools. This is robust to the order and
-# count of install-triggering generators; reordering alone is NOT, since with two of them the one
-# that runs second would still find nx-tools already pruned.
-HOUSE_BLOCK="rm -rf /tmp/bespunky-nx-tools
+# that every 'yarn install' prunes it. Several generators run installPackagesTask as their
+# post-commit step — the `app` generator (via its @nx/angular + firebase-emulators delegates) and
+# the playwright generator — so an install fires mid-sequence and deletes nx-tools out from under
+# whatever generator runs next. So we compile ONE copy into a stage dir and re-establish it before
+# EVERY generator via ensure_nx_tools. This is robust to the order and count of install-triggering
+# generators; reordering alone is NOT, since the generator that runs after an install would
+# otherwise find nx-tools already pruned. This block (which DEFINES ensure_nx_tools) must run
+# before the first @bespunky/nx-tools generator call in either mode.
+STAGE_BLOCK="rm -rf /tmp/bespunky-nx-tools
 cp -r /assets/nx-tools /tmp/bespunky-nx-tools
 node /assets/compile-generators.mts /tmp/bespunky-nx-tools
 ensure_nx_tools() {
   rm -rf node_modules/@bespunky/nx-tools
   mkdir -p node_modules/@bespunky
   cp -r /tmp/bespunky-nx-tools node_modules/@bespunky/nx-tools
-}
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
+}"
+
+# --- per-workspace house generators (used by both modes; idempotent; run once per workspace) ---
+# The PER-APP generators (serve, serve-options, firebase-emulators) are deliberately NOT here: in
+# scaffold mode the `app` generator applies them to the new app; in repair mode they run explicitly
+# against the existing app (see each mode's INNER below). These workspace-level ones are identical in
+# both modes regardless of how many apps the workspace has.
+WORKSPACE_GEN_BLOCK="ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright$FIREBASE_BLOCK
-# Persist @bespunky/nx-tools as a real devDependency so the house generators (including the
-# reusable-tool extraction generators mark-extractable / adopt-extracted) survive 'yarn install'
-# and stay runnable in the project's devcontainer. Graceful until the package is first published
-# (see tools/publish-nx-tools); once published, --repair adds it to existing projects.
-yarn add -D @bespunky/nx-tools@^0.1.0 || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
+# The design system — the workspace's single source of visual truth, present from moment zero (a design
+# system retrofitted after five screens of hardcoded hex is not a design system, it's an archaeology dig).
+# Runs AFTER the app exists so it can open the sass channel on it; a LATER app wires itself, because the
+# \`app\` generator composes the same per-app design-system-styles generator. --scope is load-bearing: the
+# underlying publishable-lib defaults to the @bespunky npm scope (the toolkit's own), which would be wrong
+# for every consumer project. Idempotent in --repair (the token file is seeded, never overwritten — a
+# repair must not restore placeholder tokens over the project's real design).
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:design-system --scope=$PROJECT
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION
+# Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
+# for adding further apps, plus the reusable-tool extraction generators mark-extractable /
+# adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
+# until the package is first published (see tools/publish-nx-tools); once published, --repair adds
+# it to existing projects.
+yarn add -D @bespunky/nx-tools@^$NX_TOOLS_VERSION || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
 git config --global user.name '$GIT_NAME'
 git config --global user.email '$GIT_EMAIL'
 git config --global init.defaultBranch main
-yarn create nx-workspace '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive
+$CREATE_WORKSPACE '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive
 cd '$PROJECT'
-yarn nx add @nx/angular
-yarn nx g @nx/angular:application 'apps/$APP' --minimal --style=scss --routing --e2eTestRunner=none
-$HOUSE_BLOCK
+yarn nx add @nx/angular${NX_TAG}
+$STAGE_BLOCK
+# Create the first app through the HOUSE \`app\` generator (NOT raw @nx/angular:application): it
+# delegates to @nx/angular:application with the house defaults AND applies the per-app config
+# (serve host 0.0.0.0, plus the full Firebase wiring when --firebase=true). This is the SAME one
+# command a developer runs to add any LATER app — first app and Nth app share one code path, so a
+# second app can never silently miss the configuration the first app got.
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG
+$WORKSPACE_GEN_BLOCK
 # Commit the full scaffold. \`yarn create nx-workspace\` made an initial commit, but the
 # house generators + dep installs ran after it — capture them so the host-side push (gh repo
 # create --source --push) ships a clean, complete tree on \`main\`.
@@ -152,7 +284,52 @@ if [ ! -x node_modules/.bin/nx ]; then
   echo 'ERROR: node_modules/.bin/nx not found - run \"yarn install\" in the project first, then re-run --repair.' >&2
   exit 1
 fi
-$HOUSE_BLOCK"
+$STAGE_BLOCK
+# Repair re-applies the per-app house config to the EXISTING app (the \`app\` generator CREATES
+# apps; it is not the heal path), then the workspace-level generators. All idempotent.
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve --project=$APP
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP$REPAIR_FIREBASE_BLOCK
+$WORKSPACE_GEN_BLOCK"
+fi
+
+# --- auto-backup before repair (repair re-runs the house generators, which REWRITE files — e.g.
+#     firebase.config.ts is regenerated when a legacy/pre-per-service shape is detected — so snapshot
+#     the project to git FIRST, making any clobbered customization recoverable). The snapshot is a
+#     TAG built through a throwaway index: HEAD, the branch, the real index and the working tree are
+#     left untouched, while committed + uncommitted + untracked content (minus .gitignore) is
+#     captured, so repair still runs on the exact current tree. Scaffold mode has nothing to back up
+#     (brand-new project). Opt out with --no-backup — but if a backup is wanted and CAN'T be made,
+#     ABORT rather than mutate unprotected ("backup before executing any changes"). ---
+BACKUP_REF="(--no-backup)"
+if [ "$MODE" = "repair" ] && [ "$BACKUP" = "1" ]; then
+  if ! git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "BACKUP_ABORT: '$TARGET' is not a git repository, so repair can't snapshot it before changing files." >&2
+    echo "  Create a restore point first:  (cd \"$TARGET\" && git init && git add -A && git commit -m 'pre-repair')" >&2
+    echo "  …or re-run with --no-backup to repair without one." >&2
+    exit 1
+  fi
+  if [ -z "$(git -C "$TARGET" status --porcelain 2>/dev/null)" ] && git -C "$TARGET" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    # Clean tree: HEAD already IS the pre-repair state — no redundant tag.
+    BACKUP_REF="HEAD($(git -C "$TARGET" rev-parse --short HEAD))"
+    echo "BACKUP_OK: working tree clean — pre-repair restore point is $BACKUP_REF. Undo a change with: git -C \"$TARGET\" checkout HEAD -- <path>"
+  else
+    BACKUP_TAG="repair-backup-$(date +%Y%m%d-%H%M%S)"
+    BACKUP_INDEX="$(mktemp -u)"
+    HEAD_PARENT=""
+    git -C "$TARGET" rev-parse --verify -q HEAD >/dev/null 2>&1 && HEAD_PARENT="-p HEAD"
+    if GIT_INDEX_FILE="$BACKUP_INDEX" git -C "$TARGET" add -A >/dev/null 2>&1 \
+      && _backup_tree="$(GIT_INDEX_FILE="$BACKUP_INDEX" git -C "$TARGET" write-tree 2>/dev/null)" \
+      && _backup_commit="$(GIT_AUTHOR_NAME="$GIT_NAME" GIT_AUTHOR_EMAIL="$GIT_EMAIL" GIT_COMMITTER_NAME="$GIT_NAME" GIT_COMMITTER_EMAIL="$GIT_EMAIL" git -C "$TARGET" commit-tree "$_backup_tree" $HEAD_PARENT -m "chore: pre-repair backup ($BACKUP_TAG)" 2>/dev/null)" \
+      && git -C "$TARGET" tag "$BACKUP_TAG" "$_backup_commit" >/dev/null 2>&1; then
+      rm -f "$BACKUP_INDEX"
+      BACKUP_REF="$BACKUP_TAG"
+      echo "BACKUP_OK: snapshotted the project (incl. uncommitted + untracked) to tag '$BACKUP_TAG'. Review repair's changes: git -C \"$TARGET\" diff $BACKUP_TAG ; restore a file: git -C \"$TARGET\" checkout $BACKUP_TAG -- <path>"
+    else
+      rm -f "$BACKUP_INDEX"
+      echo "BACKUP_ABORT: could not create the git snapshot — aborting so nothing changes without a backup. (Check 'git -C \"$TARGET\" status', or re-run with --no-backup.)" >&2
+      exit 1
+    fi
+  fi
 fi
 
 docker run --rm \
@@ -206,5 +383,5 @@ fi
 if [ "$MODE" = "scaffold" ]; then
   echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE github=$GITHUB) ${GITHUB_RESULT:-}"
 else
-  echo "REPAIR_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE)"
+  echo "REPAIR_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE backup=$BACKUP_REF)"
 fi

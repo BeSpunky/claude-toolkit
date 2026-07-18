@@ -22,6 +22,7 @@ Each of these is the model trying to *route around* the design instead of *evolv
 - Widening a type to `any`/`unknown`, or **casting**, to silence a design mismatch.
 - Bumping a **timeout, retry count, limit, or sleep** to mask a structural problem.
 - A `// HACK` / `// TODO` / "temporary workaround" with no design behind it.
+- A **hardcoded visual value** — a raw hex, a magic `px`, a hand-typed `200ms ease`, a copy-pasted card, a `::ng-deep` reach-in, an `!important`, a one-off `variant` boolean. Every smell above has a styling twin: a raw colour **is** a magic value, a duplicated card **is** copy-paste, and `::ng-deep` **is** reaching into another module's internals. It is worse there, because CSS has no compiler to catch the drift. See `bespunky-design-system:design-system-first`.
 
 If your next edit is one of these, stop — the design is missing something. Run the loop.
 
@@ -117,6 +118,7 @@ These sentences mean the design is missing something — never act on them, run 
 - New behavior is reachable as a natural case of the design, **without** a flag.
 - Any refactor was designed and confirmed before implementation.
 - Coupling and duplication did not increase.
+- **No new hardcoded visual value** — every colour, space, radius, type step, elevation, duration and easing came from the design system's tokens, and any UI pattern that appeared a second time was **promoted** into the design system rather than copied (`bespunky-design-system:design-system-first`).
 - Any code generic enough to serve other projects was **extracted to the shared libraries** (when reachable) or made extraction-ready and **staged as a candidate** (when sandboxed) via the house mechanism — never left inlined.
 
 ## Keeping the rule always-on in a project

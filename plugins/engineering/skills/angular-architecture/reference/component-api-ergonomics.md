@@ -77,4 +77,22 @@ readonly markerClick = output<{ marker: Marker; data: T }>();
 
 ---
 
+## 6. Variants are data; the styling surface is a contract
+
+**What.** A visual variant is a **union**, not a bag of booleans — rendered as a host attribute the component's SCSS selects on:
+
+```ts
+// ✗ isCompact + isDanger + isBig = eight states, of which you designed three.
+// ✓ Two orthogonal, closed dimensions:
+variant = input<'primary' | 'secondary' | 'danger'>('primary');
+size    = input<'sm' | 'md' | 'lg'>('md');
+host: { '[attr.data-variant]': 'variant()', '[attr.data-size]': 'size()' }
+```
+
+And a component's **styleable surface is as much a published contract as its inputs**: **tokens in** (a consumer re-binds a CSS custom property on the host), **parts out** (`::part()` for a named seam), content projection for structure. Never a `::ng-deep` hole a consumer has to drill.
+
+**Why.** *Make illegal states unrepresentable* is a styling rule too (`advanced-typescript`) — the boolean bag lets a caller compose a combination nobody designed and CSS renders anyway. And *abstractions must never trap*: the moment a consumer **must** reach into your DOM to get the look they need, your component's contract is incomplete — that is your bug, and the reach-in only hides it. See `bespunky-design-system:design-tokens-and-theming` → *component styling & encapsulation*.
+
+---
+
 **Mentality anchors for this cluster:** *Design for the consumer*, *Work smart, not hard*, *Refuse false tradeoffs*, *Lead with one mental model*, *Place everything on purpose* — all in the `architect-mentality` skill.

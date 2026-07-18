@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkySharedBrowser",
+  "title": "Install the always-on shared co-driven browser tooling",
+  "description": "Write the shared-browser CLI + its CDP helpers into tools/shared-browser/ and register the workspace Nx project `shared-browser` (up|down|status|restart|clean|url|logs). Workspace-level and always-on — no inputs. Idempotent and --repair-safe: every generator-owned file is rewritten on each run.",
+  "type": "object",
+  "properties": {},
+  "required": []
+}

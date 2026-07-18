@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "enabledPlugins": {
+    "bespunky@claude-toolkit": true,
+    "bespunky-project-starter@claude-toolkit": true,
+    "bespunky-engineering@claude-toolkit": true,
+    "bespunky-workflow@claude-toolkit": true,
+    "bespunky-browser-automation@claude-toolkit": true,
+    "bespunky-product-ux@claude-toolkit": true
+  }
+}

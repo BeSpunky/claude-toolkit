@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyWorktreeDomains",
+  "title": "Install the worktree-domains proxy + route registry",
+  "description": "Write the worktree-domains CLI + its self-contained Node reverse proxy into tools/worktree-domains/ and register the workspace Nx project `worktree-domains` (list|reconcile|status|logs|stop). Workspace-level and always-on — no inputs. Idempotent and --repair-safe: every generator-owned file is rewritten on each run.",
+  "type": "object",
+  "properties": {},
+  "required": []
+}

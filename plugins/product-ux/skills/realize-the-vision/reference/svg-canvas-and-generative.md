@@ -51,8 +51,8 @@ Caveats: filters can be expensive (they rasterize a region every frame when anim
 ## On the house stack (Angular / Nx)
 
 - **Inline SVG** binds naturally to templates/signals — animate via CSS or a wrapped GSAP timeline.
-- Wrap **canvas/p5/Lottie/Rive** runtimes behind a directive/service (`engineering:angular-native-wrappers`): own the draw loop, `runOutsideAngular`, dispose on destroy.
-- For data-driven drawing, keep generation pure and **derive** the visual from a single source of truth (`engineering:software-design`).
+- Wrap **canvas/p5/Lottie/Rive** runtimes behind a directive/service (`bespunky-engineering:angular-native-wrappers`): own the draw loop, `runOutsideAngular`, dispose on destroy.
+- For data-driven drawing, keep generation pure and **derive** the visual from a single source of truth (`bespunky-engineering:software-design`).
 
 ## When NOT to
 

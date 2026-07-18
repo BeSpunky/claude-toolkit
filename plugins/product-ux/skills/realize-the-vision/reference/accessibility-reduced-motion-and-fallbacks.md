@@ -35,7 +35,7 @@ An immersive interface that excludes or harms people is not finished — it's br
 
 - Centralize a **reduced-motion signal/service** the whole app reads, so every animation seam honors it by default.
 - Angular **CDK a11y** (`FocusTrap`, `LiveAnnouncer`, `FocusMonitor`, roving tabindex) gives focus/announcement primitives for custom immersive widgets.
-- Keep semantics in the template and the spectacle in a wrapped, disposable layer (`engineering:angular-native-wrappers`) so the accessible core never depends on the effect.
+- Keep semantics in the template and the spectacle in a wrapped, disposable layer (`bespunky-engineering:angular-native-wrappers`) so the accessible core never depends on the effect.
 
 ## The rule
 
