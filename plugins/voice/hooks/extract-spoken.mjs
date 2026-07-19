@@ -16,6 +16,9 @@ process.stdin.on('data', (d) => { raw += d; });
 process.stdin.on('end', () => {
   let j;
   try { j = JSON.parse(raw); } catch { process.exit(0); }
+  // JSON.parse('null')/'42'/'"x"' are valid but not objects — guard so a stray
+  // payload prints nothing instead of throwing a TypeError on j.tool_name.
+  if (!j || typeof j !== 'object') process.exit(0);
 
   const tool = j.tool_name || '';
   const ti = j.tool_input || {};
@@ -44,6 +47,15 @@ process.stdin.on('end', () => {
     }
   }
 
-  const text = out.join(' ').trim();
+  let text = out.join(' ').trim();
+  // Cap the spoken length: a wall of options is unpleasant to hear AND a very
+  // long argv to speak.sh could hit ARG_MAX. Trim on a word boundary.
+  const CAP = 1000;
+  if (text.length > CAP) {
+    const cut = text.slice(0, CAP);
+    const onWord = cut.replace(/\s+\S*$/, '');
+    // Prefer a word boundary, but don't let an unbroken token collapse the text.
+    text = (onWord.length > CAP * 0.6 ? onWord : cut) + '…';
+  }
   if (text) process.stdout.write(text);
 });

@@ -30,8 +30,11 @@ mkdir -p "$PIPER_DIR" "$VOICES_DIR"
 # --- --set-default <name>: just repoint the symlink and exit ------------------
 if [ "${1:-}" = "--set-default" ]; then
   name="${2:?usage: install-piper.sh --set-default <voice-name>}"
-  target="$VOICES_DIR/$name.onnx"
-  [ -f "$target" ] || { echo "no such voice: $name (in $VOICES_DIR)" >&2; exit 1; }
+  # Piper needs BOTH the .onnx and its .onnx.json sidecar — verify both so we
+  # never point default.* at a half-present voice (a dangling .json symlink would
+  # make a "successful" set-default produce a non-working default).
+  [ -f "$VOICES_DIR/$name.onnx" ]      || { echo "no such voice: $name (in $VOICES_DIR)" >&2; exit 1; }
+  [ -f "$VOICES_DIR/$name.onnx.json" ] || { echo "voice $name is missing its .onnx.json config" >&2; exit 1; }
   ln -sf "$name.onnx" "$VOICES_DIR/default.onnx"
   ln -sf "$name.onnx.json" "$VOICES_DIR/default.onnx.json"
   echo "default voice → $name"
@@ -87,4 +90,5 @@ if [ ! -e "$VOICES_DIR/default.onnx" ]; then
 fi
 
 echo "[install-piper] done. Installed voices:"
-ls -1 "$VOICES_DIR"/*.onnx 2>/dev/null | sed 's#.*/##;s/\.onnx$//' | grep -v '^default$'
+ls -1 "$VOICES_DIR"/*.onnx 2>/dev/null | sed 's#.*/##;s/\.onnx$//' | grep -v '^default$' || true
+exit 0

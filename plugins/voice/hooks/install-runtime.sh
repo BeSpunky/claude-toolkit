@@ -15,7 +15,19 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 
 DEST="${HOME}/.claude/bespunky-voice"
 mkdir -p "$DEST" 2>/dev/null || exit 0
-cp -f "$PLUGIN_ROOT"/scripts/*.sh "$DEST"/ 2>/dev/null || exit 0
-chmod +x "$DEST"/*.sh 2>/dev/null || true
+
+# Copy each script via a temp name + atomic rename. A plain `cp -f` truncates and
+# rewrites the SAME inode, so if a detached speak.sh (launched by the /voice
+# command from $DEST) is still running when this fires, bash could read a
+# half-written file. `mv` swaps in a new inode and leaves the running one intact.
+for f in "$PLUGIN_ROOT"/scripts/*.sh; do
+  [ -f "$f" ] || continue
+  b="$(basename "$f")"
+  tmp="$DEST/.$b.tmp.$$"
+  if cp -f "$f" "$tmp" 2>/dev/null; then
+    chmod +x "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$DEST/$b" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+  fi
+done
 
 exit 0

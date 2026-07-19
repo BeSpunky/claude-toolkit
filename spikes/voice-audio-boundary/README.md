@@ -8,6 +8,12 @@ boundary, no amount of clever plugin code matters — so we prove it first.
 This is throwaway R&D, not product. Delete `spikes/` once the boundary is
 settled and the finding is folded into the plugin's devcontainer requirements.
 
+**Retained on purpose (as of 2026-07-19):** the *output* half is settled and
+folded into `.devcontainer/`, but the *mic input* half is NOT — WSLg delivers a
+silent `RDPSource`, and `probe-audio.sh` is the live test harness for fixing that
+(the gate for answering-by-voice). Bin this whole folder once the mic path works
+or is abandoned.
+
 ## Run it
 
 ```bash

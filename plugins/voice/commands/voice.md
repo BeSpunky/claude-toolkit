@@ -8,6 +8,12 @@ The bespunky-voice runtime scripts live at a stable path, `~/.claude/bespunky-vo
 (published each session by the plugin's SessionStart hook). Always call them there,
 by absolute path.
 
+**First check** — if `~/.claude/bespunky-voice/speak.sh` does NOT exist, the
+SessionStart hook hasn't run yet (this happens right after a fresh install, since
+installing a plugin mid-session does not fire SessionStart). Tell the user to
+restart Claude Code or start a new session once to activate the voice plugin, then
+stop — do not try to run the scripts.
+
 The user ran: `/voice $ARGUMENTS`
 
 Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
