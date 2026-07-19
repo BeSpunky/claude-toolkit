@@ -34,11 +34,25 @@ if claude plugin marketplace add "$WS" \
     && claude plugin install bespunky-engineering@claude-toolkit --scope project \
     && claude plugin install bespunky-workflow@claude-toolkit --scope project \
     && claude plugin install bespunky-browser-automation@claude-toolkit --scope project \
-    && claude plugin install bespunky-product-ux@claude-toolkit --scope project; then
+    && claude plugin install bespunky-product-ux@claude-toolkit --scope project \
+    && claude plugin install bespunky-voice@claude-toolkit --scope project; then
   echo "[post-create] claude-toolkit plugins installed at project scope (from working tree)"
 else
   echo "[post-create] NOTE: local plugin install skipped (CLI offline?). Enable later with:"
   echo "[post-create]   /plugin marketplace add . && /plugin"
+fi
+
+# --- 2. Audio toolset (for the voice-plugin spike + future bespunky-voice) ---
+# WSLg audio is bridged in via devcontainer.json (PULSE_SERVER + /mnt/wslg mount).
+# Install the client tools so a process here can speak/record. Best-effort: an
+# offline rebuild shouldn't fail the build. Verify the bridge with:
+#   bash spikes/voice-audio-boundary/probe-audio.sh
+echo "[post-create] installing audio toolset (pulseaudio-utils espeak-ng alsa-utils sox)"
+if sudo apt-get update -qq && sudo apt-get install -y -qq pulseaudio-utils espeak-ng alsa-utils sox; then
+  echo "[post-create] audio toolset installed"
+else
+  echo "[post-create] NOTE: audio toolset install skipped (offline?). Install later with:"
+  echo "[post-create]   bash spikes/voice-audio-boundary/probe-audio.sh --install"
 fi
 
 echo "[post-create] done"

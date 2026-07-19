@@ -40,13 +40,20 @@
   "remoteUser": "node",
 
   "remoteEnv": {
-    "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1"
+    "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1",
+    // Bridge to WSL2's WSLg PulseAudio server (mounted below) so a process in the
+    // container can reach the real speaker + mic — foundation for the voice plugin.
+    "PULSE_SERVER": "unix:/mnt/wslg/PulseServer"
   },
 
   // Persist Claude's auth/config/plugin state across container rebuilds. `.claude/data` is
   // gitignored (see .gitignore); a committed .gitkeep guarantees the dir exists on fresh
   // clones so Docker binds a real (node-owned) directory instead of creating a root-owned one.
   "mounts": [
-    "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached"
+    "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached",
+    // WSLg audio: exposes the host PulseAudio socket at /mnt/wslg/PulseServer.
+    // If the socket is absent after a rebuild (Docker Desktop WSL2 backend), swap the
+    // source to /run/desktop/mnt/host/wslg — see spikes/voice-audio-boundary/README.md.
+    "source=/mnt/wslg,target=/mnt/wslg,type=bind"
   ]
 }

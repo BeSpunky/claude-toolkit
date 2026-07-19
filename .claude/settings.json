@@ -8,6 +8,7 @@
     "bespunky-engineering@claude-toolkit": true,
     "bespunky-workflow@claude-toolkit": true,
     "bespunky-browser-automation@claude-toolkit": true,
-    "bespunky-product-ux@claude-toolkit": true
+    "bespunky-product-ux@claude-toolkit": true,
+    "bespunky-voice@claude-toolkit": true
   }
 }

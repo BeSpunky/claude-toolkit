@@ -1,0 +1,9 @@
+{
+  "name": "bespunky-voice",
+  "description": "Hear Claude's questions and speak your answers. When Claude asks something, get a listenable, audio-dedicated summary (no markup or structure read aloud — just the gist and the options) so you can decide without reading the screen, and answer hands-free by voice. Two triggers: manual (a `/voice` command to read the current question on demand) and automatic (a hook that speaks pending questions when you toggle auto-speak on). TTS/STT sit behind a swappable boundary — free espeak-ng floor, upgradeable to a local Piper neural voice or a cloud voice — so the plugin is about WHEN and WHAT to speak, not which engine.",
+  "version": "0.1.0",
+  "author": {
+    "name": "BeSpunky",
+    "url": "https://github.com/BeSpunky"
+  }
+}
