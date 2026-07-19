@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "bespunky-voice": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/ask-server.mjs"]
+    }
+  }
+}
