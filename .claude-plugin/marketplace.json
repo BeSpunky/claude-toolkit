@@ -52,7 +52,7 @@
       "name": "bespunky-voice",
       "source": "./plugins/voice",
       "description": "Hear Claude's questions and answer by voice, so you can work away from the screen. SPEAK: when Claude asks something, get a listenable, audio-dedicated summary — no markup or structure read aloud, just the gist and the options — on demand (`/voice say`; plus `/voice test`, `/voice status`) or automatically (`/voice auto on`, default off): a PreToolUse hook speaks multiple-choice questions and plan-approvals, and a Stop hook speaks plain free-text questions. ANSWER: `/voice answer` records your spoken reply, transcribes it locally, and hands it to Claude as your answer — no typing. HANDS-FREE: the `ask_by_voice` MCP tool + the `voice-conversation` skill let Claude ask aloud and BLOCK for your spoken answer with no command — say \"let's talk by voice\" and Claude routes its questions through it, matching your spoken choice (by label, ordinal, or yes/no) to an option. TTS is a swappable boundary (free espeak-ng floor on Linux / `say` on macOS, auto-upgraded to a local Piper neural voice via scripts/install-piper.sh, built to allow a cloud voice). STT is local whisper.cpp, opt-in via scripts/install-whisper.sh (base.en → small.en); listen.sh boosts the mic itself to beat WSLg's low input gain. Needs a synthesis engine, a player (paplay/aplay/afplay), Node, a reachable audio sink (WSLg's PULSE_SERVER in the BeSpunky devcontainer), and — to answer — a mic plus whisper.",
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ]
 }
