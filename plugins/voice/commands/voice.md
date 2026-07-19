@@ -1,6 +1,6 @@
 ---
-description: Speak Claude's current question aloud, or toggle automatic speaking. For when you're away from the screen and want to hear what Claude is asking.
-argument-hint: "[say | auto on | auto off | test | status]"
+description: Speak Claude's current question aloud, answer it by voice, or toggle automatic speaking. For when you're away from the screen.
+argument-hint: "[say | answer | auto on | auto off | test | status]"
 allowed-tools: Bash
 ---
 
@@ -30,6 +30,18 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
   ```
   If you have NOT actually asked a question recently, tell the user that instead
   of inventing one to read.
+
+- **answer** — Capture the user's spoken reply and act on it. Run:
+  ```
+  bash ~/.claude/bespunky-voice/listen.sh
+  ```
+  It boosts the mic, records until they stop talking, and prints the transcript on
+  stdout. Take that transcript as the user's answer to the question you last asked
+  them, echo it back in one line so they can catch a misrecognition ("You said:
+  …"), and then continue acting on it. If it exits non-zero (nothing recognized, or
+  STT not installed), relay the stderr message and offer to retry — do NOT guess an
+  answer. If speech-to-text isn't installed yet, tell them to run
+  `bash ~/.claude/bespunky-voice/install-whisper.sh` once.
 
 - **auto on** / **auto off** — Run `bash ~/.claude/bespunky-voice/voice-auto.sh on`
   (or `off`) and report the new state. When ON, the plugin automatically speaks
