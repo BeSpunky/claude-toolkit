@@ -240,6 +240,14 @@ ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
+# The window identity — an emoji + a quiet, project-coloured status band in .vscode/settings.json, so this
+# project's VSCode window is distinguishable from every other open window. Runs BEFORE the design system, so
+# at scaffold time there is deliberately no primary token to read and the colour is a stable hash of the
+# project NAME (source=name-hash) — distinct per project from moment zero. It upgrades to the real brand
+# colour later, once the design system has real tokens (the bespunky-vscode-identity skill + its offer hook).
+# Idempotent + --repair-safe: the provenance ratchet means this name-hash pass never downgrades a colour a
+# project has since moved to design-system or a hand-picked one.
+ensure_nx_tools; yarn nx g @bespunky/nx-tools:window-identity --name=$PROJECT
 # The design system — the workspace's single source of visual truth, present from moment zero (a design
 # system retrofitted after five screens of hardcoded hex is not a design system, it's an archaeology dig).
 # Runs AFTER the app exists so it can open the sass channel on it; a LATER app wires itself, because the

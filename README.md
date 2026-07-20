@@ -163,6 +163,13 @@ claude-toolkit/
 │       │   └── SKILL.md
 │       └── session-handoff/               # carry a live effort across a context boundary — capture writes the baton into the feature package; resume re-grounds
 │           └── SKILL.md
+├── plugins/bespunky-vscode-identity/
+│   ├── .claude-plugin/plugin.json
+│   ├── hooks/                                # SessionStart: is the window colour still the name-hash placeholder while a design system now exists?
+│   │   ├── hooks.json
+│   │   └── check-window-identity.sh          # DETECTS + offers the name-hash → design-system re-derive; never runs it
+│   └── skills/window-identity/
+│       └── SKILL.md                          # the INTELLIGENCE: finds the DS primary + a project emoji, then calls the window-identity generator (the writer lives in nx-tools)
 └── plugins/project-starter/
     ├── .claude-plugin/plugin.json
     ├── hooks/                                # SessionStart: is this project's house tooling behind the installed plugin?
@@ -184,7 +191,8 @@ claude-toolkit/
                     ├── ds-component/         # promote a component into the DS as its own secondary entry point
                     ├── devcontainer/         # writes .devcontainer/devcontainer.json
                     ├── house-doc/            # writes the generated HOUSE.md (the always-on directives + the version stamp in its header) + the CLAUDE.md pointer
-                    └── claude-settings/      # MERGES the house keys into .claude/settings.json (+ .gitignore) — the project's own hooks/permissions survive
+                    ├── claude-settings/      # MERGES the house keys into .claude/settings.json (+ .gitignore) — the project's own hooks/permissions survive
+                    └── window-identity/      # MERGES a per-window VSCode identity (emoji + design-system/name-hash band) into .vscode/settings.json; provenance ratchet in .vscode/.window-identity.json (writer for bespunky-vscode-identity)
 ```
 
 To add a skill: `plugins/<plugin>/skills/<name>/SKILL.md`.
@@ -205,6 +213,7 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 /plugin install bespunky-browser-automation@claude-toolkit
 /plugin install bespunky-product-ux@claude-toolkit
 /plugin install bespunky-voice@claude-toolkit
+/plugin install bespunky-vscode-identity@claude-toolkit
 ```
 
 …or add to `~/.claude/settings.json` so every project sees it:
@@ -222,12 +231,13 @@ Register new plugins in `.claude-plugin/marketplace.json`.
     "bespunky-design-system@claude-toolkit": true,
     "bespunky-browser-automation@claude-toolkit": true,
     "bespunky-product-ux@claude-toolkit": true,
-    "bespunky-voice@claude-toolkit": true
+    "bespunky-voice@claude-toolkit": true,
+    "bespunky-vscode-identity@claude-toolkit": true
   }
 }
 ```
 
-Skills are namespaced as `bespunky:index`, `bespunky-project-starter:new-project`, `bespunky-product-ux:keep-users-oriented`, `bespunky-product-ux:astonishing-to-use`, `bespunky-product-ux:redesign-means-rethink`, `bespunky-product-ux:distill-the-brief`, `bespunky-product-ux:envision-the-experience`, `bespunky-product-ux:stage-the-vision`, `bespunky-product-ux:mock-to-choose`, `bespunky-product-ux:realize-the-vision`, `bespunky-product-ux:model-intent-not-data`, `bespunky-workflow:branch-and-release`, `bespunky-workflow:feature-package`, `bespunky-workflow:session-handoff`, `bespunky-workflow:local-server-isolation`, `bespunky-browser-automation:playwright`, `bespunky-browser-automation:shared-browser`, `bespunky-engineering:architect-mentality`, `bespunky-engineering:architecture-first`, `bespunky-engineering:advanced-typescript`, `bespunky-engineering:software-design`, `bespunky-engineering:angular-architecture`, `bespunky-engineering:angular-native-wrappers`, `bespunky-engineering:nx-monorepo-and-dx`, `bespunky-engineering:resumable-state`, `bespunky-engineering:typed-reactive-navigation`, `bespunky-design-system:design-system-first`, `bespunky-design-system:design-tokens-and-theming`, and `bespunky-voice:voice-conversation`. Scaffolded
+Skills are namespaced as `bespunky:index`, `bespunky-project-starter:new-project`, `bespunky-product-ux:keep-users-oriented`, `bespunky-product-ux:astonishing-to-use`, `bespunky-product-ux:redesign-means-rethink`, `bespunky-product-ux:distill-the-brief`, `bespunky-product-ux:envision-the-experience`, `bespunky-product-ux:stage-the-vision`, `bespunky-product-ux:mock-to-choose`, `bespunky-product-ux:realize-the-vision`, `bespunky-product-ux:model-intent-not-data`, `bespunky-workflow:branch-and-release`, `bespunky-workflow:feature-package`, `bespunky-workflow:session-handoff`, `bespunky-workflow:local-server-isolation`, `bespunky-browser-automation:playwright`, `bespunky-browser-automation:shared-browser`, `bespunky-engineering:architect-mentality`, `bespunky-engineering:architecture-first`, `bespunky-engineering:advanced-typescript`, `bespunky-engineering:software-design`, `bespunky-engineering:angular-architecture`, `bespunky-engineering:angular-native-wrappers`, `bespunky-engineering:nx-monorepo-and-dx`, `bespunky-engineering:resumable-state`, `bespunky-engineering:typed-reactive-navigation`, `bespunky-design-system:design-system-first`, `bespunky-design-system:design-tokens-and-theming`, `bespunky-voice:voice-conversation`, and `bespunky-vscode-identity:window-identity`. Scaffolded
 projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
 available inside every new project automatically.
 
@@ -311,6 +321,7 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
    - `nx g @bespunky/nx-tools:serve-options --project=<app>` → serve `host: 0.0.0.0` (polling lives in the devcontainer env, since modern Angular's `@angular/build:dev-server` rejects `poll`)
    - `nx g @bespunky/nx-tools:devcontainer --name=<project> --nodeMajor=<major>` `[--firebase=true]` → `.devcontainer/devcontainer.json` (Claude CLI/extension, `.claude` persistence, **`CHOKIDAR_USEPOLLING`/`CHOKIDAR_INTERVAL`** for WSL/Docker file-watching, postCreateCommand pre-installing the toolkit plugins; with `--firebase=true`, adds the Firebase CLI + Google Cloud CLI features, the `toba.vsfire` extension, and labeled `portsAttributes` for the emulator suite — but **no explicit `forwardPorts`**: VS Code auto-detects every container binding and forwards each to a free host port, so multiple devcontainers can run in parallel without colliding on the same host port)
    - `nx g @bespunky/nx-tools:claude-settings` → `.claude/settings.json` (marketplaces + enabled plugins incl. `bespunky-browser-automation@claude-toolkit`)
+   - `nx g @bespunky/nx-tools:window-identity --name=<project>` → a per-window VSCode identity in `.vscode/settings.json` (emoji in `window.title` + a quiet status-bar band), so this project's window is distinguishable from every other open one. Runs **before** the design system, so the colour is a stable hash of the project **name** (distinct per project from moment zero); it upgrades to the real design-system primary later via the `bespunky-vscode-identity:window-identity` skill (offered by that plugin's `SessionStart` hook). Merges — the project's own VSCode settings survive — and a provenance marker (`.vscode/.window-identity.json`) keeps a `--repair` from ever downgrading a design-system or hand-picked colour back to the placeholder.
    - `nx g @bespunky/nx-tools:playwright` → adds `@playwright/test` as a devDependency so the devcontainer's `post-create.sh` runs `playwright install --with-deps chromium` (Chromium + apt deps) on container build. Browser binary cached in a per-workspace Docker volume so rebuilds don't re-download. Always-on for BeSpunky projects; pairs with the `bespunky-browser-automation:playwright` skill (loaded via the plugin) which covers when to choose Playwright vs. the preview / Chrome MCPs and how to write headless scripts.
    - **Only with `--firebase`:** `nx g @bespunky/nx-tools:firebase-emulators --project=<app> --workspaceName=<project>` → `firebase.json` (emulator suite + `singleProjectMode`); **no `.firebaserc`** is fabricated — cloud-project linkage is the Firebase CLI's job (`firebase use --add` after `firebase login`); each emulator Nx target passes `--project=demo-<name>` so emulators work without login or a real project. Generates the env files `apps/<app>/src/environments/{environment.interface.ts, environment.ts, environment.prod.ts}` (Angular's canonical environment-files pattern — emulator config in the dev file, real Firebase web config placeholders in the prod file, shared `Environment` type in the interface; user-customizable values live here, the generator preserves `environment.ts` / `environment.prod.ts` across re-runs), writes `apps/<app>/src/app/firebase.config.ts` to the canonical shape that reads from `environment` and gates emulator wiring behind `!environment.production` (the file is written when absent and rewritten when it detects the legacy `ngDevMode`-and-two-consts shape, so `--repair --firebase` self-heals old projects; once the file is on the env-files shape, `--repair` leaves it alone to preserve any app-specific customizations you've added — custom `messagingSenderId`, `initializeFirestore` options, etc.), registers the `environment.ts` → `environment.prod.ts` `fileReplacements` on the production build configuration (idempotently), self-heals legacy `ngDevMode`-and-two-consts projects on `--repair --firebase` (any populated `productionFirebaseConfig` values are migrated into `environment.prod.ts` before the legacy file is overwritten), best-effort AST wiring into `app.config.ts`, Nx targets on the app: `emulators` (flagged `continuous: true`) + `emulators:<svc>` (auth/firestore/storage/functions) for standalone use, and `serve` — the Angular dev-server itself — given **`dependsOn: ["emulators"]`** so Nx's native continuous-task orchestration (Nx 21+) boots the emulator suite alongside the dev-server as one task graph and tears both down together. `serve` is **not** wrapped in `firebase emulators:exec` or renamed: Nx's task runner owns both lifecycles, so no detached process tree orphans emulator JVMs that hold ports + the Nx task lock between restarts (`--repair` un-wraps the legacy `nx:run-commands` wrapper / `serve-app` shape back to this). `nx serve <app>` brings up the suite + the app in one command; Ctrl-C cleans both up — and **adds `firebase` + `@angular/fire`** to `package.json`, installed post-commit via Nx's `installPackagesTask`. (No shell-side `yarn add` — the generator owns deps.)
 

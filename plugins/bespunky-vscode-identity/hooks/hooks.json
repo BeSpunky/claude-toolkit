@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/check-window-identity.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking window identity..."
+          }
+        ]
+      }
+    ]
+  }
+}

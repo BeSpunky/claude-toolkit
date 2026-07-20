@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyWindowIdentity",
+  "title": "Give the workspace a per-window VSCode identity",
+  "description": "Write .vscode/settings.json so this project's window is visually distinguishable from other open windows: an emoji in window.title (dock / Alt-Tab / window switcher) and a quiet design-system-coloured band on the chosen bar. Deterministic and idempotent: colours are DERIVED (a design-system primary, or a stable hash of the project name when there's no design system yet), the file is MERGED not clobbered (the project's own VSCode settings survive), and a provenance marker (.vscode/.window-identity.json) drives a no-clobber ratchet so a --repair never downgrades a design-system or hand-picked colour back to the name-hash placeholder.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The name that seeds the name-hash placeholder colour. Defaults to the workspace package.json name (scope stripped). The window.title label itself uses VSCode's ${rootName}, so it tracks the folder regardless.",
+      "x-priority": "important"
+    },
+    "primary": {
+      "type": "string",
+      "description": "The design-system primary as a hex colour (e.g. #D97757). When given, the band is derived from this and the default source becomes 'design-system'; when omitted, the band is derived from the name hash. Supplied by the window-identity skill once the project has a design system.",
+      "x-priority": "important"
+    },
+    "emoji": {
+      "type": "string",
+      "description": "The window emoji, prepended to window.title. Defaults to the existing marker's emoji, then to a neutral placeholder. The colour already makes each window distinct, so a generic emoji at baseline is acceptable; the skill supplies a project-fitting one."
+    },
+    "surface": {
+      "type": "string",
+      "enum": ["title", "status", "titlebar", "both"],
+      "default": "status",
+      "description": "Which window surfaces to drive. 'title' = emoji only. 'status' = emoji + status bar (default; always rendered, no custom-title-bar dependency). 'titlebar' = emoji + title bar (needs window.titleBarStyle: custom). 'both' = emoji + both bars."
+    },
+    "personal": {
+      "type": "boolean",
+      "default": false,
+      "description": "Git-ignore .vscode/settings.json and the provenance marker so the identity is this developer's own rather than committed team-wide. Note: this ignores the WHOLE settings.json, not just the identity keys.",
+      "x-priority": "internal"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["name-hash", "design-system", "manual"],
+      "description": "Provenance driving the no-clobber ratchet (name-hash < design-system < manual). Defaults to 'design-system' when --primary is passed, else 'name-hash'. Pass 'manual' when a human deliberately picks the colour/emoji so no automated run ever overwrites it.",
+      "x-priority": "internal"
+    }
+  },
+  "required": []
+}

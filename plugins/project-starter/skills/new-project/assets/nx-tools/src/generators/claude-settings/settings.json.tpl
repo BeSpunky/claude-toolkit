@@ -22,7 +22,8 @@
     "bespunky-workflow@claude-toolkit": true,
     "bespunky-browser-automation@claude-toolkit": true,
     "bespunky-product-ux@claude-toolkit": true,
-    "bespunky-design-system@claude-toolkit": true
+    "bespunky-design-system@claude-toolkit": true,
+    "bespunky-vscode-identity@claude-toolkit": true
   },
   "permissions": {
     "defaultMode": "bypassPermissions"

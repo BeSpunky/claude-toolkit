@@ -1,0 +1,9 @@
+{
+  "name": "bespunky-vscode-identity",
+  "description": "Make every project's VSCode window recognizable at a glance — so multiple open windows stop looking identical, without Peacock's whole-window glow. window-identity: the skill finds the project's design-system primary colour and a project-fitting emoji, then hands them to the @bespunky/nx-tools:window-identity generator (the deterministic writer), which merges an emoji into window.title (dock / Alt-Tab / window switcher) and a quiet, design-system-derived band onto a bar (status by default; title bar or both optional). Colours are DERIVED, never hand-typed: from the design-system primary when one exists, else from a stable hash of the project name — so a window is distinct from birth, before the project has a design system, and the colour later SNAPS to the brand when the design system arrives. A provenance marker (.vscode/.window-identity.json) drives a no-clobber ratchet (name-hash < design-system < manual) so an upgrade never downgrades a design-system or hand-picked colour and never stomps a human's manual choice. A SessionStart hook detects — and only OFFERS, never runs — the name-hash → design-system re-derive once a project grows a design system. Committed team-wide by default; --personal keeps it a per-developer choice. Enabled by default in scaffolded projects; the generator runs in the scaffold/--repair baseline.",
+  "version": "0.1.0",
+  "author": {
+    "name": "BeSpunky",
+    "url": "https://github.com/BeSpunky"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  // --- Per-window project identity (POC) ---------------------------------
+  // Hand-authored to demonstrate what a toolkit feature would generate.
+  // Two independent signals so a window is recognizable in Alt-Tab / the dock
+  // AND at a glance inside the editor, without Peacock's full-chrome glow.
+
+  // 1. Emoji + project name in the OS title bar / taskbar / window switcher.
+  "window.title": "🧰 ${rootName}${separator}${activeEditorShort}",
+
+  // 2. A warm-clay tint on ONLY the status bar — the accent hue is
+  //    Anthropic clay (#D97757). The status bar is always rendered by
+  //    VSCode (no custom-title-bar dependency) and sits in constant
+  //    peripheral view, so the signal is always present. Title bar,
+  //    activity bar and editor are deliberately left untouched.
+  "workbench.colorCustomizations": {
+    "statusBar.background": "#8a4a32",
+    "statusBar.foreground": "#f2e6dc",
+    "statusBar.noFolderBackground": "#8a4a32",
+    "statusBar.debuggingBackground": "#8a4a32",
+    "statusBarItem.remoteBackground": "#4a3226",
+    "statusBarItem.remoteForeground": "#f2e6dc"
+  }
+}
