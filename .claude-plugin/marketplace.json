@@ -15,8 +15,8 @@
     {
       "name": "bespunky-project-starter",
       "source": "./plugins/project-starter",
-      "description": "Scaffold new BeSpunky-standard projects: integrated Nx monorepo + Angular (clean --minimal app, no demo) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. Generator-first. Scaffolded projects stay current on their own: a SessionStart hook orders the stamp in the project's HOUSE.md against the installed @bespunky/nx-tools and, when the toolkit has genuinely moved on, relays that fact so Claude can offer `scaffold.sh --repair` — which itself refuses to run without an explicit human yes.",
-      "version": "0.8.2"
+      "description": "Scaffold new BeSpunky-standard projects: integrated Nx monorepo + Angular (clean --minimal app, no demo) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md + a per-window VSCode identity (bespunky-vscode-identity's window-identity generator, in the scaffold/--repair baseline). Generator-first. Scaffolded projects stay current on their own: a SessionStart hook orders the stamp in the project's HOUSE.md against the installed @bespunky/nx-tools and, when the toolkit has genuinely moved on, relays that fact so Claude can offer `scaffold.sh --repair` — which itself refuses to run without an explicit human yes.",
+      "version": "0.9.0"
     },
     {
       "name": "bespunky-workflow",
@@ -53,6 +53,12 @@
       "source": "./plugins/voice",
       "description": "Hear Claude's questions and answer by voice, so you can work away from the screen. SPEAK: when Claude asks something, get a listenable, audio-dedicated summary — no markup or structure read aloud, just the gist and the options — on demand (`/voice say`; plus `/voice test`, `/voice status`) or automatically (`/voice auto on`, default off): a PreToolUse hook speaks multiple-choice questions and plan-approvals, and a Stop hook speaks plain free-text questions. ANSWER: `/voice answer` records your spoken reply, transcribes it locally, and hands it to Claude as your answer — no typing. HANDS-FREE: the `ask_by_voice` MCP tool + the `voice-conversation` skill let Claude ask aloud and BLOCK for your spoken answer with no command — say \"let's talk by voice\" and Claude routes its questions through it, matching your spoken choice (by label, ordinal, or yes/no) to an option. TTS is a swappable boundary (free espeak-ng floor on Linux / `say` on macOS, auto-upgraded to a local Piper neural voice via scripts/install-piper.sh, built to allow a cloud voice). STT is local whisper.cpp, opt-in via scripts/install-whisper.sh (base.en → small.en); listen.sh boosts the mic itself to beat WSLg's low input gain. Needs a synthesis engine, a player (paplay/aplay/afplay), Node, a reachable audio sink (WSLg's PULSE_SERVER in the BeSpunky devcontainer), and — to answer — a mic plus whisper.",
       "version": "0.2.0"
+    },
+    {
+      "name": "bespunky-vscode-identity",
+      "source": "./plugins/bespunky-vscode-identity",
+      "description": "Make every project's VSCode window recognizable at a glance — so multiple open windows stop looking identical, without Peacock's whole-window glow. window-identity: the skill finds the project's design-system primary colour and a project-fitting emoji, then hands them to the @bespunky/nx-tools:window-identity generator (the deterministic writer), which merges an emoji into window.title (dock / Alt-Tab / window switcher) and a quiet, design-system-derived band onto a bar (status by default; title bar or both optional). Colours are DERIVED, never hand-typed: from the design-system primary when one exists, else from a stable hash of the project name — so a window is distinct from birth, before the project has a design system, and the colour later SNAPS to the brand when the design system arrives. A provenance marker (.vscode/.window-identity.json) drives a no-clobber ratchet (name-hash < design-system < manual) so an upgrade never downgrades a design-system or hand-picked colour and never stomps a human's manual choice. A SessionStart hook detects — and only OFFERS, never runs — the name-hash → design-system re-derive once a project grows a design system. Committed team-wide by default; --personal keeps it a per-developer choice. Enabled by default in scaffolded projects; the generator runs in the scaffold/--repair baseline.",
+      "version": "0.1.0"
     }
   ]
 }
