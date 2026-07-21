@@ -8,14 +8,15 @@
 # scaffolded.
 #
 # WHY IT ONLY DETECTS. The obvious move — have a hook RUN the repair — is wrong, and deliberately not done.
-# A repair needs a Docker daemon, pulls a base image, runs the house generators and several installs; it takes
-# minutes, hard-fails without Docker, and tags the repo on a dirty tree. That is not something to ambush a
-# session with. So this hook does the cheap half — a few small file reads — and hands Claude a statement of
-# fact. Claude relays it; the human decides. Detection is automatic; execution stays consented.
+# A repair re-runs the house generators and several package installs; it takes minutes and tags the repo on a
+# dirty tree. (It does NOT require Docker — inside a devcontainer it runs the generators on the local Node
+# natively; see scaffold.sh.) That is not something to ambush a session with. So this hook does the cheap
+# half — a few small file reads — and hands Claude a statement of fact. Claude relays it; the human decides.
+# Detection is automatic; execution stays consented.
 #
 # WHAT IT COMPARES, AND WHY ONLY THAT. `@bespunky/nx-tools` — the package the generators come from, and so the
 # only thing that can change what a repair PRODUCES. Deliberately NOT the plugin version: the house convention
-# bumps a plugin's version on ANY change (a SKILL.md typo, a README line), and demanding a multi-minute Docker
+# bumps a plugin's version on ANY change (a SKILL.md typo, a README line), and demanding a multi-minute
 # repair for a change that regenerates nothing would train everyone to ignore this notice. The plugin version
 # is still read and shown, for provenance.
 #
@@ -96,7 +97,7 @@ is_version "$INSTALLED_NX" || exit 0 # can't read what's installed → can't mak
 is_version "$INSTALLED_PLUGIN" || INSTALLED_PLUGIN='?'
 is_version "$STAMPED_NX" || STAMPED_NX=''
 
-# Already current — the common case, and the reason this hook is a few greps instead of a Docker run.
+# Already current — the common case, and the reason this hook is a few greps instead of a full generator run.
 [ "$STAMPED_NX" = "$INSTALLED_NX" ] && exit 0
 
 # This developer already said "not now" for exactly this version. A refusal that evaporated at the end of the

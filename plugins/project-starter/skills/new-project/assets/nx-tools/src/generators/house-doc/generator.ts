@@ -36,7 +36,7 @@ interface HouseDocSchema {
   nxToolsVersion?: string;
   // The bespunky-project-starter plugin version that shipped those generators. Recorded for provenance but
   // deliberately NOT what the hook compares — the house convention bumps a plugin's version on ANY change
-  // (a SKILL.md typo, a README line), and demanding a multi-minute Docker repair for a change that
+  // (a SKILL.md typo, a README line), and demanding a multi-minute repair for a change that
   // regenerates nothing would train everyone to ignore the notice.
   pluginVersion?: string;
 }

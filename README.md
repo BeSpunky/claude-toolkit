@@ -178,7 +178,7 @@ claude-toolkit/
     └── skills/new-project/
         ├── SKILL.md                          # the scaffolding skill (orchestrator)
         └── assets/
-            ├── scaffold.sh                   # thin launcher: resolve Node, docker run, bootstrap + run house generators
+            ├── scaffold.sh                   # thin launcher: run house generators on the local Node (Docker fallback for old Node), bootstrap + scaffold/repair
             ├── CLAUDE.md.tmpl                # THIN base CLAUDE.md (intentions + conventions + the generated-HOUSE.md pointer), authored by the skill; the house guidance lives in the generated HOUSE.md
             └── nx-tools/                     # @bespunky/nx-tools — house Nx generators, run post-scaffold
                 ├── generators.json
@@ -311,8 +311,8 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
 
 ## How the scaffolder works
 
-`scaffold.sh <project> [app]` is a thin launcher; everything runs **inside the base image via `docker run`** (as your uid, mounting `~/projects`) so there's no host Node/nvm dependency:
-1. Resolves the newest `mcr.microsoft.com/devcontainers/typescript-node:<major>` tag (the Node source).
+`scaffold.sh <project> [app]` is a thin launcher. **Docker was never the requirement — a modern Node is.** When the local Node is new enough (22.18+, e.g. inside a devcontainer) it runs the generators **natively** — no daemon, no image, no mounts — so it works with no Docker at all; otherwise it falls back to running everything **inside the base image via `docker run`** (as your uid, mounting `~/projects`) so an old host Node is no obstacle. `--docker` forces the image; either way there's no nvm. This mirrors `tools/publish-nx-tools`.
+1. On the Docker fallback, resolves the newest `mcr.microsoft.com/devcontainers/typescript-node:<major>` tag (the Node source); the native path uses the running Node.
 2. Bootstraps the workspace:
    - `yarn create nx-workspace <project> --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive`
    - `yarn nx add @nx/angular`
@@ -335,7 +335,7 @@ Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch 
 bash <path-to>/scaffold.sh --repair [--firebase] [--voice] [--yes] <project-path-or-name> [<app-name>]
 ```
 
-**Repair refuses to run unattended.** It rewrites generated files, needs Docker, and takes minutes — so on a TTY it prompts you, with no TTY (an agent's shell) it aborts unless `--yes` is passed, and in CI it refuses outright. `--yes` *asserts that a human explicitly agreed*; an agent may pass it only after you actually said so. That gate is what makes the hook's "detect, never execute" boundary structural instead of a promise.
+**Repair runs wherever you are — including inside the project's own devcontainer** (it uses the local Node natively there, no Docker), so a Claude session *at the project* is the right place to run it; it only falls back to `docker run` when the local Node is too old. **Repair refuses to run unattended.** It rewrites generated files and takes minutes — so on a TTY it prompts you, with no TTY (an agent's shell) it aborts unless `--yes` is passed, and in CI it refuses outright. `--yes` *asserts that a human explicitly agreed*; an agent may pass it only after you actually said so. That gate is what makes the hook's "detect, never execute" boundary structural instead of a promise.
 
 **Important: the house guidance is a generated, repairable `HOUSE.md`.** `--repair` regenerates `HOUSE.md` (architecture directives, branch/release workflow, serving, Firebase, Nx, browser tooling) in full every run and upserts a bounded pointer to it in `CLAUDE.md` — the only part of `CLAUDE.md` it touches. The user's own `CLAUDE.md` content (intentions + conventions) is preserved verbatim. Everything else (devcontainer files, `.claude/settings.json`, `project.json`, `package.json` devDeps, Firebase config files) is brought up to current spec by the generators. So a toolkit upgrade reaches an existing project entirely through `--repair` — **no hand-merge** (see the `bespunky-project-starter:new-project` skill's §1b).
 
@@ -349,7 +349,7 @@ Claude Code has **no plugin-update hook event**, so `/plugin marketplace update`
 - The plugin ships a **`SessionStart` hook** (`plugins/project-starter/hooks/`). Plugin hooks run in the sessions of everyone who has the plugin *installed* — i.e. in your scaffolded project. It orders the stamped `@bespunky/nx-tools` version against the installed one: **same → silent** (a few small file reads, the common case); **installed is newer → it tells Claude**, who relays it and offers the repair.
 - **It compares `nx-tools`, not the plugin version** — that package is where the generators come from, so it's the only thing that changes what a repair *produces*. A plugin bump that only touches docs regenerates nothing, and demanding a multi-minute repair for it would train everyone to ignore the notice.
 - **Direction matters.** The stamp travels with the repo; the plugin is installed per machine. So a teammate whose plugin is *behind* the project is a normal state, not an error — they're told to run `/plugin marketplace update`, and explicitly told **not** to repair (which would regenerate the project with older generators and stamp it backwards for everyone else).
-- **It detects; it never runs.** A repair needs Docker, pulls a base image, runs the house generators and several installs — minutes, and it rewrites generated files. So the hook emits a statement of fact to relay, never an order to obey: **detection is automatic, execution stays consented.** Decline once and Claude records it in the gitignored `.claude/house-snooze.json`, so you're not asked again for that version. No `HOUSE.md` at the root → not a house project → the hook says nothing.
+- **It detects; it never runs.** A repair re-runs the house generators and several installs — minutes, and it rewrites generated files. So the hook emits a statement of fact to relay, never an order to obey: **detection is automatic, execution stays consented.** Decline once and Claude records it in the gitignored `.claude/house-snooze.json`, so you're not asked again for that version. No `HOUSE.md` at the root → not a house project → the hook says nothing.
 
 The `new-project` skill then authors a tailored `CLAUDE.md` (the one piece that stays contextual, not a template).
 

@@ -28,8 +28,8 @@
 #                  deploy methodology). Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
-#   scaffold.sh [--firebase] [--voice] [--no-github] <project-name> [app-name]                    # full scaffold
-#   scaffold.sh --repair [--firebase] [--voice] [--no-backup] [--yes] <project-path|project-name> [app-name]
+#   scaffold.sh [--firebase] [--voice] [--no-github] [--docker] <project-name> [app-name]          # full scaffold
+#   scaffold.sh --repair [--firebase] [--voice] [--no-backup] [--yes] [--docker] <project-path|project-name> [app-name]
 #
 # Repair auto-backup: --repair snapshots the project to a git tag (repair-backup-<ts>) BEFORE running
 # any generator, so a regenerated file (e.g. firebase.config.ts) is always recoverable — review with
@@ -37,8 +37,8 @@
 # restore point). If a backup is wanted but impossible (not a git repo) or fails, repair ABORTS rather
 # than change files unprotected. Opt out with --no-backup.
 #
-# Repair CONSENT GATE (--yes): a repair rewrites generated files, needs a Docker daemon, and takes
-# minutes — it must never happen because something *inferred* that it should. The SessionStart hook that
+# Repair CONSENT GATE (--yes): a repair rewrites generated files and takes minutes — it must never
+# happen because something *inferred* that it should. The SessionStart hook that
 # detects a stale project deliberately only RELAYS that fact; this gate is what makes that boundary
 # structural rather than a matter of an agent's good behavior:
 #   - on a TTY  : a human is present → prompt, and proceed only on an explicit "yes".
@@ -49,9 +49,16 @@
 # Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
 # clobber anything that already exists.
 #
-# Leading flags (--repair, --firebase, --voice, --no-github, --no-backup, --yes) may be given in any order.
+# Leading flags (--repair, --firebase, --voice, --no-github, --no-backup, --yes, --docker) may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
-# Node comes from the typescript-node devcontainer base image, run via Docker - NO nvm.
+#
+# WHERE IT RUNS. Docker was never the requirement — a modern NODE is (Docker only ever existed here to
+# supply one when the host's Node was too old). So this runs on the LOCAL Node when it's new enough —
+# Node 22.18+, the bar for compile-generators.mts's unflagged type-stripping — with no daemon, no image
+# pull and no mounts; that is exactly the case INSIDE a devcontainer, so `--repair` works there directly.
+# Otherwise it falls back to the typescript-node base image via `docker run`, exactly as before. Both
+# paths run the SAME rendered command sequence, so they cannot drift (mirrors tools/publish-nx-tools).
+# Force the image with --docker. Never nvm.
 set -euo pipefail
 
 MODE="scaffold"
@@ -61,6 +68,7 @@ STAGING=0  # --staging: also scaffold a first-class staging environment (require
 GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
 BACKUP=1   # repair snapshots the project to a git tag BEFORE mutating; --no-backup opts out.
 CONSENT=0  # --yes: asserts a human explicitly agreed to this repair (see the consent gate above).
+FORCE_DOCKER=0  # --docker: use the base image even when the local Node would do (escape hatch).
 while [ "${1:-}" != "" ]; do
   case "$1" in
     --repair)     MODE="repair"; shift;;
@@ -70,10 +78,24 @@ while [ "${1:-}" != "" ]; do
     --no-github)  GITHUB=0;      shift;;
     --no-backup)  BACKUP=0;      shift;;
     --yes|-y)     CONSENT=1;     shift;;
+    --docker)     FORCE_DOCKER=1; shift;;
     --*)          echo "ERROR: unknown flag '$1'" >&2; exit 1;;
     *)            break;;
   esac
 done
+
+# --- is the local Node new enough to skip Docker entirely? ---
+# The bar is compile-generators.mts: TypeScript run directly by node, which needs type-stripping ON BY
+# DEFAULT — Node 22.18+ (flagged/experimental before that). Anything older, or no local node/yarn at all,
+# falls back to the image. Inside a devcontainer this is always true, which is why `--repair` runs there
+# with no Docker. Mirrors local_node_ok() in tools/publish-nx-tools/publish.sh.
+local_node_ok() {
+  command -v node >/dev/null && command -v yarn >/dev/null || return 1
+  local major minor
+  major="$(node -p 'process.versions.node.split(".")[0]')" || return 1
+  minor="$(node -p 'process.versions.node.split(".")[1]')" || return 1
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 18 ]; }
+}
 
 # Nx release channel for the workspace create + the `nx add @nx/angular` step. Empty = latest stable.
 # Set NX_CHANNEL=next to honor the Nx-lag rule: scaffold on a beta Nx that supports a NEWER Angular
@@ -145,10 +167,10 @@ fi
 # file-rewriting action; the hook that notices a stale project can only SAY so. Consent has to come from a
 # human, and this is where that is enforced instead of hoped for.
 #
-# It runs FIRST — before the docker/curl guards below, before any network call, before anything is read or
+# It runs FIRST — before the runtime decision below, before any network call, before anything is read or
 # written. An unconsented repair must fail for want of CONSENT, not trip over a missing daemon on its way to
-# the same place: "docker not found" would send an agent off to fix Docker and come back, which is precisely
-# the inference this gate exists to stop.
+# the same place: "docker not found" would send an agent off to fix Docker and come back (which is precisely
+# the inference this gate exists to stop) — and, worse, is now a lie, since the local Node usually suffices.
 if [ "$MODE" = "repair" ]; then
   if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
     echo "ERROR: refusing to repair in CI — a repair rewrites generated files and no human is here to agree." >&2
@@ -169,25 +191,47 @@ if [ "$MODE" = "repair" ]; then
       esac
     else
       echo "ERROR: refusing to repair without consent — nothing is attached to this shell to ask." >&2
-      echo "       A repair rewrites generated files, needs Docker, and takes several minutes." >&2
+      echo "       A repair rewrites generated files and takes several minutes." >&2
       echo "       If (and ONLY if) the user has explicitly agreed to it, re-run with --yes." >&2
       exit 1
     fi
   fi
 fi
 
-# --- guards (apply to both modes; AFTER the consent gate, so an unconsented repair never gets here) ---
-command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
-docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
-command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
-
-# --- resolve newest Node major that has a typescript-node devcontainer image ---
-echo "Resolving latest typescript-node base image..."
-MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
-  | grep -oE '[0-9]+-bookworm' | sed 's/-bookworm//' | sort -rn | awk '$1>=18' | head -1 || true)"
-[ -n "${MAJOR:-}" ] || MAJOR=24
-IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
-echo "Base image: $IMAGE"
+# --- runtime decision: local Node vs Docker (AFTER the consent gate, so an unconsented repair never gets
+#     here). Docker was never the requirement — a modern Node is. When the local Node is new enough we run
+#     the generators NATIVELY (no daemon, no image, no mounts) with the path roots bound to real host dirs;
+#     otherwise we fall back to the base image, binding the roots to the container mount points. STAGE_BLOCK/
+#     WORKSPACE_GEN_BLOCK/INNER below are rendered ONCE against these roots, so the two paths cannot drift. ---
+if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
+  RUNTIME="native"
+  echo "Node $(node -v) is new enough — running the generators natively (no Docker)."
+  WORK_ROOT="$PROJECTS_DIR"          # where the <project> dir lives (host path)
+  ASSETS_ROOT="$ASSETS_DIR"          # nx-tools + compile-generators.mts (host path)
+  STAGE_DIR="$(mktemp -d)"           # nx-tools staging dir (native, cleaned up after the run)
+  MAJOR="$(node -p 'process.versions.node.split(".")[0]')"   # generated devcontainer's nodeMajor = this Node's
+  RUNTIME_DESC="native node $(node -v)"
+else
+  RUNTIME="docker"
+  if [ "$FORCE_DOCKER" = "1" ]; then
+    echo "--docker: forcing the base image even though the local Node may suffice."
+  else
+    echo "Local Node missing or older than 22.18 — falling back to Docker."
+  fi
+  command -v docker >/dev/null || { echo "ERROR: docker not found (and the local Node is too old to run natively — need Node 22.18+)." >&2; exit 1; }
+  docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
+  command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
+  echo "Resolving latest typescript-node base image..."
+  MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
+    | grep -oE '[0-9]+-bookworm' | sed 's/-bookworm//' | sort -rn | awk '$1>=18' | head -1 || true)"
+  [ -n "${MAJOR:-}" ] || MAJOR=24
+  IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
+  echo "Base image: $IMAGE"
+  WORK_ROOT="/work"                  # PROJECTS_DIR is mounted here (see docker run -v below)
+  ASSETS_ROOT="/assets"              # ASSETS_DIR is mounted here (ro)
+  STAGE_DIR="/tmp/bespunky-nx-tools" # nx-tools staging dir inside the container
+  RUNTIME_DESC="image=$IMAGE"
+fi
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
 [ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (WSLg audio bridge + espeak-ng + bespunky-voice plugin — WSL-only)"
@@ -231,13 +275,13 @@ fi
 # generators; reordering alone is NOT, since the generator that runs after an install would
 # otherwise find nx-tools already pruned. This block (which DEFINES ensure_nx_tools) must run
 # before the first @bespunky/nx-tools generator call in either mode.
-STAGE_BLOCK="rm -rf /tmp/bespunky-nx-tools
-cp -r /assets/nx-tools /tmp/bespunky-nx-tools
-node /assets/compile-generators.mts /tmp/bespunky-nx-tools
+STAGE_BLOCK="rm -rf '$STAGE_DIR'
+cp -r '$ASSETS_ROOT/nx-tools' '$STAGE_DIR'
+node '$ASSETS_ROOT/compile-generators.mts' '$STAGE_DIR'
 ensure_nx_tools() {
   rm -rf node_modules/@bespunky/nx-tools
   mkdir -p node_modules/@bespunky
-  cp -r /tmp/bespunky-nx-tools node_modules/@bespunky/nx-tools
+  cp -r '$STAGE_DIR' node_modules/@bespunky/nx-tools
 }"
 
 # --- per-workspace house generators (used by both modes; idempotent; run once per workspace) ---
@@ -277,9 +321,14 @@ yarn add -D @bespunky/nx-tools@^$NX_TOOLS_VERSION || echo 'NOTE: @bespunky/nx-to
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
-git config --global user.name '$GIT_NAME'
-git config --global user.email '$GIT_EMAIL'
-git config --global init.defaultBranch main
+mkdir -p '$WORK_ROOT'
+cd '$WORK_ROOT'
+# Set the git identity only if unset. In the throwaway Docker image there is none, so this establishes it;
+# on the native path the invoking user already HAS a global identity (it's where \$GIT_NAME came from), so
+# this must not clobber it — hence the conditional. Same result on both paths, no drift.
+git config --global user.name >/dev/null 2>&1 || git config --global user.name '$GIT_NAME'
+git config --global user.email >/dev/null 2>&1 || git config --global user.email '$GIT_EMAIL'
+git config --global init.defaultBranch >/dev/null 2>&1 || git config --global init.defaultBranch main
 $CREATE_WORKSPACE '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive
 cd '$PROJECT'
 yarn nx add @nx/angular${NX_TAG}
@@ -298,7 +347,7 @@ git add -A
 git commit -m 'chore: scaffold BeSpunky project (Nx + Angular + house generators)' || true"
 else
   INNER="set -e
-cd '$PROJECT'
+cd '$WORK_ROOT/$PROJECT'
 if [ ! -x node_modules/.bin/nx ]; then
   echo 'ERROR: node_modules/.bin/nx not found - run \"yarn install\" in the project first, then re-run --repair.' >&2
   exit 1
@@ -351,24 +400,34 @@ if [ "$MODE" = "repair" ] && [ "$BACKUP" = "1" ]; then
   fi
 fi
 
-docker run --rm \
-  -u "$(id -u):$(id -g)" \
-  -e HOME=/home/node \
-  -v "$PROJECTS_DIR":/work -v "$ASSETS_DIR":/assets:ro -w /work \
-  "$IMAGE" \
-  bash -lc "$INNER"
+# --- run the rendered command sequence, on whichever runtime we chose ---
+if [ "$RUNTIME" = "native" ]; then
+  # Native: the generators run in THIS environment, as the invoking user, writing straight to the host
+  # tree — so no mounts, no uid mapping, and no root-owned-files fixup are needed. $INNER's roots are
+  # already bound to the real host paths. Clean up the staging dir on any exit.
+  trap 'rm -rf "$STAGE_DIR"' EXIT
+  bash -c "$INNER"
+else
+  docker run --rm \
+    -u "$(id -u):$(id -g)" \
+    -e HOME=/home/node \
+    -v "$PROJECTS_DIR":/work -v "$ASSETS_DIR":/assets:ro -w /work \
+    "$IMAGE" \
+    bash -lc "$INNER"
 
-# --- normalize ownership back to the invoking host user (both modes) ---
-# Some Docker backends (notably Docker Desktop's WSL2 integration) leave freshly created files
-# owned by root despite the `-u` flag above, which makes every later host-side operation
-# (git, yarn, the Claude CLI) fail with permission errors. A throwaway ROOT container hands the
-# whole project tree back to the host uid:gid — the only context that can chown root-owned files
-# without host sudo. Idempotent: a no-op when files are already user-owned. Runs before the gh
-# push so git operations on the tree don't hit permission errors.
-docker run --rm \
-  -v "$PROJECTS_DIR":/work -w /work \
-  "$IMAGE" \
-  chown -R "$(id -u):$(id -g)" "/work/$PROJECT"
+  # --- normalize ownership back to the invoking host user (Docker path only) ---
+  # Some Docker backends (notably Docker Desktop's WSL2 integration) leave freshly created files
+  # owned by root despite the `-u` flag above, which makes every later host-side operation
+  # (git, yarn, the Claude CLI) fail with permission errors. A throwaway ROOT container hands the
+  # whole project tree back to the host uid:gid — the only context that can chown root-owned files
+  # without host sudo. Idempotent: a no-op when files are already user-owned. Runs before the gh
+  # push so git operations on the tree don't hit permission errors. (The native path never creates
+  # root-owned files, so it needs none of this.)
+  docker run --rm \
+    -v "$PROJECTS_DIR":/work -w /work \
+    "$IMAGE" \
+    chown -R "$(id -u):$(id -g)" "/work/$PROJECT"
+fi
 
 # --- create + push a private GitHub repo (scaffold mode only; gh auth lives on the host) ---
 # Runs OUTSIDE Docker: the bare typescript-node base image has neither `gh` nor the host's
@@ -400,7 +459,7 @@ elif [ "$MODE" = "scaffold" ]; then
 fi
 
 if [ "$MODE" = "scaffold" ]; then
-  echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
+  echo "SCAFFOLD_OK $TARGET ($RUNTIME_DESC app=apps/$APP firebase=$FIREBASE voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
 else
-  echo "REPAIR_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE voice=$VOICE backup=$BACKUP_REF)"
+  echo "REPAIR_OK $TARGET ($RUNTIME_DESC app=apps/$APP firebase=$FIREBASE voice=$VOICE backup=$BACKUP_REF)"
 fi
