@@ -4,7 +4,7 @@
 // Template supports two kinds of placeholders:
 //   - simple substitution:   {{name}}, {{nodeMajor}}
 //   - conditional blocks:    {{#flag}}...{{/flag}}  -> included iff the flag option is truthy
-// (`firebase` is the only conditional flag for now; add more by passing them in `options`.)
+// (`firebase` and `voice` are the conditional flags; add more by passing them in `options`.)
 import { type Tree } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +13,7 @@ interface DevcontainerSchema {
   name: string;
   nodeMajor?: string | number;
   firebase?: boolean;
+  voice?: boolean;
 }
 
 export default async function devcontainerGenerator(
@@ -24,7 +25,10 @@ export default async function devcontainerGenerator(
   }
   // Default the image tag to the Node major we are running under (the base image), if not given.
   const nodeMajor = String(options.nodeMajor ?? process.versions.node.split('.')[0]);
-  const flags: Record<string, boolean> = { firebase: !!options.firebase };
+  const flags: Record<string, boolean> = {
+    firebase: !!options.firebase,
+    voice: !!options.voice,
+  };
 
   const template = readFileSync(join(__dirname, 'devcontainer.json.tpl'), 'utf8');
 

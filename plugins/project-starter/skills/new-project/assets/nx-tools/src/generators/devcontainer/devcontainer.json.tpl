@@ -106,7 +106,10 @@
     // Reliable file-watching for chokidar-based watchers over WSL/Docker mounts.
     // (Replaces the legacy `poll` option on serve targets, which the modern @angular/build:dev-server schema rejects.)
     "CHOKIDAR_USEPOLLING": "true",
-    "CHOKIDAR_INTERVAL": "1000"
+    "CHOKIDAR_INTERVAL": "1000"{{#voice}},
+    // Bridge to WSL2's WSLg PulseAudio server (mounted below) so a process in the container
+    // can reach the real speaker + mic — the sink the bespunky-voice plugin speaks/listens through.
+    "PULSE_SERVER": "unix:/mnt/wslg/PulseServer"{{/voice}}
   },
   "mounts": [
     "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached",
@@ -117,6 +120,11 @@
     // volume so rebuilds reuse the cached browser instead of re-downloading on
     // every postCreate. Populated by post-create.sh when @playwright/test is in
     // package.json.
-    "source=${localWorkspaceFolderBasename}-playwright-cache,target=/home/node/.cache/ms-playwright,type=volume"
+    "source=${localWorkspaceFolderBasename}-playwright-cache,target=/home/node/.cache/ms-playwright,type=volume"{{#voice}},
+    // WSLg audio (bespunky-voice): exposes the host PulseAudio socket at /mnt/wslg/PulseServer.
+    // WSL-specific — this is why voice is an opt-in flag, not always-on: binding /mnt/wslg on a
+    // non-WSL host (macOS / Codespaces) has no source socket. If the socket is absent after a
+    // rebuild on the Docker Desktop WSL2 backend, swap the source to /run/desktop/mnt/host/wslg.
+    "source=/mnt/wslg,target=/mnt/wslg,type=bind"{{/voice}}
   ]
 }

@@ -36,6 +36,7 @@ The `bespunky-project-starter@claude-toolkit` plugin must be installed and **cur
   - **Deps**: the generator adds `firebase` + `@angular/fire` (dependencies), `firebase-admin` + `firebase-functions` (the Functions runtime, at the **workspace root** — keep aligned with `apps/functions/package.json`, the deploy manifest), and `@nx/esbuild` (devDependency, pinned to the workspace's own Nx version — Nx plugin packages move in lockstep with `nx`) to `package.json`, then runs the package-manager install via Nx's `installPackagesTask` (post-commit). Existing entries are never overwritten (user pins survive `--repair`). No shell-side `yarn add`.
   - **CI/deploy is Firebase's, not ours**: the scaffolder writes **no GitHub Actions deploy workflow**. Deploy CI is wired when the user links the (always-created, see the GitHub bullet above) repo at `firebase apphosting:backends:create` — App Hosting then provisions and maintains its own Cloud Build pipeline and auto-deploys on every push to the configured branch. This is deliberate: relying on Firebase's native GitHub integration means deploys keep working as Firebase evolves its mechanism, with nothing in the project to maintain. The repo-as-CI linkage is documented in the "connect a real Firebase project" recipe below, the `{{#firebase}}` block of `CLAUDE.md.tmpl`, the `apphosting.yaml` header comment, and the devcontainer welcome banner.
   - **Never enabled by default** — only when the user explicitly asks for Firebase or **you asked and they said yes**.
+- **Voice support is opt-in (WSL-only)**: when scaffolded with `--voice`, the `devcontainer` generator bridges WSL2's **WSLg PulseAudio** server into the container — `remoteEnv.PULSE_SERVER = unix:/mnt/wslg/PulseServer` plus a `/mnt/wslg` bind mount — and the devcontainer's `post-create.sh` **self-adapts on that mount's presence** (`[ -d /mnt/wslg ]`) to install the free **espeak-ng** TTS floor + `pulseaudio-utils` and pre-install the **`bespunky-voice`** plugin at project scope, so `/voice` speaks the moment the container opens. (Piper — the natural neural-voice upgrade — stays a manual, machine-local opt-in via the plugin's `install-piper.sh`.) **Why opt-in, not always-on like Playwright/shared-browser:** the `/mnt/wslg` bind source is **WSL-specific**, so mounting it unconditionally would break non-WSL hosts (macOS, Codespaces). One flag wires all three halves — the audio bridge, the engine, and the plugin — and because post-create keys off the mount rather than a second flag, `--repair --voice` retrofits voice onto an existing project too. **Never enabled by default** — only when the user explicitly asks for hands-free/spoken output on a WSL machine.
 
 ## Generator-first, manual last (applies to ALL scaffolding)
 
@@ -77,14 +78,14 @@ Invoke it according to the environment you're running in:
 
 - **Windows host where Docker runs inside WSL** (the common BeSpunky setup): `${CLAUDE_SKILL_DIR}` is a Windows path, and Docker/the projects root live in WSL - so run the script inside WSL, converting the path with `wslpath`:
   ```
-  wsl.exe bash -lc 'bash "$(wslpath "<CLAUDE_SKILL_DIR>")"/assets/scaffold.sh [--firebase] [--no-github] <PROJECT_NAME> [<APP_NAME>]'
+  wsl.exe bash -lc 'bash "$(wslpath "<CLAUDE_SKILL_DIR>")"/assets/scaffold.sh [--firebase] [--voice] [--no-github] <PROJECT_NAME> [<APP_NAME>]'
   ```
 - **Linux/macOS, or inside a devcontainer** where Docker is local:
   ```
-  bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" [--firebase] [--no-github] <PROJECT_NAME> [<APP_NAME>]
+  bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" [--firebase] [--voice] [--no-github] <PROJECT_NAME> [<APP_NAME>]
   ```
 
-Include `--firebase` **only** if step 0 input 4 was yes (the user opted in). Omit it otherwise. Include `--no-github` **only** if the user explicitly opted out of a remote (otherwise a private GitHub repo is created).
+Include `--firebase` **only** if step 0 input 4 was yes (the user opted in). Omit it otherwise. Include `--voice` **only** if the user explicitly asked for hands-free voice on a WSL host (see the voice opt-in bullet). Include `--no-github` **only** if the user explicitly opted out of a remote (otherwise a private GitHub repo is created).
 
 Wait for the final `SCAFFOLD_OK <path>` line. It also reports the GitHub outcome — `GITHUB_OK <url>` when the private repo was created and pushed, or `GITHUB_SKIP: <reason>` when it was skipped (so you can relay the reason and the manual follow-up). First run pulls the base image (a few hundred MB). If a generator/CLI flag is rejected, check `yarn create nx-workspace --help`, `nx g @nx/angular:application --help`, or `gh repo create --help` - **never guess**.
 

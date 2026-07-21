@@ -18,6 +18,11 @@
       "type": "boolean",
       "description": "Include Firebase CLI + Google Cloud CLI devcontainer features, the toba.vsfire VS Code extension, and labeled portsAttributes for the Firebase emulator suite (4000 UI, 9099 Auth, 8080 Firestore, 9150 ws, 9199 Storage, 5001 Functions). No explicit forwardPorts — VS Code auto-forwards each binding to a free host port so multiple devcontainers can run in parallel without collision. Opt-in only - never enabled by default.",
       "default": false
+    },
+    "voice": {
+      "type": "boolean",
+      "description": "Bridge WSL2's WSLg PulseAudio server into the container (remoteEnv PULSE_SERVER + the /mnt/wslg bind mount) so the bespunky-voice plugin can reach the host speaker + mic. The bind source /mnt/wslg is WSL-specific, so this is opt-in — enabling it unconditionally would break non-WSL hosts (macOS, Codespaces). The companion post-create.sh self-adapts on the mount's presence: it installs the espeak-ng TTS floor + pulseaudio-utils and pre-installs the voice plugin only when the bridge is there. Opt-in only - never enabled by default.",
+      "default": false
     }
   },
   "required": ["name"]

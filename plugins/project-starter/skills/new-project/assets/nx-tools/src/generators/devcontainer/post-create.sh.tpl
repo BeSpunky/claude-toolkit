@@ -233,4 +233,47 @@ else
   fi
 fi
 
+# --- 7. Voice prerequisites (auto-detected via the WSLg audio bridge) ---
+# The bespunky-voice plugin speaks (TTS) and listens (STT) through a PulseAudio sink.
+# Voice is OPT-IN (scaffold with --voice): the devcontainer generator bridges WSL2's
+# WSLg PulseServer (remoteEnv PULSE_SERVER + the /mnt/wslg mount) ONLY when voice was
+# requested — /mnt/wslg is WSL-specific, so binding it unconditionally would break
+# non-WSL hosts (macOS, Codespaces). So this step self-adapts on that bridge's PRESENCE:
+# /mnt/wslg exists in the container IFF --voice put the mount there. When it does, install
+# the free espeak-ng TTS floor (+ pulseaudio-utils for `paplay`) and pre-install the plugin,
+# so `/voice` speaks the moment the container opens. Piper (the natural-voice upgrade) stays
+# a manual, machine-local opt-in via the plugin's install-piper.sh — same stance as the
+# claude-toolkit repo's own devcontainer. Best-effort + retry: a transient apt blip only
+# warns, never aborts post-create (set -e) and leaves the container half-provisioned
+# (same stance as the Playwright, Angular-skills, and shared-browser steps above).
+if [ -d /mnt/wslg ]; then
+  echo "[post-create] WSLg audio bridge detected (--voice) — provisioning bespunky-voice (espeak-ng + pulseaudio-utils)"
+  voice_apt_ok=0
+  for attempt in 1 2 3; do
+    if sudo apt-get update && sudo apt-get install -y pulseaudio-utils espeak-ng; then
+      voice_apt_ok=1; break
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "[post-create] voice apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+      sleep $((attempt * 10))
+    fi
+  done
+  if [ "$voice_apt_ok" = 1 ]; then
+    echo "[post-create] voice engine ready (espeak-ng floor; run the plugin's install-piper.sh for the neural-voice upgrade)"
+  else
+    echo "[post-create] WARNING: voice engine install failed after 3 attempts — likely a transient network issue."
+    echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
+    echo "[post-create]            sudo apt-get update && sudo apt-get install -y pulseaudio-utils espeak-ng"
+  fi
+  # Pre-install the voice plugin at project scope so /voice is live on open. Best-effort:
+  # the marketplace was added in step 2; if that was offline, .claude/settings.json offers
+  # install on first run. (The other house plugins are pre-installed unconditionally in
+  # step 2; bespunky-voice is gated here because without this WSLg bridge it can't play audio.)
+  if claude plugin install bespunky-voice@claude-toolkit --scope project; then
+    echo "[post-create] bespunky-voice plugin installed at project scope"
+  else
+    echo "[post-create] NOTE: bespunky-voice plugin install skipped (CLI offline?) — enable later with /plugin"
+  fi
+fi
+
 echo "[post-create] done"

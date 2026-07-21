@@ -11,6 +11,12 @@
 #                  generator additionally scaffolds Cloud Functions as an Nx app (apps/functions), the
 #                  workspace-level `firebase` emulator project, and the seed/cache/reset tooling.
 #                  NEVER enabled by default.
+# Voice opt-in   : when --voice is passed, the devcontainer bridges WSL2's WSLg PulseAudio server
+#                  (remoteEnv PULSE_SERVER + the /mnt/wslg bind mount) and post-create.sh self-adapts
+#                  on that mount to install the espeak-ng TTS floor + pulseaudio-utils and pre-install
+#                  the bespunky-voice plugin — so /voice speaks the moment the container opens. WSL-only
+#                  (the /mnt/wslg source is WSL-specific), which is why it's opt-in, not always-on.
+#                  NEVER enabled by default.
 # GitHub repo    : full scaffold creates a PRIVATE GitHub repo via `gh` and pushes to it. This runs
 #                  host-side AFTER the Docker scaffold (gh auth lives on the host, not in the bare base
 #                  image). Skipped gracefully (local repo only) when gh is missing/unauthenticated.
@@ -22,8 +28,8 @@
 #                  deploy methodology). Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
-#   scaffold.sh [--firebase] [--no-github] <project-name> [app-name]                    # full scaffold
-#   scaffold.sh --repair [--firebase] [--no-backup] [--yes] <project-path|project-name> [app-name]
+#   scaffold.sh [--firebase] [--voice] [--no-github] <project-name> [app-name]                    # full scaffold
+#   scaffold.sh --repair [--firebase] [--voice] [--no-backup] [--yes] <project-path|project-name> [app-name]
 #
 # Repair auto-backup: --repair snapshots the project to a git tag (repair-backup-<ts>) BEFORE running
 # any generator, so a regenerated file (e.g. firebase.config.ts) is always recoverable — review with
@@ -43,13 +49,14 @@
 # Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
 # clobber anything that already exists.
 #
-# Leading flags (--repair, --firebase, --no-github, --no-backup, --yes) may be given in any order.
+# Leading flags (--repair, --firebase, --voice, --no-github, --no-backup, --yes) may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 # Node comes from the typescript-node devcontainer base image, run via Docker - NO nvm.
 set -euo pipefail
 
 MODE="scaffold"
 FIREBASE=0
+VOICE=0    # --voice: bridge WSLg audio into the devcontainer + provision bespunky-voice (WSL-only; opt-in).
 STAGING=0  # --staging: also scaffold a first-class staging environment (requires --firebase).
 GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
 BACKUP=1   # repair snapshots the project to a git tag BEFORE mutating; --no-backup opts out.
@@ -58,6 +65,7 @@ while [ "${1:-}" != "" ]; do
   case "$1" in
     --repair)     MODE="repair"; shift;;
     --firebase)   FIREBASE=1;    shift;;
+    --voice)      VOICE=1;       shift;;
     --staging)    STAGING=1;     shift;;
     --no-github)  GITHUB=0;      shift;;
     --no-backup)  BACKUP=0;      shift;;
@@ -182,10 +190,13 @@ IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
 echo "Base image: $IMAGE"
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
+[ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (WSLg audio bridge + espeak-ng + bespunky-voice plugin — WSL-only)"
 
 # --- devcontainer generator args ---
+# Append (never overwrite) so --firebase and --voice compose in either order.
 DEVCONTAINER_FLAGS=""
-[ "$FIREBASE" = "1" ] && DEVCONTAINER_FLAGS=" --firebase=true"
+[ "$FIREBASE" = "1" ] && DEVCONTAINER_FLAGS="$DEVCONTAINER_FLAGS --firebase=true"
+[ "$VOICE" = "1" ]    && DEVCONTAINER_FLAGS="$DEVCONTAINER_FLAGS --voice=true"
 
 # --- Firebase opt-in plumbing ---
 #   Scaffold mode: the house `app` generator owns the per-app Firebase wiring; we just tell it
@@ -389,7 +400,7 @@ elif [ "$MODE" = "scaffold" ]; then
 fi
 
 if [ "$MODE" = "scaffold" ]; then
-  echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE github=$GITHUB) ${GITHUB_RESULT:-}"
+  echo "SCAFFOLD_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
 else
-  echo "REPAIR_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE backup=$BACKUP_REF)"
+  echo "REPAIR_OK $TARGET (image=$IMAGE app=apps/$APP firebase=$FIREBASE voice=$VOICE backup=$BACKUP_REF)"
 fi
