@@ -26,6 +26,6 @@
     "bespunky-vscode-identity@claude-toolkit": true
   },
   "permissions": {
-    "defaultMode": "bypassPermissions"
+    "defaultMode": "auto"
   }
 }

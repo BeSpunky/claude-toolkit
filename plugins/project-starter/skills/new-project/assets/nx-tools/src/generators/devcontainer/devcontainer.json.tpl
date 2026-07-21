@@ -36,7 +36,10 @@
         "toba.vsfire"{{/firebase}}
       ],
       "settings": {
-        "claude-code.dangerouslySkipPermissions": true,
+        // Claude's permission posture is set once in .claude/settings.json (permissions.defaultMode: "auto")
+        // — deliberately NOT a blanket skip here. "auto" gives frictionless auto-approval WITH the background
+        // safety classifier (it still blocks actions that escalate beyond the request or touch unrecognized
+        // infrastructure), the right default even in an isolated container.
         "editor.formatOnSave": false,
         "editor.codeActionsOnSave": {
           "source.fixAll.eslint": "explicit"
@@ -102,7 +105,9 @@
   },
   "remoteEnv": {
     "PATH": "${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",
-    "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1",
+    // No CLAUDE_CODE_BYPASS_ALL_PERMISSIONS here: Claude's permission mode is governed by
+    // .claude/settings.json (permissions.defaultMode: "auto"), not a hard bypass override — a
+    // bypass env var would win over settings.json and defeat the "auto" default.
     // Reliable file-watching for chokidar-based watchers over WSL/Docker mounts.
     // (Replaces the legacy `poll` option on serve targets, which the modern @angular/build:dev-server schema rejects.)
     "CHOKIDAR_USEPOLLING": "true",
