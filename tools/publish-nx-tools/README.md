@@ -38,7 +38,8 @@ container with `--docker`. Both paths run the same rendered command sequence, so
 **2FA.** If the account requires an OTP for writes, a 30-second TOTP code can expire during the staging +
 compile. The native path is faster, which narrows that window but doesn't close it — the robust fix is an npm
 **automation token** (or a granular token that bypasses 2FA) in `~/.npmrc`, after which publishes run unattended
-with no `--otp` at all.
+with no `--otp` at all. Set one up with **[`tools/set-npm-token`](../set-npm-token/README.md)** — it prompts
+silently and writes the token to `~/.npmrc` for you (the human types it; it's never pasted into a chat).
 
 ## Bootstrapping order
 
