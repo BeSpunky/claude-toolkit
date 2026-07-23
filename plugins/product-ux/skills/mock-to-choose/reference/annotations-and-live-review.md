@@ -11,7 +11,7 @@ Two layers, one kit:
 | Layer | Authored by | Purpose |
 | --- | --- | --- |
 | **Intent notes** | **Claude**, as the mock is built | *"This static glow is the lantern — the real one drifts and dims as you scroll."* Hover/focus a pin → a popover explains what the low-fidelity thing represents. |
-| **Comments** | **the user** (live or async) | Click anywhere → pin a comment to that spot. The server writes it to `comments.json`; Claude reads it back from that file: exact words, exact element, exact position. |
+| **Comments** | **the user** (live or async) | Press `c`, click the exact spot → a delightful in-place **composer** opens (a pulsing dot marks the point, `Enter` pins, `Esc` cancels — no native browser prompt). The server writes it to `comments.json`; Claude reads it back from that file: exact words, exact element, exact position. |
 
 ---
 
@@ -21,15 +21,16 @@ The review layer is **harness, not mock**: it ships with this skill at `assets/m
 
 ```text
 assets/mock-harness/          →  copied to  docs/features/<date>-<slug>/mocks/
-  gallery.html                # the shell: renders whatever mocks.json declares
-  gallery.js                  #   … side by side, at every viewport, with the comment bar
-  review.css                  # the pins, popovers, comment-mode chrome (namespaced .mk-*)
-  review.js                   # intent pins + the user's comments (POSTed to the server)
-  serve.py                    # the server: static files + a /comments endpoint → comments.json
+  gallery.html                # the shell: Compare wall + Focus view + viewport toggle, deep-linked
+  gallery.js                  #   … renders whatever mocks.json declares; comment bar + hot reload
+  review.css                  # the pins, clamped popovers, comment-mode chrome (namespaced .mk-*)
+  review.js                   # intent pins + the user's comments — pinned to the exact click point
+  serve.py                    # the server: static files + /comments + a hot-reload SSE stream
   serve.sh                    # launcher: random free port, prints the gallery URL
   mocks.json                  # ← YOU WRITE THIS: the question, what's faked, the variants
   variants/_template.html     # ← COPY PER CONCEPT: two harness lines + your mock
-  (comments.json, .gitignore  #    written by the server — read comments.json; git ignores the folder)
+  (comments.json, versions.json,   #  written by the server — read them; git ignores the folder
+   .versions/, .gitignore)         #  .versions/ = per-round HTML snapshots; comments.json = the inbox
 ```
 
 **What Claude authors is only ever two things:** `mocks.json` (the question, the honesty list, the variants and their pitches) and one file per concept under `variants/`. Everything else is fixed, so **every mock review looks and behaves the same** — same pins, same comment gesture, same gallery, same read-back contract — and the only thing that changes between reviews is the design being judged.
@@ -77,23 +78,41 @@ The mocks are for a **decision**, and a decision is a conversation. Because the 
    Never the project's default/forwarded port — that one belongs to whatever the user launched (`bespunky-workflow:local-server-isolation`). And never `file://`: the gallery `fetch`es `mocks.json` and the comment layer POSTs to `/comments`, both of which need the http server (`serve.py`). The server also writes the `*` `.gitignore` on first run, so the folder is throwaway from the first serve.
 
 2. **Get it in front of the user — live if you can, async if you can't.**
-   - **Co-driven (best):** open the gallery in the **shared browser** (`bespunky-browser-automation:shared-browser`) — the user clicks in a host tab over noVNC while you narrate and watch. Tell them, in one line: *"Press `c` and click anything — on any variant — to pin a comment to it. Hover a purple pin to see what a faked thing is meant to be."*
-   - **Async (also fine):** send screenshots (`bespunky-browser-automation:playwright`) and the URL; the user opens it in their own browser whenever. The comments still land in `comments.json`.
+   - **Co-driven (best):** open the gallery URL *inside* the **shared browser** (`bespunky-browser-automation:shared-browser`) — the user watches and clicks in a host tab over the forwarded **noVNC `:6080`** (so there's no random port for them to find or forward), while you drive the live page over CDP (`window.mockGoto('Lantern')`, `window.mockViewport('Phone')`) and narrate. Tell them, in one line: *"Open a concept, press `c`, and click the exact spot to pin a comment. Hover a purple pin to see what a faked thing is meant to be."*
+   - **Async (also fine):** send screenshots (`bespunky-browser-automation:playwright`) and the URL as a **clickable link**; the user opens it in their own browser whenever. The comments still land in `comments.json`.
 
-3. **Walk them through it** — the same narration the pins carry: what each variant's concept is, what's faked, what you're asking them to judge. They are looking at an empty house; be the architect standing in it.
+3. **Walk them through it** — Compare first (all concepts at once), then Focus on one to judge and comment at true size. Narrate what each variant's concept is, what's faked, what you're asking them to judge. They are looking at an empty house; be the architect standing in it.
 
-4. **Read the comments back — from the file, not from a live browser:**
+4. **Read the inbox — the comments the user actually SENT.** A comment runs `draft → submitted → handled`; you act on the **submitted-and-not-handled** ones (the user pinned the rest but hasn't sent them yet). Read them from the file, not from a live browser:
 
    ```bash
-   cat docs/features/<YYYY-MM-DD>-<slug>/mocks/comments.json      # the durable source of truth
+   # the inbox — submitted, not yet handled, with full DOM context:
+   jq '[.[] | select(.status=="submitted" and (.handled|not))]' docs/features/<…>/mocks/comments.json
+   curl -s http://127.0.0.1:<port>/state | jq .pending        # same thing, from the running server
+   # or over CDP in the live gallery:  window.mockInbox()
    ```
 
-   or, if you're already driving the live gallery over CDP, `JSON.stringify(window.allComments())`. Both return the same array — the gallery reads it from the same `/comments` endpoint. Reading the **file** is preferred: it survives a server restart, a closed tab, and a review that happened while you were away, and it needs no live session at all. Each comment carries the **exact words**, the **element** (a stable selector), its position within that element, the **variant**, and the viewport width — so *"too big"* is never ambiguous again: you know which thing, on which concept, at which width. (If a comment was pinned to an element that also has an intent note, its `note` field carries that note — so you can see whether the user was reacting to your stated intent.)
+   `comments.json` is the durable source of truth (it survives a restart, a closed tab, and a review that happened while you were away). Each comment carries the **exact words**, the **element** (`element` label + a stable `anchor` selector), the **fractional point** clicked (`at`), the **variant**, the **`version`** (the round it was made against — see below), the viewport width, and a **`dom` blob** (tag, id, classes, text snippet, `rect`, key styles, ancestor `path`) — so *"too big"* is never ambiguous: you know which thing, on which concept, in which round, where, how big, how styled. (If the element also has an intent note, its `note` field carries that note — so you can see whether the user was reacting to your stated intent.)
 
 5. **Read them back to the user before acting.** *"So: the lantern hero is too big on the phone, the tideline palette reads cold, and you want the second row gone."* This catches a misread while it's free.
 
 6. **Take the verdict — including "none of these" and "a hybrid".** A rejection of all concepts, or a graft of two, is a *first-class* outcome, not a failure: this is the outside-eye taste gate. Any verdict routes **upstream** — a comment is feedback on the **design**, not a bug in the mock's CSS — to `stage-the-vision` (re-conceive, or re-synthesize a hybrid into one concept) or `envision-the-experience` (the feeling was wrong). **Re-mock cheaply; never polish the mock into compliance.**
 
-7. **Copy the verbatim comments into `DECISION.md`** — the user's own words are the most valuable line in the package (`bespunky-workflow:feature-package`), and `comments.json` is thrown away with the `mocks/` folder.
+7. **Commit the round before you re-mock.** A mock iterates in internal **rounds** — v1 → v2 → … (a *mocking-process* version, not an app version). Right before you edit a variant for the next round, freeze what was reviewed: `POST /version {variant, note}` (or `window.mockCommit("Lantern", "shrank the hero, warmed the palette")`) snapshots the mock's current HTML to `.versions/<variant>__v<n>.html`, bumps the round in `versions.json`, and stamps that note. Every new comment is then version-bound to the current round. Past rounds stay viewable read-only — their snapshot **and** that round's comments — via the Focus view's **History** timeline (`#focus/Lantern/Phone/v2`), and any two rounds can be compared side by side (`#diff/Lantern/Phone/v2`). A version chip (*"v2 · current"*) shows where you are.
+
+8. **Check each comment off as you address it.** `PATCH /comments {n, handled: true, reply: "shrank the hero"}` (or `window.mockHandle(n, {reply: "shrank the hero"})`). A handled comment's pin **disappears from the live mock** — the live mock only ever shows the *current round's open* pins, so handled and past-round pins never clutter it. The resolution — a green ✓ and your one-line reply — shows in the Focus **side-list** and in that round's history snapshot. So the user still *watches their notes get checked off*, in the side-list, while the pin clears from the mock: comment → re-mock → checked, with no manual refresh. (`PATCH` is a partial update — `{n, text?, status?, handled?, reply?}` — so the same endpoint also backs an inline edit and a per-comment send; see below.)
+
+9. **Copy the verbatim comments into `DECISION.md`** — the user's own words are the most valuable line in the package (`bespunky-workflow:feature-package`), and `comments.json` is thrown away with the `mocks/` folder.
+
+## Managing the inbox — the Focus side-list
+
+The Focus view lists the current round's comments beside the mock, and each row is manageable in place:
+
+- **Edit** a comment's text inline (`PATCH /comments {n, text}`).
+- **Send** a single draft on its own — a per-row *Send* (`PATCH {n, status:"submitted"}`), distinct from the batch **Submit review (N)** that flips every draft at once.
+- **Remove** a comment with a 6-second **Undo** toast (the undo restores it exactly, round and status preserved).
+- **Row ↔ pin linking:** hovering a list row highlights its pin on the mock, and hovering a pin highlights its row; clicking a row scrolls to and flashes the pin. Recognition, not recall — you never hunt for which pin a note belongs to.
+
+(**Auto-send** — fire each comment to Claude the moment it's saved — is a persisted toggle: it lives in `localStorage`, so it survives a reload and is per-browser, not per-session.)
 
 > **A comment pinned to a pixel beats a paragraph written from memory.** That is the whole reason this layer writes to a file instead of trusting a chat reply to remember which pixel.

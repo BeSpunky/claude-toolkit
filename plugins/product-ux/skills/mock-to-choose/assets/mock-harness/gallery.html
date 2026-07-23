@@ -6,67 +6,282 @@
   <title>Mock review</title>
   <link rel="stylesheet" href="review.css">
   <style>
-    :root { color-scheme: dark; }
+    :root {
+      color-scheme: dark;
+      --bg: #0d0b14;
+      --panel: #17141f;
+      --panel-2: #1e1a29;
+      --line: #2a2637;
+      --ink: #e9e6f5;
+      --muted: #8f88ad;
+      --faint: #6f688a;
+      --intent: #7c5cff;
+      --comment: #ff8a3d;
+    }
     * { box-sizing: border-box; }
+    html, body { margin: 0; }
     body {
-      margin: 0; padding: 24px 24px 96px;
-      background: #0d0b14; color: #e9e6f5;
+      overflow-x: hidden;   /* the compact topbar can get tight on very narrow widths — never a page h-scroll */
+      padding: 22px clamp(16px, 4vw, 40px) 92px;
+      background:
+        radial-gradient(1200px 600px at 15% -10%, #1a1430 0%, transparent 60%),
+        var(--bg);
+      color: var(--ink);
       font: 400 15px/1.5 ui-sans-serif, system-ui, sans-serif;
+      min-block-size: 100vh;
     }
-    header.top { max-width: 1100px; margin: 0 auto 32px; }
-    h1 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #7c5cff; }
-    #question { margin: 0 0 20px; font-size: 26px; line-height: 1.25; font-weight: 600; }
-    .honesty { padding: 14px 18px; border-radius: 12px; background: #17141f; font-size: 13px; color: #b9b2d6; }
-    .honesty strong { display: block; margin-bottom: 6px; color: #e9e6f5; }
-    .honesty ul { margin: 0; padding-left: 18px; }
-    .how { margin-top: 12px; font-size: 13px; color: #8f88ad; }
-    .how kbd { padding: 2px 6px; border-radius: 5px; background: #2a2637; font: inherit; font-size: 12px; }
+    .wrap { max-width: 1320px; margin: 0 auto; }
 
-    #variants { display: flex; gap: 28px; align-items: start; max-width: 1100px; margin: 0 auto; flex-wrap: wrap; }
-    .variant { flex: 1 1 320px; min-width: 300px; }
-    .variant header h2 { margin: 0 0 4px; font-size: 18px; }
-    .variant header p { margin: 0 0 14px; font-size: 13px; color: #8f88ad; }
-    .views { display: flex; flex-direction: column; gap: 18px; }
-    .view { margin: 0; }
-    figcaption { margin-bottom: 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6f688a; display: flex; gap: 10px; align-items: baseline; }
-    .mk-fullsize { color: #7c5cff; text-decoration: none; letter-spacing: 0; text-transform: none; }
-    .mk-fullsize:hover { text-decoration: underline; }
-    .frame-box { overflow: hidden; border-radius: 12px; background: #fff; box-shadow: 0 12px 40px rgb(0 0 0 / .45); }
-    iframe { border: 0; display: block; transform-origin: top left; }
+    /* Scrollbars are themed once in review.css (loaded here AND inside every mock frame), so the whole
+       review system — gallery chrome and the mock-in-Focus scroll — shares one look. */
 
-    .bar {
-      position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 10000;
-      display: flex; gap: 12px; align-items: center; justify-content: center;
-      padding: 12px; background: #14121cf2; backdrop-filter: blur(8px);
-      border-top: 1px solid #2a2637; font-size: 13px;
+    /* ---- header (compact, sticky — the mock starts right below it) ---- */
+    .top { position: sticky; inset-block-start: 0; z-index: 60;
+           background: linear-gradient(var(--bg) 72%, color-mix(in srgb, var(--bg) 80%, transparent));
+           backdrop-filter: blur(6px); }
+    .topbar { display: flex; align-items: center; gap: 12px; padding: 12px 0 10px; flex-wrap: wrap; row-gap: 8px; }
+    .eyebrow-dot { flex: none; inline-size: 8px; block-size: 8px; border-radius: 50%;
+                   background: var(--comment); box-shadow: 0 0 10px var(--comment); }
+    #question { flex: 1; min-inline-size: 0; margin: 0; font-size: 16px; font-weight: 650; line-height: 1.3;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* a slim always-visible line: teaches the core gesture + surfaces the honesty count (never fully hidden) */
+    .subhint { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 0 0 10px; }
+    .subhint-teach { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                     font-size: 12px; color: var(--faint); }
+    .subhint-teach b { font-weight: 600; }
+    .subhint-teach kbd { padding: 1px 6px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--line);
+                         font: inherit; font-size: 11px; color: var(--muted); }
+    .info-toggle { flex: none; border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+                   border-radius: 999px; padding: 6px 13px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .info-toggle:hover, .info-toggle[aria-expanded="true"] { border-color: var(--intent); color: var(--ink); }
+    .info-panel { margin: 2px 0 10px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 12px;
+                  background: var(--panel); max-inline-size: 760px; box-shadow: 0 14px 40px rgb(0 0 0 / .4); }
+    .info-panel[hidden] { display: none; }
+    .info-panel strong { display: block; margin-bottom: 6px; font-size: 13px; }
+    .info-panel ul { margin: 0 0 10px; padding-left: 18px; font-size: 13px; color: #b9b2d6; }
+    .info-panel li { margin: 3px 0; }
+    .how { margin: 0; font-size: 13px; color: var(--muted); }
+    .how b { font-weight: 600; }
+    .how kbd { padding: 2px 7px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line);
+               font: inherit; font-size: 12px; }
+
+    /* ---- toolbar (nav; hidden in Compare where there's nothing to show) ---- */
+    .toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+               padding-block: 4px 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .toolbar:has(#nav-left:empty) { display: none; }
+    .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
+    .seg button { border: 0; border-radius: 999px; padding: 7px 15px; cursor: pointer; font: inherit; font-size: 13px;
+                  background: transparent; color: var(--muted); }
+    .seg button[aria-pressed="true"] { background: var(--intent); color: #fff; font-weight: 600; }
+    .toolbar .grow { flex: 1; }
+    .backbtn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px;
+               padding: 7px 14px; cursor: pointer; font: inherit; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+    .backbtn:hover { border-color: var(--intent); }
+    .focusnav { display: inline-flex; align-items: center; gap: 8px; }
+    .focusnav .arrow { inline-size: 34px; block-size: 34px; border-radius: 50%; border: 1px solid var(--line);
+                       background: var(--panel); color: var(--ink); cursor: pointer; font-size: 16px; line-height: 1; }
+    .focusnav .arrow:hover { border-color: var(--intent); }
+    .focusnav .whoami { font-size: 14px; font-weight: 600; }
+    .focusnav .whoami small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+    .vchip { margin-inline-start: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+             border-radius: 999px; padding: 6px 12px; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
+             letter-spacing: .02em; cursor: default; }
+    .vchip.hist { color: #ffd17a; border-color: #ffd17a55; cursor: pointer; }
+
+    /* ---- compare wall ---- */
+    #stage { min-block-size: 40vh; }
+    .wall { display: grid; gap: 22px; align-items: start;
+            grid-template-columns: repeat(auto-fit, minmax(clamp(220px, 26vw, 300px), 1fr)); }
+    .card { border: 1px solid var(--line); border-radius: 16px; background: var(--panel);
+            padding: 14px; cursor: pointer; transition: border-color .15s, transform .15s; }
+    .card:hover { border-color: var(--intent); transform: translateY(-2px); }
+    .card h2 { margin: 0 0 3px; font-size: 16px; }
+    .card .pitch { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); min-block-size: 2.6em; }
+    .card .badge { display: inline-flex; align-items: center; gap: 5px; margin-top: 12px; font-size: 12px; color: var(--muted); }
+    .card .badge b { color: var(--comment); }
+    .card .open-hint { float: right; font-size: 12px; color: var(--intent); }
+
+    /* ---- concept rail — a slim VERTICAL column beside the mock (costs horizontal space, not vertical) ---- */
+    .concept-rail { display: flex; flex-direction: column; gap: 12px; align-items: center; align-self: start;
+                    position: sticky; inset-block-start: var(--header-h, 108px);
+                    max-block-size: calc(100vh - var(--header-h, 108px) - 72px);
+                    overflow-y: auto; padding-inline-end: 12px; border-inline-end: 1px solid var(--line); }
+    .rail-item { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px;
+                 cursor: pointer; background: none; border: 0; padding: 0; inline-size: 100%; }
+    .rail-item:focus-visible { outline: 2px solid var(--intent); outline-offset: 3px; border-radius: 12px; }
+    .rail-thumb { inline-size: 64px; block-size: 92px; overflow: hidden; border-radius: 5px; background: var(--bg);
+                  border: 2px solid var(--line); box-shadow: 0 4px 12px rgb(0 0 0 / .45);
+                  transition: border-color .12s ease, transform .12s ease; }
+    /* thumbnails (rail / compare / evolution) get a subtle radius — not the mock's full/phone-shaped rounding */
+    .rail-thumb .frame-box, .card .frame-box, .evo-frame .frame-box { border-radius: 5px; }
+    .rail-item:hover .rail-thumb { transform: translateY(-2px); border-color: var(--muted); }
+    .rail-item.current .rail-thumb { border-color: var(--intent); box-shadow: 0 0 0 1px var(--intent), 0 4px 12px rgb(0 0 0 / .45); }
+    .rail-thumb iframe { pointer-events: none; }   /* click falls through to the rail item */
+    .rail-name { max-inline-size: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                 font-size: 11px; color: var(--muted); }
+    .rail-item.current .rail-name { color: var(--ink); font-weight: 600; }
+
+    /* ---- focus stage ---- */
+    .focus { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+    .focus.has-rail { grid-template-columns: 88px minmax(0, 1fr) 300px; }
+    @media (max-width: 900px) {
+      .focus, .focus.has-rail { grid-template-columns: 1fr; }
+      .concept-rail { flex-direction: row; align-items: start; overflow-x: auto; overflow-y: visible;
+                      position: static; max-block-size: none; padding: 0 0 12px; padding-inline-end: 0;
+                      border-inline-end: 0; border-block-end: 1px solid var(--line); }
+      .concept-rail .rail-item { inline-size: auto; }   /* in a row, don't let items stretch to full width */
     }
-    .bar button { border: 0; border-radius: 999px; padding: 8px 14px; cursor: pointer;
-                  background: #2a2637; color: #e9e6f5; font: inherit; }
-    .bar button[aria-pressed="true"] { background: #ff8a3d; color: #14121c; font-weight: 600; }
-    #count { color: #8f88ad; }
+    .focus .pitch { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+
+    /* dark backing (not #fff): a mock paints its own background, and white here bled through the mock's
+       transparent scrollbar gutter and rounded corners as white stains. Dark matches the system. */
+    .frame-box { overflow: hidden; border-radius: 14px; background: var(--bg);
+                 box-shadow: 0 20px 60px rgb(0 0 0 / .5); margin-inline: auto; }
+    /* preview iframes (compare cards + evolution thumbnails) are non-interactive, so a click falls
+       through to the clickable card/step instead of being swallowed by the iframe's own document.
+       (Focus's iframe stays interactive — that's where commenting happens.) */
+    .card iframe, .evo-frame iframe { pointer-events: none; }
+    .frame-box.phone { border-radius: 26px; }
+    iframe { border: 0; display: block; transform-origin: top left; background: #fff; }
+
+    .side { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 16px; }
+    .side h3 { margin: 0 0 10px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+    .clist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .clist li { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
+    .clist .num { display: inline-block; min-inline-size: 20px; block-size: 20px; border-radius: 50%;
+                  background: var(--comment); color: #14121c; font: 600 11px/20px ui-sans-serif; text-align: center; margin-inline-end: 7px; }
+    .clist .txt { font-size: 13px; }
+    .clist .meta { margin-top: 6px; font-size: 11px; color: var(--faint); }
+    .clist .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600;
+                   letter-spacing: .04em; text-transform: uppercase; }
+    .clist .pill-draft { background: #201b2b; color: var(--comment); border: 1px solid #ff8a3d55; }
+    .clist .pill-sent { background: #ff8a3d22; color: #ffb27f; }
+    .clist .pill-handled { background: #3aa76a22; color: #8fe3b3; }
+    .clist li.st-handled .txt { opacity: .6; }
+    .clist li.st-draft { border-style: dashed; }
+    .clist li { cursor: pointer; transition: border-color .12s, background .12s; }
+    .clist li.hot { border-color: var(--comment); background: #ff8a3d12; }
+    .clist .chead { display: flex; align-items: baseline; }
+    .clist .editin { flex: 1; margin-inline-start: 2px; border: 1px solid var(--intent); border-radius: 6px;
+                     background: #0f0d16; color: var(--ink); font: inherit; font-size: 13px; padding: 3px 7px; }
+    /* progressive disclosure: row actions appear on hover/focus, so the resting list stays calm */
+    .clist .acts { display: flex; gap: 6px; margin-top: 8px; opacity: 0; max-height: 0; overflow: hidden;
+                   transition: opacity .12s ease; }
+    .clist li:hover .acts, .clist li:focus-within .acts { opacity: 1; max-height: 40px; }
+    .clist .act { border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); cursor: pointer;
+                  border-radius: 7px; padding: 4px 10px; font: 600 11px/1 ui-sans-serif, system-ui, sans-serif; }
+    .clist .act:hover { border-color: var(--intent); color: var(--ink); }
+    .clist .act.send:hover { border-color: var(--comment); color: var(--comment); }
+    .clist .act.rm:hover { border-color: #e0576b; color: #ff8a9a; }
+
+    /* history + diff */
+    .side h4 { margin: 0; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+    .history-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+                    margin: 18px 0 8px; border-top: 1px solid var(--line); padding-top: 14px; }
+    .history .hround { font-size: 13px; margin: 5px 0; color: var(--muted); }
+    .linklike { border: 0; background: none; color: var(--intent); cursor: pointer; font: inherit; font-size: 13px; padding: 0; }
+    .linklike:hover { text-decoration: underline; }
+    .hround .hmeta { color: var(--faint); }
+    .evo-open { border: 0; background: none; color: var(--intent); cursor: pointer; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; padding: 0; white-space: nowrap; }
+    .evo-open:hover { text-decoration: underline; }
+    .histbanner { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 9px 12px; border-radius: 10px;
+                  background: #ffd17a14; border: 1px solid #ffd17a44; color: #ffd17a; font-size: 13px; font-weight: 600; }
+
+    /* ---- evolution timeline (the whole life of a concept, v1 → now) ---- */
+    .evolution { display: flex; align-items: flex-start; gap: 4px; overflow-x: auto; padding: 4px 2px 18px; }
+    .evo-step { flex: 0 0 auto; inline-size: clamp(200px, 22vw, 264px); margin: 0;
+                border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 12px; }
+    .evo-step.current { border-color: var(--intent); box-shadow: 0 0 0 1px var(--intent) inset; }
+    /* only the version label is above the thumbnail (one line, uniform) → all thumbnails share a baseline */
+    .evo-step figcaption { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+    .evo-step figcaption b { color: var(--ink); }
+    .evo-step.current figcaption b { color: var(--intent); }
+    /* the full round note, below the thumbnail — nothing cut, and its length can't shift the row above */
+    .evo-note { margin-top: 12px; font-weight: 400; font-size: 12px; line-height: 1.4; color: var(--muted);
+                padding-inline-start: 10px; border-inline-start: 2px solid var(--line); }
+    /* NO radius/overflow/background here — the inner .frame-box is the single rounded surface (like Compare/
+       Focus). A wrapper with its own smaller radius + white bg peeked through the corners as white crescents. */
+    .evo-frame { cursor: pointer; border-radius: 14px; transition: transform .12s ease; }
+    .evo-frame:hover { transform: translateY(-2px); }
+    .evo-frame:hover .frame-box { box-shadow: 0 14px 34px rgb(0 0 0 / .6); }
+    .evo-frame:focus-visible { outline: 2px solid var(--intent); outline-offset: 3px; }
+    /* align the arrow to the thumbnail band (near the top), not the vertical centre of the tallest step */
+    .evo-arrow { flex: 0 0 auto; align-self: flex-start; margin-block-start: 46px; color: var(--faint); font-size: 22px; padding: 0 4px; }
+    .evo-comments { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+    .evo-comments li { font-size: 12.5px; color: var(--ink); line-height: 1.35; }
+    .evo-comments li.done { opacity: .55; }
+    .evo-empty { margin: 12px 0 0; font-size: 12px; color: var(--faint); font-style: italic; }
+
+    /* undo toast */
+    .toast { position: fixed; inset-block-end: 76px; inset-inline: 0; margin-inline: auto; width: max-content; max-width: 90vw;
+             z-index: 10001; display: flex; align-items: center; gap: 14px; padding: 11px 16px; border-radius: 12px;
+             background: #211c2e; border: 1px solid var(--line); box-shadow: 0 12px 40px rgb(0 0 0 / .5);
+             font-size: 13px; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .16s, transform .16s; }
+    .toast.show { opacity: 1; transform: none; pointer-events: auto; }
+    .toast-act { border: 0; background: none; color: var(--comment); font: 600 13px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
+    .clist .rm { float: right; border: 0; background: transparent; color: var(--faint); cursor: pointer; font-size: 12px; }
+    .clist .rm:hover { color: var(--comment); }
+    .side .empty { font-size: 13px; color: var(--muted); }
+
+    /* ---- bottom bar ---- */
+    .bar { position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 10000;
+           display: flex; gap: 12px; align-items: center; justify-content: center;
+           padding: 12px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px);
+           border-top: 1px solid var(--line); font-size: 13px; }
+    .bar button { border: 1px solid var(--line); border-radius: 999px; padding: 8px 15px; cursor: pointer;
+                  background: var(--panel); color: var(--ink); font: inherit; }
+    .bar button:hover:not(:disabled) { border-color: var(--intent); }
+    .bar button:disabled { opacity: .45; cursor: not-allowed; }
+    .bar button#comment-toggle[aria-pressed="true"] { background: var(--comment); color: #14121c; border-color: var(--comment); font-weight: 600; }
+    .bar button.primary:not(:disabled) { background: var(--intent); border-color: var(--intent); color: #fff; font-weight: 600; }
+    .bar button.primary:not(:disabled):hover { filter: brightness(1.08); }
+    #autosend-wrap { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+    #autosend-wrap input { accent-color: var(--comment); }
+    #count { color: var(--muted); min-inline-size: 8ch; }
+    #live { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 12px; }
+    #live::before { content: ""; inline-size: 7px; block-size: 7px; border-radius: 50%; background: #4b4666; }
+    #live.on::before { background: #58d68d; box-shadow: 0 0 8px #58d68d; }
   </style>
 </head>
 <body>
-  <header class="top">
-    <h1>Mock review — nothing here works</h1>
-    <p id="question"></p>
-    <div class="honesty">
-      <strong>What's faked (and why)</strong>
-      <ul id="honesty"></ul>
-    </div>
-    <p class="how">
-      Hover a <b style="color:#7c5cff">purple pin</b> to see what a low-fidelity thing is meant to become.
-      Press <kbd>c</kbd> and click anything to pin a comment to it — an <b style="color:#ff8a3d">orange pin</b> is yours.
-    </p>
-  </header>
+  <div class="wrap">
+    <header class="top">
+      <div class="topbar">
+        <span class="eyebrow-dot" title="Mock review — nothing here works"></span>
+        <h1 id="question"></h1>
+        <span class="grow"></span>
+        <div class="seg" id="viewport-seg" role="group" aria-label="Viewport"></div>
+      </div>
+      <div class="subhint">
+        <span class="subhint-teach">Press <kbd>c</kbd>, then click the exact spot to comment ·
+          <b style="color:var(--intent)">purple pins</b> = design intent · <b style="color:var(--comment)">orange</b> = your comments</span>
+        <button type="button" id="info-toggle" class="info-toggle" aria-expanded="false">What's faked <span id="faked-count"></span>▾</button>
+      </div>
+      <div id="info-panel" class="info-panel" hidden>
+        <strong>What's faked (and why)</strong>
+        <ul id="honesty"></ul>
+        <p class="how">
+          <b style="color:var(--intent)">Purple pins</b> are the design intent — hover one to see what a low-fidelity
+          thing will become. Open a concept, press <kbd>c</kbd>, and click the <b>exact spot</b> to leave an
+          <b style="color:var(--comment)">orange comment</b> right where you point.
+        </p>
+      </div>
+      <div class="toolbar"><div id="nav-left"></div></div>
+    </header>
 
-  <main id="variants"></main>
+    <main id="stage"></main>
+  </div>
 
   <div class="bar">
+    <span id="live" title="Live reload: the page updates itself when a mock changes on disk">live</span>
     <span id="count">no comments yet</span>
-    <button type="button" id="comment-toggle" aria-pressed="false">Comment (c)</button>
-    <button type="button" id="export">Copy comments</button>
-    <button type="button" id="clear">Clear</button>
+    <button type="button" id="comment-toggle" aria-pressed="false" disabled>Comment (c)</button>
+    <button type="button" id="submit" class="primary" disabled title="Send your pinned comments to Claude">Submit review</button>
+    <label id="autosend-wrap" title="On (default): each comment is sent to Claude the moment you pin it. Uncheck to collect drafts and send them as a batch with Submit review.">
+      <input type="checkbox" id="autosend"> <span>auto-send</span>
+    </label>
+    <button type="button" id="export" title="Copy all comments as JSON">Copy comments</button>
+    <button type="button" id="clear">Clear all</button>
   </div>
 
   <script src="gallery.js"></script>

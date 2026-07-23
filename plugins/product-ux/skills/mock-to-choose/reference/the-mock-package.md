@@ -19,8 +19,9 @@ docs/features/
       .gitignore                   #     contains "*" — the folder ignores itself
       gallery.html · gallery.js    #     THE HARNESS — copied verbatim, never edited
       review.css   · review.js     #     intent pins, comments (POSTed to the server)
-      serve.py     · serve.sh      #     server (a /comments endpoint) + launcher → gallery URL
+      serve.py     · serve.sh      #     server (/comments + /version endpoints) + launcher → gallery URL
       comments.json                #     written by the server as the user comments — read this
+      versions.json · .versions/   #     round state + per-round HTML snapshots (both self-ignored by *)
       mocks.json                   #     ← authored: the question, what's faked, the variants
       variants/
         lantern.html               #     ← authored: one file per concept
@@ -95,10 +96,16 @@ You do not build it. The harness's `gallery.html` renders whatever **`mocks.json
 Which gives you, unchanged in every review:
 
 - **The question at the top** — what is being judged, in one line.
-- **Every variant, side by side**, each under its concept name and one-line pitch.
-- **Every viewport** — each mock laid out at its **true width** (a phone mock rendered at 390px, then scaled to fit the column — never a squashed desktop), because the Staging is mobile-first and a concept that only holds wide is not a concept.
+- **A Compare wall** — every variant side by side, each under its concept name and one-line pitch, at a readable, honest scale, so the eye can pick. Click one to **Focus** it.
+- **A Focus view** — one concept at its **true width** for the chosen viewport (a phone mock at a real 390px, a desktop mock at 1280px), where the pins are full-resolution and a comment lands on the exact pixel it was clicked. This is where commenting happens — never on a shrunk-down thumbnail, which is why *"this, here"* finally lands where the user meant.
+- **A viewport toggle** (phone / desktop) that drives both views — the Staging is mobile-first, and a concept that only holds wide is not a concept.
 - **The honesty note** — what is faked and what is real. Without it, the user rejects a concept for a placeholder's sins.
-- **The comment bar** — comment mode across every variant at once, a live count, copy-to-clipboard, and clear.
+- **The comment gesture** — press `c`, click the exact spot, and a delightful in-place **composer** opens (a pulsing dot marks the point, `Enter` pins, `Esc` cancels — no native browser prompt).
+- **The comment bar** — a draft / sent / handled tally, a **"Submit review (N)"** button (and an **auto-send** toggle, persisted in `localStorage`, to fire each comment on save), copy-to-clipboard, and clear. In the Focus **side-list**, each comment is managed in place — **edit** the text inline, **send** a single draft on its own (distinct from the batch Submit), **remove** with a 6-second **Undo** toast — and rows **link** to pins both ways (hover a row to light its pin, click to scroll to and flash it).
+- **A review channel** — comments run `draft → submitted → handled`, carry full DOM context, and are read back as an inbox (`/state → pending`, `window.mockInbox()`, or `comments.json`); see SKILL.md → *Send it to Claude*. A handled pin **clears from the live mock** (which only shows the current round's open pins) and shows resolved — green ✓ + reply — in the side-list and the round's snapshot.
+- **Rounds & history** — a mock iterates in internal rounds (v1 → v2 → …); Claude commits a round (`window.mockCommit(variant, note)`, `POST /version`) right before re-mocking, which snapshots the mock's HTML and stamps a note; `window.mockVersions()` (or `GET /versions`) reads the round state back. A version chip shows the current round, and past rounds are viewable read-only (their snapshot + that round's comments) on a **History** timeline, with any two rounds comparable side by side.
+- **Hot reload** — edit a variant or `mocks.json` and every open gallery updates itself; no manual refresh, so you can re-mock while the user watches.
+- **Deep links** — `gallery.html#focus/Lantern/Phone` reopens the exact state, and a round suffix addresses history (`#focus/Lantern/Phone/v2`) or a diff (`#diff/Lantern/Phone/v2`); the back button and a shared link both honour it, which is also how Claude drives the live page over CDP.
 
 ---
 
@@ -108,10 +115,10 @@ Which gives you, unchanged in every review:
 
 1. **Screenshot every variant** — phone and desktop — with `bespunky-browser-automation:playwright`. Put the images directly in the message.
 2. **Name each one** with its concept and one-line pitch, so the picture has a handle they can refer to.
-3. **Open it — live if you can, async if you can't.** `bash mocks/serve.sh` (a random free port — `bespunky-workflow:local-server-isolation`). Best case, drive the **shared browser** (`bespunky-browser-automation:shared-browser`) so you and the user look at the *same* page and you narrate live. Otherwise send screenshots and the URL and let them open it themselves — the comments land in `comments.json` either way.
-4. **Narrate the walkthrough** — what each concept is, what's faked, what you're asking them to judge — and tell them how to talk back: *press `c` and click anything to pin a comment to it; hover a purple pin to see what a faked thing is meant to be.*
+3. **Open it — live if you can, async if you can't.** `bash mocks/serve.sh` (a random free port — `bespunky-workflow:local-server-isolation`) prints the gallery URL. Best case, open that URL in the **shared browser** (`bespunky-browser-automation:shared-browser`) so you and the user look at the *same* page over the forwarded `:6080` (no random port for them to forward), and you drive it over CDP and narrate live. Otherwise send screenshots and the URL as a **clickable link** and let them open it themselves — the comments land in `comments.json` either way.
+4. **Narrate the walkthrough** — what each concept is, what's faked, what you're asking them to judge — and tell them how to talk back: *open a concept, press `c`, click the exact spot to pin a comment; hover a purple pin to see what a faked thing is meant to be.*
 5. **Ask one question:** *which one — and what would you change?* Not "does this look good?"
-6. **Read their comments from `comments.json`** (or `window.allComments()` in the live gallery), repeat them back, and copy them **verbatim** into `DECISION.md`.
+6. **Read their comments from `comments.json`** (or `window.allComments()` in the live gallery), repeat them back, and copy them **verbatim** into `DECISION.md`. As you re-mock, **check each one off** (`window.mockHandle(n, {reply})`) — the handled pin clears from the live mock and shows resolved with your reply in the side-list, so the user watches their notes get checked off.
 
 The harness, the intent notes, and reading comments from disk: `annotations-and-live-review.md` (and the asset itself at `assets/mock-harness/`).
 
@@ -128,5 +135,7 @@ Write it as prose, short. It carries:
 - **What was rejected, and why.** The road not taken, with its reason — so it is not re-proposed, re-mocked, and re-rejected.
 - **The corrections asked for.** *"Darker. Lose the second row. The hero is too big on the phone."* These feed the next iteration and the final Staging.
 - **What was faked in the mock** and therefore still has to be *properly* designed and built by `realize-the-vision` — so nobody mistakes the shortcut for a decision.
+
+The harness's **per-round history complements this**: each committed round carries a note, its own comments, and an HTML snapshot, so `versions.json` + `.versions/` are a built-in record of *what changed and why* across the iteration. But — like the rest of `mocks/` — the rounds and snapshots are **self-ignored by the `*` `.gitignore` and thrown away** with the folder unless deliberately kept. `DECISION.md` is the durable conclusion; the round history is disposable evidence.
 
 Then the mocks can be deleted with no loss.
