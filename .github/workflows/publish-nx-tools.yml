@@ -1,0 +1,90 @@
+# Auto-publish @bespunky/nx-tools to npm when a version bump lands on main.
+#
+# The house Nx generators live as TypeScript in the toolkit; npm needs COMPILED JS. This workflow reuses
+# the SAME script a human runs locally — tools/publish-nx-tools/publish.sh — so CI and hand-publishing can
+# never drift (that script compiles via compile-generators.mts, then npm-publishes). CI's Node is 22.18+,
+# so publish.sh takes its native path (no Docker).
+#
+# IDEMPOTENCY IS THE WHOLE GAME. This runs on EVERY push to main that touches the payload, but npm rejects
+# republishing an existing version. So we publish ONLY when package.json's version is not already on the
+# registry — i.e. only when a `chore(release): bump nx-tools …` actually changed it. Every other push is a
+# no-op. (npm view needs no auth, so the guard runs before we ever touch the token.)
+#
+# ONE-TIME SETUP: add a repo secret named NPM_TOKEN — an npm *automation* token for the @bespunky org
+# (Account → Access Tokens → Generate → Automation). Automation tokens bypass 2FA, which is why this can
+# publish unattended. The token stays in GitHub secrets; it is never printed.
+
+name: Publish nx-tools
+
+on:
+  push:
+    branches: [main]
+    # Only wake for changes that could produce a new package. A version bump lives in nx-tools/package.json
+    # (covered by the payload glob); the compiler and the publish script are inputs to what gets shipped.
+    paths:
+      - 'plugins/project-starter/skills/new-project/assets/nx-tools/**'
+      - 'plugins/project-starter/skills/new-project/assets/compile-generators.mts'
+      - 'tools/publish-nx-tools/**'
+      - '.github/workflows/publish-nx-tools.yml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate packaging only (npm publish --dry-run), never publish'
+        type: boolean
+        default: false
+
+# Never let two publishes race; do not cancel one mid-publish.
+concurrency:
+  group: publish-nx-tools
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Guard against forks trying to publish with an absent token.
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22.18+ is the bar for compile-generators.mts's type-stripping; '22' resolves to the latest
+      # 22.x, comfortably above it. This is also what lets publish.sh skip its Docker fallback.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Is package.json's version already on npm? If yes, this push didn't bump — nothing to publish.
+      # Deliberately NOT using setup-node's registry-url: it redirects npm at a temp .npmrc, but
+      # publish.sh reads ~/.npmrc, so we write that ourselves in the publish step instead.
+      - name: Resolve version and decide whether to publish
+        id: ver
+        run: |
+          set -euo pipefail
+          PKG='plugins/project-starter/skills/new-project/assets/nx-tools/package.json'
+          VERSION="$(node -p "require('./$PKG').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "@bespunky/nx-tools@$VERSION" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::@bespunky/nx-tools@$VERSION is already published — skipping (no version bump)."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::@bespunky/nx-tools@$VERSION is new — will publish."
+          fi
+
+      # Publish on a real bump, or validate-only when dispatched with dry_run.
+      - name: Publish (or dry-run)
+        if: ${{ steps.ver.outputs.publish == 'true' || github.event.inputs.dry_run == 'true' }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # publish.sh expects auth in ~/.npmrc; an automation token there publishes unattended.
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
+          trap 'rm -f "$HOME/.npmrc"' EXIT
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            bash tools/publish-nx-tools/publish.sh --dry-run
+          else
+            bash tools/publish-nx-tools/publish.sh
+          fi
