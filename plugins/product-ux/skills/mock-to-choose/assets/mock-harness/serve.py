@@ -17,8 +17,13 @@ serve.py — the mock harness's static server. It does three things a plain
      reason someone reaches for a framework's dev server; here it costs ~40 lines and
      keeps the folder dependency-free and instantly throwable.
 
-  3. A STATE SNAPSHOT for Claude.  GET /state returns the comments plus what the harness
+  3. A STATE SNAPSHOT for Claude.  GET /state returns the comments, the VERDICT, and what the harness
      knows — so Claude can read the review's status in one request, live or async.
+
+  4. THE VERDICT (the decision, not a comment).  A mock review exists to produce a DECISION — pick a
+     concept to proceed with, or reject them all. That is a first-class act, not feedback on a detail, so
+     it has its own store (verdict.json) and its own endpoints. Claude WATCHES it like the inbox and, when
+     it lands, proceeds to build the chosen direction (a mock yes is provisional — it licenses the build).
 
 A comment's lifecycle: DRAFT → SUBMITTED → HANDLED.
   · draft      — pinned, not yet sent (the user is still collecting them)
@@ -41,6 +46,9 @@ Endpoints:
   GET  /state         → {comments, pending, files_version, comments_version} — one-shot status for Claude
   POST /version       → commit a ROUND {variant, note?}: freeze the live mock as a snapshot + bump the round
   GET  /versions      → {<variant>: {current, rounds:[{v, ts, snapshot, note}]}} — the round history
+  GET  /verdict       → the current verdict {kind, choice, note, version, ts} or null   ← THE DECISION
+  POST /verdict       → record it {kind:'chosen'|'none', choice?, note?}  (choice = variant key when chosen)
+  DELETE /verdict     → clear the verdict (the user un-decides)
   everything else     → static files from this folder (including .versions/<variant>__v<n>.html snapshots)
 """
 import json
@@ -55,12 +63,15 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 STORE = os.path.join(HERE, 'comments.json')
 VERSTORE = os.path.join(HERE, 'versions.json')
+VERDICT_STORE = os.path.join(HERE, 'verdict.json')   # the DECISION — which concept to proceed with, or none
 SNAPDIR = os.path.join(HERE, '.versions')      # per-round HTML snapshots (dot-dir → git-ignored, not watched)
 MAX_BODY = 1 << 20  # 1 MB — a comment is a sentence, not a payload
 
 # Files the watcher must IGNORE: its own outputs and process bookkeeping. Watching
-# comments.json / versions.json here would make every comment or commit also trigger a page reload.
-WATCH_IGNORE = {'comments.json', 'comments.json.tmp', 'versions.json', 'versions.json.tmp', '.gitignore', '.serve.pid'}
+# comments.json / versions.json / verdict.json here would make every comment, commit, or decision
+# also trigger a page reload.
+WATCH_IGNORE = {'comments.json', 'comments.json.tmp', 'versions.json', 'versions.json.tmp',
+                'verdict.json', 'verdict.json.tmp', '.gitignore', '.serve.pid'}
 WATCH_EXTS = ('.html', '.htm', '.css', '.js', '.json', '.svg')
 
 # ---- shared change-version state (read by every SSE client) ----
@@ -161,6 +172,29 @@ def commit_round(variant, note=''):
         return vs
 
 
+# ---- the verdict (the decision) ----
+# A mock review's whole purpose is a DECISION: choose a concept to proceed with, or reject them all.
+# That is not a comment (feedback on a detail) — it is the GATE, so it gets its own single-object store.
+# kind='chosen' → `choice` is the picked variant's key; kind='none' → all rejected (choice=None).
+_verdict_lock = threading.Lock()
+
+
+def load_verdict():
+    try:
+        with open(VERDICT_STORE, encoding='utf-8') as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else None
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def save_verdict(verdict):
+    tmp = VERDICT_STORE + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(verdict, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, VERDICT_STORE)
+
+
 def scan():
     """A signature of every watched file's mtime, keyed by path relative to HERE."""
     sig = {}
@@ -250,6 +284,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(load())
         if path == '/versions':
             return self._json(load_versions())
+        if path == '/verdict':
+            return self._json(load_verdict())
         if path == '/events':
             return self._sse()
         if path == '/state':
@@ -260,6 +296,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({
                 'comments': comments,
                 'pending': pending,
+                'verdict': load_verdict(),          # the DECISION — read this to know if the user has chosen
                 'files_version': s['files'],
                 'comments_version': s['comments'],
             })
@@ -290,7 +327,7 @@ class Handler(SimpleHTTPRequestHandler):
             except ValueError:
                 self.close_connection = True
                 return self._json({'error': 'bad length'}, 400)
-            if length > MAX_BODY:
+            if length < 0 or length > MAX_BODY:
                 self.close_connection = True   # unread body would desync a keep-alive socket
                 return self._json({'error': 'too large'}, 400)
             try:
@@ -305,6 +342,46 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({'error': 'no such variant'}, 404)
             bump('comments')                   # gallery re-pulls /versions alongside comments
             return self._json(vs)
+
+        # /verdict — record THE DECISION (choose a concept, or reject all). This is the review's gate; it is
+        # deliberately NOT a comment. Claude watches for it and, once set, proceeds to build the chosen concept.
+        if path == '/verdict':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+            except ValueError:
+                self.close_connection = True
+                return self._json({'error': 'bad length'}, 400)
+            if length < 0 or length > MAX_BODY:
+                self.close_connection = True   # unread/negative body would desync a keep-alive socket
+                return self._json({'error': 'bad length'}, 400)
+            try:
+                body = json.loads(self.rfile.read(length)) if length > 0 else {}
+            except json.JSONDecodeError:
+                return self._json({'error': 'bad json'}, 400)
+            kind = str(body.get('kind', 'chosen'))
+            if kind not in ('chosen', 'none'):
+                return self._json({'error': "kind must be 'chosen' or 'none'"}, 400)
+            choice = str(body.get('choice', '')).strip() or None
+            if kind == 'chosen':
+                # Mirror /version's strictness: a choice must be a real variant, never a path-escape or a
+                # typo that would paint a phantom "✓ Chosen: <junk>". Variants live at variants/<key>.html.
+                if not choice:
+                    return self._json({'error': 'chosen needs a choice (variant key)'}, 400)
+                if '/' in choice or '\\' in choice or '..' in choice \
+                        or not os.path.isfile(os.path.join(HERE, 'variants', f'{choice}.html')):
+                    return self._json({'error': 'no such variant'}, 404)
+            verdict = {
+                'kind': kind,
+                'choice': choice if kind == 'chosen' else None,
+                'note': str(body.get('note', '')),
+                # stamp the round the chosen concept was on, so DECISION.md records exactly what was approved
+                'version': current_round(choice) if kind == 'chosen' else None,
+                'ts': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            }
+            with _verdict_lock:
+                save_verdict(verdict)
+            bump('comments')                   # gallery re-pulls /verdict alongside comments; Claude's watch sees it
+            return self._json(verdict, 201)
 
         if path != '/comments':
             return self.send_error(404)
@@ -351,9 +428,9 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError:
             self.close_connection = True
             return self._json({'error': 'bad length'}, 400)
-        if length > MAX_BODY:
-            self.close_connection = True
-            return self._json({'error': 'too large'}, 400)
+        if length < 0 or length > MAX_BODY:
+            self.close_connection = True   # unread/negative body would desync a keep-alive socket
+            return self._json({'error': 'bad length'}, 400)
         try:
             patch = json.loads(self.rfile.read(length)) if length > 0 else {}
         except json.JSONDecodeError:
@@ -385,6 +462,11 @@ class Handler(SimpleHTTPRequestHandler):
         return self._json(comments)
 
     def do_DELETE(self):
+        if self.path.split('?')[0] == '/verdict':   # the user un-decides — clear the gate
+            with _verdict_lock:
+                save_verdict(None)
+            bump('comments')
+            return self._json(None)
         if self.path.split('?')[0] != '/comments':
             return self.send_error(404)
         # ?n=<n> removes a single comment (by its stable `n`); no query clears them all.

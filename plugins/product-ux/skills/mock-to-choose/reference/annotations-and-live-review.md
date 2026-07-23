@@ -25,12 +25,13 @@ assets/mock-harness/          →  copied to  docs/features/<date>-<slug>/mocks/
   gallery.js                  #   … renders whatever mocks.json declares; comment bar + hot reload
   review.css                  # the pins, clamped popovers, comment-mode chrome (namespaced .mk-*)
   review.js                   # intent pins + the user's comments — pinned to the exact click point
-  serve.py                    # the server: static files + /comments + a hot-reload SSE stream
+  serve.py                    # the server: static files + /comments + /version + /verdict + a hot-reload SSE stream
   serve.sh                    # launcher: random free port, prints the gallery URL
   mocks.json                  # ← YOU WRITE THIS: the question, what's faked, the variants
   variants/_template.html     # ← COPY PER CONCEPT: two harness lines + your mock
-  (comments.json, versions.json,   #  written by the server — read them; git ignores the folder
-   .versions/, .gitignore)         #  .versions/ = per-round HTML snapshots; comments.json = the inbox
+  (comments.json, verdict.json,    #  written by the server — read them; git ignores the folder
+   versions.json, .versions/,      #  comments.json = the inbox; verdict.json = the DECISION;
+   .gitignore)                     #  .versions/ = per-round HTML snapshots
 ```
 
 **What Claude authors is only ever two things:** `mocks.json` (the question, the honesty list, the variants and their pitches) and one file per concept under `variants/`. Everything else is fixed, so **every mock review looks and behaves the same** — same pins, same comment gesture, same gallery, same read-back contract — and the only thing that changes between reviews is the design being judged.
@@ -77,13 +78,15 @@ The mocks are for a **decision**, and a decision is a conversation. Because the 
 
    Never the project's default/forwarded port — that one belongs to whatever the user launched (`bespunky-workflow:local-server-isolation`). And never `file://`: the gallery `fetch`es `mocks.json` and the comment layer POSTs to `/comments`, both of which need the http server (`serve.py`). The server also writes the `*` `.gitignore` on first run, so the folder is throwaway from the first serve.
 
+   **Arm the inbox watch as you serve — by default, not on request.** A served mock is a mock you are reviewing, so the moment the server is up, start a **persistent `Monitor`** on `comments.json` that emits one event per newly submitted-and-not-handled comment (the command is in SKILL.md → *Send it to Claude*). A web page can't interrupt an idle Claude, so this watch *is* how the review feels live: the user pins and submits, and each submission wakes you with its payload — no "go", no ping. Reading the inbox on demand (step 4) is the *fallback* for a genuinely async review, not the default posture. (No `Monitor` available? A self-paced `/loop` on the inbox does the same at the cost of some idle tokens.)
+
 2. **Get it in front of the user — live if you can, async if you can't.**
    - **Co-driven (best):** open the gallery URL *inside* the **shared browser** (`bespunky-browser-automation:shared-browser`) — the user watches and clicks in a host tab over the forwarded **noVNC `:6080`** (so there's no random port for them to find or forward), while you drive the live page over CDP (`window.mockGoto('Lantern')`, `window.mockViewport('Phone')`) and narrate. Tell them, in one line: *"Open a concept, press `c`, and click the exact spot to pin a comment. Hover a purple pin to see what a faked thing is meant to be."*
    - **Async (also fine):** send screenshots (`bespunky-browser-automation:playwright`) and the URL as a **clickable link**; the user opens it in their own browser whenever. The comments still land in `comments.json`.
 
 3. **Walk them through it** — Compare first (all concepts at once), then Focus on one to judge and comment at true size. Narrate what each variant's concept is, what's faked, what you're asking them to judge. They are looking at an empty house; be the architect standing in it.
 
-4. **Read the inbox — the comments the user actually SENT.** A comment runs `draft → submitted → handled`; you act on the **submitted-and-not-handled** ones (the user pinned the rest but hasn't sent them yet). Read them from the file, not from a live browser:
+4. **Read the inbox — the comments the user actually SENT.** A comment runs `draft → submitted → handled`; you act on the **submitted-and-not-handled** ones (the user pinned the rest but hasn't sent them yet). With the watch armed (step 1) each submission already woke you; this is how you pull its full payload. Read them from the file, not from a live browser:
 
    ```bash
    # the inbox — submitted, not yet handled, with full DOM context:
@@ -96,9 +99,9 @@ The mocks are for a **decision**, and a decision is a conversation. Because the 
 
 5. **Read them back to the user before acting.** *"So: the lantern hero is too big on the phone, the tideline palette reads cold, and you want the second row gone."* This catches a misread while it's free.
 
-6. **Take the verdict — including "none of these" and "a hybrid".** A rejection of all concepts, or a graft of two, is a *first-class* outcome, not a failure: this is the outside-eye taste gate. Any verdict routes **upstream** — a comment is feedback on the **design**, not a bug in the mock's CSS — to `stage-the-vision` (re-conceive, or re-synthesize a hybrid into one concept) or `envision-the-experience` (the feeling was wrong). **Re-mock cheaply; never polish the mock into compliance.**
+6. **Take the verdict — a dedicated SELECT, including "none of these" and "a hybrid".** The decision is *not* a comment: the user casts it with the **"Choose this concept"** button (in Focus, or **Choose ✓** on a Compare card), confirms it, and the server writes it to `verdict.json`. Your launch-time watch fires a **VERDICT** event (SKILL.md → *Send it to Claude*); or read it any time — `window.mockVerdict()`, `GET /verdict`, `GET /state → verdict`, or `verdict.json` off disk (`{kind:'chosen'|'none', choice, note, version, ts}`). A `chosen` verdict names the very round the user approved (so `DECISION.md` is exact) and licenses `realize-the-vision` to build that concept **fresh from the Staging** — a mock yes is provisional. A `none` verdict — or a graft of two concepts — is a *first-class* outcome, not a failure: this is the outside-eye taste gate, and it routes **upstream** to `stage-the-vision` (re-conceive, or re-synthesize a hybrid into one concept) or `envision-the-experience` (the feeling was wrong). **Re-mock cheaply; never polish the mock into compliance.**
 
-7. **Commit the round before you re-mock.** A mock iterates in internal **rounds** — v1 → v2 → … (a *mocking-process* version, not an app version). Right before you edit a variant for the next round, freeze what was reviewed: `POST /version {variant, note}` (or `window.mockCommit("Lantern", "shrank the hero, warmed the palette")`) snapshots the mock's current HTML to `.versions/<variant>__v<n>.html`, bumps the round in `versions.json`, and stamps that note. Every new comment is then version-bound to the current round. Past rounds stay viewable read-only — their snapshot **and** that round's comments — via the Focus view's **History** timeline (`#focus/Lantern/Phone/v2`), and any two rounds can be compared side by side (`#diff/Lantern/Phone/v2`). A version chip (*"v2 · current"*) shows where you are.
+7. **Commit the round before you re-mock.** A mock iterates in internal **rounds** — v1 → v2 → … (a *mocking-process* version, not an app version). Right before you edit a variant for the next round, freeze what was reviewed: `POST /version {variant, note}` (or `window.mockCommit("Lantern", "shrank the hero, warmed the palette")`) snapshots the mock's current HTML to `.versions/<variant>__v<n>.html`, bumps the round in `versions.json`, and stamps that note. Every new comment is then version-bound to the current round. Past rounds stay viewable read-only — their snapshot **and** that round's comments — via the Focus view's **History** list (`#focus/Lantern/Phone/v2`), and the whole arc is laid out as a timeline in the **Evolution** view (`#evolution/Lantern/Phone`, `window.mockEvolution()`). A version chip (*"v2 · current"*) shows where you are.
 
 8. **Check each comment off as you address it.** `PATCH /comments {n, handled: true, reply: "shrank the hero"}` (or `window.mockHandle(n, {reply: "shrank the hero"})`). A handled comment's pin **disappears from the live mock** — the live mock only ever shows the *current round's open* pins, so handled and past-round pins never clutter it. The resolution — a green ✓ and your one-line reply — shows in the Focus **side-list** and in that round's history snapshot. So the user still *watches their notes get checked off*, in the side-list, while the pin clears from the mock: comment → re-mock → checked, with no manual refresh. (`PATCH` is a partial update — `{n, text?, status?, handled?, reply?}` — so the same endpoint also backs an inline edit and a per-comment send; see below.)
 

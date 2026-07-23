@@ -19,8 +19,9 @@ docs/features/
       .gitignore                   #     contains "*" — the folder ignores itself
       gallery.html · gallery.js    #     THE HARNESS — copied verbatim, never edited
       review.css   · review.js     #     intent pins, comments (POSTed to the server)
-      serve.py     · serve.sh      #     server (/comments + /version endpoints) + launcher → gallery URL
+      serve.py     · serve.sh      #     server (/comments + /version + /verdict endpoints) + launcher → gallery URL
       comments.json                #     written by the server as the user comments — read this
+      verdict.json                 #     written when the user selects a concept — the DECISION (watched)
       versions.json · .versions/   #     round state + per-round HTML snapshots (both self-ignored by *)
       mocks.json                   #     ← authored: the question, what's faked, the variants
       variants/
@@ -103,9 +104,10 @@ Which gives you, unchanged in every review:
 - **The comment gesture** — press `c`, click the exact spot, and a delightful in-place **composer** opens (a pulsing dot marks the point, `Enter` pins, `Esc` cancels — no native browser prompt).
 - **The comment bar** — a draft / sent / handled tally, a **"Submit review (N)"** button (and an **auto-send** toggle, persisted in `localStorage`, to fire each comment on save), copy-to-clipboard, and clear. In the Focus **side-list**, each comment is managed in place — **edit** the text inline, **send** a single draft on its own (distinct from the batch Submit), **remove** with a 6-second **Undo** toast — and rows **link** to pins both ways (hover a row to light its pin, click to scroll to and flash it).
 - **A review channel** — comments run `draft → submitted → handled`, carry full DOM context, and are read back as an inbox (`/state → pending`, `window.mockInbox()`, or `comments.json`); see SKILL.md → *Send it to Claude*. A handled pin **clears from the live mock** (which only shows the current round's open pins) and shows resolved — green ✓ + reply — in the side-list and the round's snapshot.
+- **The verdict — a dedicated SELECT** (SKILL.md → *The verdict*). A **"Choose this concept"** button (in Focus, and a **Choose ✓** on every Compare card) with a confirm, plus **"None of these"** to reject all — the decision, not a comment. It persists to `verdict.json` (`{kind, choice, note, version, ts}`), is **watched** so Claude is notified when it lands (`window.mockVerdict()`, `GET /verdict`, `GET /state → verdict`), and shows as a green **✓ Chosen** ribbon/status across the wall, rail, and bar.
 - **Rounds & history** — a mock iterates in internal rounds (v1 → v2 → …); Claude commits a round (`window.mockCommit(variant, note)`, `POST /version`) right before re-mocking, which snapshots the mock's HTML and stamps a note; `window.mockVersions()` (or `GET /versions`) reads the round state back. A version chip shows the current round, and past rounds are viewable read-only (their snapshot + that round's comments) on a **History** timeline, with any two rounds comparable side by side.
 - **Hot reload** — edit a variant or `mocks.json` and every open gallery updates itself; no manual refresh, so you can re-mock while the user watches.
-- **Deep links** — `gallery.html#focus/Lantern/Phone` reopens the exact state, and a round suffix addresses history (`#focus/Lantern/Phone/v2`) or a diff (`#diff/Lantern/Phone/v2`); the back button and a shared link both honour it, which is also how Claude drives the live page over CDP.
+- **Deep links** — `gallery.html#focus/Lantern/Phone` reopens the exact state, a round suffix addresses history (`#focus/Lantern/Phone/v2`), and `#evolution/Lantern/Phone` opens the round-by-round timeline; the back button and a shared link both honour it, which is also how Claude drives the live page over CDP.
 
 ---
 
@@ -117,7 +119,7 @@ Which gives you, unchanged in every review:
 2. **Name each one** with its concept and one-line pitch, so the picture has a handle they can refer to.
 3. **Open it — live if you can, async if you can't.** `bash mocks/serve.sh` (a random free port — `bespunky-workflow:local-server-isolation`) prints the gallery URL. Best case, open that URL in the **shared browser** (`bespunky-browser-automation:shared-browser`) so you and the user look at the *same* page over the forwarded `:6080` (no random port for them to forward), and you drive it over CDP and narrate live. Otherwise send screenshots and the URL as a **clickable link** and let them open it themselves — the comments land in `comments.json` either way.
 4. **Narrate the walkthrough** — what each concept is, what's faked, what you're asking them to judge — and tell them how to talk back: *open a concept, press `c`, click the exact spot to pin a comment; hover a purple pin to see what a faked thing is meant to be.*
-5. **Ask one question:** *which one — and what would you change?* Not "does this look good?"
+5. **Ask one question:** *which one — and what would you change?* Not "does this look good?" And tell them how to answer it: **press "Choose this concept"** on the one they want (or **"None of these"** to send them all back) — a dedicated Select, not a comment; you're watching for it.
 6. **Read their comments from `comments.json`** (or `window.allComments()` in the live gallery), repeat them back, and copy them **verbatim** into `DECISION.md`. As you re-mock, **check each one off** (`window.mockHandle(n, {reply})`) — the handled pin clears from the live mock and shows resolved with your reply in the side-list, so the user watches their notes get checked off.
 
 The harness, the intent notes, and reading comments from disk: `annotations-and-live-review.md` (and the asset itself at `assets/mock-harness/`).

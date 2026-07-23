@@ -56,14 +56,22 @@
   const state = { mode: 'compare', focus: 0, vp: 0, hist: null };
   let comments = [];
   let versions = {};
+  let verdict = null;                    // THE DECISION: {kind:'chosen'|'none', choice, note, version, ts} or null
   let reloadV = 0;
   let commentOn = false;
   let evoSig = '';                       // last-rendered evolution data signature (skip needless re-renders)
   let handledSeen = null;                // n's already handled (to announce only NEWLY handled ones)
   let autosend = localStorage.getItem('mk-autosend') !== '0';   // DEFAULT ON: pin = sent. Uncheck to batch.
   let editingN = null;                   // an inline edit in progress — don't rebuild the list under it
+  let composerOpen = false;              // the in-mock comment composer is open with unsaved text (a frame in it)
+  let pendingChanged = null;             // Set of file paths whose hot-reload was DEFERRED while the composer is open
+  let pendingFull = false;               // a full page reload deferred likewise (mocks.json / gallery.* changed)
+  // The user is mid-input — a reload now would eat their typing. Frame reloads defer on an open composer;
+  // a whole-page reload defers on either an open composer OR an in-progress inline edit.
+  const userBusy = () => composerOpen || editingN != null;
 
   const variantKey = (v) => v.file.split('/').pop().replace(/\.html$/, '');
+  const nameOfKey = (key) => variants.find((v) => variantKey(v) === key)?.name || key;
   const curVersion = (v) => Number(versions[variantKey(v)]?.current) || 1;
   const roundsOf = (v) => versions[variantKey(v)]?.rounds || [];
   const snapshotPath = (v, n) => roundsOf(v).find((r) => Number(r.v) === Number(n))?.snapshot;
@@ -162,6 +170,11 @@
     stage.replaceChildren();
     navLeft.replaceChildren();
     editingN = null;                     // any full re-render (incl. the Back button) discards an in-progress edit
+    // A render rebuilds the focus iframe, so any composer inside it is gone — clear the flag (its close
+    // message can't fire from a destroyed frame) so reloads never get stuck deferred. Frames rebuild fresh
+    // at the current reloadV, so a deferred file reload is moot; a deferred full reload flushes at the end.
+    composerOpen = false;
+    pendingChanged = null;
     // Keep comment mode across a re-render WITHIN the current-round Focus (switching viewport/concept
     // shouldn't drop you out of commenting — the frame's load handler re-arms it). Clear it elsewhere.
     if (state.mode !== 'focus' || state.hist != null) commentOn = false;
@@ -178,7 +191,9 @@
     renderViewportSeg();
     setCommentButton();
     paintBadges();
+    paintDecision();                     // chosen ribbon/tag/button state for the freshly-built DOM
     requestAnimationFrame(() => { fit(); measureHeader(); });
+    flushReload();                       // a full reload deferred while the user was mid-input, now that they've moved on
   };
 
   const renderViewportSeg = () => {
@@ -201,7 +216,12 @@
       const holder = el('div');
       card.append(holder);
       frameFor(v, state.vp, holder, { preview: true });
-      card.append(el('div', { className: 'badge' }));
+      // Actions row: the comment tally (badge) and a direct "Choose" — so a verdict can be cast from the wall,
+      // not only from Focus. The button stops propagation so it doesn't also open the concept.
+      card.append(el('div', { className: 'card-actions' },
+        el('div', { className: 'badge' }),
+        el('button', { className: 'card-choose', type: 'button', title: `Choose ${v.name} as the direction`,
+          onclick: (e) => { e.stopPropagation(); chooseVariant(v); } }, 'Choose ✓')));
       const go = () => { state.mode = 'focus'; state.focus = i; state.hist = null; apply(); };
       card.addEventListener('click', go);
       card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -378,8 +398,10 @@
       if (settled) return;
       settled = true;
       editingN = null;
-      if (save && input.value.trim() && input.value !== c.text) editComment(c.n, input.value.trim());
-      else pullAll();
+      // Persist (or refresh) FIRST, then flush any full reload deferred during the edit — a reload before the
+      // PATCH lands would drop the edit. pullAll()/editComment() both resolve once the write is saved.
+      const p = (save && input.value.trim() && input.value !== c.text) ? editComment(c.n, input.value.trim()) : pullAll();
+      p.then(flushReload).catch(() => {});
     };
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); commit(true); }
@@ -431,6 +453,10 @@
   addEventListener('message', (e) => {
     const d = e.data || {};
     if (d.type === 'mk:mode') { commentOn = d.on; setCommentButton(); }
+    // The composer opened/closed. While open, hot-reloads are deferred (userBusy); on close, resync then
+    // apply whatever was deferred — pullAll() may fully re-render (a committed round), which already reloads
+    // the frame fresh; flushReload() covers a pending file reload or full-page reload it didn't.
+    if (d.type === 'mk:composer') { composerOpen = d.open; if (!d.open) pullAll().then(flushReload); }
     if (d.type === 'mk:changed') { if (autosend) submitDrafts(); else pullAll(); }
     // pin hover in the frame → light the matching list row (the other half of recognition)
     if (d.type === 'mk:pin-enter') $(`.clist li[data-n="${d.n}"]`)?.classList.add('hot');
@@ -469,6 +495,107 @@
       .then((r) => r.json()).then(() => pullAll());
   };
 
+  // ---- the verdict (the decision) ----
+  const setVerdict = (body) => fetch('/verdict', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).then((r) => r.json()).then(() => pullAll()).catch(() => {});
+  const clearVerdict = () => fetch('/verdict', { method: 'DELETE' }).then(() => pullAll()).catch(() => {});
+
+  // A small, explicit, reversible confirm — choosing a direction (or rejecting all) is the review's GATE,
+  // never an accidental click. onYes runs on confirm; Esc / Cancel / backdrop-click dismiss.
+  const cbk = $('#confirm-backdrop');
+  let confirmYes = null;
+  let confirmReturnFocus = null;
+  const openConfirm = (title, bodyText, yesLabel, onYes, tone = 'go') => {
+    $('#confirm-title').textContent = title;
+    $('#confirm-body').textContent = bodyText;
+    const yes = $('#confirm-yes'); yes.textContent = yesLabel;
+    yes.classList.toggle('neutral', tone !== 'go');   // green affirms a "go"; reject / un-choose get a neutral button
+    confirmYes = onYes;
+    confirmReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    cbk.hidden = false;
+    yes.focus();
+  };
+  const closeConfirm = () => {
+    cbk.hidden = true; confirmYes = null;
+    const back = confirmReturnFocus; confirmReturnFocus = null;
+    back?.focus?.();                                   // restore focus to the control that opened the dialog
+  };
+  $('#confirm-yes').addEventListener('click', () => { const h = confirmYes; closeConfirm(); h?.(); });
+  $('#confirm-cancel').addEventListener('click', closeConfirm);
+  cbk.addEventListener('click', (e) => { if (e.target === cbk) closeConfirm(); });
+  // Esc closes; Tab is trapped between Cancel and the affirmative so focus can't wander into the obscured page.
+  cbk.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeConfirm(); return; }
+    if (e.key !== 'Tab') return;
+    const first = $('#confirm-cancel'), last = $('#confirm-yes');
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
+  const isChosen = (v) => verdict?.kind === 'chosen' && v && verdict.choice === variantKey(v);
+  const chooseVariant = (v) => {
+    if (isChosen(v)) {   // clicking the already-chosen concept un-decides it
+      openConfirm(`Un-choose ${v.name}?`, 'This clears the decision so you can pick again. Claude waits for a new choice.',
+        'Un-choose', () => clearVerdict().then(() => showToast('Decision cleared', 'Choose again', () => setVerdict({ kind: 'chosen', choice: variantKey(v) }))), 'neutral');
+      return;
+    }
+    const switching = verdict?.kind === 'chosen';
+    openConfirm(`${switching ? 'Switch to' : 'Proceed with'} ${v.name}?`,
+      'Claude will build this direction. A mock “yes” is provisional — it picks the direction; a fresh pair of eyes still reviews the finished screen.',
+      switching ? 'Switch choice' : 'Confirm choice',
+      () => setVerdict({ kind: 'chosen', choice: variantKey(v) })
+        .then(() => showToast(`✓ ${v.name} chosen — Claude will proceed`, 'Undo', clearVerdict)));
+  };
+  const chooseFocused = () => { const v = variants[state.focus]; if (v) chooseVariant(v); };
+  const rejectAll = () => openConfirm('Reject all concepts?',
+    'None of these is a first-class outcome, not a failure. Claude will rethink the approach and produce fresh mocks.',
+    'Reject all',
+    () => setVerdict({ kind: 'none' }).then(() => showToast('Rejected all — Claude will reconceive', 'Undo', clearVerdict)),
+    'neutral');
+
+  // Paint the decision everywhere it shows — bar status + button, compare ribbons, rail markers, focus tag —
+  // so a verdict change (from a click here OR another browser) is legible without a full re-render.
+  const paintDecision = () => {
+    const d = $('#decision'), choose = $('#choose');
+    if (!verdict) { d.textContent = 'no decision yet'; d.className = 'decision'; d.disabled = true; d.onclick = null; }
+    else if (verdict.kind === 'none') { d.textContent = '✗ Rejected all — reconceiving'; d.className = 'decision rejected'; d.disabled = true; d.onclick = null; }
+    else {
+      const cv = variants.find((v) => variantKey(v) === verdict.choice);
+      const cur = cv ? curVersion(cv) : null;
+      const behind = cur != null && verdict.version != null && verdict.version < cur;   // approved an OLDER round
+      d.textContent = `✓ Chosen: ${nameOfKey(verdict.choice)}${verdict.version ? ` · v${verdict.version}` : ''}${behind ? ` (now v${cur})` : ''}`;
+      d.className = 'decision chosen'; d.disabled = false;
+      d.title = behind ? `Chosen on v${verdict.version}; the mock is now on v${cur}. Click to view the approved round.` : 'Click to view the chosen concept';
+      d.onclick = () => {
+        state.mode = 'focus'; state.focus = variantByName(verdict.choice);
+        state.hist = behind ? verdict.version : null;   // open exactly the round the user approved
+        apply();
+      };
+    }
+    const inFocus = state.mode === 'focus' && state.hist == null;
+    const focusedChosen = inFocus && isChosen(variants[state.focus]);
+    choose.disabled = !inFocus;
+    choose.textContent = focusedChosen ? '✓ Your choice — click to clear' : '✓ Choose this concept';
+    choose.classList.toggle('is-chosen', !!focusedChosen);
+    // compare ribbons
+    document.querySelectorAll('.card').forEach((card) => {
+      const chosen = verdict?.kind === 'chosen' && card.dataset.key === verdict.choice;
+      card.classList.toggle('chosen', chosen);
+      const existing = $('.chosen-ribbon', card);
+      if (chosen && !existing) card.append(el('div', { className: 'chosen-ribbon' }, '✓ Chosen'));
+      else if (!chosen && existing) existing.remove();
+    });
+    // rail markers (rail order matches variants order)
+    document.querySelectorAll('.rail-item').forEach((item, i) => {
+      item.classList.toggle('chosen', verdict?.kind === 'chosen' && variants[i] && variantKey(variants[i]) === verdict.choice);
+    });
+    // focus concept tag
+    const whoami = $('.focusnav .whoami');
+    $('.chosen-tag')?.remove();
+    if (focusedChosen && whoami) whoami.append(el('span', { className: 'chosen-tag' }, '✓ chosen'));
+  };
+
   const paintBar = () => {
     const draft = comments.filter((c) => statusOf(c) === 'draft').length;
     const sent = comments.filter((c) => statusOf(c) === 'sent').length;
@@ -498,12 +625,15 @@
   const pullAll = () => Promise.all([
     fetch('/comments').then((r) => r.json()).catch(() => comments),
     fetch('/versions').then((r) => r.json()).catch(() => versions),
-  ]).then(([cs, vs]) => {
+    fetch('/verdict').then((r) => r.json()).catch(() => verdict),
+  ]).then(([cs, vs, vd]) => {
     comments = Array.isArray(cs) ? cs : [];
     versions = vs && typeof vs === 'object' ? vs : {};
+    verdict = vd && typeof vd === 'object' ? vd : null;
     // Notice comments that just became handled → a small acknowledgement, since the pin vanishes silently.
     announceHandled();
     paintBar();
+    paintDecision();                     // keep the decision UI live when the verdict changes via SSE/poll
     if (state.mode === 'evolution') {
       // The timeline shows the review's record — keep it live. Re-render only when the data actually
       // changed (else the SSE-down 3s poll would reload every snapshot iframe on a tick).
@@ -512,7 +642,7 @@
       return;
     }
     evoSig = '';
-    if (state.mode === 'focus' && editingN == null) {
+    if (state.mode === 'focus' && editingN == null && !composerOpen) {
       const v = variants[state.focus];
       const wantV = state.hist != null ? state.hist : curVersion(v);
       const loadedV = /(?:^|&)v=(\d+)/.exec(frames[0]?.iframe?.dataset.q || '')?.[1];
@@ -528,7 +658,7 @@
   });
 
   // ---- toast (undo) ----
-  const toast = el('div', { className: 'toast', id: 'toast' });
+  const toast = el('div', { className: 'toast', id: 'toast', 'aria-live': 'polite', role: 'status' });
   document.body.append(toast);
   let toastTimer = null;
   const showToast = (msg, actionLabel, onAction) => {
@@ -573,6 +703,8 @@
     });
   });
   $('#submit').addEventListener('click', submitDrafts);
+  $('#choose').addEventListener('click', chooseFocused);
+  $('#reject').addEventListener('click', rejectAll);
   const autoBox = $('#autosend');
   autoBox.checked = autosend;
   autoBox.addEventListener('change', () => {
@@ -586,6 +718,22 @@
   });
 
   // ---- hot reload ----
+  // Reload the frames whose loaded file changed (variant edits, or a review.js/css change hits every frame),
+  // keeping each frame's version/mode params. Called live, or flushed after a deferral.
+  const doFrameReload = (changed) => {
+    frames.forEach(({ iframe }) => {
+      const base = (iframe.dataset.file || '').split('/').pop();
+      const hit = changed.some((p) => p.split('/').pop() === base) || changed.some((p) => /review\.(js|css)$/.test(p));
+      if (hit) iframe.src = `${iframe.dataset.file}?${iframe.dataset.q}&r=${reloadV}`;
+    });
+  };
+  // Apply reloads that were deferred while the user was typing. Runs when the composer closes / an edit
+  // commits. Full reload wins (it supersedes any frame reload); otherwise apply the accumulated file set.
+  const flushReload = () => {
+    if (userBusy()) return;                       // still busy (e.g. an inline edit outlived the composer)
+    if (pendingFull) { pendingFull = false; location.reload(); return; }
+    if (pendingChanged) { const c = [...pendingChanged]; pendingChanged = null; doFrameReload(c); }
+  };
   const live = $('#live');
   let poll = setInterval(pullAll, 3000);
   try {
@@ -595,13 +743,13 @@
     es.addEventListener('reload', (ev) => {
       const changed = (JSON.parse(ev.data || '{}').changed) || [];
       reloadV++;
-      if (changed.some((p) => p.endsWith('mocks.json'))) { location.reload(); return; }
-      if (changed.some((p) => /gallery\.(js|html)$/.test(p))) { location.reload(); return; }
-      frames.forEach(({ iframe }) => {
-        const base = (iframe.dataset.file || '').split('/').pop();
-        const hit = changed.some((p) => p.split('/').pop() === base) || changed.some((p) => /review\.(js|css)$/.test(p));
-        if (hit) iframe.src = `${iframe.dataset.file}?${iframe.dataset.q}&r=${reloadV}`;   // keep the version/mode params
-      });
+      const full = changed.some((p) => p.endsWith('mocks.json') || /gallery\.(js|html)$/.test(p));
+      // NEVER yank the document out from under a user who is mid-comment. A whole-page reload also defers on
+      // an in-progress inline edit; a frame reload only needs to wait for the (in-frame) composer. Deferred
+      // work is coalesced and flushed by flushReload() the instant they pin, cancel, or finish the edit.
+      if (full) { if (userBusy()) { pendingFull = true; return; } location.reload(); return; }
+      if (composerOpen) { (pendingChanged ||= new Set()); changed.forEach((p) => pendingChanged.add(p)); return; }
+      doFrameReload(changed);
     });
     es.addEventListener('comments', () => pullAll());
   } catch { /* interval poll stays active */ }
@@ -611,6 +759,7 @@
   window.allComments = () => comments;
   window.mockVersions = () => versions;
   window.mockInbox = () => comments.filter((c) => c.status === 'submitted' && !c.handled);
+  window.mockVerdict = () => verdict;    // THE DECISION — null until the user chooses / rejects all
   window.mockState = () => {
     const v = variants[state.focus];
     return {
@@ -623,6 +772,7 @@
       drafts: comments.filter((c) => statusOf(c) === 'draft').length,
       pending: window.mockInbox().length,
       handled: comments.filter((c) => c.handled).length,
+      verdict,                           // {kind, choice, note, version, ts} or null
     };
   };
   window.mockCompare = () => { state.mode = 'compare'; state.hist = null; apply(); };
@@ -633,6 +783,14 @@
   window.mockHandle = (n, extra) => handleComment(n, extra);
   window.mockSubmit = () => submitDrafts();
   window.mockCommit = (variantName, note) => commitRound(variantName, note);
+  // Verdict, from Claude's side (rarely needed — the USER casts it; these help scripting/tests):
+  window.mockChoose = (nameOrIndex, note) => {
+    const v = resolveVariant(nameOrIndex);
+    return v ? setVerdict({ kind: 'chosen', choice: variantKey(v), note: note || '' })
+      : Promise.reject(new Error(`mockChoose: no variant "${nameOrIndex}"`));
+  };
+  window.mockRejectAll = (note) => setVerdict({ kind: 'none', note: note || '' });
+  window.mockClearVerdict = () => clearVerdict();
 
   // ---- boot ----
   addEventListener('hashchange', () => {

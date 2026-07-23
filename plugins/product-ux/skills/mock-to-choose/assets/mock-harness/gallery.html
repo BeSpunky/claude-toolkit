@@ -17,6 +17,7 @@
       --faint: #6f688a;
       --intent: #7c5cff;
       --comment: #ff8a3d;
+      --go: #3ecf8e;        /* the verdict / chosen colour — "go", distinct from intent (purple) & comments (orange) */
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; }
@@ -90,7 +91,9 @@
 
     /* ---- compare wall ---- */
     #stage { min-block-size: 40vh; }
-    .wall { display: grid; gap: 22px; align-items: start;
+    /* top padding leaves room for the "✓ Chosen" ribbon, which straddles a card's top edge — without it the
+       first row's ribbon slides under the sticky header (z-index 60) and gets clipped. */
+    .wall { display: grid; gap: 22px; align-items: start; padding-block-start: 14px;
             grid-template-columns: repeat(auto-fit, minmax(clamp(220px, 26vw, 300px), 1fr)); }
     .card { border: 1px solid var(--line); border-radius: 16px; background: var(--panel);
             padding: 14px; cursor: pointer; transition: border-color .15s, transform .15s; }
@@ -241,6 +244,57 @@
     #live { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 12px; }
     #live::before { content: ""; inline-size: 7px; block-size: 7px; border-radius: 50%; background: #4b4666; }
     #live.on::before { background: #58d68d; box-shadow: 0 0 8px #58d68d; }
+
+    /* ---- the verdict (the decision — a first-class GATE, not a comment) ---- */
+    /* Two zones: comment tools (left) and the DECISION (right, in its own faintly-green-tinted pill) so the
+       gate reads as its own thing, not one more control lost in a crowded row. Both zones wrap on narrow. */
+    .bar { flex-wrap: wrap; justify-content: space-between; gap: 10px 14px; }
+    .bar-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .verdict-group { gap: 10px; padding: 6px 8px 6px 12px; border-radius: 999px;
+                     border: 1px solid color-mix(in srgb, var(--go) 30%, var(--line));
+                     background: color-mix(in srgb, var(--go) 8%, var(--panel)); }
+    #decision { color: var(--muted); font: inherit; font-size: 12px; white-space: nowrap;
+                background: none; border: 0; padding: 4px 6px; cursor: default; }
+    #decision.chosen { color: #8fe3b3; font-weight: 600; cursor: pointer; }
+    #decision.chosen:hover, #decision.chosen:focus-visible { text-decoration: underline; }
+    #decision.rejected { color: #ffb27f; font-weight: 600; }
+    .bar button.verdict:not(:disabled) { background: var(--go); border-color: var(--go); color: #04140c; font-weight: 700; }
+    .bar button.verdict:not(:disabled):hover { filter: brightness(1.08); }
+    .bar button.verdict.is-chosen:not(:disabled) { background: transparent; color: #8fe3b3; border-color: #3aa76a; font-weight: 600; }
+    .bar button.reject:not(:disabled):hover { border-color: #e0576b; color: #ff8a9a; }
+
+    /* the chosen concept — legible everywhere, not only in the bar */
+    .card { position: relative; }
+    .card.chosen { border-color: var(--go); box-shadow: 0 0 0 1px var(--go); }
+    .chosen-ribbon { position: absolute; inset-block-start: -10px; inset-inline-end: 12px; background: var(--go); color: #04140c;
+                     font: 700 11px/1 ui-sans-serif, system-ui, sans-serif; padding: 5px 10px; border-radius: 999px;
+                     box-shadow: 0 4px 12px rgb(0 0 0 / .4); }
+    .card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+    .card-choose { border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); border-radius: 999px;
+                   padding: 6px 13px; cursor: pointer; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; white-space: nowrap; }
+    .card-choose:hover, .card.chosen .card-choose { border-color: var(--go); color: #8fe3b3; }
+    .rail-item.chosen .rail-thumb { border-color: var(--go); box-shadow: 0 0 0 1px var(--go), 0 4px 12px rgb(0 0 0 / .45); }
+    .rail-item.chosen .rail-name::after { content: " ✓"; color: #8fe3b3; }
+    .chosen-tag { margin-inline-start: 8px; color: #8fe3b3; font-size: 12px; font-weight: 700; }
+
+    /* confirm dialog — choosing / rejecting is an explicit, reversible gate (never an accidental click) */
+    .confirm-backdrop { position: fixed; inset: 0; z-index: 10002; display: flex; align-items: center; justify-content: center;
+                        background: rgb(6 4 12 / .6); backdrop-filter: blur(3px); padding: 20px; }
+    .confirm-backdrop[hidden] { display: none; }
+    .confirm { max-inline-size: 420px; inline-size: 100%; background: var(--panel); border: 1px solid var(--line);
+               border-radius: 16px; padding: 22px; box-shadow: 0 24px 70px rgb(0 0 0 / .6); }
+    .confirm h3 { margin: 0 0 8px; font-size: 17px; }
+    .confirm p { margin: 0 0 18px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+    .confirm-acts { display: flex; gap: 10px; justify-content: flex-end; }
+    .confirm-acts button { border-radius: 999px; padding: 9px 16px; cursor: pointer;
+                           font: 600 13px/1 ui-sans-serif, system-ui, sans-serif; border: 1px solid var(--line); }
+    .confirm-cancel { background: var(--panel-2); color: var(--ink); }
+    .confirm-cancel:hover { border-color: var(--muted); }
+    .confirm-yes { background: var(--go); border-color: var(--go); color: #04140c; }
+    .confirm-yes:hover { filter: brightness(1.08); }
+    /* affirming a NOT-go action (reject all / un-choose) must not wear the green "go" button */
+    .confirm-yes.neutral { background: var(--panel-2); border-color: var(--line); color: var(--ink); }
+    .confirm-yes.neutral:hover { border-color: #e0576b; color: #ff8a9a; filter: none; }
   </style>
 </head>
 <body>
@@ -265,6 +319,10 @@
           thing will become. Open a concept, press <kbd>c</kbd>, and click the <b>exact spot</b> to leave an
           <b style="color:var(--comment)">orange comment</b> right where you point.
         </p>
+        <p class="how">
+          <b style="color:var(--go)">Deciding:</b> when one concept wins, press <b style="color:var(--go)">Choose this concept</b>
+          to lock the direction to build — or <b>None of these</b> to send them all back to be reconceived.
+        </p>
       </div>
       <div class="toolbar"><div id="nav-left"></div></div>
     </header>
@@ -273,15 +331,33 @@
   </div>
 
   <div class="bar">
-    <span id="live" title="Live reload: the page updates itself when a mock changes on disk">live</span>
-    <span id="count">no comments yet</span>
-    <button type="button" id="comment-toggle" aria-pressed="false" disabled>Comment (c)</button>
-    <button type="button" id="submit" class="primary" disabled title="Send your pinned comments to Claude">Submit review</button>
-    <label id="autosend-wrap" title="On (default): each comment is sent to Claude the moment you pin it. Uncheck to collect drafts and send them as a batch with Submit review.">
-      <input type="checkbox" id="autosend"> <span>auto-send</span>
-    </label>
-    <button type="button" id="export" title="Copy all comments as JSON">Copy comments</button>
-    <button type="button" id="clear">Clear all</button>
+    <div class="bar-group">
+      <span id="live" title="Live reload: the page updates itself when a mock changes on disk">live</span>
+      <span id="count">no comments yet</span>
+      <button type="button" id="comment-toggle" aria-pressed="false" disabled>Comment (c)</button>
+      <button type="button" id="submit" class="primary" disabled title="Send your pinned comments to Claude">Submit review</button>
+      <label id="autosend-wrap" title="On (default): each comment is sent to Claude the moment you pin it. Uncheck to collect drafts and send them as a batch with Submit review.">
+        <input type="checkbox" id="autosend"> <span>auto-send</span>
+      </label>
+      <button type="button" id="export" title="Copy all comments as JSON">Copy comments</button>
+      <button type="button" id="clear">Clear all</button>
+    </div>
+    <div class="bar-group verdict-group" role="group" aria-label="Decision">
+      <button type="button" id="decision" class="decision" disabled title="The review's decision — what Claude will proceed with">no decision yet</button>
+      <button type="button" id="choose" class="verdict" disabled title="Choose the concept you're viewing as the direction to build">✓ Choose this concept</button>
+      <button type="button" id="reject" class="reject" title="Reject all concepts — send them back to be reconceived">None of these</button>
+    </div>
+  </div>
+
+  <div id="confirm-backdrop" class="confirm-backdrop" hidden>
+    <div class="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+      <h3 id="confirm-title"></h3>
+      <p id="confirm-body"></p>
+      <div class="confirm-acts">
+        <button type="button" id="confirm-cancel" class="confirm-cancel">Cancel</button>
+        <button type="button" id="confirm-yes" class="confirm-yes"></button>
+      </div>
+    </div>
   </div>
 
   <script src="gallery.js"></script>

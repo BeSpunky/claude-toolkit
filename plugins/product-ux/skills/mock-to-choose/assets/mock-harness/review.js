@@ -294,6 +294,9 @@
   let dialogOpen = false;
   const openDialog = (labelText, x, y) => new Promise((resolve) => {
     dialogOpen = true;
+    // Tell the gallery a composer is open with (soon) unsaved text, so it DEFERS any hot-reload of this
+    // frame until the comment is pinned or cancelled — a reload here would destroy what the user is typing.
+    parent?.postMessage({ type: 'mk:composer', open: true }, '*');
     const backdrop = document.createElement('div'); backdrop.className = 'mk-dlg-backdrop';
     const dot = document.createElement('div'); dot.className = 'mk-dlg-dot';
     dot.style.left = `${x}px`; dot.style.top = `${y}px`;
@@ -350,7 +353,10 @@
       y: +((e.clientY - r.top) / (r.height || 1)).toFixed(3),
     };
     const text = await openDialog(label(el), e.clientX, e.clientY);
-    if (!text) return;
+    // Release the gallery's hot-reload deferral (the composer is done). On cancel, release now; on save,
+    // release only AFTER the POST settles — a frame reload before the comment is persisted would abort it.
+    const release = () => parent?.postMessage({ type: 'mk:composer', open: false }, '*');
+    if (!text) { release(); return; }
     const body = {
       text,
       variant: VARIANT,
@@ -364,7 +370,8 @@
     fetch('/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then((r) => r.json())
       .then((all) => { comments = all; renderComments(); parent?.postMessage({ type: 'mk:changed' }, '*'); })
-      .catch(() => alert('Could not save the comment — is the folder served with serve.sh?'));
+      .catch(() => alert('Could not save the comment — is the folder served with serve.sh?'))
+      .finally(release);
   }, true);
 
   // ---- the contract Claude reads (also readable straight off disk: comments.json) ----
