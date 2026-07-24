@@ -112,6 +112,24 @@ A skill that finds itself inventing a folder for its output is a skill that has 
 - Is all the throwaway evidence **self-ignoring**, with **nothing outside depending on it**, so it can be deleted without breaking anything?
 - When I revisit a feature, did I open a **new dated package** and read the old one — or overwrite the record of what was already tried?
 
+## The package's lifecycle — and the archive tier
+
+A package is born in-flight and, at the end, **concludes**. Mark that boundary on `DECISION.md` with frontmatter — written **once**, at the merge / abandon / pivot gate, so it never rots:
+
+```yaml
+---
+effort: gift-picker
+status: concluded        # concluded | abandoned | superseded   (absent ⇒ still in-flight)
+concluded: 2026-03-11
+summary: Shipped the swipe-to-pick gallery; ruled out the wizard (too many taps on mobile).
+tags: [ui, checkout]
+---
+```
+
+The **presence of `status:`** (not of the file) is the concluded-signal — a mid-flight `DECISION.md` has none. That one line is what lets a returning reader collapse a finished effort to a single row instead of re-reading the package.
+
+As history grows, concluded-and-aged packages move to an **archive tier** — `docs/features/archive/<year>/<pkg>/` — by an additive `git mv` (blame preserved), **never an erase**. The live directory stays scannable; the archive is searched on demand via that frontmatter. This whole lifecycle — reconstructing standing, collapsing concluded efforts, and the archive sweep — is owned by [[project-standing]] (the cold pick-up). This skill just defines the *home*; that skill *reads* it.
+
 ## Red flags
 
 - **`NOTES.md` at the repo root.** Or `design/`, or `tmp-plan.md`, or a folder invented on the spot. The effort had a home; the file didn't go in it.

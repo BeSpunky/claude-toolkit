@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/detect-standing.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking for in-flight work..."
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/checkpoint-on-compact.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checkpoint before compaction..."
+          }
+        ]
+      }
+    ]
+  }
+}
