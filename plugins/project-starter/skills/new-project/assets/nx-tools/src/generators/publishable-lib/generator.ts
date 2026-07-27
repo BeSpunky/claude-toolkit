@@ -48,6 +48,7 @@ import {
   logger,
 } from '@nx/devkit';
 import type { PublishableLibGeneratorSchema } from './schema';
+import { requireLayer } from '../../layers/registry';
 
 // The npm scope every BeSpunky package lives under. Used to build the default importPath
 // and to expand --workspaceDeps short names into scoped package names.
@@ -81,6 +82,12 @@ export default async function publishableLibGenerator(
   const style        = options.style ?? 'scss';
   const nonAngular   = options.nonAngular ?? false;
   const skipFormat   = options.skipFormat ?? false;
+
+  // This generator's layer is a FUNCTION OF ITS MODE, not a fixed property — the one generator in the
+  // house set with two delegates and therefore two preconditions. `--nonAngular` needs `@nx/js`, the
+  // default needs `@nx/angular`; guarding it as flatly "Angular" would deny the plain-TS path to
+  // exactly the non-Angular workspaces this layering exists to serve.
+  requireLayer(tree, nonAngular ? 'js' : 'angular', 'publishable-lib');
 
   // 1) Delegate the scaffold. We skipFormat on the delegate and run a single formatFiles at the
   //    end (so the whole tree — base output + our mutations — is formatted once).

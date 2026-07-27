@@ -18,7 +18,8 @@
 //
 // 3. DETERMINISM. Colours are pure functions of (primary | name) — see color.ts — so a repair regenerates
 //    byte-identical output and a name-hashed colour is stable across machines and clones.
-import { type Tree } from '@nx/devkit';
+import { type Tree, logger, parseJson } from '@nx/devkit';
+import { applyEdits, modify } from 'jsonc-parser';
 import {
   colorCustomizations,
   deriveShades,
@@ -73,6 +74,23 @@ export default async function windowIdentityGenerator(
   // (a legitimate refresh — repair re-asserting name-hash, or a design-system colour that changed).
   if (existing && RANK[source] < RANK[existing.source]) return;
 
+  // UNMARKED HUMAN IDENTITY. The ratchet can only defend what it recorded — and a project that set its own
+  // `window.title` / bar colours BEFORE this generator ever ran (or by hand, in the editor) has no marker at
+  // all. Treated naively that reads as "no identity", so an automatic name-hash pass would overwrite a
+  // deliberate choice with a hashed one — the exact downgrade the ratchet exists to prevent, arriving through
+  // the one door it doesn't watch. So an automatic pass DETECTS a pre-existing identity and leaves it alone.
+  // Only an automatic pass defers: an explicit --primary/--emoji/--source is a human (or the skill) asking for
+  // a specific identity, and that still wins.
+  const automatic = source === 'name-hash' && !options.primary && !options.emoji;
+  if (!existing && automatic && hasUnmarkedIdentity(tree)) {
+    logger.info(
+      `[window-identity] \`${SETTINGS}\` already defines a window identity that this generator did not write — ` +
+        `keeping it. Re-run with an explicit --primary/--emoji (or let the bespunky-vscode-identity skill drive it) ` +
+        `to replace it deliberately.`,
+    );
+    return;
+  }
+
   const primary =
     normalizeHex(options.primary) ??
     (source === 'name-hash' ? nameToPrimaryHex(name) : existing?.primary ?? nameToPrimaryHex(name));
@@ -80,19 +98,50 @@ export default async function windowIdentityGenerator(
 
   const colors = colorCustomizations(surface, deriveShades(primary));
 
-  // --- write settings.json (merge) -------------------------------------------------------------------------
-  const settings = readJson(tree, SETTINGS) ?? {};
-  settings['window.title'] = emoji + TITLE_TAIL;
+  // --- write settings.json (merge, COMMENT-PRESERVING) ------------------------------------------------------
+  // `.vscode/settings.json` is JSONC in practice: VSCode itself writes comments into it, and humans annotate
+  // WHY a colour was chosen right next to it. `JSON.parse` throws on that — and the old code caught the throw
+  // and started from `{}`, which silently turned "merge, never clobber" (property 1 in the header) into a total
+  // rewrite: every comment and every setting the project owned was destroyed. The provenance ratchet could not
+  // save it either, because the marker file is written in the same breath. So: PARSE as JSONC (devkit's
+  // parseJson) and EDIT as JSONC (jsonc-parser splices individual keys in place), which keeps comments,
+  // formatting and key order intact.
+  const settingsText = readText(tree, SETTINGS) || '{}';
+  const settings = readJsonc(settingsText) ?? {};
 
-  const existingColors = isPlainObject(settings['workbench.colorCustomizations'])
-    ? { ...(settings['workbench.colorCustomizations'] as Json) }
+  const currentColors = isPlainObject(settings['workbench.colorCustomizations'])
+    ? (settings['workbench.colorCustomizations'] as Json)
     : {};
-  for (const key of OWNED_KEYS) delete existingColors[key]; // clear our keys; keep the project's own
-  Object.assign(existingColors, colors);
-  if (Object.keys(existingColors).length > 0) settings['workbench.colorCustomizations'] = existingColors;
-  else delete settings['workbench.colorCustomizations'];
+  // Keep every colour key the PROJECT set; drop the ones we own (so a surface change cleans up the bar it no
+  // longer paints); then lay ours on top.
+  const owned = OWNED_KEYS as readonly string[]; // widened: OWNED_KEYS is `as const`, so .includes(string) needs it
+  const kept = Object.fromEntries(Object.entries(currentColors).filter(([key]) => !owned.includes(key)));
+  const nextColors: Json = { ...kept, ...colors };
 
-  writeJson(tree, SETTINGS, settings);
+  // Per-KEY edits rather than one whole-object replace: replacing the object wholesale would drop any comment
+  // written INSIDE the colorCustomizations block — exactly where people explain their palette.
+  // NEVER emit a delete for something that isn't there. jsonc-parser throws ("Can not delete in empty
+  // document") rather than no-opping, so an unconditional cleanup edit — correct on a settings file that has
+  // our keys — takes the whole run down on a project that has no .vscode/settings.json at all. Which is every
+  // repo this generator now reaches: the layered repair applies the agent layer to projects that were never
+  // scaffolded. So each delete is conditioned on the key actually existing in the CURRENT document.
+  const edits: JsonEdit[] = [{ path: ['window.title'], value: emoji + TITLE_TAIL }];
+  if (Object.keys(nextColors).length === 0) {
+    if (settings['workbench.colorCustomizations'] !== undefined) {
+      edits.push({ path: ['workbench.colorCustomizations'], value: undefined });
+    }
+  } else {
+    for (const key of OWNED_KEYS) {
+      if (!(key in nextColors) && key in currentColors) {
+        edits.push({ path: ['workbench.colorCustomizations', key], value: undefined });
+      }
+    }
+    for (const [key, value] of Object.entries(nextColors)) {
+      edits.push({ path: ['workbench.colorCustomizations', key], value });
+    }
+  }
+
+  tree.write(SETTINGS, applyJsoncEdits(settingsText, edits));
 
   // --- write the provenance marker -------------------------------------------------------------------------
   const marker: Marker = { source, primary, emoji, surface };
@@ -107,6 +156,26 @@ function workspaceName(tree: Tree): string | null {
   const pkg = readJson(tree, 'package.json');
   const raw = pkg?.['name'];
   return typeof raw === 'string' && raw ? raw.replace(/^@[^/]+\//, '') : null;
+}
+
+/**
+ * Does `.vscode/settings.json` already carry a window identity this generator did not write?
+ *
+ * True when a `window.title` is set, or when ANY key we own already has a value. Both are things a human (or
+ * an older, pre-marker toolkit) put there deliberately — and neither is something an automatic name-hash pass
+ * has any business replacing. Paired with the marker check in the caller: a marker means we own it and the
+ * ratchet decides; no marker plus a visible identity means somebody else owns it and we keep our hands off.
+ */
+function hasUnmarkedIdentity(tree: Tree): boolean {
+  const settings = readJson(tree, SETTINGS);
+  if (!settings) return false;
+
+  if (typeof settings['window.title'] === 'string' && settings['window.title'].trim() !== '') return true;
+
+  const colors = isPlainObject(settings['workbench.colorCustomizations'])
+    ? (settings['workbench.colorCustomizations'] as Json)
+    : {};
+  return (OWNED_KEYS as readonly string[]).some((key) => key in colors);
 }
 
 /** Canonicalise a hex colour, or `undefined` when the input isn't a valid hex (so callers fall back). */
@@ -155,14 +224,48 @@ function stripIgnoreBlock(gitignore: string): string {
   return `${before}${after}`.replace(/\n{3,}/g, '\n\n');
 }
 
-function readJson(tree: Tree, path: string): Json | undefined {
-  if (!tree.exists(path)) return undefined;
+/** JSONC formatting for spliced edits — 2-space, matching VSCode's own settings style. */
+const JSONC_FORMAT = { tabSize: 2, insertSpaces: true, eol: '\n' };
+
+interface JsonEdit {
+  path: (string | number)[];
+  /** `undefined` REMOVES the key (jsonc-parser's delete semantics). */
+  value: unknown;
+}
+
+/**
+ * Apply key edits to a JSONC document IN PLACE — comments, formatting and key order all survive, because
+ * jsonc-parser splices the minimal text range for each key rather than re-serializing the document.
+ */
+function applyJsoncEdits(source: string, edits: JsonEdit[]): string {
+  return edits.reduce(
+    (text, { path, value }) => applyEdits(text, modify(text, path, value, { formattingOptions: JSONC_FORMAT })),
+    source,
+  );
+}
+
+/** Raw file text, or `''` when the file is absent. */
+function readText(tree: Tree, path: string): string {
+  return tree.exists(path) ? tree.read(path, 'utf8') ?? '' : '';
+}
+
+/**
+ * Parse a JSONC string (comments + trailing commas tolerated — devkit's parseJson, not JSON.parse).
+ * `undefined` means genuinely unparseable, not merely commented.
+ */
+function readJsonc(source: string): Json | undefined {
   try {
-    const parsed: unknown = JSON.parse(tree.read(path, 'utf8') ?? '');
+    const parsed: unknown = parseJson(source);
     return isPlainObject(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
+}
+
+/** Read + parse a JSONC file from the tree. */
+function readJson(tree: Tree, path: string): Json | undefined {
+  const text = readText(tree, path);
+  return text ? readJsonc(text) : undefined;
 }
 
 function writeJson(tree: Tree, path: string, value: Json): void {

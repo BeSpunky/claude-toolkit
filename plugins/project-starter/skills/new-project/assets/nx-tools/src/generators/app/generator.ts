@@ -42,6 +42,7 @@ import {
   formatFiles,
 } from '@nx/devkit';
 import { basename } from 'node:path';
+import { requireLayer } from '../../layers/registry';
 import serveOptionsGenerator from '../serve-options/generator';
 import serveGenerator from '../serve/generator';
 import firebaseEmulatorsGenerator from '../firebase-emulators/generator';
@@ -69,6 +70,12 @@ export default async function appGenerator(
   tree: Tree,
   options: AppGeneratorSchema
 ): Promise<GeneratorCallback> {
+  // The `angular` layer is this generator's precondition, not an assumption: line ~88 binds
+  // `@nx/angular/generators` by dynamic import, which on a workspace without the plugin fails as a
+  // module-resolution trace pointing at node_modules — a message that sends the reader off to install
+  // something rather than telling them this generator doesn't apply to their workspace yet.
+  requireLayer(tree, 'angular', 'app');
+
   if (!options.directory) {
     throw new Error(
       'app generator requires a directory (positional arg 0 / --directory), e.g. `apps/<name>`.'

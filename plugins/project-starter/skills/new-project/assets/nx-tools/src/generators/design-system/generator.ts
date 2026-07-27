@@ -61,6 +61,7 @@ import publishableLibGenerator from '../publishable-lib/generator';
 import designSystemStylesGenerator from '../design-system-styles/generator';
 import { findDesignSystem, isAngularApp, DESIGN_SYSTEM_TAG } from '../_utils/design-system';
 import { resolveLibsDir } from '../_utils/workspace-layout';
+import { requireLayer } from '../../layers/registry';
 
 interface DesignSystemSchema {
   /** The library (and project) name. Defaults to `design-system`. */
@@ -88,6 +89,11 @@ export default async function designSystemGenerator(
   tree: Tree,
   options: DesignSystemSchema = {}
 ): Promise<GeneratorCallback> {
+  // Inherited from the `publishable-lib` delegate below, which binds `@nx/angular/generators` in its
+  // Angular branch. Stated here rather than left to surface from two frames down, so the message names
+  // the generator the caller actually ran.
+  requireLayer(tree, 'angular', 'design-system');
+
   const name = options.name ?? 'design-system';
   const tokenPrefix = options.tokenPrefix ?? 'ds';
   const prefix = options.prefix ?? 'bs';

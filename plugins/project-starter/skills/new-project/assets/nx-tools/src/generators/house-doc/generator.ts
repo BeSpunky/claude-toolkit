@@ -26,10 +26,14 @@
 import { type Tree, formatFiles } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { detectLayers, type LayerId } from '../../layers/registry';
 
 interface HouseDocSchema {
   // Render the Firebase sections. Default: auto-detect firebase.json at the workspace root.
   firebase?: boolean;
+  // The layers this project has. Default: DETECTED from the workspace. Drives which sections render (a
+  // non-Angular project has no business reading the Angular MCP section) and is recorded in the stamp.
+  layers?: LayerId[];
   // The @bespunky/nx-tools version whose generators are producing this project. Passed by scaffold.sh
   // (derived from the staged package.json — never hand-maintained). THIS is the version the hook compares:
   // it is what actually determines the generated output, so it is what a repair can actually change.
@@ -55,11 +59,23 @@ export default async function houseDocGenerator(
   tree: Tree,
   options: HouseDocSchema = {},
 ): Promise<void> {
-  const firebase = options.firebase ?? tree.exists('firebase.json');
+  // DETECTED by default, never declared — the same rule the layer registry states for itself. A caller may
+  // pass layers explicitly (scaffold.sh knows what it just ensured, before the tree reflects it), but a
+  // direct `nx g …:house-doc` reads the workspace, so HOUSE.md can't describe a project that isn't there.
+  const layers = options.layers ?? detectLayers(tree);
+  const firebase = options.firebase ?? layers.includes('firebase');
   const nxTools = options.nxToolsVersion ?? UNKNOWN;
   const plugin = options.pluginVersion ?? UNKNOWN;
   const tpl = (name: string) => readFileSync(join(__dirname, name), 'utf8');
-  const render = (s: string) => renderTemplate(s, firebase, nxTools, plugin);
+
+  // `firebase` stays an explicit flag rather than folding into `layers`, because it is the one section set a
+  // caller overrides directly (scaffold.sh --firebase renders the Firebase docs for a project that is about
+  // to become a Firebase project, before firebase.json exists to detect).
+  const flags: Record<string, boolean> = Object.fromEntries([
+    ...layers.map((id) => [id, true]),
+    ['firebase', firebase],
+  ]);
+  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers);
 
   // 1) The generated reference — rewritten every run (generator-owned; never hand-edited), carrying the
   //    stamp in its header. No timestamp anywhere: a stamp that changed on every repair would dirty the
@@ -84,18 +100,57 @@ export default async function houseDocGenerator(
   await formatFiles(tree);
 }
 
-/** Minimal mustache-subset renderer: {{#firebase}}…{{/firebase}}, {{^firebase}}…{{/firebase}}, and the stamp tokens. */
+/**
+ * Minimal mustache-subset renderer: {{#flag}}…{{/flag}}, {{^flag}}…{{/flag}}, and the stamp tokens.
+ *
+ * The flag set is now every LAYER plus `firebase`, not the single hard-coded `firebase` it started as. That
+ * generalization is the whole point: a HOUSE.md that documents the Angular MCP server, the design-system
+ * SASS API and the shared browser to a plain TypeScript library is not merely noisy — it is instructions to
+ * use tooling the project does not have, aimed at a reader (human or model) with no way to tell.
+ *
+ * An UNKNOWN flag renders as false, which is the safe direction: a section guarded by a typo'd flag
+ * disappears (visible, fixable) rather than appearing in every project regardless of shape.
+ */
 function renderTemplate(
   src: string,
-  firebase: boolean,
+  flags: Record<string, boolean>,
   nxToolsVersion: string,
   pluginVersion: string,
+  layers: readonly string[],
 ): string {
-  return src
-    .replace(/\{\{#firebase\}\}([\s\S]*?)\{\{\/firebase\}\}/g, (_m, body) => (firebase ? body : ''))
-    .replace(/\{\{\^firebase\}\}([\s\S]*?)\{\{\/firebase\}\}/g, (_m, body) => (firebase ? '' : body))
+  return expandBlocks(src, flags)
     .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
-    .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion);
+    .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion)
+    // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the repair
+    // re-DETECTS. Its value is drift: a project whose workspace now has `firebase` but whose stamp doesn't
+    // grew a layer that never got its house tooling, and that is a fact worth being able to see.
+    .replace(/\{\{LAYERS\}\}/g, layers.length ? layers.join(',') : 'none');
+}
+
+/**
+ * Expand {{#flag}}/{{^flag}} blocks until none remain.
+ *
+ * A single `String.replace` pass is NOT enough once blocks NEST — and they do the moment a layer section
+ * contains a Firebase aside. `replace` consumes the outer match and continues AFTER it, so the tags inside a
+ * kept body are never looked at again and ship verbatim into HOUSE.md. Iterating to a fixed point is what
+ * makes `{{#web}}…{{#firebase}}…{{/firebase}}…{{/web}}` mean what it reads like.
+ *
+ * The backreference in the pattern (`\{\{\/\1\}\}`) is what keeps an outer block from ending on an inner
+ * block's closing tag. The iteration bound is a guard against a malformed template, not an expected path.
+ */
+function expandBlocks(src: string, flags: Record<string, boolean>): string {
+  const POSITIVE = /\{\{#([\w-]+)\}\}([\s\S]*?)\{\{\/\1\}\}/g;
+  const NEGATIVE = /\{\{\^([\w-]+)\}\}([\s\S]*?)\{\{\/\1\}\}/g;
+
+  let out = src;
+  for (let pass = 0; pass < 10; pass++) {
+    const next = out
+      .replace(POSITIVE, (_m, flag: string, body: string) => (flags[flag] ? body : ''))
+      .replace(NEGATIVE, (_m, flag: string, body: string) => (flags[flag] ? '' : body));
+    if (next === out) return out;
+    out = next;
+  }
+  return out;
 }
 
 /** Add the hook's local-only snooze file to .gitignore (idempotent). */

@@ -38,11 +38,26 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 # Not invoked as a plugin hook (no plugin root to compare against) — nothing to say.
 [ -n "$PLUGIN_ROOT" ] || exit 0
 
-# Is this even a house project? HOUSE.md is the marker: generator-owned, present in every scaffolded project,
-# absent everywhere else — including this toolkit repo itself, so developing the toolkit never trips its own
-# hook. No HOUSE.md → somebody else's project; stay quiet.
+# Is this even a house project? HOUSE.md is the marker: generator-owned, present in every scaffolded project.
+# No HOUSE.md → somebody else's project; stay quiet.
 HOUSE_DOC="$PROJECT_DIR/HOUSE.md"
 [ -f "$HOUSE_DOC" ] || exit 0
+
+# IS THE PLUGIN THIS PROJECT'S OWN SOURCE? Then there is nothing to compare and never anything to say.
+#
+# This used to be free: HOUSE.md was absent from the toolkit repo, so the check above exited first. Layering
+# ends that — the whole point is that `--repair` now runs on repos like the toolkit itself, which means the
+# toolkit gets a HOUSE.md and would start tripping its own hook. And the comparison there is not merely
+# noisy, it is MEANINGLESS: the marketplace is loaded from the working tree (`claude plugin marketplace
+# add .`), so "installed version" and "the version I am editing right now" are the same file. Every edit to
+# the payload's package.json would fire a notice telling the author to repair the repo they are mid-change in.
+#
+# Detected by CONTAINMENT rather than by name: the plugin root living inside the project means this session's
+# plugin IS this repo's source, whatever the repo is called or wherever it is checked out. Covers the toolkit,
+# a fork of it, and any project that vendors the plugin — all the same fact, one test.
+case "$PLUGIN_ROOT/" in
+  "$PROJECT_DIR"/*) exit 0 ;;
+esac
 
 # --- reading versions, defensively ---------------------------------------------------------------------------
 # Everything below is read from files a REPO can control (HOUSE.md is checked in; a cloned repo can carry any
@@ -96,6 +111,58 @@ STAMPED_NX="$(stamp_value nx-tools || true)"
 is_version "$INSTALLED_NX" || exit 0 # can't read what's installed → can't make a claim. Never guess.
 is_version "$INSTALLED_PLUGIN" || INSTALLED_PLUGIN='?'
 is_version "$STAMPED_NX" || STAMPED_NX=''
+
+# --- layer drift ----------------------------------------------------------------------------------------------
+# A SECOND way a project goes stale, and one that version comparison structurally cannot see: the project grew
+# a LAYER. Somebody ran `nx add @nx/angular`, or added firebase.json, and the house tooling for that layer —
+# the devcontainer ports, the emulator wiring, the Angular editor extensions — was never applied. The stamp is
+# current, the toolkit hasn't moved, and the project is still missing house files it should now have.
+#
+# Only layers that are a SINGLE-FILE fact are detected here. `angular` and `firebase` are one grep each;
+# `web`, `js`, `design-system` and `navigation` need the Nx project graph, which means a Node process and
+# seconds — far past what a hook that runs at every session start in every project may spend. Under-reporting
+# is the right failure: a missed notice costs a stale layer, a false one costs everyone's trust in the notice.
+STAMPED_LAYERS="$(stamp_value layers || true)"
+
+has_layer() {
+  case ",$STAMPED_LAYERS," in *",$1,"*) return 0 ;; esac
+  return 1
+}
+
+DRIFTED=''
+if grep -q '"@angular/core"' "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer angular; then
+  DRIFTED="angular"
+fi
+if [ -f "$PROJECT_DIR/firebase.json" ] && ! has_layer firebase; then
+  DRIFTED="${DRIFTED:+$DRIFTED, }firebase"
+fi
+
+# Only speak about drift when the stamp actually RECORDS layers. A project stamped before layers existed has
+# an empty list, which is not evidence that it lacks them — treating it as such would fire this notice at
+# every pre-layer project on the machine, every session, for a reason none of them can act on. Those projects
+# are already covered by the version branch below, whose repair re-stamps them WITH layers.
+if [ -n "$DRIFTED" ] && [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none" ]; then
+  SNOOZED_LAYERS="$(json_value "$PROJECT_DIR/.claude/house-snooze.json" declinedLayers || true)"
+  if [ "$SNOOZED_LAYERS" != "$DRIFTED" ]; then
+    cat <<EOF
+[bespunky-project-starter] This project has grown a layer its house tooling was never applied for.
+
+  present in the workspace but not in the stamp : $DRIFTED
+  stamp records                                 : layers=$STAMPED_LAYERS
+
+So the house files for that layer are missing — for \`angular\` that is the editor extensions, the dev-server
+target and the Angular agent tooling; for \`firebase\` the emulator wiring, the JDK step and the forwarded
+emulator ports. Re-applying the house generators adds them: the repair path of the
+bespunky-project-starter:new-project skill.
+
+RELAY THIS TO THE USER — do not act on it. Offer the repair; it needs a human's yes (see the repair's \`--yes\`
+gate) and must never run in a scripted or headless session. If they decline, record it so they are not asked
+again for this same drift — write \`.claude/house-snooze.json\` (gitignored) in the project root, containing:
+{ "declinedLayers": "$DRIFTED" }
+EOF
+    exit 0
+  fi
+fi
 
 # Already current — the common case, and the reason this hook is a few greps instead of a full generator run.
 [ "$STAMPED_NX" = "$INSTALLED_NX" ] && exit 0

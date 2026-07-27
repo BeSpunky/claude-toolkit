@@ -39,16 +39,26 @@ import {
 // xpand (an older @nx/angular line) imported `librarySecondaryEntryPointGenerator` and
 // `componentGenerator` from here; the names have been stable across recent majors. If the
 // import fails, check `node_modules/@nx/angular/generators` for the current export name.
-import {
-  componentGenerator,
-  librarySecondaryEntryPointGenerator,
-} from '@nx/angular/generators';
+//
+// TYPE-ONLY here, VALUE by dynamic import at the point of use (matching the `app` and
+// `publishable-lib` generators). A static value-import binds @nx/angular at MODULE LOAD, so on a
+// workspace without it this file could not even be loaded — and Nx surfaces that as a module
+// resolution stack trace on any `nx g`, long before the generator could say the useful thing
+// ("this needs the Angular layer"). A type-only import is erased entirely, so the failure moves to
+// the layer guard, where it can be explained.
+import type * as AngularGenerators from '@nx/angular/generators';
 import type { SecondaryEntrypointGeneratorSchema } from './schema';
+import { requireLayer } from '../../layers/registry';
 
 export async function secondaryEntrypointGenerator(
   tree: Tree,
   options: SecondaryEntrypointGeneratorSchema
 ): Promise<void> {
+  // Asserted BEFORE the dynamic import below, so the absent-plugin case reads as a precondition rather
+  // than a module path. Making the import dynamic stopped the failure happening at module load; this is
+  // what makes the failure it still has say something useful.
+  requireLayer(tree, 'angular', 'secondary-entrypoint');
+
   if (!options.name) {
     throw new Error('secondary-entrypoint generator requires --name=<entry> (the subpath, e.g. `testing`).');
   }
@@ -57,6 +67,11 @@ export async function secondaryEntrypointGenerator(
   }
 
   const component = options.component ?? 'none';
+
+  // Resolved here, once, rather than at module load — see the import comment.
+  const { componentGenerator, librarySecondaryEntryPointGenerator } = (await import(
+    '@nx/angular/generators'
+  )) as typeof AngularGenerators;
 
   // The parent library must already exist (it's produced by `publishable-lib`). Read it up
   // front so we fail fast with a clear message and so we know where the nested entry lands.

@@ -69,6 +69,7 @@ GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github
 BACKUP=1   # repair snapshots the project to a git tag BEFORE mutating; --no-backup opts out.
 CONSENT=0  # --yes: asserts a human explicitly agreed to this repair (see the consent gate above).
 FORCE_DOCKER=0  # --docker: use the base image even when the local Node would do (escape hatch).
+ENSURE_ARG=""   # --ensure=<csv>: layers to BRING INTO BEING (see the layer model below). Empty = detect only.
 while [ "${1:-}" != "" ]; do
   case "$1" in
     --repair)     MODE="repair"; shift;;
@@ -79,6 +80,8 @@ while [ "${1:-}" != "" ]; do
     --no-backup)  BACKUP=0;      shift;;
     --yes|-y)     CONSENT=1;     shift;;
     --docker)     FORCE_DOCKER=1; shift;;
+    --ensure=*)   ENSURE_ARG="${1#--ensure=}"; shift;;
+    --ensure)     ENSURE_ARG="${2:?--ensure needs a comma-separated layer list}"; shift 2;;
     --*)          echo "ERROR: unknown flag '$1'" >&2; exit 1;;
     *)            break;;
   esac
@@ -236,8 +239,57 @@ fi
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
 [ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (WSLg audio bridge + espeak-ng + bespunky-voice plugin — WSL-only)"
 
+# --- THE LAYER SET -------------------------------------------------------------------------------------------
+# A project is not one shape; it is a STACK OF LAYERS, each with its own detector and its own generators. This
+# is what lets --repair run on a repo that is not the scaffolder's own Angular+Firebase shape — including a
+# plain TypeScript repo, or this toolkit itself.
+#
+# Two distinct questions, deliberately separated:
+#   DETECT — what does this workspace already HAVE? Read from the workspace (see src/layers/registry.ts), at
+#            run time, inside the target. Never declared, never inferred from flags.
+#   ENSURE — which layers should this run BRING INTO BEING? An explicit request, never a guess. Creating an
+#            Angular app in someone's repo because a flag defaulted to it is exactly the kind of surprise a
+#            repair must never spring.
+#
+# The generators that run = the union. Detected layers get REFRESHED (that is what repair is); ensured layers
+# get created and then refreshed by the same blocks. Which is the whole simplification: SCAFFOLD IS REPAIR
+# WITH A FULL ENSURE SET AGAINST AN EMPTY DIRECTORY. One rendered sequence below serves both modes, so the
+# two can no longer drift the way two hand-maintained command lists did.
+if [ "$MODE" = "scaffold" ]; then
+  # A new project is the house shape by definition — the user asked for exactly this.
+  ENSURE_DEFAULT="nx,agent,web,angular,design-system"
+  [ "$FIREBASE" = "1" ] && ENSURE_DEFAULT="$ENSURE_DEFAULT,firebase"
+else
+  # A repair ensures NOTHING by default. It refreshes what is there and adds no capability the project didn't
+  # ask for — the difference between "bring my house tooling up to date" and "turn my library into an Angular
+  # app". `--ensure=agent` on a bare repo is the interesting case: house DX, no framework opinion.
+  ENSURE_DEFAULT=""
+fi
+ENSURE_LAYERS="${ENSURE_ARG:-$ENSURE_DEFAULT}"
+
+# `agent` is the one layer a run cannot sensibly omit once it is touching the project at all: it is the
+# devcontainer, the Claude settings and HOUSE.md — the reason to run this tool. Ensuring it implies `nx`,
+# because every house generator runs through `nx g`.
+case ",$ENSURE_LAYERS," in
+  *,agent,*) case ",$ENSURE_LAYERS," in *,nx,*) ;; *) ENSURE_LAYERS="nx,$ENSURE_LAYERS" ;; esac ;;
+esac
+
+# Validate against the registry's ids here, in the outer shell, where the error still has a human in front of
+# it — rather than letting a typo silently ensure nothing at all.
+KNOWN_LAYERS="nx,agent,js,web,angular,design-system,navigation,firebase"
+if [ -n "$ENSURE_LAYERS" ]; then
+  for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+    case ",$KNOWN_LAYERS," in
+      *",$_l,"*) ;;
+      *) echo "ERROR: unknown layer '$_l' in --ensure. Known layers: $KNOWN_LAYERS" >&2; exit 1;;
+    esac
+  done
+fi
+[ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
+
 # --- devcontainer generator args ---
-# Append (never overwrite) so --firebase and --voice compose in either order.
+# Append (never overwrite) so --firebase and --voice compose in either order. The LAYER flags are resolved at
+# run time (they depend on detection), so they are appended inside the rendered sequence, not here.
 DEVCONTAINER_FLAGS=""
 [ "$FIREBASE" = "1" ] && DEVCONTAINER_FLAGS="$DEVCONTAINER_FLAGS --firebase=true"
 [ "$VOICE" = "1" ]    && DEVCONTAINER_FLAGS="$DEVCONTAINER_FLAGS --voice=true"
@@ -261,7 +313,7 @@ APP_STAGING_FLAG=""
 REPAIR_FIREBASE_BLOCK=""
 if [ "$FIREBASE" = "1" ]; then
   REPAIR_FIREBASE_BLOCK="
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG"
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG"
 fi
 
 # --- house tooling: stage @bespunky/nx-tools (used by both modes) ---
@@ -275,43 +327,154 @@ fi
 # generators; reordering alone is NOT, since the generator that runs after an install would
 # otherwise find nx-tools already pruned. This block (which DEFINES ensure_nx_tools) must run
 # before the first @bespunky/nx-tools generator call in either mode.
-STAGE_BLOCK="rm -rf '$STAGE_DIR'
+#
+# THE COMPILE BRINGS ITS OWN TYPESCRIPT — it never uses the workspace's. Two independent reasons, one fix:
+#   1. compile-generators.mts uses the CLASSIC compiler API (ts.transpileModule / ts.ModuleKind), which the
+#      native-port TypeScript 7.x no longer exposes from its main entry (its `.` export is now just
+#      lib/version.cjs). `typescript` on npm now resolves to 7.x, so any workspace that has moved on dies
+#      with "Cannot read properties of undefined (reading 'CommonJS')". Angular pinning 5.x is the only
+#      reason this hasn't bitten yet — it is a timer, not a safety property.
+#   2. A workspace need not have TypeScript AT ALL. A repo that just got `nx init` (the non-Angular layer-1
+#      path) has none, and installing one into the consumer to satisfy OUR build step would be the tool
+#      leaking its needs into the project.
+# So the pin lives in a sibling dir that exists only for this compile. The stage itself stays a PURE copy of
+# the plugin (no node_modules), which is what lets ensure_nx_tools keep copying it wholesale.
+# tools/publish-nx-tools/publish.sh pins the same version for reason (1) — one failure mode, one fix, both places.
+STAGE_BLOCK="rm -rf '$STAGE_DIR' '$STAGE_DIR-ts'
 cp -r '$ASSETS_ROOT/nx-tools' '$STAGE_DIR'
-node '$ASSETS_ROOT/compile-generators.mts' '$STAGE_DIR'
+mkdir -p '$STAGE_DIR-ts'
+(cd '$STAGE_DIR-ts' && npm init -y >/dev/null 2>&1 && npm install --no-save --no-audit --no-fund --silent 'typescript@^5' && node '$ASSETS_ROOT/compile-generators.mts' '$STAGE_DIR')
 ensure_nx_tools() {
   rm -rf node_modules/@bespunky/nx-tools
   mkdir -p node_modules/@bespunky
   cp -r '$STAGE_DIR' node_modules/@bespunky/nx-tools
 }"
 
-# --- per-workspace house generators (used by both modes; idempotent; run once per workspace) ---
-# The PER-APP generators (serve, serve-options, firebase-emulators) are deliberately NOT here: in
-# scaffold mode the `app` generator applies them to the new app; in repair mode they run explicitly
-# against the existing app (see each mode's INNER below). These workspace-level ones are identical in
-# both modes regardless of how many apps the workspace has.
-WORKSPACE_GEN_BLOCK="ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR$DEVCONTAINER_FLAGS
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
-# The window identity — an emoji + a quiet, project-coloured status band in .vscode/settings.json, so this
-# project's VSCode window is distinguishable from every other open window. Runs BEFORE the design system, so
-# at scaffold time there is deliberately no primary token to read and the colour is a stable hash of the
-# project NAME (source=name-hash) — distinct per project from moment zero. It upgrades to the real brand
-# colour later, once the design system has real tokens (the bespunky-vscode-identity skill + its offer hook).
-# Idempotent + --repair-safe: the provenance ratchet means this name-hash pass never downgrades a colour a
-# project has since moved to design-system or a hand-picked one.
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:window-identity --name=$PROJECT
-# The design system — the workspace's single source of visual truth, present from moment zero (a design
-# system retrofitted after five screens of hardcoded hex is not a design system, it's an archaeology dig).
-# Runs AFTER the app exists so it can open the sass channel on it; a LATER app wires itself, because the
-# \`app\` generator composes the same per-app design-system-styles generator. --scope is load-bearing: the
-# underlying publishable-lib defaults to the @bespunky npm scope (the toolkit's own), which would be wrong
-# for every consumer project. Idempotent in --repair (the token file is seeded, never overwritten — a
-# repair must not restore placeholder tokens over the project's real design).
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:design-system --scope=$PROJECT
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION
+# --- ensure the `nx` layer on a repo that has none (the layer-1 ENSURE) ---
+# `nx init` is the Nx-native answer to "make this existing repo an Nx workspace" — as opposed to
+# create-nx-workspace, which is greenfield-only and is what the scaffold path uses. It is what makes every
+# layer above reachable in a repo that was never scaffolded by this tool.
+#
+# THE ROOT package.json COMES FIRST, and that is not a nicety. Run against a directory without one, `nx init`
+# chooses the "dot-nx" installation (.nx/nxw.js + a wrapper script) — in which neither `typescript` nor
+# `@nx/devkit` is resolvable from the workspace root and `nx add` FAILS OUTRIGHT. Every house generator is a
+# devkit generator, so that mode cannot host this toolkit at all. Seeding a minimal package.json first forces
+# the normal node_modules installation, which can. One hosting model, no dot-nx branch.
+#
+# `nx init` is also a polite co-owner — it MERGES into an existing .claude/settings.json and its CLAUDE.md
+# marker block coexists with the house pointer — so this is safe to run in a repo with prior Claude setup.
+# The one thing it decides that we override: it sets defaultBase to "master".
+NX_INIT_BLOCK="
+if [ ! -f nx.json ]; then
+  echo '[layers] ensure nx: no nx.json — initialising an Nx workspace in place'
+  if [ ! -f package.json ]; then
+    echo '[layers] ensure nx: seeding a minimal root package.json (forces the node_modules install mode, not dot-nx)'
+    printf '{\\n  \"name\": \"%s\",\\n  \"version\": \"0.0.0\",\\n  \"private\": true\\n}\\n' '$PROJECT' > package.json
+  fi
+  npx --yes nx@latest init --useDotNxInstallation=false --no-interactive
+  [ -x node_modules/.bin/nx ] || yarn install
+  node -e \"const f='nx.json',j=JSON.parse(require('fs').readFileSync(f,'utf8'));if(j.defaultBase==='master'){j.defaultBase='main';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\\n');console.log('[layers] ensure nx: defaultBase master -> main')}\" || true
+fi"
+
+# Run the layer-1 ensure only when this run was actually ASKED to create an Nx workspace. A repair that
+# merely detects must never conjure one — "this isn't an Nx workspace" is a fact to report, not to fix unasked.
+ENSURE_NX_BLOCK=""
+case ",$ENSURE_LAYERS," in *,nx,*) ENSURE_NX_BLOCK="$NX_INIT_BLOCK" ;; esac
+
+# --- resolve the ACTIVE layer set at run time, inside the target workspace ---
+# Detection reads the workspace itself through the same registry the generators guard on, so the scaffolder
+# and the generators can never disagree about what this project is. Degrades to "nothing detected" rather than
+# failing the run: on a fresh scaffold the workspace legitimately has no layers yet, and an ensure set that
+# names them is the whole instruction.
+LAYER_RESOLVE_BLOCK="
+# The staged package has to be in place BEFORE detection, not merely before the first generator: detection
+# reads the registry out of node_modules/@bespunky/nx-tools, so without this the require fails, DETECTED
+# comes back empty, and every layer the workspace actually has is silently missed.
+ensure_nx_tools
+
+# @nx/devkit is the MECHANISM FLOOR — every house generator imports it, and so does the layer registry. A
+# workspace created by \`create-nx-workspace\` + \`nx add @nx/angular\` gets it transitively, which is why this
+# was never needed before; a workspace produced by \`nx init\` gets \`nx\` and NOTHING ELSE. So it is asserted
+# here, for every path, rather than assumed from the shape the scaffolder happens to produce. Pinned to the
+# installed nx version: a devkit that doesn't match its nx is its own failure mode.
+if ! node -e \"require.resolve('@nx/devkit')\" >/dev/null 2>&1; then
+  _nxv=\"\$(node -p \"require('nx/package.json').version\" 2>/dev/null || echo latest)\"
+  echo \"[layers] @nx/devkit missing (an \\\`nx init\\\` workspace ships only nx) — installing @nx/devkit@\$_nxv\"
+  yarn add -D \"@nx/devkit@\$_nxv\"
+  ensure_nx_tools
+fi
+
+ENSURED='$ENSURE_LAYERS'
+# Detection must not fail SILENTLY. Swallowing the error here reports 'none', which reads as a legitimate
+# bare repo — so every layer the project has would be skipped and its house tooling quietly not applied. A
+# sentinel distinguishes 'detected nothing' from 'could not detect', and the latter aborts.
+DETECTED=\"\$(node -e \"const {FsTree}=require('nx/src/generators/tree');const {detectLayers}=require('@bespunky/nx-tools/src/layers/registry');console.log(detectLayers(new FsTree(process.cwd(),false)).join(','))\" 2>/dev/null || echo '__DETECT_FAILED__')\"
+if [ \"\$DETECTED\" = '__DETECT_FAILED__' ]; then
+  echo 'ERROR: could not read this workspace layers (the layer registry failed to load).' >&2
+  echo '       Refusing to continue: a failed detection is indistinguishable from an empty project, and' >&2
+  echo '       acting on it would skip the house tooling for every layer this project actually has.' >&2
+  exit 1
+fi
+ACTIVE=\"\$(printf '%s\\n%s\\n' \"\$DETECTED\" \"\$ENSURED\" | tr ',' '\\n' | sed '/^\$/d' | sort -u | paste -sd, -)\"
+echo \"[layers] detected in workspace : \${DETECTED:-none}\"
+echo \"[layers] ensured by this run   : \${ENSURED:-none}\"
+echo \"[layers] active (union)        : \${ACTIVE:-none}\"
+layer_active() { case \",\$ACTIVE,\" in *\",\$1,\"*) return 0;; esac; return 1; }"
+
+# --- per-workspace house generators, GATED BY LAYER (one sequence, both modes) ---
+# Every block below is rendered unconditionally and gated at RUN time on the layer it belongs to. That is what
+# collapses scaffold and repair into one path: the difference between them is now entirely in the ensure set,
+# not in two separately-maintained command lists that drifted every time one was edited.
+#
+# The PER-APP generators (serve, serve-options, firebase-emulators) are deliberately NOT here: in scaffold
+# mode the `app` generator applies them to the new app; in repair mode they run explicitly against the
+# existing app (see each mode's INNER below).
+WORKSPACE_GEN_BLOCK="
+# --- agent layer: the stack-agnostic house DX. The ONLY block a bare, frameworkless repo runs — and the
+#     reason layering exists, since none of it needs Angular, a design system, or anything to serve.
+if layer_active agent; then
+  # Both layer flags are passed EXPLICITLY, including the false cases. The generator defaults \`web\` to true
+  # (the common shape), so omitting it on a library-only repo would silently forward :80 and mount the shared
+  # browser volumes into a container that has nothing to serve.
+  if layer_active web; then DC_LAYER_FLAGS=' --web=true'; else DC_LAYER_FLAGS=' --web=false'; fi
+  if layer_active angular; then DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --angular=true\"; else DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --angular=false\"; fi
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR\$DC_LAYER_FLAGS$DEVCONTAINER_FLAGS
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
+  # The window identity — an emoji + a quiet, project-coloured status band in .vscode/settings.json, so this
+  # project's VSCode window is distinguishable from every other open window. Runs BEFORE the design system, so
+  # at scaffold time there is deliberately no primary token to read and the colour is a stable hash of the
+  # project NAME (source=name-hash) — distinct per project from moment zero. It upgrades to the real brand
+  # colour later, once the design system has real tokens (the bespunky-vscode-identity skill + its offer hook).
+  # Idempotent + --repair-safe: the provenance ratchet means this name-hash pass never downgrades a colour a
+  # project has since moved to design-system or a hand-picked one.
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:window-identity --name=$PROJECT
+fi
+# --- web layer: the dev loop. Framework-agnostic by design — the shared browser is pure CDP and the
+#     worktree-domains proxy forwards any localhost port, so neither needs Angular.
+if layer_active web; then
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
+fi
+# --- angular layer: the Angular CLI MCP server + the Angular agent skills' gitignore rule.
+if layer_active angular; then
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
+fi
+# --- design-system layer: the workspace's single source of visual truth, present from moment zero (a design
+#     system retrofitted after five screens of hardcoded hex is not a design system, it's an archaeology dig).
+#     Runs AFTER the app exists so it can open the sass channel on it; a LATER app wires itself, because the
+#     \`app\` generator composes the same per-app design-system-styles generator. --scope is load-bearing: the
+#     underlying publishable-lib defaults to the @bespunky npm scope (the toolkit's own), which would be wrong
+#     for every consumer project. Idempotent in --repair (the token file is seeded, never overwritten — a
+#     repair must not restore placeholder tokens over the project's real design).
+if layer_active design-system; then
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:design-system --scope=$PROJECT
+fi
+# --- HOUSE.md last: it STAMPS the layer set, so it must run after every layer above has had its turn (a
+#     design system created moments ago has to appear in the stamp that records this run).
+if layer_active agent; then
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION --layers=\"\$ACTIVE\"
+fi
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
 # for adding further apps, plus the reusable-tool extraction generators mark-extractable /
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
@@ -339,6 +502,7 @@ $STAGE_BLOCK
 # command a developer runs to add any LATER app — first app and Nth app share one code path, so a
 # second app can never silently miss the configuration the first app got.
 ensure_nx_tools; yarn nx g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG
+$LAYER_RESOLVE_BLOCK
 $WORKSPACE_GEN_BLOCK
 # Commit the full scaffold. \`yarn create nx-workspace\` made an initial commit, but the
 # house generators + dep installs ran after it — capture them so the host-side push (gh repo
@@ -348,15 +512,32 @@ git commit -m 'chore: scaffold BeSpunky project (Nx + Angular + house generators
 else
   INNER="set -e
 cd '$WORK_ROOT/$PROJECT'
+$ENSURE_NX_BLOCK
+if [ ! -f nx.json ]; then
+  echo 'ERROR: not an Nx workspace (no nx.json), and this run was not asked to create one.' >&2
+  echo '       Re-run with --ensure=agent to initialise Nx in place and apply the house DX layer' >&2
+  echo '       (devcontainer, Claude settings, window identity, HOUSE.md) — no framework opinion.' >&2
+  exit 1
+fi
 if [ ! -x node_modules/.bin/nx ]; then
   echo 'ERROR: node_modules/.bin/nx not found - run \"yarn install\" in the project first, then re-run --repair.' >&2
   exit 1
 fi
 $STAGE_BLOCK
-# Repair re-applies the per-app house config to the EXISTING app (the \`app\` generator CREATES
-# apps; it is not the heal path), then the workspace-level generators. All idempotent.
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve --project=$APP
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP$REPAIR_FIREBASE_BLOCK
+$LAYER_RESOLVE_BLOCK
+# Repair re-applies the per-app house config to the EXISTING app (the \`app\` generator CREATES apps; it is
+# not the heal path), then the workspace-level generators. All idempotent — and all gated on the layer they
+# belong to, so a repo with no app never has an app's config applied to a project that isn't there.
+# Gated on \`web\`, NOT \`angular\`: both are framework-agnostic now — the composer drives a \`dev-server\`
+# target by name, and serve-options just sets host on whatever dev-server is there. An Angular leaf is
+# written only when the project has no dev-server of its own (see the serve generator's THE SEAM).
+if layer_active web; then
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve --project=$APP
+  ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
+fi
+if layer_active firebase; then$REPAIR_FIREBASE_BLOCK
+  :
+fi
 $WORKSPACE_GEN_BLOCK"
 fi
 
@@ -405,7 +586,7 @@ if [ "$RUNTIME" = "native" ]; then
   # Native: the generators run in THIS environment, as the invoking user, writing straight to the host
   # tree — so no mounts, no uid mapping, and no root-owned-files fixup are needed. $INNER's roots are
   # already bound to the real host paths. Clean up the staging dir on any exit.
-  trap 'rm -rf "$STAGE_DIR"' EXIT
+  trap 'rm -rf "$STAGE_DIR" "$STAGE_DIR-ts"' EXIT
   bash -c "$INNER"
 else
   docker run --rm \

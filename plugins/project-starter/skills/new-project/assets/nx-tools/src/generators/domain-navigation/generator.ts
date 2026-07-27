@@ -19,6 +19,7 @@
 import { type Tree, names, formatFiles } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { requireLayer } from '../../layers/registry';
 
 interface DomainNavigationSchema {
   name: string;
@@ -38,6 +39,8 @@ export default async function domainNavigationGenerator(
   tree: Tree,
   options: DomainNavigationSchema
 ): Promise<void> {
+  requireLayer(tree, 'angular', 'domain-navigation');
+
   if (!options.name) {
     throw new Error('domain-navigation generator requires --name (the domain name, e.g. orders).');
   }
