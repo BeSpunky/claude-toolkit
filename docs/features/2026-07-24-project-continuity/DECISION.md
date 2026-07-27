@@ -60,7 +60,7 @@ Continuity artifacts are versioned and co-located with the code. A PM platform w
 
 ## Resolved during build (2026-07-24)
 - **Stale threshold** → `BESPUNKY_STANDING_STALE_DAYS`, default **14**. The `SessionStart` hook fires only when in-flight work exists AND nothing (doc edit or commit) has happened within the window — so it never nags during active work, only on a genuine cold return. A per-machine, gitignored snooze (`.claude/.standing-snooze`, fingerprinted on last-commit epoch) stops re-nagging across multiple starts in one dormant stretch.
-- **Archive cadence** → `BESPUNKY_ARCHIVE_MONTHS`, default **6** months since `concluded:`. Not automated — the ARCHIVE-SWEEP scope offers it and moves only on a yes (heavier, tree-changing ⇒ consented, like `--repair`).
+- **Archive cadence** → `BESPUNKY_ARCHIVE_MONTHS`, default **6** months since `concluded:`. Not automated — the ARCHIVE-SWEEP scope offers it and moves only on a yes (heavier, tree-changing ⇒ consented, like `--sync`).
 - **Concluded-signal** → `status:` frontmatter on `DECISION.md` (`concluded|abandoned|superseded`). Presence of the field (not the file) marks conclusion, so a mid-flight `DECISION.md` like this one reads as in-flight.
 - **Output shape** → built directly into the skill (the report template) rather than a separate sketch, per the "implement to completion" goal.
 

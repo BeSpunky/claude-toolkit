@@ -97,7 +97,7 @@ Triggered by "did we ever try X", "have we solved Y before", "what happened to t
 
 ## Scope: ARCHIVE-SWEEP — bound the default scan (consented, additive)
 
-Triggered by "tidy the feature docs", "archive old efforts", or offered proactively when the live tier has grown thick with aged-concluded efforts. This is the *only* scope that changes the tree, so it is **consented and additive** — like a repair, never automatic:
+Triggered by "tidy the feature docs", "archive old efforts", or offered proactively when the live tier has grown thick with aged-concluded efforts. This is the *only* scope that changes the tree, so it is **consented and additive** — like a sync, never automatic:
 
 1. **Find candidates** — live-tier efforts that are **concluded** (`status:` set) **and aged** past the threshold (default 6 months since `concluded:`; override `BESPUNKY_ARCHIVE_MONTHS`).
 2. **Show the list and ask.** Never move without a yes.

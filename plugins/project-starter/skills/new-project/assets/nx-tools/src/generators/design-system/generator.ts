@@ -37,13 +37,13 @@
 //   (3) a published consumer -> the raw .scss shipped to dist as an ng-package `asset` + a `./styles`
 //                               entry in the package's `exports` map
 //
-// IDEMPOTENCE / --repair CONTRACT (read before changing anything here):
+// IDEMPOTENCE / --sync CONTRACT (read before changing anything here):
 //   - `styles/` and `src/` are SEEDED, not owned: each file is written only if ABSENT. This is not
-//     laziness — `styles/_core/_tokens.scss` is precisely the file the design phase REPLACES, and a --repair
+//     laziness — `styles/_core/_tokens.scss` is precisely the file the design phase REPLACES, and a --sync
 //     that rewrote it would silently destroy the project's real design and restore the placeholders.
 //     Same for any mixin or breakpoint the project has since added.
 //   - Everything else (STRUCTURE.md, the ng-package/package.json patches, the tags, the app wiring) is
-//     GENERATOR-OWNED and re-asserted on every run, so a --repair heals drift.
+//     GENERATOR-OWNED and re-asserted on every run, so a --sync heals drift.
 import {
   type Tree,
   type GeneratorCallback,
@@ -100,7 +100,7 @@ export default async function designSystemGenerator(
   const scope = normalizeNpmScope(options.scope ?? resolveWorkspaceScope(tree));
   const importPath = options.importPath ?? `@${scope}/${name}`;
 
-  // 1) Create the library — but ONLY if it isn't there. On a --repair the lib already exists, and
+  // 1) Create the library — but ONLY if it isn't there. On a --sync the lib already exists, and
   //    re-running publishable-lib would re-delegate to @nx/angular:library over a lib the project has
   //    since filled with real components. Everything below this point is safe to re-run.
   let installTask: GeneratorCallback = noop;
@@ -136,7 +136,7 @@ export default async function designSystemGenerator(
   const specifier = `${basename(root)}/styles`; // e.g. `design-system/styles`
   const stylesLoadPath = dirname(root); // e.g. `packages` — the ONE sass load path
 
-  // 2) Re-assert the tag (a --repair heals a lib whose tags were edited away, and it is the ONLY thing
+  // 2) Re-assert the tag (a --sync heals a lib whose tags were edited away, and it is the ONLY thing
   //    that makes the DS findable).
   const tags = new Set(project.tags ?? []);
   tags.add(DESIGN_SYSTEM_TAG);
@@ -147,12 +147,12 @@ export default async function designSystemGenerator(
   //    the barrel src/index.ts that re-exports it. This MUST happen before seeding — the base generator
   //    already wrote src/index.ts, so a seed-if-absent would skip our curated barrel and leave a barrel
   //    pointing at a component we're about to delete (→ the lib and every app fail to compile). Skipped
-  //    on --repair, where src/lib and src/index.ts are the project's own.
+  //    on --sync, where src/lib and src/index.ts are the project's own.
   if (!existing) pruneGeneratedComponents(tree, root);
 
   // 4) Seed the sass layer, the TS surface, and the docs. `styles/**` and the TS impl under `src/lib`
   //    are SEEDED, NOT OWNED (written only if absent) — `styles/_core/_tokens.scss` is the file the
-  //    design phase replaces wholesale, and a --repair must never restore placeholders over a real
+  //    design phase replaces wholesale, and a --sync must never restore placeholders over a real
   //    design. But the CONTRACT files are generator-owned and force-rewritten every run: `STRUCTURE.md`
   //    (docs), and `src/index.ts` (the public API — a skipped barrel is the compile-breaker above).
   const substitutions = { tokenPrefix, importPath, specifier, root, name, prefix };
@@ -201,7 +201,7 @@ export default async function designSystemGenerator(
   }
 
   // 7) Wire every Angular app that already exists (the scaffold's first app — which was created BEFORE
-  //    this lib and so couldn't wire itself; and every app in the workspace on a --repair). A LATER app
+  //    this lib and so couldn't wire itself; and every app in the workspace on a --sync). A LATER app
   //    wires itself, because the `app` generator composes this same per-app generator. One code path,
   //    both directions: the sass channel, the implicit dependency, the stylesheet blocks, and provideDesignSystem().
   for (const [appName] of getProjects(tree)) {
@@ -218,8 +218,8 @@ export default async function designSystemGenerator(
 /**
  * We're about to CREATE a design system because none was found by tag or by the name `design-system`.
  * If the workspace already contains libraries, one of them might be the project's real design system
- * under a different name — in which case creating a fresh one is a DUPLICATE, not a repair (exactly the
- * failure a `--repair` against a `libs/`-style repo produced). We DETECT and RELAY; we never adopt on a
+ * under a different name — in which case creating a fresh one is a DUPLICATE, not a sync (exactly the
+ * failure a `--sync` against a `libs/`-style repo produced). We DETECT and RELAY; we never adopt on a
  * guess, because the `type:design-system` tag is the single source of truth and the correct fix is a
  * human tagging the real DS and re-running (which makes DS creation a no-op).
  *
@@ -281,7 +281,7 @@ function normalizeNpmScope(scope: string): string {
  * — a plain .scss under src/ would never reach a consumer's node_modules).
  *
  * SEED semantics: a file is written only if it does NOT exist, EXCEPT for the paths in `alwaysRewrite`.
- * See the file header for why this matters — a --repair must never restore placeholder tokens over the
+ * See the file header for why this matters — a --sync must never restore placeholder tokens over the
  * project's real design.
  */
 function seedTemplates(

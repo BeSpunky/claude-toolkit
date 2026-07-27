@@ -1,7 +1,7 @@
 // Per-session emulator overrides — flip which Firebase services use the LOCAL emulator vs the REAL
 // backend WITHOUT editing environment.ts or rebuilding. Read once at app start by firebase.config.ts.
 //
-// This file is GENERATOR-OWNED (rewritten on every `--repair --firebase`) — don't edit it by hand;
+// This file is GENERATOR-OWNED (rewritten on every `--sync --firebase`) — don't edit it by hand;
 // change the committed defaults in environment.ts (the `EMULATE` map) instead.
 //
 // Sources, later wins:  committed default (environment.ts EMULATE)  <  localStorage  <  URL query.

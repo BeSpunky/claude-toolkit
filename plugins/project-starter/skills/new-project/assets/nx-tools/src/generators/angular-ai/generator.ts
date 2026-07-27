@@ -19,7 +19,7 @@
 //
 // Idempotent and a good citizen: the `angular-cli` server key is generator-owned and
 // merged into any existing `.mcp.json` so user-added MCP servers are preserved across
-// re-runs (--repair).
+// re-runs (--sync).
 import { type Tree } from '@nx/devkit';
 import { requireLayer } from '../../layers/registry';
 

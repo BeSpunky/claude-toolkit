@@ -3,7 +3,7 @@
 // The per-app half of the design system, and the reason a LATER app is correct by construction. It is
 // composed by BOTH:
 //   - `design-system`  — for every app that already exists when the DS lands (the scaffold's first app,
-//                        and every app in the workspace on a --repair), and
+//                        and every app in the workspace on a --sync), and
 //   - `app`            — for every app created afterwards.
 // so `nx g @bespunky/nx-tools:app apps/admin` in a design-system workspace comes out sass-wired with no
 // flag and no recollection that this workspace has a design system. Self-detecting, exactly like the
@@ -23,14 +23,14 @@
 //      match app.config.ts. It is deliberately NOT a hand-rolled `inputs` array — a project-level
 //      `inputs` OVERRIDES the inferred/targetDefault inputs wholesale, and a hardcoded named input
 //      (`production`) hard-fails `nx build` on any workspace whose nx.json doesn't define it (a real
-//      `--repair`-on-a-foreign-project failure). A graph edge also keeps `nx affected` correct.
+//      `--sync`-on-a-foreign-project failure). A graph edge also keeps `nx affected` correct.
 //
 //   3. The two marker blocks in the app's global stylesheet: the `@use` (prepended) and the
 //      `@include ds.theme()` (appended). TWO blocks, not one, because sass requires every `@use` to
 //      precede any other rule — a single block containing both would break the moment the app's own
 //      stylesheet has a `@use` of its own further down.
 //
-// Idempotent + --repair-safe: arrays are MERGED and de-duplicated (never clobbered — an app may have
+// Idempotent + --sync-safe: arrays are MERGED and de-duplicated (never clobbered — an app may have
 // its own includePaths for something else), and the marker blocks are upserted between their markers
 // (the house-doc pointer idiom), so everything OUTSIDE the markers stays the developer's.
 import {
@@ -98,7 +98,7 @@ export default async function designSystemStylesGenerator(
   }
 
   // 1) The sass load path. Merge + dedupe: an app may already carry includePaths of its own, and a
-  //    --repair must re-assert ours without dropping theirs.
+  //    --sync must re-assert ours without dropping theirs.
   // ASSUMPTION (verify in Docker against @angular/build): `stylePreprocessorOptions.includePaths`
   //   entries are resolved relative to the WORKSPACE ROOT (not the project root). The entire in-repo
   //   channel rests on this. If they turn out to be project-relative, the fix is a `../..`-style path
@@ -117,7 +117,7 @@ export default async function designSystemStylesGenerator(
   //    provider wiring below can't match app.config.ts, WITHOUT the hazards of a hand-rolled `inputs`
   //    array — which would (a) OVERRIDE the inferred/targetDefault inputs wholesale, and (b) hard-fail
   //    `nx build` on any workspace whose nx.json doesn't define the `production` namedInput (a real
-  //    `--repair`-on-a-foreign-project failure). A real graph edge also keeps `nx affected` correct.
+  //    `--sync`-on-a-foreign-project failure). A real graph edge also keeps `nx affected` correct.
   const deps = new Set<string>([...(project.implicitDependencies ?? []), designSystem.name]);
   // Never make a project depend on itself (design-system-styles is only ever run on apps, but be safe).
   deps.delete(options.project);
@@ -152,7 +152,7 @@ function readImportPath(tree: Tree, designSystemRoot: string): string {
  * it the service is never constructed until some component injects it, so the app boots in the wrong
  * theme and then snaps — a flash the user sees and nobody can reproduce on demand.
  *
- * Idempotent (a --repair re-run is a no-op), and warns with a manual instruction rather than crashing if
+ * Idempotent (a --sync re-run is a no-op), and warns with a manual instruction rather than crashing if
  * the app.config shape is unrecognized.
  */
 function wireDesignSystemProvider(tree: Tree, projectName: string, importPath: string): void {

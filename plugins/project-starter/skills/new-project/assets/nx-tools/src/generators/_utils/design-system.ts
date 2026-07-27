@@ -26,14 +26,14 @@ export interface DesignSystemProject {
  * The workspace's design-system project, or `null` when there isn't one.
  *
  * `null` is a legitimate, expected answer — not an error: the scaffolder creates the first app BEFORE
- * the DS lib exists, and a project scaffolded by an older toolkit has no DS until it's repaired. Every
+ * the DS lib exists, and a project scaffolded by an older toolkit has no DS until it's synced. Every
  * caller must no-op cleanly on `null`.
  *
  * Falls back to a LIBRARY literally named `design-system` so a hand-made (or pre-tag) library is still
- * found and can be healed by a --repair. The `projectType === 'library'` gate is load-bearing: without
+ * found and can be healed by a --sync. The `projectType === 'library'` gate is load-bearing: without
  * it, an `apps/design-system` (a docs/demo/storybook app — a very natural name) would be silently
  * hijacked — tagged, seeded with styles, and have its package.json rewritten — the moment anyone ran the
- * generator or a `--repair`.
+ * generator or a `--sync`.
  */
 export function findDesignSystem(tree: Tree): DesignSystemProject | null {
   const projects = getProjects(tree);

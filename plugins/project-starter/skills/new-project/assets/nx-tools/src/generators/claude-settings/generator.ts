@@ -4,13 +4,13 @@
 // MERGE, never clobber. This file is co-owned: the house owns the marketplace/plugin/permission keys,
 // but the PROJECT owns everything it adds afterwards (its own `hooks`, extra `permissions.allow`
 // entries, extra `enabledPlugins`, env, statusLine…). A wholesale `tree.write` of the template — what
-// this generator used to do — silently deleted all of that on every `scaffold.sh --repair`.
+// this generator used to do — silently deleted all of that on every `scaffold.sh --sync`.
 //
 // The merge rule is deliberate and one-directional: house keys are RE-ASSERTED (the template wins at
 // every leaf it declares, so a drifted or hand-broken house setting heals), and any key the template
 // does NOT declare is PRESERVED as-is. Objects merge recursively; a leaf (scalar or array) the template
 // declares replaces the project's. So the house can never lose a setting to drift, and the project can
-// never lose a setting to a repair.
+// never lose a setting to a sync.
 import { type Tree } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -60,7 +60,7 @@ function ensureIgnored(tree: Tree, heading: string, entries: string[]): void {
 /**
  * Read + parse a JSON file from the tree. A file that doesn't exist — or that a human has left
  * unparseable — yields `undefined`, which the caller treats as "nothing to preserve" and writes the
- * clean house template. Healing a broken settings.json beats failing the whole repair on it.
+ * clean house template. Healing a broken settings.json beats failing the whole sync on it.
  */
 function readJson(tree: Tree, path: string): Json | undefined {
   if (!tree.exists(path)) return undefined;

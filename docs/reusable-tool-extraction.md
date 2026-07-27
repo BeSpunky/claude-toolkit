@@ -162,8 +162,8 @@ The mechanism does **not** reinvent publishing — it uses the shared workspace'
 - **Phase 1 ✅** — marker convention (the explicit tag + `extraction.json`) + `mark-extractable` generator. Sandbox-safe.
 - **Phase 2 ✅** — the `extract-tool` host tool (Docker launcher + `.mjs`: scaffold the `@bespunky/<name>` package via `@nx/js:lib` / `@nx/angular:library`, copy source, set deps/peerDeps, mark `ingested`). Publish stays the existing `nx release`.
 - **Phase 3 ✅** — `adopt-extracted` generator: two-step verify-then-delete — add + import-codemod (keep lib) → build to verify → `--finalize` removes the local lib. `--keepShim` for staged migration.
-- **Phase 4 ✅ (distribution)** — `@bespunky/nx-tools` made **publishable** (compiled JS via `compile-generators.mts`; `files`/`publishConfig` set) + a Docker publish script (`tools/publish-nx-tools/`, user-run with npm auth). The scaffold's `HOUSE_BLOCK` (so both scaffold **and** `--repair`) adds `@bespunky/nx-tools` as a **devDep**, so it survives `yarn install` and the generators run natively in any project's devcontainer. The `architecture-first` skill already references "the house mechanism" generically.
-  - **Bootstrapping:** publish first (`tools/publish-nx-tools/publish.sh`), then new projects get the devDep automatically and existing ones via `scaffold.sh --repair`.
+- **Phase 4 ✅ (distribution)** — `@bespunky/nx-tools` made **publishable** (compiled JS via `compile-generators.mts`; `files`/`publishConfig` set) + a Docker publish script (`tools/publish-nx-tools/`, user-run with npm auth). The scaffold's `HOUSE_BLOCK` (so both scaffold **and** `--sync`) adds `@bespunky/nx-tools` as a **devDep**, so it survives `yarn install` and the generators run natively in any project's devcontainer. The `architecture-first` skill already references "the house mechanism" generically.
+  - **Bootstrapping:** publish first (`tools/publish-nx-tools/publish.sh`), then new projects get the devDep automatically and existing ones via `scaffold.sh --sync`.
 
 ## 8. Status — end-to-end tested ✅
 

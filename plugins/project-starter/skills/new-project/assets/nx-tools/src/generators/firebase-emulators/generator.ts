@@ -1,5 +1,5 @@
 // House generator: scaffold Firebase emulator config + Cloud Functions + Nx targets + app initialization.
-// Idempotent and safe in --repair mode.
+// Idempotent and safe in --sync mode.
 //
 // IMPORTANT: this generator NEVER writes `.firebaserc`. The cloud-project linkage is the
 // Firebase CLI's responsibility — `firebase use --add` validates against the user's actual
@@ -177,7 +177,7 @@ firebase-debug.*.log
 `;
 
 // Local Functions secrets ignore — kept separate from GITIGNORE_BLOCK (its own idempotency
-// marker) so a project already past the emulator block self-heals to ignore .secret.local on --repair.
+// marker) so a project already past the emulator block self-heals to ignore .secret.local on --sync.
 const SECRET_GITIGNORE_BLOCK = `# Local Cloud Functions secrets — the gitignored source for \`nx run functions:push-secrets\`
 # (which sets them in Google Secret Manager for production) and the emulator's local injection.
 # The committed apps/functions/.secret.local.example documents the shape.
@@ -238,7 +238,7 @@ export default async function firebaseEmulatorsGenerator(
     tree.write('.gitignore', `${gitignore.trimEnd()}\n\n${GITIGNORE_BLOCK}`);
   }
   // Secret ignore — separate marker so an older-scaffold project (already past the emulator
-  // block above) still self-heals to ignore apps/functions/.secret.local on --repair.
+  // block above) still self-heals to ignore apps/functions/.secret.local on --sync.
   const gitignoreNow = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
   if (!gitignoreNow.includes('apps/functions/.secret.local')) {
     tree.write('.gitignore', `${gitignoreNow.trimEnd()}\n\n${SECRET_GITIGNORE_BLOCK}`);
@@ -364,7 +364,7 @@ export default async function firebaseEmulatorsGenerator(
   //     is "customized" — the old marker-sniffing heuristic could not tell a current file from a stale one
   //     that merely carried the same old markers, so a customized file silently froze and stopped receiving
   //     template improvements (e.g. the port-offset emulator wiring). Always rewriting removes that whole
-  //     drift class. The file header states the contract; --repair's git backup covers a project that
+  //     drift class. The file header states the contract; --sync's git backup covers a project that
   //     edited it anyway. (The legacy prod-config MIGRATION still ran above, off the pre-rewrite contents.)
   if (tree.exists(firebaseConfigPath)) {
     logger.info(
@@ -568,7 +568,7 @@ export default async function firebaseEmulatorsGenerator(
   }
 
   // 6) Runtime + build deps. `latest` resolves to current at install time; the lockfile pins
-  //    after install. Existing entries are never overwritten (preserves user pins on --repair).
+  //    after install. Existing entries are never overwritten (preserves user pins on --sync).
   //      - firebase / @angular/fire          — the browser SDK (dependencies).
   //      - firebase-admin / firebase-functions — the Cloud Functions runtime, at the WORKSPACE
   //        ROOT (no per-project node_modules; local build/lint/emulate resolve from root).
@@ -755,7 +755,7 @@ function ensureFirebaseProject(tree: Tree): void {
           options: { command: 'bash tools/seed/build-seeds.sh', cwd: '{workspaceRoot}' },
         },
         // On-call reset to the default pristine world (takes effect on the next serve).
-        // Add `reset:<seed>` siblings here for extra worlds — they survive --repair.
+        // Add `reset:<seed>` siblings here for extra worlds — they survive --sync.
         reset: {
           executor: 'nx:run-commands',
           options: { command: 'bash tools/emulator-data.sh reset', cwd: '{workspaceRoot}' },
@@ -852,7 +852,7 @@ function addPlatformBoundaries(source: string, sourcePath: string): string | nul
  * an old-shape firebase.config.ts (the pre-environment-files version that
  * carried the two-consts-plus-ngDevMode pattern).
  *
- * Used by the generator's migration path: when `--repair --firebase` runs on a
+ * Used by the generator's migration path: when `--sync --firebase` runs on a
  * project that still has the legacy file, we don't want to drop the user's
  * real production config on the floor — those values get carried into the new
  * `environment.prod.ts` before the legacy file is overwritten with the new
@@ -879,7 +879,7 @@ function extractLegacyProdConfig(source: string): {
 
   // No usable TypeScript -> nothing to migrate. `empty` is the same answer this returns for a project that
   // never had a legacy config, and the caller treats both identically: it writes the current shape without
-  // carrying values forward. Degrading rather than throwing keeps a --repair alive on a workspace whose
+  // carrying values forward. Degrading rather than throwing keeps a --sync alive on a workspace whose
   // TypeScript moved to the 7.x native port.
   const ts = loadTypeScript();
   if (!ts) return empty;

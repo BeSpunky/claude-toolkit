@@ -2,7 +2,7 @@
 //
 // Everything here is a PURE function of its inputs — no Date, no Math.random — so the same project name
 // (or the same design-system primary) always yields the same window identity. That determinism is the
-// whole point: `scaffold.sh --repair` must regenerate byte-identical settings, and a name-hashed colour
+// whole point: `scaffold.sh --sync` must regenerate byte-identical settings, and a name-hashed colour
 // must be stable across machines and clones, or the identity would flicker on every run and dirty the tree.
 //
 // The design brief (from the POC): a QUIET band, never a Peacock glow. So a primary is always pushed to a
