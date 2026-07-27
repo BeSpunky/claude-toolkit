@@ -88,8 +88,26 @@ $PM_INSTALL
 # isn't reachable (offline rebuild, etc.) we don't fail the build — the project's
 # .claude/settings.json declares the marketplace, so Claude on the host offers a
 # one-click install on first session instead.
-echo "[post-create] pre-installing claude-toolkit plugins"
-if claude plugin marketplace add BeSpunky/claude-toolkit \
+# THE SOURCE SELF-ADAPTS, on the same principle as the Firebase, Playwright and Angular steps below.
+#
+# A repo that IS the claude-toolkit marketplace must register its OWN WORKING TREE, never the published
+# copy of itself: the whole point of developing there is that a skill edit is live in the next session with
+# no publish round-trip, and pulling the released plugins over the top would silently shadow the very files
+# being edited. `.claude-plugin/marketplace.json` uses relative `./plugins/...` sources, so the workspace
+# root is a valid marketplace as-is.
+#
+# Narrow on purpose — the marketplace must be claude-toolkit ITSELF, not merely "some marketplace". A repo
+# that is a DIFFERENT marketplace (its own plugins, its own name) still wants the BeSpunky plugins from
+# GitHub, because its working tree does not contain them, and `install bespunky@claude-toolkit` against it
+# would simply fail.
+if grep -q '"name"[[:space:]]*:[[:space:]]*"claude-toolkit"' "$WS/.claude-plugin/marketplace.json" 2>/dev/null; then
+  MARKETPLACE_SOURCE="$WS"
+  echo "[post-create] this repo IS the claude-toolkit marketplace — registering the working tree (dogfooding), not the published copy"
+else
+  MARKETPLACE_SOURCE="BeSpunky/claude-toolkit"
+  echo "[post-create] pre-installing claude-toolkit plugins"
+fi
+if claude plugin marketplace add "$MARKETPLACE_SOURCE" \
     && claude plugin install bespunky@claude-toolkit --scope project \
     && claude plugin install bespunky-project-starter@claude-toolkit --scope project \
     && claude plugin install bespunky-engineering@claude-toolkit --scope project \
