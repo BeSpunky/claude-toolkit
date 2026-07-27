@@ -33,6 +33,7 @@ import {
   formatFiles,
   logger,
 } from '@nx/devkit';
+import { requireLayer } from '../../layers/registry';
 
 interface AdoptExtractedSchema {
   lib: string;
@@ -66,6 +67,9 @@ export default async function adoptExtractedGenerator(
   tree: Tree,
   options: AdoptExtractedSchema
 ): Promise<GeneratorCallback | void> {
+  // Swapping a local library for its published package presupposes there ARE libraries — the `js` layer.
+  requireLayer(tree, 'js', 'adopt-extracted');
+
   const project = readProjectConfiguration(tree, options.lib);
   const markerPath = joinPathFragments(project.root, 'extraction.json');
   const marker = readJsonSafe(tree, markerPath);

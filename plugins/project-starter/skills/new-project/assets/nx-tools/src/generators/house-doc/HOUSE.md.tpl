@@ -113,7 +113,26 @@ nx g @bespunky/nx-tools:ds-component <name>    # -> packages/design-system/<name
 > **The tokens currently in that file are PLACEHOLDERS with no design authority.** They exist so the library compiles and the app runs on day zero. The design phase (`bespunky-product-ux:stage-the-vision` → `realize-the-vision`) replaces that file wholesale with the real visual system. Do not build a look on top of them, and do not tweak them into one.
 
 {{/design-system}}
-{{#web}}
+{{#navigation}}
+## Typed reactive navigation
+
+This workspace has a `navigation-core` library, so **navigation is never a raw `router.navigate([...])` or a `routerLink="/literal/path"` in a component.** Per domain, five pieces:
+
+1. **A typed route registry** — every route defined ONCE (path + param types + query schema + fragment), and BOTH the Angular `Routes` config and the typed navigation API derived from it, so a path can never drift from the code that builds it.
+2. **A navigation service** — one strongly-typed command per route, receiving **models/entities/values**, never routes or route config. It is the only place that talks to the `Router`.
+3. **Typed reactive route-state selectors** — signals derived from the URL. A route IS state and the URL is its single source of truth, so a change from ANY source (a click, the back button, a deep link, a notification) flows through one reactive pipe and the UI re-derives.
+4. **A per-domain typed event bus** — components emit FACTS/INTENTS (`orderSelected`, `createRequested`); they do not navigate.
+5. **A binding** — event → navigation command, as a pure function.
+
+Generator-first; never hand-roll a domain's navigation:
+
+```bash
+yarn nx g @bespunky/nx-tools:domain-navigation <domain>   # routes + events + navigation + selectors
+```
+
+For the full architecture (registry shape, what belongs on the bus vs in the command, and the overlap with resumable state) invoke the **`bespunky-engineering:typed-reactive-navigation`** skill; for making every screen reconstructible from its URL, **`bespunky-engineering:resumable-state`**.
+
+{{/navigation}}{{#web}}
 ## Serving the app
 
 `nx serve <app>` is the one command for local dev — a single **`@bespunky/nx-tools:serve`** orchestrator that composes, in parallel under one Ctrl+C:
@@ -287,7 +306,26 @@ The package answers the question the code never can: *six months from now, why w
 
 For anything Nx can generate - apps, libraries, components, services, project config - **use the Nx generator (`nx g ...`); never hand-create and fill files.** Before hand-writing anything structural, check what exists: `nx list <plugin>` / `nx g <generator> --help` (or the `nx-generate` skill / the Nx MCP server). Only fall back to manual file creation when no generator covers the task. **Never guess flags** - verify against `--help` / `nx_docs`.
 
-## Common Commands
+{{#js}}
+## Publishable libraries & reusable tools
+
+Libraries here are **publishable by default** — one generator owns the package config (build target, `package.json` exports, the tsconfig path alias, the test runner and the `nx release` wiring), so no library has to re-derive it:
+
+```bash
+yarn nx g @bespunky/nx-tools:publishable-lib <name>               # Angular library
+yarn nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular  # plain TypeScript (@nx/js, tsc)
+```
+
+**A tool that has proved itself in one project belongs to every project.** Rather than copy-pasting it into the next repo, MARK it — that records the intent to lift it into the shared toolkit, and the extraction tooling takes it from there:
+
+```bash
+yarn nx g @bespunky/nx-tools:mark-extractable <lib> --summary="..." --rationale="..."
+yarn nx g @bespunky/nx-tools:adopt-extracted <lib> --package=<npm-package>
+```
+
+`mark-extractable` declares this library reusable; `adopt-extracted` swaps a local copy for the published package (with `--keepShim` while call sites migrate, then `--finalize`). The cross-workspace half runs from the toolkit repo — see its `docs/reusable-tool-extraction.md`.
+
+{{/js}}## Common Commands
 
 ```bash
 {{#angular}}# Generate the next Angular app or library (generator-first!)

@@ -116,6 +116,7 @@ import type * as TS from 'typescript';
 // The app.config `providers` wiring is shared with the `serve` and `design-system-styles` generators —
 // it used to be copy-pasted here in full (the same TS-AST walk, three times over).
 import { wireProvider, loadTypeScript } from '../_utils/wire-provider';
+import { requireLayer } from '../../layers/registry';
 
 interface FirebaseEmulatorsSchema {
   project: string;
@@ -187,6 +188,11 @@ export default async function firebaseEmulatorsGenerator(
   tree: Tree,
   options: FirebaseEmulatorsSchema
 ): Promise<GeneratorCallback> {
+  // The emulator suite is wired INTO an Angular app — environment files, `firebase.config.ts`, the
+  // `app.config.ts` provider. Without the Angular layer there is nothing to wire it to, and the files it
+  // would emit are Angular source a non-Angular workspace cannot compile.
+  requireLayer(tree, 'angular', 'firebase-emulators');
+
   if (!options.project) {
     throw new Error('firebase-emulators generator requires --project=<app-name>.');
   }

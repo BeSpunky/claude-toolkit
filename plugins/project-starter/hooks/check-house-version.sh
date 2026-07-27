@@ -118,10 +118,14 @@ is_version "$STAMPED_NX" || STAMPED_NX=''
 # the devcontainer ports, the emulator wiring, the Angular editor extensions — was never applied. The stamp is
 # current, the toolkit hasn't moved, and the project is still missing house files it should now have.
 #
-# Only layers that are a SINGLE-FILE fact are detected here. `angular` and `firebase` are one grep each;
-# `web`, `js`, `design-system` and `navigation` need the Nx project graph, which means a Node process and
-# seconds — far past what a hook that runs at every session start in every project may spend. Under-reporting
-# is the right failure: a missed notice costs a stale layer, a false one costs everyone's trust in the notice.
+# EVERY layer is detected, but only by facts a hook can afford. `angular`, `js` and `firebase` are a single
+# grep on one known file. `web`, `design-system` and `navigation` live in project.json files, so they need a
+# scan — bounded to a shallow depth and with the heavy directories pruned, which keeps it in the milliseconds
+# a session-start hook may spend. It deliberately does NOT load the Nx project graph (a Node process and
+# seconds); the greps below approximate it, and where they can't tell they say nothing.
+#
+# Under-reporting stays the intended failure mode throughout: a missed notice costs a stale layer, a false
+# one costs everyone's trust in the notice. So every probe below is written to be quiet when unsure.
 STAMPED_LAYERS="$(stamp_value layers || true)"
 
 has_layer() {
@@ -129,13 +133,33 @@ has_layer() {
   return 1
 }
 
+# All project.json files, excluding the directories that make a repo scan expensive. Printed once and
+# reused, so the cost is a single traversal no matter how many layers are probed.
+project_files() {
+  find "$PROJECT_DIR" \
+    \( -name node_modules -o -name .git -o -name dist -o -name .nx -o -name .angular -o -name tmp \) -prune -o \
+    -name project.json -print 2>/dev/null | head -200
+}
+PROJECT_FILES="$(project_files)"
+
+# Does any project.json match this pattern? Quiet (and false) when there are none to search.
+in_projects() {
+  [ -n "$PROJECT_FILES" ] || return 1
+  printf '%s\n' "$PROJECT_FILES" | xargs grep -l "$1" 2>/dev/null | grep -q .
+}
+
 DRIFTED=''
-if grep -q '"@angular/core"' "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer angular; then
-  DRIFTED="angular"
-fi
-if [ -f "$PROJECT_DIR/firebase.json" ] && ! has_layer firebase; then
-  DRIFTED="${DRIFTED:+$DRIFTED, }firebase"
-fi
+note_drift() { DRIFTED="${DRIFTED:+$DRIFTED, }$1"; }
+
+grep -q '"@angular/core"' "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer angular && note_drift angular
+grep -q '"@nx/js"'        "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer js      && note_drift js
+[ -f "$PROJECT_DIR/firebase.json" ] && ! has_layer firebase && note_drift firebase
+# `web` — a project with something to serve. The registry's own test is a `dev-server` or `serve` TARGET.
+in_projects '"dev-server"' && ! has_layer web && note_drift web
+# `design-system` — the tag is the key, exactly as the registry and design-system-styles use it.
+in_projects '"type:design-system"' && ! has_layer design-system && note_drift design-system
+# `navigation` — a project NAMED navigation-core (the registry matches on project name).
+in_projects '"name": *"navigation-core"' && ! has_layer navigation && note_drift navigation
 
 # Only speak about drift when the stamp actually RECORDS layers. A project stamped before layers existed has
 # an empty list, which is not evidence that it lacks them — treating it as such would fire this notice at
@@ -150,9 +174,16 @@ if [ -n "$DRIFTED" ] && [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none
   present in the workspace but not in the stamp : $DRIFTED
   stamp records                                 : layers=$STAMPED_LAYERS
 
-So the house files for that layer are missing — for \`angular\` that is the editor extensions, the dev-server
-target and the Angular agent tooling; for \`firebase\` the emulator wiring, the JDK step and the forwarded
-emulator ports. Re-applying the house generators adds them: the repair path of the
+So the house files for that layer are missing. What each one brings:
+  angular       — the Angular editor extensions, the dev-server leaf, the Angular CLI MCP + agent skills
+  web           — the serve composer, worktree domains, the shared co-driven browser, Playwright, :80
+  design-system — the design-system config, STRUCTURE.md, and every app's sass/provider wiring
+  navigation    — nothing generated per-repair (its generators are on-demand), but HOUSE.md gains the
+                  typed-navigation conventions, so the stamp is what makes the layer visible at all
+  js            — the publishable-library and tool-extraction conventions in HOUSE.md
+  firebase      — the emulator wiring, the JDK step, and the forwarded emulator ports
+
+Re-applying the house generators adds them: the repair path of the
 bespunky-project-starter:new-project skill.
 
 RELAY THIS TO THE USER — do not act on it. Offer the repair; it needs a human's yes (see the repair's \`--yes\`

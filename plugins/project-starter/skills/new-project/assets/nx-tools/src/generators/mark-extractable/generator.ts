@@ -25,6 +25,7 @@ import {
   joinPathFragments,
   formatFiles,
 } from '@nx/devkit';
+import { requireLayer } from '../../layers/registry';
 
 interface MarkExtractableSchema {
   lib: string;
@@ -57,6 +58,11 @@ export default async function markExtractableGenerator(
   tree: Tree,
   options: MarkExtractableSchema
 ): Promise<void> {
+  // Marking a library reusable presupposes there ARE libraries — which is exactly what the `js` layer
+  // detects. Stated before `readProjectConfiguration`, so a workspace with no libraries at all is told
+  // that, rather than being told one particular name wasn't found.
+  requireLayer(tree, 'js', 'mark-extractable');
+
   const project = readProjectConfiguration(tree, options.lib);
 
   if (project.projectType && project.projectType !== 'library') {
