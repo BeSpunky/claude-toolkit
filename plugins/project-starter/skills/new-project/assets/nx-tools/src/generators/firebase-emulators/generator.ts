@@ -106,16 +106,14 @@ import { join } from 'node:path';
 // Still needed by this file's OTHER AST routine (the ESLint depConstraints inserter). The app.config
 // `providers` wiring, however, is now shared — see the import below.
 //
-// TYPE-ONLY import + a LAZY runtime binding, for the same reason wire-provider does it (the full argument
-// lives in that file's header): a static value-import binds at MODULE LOAD, so this whole generator would
-// fail to load in a workspace without TypeScript — and, more pressingly, `typescript` on npm now resolves
-// to the 7.x native port whose main entry no longer exposes the classic compiler API, so it would LOAD and
-// then die on the first call. The shared loader probes the API and degrades to null, which this file's one
-// consumer (addPlatformBoundaries) already handles by returning null and warning.
-import type * as TS from 'typescript';
-// The app.config `providers` wiring is shared with the `serve` and `design-system-styles` generators —
-// it used to be copy-pasted here in full (the same TS-AST walk, three times over).
-import { wireProvider, loadTypeScript } from '../_utils/wire-provider';
+// The TypeScript compiler API is reached through `_utils/typescript-api` — see that file.
+import { wireProvider } from '../_utils/wire-provider';
+import {
+  loadTypeScript,
+  type TsArrayLiteralExpression,
+  type TsNode,
+  type TsObjectLiteralExpression,
+} from '../_utils/typescript-api';
 import { requireLayer } from '../../layers/registry';
 
 interface FirebaseEmulatorsSchema {
@@ -800,8 +798,8 @@ function addPlatformBoundaries(source: string, sourcePath: string): string | nul
     ts.ScriptKind.JS
   );
 
-  let constraintsArray: TS.ArrayLiteralExpression | null = null;
-  const findConstraints = (node: TS.Node): void => {
+  let constraintsArray: TsArrayLiteralExpression | null = null;
+  const findConstraints = (node: TsNode): void => {
     if (constraintsArray) return;
     if (
       ts.isPropertyAssignment(node) &&
@@ -817,7 +815,7 @@ function addPlatformBoundaries(source: string, sourcePath: string): string | nul
   findConstraints(sf);
   if (!constraintsArray) return null;
 
-  const found: TS.ArrayLiteralExpression = constraintsArray;
+  const found: TsArrayLiteralExpression = constraintsArray;
   const snippet =
     `// by platform: the server-only Firebase Admin/Functions SDKs belong to Cloud\n` +
     `// Functions alone — they must never reach browser/SSR Angular code (they pull in\n` +
@@ -895,8 +893,8 @@ function extractLegacyProdConfig(source: string): {
     ts.ScriptKind.TS
   );
 
-  let prodObject: TS.ObjectLiteralExpression | null = null;
-  const findProd = (node: TS.Node): void => {
+  let prodObject: TsObjectLiteralExpression | null = null;
+  const findProd = (node: TsNode): void => {
     if (prodObject) return;
     if (
       ts.isVariableDeclaration(node) &&

@@ -12,43 +12,15 @@
 // applies non-overlapping text inserts via `applyChangesToString` so surrounding formatting survives
 // and the caller's `formatFiles` polishes the result.
 //
-// TYPESCRIPT IS BOUND LAZILY, and that is load-bearing rather than a micro-optimisation. A static
-// `import * as ts from 'typescript'` binds at MODULE LOAD, so merely importing a generator that imports
-// this file would throw `Cannot find module 'typescript'` in a workspace that hasn't got one — and a
-// workspace produced by `nx init` hasn't. The failure landed nowhere near the cause: the `serve` generator
-// died before its first line ran, on a repo where the provider-wiring step would never have applied
-// anyway. Same shape as the `@nx/angular` static import that took down `secondary-entrypoint`. So the
-// binding happens at CALL time, and its absence degrades to `null` — which every caller already handles by
-// warning with manual wiring instructions.
+// The TypeScript compiler API is reached through `_utils/typescript-api` — a declared subset plus a lazy,
+// feature-probed loader. See that file for why this cannot be `typeof import('typescript')` any more.
 import { applyChangesToString, type StringChange, ChangeType } from '@nx/devkit';
-import type * as TS from 'typescript';
-
-let tsModule: typeof TS | null | undefined;
-
-/**
- * The TypeScript compiler API, or `null` when this workspace hasn't got a usable one. Resolved once.
- *
- * "Usable" is checked by FEATURE, not by resolvability, and that distinction is already live rather than
- * hypothetical: `typescript` on npm now resolves to the 7.x native port, whose main entry no longer exposes
- * the classic compiler API (`createSourceFile`, `ScriptTarget`, the `isXxx` guards) — its `.` export is
- * essentially just the version. So `require` SUCCEEDS and the first call then dies with
- * "createSourceFile is not a function", which reads as a bug in this file rather than as a workspace whose
- * TypeScript moved on. Probing one representative entry point turns that crash into the same graceful
- * `null` the missing-module case produces, and callers already warn with manual wiring instructions.
- * (`compile-generators.mts` hits the same wall from the other side — see the pinned TS 5 in scaffold.sh.)
- */
-export function loadTypeScript(): typeof TS | null {
-  if (tsModule === undefined) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const loaded = require('typescript') as Partial<typeof TS>;
-      tsModule = typeof loaded?.createSourceFile === 'function' ? (loaded as typeof TS) : null;
-    } catch {
-      tsModule = null;
-    }
-  }
-  return tsModule;
-}
+import {
+  loadTypeScript,
+  type TsArrayLiteralExpression,
+  type TsImportDeclaration,
+  type TsNode,
+} from './typescript-api';
 
 export interface WireProviderOptions {
   /** The provider function to call inside `providers: [...]`, e.g. `provideDesignSystem`. */
@@ -75,8 +47,8 @@ export function wireProvider(
   const sf = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, /* setParentNodes */ true, ts.ScriptKind.TS);
 
   // Locate `export const appConfig: ApplicationConfig = { providers: [ ... ] }`.
-  let providersArray: TS.ArrayLiteralExpression | null = null;
-  const findProviders = (node: TS.Node): void => {
+  let providersArray: TsArrayLiteralExpression | null = null;
+  const findProviders = (node: TsNode): void => {
     if (providersArray) return;
     if (
       ts.isVariableDeclaration(node) &&
@@ -101,14 +73,14 @@ export function wireProvider(
   };
   findProviders(sf);
   if (!providersArray) return null;
-  const providers: TS.ArrayLiteralExpression = providersArray;
+  const providers: TsArrayLiteralExpression = providersArray;
 
   // Idempotency, scoped CORRECTLY: already wired means a CALL to `<providerFn>()` inside the providers
   // array — NOT merely the identifier appearing somewhere in the file. A leftover `import { providerFn }`
   // after a manual revert (a very common half-edit) would fool a whole-file identifier scan into
   // reporting "wired" and refusing to re-add the call, leaving the app importing-but-not-using it.
   let callWired = false;
-  const detectCall = (node: TS.Node): void => {
+  const detectCall = (node: TsNode): void => {
     if (callWired) return;
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === providerFn) {
       callWired = true;
@@ -120,7 +92,7 @@ export function wireProvider(
   if (callWired) return source;
 
   // Find the last top-level ImportDeclaration so we know where to put our new import.
-  let lastImport: TS.ImportDeclaration | null = null;
+  let lastImport: TsImportDeclaration | null = null;
   for (const stmt of sf.statements) {
     if (ts.isImportDeclaration(stmt)) lastImport = stmt;
     else break;
