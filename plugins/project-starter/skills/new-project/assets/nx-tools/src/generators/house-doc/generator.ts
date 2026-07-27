@@ -124,14 +124,19 @@ function renderTemplate(
   layers: readonly string[],
   packageManager: string,
 ): string {
-  return expandBlocks(src, flags)
+  // Collapse the blank-line runs a removed conditional block leaves behind — the same tidy the devcontainer
+  // renderer does, and for the same reason: HOUSE.md is READ, by humans and by the agent, and a document
+  // full of gaps where Angular or Firebase sections used to be reads as damaged rather than as tailored.
+  return collapseBlankRuns(
+    expandBlocks(src, flags)
     .replace(/\{\{PM\}\}/g, packageManager)
     .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
     .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion)
     // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the sync
     // re-DETECTS. Its value is drift: a project whose workspace now has `firebase` but whose stamp doesn't
     // grew a layer that never got its house tooling, and that is a fact worth being able to see.
-    .replace(/\{\{LAYERS\}\}/g, layers.length ? layers.join(',') : 'none');
+    .replace(/\{\{LAYERS\}\}/g, layers.length ? layers.join(',') : 'none'),
+  );
 }
 
 /**
@@ -205,4 +210,9 @@ function detectPackageManager(tree: Tree): string {
   if (tree.exists('pnpm-lock.yaml')) return 'pnpm';
   if (tree.exists('package-lock.json')) return 'npm';
   return 'yarn';
+}
+
+/** Squeeze runs of 3+ newlines (i.e. two or more consecutive blank lines) down to a single blank line. */
+function collapseBlankRuns(markdown: string): string {
+  return markdown.replace(/\n[ \t]*(\n[ \t]*){2,}/g, '\n\n');
 }

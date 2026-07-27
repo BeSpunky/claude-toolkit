@@ -6,3 +6,13 @@ node_modules/
 # Keep the dir tracked (via .gitkeep) so a fresh clone binds a real node-owned dir, not a root-created one.
 .claude/data/*
 !.claude/data/.gitkeep
+
+.nx/cache
+.nx/workspace-data
+.nx/migrate-runs
+.nx/polygraph
+.claude/worktrees
+.claude/settings.local.json
+
+# Claude Code — this developer's "not now" on a house-tooling sync (local, never shared)
+.claude/house-snooze.json

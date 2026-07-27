@@ -1,0 +1,14 @@
+{
+  "generator": "@bespunky/nx-tools:devcontainer",
+  "owned": false,
+  "flags": {
+    "web": false,
+    "angular": false,
+    "firebase": false,
+    "voice": false
+  },
+  "adopted": {
+    "note": "This devcontainer.json was written by the project, not by this generator, so house settings are only ADDED, never changed. The keys below already had project values and were left alone — apply any of them by hand if you want the house behaviour.",
+    "skipped": []
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "claude-toolkit",
+  "version": "0.0.0",
+  "private": true,
+  "devDependencies": {
+    "@bespunky/nx-tools": "^0.20.0",
+    "@nx/devkit": "23.1.0",
+    "nx": "23.1.0"
+  }
+}

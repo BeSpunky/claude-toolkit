@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+<!-- @bespunky/house-tooling:start (generated pointer — do not edit between these markers; `scaffold.sh --sync` regenerates it) -->
+## House tooling & conventions → read [`HOUSE.md`](HOUSE.md)
+
+The house **architecture directives** (architect-mentality, **architecture-first**, redesign-means-rethink, **design-system-first**), the **branch & release workflow**, and the mechanical how-to — serve · worktrees · design system · shared browser · generators · Nx · Playwright — live in **[`HOUSE.md`](HOUSE.md)**, a **generator-owned** file regenerated on every `scaffold.sh --sync` to match the installed `@bespunky/nx-tools`. **Never hand-edit `HOUSE.md`.** Its directives are **mandatory, not optional reference — read `HOUSE.md` before you design, style, serve, branch, or drive the browser.**
+<!-- @bespunky/house-tooling:end -->
+
 ## What this repo is
 
 `claude-toolkit` is a **Claude Code plugin marketplace** — a git repo whose product is **skills** (and, where added, subagents/commands) authored as markdown. There is no application and no root build: editing a skill *is* the work. `README.md` holds the exhaustive plugin/skill catalog and the install/upgrade story; this file is the map for **developing the toolkit itself**.
@@ -57,7 +63,14 @@ A plugin's version lives in **two** places that must agree: `plugins/<plugin>/.c
 
 ## Common commands
 
-This repo has **no root package.json, build, lint, or test** — the skills are markdown. The dev loop:
+**The product is still markdown — there is no build, lint or test for the skills.** But this repo now *dogfoods its own scaffolder*: `scaffold.sh --sync --ensure=agent .` has been run on it, so it carries the `agent` layer (`HOUSE.md`, the devcontainer, `.claude/settings.json`, the window identity) and, underneath it, a minimal Nx workspace — `nx.json`, a root `package.json` and a lockfile. Nx is the *mechanism floor*: every house generator is an Nx-devkit generator invoked through `nx g`, so the DX layer cannot be applied without it. Those files exist to host the tooling, **not** to build the skills; there is still nothing to compile here.
+
+Two consequences worth knowing:
+
+- **`HOUSE.md` is generated — never hand-edit it.** It carries the house architecture directives and is rewritten by every sync. Repo-specific guidance (this file) stays here; `CLAUDE.md` holds only a generated pointer block to it.
+- **The `SessionStart` version hook stays silent in this repo**, by design: it exempts a project whose `CLAUDE_PLUGIN_ROOT` lives inside it, because the "installed" plugin *is* the working tree being edited, so comparing versions would be comparing the file to itself.
+
+The dev loop:
 
 | Task | How |
 | --- | --- |
@@ -74,3 +87,27 @@ This repo has **no root package.json, build, lint, or test** — the skills are 
 - **Router skills:** SKILL.md indexes, `reference/*.md` holds the depth — don't inline reference material back into SKILL.md.
 - **Extending the scaffolder is generator work:** add or modify an `@bespunky/nx-tools` generator (Nx-devkit `Tree`) — never hand-write file edits into `scaffold.sh`. A literal `angular-*` Nx preset forces a demo app, so the scaffold path is the `apps` preset + `nx add @nx/angular` + a `--minimal` app.
 - **Adding/renaming a plugin touches three catalogs in sync:** `marketplace.json`, the plugin's `plugin.json`, and `README.md`.
+
+<!-- nx configuration start-->
+<!-- Leave the start & end comments to automatically receive updates. -->
+
+## General Guidelines for working with Nx
+
+- For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies
+- When running tasks (for example build, lint, test, e2e, etc.), always prefer running the task through `nx` (i.e. `nx run`, `nx run-many`, `nx affected`) instead of using the underlying tooling directly
+- Prefix nx commands with the workspace's package manager (e.g., `pnpm nx build`, `npm exec nx test`) - avoids using globally installed CLI
+- You have access to the Nx MCP server and its tools, use them to help the user
+- For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md`. Not all plugins have this file - proceed without it if unavailable.
+- NEVER guess CLI flags - always check nx_docs or `--help` first when unsure
+
+## Scaffolding & Generators
+
+- For scaffolding tasks (creating apps, libs, project structure, setup), ALWAYS invoke the `nx-generate` skill FIRST before exploring or calling MCP tools
+
+## When to use nx_docs
+
+- USE for: advanced config options, unfamiliar flags, migration guides, plugin configuration, edge cases
+- DON'T USE for: basic generator syntax (`nx g @nx/react:app`), standard commands, things you already know
+- The `nx-generate` skill handles generator discovery internally - don't call nx_docs just to look up generator syntax
+
+<!-- nx configuration end-->
