@@ -1,9 +1,23 @@
 {
+  // TYPECHECKING ONLY. The shipped JS is produced by assets/compile-generators.mts via
+  // `ts.transpileModule` with its own explicit options (ModuleKind.CommonJS), which never reads this file —
+  // so this config exists for editors and for anyone typechecking the sources, not for the build.
+  //
+  // `module: node16` + `moduleResolution: node16`, and the pairing is forced rather than chosen. TypeScript
+  // 7 REMOVED `moduleResolution: "node"` outright (TS5108 — not a deprecation warning, an error), while
+  // `commonjs` cannot be paired with `node16`/`bundler` at all. Testing every combination against both TS 5
+  // (which the publisher pins) and TS 7 (which a contributor's editor may already carry) leaves `node16` as
+  // the only pairing that is valid on both. `nodenext` also passes, but its semantics track whatever Node
+  // does next and can shift under a TypeScript upgrade; `node16` is the deterministic choice for a payload
+  // that must typecheck identically everywhere.
+  //
+  // This still describes the package honestly: nx-tools declares no `"type": "module"`, so Node — and
+  // `node16` resolution — treat it as CommonJS, which is exactly how Nx `require()`s the compiled output.
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "node16",
     "target": "es2021",
     "lib": ["es2021"],
-    "moduleResolution": "node",
+    "moduleResolution": "node16",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "strict": true,
