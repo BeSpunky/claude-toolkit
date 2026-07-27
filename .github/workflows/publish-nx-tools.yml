@@ -47,11 +47,11 @@ jobs:
     # Guard against forks trying to publish with an absent token.
     if: github.repository == 'BeSpunky/claude-toolkit'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Node 22.18+ is the bar for compile-generators.mts's type-stripping; '22' resolves to the latest
       # 22.x, comfortably above it. This is also what lets publish.sh skip its Docker fallback.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
