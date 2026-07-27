@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # shared-browser — one browser a human and Claude drive together, entirely inside the devcontainer.
 #
-#   Human  → http://localhost:${SB_WEB}   (noVNC, the ONLY forwarded port)
+#   Human  → the noVNC URL this script PRINTS  (the ONLY host-facing port — ALLOCATED, never assumed)
 #   Claude → http://127.0.0.1:${SB_CDP}   (CDP, loopback ONLY — full remote control, never forward)
 #
 # The stack (each a black box over the one below):
-#   Xvfb :99  ─ fluxbox WM ─ Chromium (persistent, CDP loopback) ─ x11vnc (:5900) ─ websockify/noVNC (:6080)
+#   Xvfb :99  ─ fluxbox WM ─ Chromium (persistent, CDP loopback) ─ x11vnc (:5900) ─ websockify/noVNC (allocated)
 # A persistent recorder attaches over CDP and streams console/network/nav to logs/events.jsonl.
 #
 # This is the single public seam. Callers say up/down/navigate/status — never touch Xvfb/x11vnc directly.
@@ -33,8 +33,29 @@ set -uo pipefail
 SB_DISPLAY="${SB_DISPLAY:-:99}"
 SB_GEOM="${SB_GEOM:-1440x900x24}"
 SB_VNC="${SB_VNC:-5900}"                                   # x11vnc RFB port (loopback)
-SB_WEB="${SB_WEB:-6080}"                                   # noVNC/websockify port (the ONLY forwarded one)
 SB_CDP="${SB_CDP:-9223}"                                   # Chromium DevTools port (loopback ONLY)
+
+# ── The noVNC port: the ONE host-facing port, and therefore the ONE that is ALLOCATED ────────────────
+# VNC and CDP are loopback-only, so they live in this container's own netns and can never collide with
+# another container. The noVNC port is different: it is forwarded to the HOST, where every devcontainer
+# on this machine competes for the same number. A fixed 6080 doesn't fail loudly there — `up` succeeds
+# in BOTH containers (each netns has its own free 6080), the editor silently forwards the second one to
+# a different HOST port, and the URL we printed then points at the OTHER container's browser. Silent
+# wrong-target, no error anywhere. So the port is allocated out of a band, claimed in a registry shared
+# by every container on this Docker engine, and the URL is DERIVED from what we actually got.
+#
+# SB_WEB may still be set explicitly as an escape hatch — an explicit pin skips allocation entirely.
+SB_WEB_PIN="${SB_WEB:-}"                                   # explicit pin (env) — bypasses allocation
+SB_WEB=""                                                  # resolved by resolve_web_port (never assume)
+# The band is INJECTED by the generator from src/generators/shared-browser/novnc-band.ts — the same
+# module that emits devcontainer.json's per-port `requireLocalPort` entries. Never edit these numbers
+# here: a port this script can pick but devcontainer.json doesn't cover is a port that fails SILENTLY.
+SB_WEB_BAND_START="${SB_WEB_BAND_START:-{{novncBandStart}}}"
+SB_WEB_BAND_SIZE="${SB_WEB_BAND_SIZE:-{{novncBandSize}}}"
+# The cross-container registry. A FIXED-NAME docker volume mounted by every BeSpunky devcontainer, so
+# its scope is exactly the collision scope: one Docker engine = one host = one set of host ports.
+SB_REGISTRY="${SB_REGISTRY:-/var/opt/bespunky/ports}"
+SB_CLAIM_TTL="${SB_CLAIM_TTL:-604800}"                     # seconds (7d) before an unrefreshed claim recycles
 SB_RUNTIME="${SB_RUNTIME:-${XDG_RUNTIME_DIR:-/tmp}/shared-browser}"
 export SB_RUNTIME                                          # so the spawned recorder.mjs writes events.jsonl under the SAME base
 SB_NOVNC_WEB="${SB_NOVNC_WEB:-/usr/share/novnc}"           # static noVNC client dir (from the `novnc` apt pkg)
@@ -57,19 +78,30 @@ _disp_num="${SB_DISPLAY#:}"; _disp_num="${_disp_num%%.*}"
 X_SOCKET="/tmp/.X11-unix/X${_disp_num}"
 
 CDP_URL="http://127.0.0.1:${SB_CDP}"
-NOVNC_URL="http://localhost:${SB_WEB}/vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true"
+NOVNC_URL=""                                               # derived from the ALLOCATED port (resolve_web_port)
+SB_WEB_ALLOCATED=false                                     # true only when the port is a REAL allocation, not a guess
 
 PROFILE="$SB_RUNTIME/profile"                              # Chromium --user-data-dir (fresh by default)
 LOGS="$SB_RUNTIME/logs"
 SHOTS="$LOGS/screenshots"                                  # verify.mjs writes before/after PNGs here
 EVENTS="$LOGS/events.jsonl"                                # recorder stream
 LOCK="$SB_RUNTIME/up.lock"
+WEBROOT="$SB_RUNTIME/novnc-web"                             # noVNC static client + our identity token
+HOST_VERIFIED_FILE="$SB_RUNTIME/host-verified"             # result of the last host round-trip check
 OBSERVE="$SB_RUNTIME/observe-only"                         # presence = observe-only (human is driving; attach/verify/navigate refuse to drive)
+PORT_FILE="$SB_RUNTIME/web.port"                           # the allocated noVNC port — so every later verb agrees with the RUNNING stack
 
 # Where the sibling helpers live, and the workspace root (for Node module resolution — gotcha #3).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RECORDER="$SCRIPT_DIR/recorder.mjs"
+PORT_CLAIM="$SCRIPT_DIR/port-claim.mjs"                    # host-port arbitration (see its header for why not bash)
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd || echo "$SCRIPT_DIR")"
+
+# The identity the human SEES. noVNC titles the browser tab from the VNC desktop name, so stamping the
+# workspace here defends every residual wrong-target case at once — a dismissed remap prompt, a squatter
+# no gate could see, a second Docker engine, a port typed from memory, a stale bookmark. Ports are
+# something you have to reason about; a tab that says the wrong project name is something you SEE.
+SB_DESKTOP_NAME="${SB_DESKTOP_NAME:-$(basename "$WORKSPACE_ROOT") (shared browser)}"
 
 # Start order (dependencies first) and its reverse for teardown (recorder torn down first).
 START_ORDER=(xvfb fluxbox chrome x11vnc websockify)
@@ -144,6 +176,159 @@ port_holders() {
   ss -tanp 2>/dev/null | awk -v p=":$1" '
     $4 ~ (p "$") { s=$0; while (match(s, /pid=[0-9]+/)) { print substr(s, RSTART+4, RLENGTH-4); s=substr(s, RSTART+RLENGTH) } }
   ' | sort -u | tr '\n' ' '
+}
+
+# ── noVNC port allocation: the port is a RESULT, never a constant ─────────────────────────────────────
+# The ARBITRATION lives in tools/shared-browser/port-claim.mjs, not here. That split is deliberate: bash
+# is the right material for process supervision (ss, /proc, setsid, PID lifecycle) and the wrong material
+# for a registry with ownership, expiry and atomicity — the bash version needed an flock and, on lock
+# timeout, proceeded UNLOCKED, leaving a real double-booking race. Node's `open(path,'wx')` removes the
+# race by construction, and the algorithm is covered by port-claim.test.mjs (including a genuine
+# multi-process race), which a bash implementation could not be.
+#
+# What stays here is what only this script can know: WHICH PORT IS LIVE right now.
+
+# The identity that owns a claim. It must name the DEV CONTAINER — not the tree, and not the container
+# instance:
+#   · not the tree, because there is exactly one shared browser per container (SB_RUNTIME is
+#     container-scoped, so every worktree drives the same stack) — a per-tree identity would let a
+#     worktree's `up` allocate a SECOND port for a browser that already exists;
+#   · not the container INSTANCE, because a rebuild is the same dev container to its user. Keying on the
+#     hostname (Docker's per-instance id) would burn a fresh band slot on every rebuild and orphan the
+#     previous claim for a full TTL, while the "bookmarkable URL" promise quietly stops holding.
+# ${devcontainerId} is the platform's own answer: "unique to the dev container ... and stable across
+# rebuilds" (containers.dev JSON reference), exactly the lifetime a port reservation wants. The
+# devcontainer generator passes it in as BESPUNKY_DEVCONTAINER_ID.
+container_key() {
+  if [ -n "${BESPUNKY_DEVCONTAINER_ID:-}" ]; then printf 'dc:%s' "$BESPUNKY_DEVCONTAINER_ID"; return 0; fi
+  # FALLBACK for a container not built by the house generator (or one predating this): the git COMMON
+  # dir — identical for the main tree and all its worktrees — plus the hostname. Correct, but the
+  # hostname is the container instance, so the slot churns on rebuild. `status` reports the mode.
+  local common root=""
+  common="$(cd "$WORKSPACE_ROOT" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null || true)"
+  [ -n "$common" ] && root="$(cd "$WORKSPACE_ROOT" 2>/dev/null && cd "$common" 2>/dev/null && pwd || true)"
+  [ -n "$root" ] || root="$WORKSPACE_ROOT"
+  printf '%s@%s' "$root" "$(cat /etc/hostname 2>/dev/null || echo unknown)"
+}
+
+# A port is a number in range — anything else (empty, partial write, junk env) is NOT a port. Without
+# this a corrupt web.port or `SB_WEB=abc` produced invalid JSON on the documented machine interface.
+valid_port() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+
+# The host as seen from inside: host.docker.internal when the runtime provides it (Docker Desktop, or
+# --add-host=host-gateway), else the default route. Empty = we cannot see the host at all.
+host_gateway() {
+  if getent hosts host.docker.internal >/dev/null 2>&1; then printf 'host.docker.internal'; return 0; fi
+  ip route 2>/dev/null | awk '/^default/{print $3; exit}'
+}
+
+# The registry is a MOUNT POINT the devcontainer provides — never created here (a directory we made
+# ourselves would be container-local, so it would look usable while giving zero cross-container
+# guarantee). Used for reporting; port-claim.mjs makes its own determination for the real decisions.
+registry_ok() { [ -d "$SB_REGISTRY" ] && [ -w "$SB_REGISTRY" ]; }
+
+# The port the RUNNING websockify actually bound, read from the process itself — the only source that
+# can answer "which port reaches the browser the human is watching".
+live_web_port() {
+  local pid cmd p=""
+  component_running websockify || return 1
+  pid="$(cat "$(pid_file websockify)" 2>/dev/null || true)"
+  [ -n "$pid" ] || return 1
+  # Our spawn form is `websockify --web=<dir> 127.0.0.1:<web> 127.0.0.1:<vnc>` — the FIRST bound address
+  # is the web port. We own that spawn (see cmd_up), so its argument order is ours to rely on.
+  cmd="$(proc_cmdline "$pid" 2>/dev/null || true)"
+  [ -n "$cmd" ] && p="$(printf '%s' "$cmd" | grep -oE '127\.0\.0\.1:[0-9]+' | head -n1 | cut -d: -f2)"
+  # Fall back to the kernel's own view if the cmdline isn't parseable.
+  valid_port "$p" || p="$(ss -ltnp 2>/dev/null | awk -v r="pid=$pid[,)]" '$0 ~ r {n=split($4,a,":"); print a[n]; exit}')"
+  valid_port "$p" || return 1
+  printf '%s' "$p"
+}
+
+# Run a port-claim verb. Prints its JSON on stdout; non-zero means the arbiter refused (and its JSON
+# carries `.error`). Kept to ONE place so every call site passes the same identity/registry/band.
+claim_cli() {
+  local verb="$1"; shift
+  node "$PORT_CLAIM" "$verb" \
+    --registry="$SB_REGISTRY" --identity="$(container_key)" \
+    --band-start="$SB_WEB_BAND_START" --band-size="$SB_WEB_BAND_SIZE" \
+    --ttl="$SB_CLAIM_TTL" --gateway="$(host_gateway)" "$@"
+}
+# Pull one field out of the arbiter's JSON without assuming a JSON parser is on PATH.
+claim_field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\([^,}]*\).*/\1/p" | tr -d '"'; }
+
+# Give the port back. Called only by `clean` — NOT by `down`, because a claim is this container's
+# reservation, not the running stack's: keeping it across down/up is what makes the URL stable.
+release_web_port() {
+  valid_port "$SB_WEB" || return 0
+  claim_cli release --port="$SB_WEB" >/dev/null 2>&1 || true
+  rm -f "$PORT_FILE"
+}
+
+# Resolve SB_WEB (and the URL derived from it). Mode `allocate` (only `up`) may claim a port; every other
+# verb READS, so `status`/`url`/`down` always describe the stack that is actually running.
+resolve_web_port() {
+  local mode="${1:-read}" port="" live="" rec="" out=""
+
+  # THE LIVE LISTENER OUTRANKS EVERY RECORD AND EVERY PREFERENCE. "The port we allocated" and "the port
+  # that is live" are different facts, and conflating them was a real bug with a real trigger: on the
+  # upgrade path a `--repair` rewrites this script while a stack from the old fixed-port version is still
+  # up, so there is a live websockify and NO recorded port. Trusting the record then allocated a SECOND
+  # port, skipped spawning websockify ("already running"), failed the readiness gate — and left `url`
+  # printing a port nothing was ever bound to, with exit 0. Asking the listener cannot be wrong.
+  live="$(live_web_port || true)"
+
+  if [ -n "$live" ]; then
+    port="$live"
+    if [ -n "$SB_WEB_PIN" ] && [ "$SB_WEB_PIN" != "$live" ]; then
+      err "NOTE: SB_WEB=$SB_WEB_PIN ignored — a shared browser is already live on :$live."
+      err "      To move it: shared-browser down && SB_WEB=$SB_WEB_PIN shared-browser up"
+    fi
+    # Self-heal the record so every later shell's `url`/`status`/`down` agrees with reality.
+    if [ "$(cat "$PORT_FILE" 2>/dev/null || true)" != "$port" ]; then
+      ensure_dirs; printf '%s' "$port" > "$PORT_FILE"
+    fi
+  elif [ -n "$SB_WEB_PIN" ]; then
+    valid_port "$SB_WEB_PIN" || die "SB_WEB must be a port number in 1..65535 (got '$SB_WEB_PIN')."
+    port="$SB_WEB_PIN"                                     # explicit pin — skips the SEARCH, not the claim
+  else
+    rec="$(cat "$PORT_FILE" 2>/dev/null || true)"          # a corrupt/partial record is NOT a port
+    valid_port "$rec" && port="$rec"
+  fi
+
+  if [ -z "$port" ] && [ "$mode" = allocate ]; then
+    ensure_dirs
+    rec="$(cat "$PORT_FILE" 2>/dev/null || true)"; valid_port "$rec" || rec=0
+    out="$(claim_cli allocate --recorded="$rec" --live="${live:-0}" 2>/dev/null || true)"
+    port="$(claim_field "$out" port)"
+    valid_port "$port" || die "could not allocate a noVNC port: ${out:-no response from port-claim.mjs}"
+    printf '%s' "$port" > "$PORT_FILE"
+  fi
+
+  # Refresh the claim's TTL on EVERY `up`, not only when we allocated — otherwise a container that simply
+  # keeps running (idempotent re-ups reuse the live port and skip allocation) would let its own claim age
+  # out and become fair game. `up` runs on every `nx serve`, so "recently touched" is a real liveness
+  # signal; that is what lets a deleted container's port recycle with no cleanup step. The arbiter
+  # refuses to overwrite a claim that legitimately belongs to somebody else, and reports it.
+  if [ "$mode" = allocate ] && valid_port "$port"; then
+    out="$(claim_cli refresh --port="$port" 2>/dev/null || true)"
+    if [ "$(claim_field "$out" conflict)" = "true" ]; then
+      err "WARNING: noVNC port $port is CLAIMED BY ANOTHER container ($(claim_field "$out" owner)) — your"
+      err "         viewer URL may open their browser. Run \`shared-browser clean\` to re-allocate."
+    fi
+  fi
+
+  # No allocation yet (nothing has ever come up here) → there is NO port, and we say so rather than
+  # inventing a plausible one. A speculative port that leaves this script looking real is the same
+  # silent-wrong-URL failure in a new costume; `url` refuses, `status` prints "none yet".
+  SB_WEB_ALLOCATED=true
+  if ! valid_port "$port"; then port=0; SB_WEB_ALLOCATED=false; fi
+
+  SB_WEB="$port"
+  if [ "$SB_WEB_ALLOCATED" = true ]; then
+    NOVNC_URL="http://localhost:${SB_WEB}/vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true"
+  else
+    NOVNC_URL=""
+  fi
 }
 
 # ── Spawning: detach as a session leader, pin the DAEMON's own PID ────────────────────────────────────
@@ -226,7 +411,7 @@ prepare_env() {
 
 preflight_deps() {
   local bin missing=()
-  for bin in Xvfb fluxbox x11vnc websockify node ss curl setsid flock; do
+  for bin in Xvfb fluxbox x11vnc websockify node ss curl setsid flock timeout; do
     command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
   done
   if [ "${#missing[@]}" -ne 0 ]; then
@@ -316,6 +501,7 @@ cmd_up() {
 
   preflight_deps || exit 1
   prepare_env
+  resolve_web_port allocate                                # decide the ONE host-facing port before anything binds
 
   local chrome_bin
   chrome_bin="$(resolve_chromium || true)"
@@ -353,24 +539,29 @@ cmd_up() {
   #    survives client disconnects so the human can reconnect. -nopw acceptable ONLY because it is
   #    loopback + reached solely via the user's own forwarded localhost.
   if ! component_running x11vnc; then
-    spawn x11vnc x11vnc -display "$SB_DISPLAY" -rfbport "$SB_VNC" -localhost -forever -shared -nopw -noxdamage -quiet
+    #    -desktop: the RFB desktop name, which noVNC turns into the browser tab's title — see
+    #    SB_DESKTOP_NAME above for why that matters more than it looks.
+    spawn x11vnc x11vnc -display "$SB_DISPLAY" -rfbport "$SB_VNC" -desktop "$SB_DESKTOP_NAME" \
+      -localhost -forever -shared -nopw -noxdamage -quiet
     STARTED+=(x11vnc)
   else say "x11vnc already running"; fi
 
-  # 5. websockify + noVNC static client — the ONLY forwarded port. Bind loopback (127.0.0.1:$SB_WEB);
-  #    VS Code's port-forward reaches it over localhost. Target the loopback VNC port.
+  # 5. websockify + noVNC static client — the ONE host-facing port, on the ALLOCATED number. Bind
+  #    loopback (127.0.0.1:$SB_WEB); the editor auto-forwards it. Because allocation already proved the
+  #    number free on the host, the forward lands on the SAME number — which is what makes the URL we
+  #    print below true on the host rather than a guess. Target the loopback VNC port.
   if ! component_running websockify; then
     # noVNC (the apt package) ships NO index.html, so a bare http://localhost:$SB_WEB/ — exactly what VS
     # Code's forwarded-port "open in browser" gives you — renders a directory listing instead of the
     # client. Serve from a runtime web root that mirrors the noVNC assets and adds an index.html that
     # redirects to vnc.html WITH the autoconnect params, so however the port is opened it lands live.
-    local webroot="$SB_RUNTIME/novnc-web"
-    if [ ! -e "$webroot/vnc.html" ]; then
-      mkdir -p "$webroot"
-      cp -r "$SB_NOVNC_WEB"/. "$webroot"/ 2>/dev/null || true
+    if [ ! -e "$WEBROOT/vnc.html" ]; then
+      mkdir -p "$WEBROOT"
+      cp -r "$SB_NOVNC_WEB"/. "$WEBROOT"/ 2>/dev/null || true
     fi
-    printf '<!doctype html><meta http-equiv="refresh" content="0; url=vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true">\n' > "$webroot/index.html"
-    spawn websockify websockify --web="$webroot" "127.0.0.1:$SB_WEB" "127.0.0.1:$SB_VNC"
+    printf '<!doctype html><title>%s</title><meta http-equiv="refresh" content="0; url=vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true">\n' \
+      "$SB_DESKTOP_NAME" > "$WEBROOT/index.html"
+    spawn websockify websockify --web="$WEBROOT" "127.0.0.1:$SB_WEB" "127.0.0.1:$SB_VNC"
     STARTED+=(websockify)
   else say "websockify already running"; fi
 
@@ -387,7 +578,36 @@ cmd_up() {
 
   ok "shared-browser is UP."
   printf '  noVNC (open this in your browser): %s\n' "$NOVNC_URL"
+  # The editor discovers a new listener by polling /proc (≥2s, longer on a loaded container), so for a
+  # moment after this line the URL is correct but not yet forwarded. Say so — otherwise the first click
+  # gets connection-refused and reads as "the shared browser is broken".
+  printf '    (the editor forwards it a moment after this line — if the first click is refused, retry once)\n'
+  printf '    the tab is titled "%s" — if it names another project, you are on the wrong container\n' "$SB_DESKTOP_NAME"
+
+  # Prove the mapping rather than assuming it (see verify_host_mapping).
+  verify_host_mapping
+  case "$(host_verified)" in
+    true)  printf '    host mapping VERIFIED — :%s on the host reaches this browser\n' "$SB_WEB" ;;
+    false) err "ALERT: host port $SB_WEB answers, but NOT with this browser — something else holds it."
+           err "       Do NOT trust the URL above. Run: shared-browser clean && shared-browser up" ;;
+    *)     printf '    host mapping unverified (no route to the host from here) — the tab title is your check\n' ;;
+  esac
   printf '  CDP (loopback — do NOT forward):   %s\n' "$CDP_URL"
+
+  # This change exists because a silent fallback handed people the wrong browser. So when a gate that
+  # protects the host port is UNAVAILABLE, say it here — at the moment the URL is handed over — not only
+  # in a provisioning log nobody re-reads. The most likely cause is a container that predates the
+  # registry mount, which is exactly when a neighbour can still be squatting the port we just took.
+  if ! registry_ok; then
+    err "NOTE: allocated WITHOUT the cross-container registry ($SB_REGISTRY not mounted/writable)."
+    err "      Parallel devcontainers cannot see each other's claims, so this URL is unverified against"
+    err "      them. Rebuild this devcontainer to mount it. If the viewer shows ANOTHER project's app,"
+    err "      that is why."
+  fi
+  if [ -z "$(host_gateway)" ]; then
+    err "NOTE: no route to the host (host.docker.internal / default gateway) — the host-side port check"
+    err "      was skipped, so a non-devcontainer process on the host could hold this port."
+  fi
 }
 
 cmd_down() {
@@ -451,6 +671,33 @@ cmd_navigate() {
   ok "navigated to $url  —  watch it at $NOVNC_URL"
 }
 
+# POSITIVE proof that the host port actually reaches THIS browser.
+#
+# Everything before this point is inference: we allocated a port nobody else claimed, so the editor
+# *should* have forwarded it one-to-one. Inference is what produced the original bug. This closes the
+# loop: write a random token into the noVNC webroot, then fetch it back THROUGH THE HOST. Getting our own
+# token back is proof; getting someone else's content back is a caught wrong-target (loud, not silent);
+# not reaching the host at all is honestly reported as unverified rather than assumed good.
+#
+# Writes true|false|unknown to HOST_VERIFIED_FILE so `status` can report it without re-probing.
+verify_host_mapping() {
+  local gw token got
+  gw="$(host_gateway)"
+  if [ -z "$gw" ] || ! valid_port "$SB_WEB"; then printf 'unknown' > "$HOST_VERIFIED_FILE"; return 0; fi
+  token="sb-$$-$(date +%s)-${RANDOM}${RANDOM}"
+  mkdir -p "$WEBROOT"
+  printf '%s' "$token" > "$WEBROOT/.sb-identity"
+  got="$(curl -s --max-time 3 "http://$gw:$SB_WEB/.sb-identity" 2>/dev/null || true)"
+  if [ "$got" = "$token" ]; then
+    printf 'true' > "$HOST_VERIFIED_FILE"
+  elif [ -z "$got" ]; then
+    printf 'unknown' > "$HOST_VERIFIED_FILE"                # host unreachable from here — say so, don't guess
+  else
+    printf 'false' > "$HOST_VERIFIED_FILE"                  # SOMETHING ELSE answers there
+  fi
+}
+host_verified() { cat "$HOST_VERIFIED_FILE" 2>/dev/null || printf 'unknown'; }
+
 # Poll the app URL until it answers with ANY HTTP status (even 4xx = the server is up). "000" = no response.
 wait_for_url() {
   local url="$1" code deadline=$(( $(date +%s) + SB_WAIT_TIMEOUT ))
@@ -506,6 +753,14 @@ cmd_status() {
     printf '"up":%s,' "$up"
     printf '"observeOnly":%s,' "$observe"
     printf '"ports":{"vnc":%s,"web":%s,"cdp":%s},' "$vnc" "$web" "$cdp"
+    printf '"webPort":%s,' "$SB_WEB"
+    printf '"webPortAllocated":%s,' "$SB_WEB_ALLOCATED"
+    # Which allocation gates were actually available — the difference between a VERIFIED port and an
+    # educated guess. A caller that only reads `url` cannot tell; these two say it out loud.
+    printf '"registry":%s,' "$(registry_ok && echo true || echo false)"
+    printf '"hostProbe":%s,' "$([ -n "$(host_gateway)" ] && echo true || echo false)"
+    printf '"stableIdentity":%s,' "$([ -n "${BESPUNKY_DEVCONTAINER_ID:-}" ] && echo true || echo false)"
+    printf '"hostVerified":"%s",' "$(host_verified)"
     printf '"components":{'
     first=1
     for comp in "${START_ORDER[@]}" recorder; do
@@ -516,7 +771,9 @@ cmd_status() {
     done
     printf '},'
     printf '"cdp":"%s",' "$CDP_URL"
-    printf '"url":"%s"' "$NOVNC_URL"
+    # null, not a string: `url` refuses to print a speculative URL, so the machine surface must not hand
+    # one over either. A caller reading .url gets a falsy value in exactly the state cmd_url errors in.
+    if [ "$SB_WEB_ALLOCATED" = true ]; then printf '"url":"%s"' "$NOVNC_URL"; else printf '"url":null'; fi
     printf '}\n'
   else
     printf 'shared-browser status: %s\n' "$([ "$up" = true ] && echo UP || echo DOWN)"
@@ -526,20 +783,34 @@ cmd_status() {
       printf '  %-11s %s\n' "$comp" "$state"
     done
     printf '  %-11s %s (port %s)\n' 'vnc'  "$([ "$vnc" = true ] && echo listening || echo -)" "$SB_VNC"
-    printf '  %-11s %s (port %s)\n' 'web'  "$([ "$web" = true ] && echo listening || echo -)" "$SB_WEB"
+    printf '  %-11s %s (port %s)\n' 'web'  "$([ "$web" = true ] && echo listening || echo -)" "$([ "$SB_WEB_ALLOCATED" = true ] && printf '%s' "$SB_WEB" || printf 'unallocated')"
     printf '  %-11s %s (port %s)\n' 'cdp'  "$([ "$cdp" = true ] && echo listening || echo -)" "$SB_CDP"
-    printf '  %-11s %s\n' 'url' "$NOVNC_URL"
+    printf '  %-11s %s\n' 'url' "$([ "$SB_WEB_ALLOCATED" = true ] && printf '%s' "$NOVNC_URL" || printf 'none yet — run `up` to allocate one')"
     printf '  %-11s %s\n' 'cdp-url' "$CDP_URL"
+    printf '  %-11s registry=%s host-probe=%s (band %s..%s)\n' 'allocation' \
+      "$(registry_ok && echo yes || echo 'NO — parallel containers are invisible to each other')" \
+      "$([ -n "$(host_gateway)" ] && echo yes || echo no)" \
+      "$SB_WEB_BAND_START" "$(( SB_WEB_BAND_START + SB_WEB_BAND_SIZE - 1 ))"
   fi
 }
 
-cmd_url() { printf '%s\n' "$NOVNC_URL"; }
+# The single source of truth for the human's URL — and therefore the place that must NOT guess. Before
+# the first `up` there is no allocation, so there is no URL: say so and fail, rather than print a
+# plausible one that may belong to another container.
+cmd_url() {
+  [ "$SB_WEB_ALLOCATED" = true ] || die "no noVNC port allocated yet — run: shared-browser up"
+  printf '%s\n' "$NOVNC_URL"
+}
 
 # Hand the shared window to the human: set the observe-only lock so every automated driver stands down.
 cmd_observe() {
   ensure_dirs
   printf 'observe-only set at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OBSERVE"
-  ok "observe-only ON — human is driving; automation will not navigate/click/type. Watch at $NOVNC_URL"
+  ok "observe-only ON — human is driving; automation will not navigate/click/type."
+  # `observe` is legal on a DOWN stack, where the port is not allocated yet — so this must not print a
+  # speculative URL (same rule as cmd_url). Nothing about a guess may leave this script looking real.
+  if [ "$SB_WEB_ALLOCATED" = true ]; then ok "  watch at $NOVNC_URL"
+  else ok "  (no browser up yet — run \`shared-browser up\`, then \`url\` for the viewer link)"; fi
   ok "  hand back with: shared-browser resume"
 }
 
@@ -621,8 +892,9 @@ cmd_clean() {
   cmd_down || true                                        # stop the stack first, so we don't wipe a live profile
   rm -rf "$PROFILE" "$LOGS"
   rm -f "$SB_RUNTIME"/*.pid
+  release_web_port                                        # a full reset gives the port back; the next `up` re-allocates
   ensure_dirs
-  ok "cleaned: profile + logs + screenshots wiped ($SB_RUNTIME)."
+  ok "cleaned: profile + logs + screenshots wiped, noVNC port released ($SB_RUNTIME)."
 }
 
 usage() {
@@ -635,7 +907,7 @@ USAGE
   shared-browser observe                         hand the shared window to the human — automation stands down (no navigate/click/type)
   shared-browser resume                          take the window back — automation may drive again
   shared-browser status [--json]                 per-component up/down + ports + observe-only mode + URL (machine-readable with --json)
-  shared-browser url                             print the noVNC URL (for scripting)
+  shared-browser url                             print the noVNC URL (for scripting) — the ONE source of truth for it
   shared-browser logs [component] [--since=<ts>] [--level=<lvl>]
                                                  tail a component log (xvfb|fluxbox|chrome|x11vnc|websockify),
                                                  or the recorder events.jsonl (default; filter by --since/--level)
@@ -643,15 +915,23 @@ USAGE
   shared-browser restart                         down + up
   shared-browser clean                           wipe profile + logs + screenshots
 
-Human opens:  $NOVNC_URL
+Human opens:  the URL from \`shared-browser url\` (allocated at \`up\` — never compose it)
 Claude drives (loopback, never forward):  $CDP_URL
-Env overrides: SB_DISPLAY SB_GEOM SB_VNC SB_WEB SB_CDP SB_RUNTIME (see the top of this script).
+
+The noVNC port is ALLOCATED (band ${SB_WEB_BAND_START}..$(( SB_WEB_BAND_START + SB_WEB_BAND_SIZE - 1 )), claimed in $SB_REGISTRY), so parallel
+devcontainers never contend for one host port. Never hardcode it — read it from \`url\` / \`status --json\`.
+
+Env overrides: SB_DISPLAY SB_GEOM SB_VNC SB_CDP SB_RUNTIME SB_REGISTRY SB_WEB_BAND_START SB_WEB_BAND_SIZE
+               SB_WEB (an explicit PIN — skips allocation; only for debugging a specific port).
 EOF
 }
 
 # ── Dispatch ───────────────────────────────────────────────────────────────────────────────────────────
 main() {
   local verb="${1:-}"; [ "$#" -gt 0 ] && shift
+  # Resolve the allocated port FIRST, read-only, so every verb (and `usage`) speaks about the stack that
+  # is actually running. `up` re-resolves in allocate mode once it holds the lock.
+  resolve_web_port read
   case "$verb" in
     up)                 cmd_up "$@" ;;
     navigate)           cmd_navigate "$@" ;;

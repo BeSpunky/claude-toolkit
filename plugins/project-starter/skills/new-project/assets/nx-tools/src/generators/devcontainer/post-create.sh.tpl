@@ -31,6 +31,29 @@ if [ -d /home/node/.cache ] && [ "$(stat -c %U /home/node/.cache)" != "node" ]; 
   sudo chown node:node /home/node/.cache
 fi
 
+# --- 0b. Shared host-port registry ---
+# /var/opt/bespunky/ports is the FIXED-name docker volume every BeSpunky devcontainer on this engine
+# mounts (see devcontainer.json). It is how containers see each other's noVNC port claims, so the
+# shared browser can allocate a host port nobody else took instead of everyone assuming 6080 and the
+# second container silently forwarding somewhere else. A fresh named volume is root-owned, so chown it
+# to `node` — the allocator must be able to write claims as the remote user. Idempotent; best-effort,
+# because a missing registry only degrades allocation (hash + probe), it never blocks a container.
+#
+# chmod 1777, not just chown: ownership in a SHARED volume is a UID, and different containers can have
+# different UIDs for their remote user (a different base image, a second host user, updateRemoteUserUID
+# not applying). A plain chown would let the second container take the directory AWAY from the first,
+# whose allocator would then silently fall back to probe-only — reopening the collision window with no
+# error anywhere. Sticky + world-writable means any UID can create its own claim file and no container
+# can ever strand another; the sticky bit still stops one container deleting another's claim.
+if [ -d /var/opt/bespunky/ports ]; then
+  if [ "$(stat -c %U /var/opt/bespunky/ports)" != "node" ] || [ "$(stat -c %a /var/opt/bespunky/ports)" != "1777" ]; then
+    echo "[post-create] preparing the shared host-port registry (/var/opt/bespunky/ports)"
+    sudo chown node:node /var/opt/bespunky/ports || true
+    sudo chmod 1777 /var/opt/bespunky/ports \
+      || echo "[post-create] WARNING: could not prepare the port registry — shared-browser will fall back to probe-only allocation (parallel devcontainers won't see each other's noVNC port claims)"
+  fi
+fi
+
 # --- 1. Workspace deps ---
 echo "[post-create] yarn install"
 yarn install
@@ -172,8 +195,10 @@ fi
 
 # --- 6. Shared-browser prerequisites (ALWAYS-ON — provisioned in EVERY BeSpunky devcontainer) ---
 # The claude-toolkit "shared-browser" capability (tools/shared-browser, started ON DEMAND)
-# runs a headed Chromium on a virtual X display and streams it to the human over noVNC on
-# :6080. The stack starts lazily, but its OS deps are installed ALWAYS — so any container can
+# runs a headed Chromium on a virtual X display and streams it to the human over noVNC on a port
+# ALLOCATED from the 6080-6119 band (so parallel containers never contend for one host port — the URL
+# is printed by `shared-browser up`). The stack starts lazily, but its OS deps are installed ALWAYS —
+# so any container can
 # co-drive a browser with no rebuild. Deps: x11vnc (VNC server) + novnc/websockify (the
 # noVNC web client + WS↔TCP bridge) + fluxbox (a minimal WM so Chromium gets a window frame)
 # + fonts (liberation + color-emoji so rendered pages and screenshots look right). Also procps

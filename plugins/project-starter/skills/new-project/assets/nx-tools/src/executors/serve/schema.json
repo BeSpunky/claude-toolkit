@@ -16,7 +16,7 @@
     },
     "sharedBrowser": {
       "type": "boolean",
-      "description": "Bring up the always-on shared co-driven browser (noVNC on :6080) and navigate it to the app, so a human and an agent watch the change in the same browser. `--no-shared-browser` serves headless (open the app in your own tab). A missing browser dependency is warned and skipped — it never fails the serve.",
+      "description": "Bring up the always-on shared co-driven browser (noVNC, on a per-container allocated port whose URL is printed) and navigate it to the app, so a human and an agent watch the change in the same browser. `--no-shared-browser` serves headless (open the app in your own tab). A missing browser dependency is warned and skipped — it never fails the serve.",
       "default": true
     },
     "buildTarget": {

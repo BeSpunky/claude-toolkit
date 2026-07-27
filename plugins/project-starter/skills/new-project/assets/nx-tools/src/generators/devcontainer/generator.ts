@@ -2,12 +2,14 @@
 // Reads its own bundled template (not a workspace file) and writes through the Nx Tree.
 //
 // Template supports two kinds of placeholders:
-//   - simple substitution:   {{name}}, {{nodeMajor}}
+//   - simple substitution:   {{name}}, {{nodeMajor}}, {{novncPortsAttributes}}, {{novncBand}}
 //   - conditional blocks:    {{#flag}}...{{/flag}}  -> included iff the flag option is truthy
 // (`firebase` and `voice` are the conditional flags; add more by passing them in `options`.)
 import { type Tree } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { NOVNC_BAND_LABEL, novncPortsAttributesJson } from '../shared-browser/novnc-band';
 
 interface DevcontainerSchema {
   name: string;
@@ -39,11 +41,17 @@ export default async function devcontainerGenerator(
   );
 
   // 2) Substitute simple placeholders.
+  // The noVNC band's portsAttributes come from the SHARED band constants, never hand-written here:
+  // an entry missing for a port the allocator can pick is precisely a port that fails silently.
   const content = expanded
     .split('{{name}}')
     .join(options.name)
     .split('{{nodeMajor}}')
-    .join(nodeMajor);
+    .join(nodeMajor)
+    .split('{{novncPortsAttributes}}')
+    .join(novncPortsAttributesJson())
+    .split('{{novncBand}}')
+    .join(NOVNC_BAND_LABEL);
 
   tree.write('.devcontainer/devcontainer.json', content);
 

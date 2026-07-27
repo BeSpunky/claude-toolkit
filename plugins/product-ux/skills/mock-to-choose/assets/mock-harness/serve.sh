@@ -11,7 +11,7 @@
 #
 # The URL is printed on the FIRST line (stdout) so callers can capture it. To spare the user any
 # port-forwarding fuss, the best way to show it is to open that URL in the shared browser
-# (bespunky-browser-automation:shared-browser) — the user then watches over the forwarded :6080,
+# (bespunky-browser-automation:shared-browser) — the user then watches over the shared browser's noVNC URL,
 # and Claude drives the live gallery over CDP (window.mockGoto / mockViewport / mockState).
 #
 #   bash serve.sh          # start; prints the gallery URL on stdout

@@ -39,7 +39,7 @@
     {
       "name": "bespunky-browser-automation",
       "source": "./plugins/browser-automation",
-      "description": "Two ways to drive a real browser. playwright: HEADLESS Playwright (Chromium, pre-installed) for solo automated verification, bug repro, before/after screenshots, DOM scraping, codegen. shared-browser: one in-container Chromium a human WATCHES via noVNC (forwarded :6080) while Claude drives it via loopback CDP — co-debugging and live in-place CSS/DOM verification with measured proof, with the fix ported to source and confirmed after reload. A decision tree keeps them distinct. Loaded by default in scaffolded projects.",
+      "description": "Two ways to drive a real browser. playwright: HEADLESS Playwright (Chromium, pre-installed) for solo automated verification, bug repro, before/after screenshots, DOM scraping, codegen. shared-browser: one in-container Chromium a human WATCHES via noVNC (a per-container ALLOCATED port, so parallel devcontainers never collide) while Claude drives it via loopback CDP — co-debugging and live in-place CSS/DOM verification with measured proof, with the fix ported to source and confirmed after reload. A decision tree keeps them distinct. Loaded by default in scaffolded projects.",
       "version": "0.2.0"
     },
     {

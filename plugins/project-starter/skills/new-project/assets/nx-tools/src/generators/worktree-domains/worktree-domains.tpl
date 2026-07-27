@@ -5,7 +5,7 @@
 # `http://<slug>.localhost/` (Chromium auto-resolves any `*.localhost` to loopback — no DNS, no hosts
 # file) lands on the proxy, which forwards to `127.0.0.1:<port>` per a slug→port route registry. So the
 # main tree and each git worktree each get a stable, human-readable domain instead of a shifted port a
-# human has to remember (and that isn't forwarded anyway — worktree serves are :6080-only).
+# human has to remember (and that isn't forwarded anyway — a worktree serve is viewable only through the shared browser).
 #
 # The proxy is a self-contained Node reverse proxy (tools/worktree-domains/proxy.mjs) using ONLY Node
 # built-ins (http + net) — no npm dep, no apt package beyond what the shared-browser stack already
@@ -130,6 +130,41 @@ kill_proxy() {
 }
 
 # Bring the proxy up if it isn't already. flock-serialized (no half-start races). Idempotent.
+# Who owns the HOST :80 — the question this proxy cannot answer for itself.
+#
+# The proxy binds :80 in THIS container's netns, so it always succeeds; the contended resource is the
+# HOST forward. And `http://<slug>.localhost/` has no port to remap, so with two devcontainers up the
+# host tab silently shows whichever one won host :80. Unlike the shared browser's noVNC port, this
+# number cannot move — it is baked into the pretty domain — so arbitration here is not a search, it is
+# ATTRIBUTION: first container wins, and the rest are TOLD which one holds it. Turning "silently wrong"
+# into "named owner" is the whole deliverable; nothing fails either way.
+#
+# Shares the shared-browser registry, so one volume arbitrates every contended host port.
+# MUST match tools/shared-browser/shared-browser's container_key, or the same container would look like
+# two different claimants to the registry.
+container_key() {
+  if [ -n "${BESPUNKY_DEVCONTAINER_ID:-}" ]; then printf 'dc:%s' "$BESPUNKY_DEVCONTAINER_ID"; return 0; fi
+  local common root=""
+  common="$(cd "$WORKSPACE_ROOT" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null || true)"
+  [ -n "$common" ] && root="$(cd "$WORKSPACE_ROOT" 2>/dev/null && cd "$common" 2>/dev/null && pwd || true)"
+  [ -n "$root" ] || root="$WORKSPACE_ROOT"
+  printf '%s@%s' "$root" "$(cat /etc/hostname 2>/dev/null || echo unknown)"
+}
+
+advise_host_ownership() {
+  local claim="$WORKSPACE_ROOT/tools/shared-browser/port-claim.mjs" out mine owner
+  [ -f "$claim" ] || return 0                              # shared-browser tooling absent — nothing to say
+  out="$(node "$claim" advise --registry="${SB_REGISTRY:-/var/opt/bespunky/ports}" \
+    --identity="$(container_key)" --port="$WD_PORT" 2>/dev/null || true)"
+  mine="$(printf '%s' "$out" | sed -n 's/.*"mine":\([a-z]*\).*/\1/p')"
+  [ "$mine" = false ] || return 0
+  owner="$(printf '%s' "$out" | sed -n 's/.*"owner":"\([^"]*\)".*/\1/p')"
+  err "NOTE: host :$WD_PORT belongs to another devcontainer ($owner)."
+  err "      In a HOST browser tab, http://<slug>.localhost/ will show THEIR app, not this one — the"
+  err "      pretty domain has no port to remap, so it cannot be arbitrated away."
+  err "      This container's app is reachable in the shared browser: tools/shared-browser/shared-browser url"
+}
+
 ensure_proxy_up() {
   ensure_dirs
   exec 9>"$LOCK" || die "cannot open lock file $LOCK"
@@ -147,6 +182,7 @@ ensure_proxy_up() {
 
   ensure_unprivileged_port
   spawn_proxy
+  advise_host_ownership
 
   local deadline=$(( $(date +%s) + WD_READY_TIMEOUT ))
   while [ "$(date +%s)" -lt "$deadline" ]; do

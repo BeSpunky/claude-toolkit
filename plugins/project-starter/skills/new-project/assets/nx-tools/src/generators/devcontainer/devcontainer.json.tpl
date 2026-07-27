@@ -47,6 +47,15 @@
         "eslint.validate": ["javascript", "typescript", "html"],
         "typescript.preferences.importModuleSpecifier": "relative",
         "typescript.updateImportsOnFileMove.enabled": "always",
+        // Auto-forwarding is LOAD-BEARING here, not a convenience: the shared browser's noVNC port is
+        // allocated at runtime (see forwardPorts below), so it can only reach the host by being detected
+        // and forwarded when it starts listening. Pinned here explicitly — these land at the container
+        // (Remote) scope, which overrides a user who turned auto-forward off globally, so the viewer URL
+        // still works. (A committed .vscode/settings.json would override THIS, so don't contradict it
+        // there.) "process" watches /proc for listening sockets, which is how the loopback-bound
+        // websockify is found — VS Code keeps candidates bound to localhost as well as 0.0.0.0.
+        "remote.autoForwardPorts": true,
+        "remote.autoForwardPortsSource": "process",
         "files.associations": {
           "*.mdc": "markdown"
         }
@@ -60,17 +69,39 @@
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "node",
 
-  // Let the non-root `node` user bind privileged ports: the worktree-domains reverse proxy binds :80 so
-  // each worktree gets a pretty http://<slug>.localhost/ domain. This namespaced sysctl is applied at
-  // container start, so the proxy binds :80 with no runtime sudo.
-  "runArgs": ["--sysctl", "net.ipv4.ip_unprivileged_port_start=0"],
+  // `--sysctl`: let the non-root `node` user bind privileged ports — the worktree-domains reverse proxy
+  // binds :80 so each worktree gets a pretty http://<slug>.localhost/ domain. Applied at container start,
+  // so the proxy binds :80 with no runtime sudo.
+  // `--add-host`: give the container a name for the host it runs on, so the shared-browser port
+  // allocator can probe the host side (the gate that spots a NON-devcontainer process squatting a port
+  // in the noVNC band). Docker Desktop provides this name already; on a plain Linux engine it doesn't
+  // exist, hence the flag.
+  // KNOW ITS LIMIT: on a plain Linux engine host-gateway is the bridge address, which does NOT reach
+  // services bound to the host's own 127.0.0.1 — and forwarded ports are loopback-bound. So this probe
+  // is a bonus that can only REJECT a port, never a proof of freeness. The cross-container registry
+  // (the volume mounted below) is the gate that actually carries the guarantee.
+  // NOTE: `runArgs` is image/Dockerfile-only. If this ever converts to `dockerComposeFile`, `--add-host`
+  // must move to the service's `extra_hosts` or the allocator loses its host probe silently.
+  "runArgs": [
+    "--sysctl", "net.ipv4.ip_unprivileged_port_start=0",
+    "--add-host=host.docker.internal:host-gateway"
+  ],
 
   // Forward :80 (the worktree-domains reverse proxy → pretty http://<slug>.localhost/ URLs, reachable
-  // from a HOST browser too) and the shared-browser noVNC port (6080) in EVERY scaffold. The
-  // shared-browser stack (tools/shared-browser, started on demand) serves its noVNC web client on 6080,
-  // the ONLY shared-browser port forwarded — CDP 9223 and VNC 5900 stay bound to loopback, so full
-  // browser control never leaves the container. Always present, firebase or not; the Firebase
-  // dev-server + emulator ports are appended below when applicable.
+  // from a HOST browser too) in EVERY scaffold. NOTE — :80 has the SAME silent-wrong-target problem the
+  // noVNC port just had, and it is NOT fixed here: `<slug>.localhost` on the host has no port to
+  // remap, so with two containers up it resolves to whichever one won host :80. Treat the host tab as
+  // first-come; the shared browser is the surface that works for every container.
+  //
+  // The shared-browser noVNC port is deliberately NOT listed. It is ALLOCATED at `up` out of the
+  // 6080-6119 band (claimed in the `bespunky-shared-ports` volume mounted below — shared by every
+  // BeSpunky devcontainer on this engine), so parallel containers each get their own number and the
+  // editor's auto-forward maps it host==container with no remap. Statically forwarding a fixed 6080
+  // is exactly what broke: two containers both bind their own 6080, the second gets silently forwarded
+  // to a different HOST port, and any URL naming 6080 then points at the OTHER container's browser.
+  // Read the real URL from `tools/shared-browser/shared-browser url` (or `status --json`) — never
+  // hardcode it. CDP 9223 and VNC 5900 stay loopback-only, so full browser control never leaves the
+  // container. The Firebase dev-server + emulator ports are appended below when applicable.
 {{#firebase}}  //
   // Firebase also forwards the dev server + emulator ports to the SAME host port. This is
   // REQUIRED for the app to work in a *host* browser: the page loads over forwarded
@@ -81,17 +112,39 @@
   // port, which the browser SDK can't discover → the page hammers localhost:9099 and
   // gets ERR_CONNECTION_REFUSED (auth token refresh fails → Firestore writes hang).
   //
-  // Tradeoff: running SEVERAL Firebase devcontainers in parallel collides on these
-  // host ports. If you ever do, remap one container's ports here AND in
-  // environment.ts + firebase.json together (they must agree). For the normal
-  // single-container case, same-port is correct.
-{{/firebase}}  "forwardPorts": [80, 6080{{#firebase}}, 4200, 4000, 9099, 8080, 9150, 9199, 5001{{/firebase}}],
+  // KNOWN LIMITATION, still open: running SEVERAL Firebase devcontainers in parallel
+  // collides on these host ports, and unlike the noVNC port they are NOT arbitrated —
+  // the second container is silently remapped. The mitigation is to stop depending on
+  // them: the shared browser runs INSIDE the container and reaches 4200/9099/8080 on
+  // container loopback, so watch a second container's app at its own allocated noVNC
+  // URL and these forwards don't matter to it. But the host surface is still
+  // first-come, and real Google OAuth is pinned to whichever container holds host
+  // :4200. Same applies to :80 below. If you insist on a HOST browser for a second
+  // container, remap its ports here AND in environment.ts + firebase.json together
+  // (they must agree). For the normal single-container case, same-port is correct.
+{{/firebase}}  "forwardPorts": [80{{#firebase}}, 4200, 4000, 9099, 8080, 9150, 9199, 5001{{/firebase}}],
   // `portsAttributes` labels the (forwarded or auto-detected) ports; `onAutoForward`
   // controls per-port notification behavior — backend emulators are silenced (you
   // rarely click into them), the dev server opens in the preview pane.
+  //
+  // The noVNC band is emitted as ONE EXACT KEY PER PORT (by the generator, from the shared band
+  // constants) rather than a "{{novncBand}}" range — deliberately. A range key matches for `label` and
+  // `onAutoForward` but the editor DISCARDS `requireLocalPort` unless the key is an exact port number,
+  // and `requireLocalPort` is the piece that matters: the editor prefers host port == container port and
+  // only remaps on conflict, but that remap is SILENT. With this flag it prompts instead. That is the
+  // backstop for the one case allocation cannot see — a host process bound to the host's own 127.0.0.1,
+  // or a second Docker engine with its own registry — so even a wrong allocation is VISIBLE, never a
+  // quietly-wrong URL.
+  //
+  // Two side effects worth keeping (don't "tidy" these entries away): having ANY attributes entry for a
+  // port defeats the editor's "initial candidates are never auto-forwarded" skip, so a window reload
+  // with the browser already up still forwards it; and it overrides the blanket
+  // `otherPortsAttributes: silent` below, so the viewer port still notifies while everything else stays
+  // quiet. Setting `remote.autoForwardPortsSource` explicitly (above) likewise stops the 20-port
+  // "switched to hybrid" fallback from silently disabling process detection.
   "portsAttributes": {
     "80": { "label": "Worktree domains (pretty <slug>.localhost URLs)", "onAutoForward": "silent" },
-    "6080": { "label": "Shared Browser (noVNC)", "onAutoForward": "notify" },
+{{novncPortsAttributes}},
     "4200": { "label": "Angular Dev Server", "onAutoForward": "openPreview" }{{#firebase}},
     "4000": { "label": "Firebase Emulator UI", "onAutoForward": "notify" },
     "9099": { "label": "Auth Emulator", "onAutoForward": "silent" },
@@ -102,6 +155,14 @@
   },
   "otherPortsAttributes": {
     "onAutoForward": "silent"
+  },
+  // ${devcontainerId} is the platform's own identifier — "unique to the dev container ... and stable
+  // across rebuilds" (containers.dev). The shared browser's port allocator uses it as the identity that
+  // OWNS a host-port claim, so a rebuild reclaims the same port (the viewer URL stays bookmarkable)
+  // instead of burning a fresh slot in the band and orphaning the old claim. containerEnv rather than
+  // remoteEnv so ANY process in the container sees it, not only editor-spawned ones.
+  "containerEnv": {
+    "BESPUNKY_DEVCONTAINER_ID": "${devcontainerId}"
   },
   "remoteEnv": {
     "PATH": "${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",
@@ -125,7 +186,13 @@
     // volume so rebuilds reuse the cached browser instead of re-downloading on
     // every postCreate. Populated by post-create.sh when @playwright/test is in
     // package.json.
-    "source=${localWorkspaceFolderBasename}-playwright-cache,target=/home/node/.cache/ms-playwright,type=volume"{{#voice}},
+    "source=${localWorkspaceFolderBasename}-playwright-cache,target=/home/node/.cache/ms-playwright,type=volume",
+    // The cross-container host-port registry. A FIXED volume name (not per-workspace, unlike every
+    // other mount here) is the whole point: every BeSpunky devcontainer on this Docker engine mounts
+    // the SAME volume, which makes it the one substrate where containers can see each other's noVNC
+    // port claims — and one engine is exactly one host, i.e. exactly the scope where host ports
+    // collide. post-create.sh chowns it to `node` (a fresh named volume is root-owned).
+    "source=bespunky-shared-ports,target=/var/opt/bespunky/ports,type=volume"{{#voice}},
     // WSLg audio (bespunky-voice): exposes the host PulseAudio socket at /mnt/wslg/PulseServer.
     // WSL-specific — this is why voice is an opt-in flag, not always-on: binding /mnt/wslg on a
     // non-WSL host (macOS / Codespaces) has no source socket. If the socket is absent after a

@@ -2,6 +2,7 @@ import type { PromiseExecutor } from '@nx/devkit';
 import { logger } from '@nx/devkit';
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -151,13 +152,18 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
     logger.info(`  shared browser : ${sharedBrowserOn ? 'up + register + navigate' : 'skipped (--no-shared-browser)'}`);
     if (sharedBrowserOn) logger.info(`  route      : ${slug} → 127.0.0.1:${appPort}`);
     logger.info(`  app URL    : ${localUrl}` + (sharedBrowserOn ? `  (pretty: ${prettyUrl})` : ''));
-    if (sharedBrowserOn) logger.info(`  viewer     : http://localhost:6080  (shared browser)`);
+    if (sharedBrowserOn) {
+      // --dry-run is the "tell me what would happen" mode, so ask the CLI: if a stack is already up this
+      // prints the real viewer URL, and if not it prints the instruction rather than a made-up port.
+      const sbScript = join(chosen.path, 'tools', 'shared-browser', 'shared-browser');
+      logger.info(`  viewer     : ${await sharedBrowserUrl(sbScript, chosen.path, env)}  (shared browser)`);
+    }
     return { success: true };
   }
 
   logger.info(`[serve] Serving ${project}:dev-server from ${worktreeLabel(chosen)}`);
   logger.info(`[serve] App:    ${localUrl}`);
-  if (offset > 0) logger.info(`[serve] Isolated on port offset ${offset} (shifted ports are :6080-only — not forwarded).`);
+  if (offset > 0) logger.info(`[serve] Isolated on port offset ${offset} (shifted ports are not forwarded — view it in the shared browser).`);
 
   // Bring up the shared browser + pretty domain CONCURRENTLY with the dev-server (its own navigate
   // --wait polls until the app answers). Kicked off without awaiting so it never delays the serve;
@@ -166,6 +172,7 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
   if (sharedBrowserOn) {
     setupSharedBrowser({
       treeRoot: chosen.path,
+      offset,
       env,
       slug,
       appPort,
@@ -194,6 +201,7 @@ function worktreeKey(w: Worktree): string {
 
 interface SharedBrowserSetup {
   treeRoot: string;
+  offset: number;
   env: NodeJS.ProcessEnv;
   slug: string;
   appPort: number;
@@ -235,7 +243,17 @@ async function setupSharedBrowser(s: SharedBrowserSetup): Promise<void> {
     }
     return;
   }
-  logger.info('[serve] Viewer: http://localhost:6080  (shared browser — open this to watch)');
+  // ASK the tooling for the viewer URL — never compose it. The noVNC port is allocated per container
+  // (parallel devcontainers each get their own), so a hardcoded number here would hand the human a link
+  // to a DIFFERENT container's browser without anything erroring.
+  const viewerUrl = await sharedBrowserUrl(sbScript, s.treeRoot, s.env);
+  logger.info(`[serve] Viewer: ${viewerUrl}  (shared browser — open this to watch)`);
+
+  // 2a) Say who owns the fixed HOST ports this tree depends on. The base stack's :4200 is the only
+  //     origin registered for real Google OAuth, and `<slug>.localhost` (:80) has no port to remap — so
+  //     with two devcontainers up, both silently belong to whichever started first. Nothing fails; the
+  //     deliverable is that the loser is TOLD instead of debugging a mystery.
+  if (s.offset === 0) await adviseHostPort(s, BASE_APP_PORT, 'the dev server on host :4200 (the only origin registered for real Google OAuth)');
 
   // 2) Register the pretty domain route (best-effort). Success means the proxy is up → the app is
   //    reachable at http://<slug>.localhost; failure falls back to the raw port URL.
@@ -261,6 +279,59 @@ async function setupSharedBrowser(s: SharedBrowserSetup): Promise<void> {
     const stderr = String((err as { stderr?: string }).stderr ?? (err as Error).message ?? '');
     logger.warn(`[serve] Shared browser navigate did not complete — open ${viewUrl} manually in the viewer.\n${stderr.trim()}`);
   }
+}
+
+/**
+ * Report whether THIS container owns a fixed host port, via the same registry the shared browser uses.
+ *
+ * These ports cannot be arbitrated away — the number is baked into an OAuth origin or a `.localhost`
+ * domain — so this never fails or changes behaviour. It converts a silent, unattributable wrong-target
+ * into a named owner, which is the only fix available for a resource that genuinely has one slot.
+ */
+async function adviseHostPort(s: SharedBrowserSetup, port: number, what: string): Promise<void> {
+  const claim = join(s.treeRoot, 'tools', 'shared-browser', 'port-claim.mjs');
+  if (!existsSync(claim)) return;
+  try {
+    const { stdout } = await pexec(
+      process.execPath,
+      [claim, 'advise', `--registry=${process.env.SB_REGISTRY ?? '/var/opt/bespunky/ports'}`,
+       `--identity=${containerIdentity()}`, `--port=${port}`],
+      { cwd: s.treeRoot, env: s.env },
+    );
+    const res = JSON.parse(String(stdout)) as { mine?: boolean; owner?: string };
+    if (res.mine === false) {
+      logger.warn(
+        `[serve] Host port ${port} belongs to another devcontainer (${res.owner}) — ${what} is THEIRS, not this one.\n` +
+        `  Nothing here is broken: view this tree in the shared browser instead (its URL is above).`,
+      );
+    }
+  } catch {
+    /* attribution is advisory — never let it affect a serve */
+  }
+}
+
+/** The same identity the shared-browser CLI claims with, so one container is one claimant. */
+function containerIdentity(): string {
+  const id = process.env.BESPUNKY_DEVCONTAINER_ID;
+  return id ? `dc:${id}` : `${process.cwd()}@${hostname()}`;
+}
+
+/**
+ * The shared browser's viewer URL, straight from the tooling that owns it (`shared-browser url`).
+ *
+ * The noVNC port is ALLOCATED per container out of a band, so it is knowable only by asking. Falling
+ * back to a composed guess would reintroduce the exact bug this replaced — a plausible-looking URL
+ * pointing at another container's browser — so the fallback is an honest instruction instead.
+ */
+async function sharedBrowserUrl(sbScript: string, treeRoot: string, env: NodeJS.ProcessEnv): Promise<string> {
+  try {
+    const { stdout } = await pexec('bash', [sbScript, 'url'], { cwd: treeRoot, env });
+    const url = String(stdout).trim();
+    if (url) return url;
+  } catch {
+    /* fall through to the instruction below */
+  }
+  return `(run \`${sbScript} url\` for the viewer URL)`;
 }
 
 /** Best-effort teardown of the pretty domain route (the shared browser itself stays up — it's shared). */
