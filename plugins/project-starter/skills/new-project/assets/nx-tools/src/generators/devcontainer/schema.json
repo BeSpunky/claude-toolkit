@@ -19,6 +19,16 @@
       "description": "Include Firebase CLI + Google Cloud CLI devcontainer features, the toba.vsfire VS Code extension, and labeled portsAttributes for the Firebase emulator suite (4000 UI, 9099 Auth, 8080 Firestore, 9150 ws, 9199 Storage, 5001 Functions). No explicit forwardPorts — VS Code auto-forwards each binding to a free host port so multiple devcontainers can run in parallel without collision. Opt-in only - never enabled by default.",
       "default": false
     },
+    "web": {
+      "type": "boolean",
+      "description": "The `web` LAYER: this workspace has something to serve. Adds the :80 worktree-domains forward, the shared browser's noVNC portsAttributes band, the auto-forward settings those depend on, the --sysctl/--add-host runArgs, the containerEnv devcontainer id, and the Playwright + shared-port volume mounts. Framework-agnostic — the shared browser is pure CDP and the proxy forwards any localhost port. Defaults to true; pass --web=false for a workspace with nothing to serve (a library-only or docs repo).",
+      "default": true
+    },
+    "angular": {
+      "type": "boolean",
+      "description": "The `angular` LAYER: adds the Angular VS Code extensions (nrwl.angular-console, Angular.ng-template) and labels port 4200 as the Angular dev server. Opt-in — a non-Angular workspace should not carry Angular editor tooling.",
+      "default": false
+    },
     "voice": {
       "type": "boolean",
       "description": "Bridge WSL2's WSLg PulseAudio server into the container (remoteEnv PULSE_SERVER + the /mnt/wslg bind mount) so the bespunky-voice plugin can reach the host speaker + mic. The bind source /mnt/wslg is WSL-specific, so this is opt-in — enabling it unconditionally would break non-WSL hosts (macOS, Codespaces). The companion post-create.sh self-adapts on the mount's presence: it installs the espeak-ng TTS floor + pulseaudio-utils and pre-installs the voice plugin only when the bridge is there. Opt-in only - never enabled by default.",

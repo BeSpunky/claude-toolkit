@@ -33,6 +33,7 @@ import {
 import { basename } from 'node:path';
 import secondaryEntrypointGenerator from '../secondary-entrypoint/generator';
 import { findDesignSystem } from '../_utils/design-system';
+import { requireLayer } from '../../layers/registry';
 
 interface DsComponentSchema {
   /** The component (and entry-point) name, e.g. `button` -> `@scope/design-system/button`. */
@@ -43,6 +44,11 @@ interface DsComponentSchema {
 }
 
 export default async function dsComponentGenerator(tree: Tree, options: DsComponentSchema): Promise<void> {
+  // `angular`, not `design-system`: the design-system requirement is already stated below with the
+  // richer message, and `--library` deliberately lets a caller target a library that ISN'T the tagged
+  // design system. What holds in both cases is the delegate — secondary-entrypoint binds @nx/angular.
+  requireLayer(tree, 'angular', 'ds-component');
+
   if (!options.name) {
     throw new Error('ds-component generator requires a component name (positional arg 0 / --name), e.g. `button`.');
   }

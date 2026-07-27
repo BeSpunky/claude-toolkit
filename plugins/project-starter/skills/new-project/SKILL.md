@@ -1,6 +1,6 @@
 ---
 name: new-project
-description: Scaffold a brand-new BeSpunky-standard project - an integrated Nx monorepo with Angular (a clean --minimal app, no demo content), a design system from moment zero (a publishable library carrying design tokens as CSS custom properties + a SASS utility layer; zero components), a devcontainer (Claude CLI + VS Code extension), a tailored CLAUDE.md, and the bespunky/claude-toolkit marketplace wired in. Runs on the local Node when it's modern enough (a Docker base-image fallback only for an old host Node) — so it works inside a devcontainer with no Docker; never nvm. Use when the user asks to "start", "create", "scaffold", "bootstrap", or "spin up" a new project.
+description: Scaffold a brand-new BeSpunky-standard project, OR retrofit the house tooling onto an EXISTING repo of any shape. A project is a STACK OF LAYERS, each detected from the workspace and applied independently - nx (the Nx workspace itself, created in place with `nx init` on a repo that has none), agent (the stack-agnostic DX: devcontainer, Claude settings, window identity, HOUSE.md), web (dev-server composer, worktree domains, shared browser, Playwright), angular, design-system, navigation, firebase. So the full scaffold is an integrated Nx monorepo with Angular (a clean --minimal app, no demo content), a design system from moment zero (a publishable library carrying design tokens as CSS custom properties + a SASS utility layer; zero components), a devcontainer (Claude CLI + VS Code extension), a tailored CLAUDE.md and the bespunky/claude-toolkit marketplace - while a plain TypeScript, Vite, Python-adjacent or frameworkless repo can take JUST the agent layer and get the plugins, skills, devcontainer and HOUSE.md with no Angular opinion imposed and nothing of its own overwritten (an existing devcontainer.json is merged additively; an existing post-create.sh is never touched). Runs on the local Node when it's modern enough (a Docker base-image fallback only for an old host Node) - so it works inside a devcontainer with no Docker; never nvm. Use when the user asks to "start", "create", "scaffold", "bootstrap", or "spin up" a new project - and equally when they ask to "add the toolkit / house tooling / devcontainer to this repo", "set up Claude in this project", "repair", "retrofit", or "bring this project up to the house standard".
 ---
 
 # Start a new project (BeSpunky standard)
@@ -89,6 +89,50 @@ Invoke it according to the environment you're running in:
 Include `--firebase` **only** if step 0 input 4 was yes (the user opted in). Omit it otherwise. Include `--voice` **only** if the user explicitly asked for hands-free voice on a WSL host (see the voice opt-in bullet). Include `--no-github` **only** if the user explicitly opted out of a remote (otherwise a private GitHub repo is created).
 
 Wait for the final `SCAFFOLD_OK <path>` line. It also reports the GitHub outcome — `GITHUB_OK <url>` when the private repo was created and pushed, or `GITHUB_SKIP: <reason>` when it was skipped (so you can relay the reason and the manual follow-up). On the Docker fallback path, the first run pulls the base image (a few hundred MB); the native path skips that. If a generator/CLI flag is rejected, check `yarn create nx-workspace --help`, `nx g @nx/angular:application --help`, or `gh repo create --help` - **never guess**.
+
+### 1z. The layer model — what makes this work on a repo that isn't the house shape
+
+**A project is not one shape; it is a stack of layers.** Each has its own detector, its own generators, and its own reason to exist. This is what lets the same script scaffold a greenfield Angular+Firebase monorepo *and* add house DX to a five-year-old TypeScript library without imposing a framework on it.
+
+| Layer | Detected by | What it owns |
+| --- | --- | --- |
+| `nx` | `nx.json` | The mechanism floor — every house generator runs through `nx g` |
+| `agent` | `HOUSE.md` | **Stack-agnostic DX**: devcontainer, Claude settings, window identity, HOUSE.md |
+| `js` | `@nx/js`, or any library project | `publishable-lib --nonAngular`, tool extraction, `nx release` |
+| `web` | any project with a `dev-server`/`serve` target | The `serve` composer, worktree domains, shared browser, Playwright |
+| `angular` | `@angular/core`, or an Angular build executor | `app`, the Angular dev-server leaf, `angular-ai`, Angular skills |
+| `design-system` | the `type:design-system` tag | `design-system`, `ds-component`, `ds-theme`, `secondary-entrypoint` |
+| `navigation` | a `navigation-core` project | `navigation-core`, `domain-navigation` |
+| `firebase` | `firebase.json` | Emulators, `apps/functions`, apphosting, env files |
+
+Two separate questions, and keeping them apart is the whole design:
+
+- **DETECT** — what the workspace already *has*. Read from the workspace itself (never declared, never inferred from a flag), so the scaffolder and the generators can't disagree about what a project is. Detected layers get **refreshed** — that is what a repair does.
+- **ENSURE** (`--ensure=<csv>`) — which layers this run should **bring into being**. Always explicit. A repair ensures **nothing** by default: refreshing house tooling and turning someone's library into an Angular app are very different requests, and only one of them was asked for.
+
+**The scaffold is just a repair with a full ensure set against an empty directory** — one rendered command sequence serves both modes, so they can no longer drift.
+
+#### Retrofitting an existing repo (the common non-scaffold case)
+
+```
+bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" --repair --ensure=agent [--yes] <PROJECT_PATH>
+```
+
+That gives *any* repo the house DX and nothing else: an Nx workspace created **in place** with `nx init` if it has none (plus `@nx/devkit`, which an `nx init` workspace does not ship), the devcontainer, `.claude/settings.json`, the window identity, and `HOUSE.md` — with **no Angular, no design system, no dev-loop tooling**, because none of those layers is present or requested. The generated `HOUSE.md` renders only the sections that apply, so a plain library is never handed instructions for an Angular MCP server it doesn't have.
+
+**It adopts the project's package manager.** A scaffold sets the house standard (yarn); a repair detects — `packageManager` (corepack) first, then the lockfile — and routes every install/exec/add through it. Say this when offering a repair on an npm or pnpm repo: running yarn there would leave a **second lockfile**, and `npm ci` would start failing for the whole team. A repo that declares nothing gets the house default, written down *before* `nx init` runs (which otherwise picks npm on its own and produces the same two-lockfile mess from the other direction). If the project's package manager isn't installed locally, the script falls back to Docker rather than substituting a different one.
+
+**What it will NOT do to a repo that already has its own setup** — this is the part to state plainly when offering it:
+
+- An existing **`.devcontainer/devcontainer.json`** is **merged additively**: house keys that are missing get added, and everything the repo already declares — its image, its name, its `postCreateCommand`, its features, its comments — is left exactly as-is.
+- **Ownership is explicit and the divergence is recorded.** `.devcontainer/.bespunky-devcontainer.json` carries `owned: true|false`. A devcontainer the generator wrote is regenerated every repair; one it adopted is merged into, permanently — and the marker then carries an **adoption report** (`adopted.skipped`) listing the keys where the project's value genuinely *differs* from the house value. **When offering a repair on an adopted repo, read that list and tell the user what they're not getting** — it is the only surface for a divergence that otherwise grows silently. It lists divergences rather than merely-present keys, so it converges and stays short.
+- An existing **`.devcontainer/post-create.sh`** is **never touched**. The house script is written beside it as `post-create.bespunky.sh`, with the one line needed to chain them printed for the user to place. A shell script's contents can't be merged meaningfully, so it isn't attempted.
+- **`CLAUDE.md`** gets only the marker-delimited `HOUSE.md` pointer; the prose is preserved verbatim (§1b).
+- **`.claude/settings.json`** is merged, never overwritten.
+- On a project the generator **does** own (one it scaffolded, marked by `.devcontainer/.bespunky-devcontainer.json`), the devcontainer is regenerated normally — ownership is what separates the two paths.
+- `.devcontainer/post-create.local.sh` is created once, never regenerated, and runs last — the seam for project-specific setup that must survive every future repair.
+
+**Adding a layer later** is the same command with a bigger ensure set (`--ensure=web,angular`), and the `SessionStart` hook notices the reverse case: a project that has *grown* a layer (someone ran `nx add @nx/angular`, or added `firebase.json`) whose house tooling was never applied, by comparing the workspace against the `layers=` list in `HOUSE.md`'s stamp.
 
 ### 1a. Recovery (if the script can't complete end-to-end)
 

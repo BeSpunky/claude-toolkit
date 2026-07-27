@@ -105,10 +105,18 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 // Still needed by this file's OTHER AST routine (the ESLint depConstraints inserter). The app.config
 // `providers` wiring, however, is now shared — see the import below.
-import * as ts from 'typescript';
+//
+// TYPE-ONLY import + a LAZY runtime binding, for the same reason wire-provider does it (the full argument
+// lives in that file's header): a static value-import binds at MODULE LOAD, so this whole generator would
+// fail to load in a workspace without TypeScript — and, more pressingly, `typescript` on npm now resolves
+// to the 7.x native port whose main entry no longer exposes the classic compiler API, so it would LOAD and
+// then die on the first call. The shared loader probes the API and degrades to null, which this file's one
+// consumer (addPlatformBoundaries) already handles by returning null and warning.
+import type * as TS from 'typescript';
 // The app.config `providers` wiring is shared with the `serve` and `design-system-styles` generators —
 // it used to be copy-pasted here in full (the same TS-AST walk, three times over).
-import { wireProvider } from '../_utils/wire-provider';
+import { wireProvider, loadTypeScript } from '../_utils/wire-provider';
+import { requireLayer } from '../../layers/registry';
 
 interface FirebaseEmulatorsSchema {
   project: string;
@@ -180,6 +188,11 @@ export default async function firebaseEmulatorsGenerator(
   tree: Tree,
   options: FirebaseEmulatorsSchema
 ): Promise<GeneratorCallback> {
+  // The emulator suite is wired INTO an Angular app — environment files, `firebase.config.ts`, the
+  // `app.config.ts` provider. Without the Angular layer there is nothing to wire it to, and the files it
+  // would emit are Angular source a non-Angular workspace cannot compile.
+  requireLayer(tree, 'angular', 'firebase-emulators');
+
   if (!options.project) {
     throw new Error('firebase-emulators generator requires --project=<app-name>.');
   }
@@ -773,6 +786,9 @@ function addPlatformBoundaries(source: string, sourcePath: string): string | nul
     return source;
   }
 
+  const ts = loadTypeScript();
+  if (!ts) return null;
+
   const sf = ts.createSourceFile(
     sourcePath,
     source,
@@ -781,8 +797,8 @@ function addPlatformBoundaries(source: string, sourcePath: string): string | nul
     ts.ScriptKind.JS
   );
 
-  let constraintsArray: ts.ArrayLiteralExpression | null = null;
-  const findConstraints = (node: ts.Node): void => {
+  let constraintsArray: TS.ArrayLiteralExpression | null = null;
+  const findConstraints = (node: TS.Node): void => {
     if (constraintsArray) return;
     if (
       ts.isPropertyAssignment(node) &&
@@ -798,7 +814,7 @@ function addPlatformBoundaries(source: string, sourcePath: string): string | nul
   findConstraints(sf);
   if (!constraintsArray) return null;
 
-  const found: ts.ArrayLiteralExpression = constraintsArray;
+  const found: TS.ArrayLiteralExpression = constraintsArray;
   const snippet =
     `// by platform: the server-only Firebase Admin/Functions SDKs belong to Cloud\n` +
     `// Functions alone — they must never reach browser/SSR Angular code (they pull in\n` +
@@ -861,6 +877,13 @@ function extractLegacyProdConfig(source: string): {
   const empty = { projectId: '', apiKey: '', appId: '', authDomain: '' };
   if (!source.includes('productionFirebaseConfig')) return empty;
 
+  // No usable TypeScript -> nothing to migrate. `empty` is the same answer this returns for a project that
+  // never had a legacy config, and the caller treats both identically: it writes the current shape without
+  // carrying values forward. Degrading rather than throwing keeps a --repair alive on a workspace whose
+  // TypeScript moved to the 7.x native port.
+  const ts = loadTypeScript();
+  if (!ts) return empty;
+
   const sf = ts.createSourceFile(
     'firebase.config.ts',
     source,
@@ -869,8 +892,8 @@ function extractLegacyProdConfig(source: string): {
     ts.ScriptKind.TS
   );
 
-  let prodObject: ts.ObjectLiteralExpression | null = null;
-  const findProd = (node: ts.Node): void => {
+  let prodObject: TS.ObjectLiteralExpression | null = null;
+  const findProd = (node: TS.Node): void => {
     if (prodObject) return;
     if (
       ts.isVariableDeclaration(node) &&

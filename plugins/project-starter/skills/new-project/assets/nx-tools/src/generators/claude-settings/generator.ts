@@ -30,11 +30,31 @@ export default async function claudeSettingsGenerator(tree: Tree): Promise<void>
   }
 
   // Keep Claude Code local state out of git.
-  const gitignore = tree.exists('.gitignore') ? (tree.read('.gitignore', 'utf8') ?? '') : '';
-  if (!gitignore.includes('.claude/data/')) {
-    const sep = gitignore === '' || gitignore.endsWith('\n') ? '' : '\n';
-    tree.write('.gitignore', `${gitignore}${sep}\n# Claude Code local state\n.claude/data/\n`);
-  }
+  ensureIgnored(tree, '# Claude Code local state', ['.claude/data/']);
+
+  // Keep Nx's CACHES out of git — an agent-DX concern, which is why it lives in this layer's generator.
+  // `nx init` on an EXISTING repo ignores `.nx/polygraph` but not `.nx/cache` or `.nx/workspace-data`, so a
+  // retrofitted repo has three files that churn on every single `nx` invocation. For a human that is noise;
+  // for an agent it is worse, because a permanently dirty tree makes "is this change mine?" unanswerable and
+  // invites committing machine-local cache. Additive and idempotent: an entry already present is left alone,
+  // so a project that ignores these its own way is untouched.
+  ensureIgnored(tree, '# Nx caches (machine-local; never committed)', ['.nx/cache', '.nx/workspace-data']);
+}
+
+/**
+ * Append any of `entries` that aren't already mentioned in `.gitignore`, under a single heading.
+ *
+ * Substring matching is deliberate and sufficient here: these are distinctive paths, and the question being
+ * asked is "does this repo already deal with this?", not "is there an exactly-equal line". A repo that
+ * ignores `.nx/` wholesale already covers `.nx/cache`, and re-adding it would be noise.
+ */
+function ensureIgnored(tree: Tree, heading: string, entries: string[]): void {
+  const current = tree.exists('.gitignore') ? (tree.read('.gitignore', 'utf8') ?? '') : '';
+  const missing = entries.filter((entry) => !current.includes(entry));
+  if (missing.length === 0) return;
+
+  const sep = current === '' || current.endsWith('\n') ? '' : '\n';
+  tree.write('.gitignore', `${current}${sep}\n${heading}\n${missing.join('\n')}\n`);
 }
 
 /**

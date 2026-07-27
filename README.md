@@ -317,9 +317,62 @@ git -C ~/projects/claude-toolkit pull        # or push new skills up
 
 Enable auto-update for the marketplace (in `/plugin` → Marketplaces) to fetch updates at startup.
 
+## The layer model — one tool, any repo shape
+
+**A project is a stack of layers, not one shape.** Each layer has its own detector, its own generators and its own reason to exist, so the same script scaffolds a greenfield Angular+Firebase monorepo *and* adds house DX to an existing plain-TypeScript repo without imposing a framework on it.
+
+| Layer | Detected by | Owns |
+| --- | --- | --- |
+| `nx` | `nx.json` | The mechanism floor — every house generator runs through `nx g` |
+| `agent` | `HOUSE.md` | **Stack-agnostic DX**: devcontainer, Claude settings, window identity, `HOUSE.md` |
+| `js` | `@nx/js`, or any library | `publishable-lib --nonAngular`, tool extraction, `nx release` |
+| `web` | any project with a `dev-server`/`serve` target | `serve` composer, worktree domains, shared browser, Playwright |
+| `angular` | `@angular/core`, or an Angular build executor | `app`, the Angular dev-server leaf, `angular-ai` |
+| `design-system` | the `type:design-system` tag | `design-system`, `ds-component`, `ds-theme`, `secondary-entrypoint` |
+| `navigation` | a `navigation-core` project | `navigation-core`, `domain-navigation` |
+| `firebase` | `firebase.json` | Emulators, `apps/functions`, apphosting, env files |
+
+**Detect** (what the workspace *has*, read from the workspace — never declared) and **ensure** (`--ensure=<csv>`, what this run should *bring into being* — always explicit) are kept strictly apart. A repair ensures nothing by default: refreshing house tooling and turning someone's library into an Angular app are different requests. **The scaffold is a repair with a full ensure set against an empty directory** — one rendered command sequence serves both, so they can't drift.
+
+Every house generator states its layer as a precondition, so running one where it doesn't apply gives a sentence you can act on instead of a module-resolution stack trace from inside a delegated Nx generator:
+
+```text
+[design-system] needs the `angular` layer (Angular application), which this workspace does not have.
+  present: nx, agent
+  add it with: `nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`
+```
+
+**Retrofit any repo with just the DX layer:**
+
+```bash
+bash <path-to>/scaffold.sh --repair --ensure=agent [--yes] <project-path>
+```
+
+`nx init` creates the Nx workspace in place if there isn't one (plus `@nx/devkit`, which an `nx init` workspace doesn't ship), then the agent layer lands: devcontainer, `.claude/settings.json`, window identity, `HOUSE.md`. No Angular, no design system, no dev-loop tooling — none of those layers is present or requested, and the generated `HOUSE.md` renders only the sections that apply.
+
+**It uses YOUR package manager.** A scaffold sets the house standard (yarn); a repair does not get that choice — the package manager is a decision the project already made, encoded in a lockfile its team and its CI depend on. `packageManager` (corepack) wins, else the lockfile decides, and every install/exec/add in the run goes through it. Running `yarn install` in an npm repo doesn't switch it, it produces a **second lockfile** — after which `npm ci` starts failing for everyone, caused by a tool someone ran once to get a devcontainer. When a repo genuinely declares nothing, the house default is chosen *and written down before `nx init` runs*, because `nx init` picks its own (npm) and takes no flag to say otherwise — so without that, the no-signal case produced two lockfiles from the other direction. Verified end-to-end on npm, pnpm-workspace, and no-signal repos: one lockfile each, scripts/deps/versions untouched.
+
+**It does not overwrite what the repo already owns.** An existing `devcontainer.json` is **merged additively** — its image, name, `postCreateCommand`, features and comments survive. An existing `post-create.sh` is **never touched**; the house script lands beside it as `post-create.bespunky.sh` with the one line needed to chain them. `CLAUDE.md` gets only its marker-delimited pointer. And `.devcontainer/post-create.local.sh` is created once, never regenerated, and runs last: the seam for project-specific setup that survives every future repair.
+
+**Ownership is explicit, and the divergence is recorded.** `.devcontainer/.bespunky-devcontainer.json` carries an `owned` flag — a devcontainer this generator wrote is regenerated on every repair; one it adopted is merged into, for good. (Ownership is *not* inferred from the marker merely existing: that made the run after an adoption believe it owned the file and overwrite the merge, so the guarantee held for exactly one run.) When adopting, the marker also carries an **adoption report** — the keys where the project's value genuinely differs from the house value, so the permanent divergence an additive merge creates has a surface instead of a log line that scrolled past:
+
+```jsonc
+{
+  "generator": "@bespunky/nx-tools:devcontainer",
+  "owned": false,
+  "adopted": {
+    "note": "…house settings are only ADDED, never changed…",
+    "skipped": ["name"]
+  }
+}
+```
+
+It lists *divergences*, not merely keys that exist — so it converges (a key the last repair added is not re-reported as skipped) and stays short enough to act on.
+
 ## How the scaffolder works
 
 `scaffold.sh <project> [app]` is a thin launcher. **Docker was never the requirement — a modern Node is.** When the local Node is new enough (22.18+, e.g. inside a devcontainer) it runs the generators **natively** — no daemon, no image, no mounts — so it works with no Docker at all; otherwise it falls back to running everything **inside the base image via `docker run`** (as your uid, mounting `~/projects`) so an old host Node is no obstacle. `--docker` forces the image; either way there's no nvm. This mirrors `tools/publish-nx-tools`.
+
 1. On the Docker fallback, resolves the newest `mcr.microsoft.com/devcontainers/typescript-node:<major>` tag (the Node source); the native path uses the running Node.
 2. Bootstraps the workspace:
    - `yarn create nx-workspace <project> --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive`
@@ -355,7 +408,7 @@ bash <path-to>/scaffold.sh --repair [--firebase] [--voice] [--yes] <project-path
 
 Claude Code has **no plugin-update hook event**, so `/plugin marketplace update` upgrades the toolkit silently and a project quietly drifts a version behind. `project-starter` closes that gap itself:
 
-- `--repair` **stamps** the project — a marker line in **`HOUSE.md`'s header** (`nx-tools=<v> plugin=<v>`). It lives there because the stamp must reach every clone, and `HOUSE.md` is root-level and unambiguously committed; a stamp under `.claude/` (the conventional home for *local* Claude state) would be one reasonable `.gitignore` line away from vanishing.
+- `--repair` **stamps** the project — a marker line in **`HOUSE.md`'s header** (`nx-tools=<v> plugin=<v> layers=<csv>`). The layer list is a *record* of what was applied, never an input to a later decision (a repair always re-detects): its value is **drift** — a workspace that now has `firebase.json` but whose stamp doesn't list `firebase` grew a layer whose house tooling was never applied, and the hook says so. It lives there because the stamp must reach every clone, and `HOUSE.md` is root-level and unambiguously committed; a stamp under `.claude/` (the conventional home for *local* Claude state) would be one reasonable `.gitignore` line away from vanishing.
 - The plugin ships a **`SessionStart` hook** (`plugins/project-starter/hooks/`). Plugin hooks run in the sessions of everyone who has the plugin *installed* — i.e. in your scaffolded project. It orders the stamped `@bespunky/nx-tools` version against the installed one: **same → silent** (a few small file reads, the common case); **installed is newer → it tells Claude**, who relays it and offers the repair.
 - **It compares `nx-tools`, not the plugin version** — that package is where the generators come from, so it's the only thing that changes what a repair *produces*. A plugin bump that only touches docs regenerates nothing, and demanding a multi-minute repair for it would train everyone to ignore the notice.
 - **Direction matters.** The stamp travels with the repo; the plugin is installed per machine. So a teammate whose plugin is *behind* the project is a normal state, not an error — they're told to run `/plugin marketplace update`, and explicitly told **not** to repair (which would regenerate the project with older generators and stamp it backwards for everyone else).

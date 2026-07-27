@@ -13,6 +13,7 @@
 import { type Tree, addDependenciesToPackageJson } from '@nx/devkit';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { requireLayer } from '../../layers/registry';
 
 interface NavigationCoreSchema {
   directory?: string;
@@ -22,6 +23,12 @@ export default async function navigationCoreGenerator(
   tree: Tree,
   options: NavigationCoreSchema
 ): Promise<void> {
+  // Nothing here CRASHES without Angular — it only writes files. That is exactly why it needs the
+  // guard: it would silently seed a library of Angular source (inject(), signals, Router) into a
+  // workspace that cannot compile it, and the failure would surface later, as a build error, far from
+  // the command that caused it.
+  requireLayer(tree, 'angular', 'navigation-core');
+
   const target = (options.directory ?? 'libs/navigation-core/src').replace(/\/+$/, '');
   const filesDir = join(__dirname, 'files');
 

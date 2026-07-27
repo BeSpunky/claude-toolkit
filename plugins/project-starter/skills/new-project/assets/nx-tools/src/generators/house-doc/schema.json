@@ -9,6 +9,11 @@
       "type": "boolean",
       "description": "Render the Firebase sections of HOUSE.md. Defaults to auto-detect (firebase.json at the workspace root)."
     },
+    "layers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The layers this project has (nx, agent, js, web, angular, design-system, navigation, firebase). Chooses which HOUSE.md sections render — a plain TypeScript repo gets no Angular MCP or design-system instructions — and is recorded in the header stamp so a later session can see that the project has since GROWN a layer whose house tooling was never applied. Defaults to DETECTING them from the workspace; scaffold.sh passes them explicitly because it knows what it just ensured, before the tree reflects it."
+    },
     "nxToolsVersion": {
       "type": "string",
       "description": "The @bespunky/nx-tools version these generators come from, stamped into HOUSE.md's header. This is the version the SessionStart hook compares — it determines what the generators produce. Passed by scaffold.sh; defaults to 'unknown' on a direct generator call."

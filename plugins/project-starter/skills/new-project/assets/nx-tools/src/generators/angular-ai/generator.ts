@@ -21,6 +21,7 @@
 // merged into any existing `.mcp.json` so user-added MCP servers are preserved across
 // re-runs (--repair).
 import { type Tree } from '@nx/devkit';
+import { requireLayer } from '../../layers/registry';
 
 const SERVER_KEY = 'angular-cli';
 const ANGULAR_CLI_SERVER = {
@@ -36,6 +37,10 @@ interface McpConfig {
 }
 
 export default async function angularAiGenerator(tree: Tree): Promise<void> {
+  // Registers the Angular CLI MCP server and Angular-specific agent guidance — meaningless, and
+  // actively misleading to the model, in a workspace with no Angular.
+  requireLayer(tree, 'angular', 'angular-ai');
+
   // 1) Merge the angular-cli MCP server into project-scoped .mcp.json (preserve user servers).
   let config: McpConfig = {};
   if (tree.exists('.mcp.json')) {
