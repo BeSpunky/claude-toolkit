@@ -155,18 +155,28 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   // LAYER 1: the dev-only worktree tab label. Generator-owned glue (no user values) — always rewritten
   // so fixes propagate. Derives purely from the runtime hostname; the workspace name is baked in only as
   // the base-host sentinel (so `<workspaceName>.localhost` is treated as the base, not a worktree).
+  //
+  // ANGULAR-ONLY, and gated as such. This half of the generator emits an Angular provider and wires it into
+  // `app.config.ts` — the composer above is framework-agnostic, this is not. Writing it unconditionally
+  // would drop an Angular source file into a Vite project that cannot compile it, for a feature that could
+  // never activate there. `app.config.ts` is the test rather than the build executor: it is the thing that
+  // must exist for the provider to have a home.
   const appRoot = project.root;
-  const tabLabelPath = `${appRoot}/src/app/worktree-tab-label.ts`;
-  tree.write(
-    tabLabelPath,
-    readFileSync(join(__dirname, 'files', 'worktree-tab-label.ts.tpl'), 'utf8').split('{{workspaceName}}').join(workspaceName),
-  );
+  const appConfigPath = `${appRoot}/src/app/app.config.ts`;
+  const angularApp = tree.exists(appConfigPath);
+
+  if (angularApp) {
+    const tabLabelPath = `${appRoot}/src/app/worktree-tab-label.ts`;
+    tree.write(
+      tabLabelPath,
+      readFileSync(join(__dirname, 'files', 'worktree-tab-label.ts.tpl'), 'utf8').split('{{workspaceName}}').join(workspaceName),
+    );
+  }
 
   updateProjectConfiguration(tree, projectName, project);
 
   // Best-effort: wire provideWorktreeTabLabel() into app.config.ts (idempotent — only when absent).
-  const appConfigPath = `${appRoot}/src/app/app.config.ts`;
-  if (tree.exists(appConfigPath)) {
+  if (angularApp) {
     const current = tree.read(appConfigPath, 'utf8') ?? '';
     const wired = wireProvider(current, appConfigPath, {
       providerFn: 'provideWorktreeTabLabel',

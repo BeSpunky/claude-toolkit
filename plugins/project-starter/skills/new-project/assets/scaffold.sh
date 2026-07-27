@@ -277,12 +277,41 @@ esac
 # Validate against the registry's ids here, in the outer shell, where the error still has a human in front of
 # it — rather than letting a typo silently ensure nothing at all.
 KNOWN_LAYERS="nx,agent,js,web,angular,design-system,navigation,firebase"
+# WHAT THIS SCRIPT CAN ACTUALLY ENSURE IN REPAIR MODE, and nothing more. `nx` (nx init) and `agent` (the
+# house generators) are the two it has code for. The rest are created by the SCAFFOLD path — an Nx preset,
+# `nx add @nx/angular`, the app generator — which exists only for a brand-new project.
+#
+# So accepting `--ensure=web` on an existing repo would be a promise the script cannot keep. It ran the
+# `web` generators against an app that isn't there and died mid-sequence; worse, had it survived it would
+# have STAMPED `web` as applied, and the next run — which re-detects — would not see it, so the tooling
+# would rot silently with the stamp claiming otherwise. Refusing up front, with the registry's own hint for
+# how to add the layer natively, is the honest move: add the layer with Nx's tooling, then repair, and
+# detection picks it up on its own. This is the same reason the ensure/detect split exists at all.
+REPAIR_ENSURABLE="nx,agent"
 if [ -n "$ENSURE_LAYERS" ]; then
   for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
     case ",$KNOWN_LAYERS," in
       *",$_l,"*) ;;
       *) echo "ERROR: unknown layer '$_l' in --ensure. Known layers: $KNOWN_LAYERS" >&2; exit 1;;
     esac
+    if [ "$MODE" = "repair" ]; then
+      case ",$REPAIR_ENSURABLE," in
+        *",$_l,"*) ;;
+        *)
+          echo "ERROR: --repair cannot ENSURE the '$_l' layer — it can only refresh a layer that is already there." >&2
+          echo "       A repair brings house tooling up to date; it does not add a framework to your project." >&2
+          echo "       Add the layer with Nx's own tooling, then re-run --repair and it will be DETECTED:" >&2
+          case "$_l" in
+            js)            echo "         nx add @nx/js" >&2;;
+            web|angular)   echo "         nx add @nx/angular  # then: nx g @bespunky/nx-tools:app apps/<name>" >&2;;
+            design-system) echo "         nx g @bespunky/nx-tools:design-system --scope=<scope>" >&2;;
+            navigation)    echo "         nx g @bespunky/nx-tools:navigation-core" >&2;;
+            firebase)      echo "         re-run with --repair --firebase (which wires Firebase onto an existing app)" >&2;;
+          esac
+          echo "       Ensurable by --repair: $REPAIR_ENSURABLE" >&2
+          exit 1;;
+      esac
+    fi
   done
 fi
 [ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
@@ -531,11 +560,25 @@ $LAYER_RESOLVE_BLOCK
 # Gated on \`web\`, NOT \`angular\`: both are framework-agnostic now — the composer drives a \`dev-server\`
 # target by name, and serve-options just sets host on whatever dev-server is there. An Angular leaf is
 # written only when the project has no dev-server of its own (see the serve generator's THE SEAM).
+#
+# AND gated on the PROJECT EXISTING. \"The web layer is present\" and \"a project named \$APP exists\" are
+# different claims: the layer is satisfied by ANY project with a dev-server, while \$APP is inferred (the
+# sole dir under apps/, else the repo name) and can easily name nothing at all. Running a per-app generator
+# against a project that isn't there is how a repair dies mid-sequence on a repo whose app is called
+# something else — a failure about the wrong thing entirely.
+project_exists() {
+  node -e \"const {FsTree}=require('nx/src/generators/tree');const {getProjects}=require('@nx/devkit');process.exit([...getProjects(new FsTree(process.cwd(),false)).keys()].includes(process.argv[1])?0:1)\" \"\$1\" >/dev/null 2>&1
+}
 if layer_active web; then
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve --project=$APP
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
+  if project_exists '$APP'; then
+    ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve --project=$APP
+    ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
+  else
+    echo \"[layers] web layer present, but no project named '$APP' — skipping the per-app serve generators.\"
+    echo \"[layers]   Pass the app name explicitly to refresh it:  scaffold.sh --repair <project> <app-name>\"
+  fi
 fi
-if layer_active firebase; then$REPAIR_FIREBASE_BLOCK
+if layer_active firebase && project_exists '$APP'; then$REPAIR_FIREBASE_BLOCK
   :
 fi
 $WORKSPACE_GEN_BLOCK"
