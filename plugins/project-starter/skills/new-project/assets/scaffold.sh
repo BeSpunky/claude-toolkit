@@ -87,13 +87,37 @@ while [ "${1:-}" != "" ]; do
   esac
 done
 
+# --- whose package manager is this? ---------------------------------------------------------------------------
+# A SCAFFOLD creates the project, so it sets the house standard: yarn. A REPAIR does not get that choice. The
+# package manager is a decision the project already made, encoded in a lockfile its whole team and its CI
+# depend on — and running `yarn install` in an npm repo doesn't switch it, it produces a SECOND lockfile
+# alongside the first. Two lockfiles that disagree is a genuinely bad state to leave someone in: `npm ci`
+# starts failing, and the cause is a tool they ran once to get a devcontainer.
+#
+# `packageManager` (corepack) wins when present — it is an explicit declaration rather than an artifact.
+# Otherwise the lockfile says it. With no signal at all, the house default is the right guess.
+# Echoes `<pm> <source>` — the source matters, because "we read your lockfile" and "you told us nothing so
+# we picked the house default" are different claims and only one of them should sound like a detection.
+detect_package_manager() {
+  local dir="$1" declared
+  declared="$(grep -m1 '"packageManager"' "$dir/package.json" 2>/dev/null \
+    | sed -E 's/.*"packageManager"[[:space:]]*:[[:space:]]*"([a-z]+)@.*/\1/')"
+  case "$declared" in
+    yarn | npm | pnpm) echo "$declared packageManager-field"; return ;;
+  esac
+  [ -f "$dir/pnpm-lock.yaml" ]    && { echo "pnpm pnpm-lock.yaml"; return; }
+  [ -f "$dir/yarn.lock" ]         && { echo "yarn yarn.lock"; return; }
+  [ -f "$dir/package-lock.json" ] && { echo "npm package-lock.json"; return; }
+  echo "yarn house-default"
+}
+
 # --- is the local Node new enough to skip Docker entirely? ---
 # The bar is compile-generators.mts: TypeScript run directly by node, which needs type-stripping ON BY
-# DEFAULT — Node 22.18+ (flagged/experimental before that). Anything older, or no local node/yarn at all,
-# falls back to the image. Inside a devcontainer this is always true, which is why `--repair` runs there
-# with no Docker. Mirrors local_node_ok() in tools/publish-nx-tools/publish.sh.
+# DEFAULT — Node 22.18+ (flagged/experimental before that). Anything older, or no local node / no local
+# copy of THIS PROJECT'S package manager, falls back to the image. Inside a devcontainer this is always
+# true, which is why `--repair` runs there with no Docker. Mirrors publish.sh's local_node_ok().
 local_node_ok() {
-  command -v node >/dev/null && command -v yarn >/dev/null || return 1
+  command -v node >/dev/null && command -v "$PM" >/dev/null || return 1
   local major minor
   major="$(node -p 'process.versions.node.split(".")[0]')" || return 1
   minor="$(node -p 'process.versions.node.split(".")[1]')" || return 1
@@ -163,6 +187,35 @@ else
     fi
   fi
   APP="${APP:-$PROJECT}"
+fi
+
+# --- resolve the package manager + the three commands the rendered sequences use -------------------------------
+# Scaffold sets the house standard (it is creating the project); repair adopts whatever the project already
+# uses. Everything downstream goes through these three variables, so a new package manager is one case here
+# rather than twenty call sites.
+if [ "$MODE" = "scaffold" ]; then
+  PM="yarn"; PM_SOURCE="house-default"
+else
+  read -r PM PM_SOURCE <<< "$(detect_package_manager "$TARGET")"
+fi
+
+case "$PM" in
+  yarn) PM_INSTALL="yarn install";  PM_EXEC="yarn";           PM_ADD_DEV="yarn add -D" ;;
+  # `npx --no-install` deliberately: nx is in node_modules by this point, and without the flag a typo or a
+  # pruned package would silently fetch something from the registry and run it instead of failing.
+  npm)  PM_INSTALL="npm install";   PM_EXEC="npx --no-install"; PM_ADD_DEV="npm install --save-dev" ;;
+  # `-w` is REQUIRED, not optional tidiness: in a pnpm WORKSPACE, `pnpm add` at the root refuses outright
+  # (ERR_PNPM_ADDING_TO_ROOT) unless you say you meant the root — and the root is exactly where house
+  # tooling belongs. Passing it unconditionally is right for both shapes, since a non-workspace repo's root
+  # IS its workspace root.
+  pnpm) PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec";       PM_ADD_DEV="pnpm add -D -w" ;;
+esac
+if [ "$MODE" = "repair" ]; then
+  if [ "$PM_SOURCE" = "house-default" ]; then
+    echo "Package manager: $PM (this project declares none — using the house default)"
+  else
+    echo "Package manager: $PM (from $PM_SOURCE — the project's choice, not imposed)"
+  fi
 fi
 
 # --- repair consent gate (see the header) ---
@@ -342,7 +395,7 @@ APP_STAGING_FLAG=""
 REPAIR_FIREBASE_BLOCK=""
 if [ "$FIREBASE" = "1" ]; then
   REPAIR_FIREBASE_BLOCK="
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG"
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG"
 fi
 
 # --- house tooling: stage @bespunky/nx-tools (used by both modes) ---
@@ -400,8 +453,26 @@ if [ ! -f nx.json ]; then
     echo '[layers] ensure nx: seeding a minimal root package.json (forces the node_modules install mode, not dot-nx)'
     printf '{\\n  \"name\": \"%s\",\\n  \"version\": \"0.0.0\",\\n  \"private\": true\\n}\\n' '$PROJECT' > package.json
   fi
+  # DECLARE THE PACKAGE MANAGER BEFORE nx init RUNS, when the repo hasn't declared one itself.
+  #
+  # \`nx init\` picks its own — npm, absent any lockfile — and takes no flag to say otherwise. So on a repo
+  # with no lockfile at all, it would create package-lock.json while everything downstream here used the
+  # detected default (yarn), leaving TWO lockfiles that disagree: exactly the state this script refuses to
+  # inflict on an npm or pnpm project, arrived at from the other direction. An empty lockfile is the signal
+  # Nx reads, so writing one first makes nx init agree with us instead of us discovering it didn't.
+  #
+  # Only ever in the genuinely-no-signal case. A repo with any lockfile, or a \`packageManager\` field, has
+  # already decided, and \$PM above is that decision.
+  if [ ! -f yarn.lock ] && [ ! -f package-lock.json ] && [ ! -f pnpm-lock.yaml ]; then
+    echo '[layers] ensure nx: no lockfile — declaring $PM (the house default) so nx init agrees with the rest of this run'
+    case '$PM' in
+      yarn) : > yarn.lock ;;
+      pnpm) : > pnpm-lock.yaml ;;
+      npm)  : ;;
+    esac
+  fi
   npx --yes nx@latest init --useDotNxInstallation=false --no-interactive
-  [ -x node_modules/.bin/nx ] || yarn install
+  [ -x node_modules/.bin/nx ] || $PM_INSTALL
   node -e \"const f='nx.json',j=JSON.parse(require('fs').readFileSync(f,'utf8'));if(j.defaultBase==='master'){j.defaultBase='main';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\\n');console.log('[layers] ensure nx: defaultBase master -> main')}\" || true
 fi"
 
@@ -429,7 +500,7 @@ ensure_nx_tools
 if ! node -e \"require.resolve('@nx/devkit')\" >/dev/null 2>&1; then
   _nxv=\"\$(node -p \"require('nx/package.json').version\" 2>/dev/null || echo latest)\"
   echo \"[layers] @nx/devkit missing (an \\\`nx init\\\` workspace ships only nx) — installing @nx/devkit@\$_nxv\"
-  yarn add -D \"@nx/devkit@\$_nxv\"
+  $PM_ADD_DEV \"@nx/devkit@\$_nxv\"
   ensure_nx_tools
 fi
 
@@ -467,8 +538,8 @@ if layer_active agent; then
   # browser volumes into a container that has nothing to serve.
   if layer_active web; then DC_LAYER_FLAGS=' --web=true'; else DC_LAYER_FLAGS=' --web=false'; fi
   if layer_active angular; then DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --angular=true\"; else DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --angular=false\"; fi
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR\$DC_LAYER_FLAGS$DEVCONTAINER_FLAGS
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:claude-settings
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR\$DC_LAYER_FLAGS$DEVCONTAINER_FLAGS
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:claude-settings
   # The window identity — an emoji + a quiet, project-coloured status band in .vscode/settings.json, so this
   # project's VSCode window is distinguishable from every other open window. Runs BEFORE the design system, so
   # at scaffold time there is deliberately no primary token to read and the colour is a stable hash of the
@@ -476,18 +547,18 @@ if layer_active agent; then
   # colour later, once the design system has real tokens (the bespunky-vscode-identity skill + its offer hook).
   # Idempotent + --repair-safe: the provenance ratchet means this name-hash pass never downgrades a colour a
   # project has since moved to design-system or a hand-picked one.
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:window-identity --name=$PROJECT
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:window-identity --name=$PROJECT
 fi
 # --- web layer: the dev loop. Framework-agnostic by design — the shared browser is pure CDP and the
 #     worktree-domains proxy forwards any localhost port, so neither needs Angular.
 if layer_active web; then
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:playwright
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:shared-browser
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:worktree-domains
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:playwright
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:shared-browser
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:worktree-domains
 fi
 # --- angular layer: the Angular CLI MCP server + the Angular agent skills' gitignore rule.
 if layer_active angular; then
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:angular-ai
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:angular-ai
 fi
 # --- design-system layer: the workspace's single source of visual truth, present from moment zero (a design
 #     system retrofitted after five screens of hardcoded hex is not a design system, it's an archaeology dig).
@@ -497,19 +568,19 @@ fi
 #     for every consumer project. Idempotent in --repair (the token file is seeded, never overwritten — a
 #     repair must not restore placeholder tokens over the project's real design).
 if layer_active design-system; then
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:design-system --scope=$PROJECT
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:design-system --scope=$PROJECT
 fi
 # --- HOUSE.md last: it STAMPS the layer set, so it must run after every layer above has had its turn (a
 #     design system created moments ago has to appear in the stamp that records this run).
 if layer_active agent; then
-  ensure_nx_tools; yarn nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION --layers=\"\$ACTIVE\"
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION --layers=\"\$ACTIVE\"
 fi
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
 # for adding further apps, plus the reusable-tool extraction generators mark-extractable /
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
 # until the package is first published (see tools/publish-nx-tools); once published, --repair adds
 # it to existing projects.
-yarn add -D @bespunky/nx-tools@^$NX_TOOLS_VERSION || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
+$PM_ADD_DEV @bespunky/nx-tools@^$NX_TOOLS_VERSION || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --repair to add it.'"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
@@ -530,7 +601,7 @@ $STAGE_BLOCK
 # (serve host 0.0.0.0, plus the full Firebase wiring when --firebase=true). This is the SAME one
 # command a developer runs to add any LATER app — first app and Nth app share one code path, so a
 # second app can never silently miss the configuration the first app got.
-ensure_nx_tools; yarn nx g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG
+ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG
 $LAYER_RESOLVE_BLOCK
 $WORKSPACE_GEN_BLOCK
 # Commit the full scaffold. \`yarn create nx-workspace\` made an initial commit, but the
@@ -549,7 +620,7 @@ if [ ! -f nx.json ]; then
   exit 1
 fi
 if [ ! -x node_modules/.bin/nx ]; then
-  echo 'ERROR: node_modules/.bin/nx not found - run \"yarn install\" in the project first, then re-run --repair.' >&2
+  echo \"ERROR: node_modules/.bin/nx not found - run '$PM_INSTALL' in the project first, then re-run --repair.\" >&2
   exit 1
 fi
 $STAGE_BLOCK
@@ -571,8 +642,8 @@ project_exists() {
 }
 if layer_active web; then
   if project_exists '$APP'; then
-    ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve --project=$APP
-    ensure_nx_tools; yarn nx g @bespunky/nx-tools:serve-options --project=$APP
+    ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:serve --project=$APP
+    ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:serve-options --project=$APP
   else
     echo \"[layers] web layer present, but no project named '$APP' — skipping the per-app serve generators.\"
     echo \"[layers]   Pass the app name explicitly to refresh it:  scaffold.sh --repair <project> <app-name>\"

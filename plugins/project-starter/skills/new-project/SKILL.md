@@ -120,6 +120,8 @@ bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" --repair --ensure=agent [--yes] <P
 
 That gives *any* repo the house DX and nothing else: an Nx workspace created **in place** with `nx init` if it has none (plus `@nx/devkit`, which an `nx init` workspace does not ship), the devcontainer, `.claude/settings.json`, the window identity, and `HOUSE.md` — with **no Angular, no design system, no dev-loop tooling**, because none of those layers is present or requested. The generated `HOUSE.md` renders only the sections that apply, so a plain library is never handed instructions for an Angular MCP server it doesn't have.
 
+**It adopts the project's package manager.** A scaffold sets the house standard (yarn); a repair detects — `packageManager` (corepack) first, then the lockfile — and routes every install/exec/add through it. Say this when offering a repair on an npm or pnpm repo: running yarn there would leave a **second lockfile**, and `npm ci` would start failing for the whole team. A repo that declares nothing gets the house default, written down *before* `nx init` runs (which otherwise picks npm on its own and produces the same two-lockfile mess from the other direction). If the project's package manager isn't installed locally, the script falls back to Docker rather than substituting a different one.
+
 **What it will NOT do to a repo that already has its own setup** — this is the part to state plainly when offering it:
 
 - An existing **`.devcontainer/devcontainer.json`** is **merged additively**: house keys that are missing get added, and everything the repo already declares — its image, its name, its `postCreateCommand`, its features, its comments — is left exactly as-is.
