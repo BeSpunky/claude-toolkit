@@ -61,7 +61,7 @@ export interface WireProviderOptions {
  * Wire `<providerFn>()` into `appConfig`'s `providers` array (+ the matching import).
  *
  * Returns the updated source when wiring is applied, the ORIGINAL `source` when already wired
- * (idempotent no-op — so a --repair re-run is a no-op), or `null` when the file shape is
+ * (idempotent no-op — so a --sync re-run is a no-op), or `null` when the file shape is
  * unrecognized (the caller warns with a manual-wiring instruction rather than crashing).
  */
 export function wireProvider(

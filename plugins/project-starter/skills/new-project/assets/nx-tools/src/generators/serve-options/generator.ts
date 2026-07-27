@@ -17,7 +17,7 @@
 //     generator runs) → set `host` on `serve.options`.
 //
 // Legacy dev-server names (`serve-with-emulators`, `serve-no-emulators`, `serve-standalone`,
-// `serve-app`) are also tolerated so `--repair` on an older project still lands `host` correctly,
+// `serve-app`) are also tolerated so `--sync` on an older project still lands `host` correctly,
 // whichever stage its serve targets are in. Safe to re-run at any stage.
 import {
   type Tree,
@@ -46,7 +46,7 @@ export default async function serveOptionsGenerator(
   const serveIsLegacyOrchestrator = serve?.executor === 'nx:run-commands';
 
   // Every name the real app dev-server can live under, current-first. The house `dev-server` leaf wins;
-  // the legacy Firebase inner targets are tolerated for --repair on older projects.
+  // the legacy Firebase inner targets are tolerated for --sync on older projects.
   const devServerNames = ['dev-server', 'serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app'].filter(
     (name) => targets[name]
   );
@@ -59,7 +59,7 @@ export default async function serveOptionsGenerator(
       delete (serve.options as Record<string, unknown>).host;
     }
     // 2) The nx-tools:serve composer DELEGATES `host` to the dev-server (forwards `--host`), so `host`
-    //    belongs on it too — assert it (the `serve` generator sets it; this keeps --repair honest).
+    //    belongs on it too — assert it (the `serve` generator sets it; this keeps --sync honest).
     if (serveIsNxToolsComposer && serve) {
       serve.options = { ...serve.options, host };
     }

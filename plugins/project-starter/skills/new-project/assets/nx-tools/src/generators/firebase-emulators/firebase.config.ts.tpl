@@ -23,8 +23,8 @@
 // inline, so it leaves the override resolver in the prod bundle — `ngDevMode` is the only signal the
 // Angular optimizer guarantees to fold.
 //
-// GENERATOR-OWNED — this file is rewritten IN FULL on every `--repair`, so never edit it by hand: a
-// future repair silently reverts it. It carries no per-project values by design, so everything you'd want
+// GENERATOR-OWNED — this file is rewritten IN FULL on every `--sync`, so never edit it by hand: a
+// future sync silently reverts it. It carries no per-project values by design, so everything you'd want
 // to change lives elsewhere:
 //   • per-environment CONFIG (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`,
 //     functions `proxied`) → environment.ts / environment.<env>.ts;

@@ -22,7 +22,7 @@
 // `nx g @bespunky/nx-tools:app` — needs its own dev-server leaf + serve target, so it is applied here,
 // on the same code path serve-options runs on, and can't drift as apps are added.
 //
-// Idempotent + --repair-safe: re-running re-asserts the same targets (self-healing the raw
+// Idempotent + --sync-safe: re-running re-asserts the same targets (self-healing the raw
 // @nx/angular `serve` and any legacy dev-server names into the `dev-server` leaf), rewrites the
 // generator-owned tab-label glue, and re-wires the provider only if absent.
 import {
@@ -53,7 +53,7 @@ const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
 // Every historical name the app dev-server may hide under (a fresh @nx/angular `serve`, or a legacy
 // Firebase inner target) — consolidated into the single `dev-server` leaf.
 const LEGACY_DEV_SERVER_NAMES = ['dev-server', 'serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app'];
-// Retired PER-APP targets the unified serve subsumes — deleted on every run so a --repair'd project is
+// Retired PER-APP targets the unified serve subsumes — deleted on every run so a --sync'd project is
 // left with just `serve` + `dev-server`. `serve-worktree`'s executor (@bespunky/nx-tools:serve-worktree)
 // was renamed to `serve` in 0.3.0, so the old target now dangles at a non-existent executor;
 // `serve-with-shared-browser`'s serve+navigate is now the serve executor's default shared-browser layer.

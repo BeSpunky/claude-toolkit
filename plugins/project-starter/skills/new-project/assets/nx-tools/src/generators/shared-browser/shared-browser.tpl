@@ -271,7 +271,7 @@ resolve_web_port() {
 
   # THE LIVE LISTENER OUTRANKS EVERY RECORD AND EVERY PREFERENCE. "The port we allocated" and "the port
   # that is live" are different facts, and conflating them was a real bug with a real trigger: on the
-  # upgrade path a `--repair` rewrites this script while a stack from the old fixed-port version is still
+  # upgrade path a `--sync` rewrites this script while a stack from the old fixed-port version is still
   # up, so there is a live websockify and NO recorded port. Trusting the record then allocated a SECOND
   # port, skipped spawning websockify ("already running"), failed the readiness gate — and left `url`
   # printing a port nothing was ever bound to, with exit 0. Asking the listener cannot be wrong.

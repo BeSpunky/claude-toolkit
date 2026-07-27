@@ -5,7 +5,7 @@
 // `authDomain` is required for any OAuth provider sign-in (popup and redirect
 // both refuse to run without it — including against the Auth emulator). It's
 // optional in the type only so older user-owned environment files keep
-// compiling across `--repair`; every generated file fills it in.
+// compiling across `--sync`; every generated file fills it in.
 //
 // `messagingSenderId` / `vapidKey` are only needed for FCM web push — add them
 // to the real-project environment files (from `firebase apps:sdkconfig`) when used.
@@ -41,12 +41,12 @@ export interface Environment {
     // Cloud Functions callable region (e.g. 'us-central1', 'europe-west1'). Set it so a per-environment
     // build pins callables to a region; omit → the SDK default. firebase.config.ts reads this to pick
     // getFunctions(app, region). Configuration, not logic — it's the reason firebase.config.ts (which is
-    // generator-owned and rewritten every --repair) never needs a hand-edit for region.
+    // generator-owned and rewritten every --sync) never needs a hand-edit for region.
     functionsRegion?: string;
   };
   // This interface is app-owned after the first scaffold (the generator writes it only if absent):
   // add app-specific top-level fields here freely — e.g. `google?: { oauthClientId: string }` for a
-  // Google API (Calendar) OAuth client id. They survive `--repair`.
+  // Google API (Calendar) OAuth client id. They survive `--sync`.
   emulators?: {
     // `proxied` (auth too): reach the emulator through the dev-server's own origin (proxy.conf.mjs relays it).
     auth?: { url: string; default: boolean; proxied?: boolean };

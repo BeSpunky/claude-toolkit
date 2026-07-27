@@ -13,10 +13,10 @@
 //
 // 2. A no-clobber PROVENANCE RATCHET (the stamp lesson). A colour has a source — name-hash < design-system <
 //    manual — recorded in .vscode/.window-identity.json. A run only writes when its source RANKS >= the
-//    recorded one, so a --repair's name-hash pass can never downgrade a design-system or hand-picked colour,
+//    recorded one, so a --sync's name-hash pass can never downgrade a design-system or hand-picked colour,
 //    and an automated design-system re-derive can never stomp a human's manual choice.
 //
-// 3. DETERMINISM. Colours are pure functions of (primary | name) — see color.ts — so a repair regenerates
+// 3. DETERMINISM. Colours are pure functions of (primary | name) — see color.ts — so a sync regenerates
 //    byte-identical output and a name-hashed colour is stable across machines and clones.
 import { type Tree, logger, parseJson } from '@nx/devkit';
 import { applyEdits, modify } from 'jsonc-parser';
@@ -71,7 +71,7 @@ export default async function windowIdentityGenerator(
   const existing = readMarker(tree);
 
   // The ratchet: never let a lower-authority run overwrite a higher-authority identity. Equal rank re-writes
-  // (a legitimate refresh — repair re-asserting name-hash, or a design-system colour that changed).
+  // (a legitimate refresh — sync re-asserting name-hash, or a design-system colour that changed).
   if (existing && RANK[source] < RANK[existing.source]) return;
 
   // UNMARKED HUMAN IDENTITY. The ratchet can only defend what it recorded — and a project that set its own
@@ -123,7 +123,7 @@ export default async function windowIdentityGenerator(
   // NEVER emit a delete for something that isn't there. jsonc-parser throws ("Can not delete in empty
   // document") rather than no-opping, so an unconditional cleanup edit — correct on a settings file that has
   // our keys — takes the whole run down on a project that has no .vscode/settings.json at all. Which is every
-  // repo this generator now reaches: the layered repair applies the agent layer to projects that were never
+  // repo this generator now reaches: the layered sync applies the agent layer to projects that were never
   // scaffolded. So each delete is conditioned on the key actually existing in the CURRENT document.
   const edits: JsonEdit[] = [{ path: ['window.title'], value: emoji + TITLE_TAIL }];
   if (Object.keys(nextColors).length === 0) {

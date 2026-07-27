@@ -3,7 +3,7 @@
 // The house default is `packages/` (BeSpunky ships publishable packages), but a house generator run
 // against a CONSUMER'S existing repo must land a new library where that repo already keeps libraries —
 // an Nx workspace that uses `libs/` should not sprout a lone `packages/` folder the moment someone runs
-// `--repair`. So the library home is DETECTED, not assumed.
+// `--sync`. So the library home is DETECTED, not assumed.
 //
 // This models the missing concept — "the workspace's library home" — as a single resolved value, rather
 // than hardcoding `packages/<name>` at every call site. Resolution is deliberately ordered from the most

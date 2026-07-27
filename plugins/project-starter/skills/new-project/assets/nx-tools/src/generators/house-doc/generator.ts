@@ -2,18 +2,18 @@
 //
 // The toolkit-owned conventions (architecture directives, the branch/release workflow, serving,
 // worktrees, Firebase, Nx, the shared browser) used to live inline in each project's CLAUDE.md — where
-// they went STALE, because `scaffold.sh --repair` deliberately never rewrites the hand-owned CLAUDE.md.
+// they went STALE, because `scaffold.sh --sync` deliberately never rewrites the hand-owned CLAUDE.md.
 // This generator moves them to HOUSE.md, a GENERATOR-OWNED reference rewritten on every run (so it always
 // matches the installed @bespunky/nx-tools), and leaves only a small, marker-delimited POINTER in
 // CLAUDE.md — the single part of CLAUDE.md it touches, so the rest stays the project's own.
 //
-// Idempotent + --repair-safe: HOUSE.md is fully rewritten every run; the pointer is upserted between its
+// Idempotent + --sync-safe: HOUSE.md is fully rewritten every run; the pointer is upserted between its
 // markers (inserted if absent, replaced/restored if present), so a hand-deleted or edited pointer heals.
 //
 // It also renders the STAMP into HOUSE.md's header — a marker line recording the @bespunky/nx-tools (and,
 // for provenance, the plugin) version this project was last generated with. The stamp exists so that "is
 // this project behind the installed toolkit?" is a FILE READ rather than a five-minute Docker run: it is
-// what lets project-starter's SessionStart hook detect a toolkit upgrade and ask for a repair, instead of
+// what lets project-starter's SessionStart hook detect a toolkit upgrade and ask for a sync, instead of
 // speculatively running one.
 //
 // WHY THE STAMP LIVES IN HOUSE.md, and not in a file of its own. The hook's whole premise is that the stamp
@@ -21,7 +21,7 @@
 // Claude state (this project's own generators already gitignore `.claude/data/` and `.claude/skills/`), where
 // one entirely reasonable `.gitignore` line would silently delete the stamp from every other checkout and
 // leave the hook nagging forever with no way to fix it. HOUSE.md is the opposite: root-level, unambiguously
-// committed, generator-owned, rewritten on every repair — and already the file the hook stats to decide
+// committed, generator-owned, rewritten on every sync — and already the file the hook stats to decide
 // whether this is even a house project. One file, one truth, no new gitignore surface.
 import { type Tree, formatFiles } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
@@ -36,11 +36,11 @@ interface HouseDocSchema {
   layers?: LayerId[];
   // The @bespunky/nx-tools version whose generators are producing this project. Passed by scaffold.sh
   // (derived from the staged package.json — never hand-maintained). THIS is the version the hook compares:
-  // it is what actually determines the generated output, so it is what a repair can actually change.
+  // it is what actually determines the generated output, so it is what a sync can actually change.
   nxToolsVersion?: string;
   // The bespunky-project-starter plugin version that shipped those generators. Recorded for provenance but
   // deliberately NOT what the hook compares — the house convention bumps a plugin's version on ANY change
-  // (a SKILL.md typo, a README line), and demanding a multi-minute repair for a change that
+  // (a SKILL.md typo, a README line), and demanding a multi-minute sync for a change that
   // regenerates nothing would train everyone to ignore the notice.
   pluginVersion?: string;
 }
@@ -52,7 +52,7 @@ const END = '<!-- @bespunky/house-tooling:end -->';
 
 // What an unknown version records as. A version is only unknown when a generator is invoked directly
 // (`nx g …:house-doc`) rather than through scaffold.sh; the hook treats it as "can't compare" and — like a
-// missing stamp on a house project — asks for a repair, which is exactly the action that fixes it.
+// missing stamp on a house project — asks for a sync, which is exactly the action that fixes it.
 const UNKNOWN = 'unknown';
 
 export default async function houseDocGenerator(
@@ -78,13 +78,13 @@ export default async function houseDocGenerator(
   const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers);
 
   // 1) The generated reference — rewritten every run (generator-owned; never hand-edited), carrying the
-  //    stamp in its header. No timestamp anywhere: a stamp that changed on every repair would dirty the
+  //    stamp in its header. No timestamp anywhere: a stamp that changed on every sync would dirty the
   //    tree (and the git diff) even when the toolkit hadn't moved. Version identity is the whole question.
   tree.write('HOUSE.md', render(tpl('HOUSE.md.tpl')));
 
   // 2) The bounded pointer in CLAUDE.md — the ONLY part of CLAUDE.md this touches. Skip when CLAUDE.md
   //    doesn't exist yet (a fresh scaffold writes CLAUDE.md from the template, which already carries the
-  //    pointer); on --repair CLAUDE.md exists and the pointer is inserted/regenerated.
+  //    pointer); on --sync CLAUDE.md exists and the pointer is inserted/regenerated.
   if (tree.exists('CLAUDE.md')) {
     const current = tree.read('CLAUDE.md', 'utf8') ?? '';
     const pointer = render(tpl('pointer.md.tpl')).trim();
@@ -92,7 +92,7 @@ export default async function houseDocGenerator(
     if (next !== current) tree.write('CLAUDE.md', next);
   }
 
-  // 3) Keep the hook's SNOOZE file out of git. It records "this developer declined the repair for version
+  // 3) Keep the hook's SNOOZE file out of git. It records "this developer declined the sync for version
   //    X" — a per-person, per-machine decision, the exact opposite of the stamp: it must NOT travel to
   //    other clones, or one person's "not now" would silence the notice for the whole team.
   ignoreSnoozeFile(tree);
@@ -121,7 +121,7 @@ function renderTemplate(
   return expandBlocks(src, flags)
     .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
     .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion)
-    // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the repair
+    // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the sync
     // re-DETECTS. Its value is drift: a project whose workspace now has `firebase` but whose stamp doesn't
     // grew a layer that never got its house tooling, and that is a fact worth being able to see.
     .replace(/\{\{LAYERS\}\}/g, layers.length ? layers.join(',') : 'none');
@@ -162,7 +162,7 @@ function ignoreSnoozeFile(tree: Tree): void {
   const sep = gitignore === '' || gitignore.endsWith('\n') ? '' : '\n';
   tree.write(
     '.gitignore',
-    `${gitignore}${sep}\n# Claude Code — this developer's "not now" on a house-tooling repair (local, never shared)\n${entry}\n`,
+    `${gitignore}${sep}\n# Claude Code — this developer's "not now" on a house-tooling sync (local, never shared)\n${entry}\n`,
   );
 }
 

@@ -1,5 +1,5 @@
 // Dev-server proxy — relay Firebase emulator traffic through the app's OWN origin instead of exposing the
-// emulator ports to the host browser. GENERATOR-OWNED (rewritten on every --repair); don't edit.
+// emulator ports to the host browser. GENERATOR-OWNED (rewritten on every --sync); don't edit.
 //
 // Why this exists: a forwarded emulator port is frequently squatted on Windows hosts (ASP.NET dev HTTPS,
 // Intel services, …). A squatter that accepts the TCP connection but never answers leaves the request

@@ -15,7 +15,7 @@
 # WHY WRITING A FILE IS ALLOWED HERE. The rule the project-starter hook earned is "a hook may drive a CHEAP,
 # ADDITIVE, REVERSIBLE action; never a heavy, irreversible one." Appending a timestamped markdown file is the
 # cheap-additive class — and headless is the CASE FOR it, not against: an unattended agent most needs the
-# breadcrumb, and an append needs no consent. (A Docker repair or a delete would be the other class — banned.)
+# breadcrumb, and an append needs no consent. (A Docker sync or a delete would be the other class — banned.)
 #
 # SCOPE. It writes ONLY when the current branch is a feature effort with an existing package — so checkpoints
 # accrue exactly where wanted and never litter main or a throwaway branch. No package → it only nudges.

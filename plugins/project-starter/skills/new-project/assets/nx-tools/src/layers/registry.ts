@@ -8,7 +8,7 @@
 // didn't apply.
 //
 // A layer makes the precondition a first-class, inspectable value:
-//   - DETECT  — is this capability present? Pure; never mutates. This is the half that lets `--repair`
+//   - DETECT  — is this capability present? Pure; never mutates. This is the half that lets `--sync`
 //               re-apply only what a project actually has, instead of assuming every project is the
 //               scaffolder's own Angular+Firebase shape.
 //   - REQUIRE — a generator states what it needs, and gets a sentence a human can act on when it's absent.
@@ -72,7 +72,7 @@ export const LAYERS: readonly Layer[] = [
     // HOUSE.md is the marker: generator-owned, root-level, committed, and already the file the SessionStart
     // hook stats. Its presence means the house generators have been applied here at least once.
     detect: (tree) => tree.exists('HOUSE.md'),
-    ensureHint: '`scaffold.sh --repair --ensure=agent <project>`',
+    ensureHint: '`scaffold.sh --sync --ensure=agent <project>`',
   },
   {
     id: 'js',
@@ -120,7 +120,7 @@ export const LAYERS: readonly Layer[] = [
     title: 'Firebase',
     requires: ['angular'],
     detect: (tree) => tree.exists('firebase.json'),
-    ensureHint: '`scaffold.sh --repair --firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators --project=<app>`)',
+    ensureHint: '`scaffold.sh --sync --firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators --project=<app>`)',
   },
 ];
 
@@ -138,7 +138,7 @@ export function layer(id: LayerId): Layer {
  *
  * A layer is reported present only when its own detector says so — a layer is NOT implied by the layers above
  * it. That keeps the profile an honest description of the tree rather than a derived fiction: a workspace can
- * genuinely have `firebase.json` while its app was deleted, and a repair needs to see that, not paper over it.
+ * genuinely have `firebase.json` while its app was deleted, and a sync needs to see that, not paper over it.
  */
 export function detectLayers(tree: Tree): LayerId[] {
   return LAYERS.filter((entry) => safeDetect(entry, tree)).map((entry) => entry.id);
@@ -167,7 +167,7 @@ export function requireLayer(tree: Tree, id: LayerId, generatorName: string): vo
 /**
  * A detector must never take the whole run down. `getProjects` throws on a workspace whose project config is
  * mid-edit or malformed, and "we could not tell" has to degrade to "absent" — the caller then either skips the
- * layer (repair) or reports a precondition (requireLayer), both of which are recoverable. A crash inside
+ * layer (sync) or reports a precondition (requireLayer), both of which are recoverable. A crash inside
  * DETECTION would not be.
  */
 function safeDetect(entry: Layer, tree: Tree): boolean {
