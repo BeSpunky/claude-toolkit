@@ -71,21 +71,63 @@ export default async function devcontainerGenerator(
     flags
   );
 
-  // OWNERSHIP. The marker is what separates "regenerate the file we maintain" from "adopt somebody else's".
-  // Its absence next to an existing devcontainer.json is not ambiguity — it is a positive signal that a
-  // human wrote that file before this generator ever ran here.
-  const ours = tree.exists(MARKER);
+  // OWNERSHIP. The marker separates "regenerate the file we maintain" from "adopt somebody else's" — and it
+  // records that as an EXPLICIT `owned` flag, not as its own existence.
+  //
+  // Deriving ownership from the marker merely EXISTING is a trap this fell into: the marker was written on
+  // both paths, so the run after an adoption saw a marker, concluded it owned the file, and overwrote the
+  // devcontainer it had carefully merged into the run before. The guarantee held for exactly one run — the
+  // worst kind of bug, because a single-run test passes and the damage lands on somebody's second repair.
+  //
+  // A missing `owned` on an existing marker reads as NOT owned. That is the safe direction: the cost of
+  // being wrong is an additive merge where a regeneration would have done (recoverable, visible in the
+  // report below), against overwriting a file we don't own (not recoverable without the backup tag).
+  const marker = readMarker(tree);
+  const ours = marker?.owned === true;
   const exists = tree.exists(DEVCONTAINER);
+  const owning = !exists || ours;
 
-  if (!exists || ours) {
+  let skipped: string[] = [];
+  if (owning) {
     tree.write(DEVCONTAINER, rendered);
   } else {
-    mergeIntoForeign(tree, rendered);
+    skipped = mergeIntoForeign(tree, rendered);
   }
 
-  writePostCreate(tree, !exists || ours);
+  writePostCreate(tree, owning);
 
-  tree.write(MARKER, `${JSON.stringify({ generator: '@bespunky/nx-tools:devcontainer', flags }, null, 2)}\n`);
+  // The ADOPTION REPORT. An adopted devcontainer diverges from the house spec on every key it already
+  // declared, permanently and by design — the merge is additive and never argues with the project's own
+  // choices. Until now the only trace of that was a log line that scrolled past, so the divergence grew
+  // with nothing to see it. Recording the skipped keys makes it a fact a human (or the SessionStart hook)
+  // can look at and decide about. It is a RECORD, never an input: the next run re-reads the files and
+  // recomputes the whole thing, exactly as with the layer stamp.
+  const record: Json = {
+    generator: '@bespunky/nx-tools:devcontainer',
+    owned: owning,
+    flags,
+  };
+  if (!owning) {
+    record.adopted = {
+      note:
+        'This devcontainer.json was written by the project, not by this generator, so house settings are ' +
+        'only ADDED, never changed. The keys below already had project values and were left alone — apply ' +
+        'any of them by hand if you want the house behaviour.',
+      skipped,
+    };
+  }
+  tree.write(MARKER, `${JSON.stringify(record, null, 2)}\n`);
+}
+
+interface Marker {
+  owned?: boolean;
+}
+
+/** The ownership marker, or `null` when absent/unparseable (both of which mean "we don't own this"). */
+function readMarker(tree: Tree): Marker | null {
+  if (!tree.exists(MARKER)) return null;
+  const parsed = tryParse(tree.read(MARKER, 'utf8') ?? '');
+  return parsed ? (parsed as Marker) : null;
 }
 
 /**
@@ -402,10 +444,13 @@ function portsAttributesJson(flags: Record<string, boolean>): string {
  * nothing about. Adding an extension it lacks is a courtesy; changing its image is a breakage.
  *
  * The cost is honest and worth naming: an adopted devcontainer does NOT get house updates to keys it
- * already defines. So the skipped keys are REPORTED rather than silently dropped — the reader can then
- * apply any of them by hand, which is a decision they are equipped to make and this generator is not.
+ * already defines. So the skipped keys are REPORTED rather than silently dropped — and returned, so the
+ * caller can persist them. The reader can then apply any of them by hand, which is a decision they are
+ * equipped to make and this generator is not.
+ *
+ * Returns the dotted paths that were left as the project had them.
  */
-function mergeIntoForeign(tree: Tree, rendered: string): void {
+function mergeIntoForeign(tree: Tree, rendered: string): string[] {
   const existingText = tree.read(DEVCONTAINER, 'utf8') ?? '{}';
   const existing = tryParse(existingText);
   const house = tryParse(rendered);
@@ -415,7 +460,7 @@ function mergeIntoForeign(tree: Tree, rendered: string): void {
       `[devcontainer] \`${DEVCONTAINER}\` exists but could not be parsed as JSONC, so it was left exactly ` +
         `as-is. Fix or remove it and re-run to get the house devcontainer.`
     );
-    return;
+    return [];
   }
 
   const added: string[] = [];
@@ -461,7 +506,7 @@ function mergeIntoForeign(tree: Tree, rendered: string): void {
       mergeObject(key, value, existing[key] as Json, edit, appendMissing, skipped);
     } else if (Array.isArray(value) && Array.isArray(existing[key])) {
       appendMissing([key], value, existing[key] as unknown[]);
-    } else {
+    } else if (!sameValue(value, existing[key])) {
       skipped.push(key);
     }
   }
@@ -471,8 +516,11 @@ function mergeIntoForeign(tree: Tree, rendered: string): void {
   logger.info(
     `[devcontainer] Adopted the existing \`${DEVCONTAINER}\` (not generator-written) — merged additively.\n` +
       `  added:      ${added.length ? added.join(', ') : '(nothing — already complete)'}\n` +
-      `  left as-is: ${skipped.length ? skipped.join(', ') : '(nothing)'}`
+      `  left as-is: ${skipped.length ? skipped.join(', ') : '(nothing)'}\n` +
+      `  (recorded in \`${MARKER}\` — this project keeps its own values for those keys)`
   );
+
+  return skipped;
 }
 
 /** Merge one nested object level: add absent keys, recurse into objects, union arrays, keep scalars. */
@@ -500,9 +548,9 @@ function mergeObject(
         else if (isPlainObject(innerValue) && isPlainObject(have)) {
           for (const [leaf, leafValue] of Object.entries(innerValue)) {
             if (!(leaf in (have as Json))) edit([...innerPath, leaf], leafValue);
-            else skipped.push([...innerPath, leaf].join('.'));
+            else if (!sameValue(leafValue, (have as Json)[leaf])) skipped.push([...innerPath, leaf].join('.'));
           }
-        } else skipped.push(innerPath.join('.'));
+        } else if (!sameValue(innerValue, have)) skipped.push(innerPath.join('.'));
       }
       continue;
     }
@@ -510,8 +558,21 @@ function mergeObject(
       appendMissing(path, value, existing[key] as unknown[]);
       continue;
     }
-    skipped.push(path.join('.'));
+    if (!sameValue(value, existing[key])) skipped.push(path.join('.'));
   }
+}
+
+/**
+ * Do the project's value and the house value already AGREE?
+ *
+ * This is what makes the adoption report mean "where this project DIVERGES from the house" rather than the
+ * far less useful "which keys happened to exist". Without it the report grew on the second run: keys the
+ * FIRST run added were then present, so they were re-reported as left-as-is — listing settings that had in
+ * fact been applied, which is precisely the confusion the report exists to remove. Structural equality,
+ * since these are config values (scalars, small arrays and objects), not identities.
+ */
+function sameValue(a: unknown, b: unknown): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
 }
 
 /** An empty array or empty object — something whose addition would carry no information. */

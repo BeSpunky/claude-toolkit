@@ -350,7 +350,22 @@ bash <path-to>/scaffold.sh --repair --ensure=agent [--yes] <project-path>
 
 `nx init` creates the Nx workspace in place if there isn't one (plus `@nx/devkit`, which an `nx init` workspace doesn't ship), then the agent layer lands: devcontainer, `.claude/settings.json`, window identity, `HOUSE.md`. No Angular, no design system, no dev-loop tooling — none of those layers is present or requested, and the generated `HOUSE.md` renders only the sections that apply.
 
-**It does not overwrite what the repo already owns.** An existing `devcontainer.json` is **merged additively** — its image, name, `postCreateCommand`, features and comments survive, and the keys the merge skipped are reported so a human can apply them deliberately. An existing `post-create.sh` is **never touched**; the house script lands beside it as `post-create.bespunky.sh` with the one line needed to chain them. `CLAUDE.md` gets only its marker-delimited pointer. A project the generator *does* own (marked by `.devcontainer/.bespunky-devcontainer.json`) is regenerated normally — ownership is what picks the path. And `.devcontainer/post-create.local.sh` is created once, never regenerated, and runs last: the seam for project-specific setup that survives every future repair.
+**It does not overwrite what the repo already owns.** An existing `devcontainer.json` is **merged additively** — its image, name, `postCreateCommand`, features and comments survive. An existing `post-create.sh` is **never touched**; the house script lands beside it as `post-create.bespunky.sh` with the one line needed to chain them. `CLAUDE.md` gets only its marker-delimited pointer. And `.devcontainer/post-create.local.sh` is created once, never regenerated, and runs last: the seam for project-specific setup that survives every future repair.
+
+**Ownership is explicit, and the divergence is recorded.** `.devcontainer/.bespunky-devcontainer.json` carries an `owned` flag — a devcontainer this generator wrote is regenerated on every repair; one it adopted is merged into, for good. (Ownership is *not* inferred from the marker merely existing: that made the run after an adoption believe it owned the file and overwrite the merge, so the guarantee held for exactly one run.) When adopting, the marker also carries an **adoption report** — the keys where the project's value genuinely differs from the house value, so the permanent divergence an additive merge creates has a surface instead of a log line that scrolled past:
+
+```jsonc
+{
+  "generator": "@bespunky/nx-tools:devcontainer",
+  "owned": false,
+  "adopted": {
+    "note": "…house settings are only ADDED, never changed…",
+    "skipped": ["name"]
+  }
+}
+```
+
+It lists *divergences*, not merely keys that exist — so it converges (a key the last repair added is not re-reported as skipped) and stays short enough to act on.
 
 ## How the scaffolder works
 

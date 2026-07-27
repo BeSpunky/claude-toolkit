@@ -37,7 +37,7 @@ let tsModule: typeof TS | null | undefined;
  * `null` the missing-module case produces, and callers already warn with manual wiring instructions.
  * (`compile-generators.mts` hits the same wall from the other side — see the pinned TS 5 in scaffold.sh.)
  */
-function loadTypeScript(): typeof TS | null {
+export function loadTypeScript(): typeof TS | null {
   if (tsModule === undefined) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires

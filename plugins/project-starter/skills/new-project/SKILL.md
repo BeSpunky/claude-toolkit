@@ -122,7 +122,8 @@ That gives *any* repo the house DX and nothing else: an Nx workspace created **i
 
 **What it will NOT do to a repo that already has its own setup** — this is the part to state plainly when offering it:
 
-- An existing **`.devcontainer/devcontainer.json`** is **merged additively**: house keys that are missing get added, and everything the repo already declares — its image, its name, its `postCreateCommand`, its features, its comments — is left exactly as-is, with the skipped keys reported so a human can apply any of them deliberately.
+- An existing **`.devcontainer/devcontainer.json`** is **merged additively**: house keys that are missing get added, and everything the repo already declares — its image, its name, its `postCreateCommand`, its features, its comments — is left exactly as-is.
+- **Ownership is explicit and the divergence is recorded.** `.devcontainer/.bespunky-devcontainer.json` carries `owned: true|false`. A devcontainer the generator wrote is regenerated every repair; one it adopted is merged into, permanently — and the marker then carries an **adoption report** (`adopted.skipped`) listing the keys where the project's value genuinely *differs* from the house value. **When offering a repair on an adopted repo, read that list and tell the user what they're not getting** — it is the only surface for a divergence that otherwise grows silently. It lists divergences rather than merely-present keys, so it converges and stays short.
 - An existing **`.devcontainer/post-create.sh`** is **never touched**. The house script is written beside it as `post-create.bespunky.sh`, with the one line needed to chain them printed for the user to place. A shell script's contents can't be merged meaningfully, so it isn't attempted.
 - **`CLAUDE.md`** gets only the marker-delimited `HOUSE.md` pointer; the prose is preserved verbatim (§1b).
 - **`.claude/settings.json`** is merged, never overwritten.
