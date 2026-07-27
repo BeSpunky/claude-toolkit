@@ -194,7 +194,8 @@ So the house files for that layer are missing. What each one brings:
   firebase      — the emulator wiring, the JDK step, and the forwarded emulator ports
 
 Re-applying the house generators adds them: the sync path of the
-bespunky-project-starter:new-project skill.
+bespunky-project-starter:new-project skill — or, in one step, the \`/sync\` command, which updates the
+toolkit first and then syncs this project.
 
 RELAY THIS TO THE USER — do not act on it. Offer the sync; it needs a human's yes (see the sync's \`--yes\`
 gate) and must never run in a scripted or headless session. If they decline, record it so they are not asked
@@ -267,7 +268,8 @@ EOF
 
 So this project's generated house files (HOUSE.md, .claude/settings.json, the devcontainer, the serve /
 worktree / design-system targets) are stale. Re-applying the house generators is what refreshes them: the
-sync path of the bespunky-project-starter:new-project skill.
+sync path of the bespunky-project-starter:new-project skill — or, in one step, the \`/sync\` command, which updates the
+toolkit first and then syncs this project.
 
 RELAY THIS TO THE USER — do not act on it. Mention it briefly at the start of your reply, before their task,
 and offer the sync. The sync REFUSES to run unattended: it needs a human's yes, and passing its \`--yes\`

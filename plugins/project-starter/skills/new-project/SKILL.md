@@ -142,6 +142,14 @@ If `scaffold.sh` fails partway, **do not improvise the remaining phases by hand*
 bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" --sync [--firebase] [--yes] <PROJECT_PATH_OR_NAME> [<APP_NAME>]
 ```
 
+**The ordinary way to run this is the `/sync` command**, which updates the claude-toolkit plugins first and
+then syncs the current project — so the sync applies the CURRENT house standard rather than whatever copy
+this machine happens to have. Reach for the raw script below when syncing a project that is not the one
+open in this session, or when you need flags the command does not pass through.
+
+```
+```
+
 **Sync runs right here — including inside the project's own devcontainer.** It does **not** require Docker: when the local Node is new enough (22.18+, which is *always* true inside a devcontainer) the script runs the house generators natively, no daemon and no image. So the correct place to sync a scaffolded project is from a Claude session *at that project* — the devcontainer, or any Linux/macOS shell with a modern Node. **Do not tell the user to "run it on the host with Docker Desktop"** — that was only ever needed on the old-Node fallback path, and it is wrong for a devcontainer (which has no Docker). Only when the local Node is too old does it fall back to `docker run` (then it needs a Docker CLI + daemon; `--docker` forces that path).
 
 **Sync REFUSES to run unattended — the `--yes` gate.** A sync rewrites generated files and takes minutes, so it must never happen because something *inferred* that it should. On a TTY the script prompts a human. With no TTY (your shell), it **aborts** unless `--yes` is passed — and `--yes` *asserts that the user has explicitly agreed in this conversation*. Pass it only when that is true: never to satisfy the gate, never on inferred consent. In CI it refuses outright — no flag can conjure a human. This is what makes "detection is automatic, execution is consented" (§1c) structural rather than a matter of your good behavior.
