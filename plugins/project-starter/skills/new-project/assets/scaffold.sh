@@ -34,7 +34,11 @@
 #
 # Usage:
 #   scaffold.sh [--firebase] [--voice] [--no-github] [--docker] <project-name> [app-name]          # full scaffold
-#   scaffold.sh --sync [--firebase] [--voice] [--no-backup] [--yes] [--docker] <project-path|project-name> [app-name]
+#   scaffold.sh --sync [--ensure=<layers>] [--firebase] [--voice] [--no-backup] [--yes] [--docker] <project-path|project-name> [app-name]
+#
+#   --staging (scaffold or sync) additionally scaffolds the staging environment bundle; requires --firebase.
+#   --ensure=<csv> brings layers into being: nx,agent,firebase for a sync; also web,angular,design-system
+#                  for a scaffold. Everything else is DETECTED, never ensured.
 #
 # Sync auto-backup: --sync snapshots the project to a git tag (sync-backup-<ts>) BEFORE running
 # any generator, so a regenerated file (e.g. firebase.config.ts) is always recoverable — review with
@@ -54,7 +58,8 @@
 # Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
 # clobber anything that already exists.
 #
-# Leading flags (--sync, --firebase, --voice, --no-github, --no-backup, --yes, --docker) may be given in any order.
+# Leading flags (--sync, --ensure, --firebase, --staging, --voice, --no-github, --no-backup, --yes, --docker)
+# may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 #
 # WHERE IT RUNS. Docker was never the requirement — a modern NODE is (Docker only ever existed here to
@@ -95,7 +100,15 @@ while [ "${1:-}" != "" ]; do
     --yes|-y)     CONSENT=1;     shift;;
     --docker)     FORCE_DOCKER=1; shift;;
     --ensure=*)   ENSURE_ARG="${1#--ensure=}"; shift;;
-    --ensure)     ENSURE_ARG="${2:?--ensure needs a comma-separated layer list}"; shift 2;;
+    # The space form takes the NEXT argument as its value, so `--ensure --yes <proj>` would silently swallow
+    # `--yes` as a layer list — and the consent gate runs before layer validation, so the user would be told
+    # they hadn't consented rather than that they'd mistyped. Reject a flag-shaped value outright.
+    --ensure)     case "${2:-}" in
+                    ''|-*) echo "ERROR: --ensure needs a comma-separated layer list, got '${2:-}'." >&2
+                           echo "       Did you mean --ensure=<layers>? Known layers: nx,agent,js,web,angular,design-system,navigation,firebase" >&2
+                           exit 1;;
+                  esac
+                  ENSURE_ARG="$2"; shift 2;;
     --*)          echo "ERROR: unknown flag '$1'" >&2; exit 1;;
     *)            break;;
   esac
@@ -279,6 +292,9 @@ if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
   WORK_ROOT="$PROJECTS_DIR"          # where the <project> dir lives (host path)
   ASSETS_ROOT="$ASSETS_DIR"          # nx-tools + compile-generators.mts (host path)
   STAGE_DIR="$(mktemp -d)"           # nx-tools staging dir (native, cleaned up after the run)
+  # Armed HERE, next to the mktemp, not down at the run — a few hundred lines separate the two, and
+  # every early exit in between (the --staging guard, ensure validation, BACKUP_ABORT) leaked a temp dir.
+  trap 'rm -rf "$STAGE_DIR" "$STAGE_DIR-ts"' EXIT
   MAJOR="$(node -p 'process.versions.node.split(".")[0]')"   # generated devcontainer's nodeMajor = this Node's
   RUNTIME_DESC="native node $(node -v)"
 else
@@ -334,6 +350,20 @@ else
 fi
 ENSURE_LAYERS="${ENSURE_ARG:-$ENSURE_DEFAULT}"
 
+# `--firebase` IS an ensure request for the `firebase` layer — they are two spellings of one intent, and
+# keeping them as separate concepts is a bug rather than a nuance.
+#
+# It regressed exactly that way: layering gated the emulator generator on `layer_active firebase`, whose
+# detector is `firebase.json` — a file that by definition does NOT exist on the project you are adding
+# Firebase to. So `--sync --firebase` silently skipped the wiring while still handing the devcontainer
+# `--firebase=true`, producing a Firebase-flavoured container (gcloud CLI, vsfire, emulator ports) attached
+# to no emulators at all. Worse, this script's own error text advised that exact command as the way to add
+# Firebase. Tying the two together makes the flag mean what it says, in both directions.
+case ",$ENSURE_LAYERS," in
+  *,firebase,*) FIREBASE=1 ;;
+  *) [ "$FIREBASE" = "1" ] && ENSURE_LAYERS="${ENSURE_LAYERS:+$ENSURE_LAYERS,}firebase" ;;
+esac
+
 # `agent` is the one layer a run cannot sensibly omit once it is touching the project at all: it is the
 # devcontainer, the Claude settings and HOUSE.md — the reason to run this tool. Ensuring it implies `nx`,
 # because every house generator runs through `nx g`.
@@ -354,13 +384,36 @@ KNOWN_LAYERS="nx,agent,js,web,angular,design-system,navigation,firebase"
 # would rot silently with the stamp claiming otherwise. Refusing up front, with the registry's own hint for
 # how to add the layer natively, is the honest move: add the layer with Nx's tooling, then sync, and
 # detection picks it up on its own. This is the same reason the ensure/detect split exists at all.
-SYNC_ENSURABLE="nx,agent"
+#
+# `firebase` IS ensurable here, unlike the rest: the `firebase-emulators` generator genuinely creates that
+# layer from nothing (firebase.json, apps/functions, the env files, the emulator project) against an app
+# that already exists. That is precisely the "retrofit Firebase onto an existing project" case, and it is
+# reached through `--firebase`, which the block above folds into this ensure set.
+SYNC_ENSURABLE="nx,agent,firebase"
+# Scaffold can create more — it builds the workspace from nothing — but still not everything. `js` and
+# `navigation` have no creating step on this path either (their generators are on-demand), so accepting
+# them here would silently produce a workspace missing the very layer that was asked for.
+SCAFFOLD_ENSURABLE="nx,agent,web,angular,design-system,firebase"
 if [ -n "$ENSURE_LAYERS" ]; then
   for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
     case ",$KNOWN_LAYERS," in
       *",$_l,"*) ;;
       *) echo "ERROR: unknown layer '$_l' in --ensure. Known layers: $KNOWN_LAYERS" >&2; exit 1;;
     esac
+    if [ "$MODE" = "scaffold" ]; then
+      case ",$SCAFFOLD_ENSURABLE," in
+        *",$_l,"*) ;;
+        *)
+          echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
+          echo "       Scaffold the project, then add it with its own generator:" >&2
+          case "$_l" in
+            js)         echo "         nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular" >&2;;
+            navigation) echo "         nx g @bespunky/nx-tools:navigation-core" >&2;;
+          esac
+          echo "       Ensurable by a scaffold: $SCAFFOLD_ENSURABLE" >&2
+          exit 1;;
+      esac
+    fi
     if [ "$MODE" = "sync" ]; then
       case ",$SYNC_ENSURABLE," in
         *",$_l,"*) ;;
@@ -373,7 +426,6 @@ if [ -n "$ENSURE_LAYERS" ]; then
             web|angular)   echo "         nx add @nx/angular  # then: nx g @bespunky/nx-tools:app apps/<name>" >&2;;
             design-system) echo "         nx g @bespunky/nx-tools:design-system --scope=<scope>" >&2;;
             navigation)    echo "         nx g @bespunky/nx-tools:navigation-core" >&2;;
-            firebase)      echo "         re-run with --sync --firebase (which wires Firebase onto an existing app)" >&2;;
           esac
           echo "       Ensurable by --sync: $SYNC_ENSURABLE" >&2
           exit 1;;
@@ -587,14 +639,19 @@ fi
 # --- HOUSE.md last: it STAMPS the layer set, so it must run after every layer above has had its turn (a
 #     design system created moments ago has to appear in the stamp that records this run).
 if layer_active agent; then
-  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION --layers=\"\$ACTIVE\"
+  ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION --packageManager=$PM --layers=\"\$ACTIVE\"
 fi
 # Persist @bespunky/nx-tools as a real devDependency so the house generators (the app generator
 # for adding further apps, plus the reusable-tool extraction generators mark-extractable /
 # adopt-extracted) survive 'yarn install' and stay runnable in the project's devcontainer. Graceful
 # until the package is first published (see tools/publish-nx-tools); once published, --sync adds
 # it to existing projects.
-$PM_ADD_DEV @bespunky/nx-tools@^$NX_TOOLS_VERSION || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --sync to add it.'"
+# Gated on \`agent\`, like everything else here. Ungated, a run that applied NO generators — say
+# \`--sync --ensure=nx\` on a repo with no agent layer — would still add a dependency to the project's
+# package.json and trigger an install: a mutation with nothing to justify it.
+if layer_active agent; then
+  $PM_ADD_DEV @bespunky/nx-tools@^$NX_TOOLS_VERSION || echo 'NOTE: @bespunky/nx-tools not on npm yet — publish it (tools/publish-nx-tools), then scaffold --sync to add it.'
+fi"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
@@ -714,7 +771,6 @@ if [ "$RUNTIME" = "native" ]; then
   # Native: the generators run in THIS environment, as the invoking user, writing straight to the host
   # tree — so no mounts, no uid mapping, and no root-owned-files fixup are needed. $INNER's roots are
   # already bound to the real host paths. Clean up the staging dir on any exit.
-  trap 'rm -rf "$STAGE_DIR" "$STAGE_DIR-ts"' EXIT
   bash -c "$INNER"
 else
   docker run --rm \

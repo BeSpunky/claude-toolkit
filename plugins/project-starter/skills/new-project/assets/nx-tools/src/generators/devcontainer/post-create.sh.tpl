@@ -17,6 +17,31 @@ set -euo pipefail
 # Devcontainer-cli runs postCreateCommand from the workspace root.
 WS="$(pwd)"
 
+# --- which package manager does THIS project use? ---
+# Detected at RUN time, not baked in at generation time — the same self-adapting stance as the Firebase,
+# Playwright and Angular steps below, and for a stronger reason here: this script re-runs on every container
+# rebuild, long after it was generated, and a project can change package manager in between.
+#
+# Getting this wrong is not cosmetic. `yarn install` in an npm project does not switch it, it writes a SECOND
+# lockfile beside the first — after which `npm ci` fails for the whole team, caused by a container rebuild.
+# scaffold.sh takes exactly this care for the commands IT runs; this file is the artifact that runs forever
+# afterwards, so it has to take the same care itself.
+if [ -f "$WS/pnpm-lock.yaml" ]; then
+  PM=pnpm;  PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec"
+elif [ -f "$WS/yarn.lock" ]; then
+  PM=yarn;  PM_INSTALL="yarn install";  PM_EXEC="yarn"
+elif [ -f "$WS/package-lock.json" ]; then
+  PM=npm;   PM_INSTALL="npm install";   PM_EXEC="npx --no-install"
+else
+  # No lockfile: honour an explicit `packageManager` field if there is one, else the house default.
+  case "$(grep -m1 '"packageManager"' "$WS/package.json" 2>/dev/null)" in
+    *pnpm*) PM=pnpm; PM_INSTALL="pnpm install"; PM_EXEC="pnpm exec" ;;
+    *npm*)  PM=npm;  PM_INSTALL="npm install";  PM_EXEC="npx --no-install" ;;
+    *)      PM=yarn; PM_INSTALL="yarn install"; PM_EXEC="yarn" ;;
+  esac
+fi
+echo "[post-create] package manager: $PM"
+
 # --- 0. Reclaim /home/node/.cache ownership ---
 # Docker creates intermediate mount-point directories as root. When the
 # devcontainer mounts a volume to /home/node/.cache/ms-playwright (the
@@ -55,8 +80,8 @@ if [ -d /var/opt/bespunky/ports ]; then
 fi
 
 # --- 1. Workspace deps ---
-echo "[post-create] yarn install"
-yarn install
+echo "[post-create] $PM_INSTALL"
+$PM_INSTALL
 
 # --- 2. Pre-install the BeSpunky claude-toolkit plugins at project scope ---
 # So house skills/agents are live the moment the container opens. If the CLI
@@ -134,7 +159,7 @@ if grep -q '"@playwright/test"' package.json 2>/dev/null; then
   # (same best-effort stance as the claude-toolkit plugin pre-install above).
   pw_ok=0
   for attempt in 1 2 3; do
-    if yarn playwright install --with-deps chromium; then pw_ok=1; break; fi
+    if $PM_EXEC playwright install --with-deps chromium; then pw_ok=1; break; fi
     if [ "$attempt" -lt 3 ]; then
       echo "[post-create] Playwright browser install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
       sleep $((attempt * 10))
@@ -145,7 +170,7 @@ if grep -q '"@playwright/test"' package.json 2>/dev/null; then
   else
     echo "[post-create] WARNING: Playwright browser install failed after 3 attempts — likely a transient network/DNS issue."
     echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
-    echo "[post-create]            yarn playwright install --with-deps chromium"
+    echo "[post-create]            $PM_EXEC playwright install --with-deps chromium"
   fi
 fi
 

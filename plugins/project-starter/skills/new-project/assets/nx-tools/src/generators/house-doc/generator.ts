@@ -34,6 +34,10 @@ interface HouseDocSchema {
   // The layers this project has. Default: DETECTED from the workspace. Drives which sections render (a
   // non-Angular project has no business reading the Angular MCP section) and is recorded in the stamp.
   layers?: LayerId[];
+  // The package manager this project uses (yarn | npm | pnpm). Passed by scaffold.sh, which DETECTS it
+  // from the project's own lockfile. HOUSE.md is the doc the agent reads and copies commands out of, so
+  // `yarn nx build` in an npm project is not a cosmetic mismatch — it is a command that fails.
+  packageManager?: string;
   // The @bespunky/nx-tools version whose generators are producing this project. Passed by scaffold.sh
   // (derived from the staged package.json — never hand-maintained). THIS is the version the hook compares:
   // it is what actually determines the generated output, so it is what a sync can actually change.
@@ -64,6 +68,7 @@ export default async function houseDocGenerator(
   // direct `nx g …:house-doc` reads the workspace, so HOUSE.md can't describe a project that isn't there.
   const layers = options.layers ?? detectLayers(tree);
   const firebase = options.firebase ?? layers.includes('firebase');
+  const packageManager = options.packageManager ?? detectPackageManager(tree);
   const nxTools = options.nxToolsVersion ?? UNKNOWN;
   const plugin = options.pluginVersion ?? UNKNOWN;
   const tpl = (name: string) => readFileSync(join(__dirname, name), 'utf8');
@@ -75,7 +80,7 @@ export default async function houseDocGenerator(
     ...layers.map((id) => [id, true]),
     ['firebase', firebase],
   ]);
-  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers);
+  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers, packageManager);
 
   // 1) The generated reference — rewritten every run (generator-owned; never hand-edited), carrying the
   //    stamp in its header. No timestamp anywhere: a stamp that changed on every sync would dirty the
@@ -117,8 +122,10 @@ function renderTemplate(
   nxToolsVersion: string,
   pluginVersion: string,
   layers: readonly string[],
+  packageManager: string,
 ): string {
   return expandBlocks(src, flags)
+    .replace(/\{\{PM\}\}/g, packageManager)
     .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
     .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion)
     // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the sync
@@ -186,4 +193,16 @@ function upsertPointer(source: string, pointer: string): string {
     return `${source.slice(0, headingIdx)}${pointer}\n\n${source.slice(headingIdx)}`;
   }
   return `${source.trimEnd()}\n\n${pointer}\n`;
+}
+
+/**
+ * The project's package manager, from its own lockfile.
+ *
+ * Same evidence and same precedence scaffold.sh uses, so the doc can't disagree with the tool that wrote
+ * it. Defaults to the house standard only when the project genuinely declares nothing.
+ */
+function detectPackageManager(tree: Tree): string {
+  if (tree.exists('pnpm-lock.yaml')) return 'pnpm';
+  if (tree.exists('package-lock.json')) return 'npm';
+  return 'yarn';
 }

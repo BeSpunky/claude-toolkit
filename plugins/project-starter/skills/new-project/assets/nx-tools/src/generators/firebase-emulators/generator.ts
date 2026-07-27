@@ -156,7 +156,10 @@ function canonicalFunctionsBlock() {
       codebase: 'default',
       disallowLegacyRuntimeConfig: true,
       ignore: ['node_modules', '.git', 'firebase-debug.log', 'firebase-debug.*.log', '*.local'],
-      predeploy: ['yarn nx lint functions', 'yarn nx build functions'],
+      // `nx` via the local bin, not `yarn nx`: this array is baked into the project's firebase.json and
+      // runs on every deploy, so hardcoding one package manager breaks deploys for npm/pnpm projects.
+      // `node_modules/.bin` is on PATH for anything the Firebase CLI spawns from the workspace root.
+      predeploy: ['npx --no-install nx lint functions', 'npx --no-install nx build functions'],
     },
   ];
 }

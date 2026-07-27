@@ -436,23 +436,40 @@ async function promptForWorktree(worktrees: Worktree[]): Promise<Worktree | null
 function ensureInstalled(worktree: Worktree, install: boolean, dryRun: boolean): boolean {
   if (existsSync(join(worktree.path, 'node_modules'))) return true;
 
+  const [cmd, ...args] = installCmd(worktree.path);
+  const shown = [cmd, ...args].join(' ');
+
   if (dryRun) {
-    logger.info(`[serve] (dry run) ${worktree.path} has no node_modules — would run 'yarn install'.`);
+    logger.info(`[serve] (dry run) ${worktree.path} has no node_modules — would run '${shown}'.`);
     return true;
   }
   if (!install) {
-    logger.error(`[serve] ${worktree.path} has no node_modules and --install=false. Run 'yarn install' there first.`);
+    logger.error(`[serve] ${worktree.path} has no node_modules and --install=false. Run '${shown}' there first.`);
     return false;
   }
 
   logger.info(`[serve] Installing dependencies in ${worktree.path} (first serve of this worktree)…`);
   try {
-    execFileSync('yarn', ['install'], { cwd: worktree.path, stdio: 'inherit' });
+    execFileSync(cmd, args, { cwd: worktree.path, stdio: 'inherit' });
     return true;
   } catch (err) {
-    logger.error(`[serve] 'yarn install' failed in ${worktree.path}: ${(err as Error).message}`);
+    logger.error(`[serve] '${shown}' failed in ${worktree.path}: ${(err as Error).message}`);
     return false;
   }
+}
+
+/**
+ * The install command for a worktree, chosen from ITS OWN lockfile.
+ *
+ * Hardcoding `yarn install` here writes a `yarn.lock` into the worktree of an npm or pnpm project on the
+ * very first `nx serve --worktree=…` — a second lockfile, in a tree the developer is about to commit. A
+ * worktree is a checkout of the same repo, so its lockfile is the authority; scaffold.sh and post-create.sh
+ * each resolve the package manager the same way, from the same evidence.
+ */
+function installCmd(cwd: string): string[] {
+  if (existsSync(join(cwd, 'pnpm-lock.yaml'))) return ['pnpm', 'install'];
+  if (existsSync(join(cwd, 'package-lock.json'))) return ['npm', 'install'];
+  return ['yarn', 'install'];
 }
 
 export default runExecutor;

@@ -135,37 +135,47 @@ has_layer() {
 
 # All project.json files, excluding the directories that make a repo scan expensive. Printed once and
 # reused, so the cost is a single traversal no matter how many layers are probed.
-project_files() {
-  find "$PROJECT_DIR" \
-    \( -name node_modules -o -name .git -o -name dist -o -name .nx -o -name .angular -o -name tmp \) -prune -o \
-    -name project.json -print 2>/dev/null | head -200
-}
-PROJECT_FILES="$(project_files)"
-
-# Does any project.json match this pattern? Quiet (and false) when there are none to search.
+# Does any project.json match this pattern?
+#
+# `find … -exec grep -l {} +` rather than collecting paths first. Two reasons, both learned the hard way:
+# a plain `xargs` splits on whitespace, so `apps/my app/project.json` drops silently out of the scan; and
+# collecting `-print0` output into a shell variable does NOT fix that, because command substitution strips
+# NUL bytes (bash even warns), leaving one concatenated blob that matches nothing. `-exec … +` hands the
+# paths over as arguments, so a space is a non-event and no intermediate representation exists to corrupt.
+#
+# Each probe re-traverses. That is fine and deliberate: the traversal is pruned, and — far more importantly
+# — it happens only inside the guard below, so a project that cannot act on the answer never pays for it.
 in_projects() {
-  [ -n "$PROJECT_FILES" ] || return 1
-  printf '%s\n' "$PROJECT_FILES" | xargs grep -l "$1" 2>/dev/null | grep -q .
+  find "$PROJECT_DIR" \
+    \( -name node_modules -o -name .git -o -name dist -o -name .nx -o -name .angular -o -name tmp \
+       -o -name vendor -o -name target -o -name build -o -name out -o -name coverage -o -name .venv \) -prune -o \
+    -name project.json -exec grep -l "$1" {} + 2>/dev/null | grep -q .
 }
 
 DRIFTED=''
 note_drift() { DRIFTED="${DRIFTED:+$DRIFTED, }$1"; }
 
-grep -q '"@angular/core"' "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer angular && note_drift angular
-grep -q '"@nx/js"'        "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer js      && note_drift js
-[ -f "$PROJECT_DIR/firebase.json" ] && ! has_layer firebase && note_drift firebase
-# `web` — a project with something to serve. The registry's own test is a `dev-server` or `serve` TARGET.
-in_projects '"dev-server"' && ! has_layer web && note_drift web
-# `design-system` — the tag is the key, exactly as the registry and design-system-styles use it.
-in_projects '"type:design-system"' && ! has_layer design-system && note_drift design-system
-# `navigation` — a project NAMED navigation-core (the registry matches on project name).
-in_projects '"name": *"navigation-core"' && ! has_layer navigation && note_drift navigation
+# THE GUARD COMES FIRST, and that ordering is the point rather than tidiness. Drift is only meaningful
+# against a stamp that RECORDS layers: a project stamped before layers existed has an empty list, which is
+# not evidence that it lacks them — treating it as such would fire this notice at every pre-layer project on
+# the machine, every session, for a reason none of them can act on. Those are covered by the version branch
+# below, whose sync re-stamps them WITH layers.
+#
+# Asking that question up front also means the probes — including the filesystem scan — never run for a
+# project that could not act on their answer.
+if [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none" ]; then
+  grep -q '"@angular/core"' "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer angular && note_drift angular
+  grep -q '"@nx/js"'        "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer js      && note_drift js
+  [ -f "$PROJECT_DIR/firebase.json" ] && ! has_layer firebase && note_drift firebase
+  # `web` — a project with something to serve. The registry's own test is a `dev-server` or `serve` TARGET.
+  in_projects '"dev-server"' && ! has_layer web && note_drift web
+  # `design-system` — the tag is the key, exactly as the registry and design-system-styles use it.
+  in_projects '"type:design-system"' && ! has_layer design-system && note_drift design-system
+  # `navigation` — a project NAMED navigation-core (the registry matches on project name).
+  in_projects '"name": *"navigation-core"' && ! has_layer navigation && note_drift navigation
+fi
 
-# Only speak about drift when the stamp actually RECORDS layers. A project stamped before layers existed has
-# an empty list, which is not evidence that it lacks them — treating it as such would fire this notice at
-# every pre-layer project on the machine, every session, for a reason none of them can act on. Those projects
-# are already covered by the version branch below, whose sync re-stamps them WITH layers.
-if [ -n "$DRIFTED" ] && [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none" ]; then
+if [ -n "$DRIFTED" ]; then
   SNOOZED_LAYERS="$(json_value "$PROJECT_DIR/.claude/house-snooze.json" declinedLayers || true)"
   if [ "$SNOOZED_LAYERS" != "$DRIFTED" ]; then
     cat <<EOF
@@ -233,9 +243,17 @@ EOF
     # gt (the toolkit moved on) — or an unorderable/absent stamp, which means the project predates stamping (or
     # was generated by a direct generator call). Both are resolved by the same action, so they share a branch;
     # only the wording differs, and it never claims an ordering it hasn't established.
+    # THREE cases here, not two. `unknown` from version_cmp conflates "there is no stamp" with "there is a
+    # stamp I cannot ORDER" — a prerelease like 0.17.0-rc.1, which is_version deliberately admits. Saying
+    # "predates house stamping" about a stamp that is sitting right there is simply false, and "behind by
+    # definition" is a claim no comparison established. So the unorderable case gets its own honest
+    # sentence: we can see your version, we cannot rank it, here are both — you decide.
     if [ "$DIRECTION" = "gt" ]; then
       FROM="nx-tools@$STAMPED_NX"
       HEADLINE="The installed house tooling is NEWER than this project's generated tooling."
+    elif [ -n "$STAMPED_NX" ]; then
+      FROM="nx-tools@$STAMPED_NX (not a plain numeric version, so it cannot be ordered against the installed one)"
+      HEADLINE="This project's stamp and the installed house tooling DIFFER, but which is newer cannot be determined."
     else
       FROM="an unrecorded version (generated before house stamping existed)"
       HEADLINE="This project's generated tooling predates house stamping, so it is behind by definition."

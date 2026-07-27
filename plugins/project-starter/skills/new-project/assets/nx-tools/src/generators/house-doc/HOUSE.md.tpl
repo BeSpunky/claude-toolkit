@@ -127,7 +127,7 @@ This workspace has a `navigation-core` library, so **navigation is never a raw `
 Generator-first; never hand-roll a domain's navigation:
 
 ```bash
-yarn nx g @bespunky/nx-tools:domain-navigation <domain>   # routes + events + navigation + selectors
+{{PM}} nx g @bespunky/nx-tools:domain-navigation <domain>   # routes + events + navigation + selectors
 ```
 
 For the full architecture (registry shape, what belongs on the bus vs in the command, and the overlap with resumable state) invoke the **`bespunky-engineering:typed-reactive-navigation`** skill; for making every screen reconstructible from its URL, **`bespunky-engineering:resumable-state`**.
@@ -196,15 +196,15 @@ You don't have to emulate everything or nothing — each Firebase service is ind
 
 Cloud Functions are a first-class Nx app: `nx build functions` (esbuild) bundles `apps/functions/src/main.ts` into `dist/apps/functions` with a generated deploy-manifest `package.json`; the emulator and `firebase deploy` both consume that dist output (`firebase.json` → `functions.source`). Runtime deps (`firebase-admin`/`firebase-functions`) live at the **workspace root** — no per-project `node_modules`. Deploy with `nx run functions:deploy`. **Platform firewall (ESLint-enforced):** `platform:web` projects must never import `firebase-admin`/`firebase-functions`; `platform:server` projects (`functions`, `firebase`) must never import `firebase`/`@angular/*`. Tag new libraries accordingly.
 
-**Functions secrets (`defineSecret`).** Secret values live in `apps/functions/.secret.local` — **gitignored**; copy `.secret.local.example` and fill it. One source of truth, two sinks: `tools/emulators.sh` injects it beside the local bundle so the **emulator** reads it, and `yarn nx run functions:push-secrets` sets each `KEY` in **Google Secret Manager** for production (values piped via stdin — never on a command line or in a log). Add a `KEY=VALUE` when your functions call `defineSecret('KEY')`, then re-push and redeploy.
+**Functions secrets (`defineSecret`).** Secret values live in `apps/functions/.secret.local` — **gitignored**; copy `.secret.local.example` and fill it. One source of truth, two sinks: `tools/emulators.sh` injects it beside the local bundle so the **emulator** reads it, and `{{PM}} nx run functions:push-secrets` sets each `KEY` in **Google Secret Manager** for production (values piped via stdin — never on a command line or in a log). Add a `KEY=VALUE` when your functions call `defineSecret('KEY')`, then re-push and redeploy.
 
 ### Emulator seeds, caching & reset (no re-onboarding each serve)
 
 The emulators **persist and seed their data**. The launch path is `tools/emulators.sh` (all `firebase:emulators*` targets funnel through it): it reaps stale processes, primes the **gitignored working dir** `.emulator-data/` from a seed, then starts the suite with `--import .emulator-data` and (full runs only) `--export-on-exit .emulator-data`. So session + data **cache across serves**: onboard once, stay in. Sign in with a seeded email and the Auth emulator matches the existing account by email — you inherit the seeded uid and its docs.
 
 - **Seeds** are committed, known-good worlds under `tools/emulator-seeds/` (see its README for the catalog). They are **generated artifacts**, never hand-edited.
-- **Reset (on-call):** `yarn nx run firebase:reset` — takes effect on the next serve. Add `reset:<seed>` targets in `firebase/project.json` for extra worlds.
-- **Rebuild seeds:** `yarn nx run firebase:seed:build`.
+- **Reset (on-call):** `{{PM}} nx run firebase:reset` — takes effect on the next serve. Add `reset:<seed>` targets in `firebase/project.json` for extra worlds.
+- **Rebuild seeds:** `{{PM}} nx run firebase:seed:build`.
 
 **Directive — the seed is part of the schema contract.** The seeds' single source of truth is the **declarative** `tools/seed/world.mjs` (a description of accounts + Firestore docs, applied by a generic encoder — adding a field/collection/world is purely additive; the build orchestrator derives the seed list from it). **Whenever a Firestore document shape changes or a feature gains a backend, update the matching world in `world.mjs` and rebuild, committing `tools/emulator-seeds/`** — so the seed never drifts from the code.
 
@@ -312,15 +312,15 @@ For anything Nx can generate - apps, libraries, components, services, project co
 Libraries here are **publishable by default** — one generator owns the package config (build target, `package.json` exports, the tsconfig path alias, the test runner and the `nx release` wiring), so no library has to re-derive it:
 
 ```bash
-yarn nx g @bespunky/nx-tools:publishable-lib <name>               # Angular library
-yarn nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular  # plain TypeScript (@nx/js, tsc)
+{{PM}} nx g @bespunky/nx-tools:publishable-lib <name>               # Angular library
+{{PM}} nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular  # plain TypeScript (@nx/js, tsc)
 ```
 
 **A tool that has proved itself in one project belongs to every project.** Rather than copy-pasting it into the next repo, MARK it — that records the intent to lift it into the shared toolkit, and the extraction tooling takes it from there:
 
 ```bash
-yarn nx g @bespunky/nx-tools:mark-extractable <lib> --summary="..." --rationale="..."
-yarn nx g @bespunky/nx-tools:adopt-extracted <lib> --package=<npm-package>
+{{PM}} nx g @bespunky/nx-tools:mark-extractable <lib> --summary="..." --rationale="..."
+{{PM}} nx g @bespunky/nx-tools:adopt-extracted <lib> --package=<npm-package>
 ```
 
 `mark-extractable` declares this library reusable; `adopt-extracted` swaps a local copy for the published package (with `--keepShim` while call sites migrate, then `--finalize`). The cross-workspace half runs from the toolkit repo — see its `docs/reusable-tool-extraction.md`.
@@ -334,31 +334,31 @@ yarn nx g @bespunky/nx-tools:adopt-extracted <lib> --package=<npm-package>
 # is a Firebase workspace, auto-detected from firebase.json) the full per-app Firebase wiring.
 # Same one command, same code path the scaffolder used for the first app, so a second app is
 # configured identically. No flags needed; Firebase is detected automatically.
-yarn nx g @bespunky/nx-tools:app apps/<app-name>
-yarn nx g @nx/angular:library libs/<lib-name>
+{{PM}} nx g @bespunky/nx-tools:app apps/<app-name>
+{{PM}} nx g @nx/angular:library libs/<lib-name>
 {{/angular}}{{^angular}}# Generate the next library (generator-first!)
 # This workspace has no Angular layer, so the house Angular generators (app, design-system,
 # ds-component, secondary-entrypoint) do not apply here — they will tell you so if you run
 # them. Add the layer with `nx add @nx/angular` to unlock them.
-yarn nx g @bespunky/nx-tools:publishable-lib <lib-name> --nonAngular
-yarn nx g @nx/js:library libs/<lib-name>
+{{PM}} nx g @bespunky/nx-tools:publishable-lib <lib-name> --nonAngular
+{{PM}} nx g @nx/js:library libs/<lib-name>
 {{/angular}}
 
 # Serve / build / test / lint a project
-yarn nx serve <project>
-yarn nx build <project>
-yarn nx test <project>
-yarn nx lint <project>
+{{PM}} nx serve <project>
+{{PM}} nx build <project>
+{{PM}} nx test <project>
+{{PM}} nx lint <project>
 
 # Run a target across everything affected by your changes
-yarn nx affected -t build test lint
+{{PM}} nx affected -t build test lint
 ```
 
 ## Working with Nx
 
 - For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies.
 - When running tasks (build, lint, test, e2e, etc.), always prefer `nx` (`nx run`, `nx run-many`, `nx affected`) over the underlying tooling directly.
-- Prefix nx commands with the workspace package manager (`yarn nx ...`) - avoids the globally installed CLI.
+- Prefix nx commands with the workspace package manager (`{{PM}} nx ...`) - avoids the globally installed CLI.
 - You have access to the Nx MCP server and its tools - use them.
 - For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
 - For scaffolding (apps, libs, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
@@ -368,8 +368,8 @@ yarn nx affected -t build test lint
 
 This project ships Angular's official AI tooling, wired in two layers that complement each other:
 
-- **Angular CLI MCP server** — declared in project-scoped `.mcp.json` (`npx -y @angular/cli mcp`, always the latest CLI, no version to maintain). It exposes Angular's **knowledge tools**: `get_best_practices`, `search_documentation`, `find_examples`, `ai_tutor`, and `onpush_zoneless_migration`. **Treat these as the source of truth for current Angular guidance** — signals, `linkedSignal`, `resource`, Signal Forms, the built-in control flow, zoneless/OnPush, SSR, ARIA — rather than training-data recall, which lags the framework. The server's *experimental* exec tools (`build`, `devserver.*`, `test`, `e2e`) are deliberately **not** enabled: this is an integrated Nx workspace with **no root `angular.json`**, so those tools (which read `angular.json` and shell out to `ng build`/`ng serve`) can't function here and would only pull you off the Nx-owned targets. Build / serve / test verification belongs to **Nx** (`yarn nx build|serve|test`) and the Playwright skill — never the Angular CLI directly.
-- **Angular agent skills** — `angular-developer` and `angular-new-app` are fetched fresh from `github.com/angular/skills` into `.claude/skills/` on every container build (gitignored — a refreshable cache that tracks upstream, never a vendored fork). They load automatically and carry idiomatic, version-aware Angular patterns. **One reconciliation:** those skills are Angular-CLI-centric (they reach for `ng new` / `ng generate`); in this workspace you **always go through Nx instead** — `yarn nx g @nx/angular:application|library|component …`, `yarn nx build|serve|test` — per **Generator-first** above. Take their *Angular* guidance; ignore their *`ng` invocation* mechanics.
+- **Angular CLI MCP server** — declared in project-scoped `.mcp.json` (`npx -y @angular/cli mcp`, always the latest CLI, no version to maintain). It exposes Angular's **knowledge tools**: `get_best_practices`, `search_documentation`, `find_examples`, `ai_tutor`, and `onpush_zoneless_migration`. **Treat these as the source of truth for current Angular guidance** — signals, `linkedSignal`, `resource`, Signal Forms, the built-in control flow, zoneless/OnPush, SSR, ARIA — rather than training-data recall, which lags the framework. The server's *experimental* exec tools (`build`, `devserver.*`, `test`, `e2e`) are deliberately **not** enabled: this is an integrated Nx workspace with **no root `angular.json`**, so those tools (which read `angular.json` and shell out to `ng build`/`ng serve`) can't function here and would only pull you off the Nx-owned targets. Build / serve / test verification belongs to **Nx** (`{{PM}} nx build|serve|test`) and the Playwright skill — never the Angular CLI directly.
+- **Angular agent skills** — `angular-developer` and `angular-new-app` are fetched fresh from `github.com/angular/skills` into `.claude/skills/` on every container build (gitignored — a refreshable cache that tracks upstream, never a vendored fork). They load automatically and carry idiomatic, version-aware Angular patterns. **One reconciliation:** those skills are Angular-CLI-centric (they reach for `ng new` / `ng generate`); in this workspace you **always go through Nx instead** — `{{PM}} nx g @nx/angular:application|library|component …`, `{{PM}} nx build|serve|test` — per **Generator-first** above. Take their *Angular* guidance; ignore their *`ng` invocation* mechanics.
 
 {{/angular}}
 {{#web}}

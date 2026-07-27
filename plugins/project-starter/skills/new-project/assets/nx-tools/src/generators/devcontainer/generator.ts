@@ -87,6 +87,11 @@ export default async function devcontainerGenerator(
   const exists = tree.exists(DEVCONTAINER);
   const owning = !exists || ours;
 
+  // Whose postCreateCommand will the container actually run? Captured BEFORE the merge, because the merge
+  // is additive: a project that declares none gets ours (so the house script runs), and a project that
+  // declares its own keeps it (so the house script would not).
+  const foreignPostCreate = exists ? postCreateCommandOf(tree) : undefined;
+
   let skipped: string[] = [];
   if (owning) {
     tree.write(DEVCONTAINER, rendered);
@@ -94,7 +99,12 @@ export default async function devcontainerGenerator(
     skipped = mergeIntoForeign(tree, rendered);
   }
 
-  writePostCreate(tree, owning);
+  // `invoked` — not merely `owning`. Writing `.devcontainer/post-create.sh` into a project whose
+  // postCreateCommand points somewhere else produces a 300-line provisioning script that never runs and
+  // never says so: the worst kind of output, because it LOOKS like the setup happened. So the house script
+  // only takes that filename when something will actually call it.
+  const invoked = owning || !foreignPostCreate || foreignPostCreate.includes('post-create.sh');
+  writePostCreate(tree, invoked, owning);
 
   // The ADOPTION REPORT. An adopted devcontainer diverges from the house spec on every key it already
   // declared, permanently and by design — the merge is additive and never argues with the project's own
@@ -123,6 +133,17 @@ interface Marker {
   owned?: boolean;
 }
 
+/**
+ * The project's own `postCreateCommand`, as a string, or `undefined` when it has none (or declares it as an
+ * array/object form we shouldn't second-guess — treated as "it has one", which is the cautious direction).
+ */
+function postCreateCommandOf(tree: Tree): string | undefined {
+  const parsed = tryParse(tree.read(DEVCONTAINER, 'utf8') ?? '');
+  const value = parsed?.postCreateCommand;
+  if (value === undefined) return undefined;
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
 /** The ownership marker, or `null` when absent/unparseable (both of which mean "we don't own this"). */
 function readMarker(tree: Tree): Marker | null {
   if (!tree.exists(MARKER)) return null;
@@ -135,19 +156,26 @@ function readMarker(tree: Tree): Marker | null {
  * devcontainer.json's postCreateCommand stays a one-liner. It is self-adapting (its Firebase, Playwright,
  * Angular and voice steps each detect their own trigger at run time), so it ships verbatim, untemplated.
  *
- * `owned` decides where it lands. Overwriting a post-create script somebody else wrote would delete their
- * provisioning with no warning and no undo — strictly worse than the devcontainer.json case, because a
- * shell script's contents can't be merged meaningfully. So a foreign entry point is left ALONE and the
- * house script is written BESIDE it, with the one line needed to chain them printed for a human to place.
- * That is the same "detect, don't execute" line the SessionStart hook holds: report the fact, let the
- * person who owns the file make the edit.
+ * TWO conditions must BOTH hold for the house script to take the canonical `post-create.sh` name, and
+ * conflating them produced a silent failure each way round:
+ *
+ *   INVOKED — something will actually run it. Writing a 300-line provisioning script that the project's
+ *             postCreateCommand never calls is the worst kind of output: it looks like setup happened.
+ *   FREE    — no post-create.sh of somebody else's is already there. Overwriting one would delete their
+ *             provisioning with no warning and no undo — worse than the devcontainer.json case, since a
+ *             shell script's contents cannot be merged meaningfully.
+ *
+ * When either fails, the house script goes BESIDE the entry point and the one line needed to chain them is
+ * printed for a human to place. Same "detect, don't execute" line the SessionStart hook holds: report the
+ * fact, let the person who owns the file make the edit.
  */
-function writePostCreate(tree: Tree, owned: boolean): void {
+function writePostCreate(tree: Tree, invoked: boolean, owning: boolean): void {
   const house = readFileSync(join(__dirname, 'post-create.sh.tpl'), 'utf8');
   const HOUSE_PATH = '.devcontainer/post-create.sh';
   const BESIDE_PATH = '.devcontainer/post-create.bespunky.sh';
 
-  if (owned || !tree.exists(HOUSE_PATH)) {
+  const free = owning || !tree.exists(HOUSE_PATH);
+  if (invoked && free) {
     tree.write(HOUSE_PATH, house);
     // The extension point's other half: create it ONCE so it is discoverable, and never touch it again.
     // An empty seam nobody knows about is not a seam.
@@ -157,8 +185,11 @@ function writePostCreate(tree: Tree, owned: boolean): void {
 
   tree.write(BESIDE_PATH, house);
   logger.info(
-    `[devcontainer] \`${HOUSE_PATH}\` already exists and was not written by this generator, so it was left ` +
-      `untouched. The house setup is in \`${BESIDE_PATH}\` — chain it by adding this line to your own script:\n` +
+    `[devcontainer] The house setup is in \`${BESIDE_PATH}\` rather than \`${HOUSE_PATH}\`, because ` +
+      (free
+        ? `this project's \`postCreateCommand\` runs something else, so a script at the usual name would never execute.`
+        : `\`${HOUSE_PATH}\` already exists and this generator did not write it.`) +
+      `\n    Chain it by adding this line to whatever your postCreateCommand does run:\n` +
       `    bash .devcontainer/post-create.bespunky.sh`
   );
 }
