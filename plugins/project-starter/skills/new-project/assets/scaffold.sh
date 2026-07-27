@@ -3,11 +3,7 @@
 #
 # Default mode  : full scaffold (Nx + Angular + app + house generators + devcontainer + Claude settings).
 # Sync mode     : converge an EXISTING workspace onto the current house standard — detect which layers it
-#                 has and (re-)apply their generators, all idempotent. It was called `--repair` until the
-#                 layer model made that name wrong: it is not fixing something broken, and most often it
-#                 runs on a perfectly healthy repo that has never had house tooling at all. `--repair`
-#                 still works as a deprecated alias, because every project generated before the rename
-#                 carries that spelling in its own HOUSE.md.
+#                 has and (re-)apply their generators, all idempotent.
 # Firebase opt-in: when --firebase is passed, the devcontainer gets the Firebase CLI + Google Cloud CLI
 #                  features, the toba.vsfire extension, labeled portsAttributes, and explicit SAME-PORT
 #                  forwardPorts for the dev server + emulator suite (required: the Firebase SDK in the
@@ -83,15 +79,6 @@ ENSURE_ARG=""   # --ensure=<csv>: layers to BRING INTO BEING (see the layer mode
 while [ "${1:-}" != "" ]; do
   case "$1" in
     --sync)       MODE="sync";   shift;;
-    # `--repair` was this mode's name until the layer model made it wrong: it is not fixing something
-    # broken, it is converging a workspace onto the current house standard — most often a perfectly
-    # healthy repo that has never had house tooling at all. The old name still WORKS, and must: every
-    # project scaffolded before this rename carries `scaffold.sh --repair` in its generated HOUSE.md, and
-    # older copies of the SessionStart hook relay that spelling too. Breaking them to tidy a flag name
-    # would be the tool punishing users for its own rename. It warns, so the spelling converges over time.
-    --repair)     MODE="sync";   shift
-                  echo "NOTE: --repair is now --sync (this mode applies house layers; it isn't only for fixing" >&2
-                  echo "      something broken). --repair still works and will keep working." >&2;;
     --firebase)   FIREBASE=1;    shift;;
     --voice)      VOICE=1;       shift;;
     --staging)    STAGING=1;     shift;;
@@ -109,7 +96,13 @@ while [ "${1:-}" != "" ]; do
                            exit 1;;
                   esac
                   ENSURE_ARG="$2"; shift 2;;
-    --*)          echo "ERROR: unknown flag '$1'" >&2; exit 1;;
+    # Lists the valid flags rather than only naming the bad one. Costs two lines and answers the question
+    # the reader actually has — including the one case that will keep arriving for a while, `--repair`,
+    # which is the old name for `--sync` and is still written into the HOUSE.md of any project generated
+    # before that rename. No special case for it: it is simply not a flag, and the list says what is.
+    --*)          echo "ERROR: unknown flag '$1'" >&2
+                  echo "       Flags: --sync --ensure=<layers> --firebase --staging --voice --no-github --no-backup --yes --docker" >&2
+                  exit 1;;
     *)            break;;
   esac
 done
