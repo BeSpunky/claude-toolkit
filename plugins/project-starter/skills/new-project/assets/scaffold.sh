@@ -663,7 +663,25 @@ cd '$WORK_ROOT'
 git config --global user.name >/dev/null 2>&1 || git config --global user.name '$GIT_NAME'
 git config --global user.email >/dev/null 2>&1 || git config --global user.email '$GIT_EMAIL'
 git config --global init.defaultBranch >/dev/null 2>&1 || git config --global init.defaultBranch main
-$CREATE_WORKSPACE '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive
+# THE AGENT-MODE ENV VARS ARE STRIPPED FOR THIS ONE COMMAND, and that is the difference between a working
+# scaffold and a dead one.
+#
+# create-nx-workspace reads CLAUDECODE / OPENCODE and switches into an \"AI Agent Mode\" that IGNORES
+# --preset entirely: it builds from \`nrwl/empty-template\` instead, which is the TS-solution layout
+# (packages/ + a root tsconfig.json with project references + package.json-based Nx config) and additionally
+# litters the repo with AGENTS.md, opencode.json, .codex/, .cursor/, .gemini/. \`nx add @nx/angular\` then
+# REFUSES that workspace outright — \"The Angular framework doesn't support a TypeScript setup with project
+# references\" — so the scaffold died at its first real step.
+#
+# The sting is that this only happens when the scaffolder is run FROM Claude Code, which is its primary way
+# of being used: run it by hand in a terminal and it works, run it the way this toolkit intends and it does
+# not. Nothing in the script had changed; the environment silently reinterpreted its arguments.
+#
+# Scoped to this invocation deliberately. These variables are true — an agent IS running this — and other
+# tools may reasonably key off them. What is not acceptable is one command redefining the workspace shape
+# the entire house standard is built on. Every house generator reads project.json (\`readProjectConfiguration\`),
+# which the TS-solution layout does not use, so this is not a cosmetic preference.
+env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive --workspaces=false
 cd '$PROJECT'
 yarn nx add @nx/angular${NX_TAG}
 $STAGE_BLOCK

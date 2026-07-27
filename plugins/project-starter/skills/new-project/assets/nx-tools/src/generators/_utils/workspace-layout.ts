@@ -41,7 +41,16 @@ export function resolveLibsDir(tree: Tree): string {
   for (const [, project] of getProjects(tree)) {
     if (project.projectType !== 'library') continue;
     const top = project.root.split('/').filter((s) => s && s !== '.')[0];
-    if (top) topSegmentCounts.set(top, (topSegmentCounts.get(top) ?? 0) + 1);
+    // `tools/` is EXCLUDED, and it has to be. The house's own scaffolding — worktree-domains, shared-browser
+    // — lands there and declares `projectType: 'library'`, and those generators run BEFORE this one. So the
+    // inference was answering "where does this workspace keep its libraries?" with evidence the house itself
+    // had just planted: a fresh scaffold put the design system at `tools/design-system`, contradicting every
+    // document it generates in the same run (all of which say `packages/design-system`).
+    //
+    // Excluding it is not a special case for our own output — `tools/` is Nx's convention for workspace
+    // TOOLING, never for the libraries a project builds and publishes, so it is never a truthful answer to
+    // this question no matter who put a project there.
+    if (top && top !== 'tools') topSegmentCounts.set(top, (topSegmentCounts.get(top) ?? 0) + 1);
   }
 
   let inferred: string | undefined;

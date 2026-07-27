@@ -96,7 +96,16 @@ export const LAYERS: readonly Layer[] = [
     id: 'angular',
     title: 'Angular application',
     requires: ['nx', 'web'],
-    detect: (tree) => hasDependency(tree, '@angular/core') || hasAngularApp(tree),
+    // `@nx/angular` counts, and must. What every guard on this layer actually protects is a dynamic
+    // `import('@nx/angular/generators')` — so the honest question is "is the Angular PLUGIN here?", not "has
+    // an Angular app been built yet". Those differ for exactly one window, and it is the important one:
+    // `nx add @nx/angular` installs the plugin WITHOUT adding `@angular/core` to the root package.json
+    // (verified — it lands `@nx/angular`, `@nx/js`, `@angular-devkit/core` and nothing else), and
+    // `@angular/core` only arrives with the first app. Detecting on `@angular/core` alone therefore reported
+    // the layer ABSENT in precisely the moment the `app` generator runs, so the guard rejected the very
+    // generator whose job is to create the app — breaking every scaffold at its first house generator.
+    detect: (tree) =>
+      hasDependency(tree, '@angular/core') || hasDependency(tree, '@nx/angular') || hasAngularApp(tree),
     ensureHint: '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`',
   },
   {
