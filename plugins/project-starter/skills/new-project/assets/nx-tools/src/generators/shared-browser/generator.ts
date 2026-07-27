@@ -5,7 +5,8 @@
 // (`shared-browser`) exposing the lifecycle verbs as targets (up|down|status|restart|clean|url|logs).
 //
 // The shared browser is ONE headed Chromium on a virtual display (Xvfb), co-driven by a human over
-// noVNC (:6080 — the only forwarded port) and by an agent over CDP (:9223, loopback), so a change
+// noVNC (the one host-facing port — ALLOCATED per container, see the script header) and by an agent
+// over CDP (:9223, loopback), so a change
 // can be verified live in the same browser both watch. Full design: docs/shared-browser-DESIGN.md.
 //
 // Why workspace-level (not per-app): the shared browser is a single workspace-wide resource, not an
@@ -19,6 +20,7 @@
 // formatFiles polishes the result at the end.
 import { type Tree, formatFiles } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
+import { NOVNC_BAND_SIZE, NOVNC_BAND_START } from './novnc-band';
 import { join } from 'node:path';
 
 // Workspace-level: no inputs today. Kept as a named type for parity with the sibling generators
@@ -32,7 +34,14 @@ export default async function sharedBrowserGenerator(
   // Load a .tpl sibling of this generator. The scaffold copies the whole nx-tools tree into
   // node_modules before compiling the .ts → .js, so the .tpl files travel alongside the compiled
   // generator and __dirname resolves to the dir that contains them (same idiom as firebase-emulators).
-  const template = (name: string) => readFileSync(join(__dirname, name), 'utf8');
+  // The band placeholders come from ./novnc-band — the same module the devcontainer generator reads for
+  // its portsAttributes, so the script's band and the editor's requireLocalPort coverage cannot drift.
+  const template = (name: string) =>
+    readFileSync(join(__dirname, name), 'utf8')
+      .split('{{novncBandStart}}')
+      .join(String(NOVNC_BAND_START))
+      .split('{{novncBandSize}}')
+      .join(String(NOVNC_BAND_SIZE));
   const root = 'tools/shared-browser';
 
   // The CLI (bash) — the single entry point for up|down|status|restart|clean|url|logs|navigate.
@@ -46,6 +55,12 @@ export default async function sharedBrowserGenerator(
   tree.write(`${root}/attach.mjs`, template('attach.mjs.tpl'));
   tree.write(`${root}/verify.mjs`, template('verify.mjs.tpl'));
   tree.write(`${root}/recorder.mjs`, template('recorder.mjs.tpl'));
+
+  // Host-port arbitration + its validation. This is the piece that makes parallel devcontainers safe,
+  // and the ONLY part of the stack with a real test suite — including a multi-process race, because the
+  // failure it prevents cannot be reproduced with a single container. `node --test tools/shared-browser/`
+  tree.write(`${root}/port-claim.mjs`, template('port-claim.mjs.tpl'), { mode: 0o755 });
+  tree.write(`${root}/port-claim.test.mjs`, template('port-claim.test.mjs.tpl'));
 
   // The workspace Nx project that surfaces the lifecycle verbs as targets (each runs the CLI verb).
   tree.write(`${root}/project.json`, template('project.json.tpl'));

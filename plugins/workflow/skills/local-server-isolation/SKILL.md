@@ -16,6 +16,7 @@ You verify **headless** — Playwright (or similar) running *inside* the contain
 - **Pick a random free port** for the server you start (`--port 0` for an OS-assigned port where supported, or a random high port). **Read the actual bound URL/port from the server's own startup output** — don't assume it — and point your browser/tests there.
 - **Never kill or restart a server you didn't start** to free a port. If the default port is taken, that's the user's server: choose another port, don't reap theirs.
 - **Tear down** the server you started when the check is done (don't leave orphans holding a port).
+- **Never *pin* a port inside `6080-6119`.** That band belongs to the shared browser's per-container noVNC allocator (`bespunky-browser-automation:shared-browser`), and a squatter there costs someone their viewer URL. An OS-assigned port (`--port 0`) is always outside it; a hand-rolled "random high port" should be too.
 
 ## Fixed-port backends (e.g. a Firebase emulator suite)
 

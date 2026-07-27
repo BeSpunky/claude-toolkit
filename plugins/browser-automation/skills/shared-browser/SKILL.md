@@ -12,11 +12,25 @@ description: One live browser that you and the human drive together — the huma
 | Piece | How |
 |---|---|
 | The browser | One **persistent** headed Chromium inside the container (software-GL). It outlives any single automation. |
-| Human path | noVNC in a normal host tab on the **forwarded `:6080`** — `http://localhost:6080/vnc.html?autoconnect=true&resize=remote&reconnect=true`. |
+| Human path | noVNC in a normal host tab, on the URL `up` **prints**. Get it from `shared-browser url` — never compose it. |
 | Claude path | Playwright `connectOverCDP` on **loopback `127.0.0.1:9223`** (never forwarded — full browser control never leaves the container). |
 | Attach/detach | Claude attaches and detaches freely **without disturbing the human's session** — `browser.close()` only detaches the CDP session; the shared browser stays up. |
 
-Only `6080` is forwarded. CDP (`9223`) and VNC (`5900`) bind loopback only.
+Exactly one port reaches the host: noVNC. CDP (`9223`) and VNC (`5900`) bind loopback only.
+
+**The noVNC port is ALLOCATED, not fixed — so never name a number.** It is claimed per container out of the `6080-6119` band (a registry volume shared by every BeSpunky devcontainer on the machine), because the host is where parallel devcontainers actually collide: each container's own `6080` is free inside its netns, so a fixed port doesn't fail — the second container gets silently forwarded elsewhere and a URL saying `6080` opens **someone else's browser**. Nothing errors; you just verify the wrong app. So:
+
+```
+shared-browser url            # the ONE source of truth for the human's URL (errors if nothing is up)
+shared-browser status --json  # .url is null until .webPortAllocated is true — never a guess.
+                              # .hostVerified: "true" = the host port was PROVEN to reach this browser
+                              # (token round-trip); "false" = something else answers there, do NOT
+                              # trust the URL; "unknown" = no route to the host, use the tab title.
+```
+
+Hand the human what those print. `nx serve` prints it too. If you ever find yourself typing a port into a URL, that's the bug.
+
+The browser tab is **titled with the project name**, so tell the human to check it: a tab naming a different project means they are on another container's browser. That is the one check that survives everything the allocator can't see.
 
 ## Decision tree — which browser tool? (read this first)
 
@@ -39,13 +53,13 @@ If nobody is watching and you just need a screenshot or a scrape from a script, 
 ```
 1. nx serve <app>                                 # serve + shared-browser up + auto-navigate, one command (browser ON by default)
    (--no-shared-browser skips it; standalone:  tools/shared-browser/shared-browser up)
-2. Hand the human the printed noVNC URL           # http://localhost:6080 — they open it in a host tab and watch
+2. Hand the human the printed noVNC URL           # allocated per container — read it, never compose it
 3. Attach:  withPage(fn)  (preferred, leak-proof) # attach() is the raw escape hatch
 4. Drive / observe                                # navigate, fill, mutate, measure, read recorder
 5. Detach:  browser.close()                       # DETACHES only — does NOT close the shared browser
 ```
 
-- `up` is **idempotent** and **readiness-gated** — it blocks until `5900/6080/9223` are listening, auto-starts the recorder, and prints the noVNC URL. Never attach to a half-up stack; `status --json` is the machine-readable preflight.
+- `up` is **idempotent** and **readiness-gated** — it blocks until VNC / noVNC / CDP are listening, auto-starts the recorder, and prints the noVNC URL. Never attach to a half-up stack; `status --json` is the machine-readable preflight.
 - **`withPage(fn)` is the default** — it attaches, runs `fn(page)`, and **detaches even on throw** (leak-proof). Raw `attach()` is the escape hatch for long-lived sessions; if you use it you own the `browser.close()`.
 - `attach({ pageUrl })` selects a tab by URL pattern; `pages()` lists open tabs. **Default is the *first* open tab, which may not be the one the human is looking at** — in a multi-tab co-drive, call `pages()` and target the right one with `pageUrl` rather than assuming. Each worktree serves under its own pretty **`<slug>.localhost`** host, so address a specific worktree's tab by that hostname — `attach({ pageUrl: 'feature-x.localhost' })` — not by port (offset ports aren't forwarded, and several tabs may share bare `localhost`).
 
@@ -99,18 +113,18 @@ It's all folded into `nx serve` now — the shared browser comes up and is navig
 nx serve <app> --worktree=<branch|slug>
 ```
 
-= **isolated worktree** (code) + **its own offset port block** (app + emulators) + the **shared browser navigated to the worktree's `<slug>.localhost` domain**, human watching over noVNC. The worktree isolates the code, the offset isolates the ports, and because a worktree's shifted ports **aren't forwarded**, the shared browser (`:6080`) is the *only* way to view a worktree serve. `--no-shared-browser` opts out of the browser layer; `--port-offset` pins the block.
+= **isolated worktree** (code) + **its own offset port block** (app + emulators) + the **shared browser navigated to the worktree's `<slug>.localhost` domain**, human watching over noVNC. The worktree isolates the code, the offset isolates the ports, and because a worktree's shifted ports **aren't forwarded**, the shared browser is the *only* way to view a worktree serve. `--no-shared-browser` opts out of the browser layer; `--port-offset` pins the block.
 
 ## CLI reference — `tools/shared-browser/shared-browser`
 
 | Verb | Does |
 |---|---|
-| `up` | Start missing components (Xvfb→fluxbox→Chromium→x11vnc→websockify), readiness-gate `5900/6080/9223`, auto-start recorder, print noVNC URL. Idempotent, `flock`-serialized, reaps stale-by-PID+cmdline before starting. |
+| `up` | Start missing components (Xvfb→fluxbox→Chromium→x11vnc→websockify), **allocate the noVNC port**, readiness-gate all three ports, auto-start recorder, print the noVNC URL. Idempotent, `flock`-serialized, reaps stale-by-PID+cmdline before starting. |
 | `navigate --url=<u> [--wait]` | Ensure up; with `--wait`, poll `<u>` until it answers; navigate the shared browser via CDP. (The single primitive the `serve` executor composes when it brings the browser up — there is no `codrive` verb.) |
 | `observe` | Enter **observe-only** — attach/verify/recorder refuse to navigate/click/type and log "observe-only — human is driving". Use before handing the human an interactive step (OAuth / captcha). Flag persists in `SB_RUNTIME`. |
 | `resume` | Clear observe-only — Claude may drive again. |
 | `status [--json]` | Per-component up/down + ports + URL, **and the observe-only mode**. `--json` = machine-readable preflight. |
-| `url` | Print the noVNC URL (scripting). |
+| `url` | Print the noVNC URL — **the single source of truth**; hand this to the human rather than composing a URL. |
 | `logs [component] [--since=<ts>] [--level=<lvl>]` | Tail a component log, or the filtered recorder JSONL. |
 | `down` | Graceful `SIGTERM`→`SIGKILL` via PID files; verify ports freed. **Never pattern-kills.** |
 | `restart` | `down` + `up` (recycle Chromium when the view gets sluggish / RSS climbs). |
