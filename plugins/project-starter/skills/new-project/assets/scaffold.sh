@@ -245,83 +245,11 @@ if [ "$MODE" = "sync" ]; then
   fi
 fi
 
-# --- sync consent gate (see the header) ---
-# The point of this gate is that it cannot be satisfied by inference. A sync is a real, minutes-long,
-# file-rewriting action; the hook that notices a stale project can only SAY so. Consent has to come from a
-# human, and this is where that is enforced instead of hoped for.
-#
-# It runs FIRST — before the runtime decision below, before any network call, before anything is read or
-# written. An unconsented sync must fail for want of CONSENT, not trip over a missing daemon on its way to
-# the same place: "docker not found" would send an agent off to fix Docker and come back (which is precisely
-# the inference this gate exists to stop) — and, worse, is now a lie, since the local Node usually suffices.
-if [ "$MODE" = "sync" ]; then
-  if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
-    echo "ERROR: refusing to sync in CI — a sync rewrites generated files and no human is here to agree." >&2
-    echo "       Run it locally, review the diff against the backup tag, and commit the result." >&2
-    exit 1
-  fi
-
-  if [ "$CONSENT" != "1" ]; then
-    if [ -t 0 ] && [ -t 1 ]; then
-      echo "About to sync '$TARGET': re-runs the house generators, REWRITING generated files"
-      echo "(HOUSE.md, .claude/settings.json, .devcontainer/*, serve/worktree/design-system targets)."
-      echo "A pre-sync snapshot is taken first (git tag), unless --no-backup."
-      printf "Proceed? [y/N] "
-      read -r reply
-      case "$reply" in
-        [yY] | [yY][eE][sS]) ;;
-        *) echo "Aborted — nothing was changed." >&2; exit 1 ;;
-      esac
-    else
-      echo "ERROR: refusing to sync without consent — nothing is attached to this shell to ask." >&2
-      echo "       A sync rewrites generated files and takes several minutes." >&2
-      echo "       If (and ONLY if) the user has explicitly agreed to it, re-run with --yes." >&2
-      exit 1
-    fi
-  fi
-fi
-
-# --- runtime decision: local Node vs Docker (AFTER the consent gate, so an unconsented sync never gets
-#     here). Docker was never the requirement — a modern Node is. When the local Node is new enough we run
-#     the generators NATIVELY (no daemon, no image, no mounts) with the path roots bound to real host dirs;
-#     otherwise we fall back to the base image, binding the roots to the container mount points. STAGE_BLOCK/
-#     WORKSPACE_GEN_BLOCK/INNER below are rendered ONCE against these roots, so the two paths cannot drift. ---
-if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
-  RUNTIME="native"
-  echo "Node $(node -v) is new enough — running the generators natively (no Docker)."
-  WORK_ROOT="$PROJECTS_DIR"          # where the <project> dir lives (host path)
-  ASSETS_ROOT="$ASSETS_DIR"          # nx-tools + compile-generators.mts (host path)
-  STAGE_DIR="$(mktemp -d)"           # nx-tools staging dir (native, cleaned up after the run)
-  # Armed HERE, next to the mktemp, not down at the run — a few hundred lines separate the two, and
-  # every early exit in between (the --staging guard, ensure validation, BACKUP_ABORT) leaked a temp dir.
-  trap 'rm -rf "$STAGE_DIR" "$STAGE_DIR-ts"' EXIT
-  MAJOR="$(node -p 'process.versions.node.split(".")[0]')"   # generated devcontainer's nodeMajor = this Node's
-  RUNTIME_DESC="native node $(node -v)"
-else
-  RUNTIME="docker"
-  if [ "$FORCE_DOCKER" = "1" ]; then
-    echo "--docker: forcing the base image even though the local Node may suffice."
-  else
-    echo "Local Node missing or older than 22.18 — falling back to Docker."
-  fi
-  command -v docker >/dev/null || { echo "ERROR: docker not found (and the local Node is too old to run natively — need Node 22.18+)." >&2; exit 1; }
-  docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
-  command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
-  echo "Resolving latest typescript-node base image..."
-  MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
-    | grep -oE '[0-9]+-bookworm' | sed 's/-bookworm//' | sort -rn | awk '$1>=18' | head -1 || true)"
-  [ -n "${MAJOR:-}" ] || MAJOR=24
-  IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
-  echo "Base image: $IMAGE"
-  WORK_ROOT="/work"                  # PROJECTS_DIR is mounted here (see docker run -v below)
-  ASSETS_ROOT="/assets"              # ASSETS_DIR is mounted here (ro)
-  STAGE_DIR="/tmp/bespunky-nx-tools" # nx-tools staging dir inside the container
-  RUNTIME_DESC="image=$IMAGE"
-fi
-[ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
-[ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
-[ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (WSLg audio bridge + espeak-ng + bespunky-voice plugin — WSL-only)"
-
+# Resolved and VALIDATED before the consent gate below. Argument validation is pure string work — it
+# reads nothing, writes nothing, and reaches no network — so doing it first costs nothing and stops the
+# script answering a typo with the wrong complaint: `--ensure=bogus` used to be met with "refusing to
+# sync without consent", because the gate ran first. A malformed request should be told it is malformed.
+# (It also settles FIREBASE before the banner below reports it, so `--ensure=firebase` announces itself.)
 # --- THE LAYER SET -------------------------------------------------------------------------------------------
 # A project is not one shape; it is a STACK OF LAYERS, each with its own detector and its own generators. This
 # is what lets --sync run on a repo that is not the scaffolder's own Angular+Firebase shape — including a
@@ -434,6 +362,83 @@ if [ -n "$ENSURE_LAYERS" ]; then
   done
 fi
 [ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
+
+# --- sync consent gate (see the header) ---
+# The point of this gate is that it cannot be satisfied by inference. A sync is a real, minutes-long,
+# file-rewriting action; the hook that notices a stale project can only SAY so. Consent has to come from a
+# human, and this is where that is enforced instead of hoped for.
+#
+# It runs FIRST — before the runtime decision below, before any network call, before anything is read or
+# written. An unconsented sync must fail for want of CONSENT, not trip over a missing daemon on its way to
+# the same place: "docker not found" would send an agent off to fix Docker and come back (which is precisely
+# the inference this gate exists to stop) — and, worse, is now a lie, since the local Node usually suffices.
+if [ "$MODE" = "sync" ]; then
+  if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
+    echo "ERROR: refusing to sync in CI — a sync rewrites generated files and no human is here to agree." >&2
+    echo "       Run it locally, review the diff against the backup tag, and commit the result." >&2
+    exit 1
+  fi
+
+  if [ "$CONSENT" != "1" ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      echo "About to sync '$TARGET': re-runs the house generators, REWRITING generated files"
+      echo "(HOUSE.md, .claude/settings.json, .devcontainer/*, serve/worktree/design-system targets)."
+      echo "A pre-sync snapshot is taken first (git tag), unless --no-backup."
+      printf "Proceed? [y/N] "
+      read -r reply
+      case "$reply" in
+        [yY] | [yY][eE][sS]) ;;
+        *) echo "Aborted — nothing was changed." >&2; exit 1 ;;
+      esac
+    else
+      echo "ERROR: refusing to sync without consent — nothing is attached to this shell to ask." >&2
+      echo "       A sync rewrites generated files and takes several minutes." >&2
+      echo "       If (and ONLY if) the user has explicitly agreed to it, re-run with --yes." >&2
+      exit 1
+    fi
+  fi
+fi
+
+# --- runtime decision: local Node vs Docker (AFTER the consent gate, so an unconsented sync never gets
+#     here). Docker was never the requirement — a modern Node is. When the local Node is new enough we run
+#     the generators NATIVELY (no daemon, no image, no mounts) with the path roots bound to real host dirs;
+#     otherwise we fall back to the base image, binding the roots to the container mount points. STAGE_BLOCK/
+#     WORKSPACE_GEN_BLOCK/INNER below are rendered ONCE against these roots, so the two paths cannot drift. ---
+if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
+  RUNTIME="native"
+  echo "Node $(node -v) is new enough — running the generators natively (no Docker)."
+  WORK_ROOT="$PROJECTS_DIR"          # where the <project> dir lives (host path)
+  ASSETS_ROOT="$ASSETS_DIR"          # nx-tools + compile-generators.mts (host path)
+  STAGE_DIR="$(mktemp -d)"           # nx-tools staging dir (native, cleaned up after the run)
+  # Armed HERE, next to the mktemp, not down at the run — a few hundred lines separate the two, and
+  # every early exit in between (the --staging guard, ensure validation, BACKUP_ABORT) leaked a temp dir.
+  trap 'rm -rf "$STAGE_DIR" "$STAGE_DIR-ts"' EXIT
+  MAJOR="$(node -p 'process.versions.node.split(".")[0]')"   # generated devcontainer's nodeMajor = this Node's
+  RUNTIME_DESC="native node $(node -v)"
+else
+  RUNTIME="docker"
+  if [ "$FORCE_DOCKER" = "1" ]; then
+    echo "--docker: forcing the base image even though the local Node may suffice."
+  else
+    echo "Local Node missing or older than 22.18 — falling back to Docker."
+  fi
+  command -v docker >/dev/null || { echo "ERROR: docker not found (and the local Node is too old to run natively — need Node 22.18+)." >&2; exit 1; }
+  docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
+  command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
+  echo "Resolving latest typescript-node base image..."
+  MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
+    | grep -oE '[0-9]+-bookworm' | sed 's/-bookworm//' | sort -rn | awk '$1>=18' | head -1 || true)"
+  [ -n "${MAJOR:-}" ] || MAJOR=24
+  IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
+  echo "Base image: $IMAGE"
+  WORK_ROOT="/work"                  # PROJECTS_DIR is mounted here (see docker run -v below)
+  ASSETS_ROOT="/assets"              # ASSETS_DIR is mounted here (ro)
+  STAGE_DIR="/tmp/bespunky-nx-tools" # nx-tools staging dir inside the container
+  RUNTIME_DESC="image=$IMAGE"
+fi
+[ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
+[ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
+[ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (WSLg audio bridge + espeak-ng + bespunky-voice plugin — WSL-only)"
 
 # --- devcontainer generator args ---
 # Append (never overwrite) so --firebase and --voice compose in either order. The LAYER flags are resolved at
