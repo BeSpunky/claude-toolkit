@@ -456,11 +456,18 @@ APP_FIREBASE_FLAG="--firebase=false"
 [ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires --firebase." >&2; exit 1; }
 APP_STAGING_FLAG=""
 [ "$STAGING" = "1" ] && APP_STAGING_FLAG=" --staging=true"
-SYNC_FIREBASE_BLOCK=""
-if [ "$FIREBASE" = "1" ]; then
-  SYNC_FIREBASE_BLOCK="
+# Rendered UNCONDITIONALLY and gated at RUN time by `layer_active firebase`, exactly like every other layer
+# block. Building it only when `--firebase` was passed inverted the layer model: a project WITH firebase.json
+# detects the layer, reports it active — and then ran nothing, because the block was an empty string and the
+# rendered `if` contained only a `:`. So a plain `--sync` on a Firebase project silently skipped the emulator
+# wiring, which is precisely the case that needs it most: the generator is what RETIRES the legacy per-app
+# `emulators*` targets and moves the suite to the workspace-level `firebase` project. Projects were left
+# carrying the old shape while the sync reported success.
+#
+# DETECTION drives refresh; `--firebase` only ever controls whether the layer is ENSURED (created where it
+# does not yet exist) — which it does by joining the ensure set above, not by gating this call.
+SYNC_FIREBASE_BLOCK="
   ensure_nx_tools; $PM_EXEC nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG"
-fi
 
 # --- house tooling: stage @bespunky/nx-tools (used by both modes) ---
 # @bespunky/nx-tools is bundled scaffold-time tooling: we copy it into node_modules but never
@@ -736,8 +743,13 @@ if layer_active web; then
     echo \"[layers]   Pass the app name explicitly to refresh it:  scaffold.sh --sync <project> <app-name>\"
   fi
 fi
-if layer_active firebase && project_exists '$APP'; then$SYNC_FIREBASE_BLOCK
-  :
+# \`angular\` is in the gate because the generator REQUIRES it (it writes environment files,
+# firebase.config.ts and the app.config.ts provider) and asserts that with its own requireLayer. Without it
+# the gate would open on any repo carrying a firebase.json — a functions-only or hosting-only site — and the
+# generator's guard would then abort the whole sync over a layer the project never claimed to have.
+if layer_active firebase && layer_active angular && project_exists '$APP'; then$SYNC_FIREBASE_BLOCK
+elif layer_active firebase; then
+  echo '[layers] firebase detected, but the emulator wiring needs an Angular app in this workspace — skipping it.'
 fi
 $WORKSPACE_GEN_BLOCK"
 fi
