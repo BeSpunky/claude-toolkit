@@ -24,6 +24,7 @@
 // committed, generator-owned, rewritten on every sync — and already the file the hook stats to decide
 // whether this is even a house project. One file, one truth, no new gitignore surface.
 import { type Tree, formatFiles } from '@nx/devkit';
+import { findDesignSystem } from '../_utils/design-system';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectLayers, type LayerId } from '../../layers/registry';
@@ -80,7 +81,14 @@ export default async function houseDocGenerator(
     ...layers.map((id) => [id, true]),
     ['firebase', firebase],
   ]);
-  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers, packageManager);
+  // The design system's REAL root, not a guess. HOUSE.md's whole job is telling a reader — human or
+  // agent — where things are, and it hardcoded `packages/design-system`. Projects scaffolded before the
+  // libs-dir inference learned to ignore `tools/` have theirs at `tools/design-system`, so the document
+  // pointed at a directory that does not exist, and an agent following it either gives up or creates a
+  // SECOND design system at the path the doc named. Resolved through the same tag-based lookup every
+  // generator already trusts, so the doc and the generators can never disagree.
+  const dsRoot = findDesignSystem(tree)?.root ?? 'packages/design-system';
+  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers, packageManager, dsRoot);
 
   // 1) The generated reference — rewritten every run (generator-owned; never hand-edited), carrying the
   //    stamp in its header. No timestamp anywhere: a stamp that changed on every sync would dirty the
@@ -123,12 +131,14 @@ function renderTemplate(
   pluginVersion: string,
   layers: readonly string[],
   packageManager: string,
+  dsRoot: string,
 ): string {
   // Collapse the blank-line runs a removed conditional block leaves behind — the same tidy the devcontainer
   // renderer does, and for the same reason: HOUSE.md is READ, by humans and by the agent, and a document
   // full of gaps where Angular or Firebase sections used to be reads as damaged rather than as tailored.
   return collapseBlankRuns(
     expandBlocks(src, flags)
+    .replace(/\{\{DS_ROOT\}\}/g, dsRoot)
     .replace(/\{\{PM\}\}/g, packageManager)
     .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
     .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion)

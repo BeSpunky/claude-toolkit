@@ -30,6 +30,11 @@
       "description": "Give a devcontainer written before the ownership marker existed a marker of its own, so a house-written container resumes receiving updates instead of being treated as adopted.",
       "implementation": "./src/migrations/0.24.4/claim-legacy-devcontainer-ownership"
     },
+    "relocate-design-system-out-of-tools": {
+      "version": "0.24.5",
+      "description": "Move a design system that a pre-0.18.0 scaffold placed under tools/ to the workspace library directory, retargeting its tsconfig path alias and the apps sass include path.",
+      "implementation": "./src/migrations/0.24.5/relocate-design-system-out-of-tools"
+    },
     "remove-orphaned-beside-post-create": {
       "version": "0.24.6",
       "description": "Delete the duplicate post-create.bespunky.sh left behind by the beside-script bug, which no sync updates and which provisions the container a second time when it was chained by hand.",
