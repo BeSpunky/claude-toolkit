@@ -100,6 +100,16 @@ export default function carryLegacyFirebaseProdConfig(tree: Tree): void {
           `now and is rewritten on every sync.`,
       );
     }
+
+      // AND REMOVE THE ORIGINAL, so the same credentials stop living in two places. Carrying without
+      // clearing leaves a duplicate that is worse than either state alone: someone updates one copy and not
+      // the other, or deletes environment.prod.ts believing the real config is still in firebase.config.ts.
+      //
+      // The generator usually rewrites this file wholesale moments later, which would drop the const anyway
+      // — but "usually" is doing real work there. The per-app generators are skipped whenever a sync cannot
+      // resolve the app (the run then reports SYNC_PARTIAL), and that is exactly the case where a stale
+      // second copy of production credentials survives indefinitely.
+      removeLegacyProdConfigDeclaration(ts, tree, configPath, name);
   }
 }
 
@@ -477,4 +487,69 @@ function maskComments(source: string): string {
  */
 function escapeForQuote(value: string, quote: string): string {
   return value.split('\\').join('\\\\').split(quote).join(`\\${quote}`);
+}
+
+/**
+ * Delete the `productionFirebaseConfig` declaration once its values are safely carried across.
+ *
+ * CONCLUSIVE OR NOTHING, like everything else here. The const goes only when the file mentions the name
+ * EXACTLY once — the declaration itself. A second mention means something still reads it, and removing the
+ * declaration would turn a duplicated credential into a file that does not compile. The values are already
+ * carried by then, so the safe move is to say so and let a human unpick the reference.
+ *
+ * The span is taken from the AST where the subset allows it (`getEnd()` on the object literal) and verified
+ * against the source everywhere else — the same discipline `literalSpan` uses, and for the same reason: a
+ * position this file computed but did not check is a position that can silently eat the wrong bytes.
+ */
+function removeLegacyProdConfigDeclaration(
+  ts: ClassicTypeScript,
+  tree: Tree,
+  configPath: string,
+  project: string,
+): void {
+  const source = tree.read(configPath, 'utf8') ?? '';
+  if (source.split('productionFirebaseConfig').length - 1 !== 1) {
+    logger.warn(
+      `[migrate 0.24.2] ${project}: left the legacy \`productionFirebaseConfig\` in ${configPath} because ` +
+        `something else in the file still refers to it. Its values are in environment.prod.ts now, so remove ` +
+        `the const and its remaining use by hand — otherwise the same credentials live in two places.`,
+    );
+    return;
+  }
+
+  const literal = findVariableObject(ts, ts.createSourceFile(configPath, source, 99, true), 'productionFirebaseConfig');
+  if (!literal) return;
+
+  // Backwards to the start of the declaration's line. Safe because the identifier occurs exactly once, so
+  // there is no other line this index could belong to.
+  const nameAt = source.indexOf('productionFirebaseConfig');
+  let start = source.lastIndexOf('\n', nameAt) + 1;
+
+  // VERIFY before cutting: the line must actually open a declaration. Anything else means the shape is not
+  // what this assumed, and the correct response is to leave the file alone rather than guess at a span.
+  if (!/^\s*(export\s+)?(const|let|var)\s+productionFirebaseConfig\b/.test(source.slice(start, nameAt + 64))) {
+    logger.warn(
+      `[migrate 0.24.2] ${project}: could not identify the \`productionFirebaseConfig\` declaration in ` +
+        `${configPath}, so it was left in place. Its values are in environment.prod.ts now — remove the const ` +
+        `by hand so the same credentials are not kept in two files.`,
+    );
+    return;
+  }
+
+  // Absorb a doc comment sitting directly above it: a comment describing a const that no longer exists is
+  // just a different kind of clutter.
+  const before = source
+    .slice(0, start)
+    .replace(/(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)[ \t]*\n)+$/, '');
+  start = before.length;
+
+  let end = literal.getEnd();
+  while (end < source.length && (source[end] === ';' || source[end] === '\r')) end++;
+  while (end < source.length && source[end] === '\n') end++;
+
+  tree.write(configPath, source.slice(0, start) + source.slice(end));
+  logger.info(
+    `[migrate 0.24.2] ${project}: removed the legacy \`productionFirebaseConfig\` from ${configPath} — its ` +
+      `values are in environment.prod.ts now, and a second copy is how the two drift apart.`,
+  );
 }

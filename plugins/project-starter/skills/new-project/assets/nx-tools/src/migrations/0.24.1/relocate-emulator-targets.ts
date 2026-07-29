@@ -604,6 +604,24 @@ function deleteRetiredEnvironmentFiles(tree: Tree, projects: ProjectFile[], orph
     tree.delete(candidate);
     logger.info(`[migrate 0.24.1] Deleted ${candidate} — nothing compiles it anymore.`);
   }
+
+  // AND REPORT WHAT WAS DELIBERATELY LEFT. The ambiguous names above are excluded from the sweep on purpose —
+  // `standalone` is a word a project may legitimately use for its own build variant, and deleting a source
+  // file on a guess is not a trade this migration makes. But saying NOTHING about a file that nothing
+  // references turns a considered decision into silent clutter, which is indistinguishable from an oversight
+  // and is exactly how a workspace accumulates dead environment files nobody dares remove.
+  for (const { root } of projects) {
+    for (const { envFile, nameIsProof } of Object.values(RETIRED_BUILD_CONFIGURATIONS)) {
+      if (nameIsProof) continue;
+      const path = joinPathFragments(root, 'src/environments', envFile);
+      if (!tree.exists(path) || referenced.has(path)) continue;
+      logger.warn(
+        `[migrate 0.24.1] ${path} is left over from a retired build variant and nothing references it — but ` +
+          'its name is one a project may use for its own purposes, so it was NOT deleted. Remove it by hand ' +
+          'if it is ours; "no emulators" is a runtime choice now (?emulate=none), not a build.',
+      );
+    }
+  }
 }
 
 /** A project file's JSON, or `undefined` (reported once, by path) when it does not parse. */
