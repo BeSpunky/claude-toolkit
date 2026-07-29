@@ -22,8 +22,18 @@
     },
     "upgrade-emulator-environment-shape": {
       "version": "0.24.3",
-      "description": "Upgrade a pre-toggle environment bundle (bare emulator endpoints, and the interface that typed them) to the per-service `default` shape firebase.config.ts reads — otherwise every service silently resolves to the real Firebase backend.",
+      "description": "Upgrade a pre-toggle environment bundle (bare emulator endpoints, and the interface that typed them) to the per-service `default` shape firebase.config.ts reads \u2014 otherwise every service silently resolves to the real Firebase backend.",
       "implementation": "./src/migrations/0.24.3/upgrade-emulator-environment-shape"
+    },
+    "claim-legacy-devcontainer-ownership": {
+      "version": "0.24.4",
+      "description": "Give a devcontainer written before the ownership marker existed a marker of its own, so a house-written container resumes receiving updates instead of being treated as adopted.",
+      "implementation": "./src/migrations/0.24.4/claim-legacy-devcontainer-ownership"
+    },
+    "remove-orphaned-beside-post-create": {
+      "version": "0.24.6",
+      "description": "Delete the duplicate post-create.bespunky.sh left behind by the beside-script bug, which no sync updates and which provisions the container a second time when it was chained by hand.",
+      "implementation": "./src/migrations/0.24.6/remove-orphaned-beside-post-create"
     }
   }
 }
