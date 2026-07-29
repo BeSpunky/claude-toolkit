@@ -14,6 +14,38 @@ Fix: publish `@bespunky/nx-tools` and have projects depend on it (the scaffold/s
 devDep). Nx can't run raw TS from `node_modules`, so the published package ships **compiled JS** — this
 script compiles (reusing `compile-generators.mts`) and publishes.
 
+## Before you bump the version: the migrations gate
+
+**A release ships the migrations it owes.** The version bump this script needs is not a bookkeeping step —
+it is the moment existing projects find out what changed, and the *only* moment. So before editing
+`assets/nx-tools/package.json`, put every change going out to one question:
+
+> **Does this alter a shape that projects already on disk have?**
+
+A renamed target, a relocated project or library, a retired config or environment file, a moved path, a
+dropped option, a file shape a generator used to heal and no longer does — each is a **one-way delta**, and
+the release is unfinished until a migration at `src/migrations/<version>/` carries it (registered in
+`migrations.json`; see the toolkit `CLAUDE.md` §*Release & versioning* for the full rule, and the
+`new-project` skill §1d for how the ladder runs).
+
+**"Nothing to migrate" is a legitimate answer** — a brand-new generator, a new layer, a fix to an owned
+template artifact that every sync regenerates anyway. It is also the answer you'll reach by accident if you
+don't ask. So make it a *stated finding*: say it in the release commit message, so the next reader can tell
+a considered "nothing to migrate" from a forgotten one.
+
+Why the ceremony: **skipping an owed migration fails silently and permanently.** The project installs the new
+tooling, `nx migrate` collects nothing, and `house-doc` stamps the project current on the way out — after
+which the gap is sealed behind a stamp that every later sync believes.
+
+And when you do write one, **a migration cleans up after itself**: it is done only when the old shape is
+*gone* — deletions made, every reference to a moved path retargeted (including the ones the toolkit never
+wrote), carried data cleared from where it used to live, and anything deliberately left un-deleted **reported
+by name with its reason**. Details and the ladder's own scar tissue are in `CLAUDE.md`.
+
+**The invariant this script cannot check for you:** `max(version in migrations.json) <= version in
+assets/nx-tools/package.json`. A migration registered above the package version is never collected, never
+run, and silent about it — so the migration's `version` field and the package bump are one decision.
+
 ## Usage
 
 ```bash
