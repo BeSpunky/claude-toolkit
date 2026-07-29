@@ -1,7 +1,7 @@
 import type { PromiseExecutor } from '@nx/devkit';
 import { logger } from '@nx/devkit';
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -467,7 +467,21 @@ function ensureInstalled(worktree: Worktree, install: boolean, dryRun: boolean):
  * each resolve the package manager the same way, from the same evidence.
  */
 function installCmd(cwd: string): string[] {
+  // Same precedence as scaffold.sh, the house-doc generator and the generated post-create.sh: the
+  // `packageManager` DECLARATION first, then lockfiles, then the house default. This used to read neither
+  // the field nor `yarn.lock`, so a fresh worktree of a yarn workspace could be installed with npm.
+  let declared: string | undefined;
+  try {
+    declared = /"packageManager"\s*:\s*"(yarn|npm|pnpm)@/.exec(readFileSync(join(cwd, 'package.json'), 'utf8'))?.[1];
+  } catch {
+    declared = undefined;
+  }
+  if (declared === 'pnpm') return ['pnpm', 'install'];
+  if (declared === 'npm') return ['npm', 'install'];
+  if (declared === 'yarn') return ['yarn', 'install'];
+
   if (existsSync(join(cwd, 'pnpm-lock.yaml'))) return ['pnpm', 'install'];
+  if (existsSync(join(cwd, 'yarn.lock'))) return ['yarn', 'install'];
   if (existsSync(join(cwd, 'package-lock.json'))) return ['npm', 'install'];
   return ['yarn', 'install'];
 }

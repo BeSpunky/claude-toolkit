@@ -216,8 +216,21 @@ function upsertPointer(source: string, pointer: string): string {
  * Same evidence and same precedence scaffold.sh uses, so the doc can't disagree with the tool that wrote
  * it. Defaults to the house standard only when the project genuinely declares nothing.
  */
+/**
+ * ONE precedence rule, shared with scaffold.sh's `detect_package_manager` and the generated post-create.sh.
+ *
+ * The `packageManager` field wins because it is the only signal a human deliberately WROTE; every other one
+ * is an artifact, and artifacts are exactly what a stray lockfile leaves behind. This used to read neither
+ * the field nor `yarn.lock`, so a yarn workspace that happened to carry a package-lock.json got a HOUSE.md
+ * full of `npm` commands while the sync and the container both ran yarn — the document disagreeing with the
+ * tooling it documents.
+ */
 function detectPackageManager(tree: Tree): string {
+  const declared = /"packageManager"\s*:\s*"(yarn|npm|pnpm)@/.exec(tree.read('package.json', 'utf8') ?? '')?.[1];
+  if (declared) return declared;
+
   if (tree.exists('pnpm-lock.yaml')) return 'pnpm';
+  if (tree.exists('yarn.lock')) return 'yarn';
   if (tree.exists('package-lock.json')) return 'npm';
   return 'yarn';
 }

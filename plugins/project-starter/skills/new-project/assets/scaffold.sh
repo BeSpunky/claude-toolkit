@@ -1503,6 +1503,42 @@ if [ "$MODE" = "sync" ] && [ "$BACKUP" = "1" ]; then
   fi
 fi
 
+# --- two lockfiles: damage this toolkit caused, and will otherwise keep believing ----------------------------
+# Before nx-tools 0.18.0 the generated post-create.sh hardcoded `yarn install`, while scaffold.sh already
+# detected npm and pnpm correctly. So a devcontainer build on an npm project ran yarn and left a yarn.lock
+# beside package-lock.json. After that `npm ci` fails for the whole team, and the cause — a container rebuild
+# weeks earlier — is nowhere near the symptom.
+#
+# The 0.18.0 fix made it PERMANENT rather than repairing it: every detector here checks yarn.lock BEFORE
+# package-lock.json, so the stray file the old script planted became the evidence every later run trusts, and
+# the sync itself keeps choosing yarn in an npm project.
+#
+# Placed after the backup deliberately: a deletion below is inside the restore point, so it can be undone.
+if [ "$MODE" = "sync" ] && [ -f "$TARGET/yarn.lock" ]; then
+  _other=""
+  [ -f "$TARGET/package-lock.json" ] && _other="package-lock.json"
+  [ -f "$TARGET/pnpm-lock.yaml" ]    && _other="pnpm-lock.yaml"
+  if [ -n "$_other" ]; then
+    # The `packageManager` field is an EXPLICIT declaration, not an artifact — the one piece of evidence that
+    # settles which lockfile is legitimate. Where it names npm or pnpm, a yarn.lock contradicts something the
+    # project stated about itself, and this toolkit is what put it there.
+    if [ "$PM_SOURCE" = "packageManager-field" ] && [ "$PM" != "yarn" ]; then
+      rm -f "$TARGET/yarn.lock"
+      echo "NOTE: removed a stray yarn.lock — this project declares packageManager: $PM and also has $_other."
+      echo "      A pre-0.18 devcontainer build created it by running 'yarn install' regardless of the project's"
+      echo "      package manager, which breaks '$PM ci' for everyone and made every later sync pick yarn."
+      echo "      It is in the restore point above if you actually wanted it."
+    else
+      echo "WARNING: this workspace has TWO lockfiles — yarn.lock and $_other." >&2
+      echo "         A pre-0.18 devcontainer build may have created the yarn.lock by running 'yarn install'" >&2
+      echo "         regardless of the project's package manager. While both exist, this sync and post-create.sh" >&2
+      echo "         resolve to yarn, and '$_other'-based installs (npm ci / pnpm i --frozen-lockfile) fail." >&2
+      echo "         Nothing was deleted: which one is legitimate cannot be determined from here. Delete the one" >&2
+      echo "         that is not yours, or declare it — npm pkg set packageManager=<pm>@<version> — and re-run." >&2
+    fi
+  fi
+fi
+
 # --- --print-inner: show the rendered program and stop --------------------------------------------------------
 # This script's real product is the ~300-line shell program assembled above, and until now the only way to
 # read it was to edit this file and insert a printf — which is what every review of it has had to do, and
