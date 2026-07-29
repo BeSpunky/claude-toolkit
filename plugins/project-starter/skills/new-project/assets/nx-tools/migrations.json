@@ -1,0 +1,29 @@
+{
+  "generators": {
+    "unify-serve-targets": {
+      "version": "0.24.0",
+      "description": "Consolidate the historic dev-server target names into the single `dev-server` leaf, and drop the retired `serve-worktree` / `serve-with-shared-browser` targets.",
+      "implementation": "./src/migrations/0.24.0/unify-serve-targets"
+    },
+    "stamp-devcontainer-ownership": {
+      "version": "0.24.0",
+      "description": "Resolve devcontainer ownership markers written before the `owned` flag existed, so a devcontainer the toolkit owns keeps receiving house updates.",
+      "implementation": "./src/migrations/0.24.0/stamp-devcontainer-ownership"
+    },
+    "relocate-emulator-targets": {
+      "version": "0.24.1",
+      "description": "Move the per-app `emulators*` targets to the workspace-level `firebase` project, and drop the retired no-emulators build configurations and environment files.",
+      "implementation": "./src/migrations/0.24.1/relocate-emulator-targets"
+    },
+    "carry-legacy-firebase-prod-config": {
+      "version": "0.24.2",
+      "description": "Rescue production Firebase credentials from a legacy `productionFirebaseConfig` in firebase.config.ts into environment.prod.ts, before the generator rewrites that file.",
+      "implementation": "./src/migrations/0.24.2/carry-legacy-firebase-prod-config"
+    },
+    "upgrade-emulator-environment-shape": {
+      "version": "0.24.3",
+      "description": "Upgrade a pre-toggle environment bundle (bare emulator endpoints, and the interface that typed them) to the per-service `default` shape firebase.config.ts reads — otherwise every service silently resolves to the real Firebase backend.",
+      "implementation": "./src/migrations/0.24.3/upgrade-emulator-environment-shape"
+    }
+  }
+}

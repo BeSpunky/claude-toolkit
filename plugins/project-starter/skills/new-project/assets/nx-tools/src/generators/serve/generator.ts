@@ -22,9 +22,15 @@
 // `nx g @bespunky/nx-tools:app` — needs its own dev-server leaf + serve target, so it is applied here,
 // on the same code path serve-options runs on, and can't drift as apps are added.
 //
-// Idempotent + --sync-safe: re-running re-asserts the same targets (self-healing the raw
-// @nx/angular `serve` and any legacy dev-server names into the `dev-server` leaf), rewrites the
-// generator-owned tab-label glue, and re-wires the provider only if absent.
+// Idempotent + --sync-safe: re-running re-asserts the same targets (reclaiming the raw @nx/angular
+// `serve` slot into the `dev-server` leaf), rewrites the generator-owned tab-label glue, and re-wires
+// the provider only if absent.
+//
+// It asserts the CURRENT shape only. Collapsing a project that still carries the pre-0.3.0 fan of serve
+// targets (`serve-app`/`serve-standalone`/`serve-no-emulators`/`serve-with-emulators`, `serve-worktree`,
+// `serve-with-shared-browser`) is the job of the versioned migration
+// src/migrations/0.24.0/unify-serve-targets.ts, which sweeps EVERY project once rather than only the apps
+// a sync happens to run this per-app generator against.
 import {
   type Tree,
   type TargetConfiguration,
@@ -50,14 +56,12 @@ interface ServeSchema {
 const ANGULAR_DEV_SERVER_EXECUTOR = '@angular/build:dev-server';
 const ANGULAR_BUILD_EXECUTORS = ['@angular/build:', '@angular-devkit/build-angular:'];
 const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
-// Every historical name the app dev-server may hide under (a fresh @nx/angular `serve`, or a legacy
-// Firebase inner target) — consolidated into the single `dev-server` leaf.
-const LEGACY_DEV_SERVER_NAMES = ['dev-server', 'serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app'];
-// Retired PER-APP targets the unified serve subsumes — deleted on every run so a --sync'd project is
-// left with just `serve` + `dev-server`. `serve-worktree`'s executor (@bespunky/nx-tools:serve-worktree)
-// was renamed to `serve` in 0.3.0, so the old target now dangles at a non-existent executor;
-// `serve-with-shared-browser`'s serve+navigate is now the serve executor's default shared-browser layer.
-const RETIRED_SERVE_TARGETS = ['serve-worktree', 'serve-with-shared-browser'];
+// Where the app's dev-server may sit when this generator runs, in priority order:
+//   - `dev-server` — the canonical leaf, on a re-run or a project that already brought its own.
+//   - `serve`      — where a fresh @nx/angular:application parks its dev-server, before this generator
+//                    reclaims that slot for the composer.
+// Pre-0.3.0 names are NOT looked for here; the 0.24.0 migration renames them to `dev-server` first.
+const DEV_SERVER_NAMES = ['dev-server', 'serve'];
 
 export default async function serveGenerator(tree: Tree, options: ServeSchema): Promise<void> {
   const projectName = options.project;
@@ -100,13 +104,9 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   delete preserved.buildTarget;
   delete preserved.host;
 
-  // Drop every legacy/duplicate dev-server name (and the fresh `serve` if it WAS the raw dev-server),
-  // then assert the leaf + composer. The `serve` slot is reclaimed by the composer below.
-  const carried = ownsLeaf ? undefined : existingDevServer;
-  for (const name of LEGACY_DEV_SERVER_NAMES) delete targets[name];
+  // Free the `serve` slot when it holds the raw Angular dev-server — a fresh @nx/angular:application parks
+  // one there, and the composer takes that name below (the leaf is re-asserted as `dev-server`).
   if (targets.serve?.executor === ANGULAR_DEV_SERVER_EXECUTOR) delete targets.serve;
-  // Heal the retired per-app targets the unified serve replaces (dangling executor / redundant orchestrator).
-  for (const name of RETIRED_SERVE_TARGETS) delete targets[name];
 
   if (ownsLeaf) {
     // The `dev-server` leaf — the real Angular dev-server the composer drives. Env pinned via
@@ -123,12 +123,12 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
       defaultConfiguration: 'development',
     };
   } else {
-    // A NON-Angular dev-server: re-seat it under the canonical `dev-server` name (the loop above moved it
-    // out of the way) and otherwise leave it entirely alone. Its options, its executor and its
-    // configurations belong to whoever set it up; the composer only needs to be able to find it by name.
-    targets['dev-server'] = carried as TargetConfiguration;
+    // A NON-Angular dev-server: re-seat it under the canonical `dev-server` name (it may have been found on
+    // `serve`, which the composer is about to claim) and otherwise leave it entirely alone. Its options, its
+    // executor and its configurations belong to whoever set it up; the composer only needs to find it by name.
+    targets['dev-server'] = existingDevServer as TargetConfiguration;
     logger.info(
-      `[serve] Composing the existing \`${carried?.executor}\` dev-server for "${projectName}" — left as-is.`
+      `[serve] Composing the existing \`${existingDevServer?.executor}\` dev-server for "${projectName}" — left as-is.`
     );
   }
 
@@ -197,8 +197,8 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
 }
 
 /**
- * The project's existing dev-server, under any of the names it has historically hidden under — including the
- * fresh `serve` slot before it becomes the composer.
+ * The project's existing dev-server: the canonical `dev-server` leaf, or the fresh `serve` slot before it
+ * becomes the composer.
  *
  * Deliberately NOT filtered by executor. That filter is what made this Angular-only: a Vite dev-server sitting
  * on `serve` was invisible, so the generator concluded there was none and overwrote it with an Angular target
@@ -207,7 +207,7 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
 function findExistingDevServer(
   targets: Record<string, TargetConfiguration>
 ): TargetConfiguration | undefined {
-  for (const name of [...LEGACY_DEV_SERVER_NAMES, 'serve']) {
+  for (const name of DEV_SERVER_NAMES) {
     const target = targets[name];
     // The composer itself is not a dev-server — on a re-run it occupies `serve`, and treating it as the leaf
     // would compose it with itself.

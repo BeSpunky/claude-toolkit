@@ -87,6 +87,42 @@ npm publish $DRY $OTP
 EOF
 }
 
+# --- the migrations invariant: max(version in migrations.json) <= version in package.json ---------------------
+# `nx migrate` collects a migration only when its version is > the version the project is on AND <= the
+# TARGET, and the target is the published package version. So a migration keyed above the package version is
+# unreachable from every project, forever — and nothing about that failure is visible: the sync collects
+# nothing, runs nothing, reports success, and stamps the project as current.
+#
+# This is not hypothetical. The migrations refactor registered four migrations at 0.24.x, left package.json
+# at 0.23.0, and every review of the change read as green: the file was valid, the paths resolved, the
+# tarball shipped it. Worse, 0.23.0 was already on npm, so CI's "publish only when the version is new" guard
+# correctly did nothing, and the whole release would have silently shipped as a no-op. Check it here, where
+# a publish can still be stopped, rather than discovering it from a project that never migrated.
+if [ -f "$ASSETS_DIR/nx-tools/migrations.json" ]; then
+  node -e "
+    const fs=require('fs');
+    const pkg=require('$ASSETS_DIR/nx-tools/package.json');
+    const mig=JSON.parse(fs.readFileSync('$ASSETS_DIR/nx-tools/migrations.json','utf8'));
+    // Prerelease-aware, and it has to be: comparing release cores alone makes 0.25.0-rc.1 equal to a
+    // migration keyed 0.25.0, so the guard passes while the runtime comparators (scaffold.sh's probe and
+    // the --local collector, which both rank a prerelease BELOW its release) treat that migration as
+    // unreachable. The guard would then miss exactly the failure class it exists to catch. Three copies of
+    // this comparison now exist; they must agree, and this is the one that decides whether a release ships.
+    const p=v=>String(v).split('-')[0].split('.').map(Number);
+    const pre=v=>/^[^+]*-/.test(String(v));
+    const c=(a,b)=>{const x=p(a),y=p(b);for(let i=0;i<3;i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)<(y[i]||0)?-1:1}
+      if(pre(a)!==pre(b))return pre(a)?-1:1; return 0};
+    const over=Object.entries(mig.generators||{}).filter(([,g])=>g.version&&c(g.version,pkg.version)>0);
+    if(over.length){
+      console.error('ERROR: migrations are registered ABOVE the package version — they can never be collected.');
+      console.error('       package.json version : '+pkg.version);
+      for(const [n,g] of over) console.error('       unreachable migration: '+n+' @ '+g.version);
+      console.error('       Bump assets/nx-tools/package.json to at least '+over.map(([,g])=>g.version).sort(c).pop()+' and re-run.');
+      process.exit(1);
+    }
+  " || exit 1
+fi
+
 if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
   echo "Node $(node -v) is new enough — publishing locally (no Docker)."
   bash -c "$(render_steps "$ASSETS_DIR" "$(mktemp -d)")"

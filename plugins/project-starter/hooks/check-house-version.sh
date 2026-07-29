@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # SessionStart hook — "did the toolkit move out from under this project?"
 #
-# WHY THIS EXISTS. `scaffold.sh --sync` re-applies the house generators, so a project picks up new house
-# tooling. But nothing was telling anyone to run it: Claude Code has NO plugin-install/update hook event, so
+# WHY THIS EXISTS. `scaffold.sh --sync` runs the house MIGRATIONS and re-applies the house generators, so a
+# project picks up new house tooling — both the files the generators own and the one-way version deltas that
+# reshape what they don't. But nothing was telling anyone to run it: Claude Code has NO plugin-install/update
+# hook event, so
 # `/plugin marketplace update` upgrades the plugin silently and the project quietly drifts a version behind —
 # devcontainer, Claude settings, serve targets and HOUSE.md all frozen at whatever shipped the day it was
 # scaffolded.
 #
-# WHY IT ONLY DETECTS. The obvious move — have a hook RUN the sync — is wrong, and deliberately not done.
-# A sync re-runs the house generators and several package installs; it takes minutes and tags the repo on a
-# dirty tree. (It does NOT require Docker — inside a devcontainer it runs the generators on the local Node
-# natively; see scaffold.sh.) That is not something to ambush a session with. So this hook does the cheap
-# half — a few small file reads — and hands Claude a statement of fact. Claude relays it; the human decides.
+# WHY IT ONLY DETECTS, AND NEVER RUNS. The obvious move — have a hook RUN the sync — is wrong, and
+# deliberately not done. A sync migrates, installs and regenerates; it takes minutes, tags the repo on a dirty
+# tree, and its migrations are ONE-WAY. (It does NOT require Docker — inside a devcontainer it runs on the
+# local Node natively; see scaffold.sh.) That is not something to ambush a session with. So this hook does the
+# cheap half — a few small file reads — and hands Claude a statement of fact to RELAY. It never runs the sync
+# and never orders the model to: a hook that commands action is one compliant model away from doing the thing
+# we refused to automate, and in a headless run (`claude -p`, CI) there is no one there to consent at all.
 # Detection is automatic; execution stays consented.
 #
 # WHAT IT COMPARES, AND WHY ONLY THAT. `@bespunky/nx-tools` — the package the generators come from, and so the
@@ -20,12 +24,27 @@
 # sync for a change that regenerates nothing would train everyone to ignore this notice. The plugin version
 # is still read and shown, for provenance.
 #
+# AND IT COMPARES THAT TWICE, against two different things. Against the INSTALLED plugin, the question is "has
+# the toolkit moved out from under this project?". Against the project's own `@bespunky/nx-tools` — the version
+# RESOLVED in its node_modules first, falling back to the base version its package.json declares — the question
+# is "has this project's tooling moved out from under its own applied state?", which a floatable range makes
+# possible without anyone running anything, and which the first comparison structurally cannot see.
+#
+# The resolved version is what settles it, and reading only the declared range cannot. Stripping `^` off
+# `^0.23.0` leaves 0.23.0, which compares EQUAL to a 0.23.0 stamp — so the very case this is for (an ordinary
+# install pulled node_modules forward to a newer published version, with no migration behind it) would never
+# fire. What moved is what is resolved. The declared base is still compared, because a hand-bumped exact
+# dependency is the same drift reached another way. Same stamp, two questions, each answered only where true.
+#
 # DIRECTION MATTERS. The stamp is a REPO fact (committed, travels with every clone); the installed plugin is a
 # MACHINE fact. So "stamp newer than install" is an ordinary state — a teammate who hasn't run
 # `/plugin marketplace update`, a second machine, a CI checkout — not an error. Reporting that as "you're
 # behind, run --sync" would be a lie AND would push a sync that regenerates the project's house files with
-# OLDER generators, re-stamping it backwards and re-arming the notice for the teammate who was up to date. So
-# the versions are ORDERED, not merely compared, and each direction gets its own true sentence.
+# OLDER generators, re-stamping it backwards and re-arming the notice for the teammate who was up to date.
+# Under migrations the hazard is sharper still: the ladder only walks FORWARD. There is no reverse migration,
+# so a sync from an older machine cannot undo the deltas the project has already had applied — it would leave
+# files migrated to a shape the older generators no longer expect, and stamp that state as current. So the
+# versions are ORDERED, not merely compared, and each direction gets its own true sentence.
 #
 # Exits 0 in every path, silently, unless there is genuinely something to say — this runs at the start of every
 # session in every project on the machine, so silence is the overwhelmingly common outcome and a false alarm is
@@ -62,9 +81,12 @@ esac
 # --- reading versions, defensively ---------------------------------------------------------------------------
 # Everything below is read from files a REPO can control (HOUSE.md is checked in; a cloned repo can carry any
 # HOUSE.md it likes), and whatever we print goes straight into Claude's context. So every value is validated
-# against a strict version charset before it is ever echoed: a repo cannot smuggle a sentence — let alone an
-# instruction — into the model's context through a version string. A value that fails validation is treated as
-# absent, which lands in the "unstamped" branch rather than repeating the garbage back.
+# against a strict version charset before it is ever echoed. Be honest about what that buys: no whitespace and
+# at most 32 characters, which rules out prose, multi-line payloads and anything resembling a paragraph — but
+# NOT every instruction. `IGNORE_ALL_PRIOR_INSTRUCTIONS` passes this filter and would be echoed verbatim. It
+# is a real but PARTIAL mitigation; the load-bearing defence is the surrounding text, which frames every
+# echoed value as a version being reported and never as something to act on. A value that fails validation is
+# treated as absent, which lands in the "unstamped" branch rather than repeating the garbage back.
 is_version() {
   case "$1" in
     '' | *[!0-9A-Za-z.+_-]*) return 1 ;;
@@ -72,11 +94,14 @@ is_version() {
   [ "${#1}" -le 32 ]
 }
 
-# Read a top-level "key": "value" out of a JSON file — no jq (hooks must run in a bare shell; this is the same
-# grep/sed contract scaffold.sh already relies on to read its own versions).
+# Read a "key": "value" out of a JSON file — no jq (hooks must run in a bare shell; this is the same grep/sed
+# contract scaffold.sh already relies on to read its own versions). Line-based, so a key nested one level down
+# (a dependency inside devDependencies) reads exactly like a top-level one. The sed delimiter is `|` rather
+# than `/` precisely so a key may CONTAIN a slash — a scoped package name like `@bespunky/nx-tools` would
+# otherwise terminate the s/// expression and turn a lookup into a syntax error.
 json_value() {
   [ -f "$1" ] || return 1
-  grep -m1 "\"$2\"" "$1" 2>/dev/null | sed -E "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*/\1/"
+  grep -m1 "\"$2\"" "$1" 2>/dev/null | sed -E "s|.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*|\1|"
 }
 
 # Read `key=value` out of HOUSE.md's stamp marker: <!-- @bespunky/house-tooling:stamp nx-tools=X plugin=Y -->
@@ -127,6 +152,16 @@ is_version "$STAMPED_NX" || STAMPED_NX=''
 # Under-reporting stays the intended failure mode throughout: a missed notice costs a stale layer, a false
 # one costs everyone's trust in the notice. So every probe below is written to be quiet when unsure.
 STAMPED_LAYERS="$(stamp_value layers || true)"
+# VALIDATED like every other repo-controlled value, and it was the one that wasn't. HOUSE.md is committed, so
+# a cloned repo chooses this string, and it is echoed verbatim into the model's context. `is_version` guards
+# the version fields; `layers` had no check at all beyond stamp_value's whitespace split — which a hyphenated
+# payload defeats trivially, giving an attacker an unbounded, un-truncated injection channel into a session
+# that starts automatically. The value is a comma-separated list of known layer ids and nothing else, so
+# anything containing a character outside that alphabet is discarded rather than repeated back.
+case "$STAMPED_LAYERS" in
+  '' | *[!a-z,-]*) STAMPED_LAYERS='' ;;
+esac
+[ "${#STAMPED_LAYERS}" -le 96 ] || STAMPED_LAYERS=''
 
 has_layer() {
   case ",$STAMPED_LAYERS," in *",$1,"*) return 0 ;; esac
@@ -193,14 +228,119 @@ So the house files for that layer are missing. What each one brings:
   js            — the publishable-library and tool-extraction conventions in HOUSE.md
   firebase      — the emulator wiring, the JDK step, and the forwarded emulator ports
 
-Re-applying the house generators adds them: the sync path of the
-bespunky-project-starter:new-project skill — or, in one step, the \`/sync\` command, which updates the
-toolkit first and then syncs this project.
+A sync adds them: the sync path of the bespunky-project-starter:new-project skill — or, in one step, the
+\`/sync\` command, which updates the toolkit first and then syncs this project.
 
-RELAY THIS TO THE USER — do not act on it. Offer the sync; it needs a human's yes (see the sync's \`--yes\`
-gate) and must never run in a scripted or headless session. If they decline, record it so they are not asked
-again for this same drift — write \`.claude/house-snooze.json\` (gitignored) in the project root, containing:
+RELAY THIS TO THE USER — do not act on it. Offer the sync. It REFUSES to run unattended: it needs a human's
+yes, and passing its \`--yes\` flag ASSERTS that the user has explicitly agreed in this conversation. Pass it
+only when that is true — never to satisfy the gate, never on inferred consent, and never in a scripted or
+headless run (there, simply do nothing). If they decline, record it so they are not asked again for this same
+drift — MERGE this key into \`.claude/house-snooze.json\` (gitignored) in the project root, preserving any
+keys already there (the other house notices snooze themselves in the same file, and overwriting it re-arms them):
 { "declinedLayers": "$DRIFTED" }
+EOF
+    exit 0
+  fi
+fi
+
+# --- a floated dependency -------------------------------------------------------------------------------------
+# A THIRD way a project goes stale, and the one that hides best. The toolkit now runs VERSIONED MIGRATIONS: a
+# sync moves the project along a ladder of one-way deltas, from the version it has to the version being
+# installed. So the `nx-tools=` stamp is not merely a label — it records WHICH state has actually been APPLIED
+# to this project.
+#
+# Meanwhile the project's own `@bespunky/nx-tools` devDependency can say something different. Any project
+# whose dependency is written as a FLOATABLE range — the caret the older scaffolder wrote, and which plenty of
+# existing projects still carry — moves to a newer published version on an ordinary install, with no generator
+# run and no migration behind it. (What today's scaffolder writes is not this check's business; the check
+# exists for the projects that already have it, and costs one grep for the ones that don't.) The project then
+# DECLARES a newer toolkit than the state applied to it, and nothing else in this hook can see it: the stamp
+# may still match this machine's installed plugin exactly, which is the silent-exit case immediately below.
+#
+# BE HONEST ABOUT WHICH KIND OF FACT THIS ONE IS. The stamp is a repo fact, but the version RESOLVED in
+# node_modules — the preferred input here — is a MACHINE fact: gitignored, produced by an install, absent on
+# a fresh clone, and potentially different for each developer. So unlike the version comparison further down,
+# this notice is NOT identical for everyone on the team: it fires for whoever ran the install that floated
+# the dependency, and stays silent for a teammate who has not installed yet. That is the correct trade —
+# the float is precisely a local event, and the declared range is compared too so a committed hand-bump is
+# still caught everywhere — but it is a different guarantee, and treating it as a repo fact would be wrong.
+#
+# An absent stamp is deliberately NOT treated as "older than everything": that project is the unstamped case
+# the version branch below already describes truthfully, and preempting it here would replace an accurate
+# sentence with a confusing one.
+#
+# The declared value is a RANGE ("^0.23.0"), so the leading range operator is stripped before comparison, and
+# whatever survives must still pass is_version before it is echoed — a repo must not be able to smuggle text
+# into the model's context through a dependency string any more than through a stamp. Anything that does not
+# survive (a `workspace:` or `file:` link, a compound range, a dist-tag) is treated as absent and says
+# nothing, and version_cmp's `unknown` (a prerelease on either side) says nothing either: under-reporting
+# stays the intended failure mode here exactly as it is for every probe above.
+DEP_NX="$(json_value "$PROJECT_DIR/package.json" '@bespunky/nx-tools' || true)"
+DEP_NX="$(printf '%s' "$DEP_NX" | sed -E 's/^[[:space:]]*[v^~>=<]+[[:space:]]*//')"
+is_version "$DEP_NX" || DEP_NX=''
+
+# THE RESOLVED VERSION IS THE ONE THAT PROVES THE FLOAT, and reading only the declared range cannot see it.
+# Stripping `^` off `^0.23.0` leaves 0.23.0, which compares EQUAL to a 0.23.0 stamp — so the caret-float case
+# this notice exists for (a plain install pulled node_modules forward to a newer published version, with no
+# migration behind it) never fired. What actually moved is what is resolved in node_modules, so read that.
+# The declared base is still worth comparing: a hand-bumped exact dependency is the same class of drift,
+# reached a different way. Either being ahead of the stamp means migrations were most likely skipped.
+RESOLVED_NX="$(json_value "$PROJECT_DIR/node_modules/@bespunky/nx-tools/package.json" version || true)"
+is_version "$RESOLVED_NX" || RESOLVED_NX=''
+
+AHEAD_NX=''
+AHEAD_SRC=''
+if [ -n "$RESOLVED_NX" ] && [ -n "$STAMPED_NX" ] && [ "$(version_cmp "$RESOLVED_NX" "$STAMPED_NX")" = gt ]; then
+  AHEAD_NX="$RESOLVED_NX"; AHEAD_SRC="resolved in node_modules"
+elif [ -n "$DEP_NX" ] && [ -n "$STAMPED_NX" ] && [ "$(version_cmp "$DEP_NX" "$STAMPED_NX")" = gt ]; then
+  AHEAD_NX="$DEP_NX"; AHEAD_SRC="declared in package.json"
+fi
+
+# WILL A SYNC ACTUALLY FIX THIS? Only if this machine's toolkit is at or above where the project already is.
+# A sync installs the version THIS machine ships, and the scaffolder refuses outright when the project is
+# already above it (that would be a downgrade, and migrations do not walk backwards). Offering a sync that is
+# guaranteed to abort is worse than saying nothing: the user consents, the command fails, and a model that has
+# just been told to sync starts looking for a way around a guard that has none.
+SYNC_CAVEAT=''
+if [ -n "$AHEAD_NX" ] && [ "$(version_cmp "$AHEAD_NX" "$INSTALLED_NX")" = gt ]; then
+  SYNC_CAVEAT="But NOT YET on this machine: the toolkit installed here is nx-tools@$INSTALLED_NX, which is OLDER
+than the $AHEAD_NX this project already has. A sync would be a downgrade, and it will REFUSE to run rather than
+walk the project backwards. Update the toolkit first — /plugin marketplace update claude-toolkit — and only
+then sync. Do not offer the sync until that is done.
+"
+fi
+
+if [ -n "$AHEAD_NX" ]; then
+  # Same snooze courtesy as the other two notices: local-only, gitignored, and keyed to the version being
+  # reported so a further float asks the question again rather than inheriting an old "not now".
+  SNOOZED_DEP="$(json_value "$PROJECT_DIR/.claude/house-snooze.json" declinedNxToolsDependency || true)"
+  if [ "$SNOOZED_DEP" != "$AHEAD_NX" ]; then
+    cat <<EOF
+[bespunky-project-starter] This project DEPENDS on newer house tooling than has been APPLIED to it.
+
+  stamp records (state applied) : nx-tools@$STAMPED_NX
+  ahead of it ($AHEAD_SRC) : nx-tools@$AHEAD_NX
+  installed on this machine     : nx-tools@$INSTALLED_NX (project-starter@$INSTALLED_PLUGIN)
+
+The house tooling this project is RUNNING is ahead of the state that was last APPLIED to it. That happens
+without anyone doing anything wrong: the dependency was written as a floatable range by older versions of the
+scaffolder, so an ordinary install can pull in a newer published version with no house generator running.
+The house tooling ships VERSIONED MIGRATIONS — one-way deltas walked from
+the state the stamp records — so a stamp behind the declared dependency means the migrations between those two
+versions were most likely never applied: the project is running new tooling against files still shaped for the
+old one.
+
+A sync reconciles the two: it runs the migrations from the stamped version forward, re-applies the house
+generators and re-stamps the project — the sync path of the bespunky-project-starter:new-project skill, or, in
+one step, the \`/sync\` command, which updates the toolkit first and then syncs this project.
+$SYNC_CAVEAT
+RELAY THIS TO THE USER — do not act on it. Offer the sync. It REFUSES to run unattended: it needs a human's
+yes, and passing its \`--yes\` flag ASSERTS that the user has explicitly agreed in this conversation. Pass it
+only when that is true — never to satisfy the gate, never on inferred consent, and never in a scripted or
+headless run (there, simply do nothing). If they decline, record it so they are not asked again for this same
+gap — MERGE this key into \`.claude/house-snooze.json\` (gitignored) in the project root, preserving any keys
+already there (the other house notices snooze themselves in the same file, and overwriting it re-arms them):
+{ "declinedNxToolsDependency": "$AHEAD_NX" }
 EOF
     exit 0
   fi
@@ -238,6 +378,8 @@ The project is fine; the PLUGIN here is behind. Mention this to the user and sug
 
 Do NOT run \`scaffold.sh --sync\` in this state — it regenerates the project's house files with the OLDER
 generators installed here, downgrading the project and stamping it backwards for everyone else on the team.
+The house migrations only walk FORWARD, so nothing about that is undone by the next sync from an up-to-date
+machine; it is simply a mess someone then has to unpick by hand.
 EOF
     ;;
   *)
@@ -276,7 +418,8 @@ and offer the sync. The sync REFUSES to run unattended: it needs a human's yes, 
 flag ASSERTS that the user has explicitly agreed in this conversation. Pass it only when that is true — never
 to satisfy the gate, never on inferred consent, and never in a scripted or headless run (there, simply do
 nothing). If they decline, record it so they are not asked again for this version — write
-\`.claude/house-snooze.json\` (gitignored) in the project root, containing exactly:
+\`.claude/house-snooze.json\` (gitignored) in the project root, MERGING this key into whatever is already
+there (the other house notices snooze themselves in the same file, and overwriting it re-arms them):
 { "declinedNxToolsVersion": "$INSTALLED_NX" }
 EOF
     ;;

@@ -73,6 +73,37 @@ jobs:
             echo "::notice::@bespunky/nx-tools@$VERSION is new — will publish."
           fi
 
+      # ALWAYS RUN, and deliberately BEFORE the publish decision is acted on.
+      #
+      # The same invariant is enforced inside publish.sh, but that copy cannot catch the case it was written
+      # for. The motivating incident was: migrations registered at 0.24.x, package.json left at 0.23.0, and
+      # 0.23.0 already on npm. There `publish=false`, the publish step is SKIPPED, publish.sh never executes,
+      # and the whole release ships as a silent no-op with a green tick. A guard that only runs when we were
+      # already going to publish is a guard that misses precisely the mistake it exists for.
+      #
+      # Failing the job is right rather than a notice: a migration above the package version can never be
+      # collected by any project, and nothing else in the pipeline would ever say so.
+      - name: Check migrations are reachable from the package version
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs=require('fs');
+            const dir='plugins/project-starter/skills/new-project/assets/nx-tools';
+            if(!fs.existsSync(dir+'/migrations.json')) process.exit(0);
+            const pkg=JSON.parse(fs.readFileSync(dir+'/package.json','utf8'));
+            const mig=JSON.parse(fs.readFileSync(dir+'/migrations.json','utf8'));
+            const p=v=>String(v).split('-')[0].split('.').map(Number);
+            const pre=v=>/^[^+]*-/.test(String(v));
+            const c=(a,b)=>{const x=p(a),y=p(b);for(let i=0;i<3;i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)<(y[i]||0)?-1:1}
+              if(pre(a)!==pre(b))return pre(a)?-1:1; return 0};
+            const over=Object.entries(mig.generators||{}).filter(([,g])=>g.version&&c(g.version,pkg.version)>0);
+            if(over.length){
+              console.error('::error::migrations are registered ABOVE the package version ('+pkg.version+') and can never be collected: '+over.map(([n,g])=>n+'@'+g.version).join(', '));
+              process.exit(1);
+            }
+            console.log('migrations reachable: max <= '+pkg.version);
+          "
+
       # Publish on a real bump, or validate-only when dispatched with dry_run.
       - name: Publish (or dry-run)
         if: ${{ steps.ver.outputs.publish == 'true' || github.event.inputs.dry_run == 'true' }}

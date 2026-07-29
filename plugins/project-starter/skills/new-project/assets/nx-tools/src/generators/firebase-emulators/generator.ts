@@ -76,9 +76,10 @@
 //     `dev-server` leaf (@angular/build:dev-server) are owned by the SEPARATE `serve` generator.
 //     Emulators-on/off is a RUNTIME concern now — the app resolves all-real via `?emulate=none`
 //     (see emulator-overrides.ts) and the serve executor skips the suite for `--no-emulators` — so
-//     there's no build variant and no per-mode serve target. This generator only HEALS away the
-//     retired split targets (`serve-with-emulators`, `serve-no-emulators`) + the `build:no-emulators`
-//     configuration + the `environment.no-emulators.ts` env file when re-run on an older project.
+//     there's no build variant and no per-mode serve target. This generator asserts the CURRENT
+//     shape only; carrying an older project across to it (retiring the split serve targets, the
+//     `build:no-emulators` configuration, the app-level `emulators*` targets, the retired env files
+//     and the inline production config) is the job of the versioned migrations in src/migrations/.
 //   - root eslint.config.mjs — best-effort insertion of the `platform:` dependency-constraint
 //                       firewall: `platform:web` bans firebase-admin/firebase-functions imports,
 //                       `platform:server` bans firebase/@angular. The app is tagged platform:web,
@@ -90,6 +91,7 @@ import {
   type ProjectConfiguration,
   readProjectConfiguration,
   updateProjectConfiguration,
+  getProjects,
   formatFiles,
   addDependenciesToPackageJson,
   installPackagesTask,
@@ -103,8 +105,8 @@ import {
 } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-// Still needed by this file's OTHER AST routine (the ESLint depConstraints inserter). The app.config
-// `providers` wiring, however, is now shared — see the import below.
+// Still needed by this file's one remaining AST routine (the ESLint depConstraints inserter). The
+// app.config `providers` wiring, however, is now shared — see the import below.
 //
 // The TypeScript compiler API is reached through `_utils/typescript-api` — see that file.
 import { wireProvider } from '../_utils/wire-provider';
@@ -112,7 +114,6 @@ import {
   loadTypeScript,
   type TsArrayLiteralExpression,
   type TsNode,
-  type TsObjectLiteralExpression,
 } from '../_utils/typescript-api';
 import { requireLayer } from '../../layers/registry';
 
@@ -123,8 +124,6 @@ interface FirebaseEmulatorsSchema {
   // configuration + apphosting.staging.yaml). See schema.json for the rationale.
   staging?: boolean;
 }
-
-const EMULATORS = ['auth', 'firestore', 'storage', 'functions'] as const;
 
 // The canonical `emulators` block. Every backend-service emulator binds to `0.0.0.0`
 // (all interfaces) — required when running inside Docker / devcontainers, where the
@@ -257,16 +256,19 @@ export default async function firebaseEmulatorsGenerator(
   }
 
   // 2) Environment files — Angular's environment-files pattern, per-service emulator-aware.
-  //    - `environment.interface.ts`  — shared shape (always rewrite — generator-owned, no user values).
-  //    - `environment.ts`            — dev defaults + the per-service emulator toggle (write if absent;
-  //                                    the legacy single-string-emulators shape is migrated to the new
-  //                                    per-service-`default` shape). Its `firebase` block is the ONE
-  //                                    "go real" path: a service resolved OFF (via the EMULATE map or a
-  //                                    `?emulate=none`/`?real=all` runtime override) talks to it.
-  //    - `environment.prod.ts`       — production target (write if absent; legacy productionFirebaseConfig
-  //                                    is migrated in before writing).
-  //    There is NO `environment.no-emulators.ts` anymore — going all-real is a runtime override, not a
-  //    separate env file (any stale one from an older scaffold is healed away below).
+  //    - `environment.interface.ts`  — the shared shape (WRITE IF ABSENT — a project EXTENDS it; see below).
+  //    - `environment.ts`            — dev defaults + the per-service emulator toggle (write if absent).
+  //                                    Its `firebase` block is the ONE "go real" path: a service resolved
+  //                                    OFF (via the EMULATE map or a `?emulate=none`/`?real=all` runtime
+  //                                    override) talks to it.
+  //    - `environment.prod.ts`       — production target (write if absent).
+  //    ALL THREE ARE WRITE-IF-ABSENT: every one of them holds real per-project values, so an existing file
+  //    is the project's, never ours to rewrite. That is also why carrying an older project off the retired
+  //    shapes is NOT done here: the pre-toggle `environment.ts` + its matching `environment.interface.ts`
+  //    are upgraded by migration 0.24.3, the stale `environment.no-emulators.ts` / `environment.standalone.ts`
+  //    are removed by 0.24.1, and the inline production config is rescued by 0.24.2 — all of which run
+  //    BEFORE this generator, so by the time we get here every file it finds is already current-shaped.
+  //    There is NO `environment.no-emulators.ts`: going all-real is a runtime override, not a separate env file.
   const envDir = `${appRoot}/src/environments`;
   const envInterfacePath = `${envDir}/environment.interface.ts`;
   const envDevPath = `${envDir}/environment.ts`;
@@ -280,65 +282,40 @@ export default async function firebaseEmulatorsGenerator(
   // app-specific top-level fields (e.g. a `google: { oauthClientId }` block for Calendar OAuth).
   // Those are real per-project values, so overwriting the file every run would silently drop them
   // (and break the app's types). New scaffolds get the full standard shape from the template; an
-  // existing project owns and keeps its own. (If the toolkit ever changes the shared shape itself,
-  // that migration is a manual per-project step (these files hold real per-project values) — the same reason environment.ts /
-  // environment.prod.ts are also write-if-absent.)
+  // existing project owns and keeps its own. (When the toolkit changes the shared shape ITSELF, the carry
+  // is a VERSIONED MIGRATION, not a rewrite here — it has to splice the new shape into the project's own
+  // file rather than replace it. The pre-toggle `emulators` block is exactly that case, and migration
+  // 0.24.3 upgrades it — this generator therefore never has to reason about it.)
   if (!tree.exists(envInterfacePath)) {
     tree.write(envInterfacePath, template('environment.interface.ts.tpl'));
   }
 
-  // environment.ts — write if absent; migrate the LEGACY emulators shape (each service was a bare
-  // endpoint with no per-service `default`) to the new per-service-toggle shape. The dev env carries
-  // demo credentials (regenerated identically), so the rewrite is safe; warn in case the user
-  // customized emulator ports there.
-  const existingDevEnv = tree.exists(envDevPath) ? tree.read(envDevPath, 'utf8') ?? '' : null;
-  const devEnvIsLegacy =
-    existingDevEnv !== null && existingDevEnv.includes('emulators') && !existingDevEnv.includes('default:');
-  if (existingDevEnv === null || devEnvIsLegacy) {
-    if (devEnvIsLegacy) {
-      logger.info(
-        `[firebase-emulators] Upgrading ${envDevPath} to the per-service emulator-toggle shape ` +
-        `(each emulator now carries a \`default\` flag, toggled by the EMULATE map). Re-check any custom ` +
-        `emulator ports you set there.`
-      );
-    }
+  // environment.ts — WRITE-IF-ABSENT. It holds real per-project values (the app's `firebase` web config,
+  // its EMULATE map, custom emulator ports), so an existing one is the project's, never ours to rewrite.
+  // A pre-toggle one (bare emulator endpoints, no per-service `default`) is upgraded IN PLACE — ports and
+  // all — by migration 0.24.3, which runs before this generator. Without that, this write-if-absent would
+  // leave it untouched while the always-rewritten firebase.config.ts below reads
+  // `emulators?.<svc>?.default ?? false` off it and silently resolved EVERY service to the real backend.
+  if (!tree.exists(envDevPath)) {
     tree.write(envDevPath, substitute(template('environment.ts.tpl')));
-  }
-
-  // HEAL: `environment.no-emulators.ts` (and its interim `environment.standalone.ts` name) are retired.
-  // "No emulators" is no longer a build/env variant — it's a RUNTIME choice: the app goes all-real via
-  // `?emulate=none` / `?real=all` (resolved by emulator-overrides.ts against the `firebase` block in
-  // environment.ts), and the serve executor simply skips the emulator suite for `--no-emulators`. Remove
-  // any stale env files a pre-unification scaffold left behind so they can't compile into a build.
-  for (const stale of [`${envDir}/environment.no-emulators.ts`, `${envDir}/environment.standalone.ts`]) {
-    if (tree.exists(stale)) tree.delete(stale);
   }
 
   // emulator-overrides.ts — the pure per-session override resolver (?emulate=/?real=/localStorage).
   // Generator-owned glue, no user values — always rewritten so fixes propagate.
   tree.write(emulatorOverridesPath, template('emulator-overrides.ts.tpl'));
 
+  // environment.prod.ts — WRITE-IF-ABSENT, with empty placeholders (fill from `firebase apps:sdkconfig`).
+  // Their job is to make a half-wired prod build fail loud. Rescuing the real credentials from a
+  // pre-environment-files project (where they sat inline in firebase.config.ts) is migration 0.24.2's
+  // job — it runs ahead of this generator, so by the time we get here the file already exists.
   if (!tree.exists(envProdPath)) {
-    // Migration: if the project still has the legacy firebase.config.ts shape
-    // with a populated `productionFirebaseConfig`, carry those values into the
-    // new environment.prod.ts. Empty placeholders stay empty (their job is to
-    // make a half-wired prod build fail loud).
-    const migrated = tree.exists(firebaseConfigPath)
-      ? extractLegacyProdConfig(tree.read(firebaseConfigPath, 'utf8') ?? '')
-      : { projectId: '', apiKey: '', appId: '', authDomain: '' };
-    if (migrated.projectId || migrated.apiKey || migrated.appId) {
-      logger.info(
-        `[firebase-emulators] Migrated productionFirebaseConfig from ${firebaseConfigPath} into ${envProdPath} ` +
-        `(legacy shape detected). Verify the new file before committing.`
-      );
-    }
     tree.write(
       envProdPath,
       template('environment.prod.ts.tpl')
-        .split('{{projectId}}').join(migrated.projectId)
-        .split('{{apiKey}}').join(migrated.apiKey)
-        .split('{{appId}}').join(migrated.appId)
-        .split('{{authDomain}}').join(migrated.authDomain)
+        .split('{{projectId}}').join('')
+        .split('{{apiKey}}').join('')
+        .split('{{appId}}').join('')
+        .split('{{authDomain}}').join('')
     );
   }
 
@@ -366,7 +343,9 @@ export default async function firebaseEmulatorsGenerator(
   //     that merely carried the same old markers, so a customized file silently froze and stopped receiving
   //     template improvements (e.g. the port-offset emulator wiring). Always rewriting removes that whole
   //     drift class. The file header states the contract; --sync's git backup covers a project that
-  //     edited it anyway. (The legacy prod-config MIGRATION still ran above, off the pre-rewrite contents.)
+  //     edited it anyway. (A pre-environment-files project's inline production config is rescued into
+  //     environment.prod.ts by migration 0.24.2, which runs BEFORE any generator — so this rewrite can
+  //     never be the thing that drops it.)
   if (tree.exists(firebaseConfigPath)) {
     logger.info(
       `[firebase-emulators] Rewrote ${firebaseConfigPath} to the current generator-owned shape (it holds no ` +
@@ -452,30 +431,16 @@ export default async function firebaseEmulatorsGenerator(
   // longer creates or reshapes any serve/dev-server target: emulators-on/off is a RUNTIME concern now —
   // the app resolves all-real via `?emulate=none` (emulator-overrides.ts, against environment.ts's
   // `firebase` block) and the serve executor skips the emulator suite for `--no-emulators` — so there's
-  // no build variant and no per-mode serve target to wire.
-  //
-  // HEAL: retire the split serve targets a pre-unification scaffold created. The old trio was `serve`
-  // (an nx:run-commands orchestrator), plus `serve-with-emulators` / `serve-no-emulators` (dev-servers
-  // pinned to the emulator / no-emulator env). We drop ONLY the now-orphaned inner dev-server targets
-  // (and their interim names); we deliberately DON'T touch `serve`/`dev-server` — the `serve` generator
-  // re-asserts those to the unified shape, so healing them here would just fight it.
-  for (const name of ['serve-with-emulators', 'serve-no-emulators', 'serve-standalone', 'serve-app']) {
-    delete targets[name];
-  }
-
-  // The per-app `emulators*` targets of earlier generations moved to the workspace-level
-  // `firebase` project — drop them from the app so there's exactly one home.
-  delete targets.emulators;
-  for (const svc of EMULATORS) {
-    delete targets[`emulators:${svc}`];
-  }
+  // no build variant and no per-mode serve target to wire. Retiring the split serve targets a
+  // pre-unification scaffold created is migration 0.24.0's job, and moving the app-level `emulators*`
+  // targets onto the workspace-level `firebase` project is migration 0.24.1's.
 
   // 4b) Build configuration that selects the environment file:
   //     - `production`  swaps environment.ts → environment.prod.ts (the default `nx build <app>`).
   //     We touch ONLY `configurations.production` (de-duplicated) — never `build.options`, so a user's
-  //     own staging config is unaffected.
-  //     HEAL: the retired `no-emulators` build configuration (and its interim `standalone` name) are
-  //     removed — going all-real is a runtime override (`?emulate=none`) now, not a build variant.
+  //     own staging config is unaffected. There is no `no-emulators` configuration to assert: going
+  //     all-real is a runtime override (`?emulate=none`) now, not a build variant. (Removing the retired
+  //     one from an older project is migration 0.24.1's job.)
   const buildTarget = targets.build as
     | {
         configurations?: Record<
@@ -511,10 +476,6 @@ export default async function firebaseEmulatorsGenerator(
       );
       stagingCfg.fileReplacements = stPresent ? stExisting : [...stExisting, stagingReplacement];
     }
-
-    // Drop the retired build configurations if an older scaffold left them behind.
-    delete buildTarget.configurations['no-emulators'];
-    delete buildTarget.configurations['standalone'];
   } else {
     logger.warn(
       `[firebase-emulators] No \`build\` target on project \`${projectName}\` — skipped registering the ` +
@@ -616,8 +577,16 @@ function ensureTag(project: ProjectConfiguration, tag: string): void {
 }
 
 /**
- * Merge generator-owned targets into a project.json-style config file, preserving any
- * user-added targets and tags. Writes the file when absent.
+ * Merge generator-owned targets into a project config file, preserving any user-added targets
+ * and tags. Writes the file only when the project genuinely has no home yet.
+ *
+ * THE PROJECT IS RESOLVED BY NAME, not by path, and that is the whole point of `existingProjectFile`
+ * below. `tree.exists(path)` alone answers "is the canonical path free?" — a different question from
+ * "does this project already exist?", and answering the second with the first is how you get two
+ * projects called `firebase`, which makes EVERY `nx` command in the workspace fail with "defined in
+ * multiple locations". The 0.24.1 migration already resolves the emulator home by name (it merges into
+ * a `firebase` project wherever it lives, and logs that it avoided the duplicate); this generator ran
+ * in the same sync and wrote the duplicate the migration had just refused to create.
  */
 function ensureProjectFile(
   tree: Tree,
@@ -631,7 +600,9 @@ function ensureProjectFile(
   },
   schemaRelativePrefix: string
 ): void {
-  if (!tree.exists(path)) {
+  const existing = existingProjectFile(tree, canonical.name, path);
+
+  if (!existing) {
     writeJson(tree, path, {
       name: canonical.name,
       $schema: `${schemaRelativePrefix}node_modules/nx/schemas/project-schema.json`,
@@ -642,14 +613,67 @@ function ensureProjectFile(
     });
     return;
   }
-  updateJson(tree, path, (json) => {
-    json.tags ??= [];
+
+  if (existing.path !== path) {
+    logger.info(
+      `[firebase-emulators] Project "${canonical.name}" already lives at ${existing.path}, so its ` +
+        `house targets were merged there instead of into a new ${path} — two projects under one name ` +
+        `break every \`nx\` command in the workspace.`
+    );
+  }
+
+  updateJson(tree, existing.path, (json) => {
+    // A package.json-defined project keeps its Nx configuration under `nx`; a project.json holds it
+    // at the top level. Same merge, different container.
+    const container = existing.kind === 'package.json' ? (json.nx ??= {}) : json;
+    container.tags ??= [];
     for (const tag of canonical.tags) {
-      if (!json.tags.includes(tag)) json.tags.push(tag);
+      if (!container.tags.includes(tag)) container.tags.push(tag);
     }
-    json.targets = { ...(json.targets ?? {}), ...canonical.targets };
+    container.targets = { ...(container.targets ?? {}), ...canonical.targets };
     return json;
   });
+}
+
+/**
+ * Where a project of this name already lives, or `null` when it does not exist yet.
+ *
+ * Precedence mirrors the 0.24.1 migration exactly, so a sync cannot undo what the migration just
+ * decided: the canonical path if it is taken; otherwise a project ALREADY NAMED this, wherever it
+ * sits; otherwise a project that already owns the canonical DIRECTORY under some other name (writing
+ * a project.json beside its package.json would silently rename it).
+ *
+ * `getProjects` throws on a workspace it cannot read; that must not take a generator down, so an
+ * unreadable graph degrades to "canonical path only" — the behaviour this had before.
+ */
+function existingProjectFile(
+  tree: Tree,
+  name: string,
+  canonicalPath: string
+): { path: string; kind: 'project.json' | 'package.json' } | null {
+  if (tree.exists(canonicalPath)) return { path: canonicalPath, kind: 'project.json' };
+
+  const canonicalRoot = canonicalPath.slice(0, canonicalPath.lastIndexOf('/'));
+  let projects: Map<string, ProjectConfiguration>;
+  try {
+    projects = getProjects(tree);
+  } catch {
+    return null;
+  }
+
+  const fileFor = (root: string): { path: string; kind: 'project.json' | 'package.json' } | null => {
+    if (tree.exists(`${root}/project.json`)) return { path: `${root}/project.json`, kind: 'project.json' };
+    if (tree.exists(`${root}/package.json`)) return { path: `${root}/package.json`, kind: 'package.json' };
+    return null;
+  };
+
+  for (const [projectName, project] of projects) {
+    if (projectName === name) return fileFor(project.root);
+  }
+  for (const [, project] of projects) {
+    if (project.root === canonicalRoot) return fileFor(project.root);
+  }
+  return null;
 }
 
 /** Cloud Functions as a first-class Nx app at apps/functions. */
@@ -845,90 +869,4 @@ function addPlatformBoundaries(source: string, sourcePath: string): string | nul
     },
   ];
   return applyChangesToString(source, changes);
-}
-
-
-/**
- * Extract the field values of the legacy `productionFirebaseConfig` const from
- * an old-shape firebase.config.ts (the pre-environment-files version that
- * carried the two-consts-plus-ngDevMode pattern).
- *
- * Used by the generator's migration path: when `--sync --firebase` runs on a
- * project that still has the legacy file, we don't want to drop the user's
- * real production config on the floor — those values get carried into the new
- * `environment.prod.ts` before the legacy file is overwritten with the new
- * structural shape.
- *
- * Uses the TypeScript compiler API (no regex on source — source code is a tree,
- * not text) to find the `productionFirebaseConfig` variable declaration and
- * read the string fields. Returns empty strings for any field that's
- * absent, non-literal, or itself an empty string — same shape as the template's
- * placeholders, so missing values stay missing.
- *
- * Returns all-empty when the source is the new shape (no
- * `productionFirebaseConfig` const) — the caller treats all-empty as
- * "no migration needed."
- */
-function extractLegacyProdConfig(source: string): {
-  projectId: string;
-  apiKey: string;
-  appId: string;
-  authDomain: string;
-} {
-  const empty = { projectId: '', apiKey: '', appId: '', authDomain: '' };
-  if (!source.includes('productionFirebaseConfig')) return empty;
-
-  // No usable TypeScript -> nothing to migrate. `empty` is the same answer this returns for a project that
-  // never had a legacy config, and the caller treats both identically: it writes the current shape without
-  // carrying values forward. Degrading rather than throwing keeps a --sync alive on a workspace whose
-  // TypeScript moved to the 7.x native port.
-  const ts = loadTypeScript();
-  if (!ts) return empty;
-
-  const sf = ts.createSourceFile(
-    'firebase.config.ts',
-    source,
-    ts.ScriptTarget.Latest,
-    /* setParentNodes */ true,
-    ts.ScriptKind.TS
-  );
-
-  let prodObject: TsObjectLiteralExpression | null = null;
-  const findProd = (node: TsNode): void => {
-    if (prodObject) return;
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === 'productionFirebaseConfig' &&
-      node.initializer &&
-      ts.isObjectLiteralExpression(node.initializer)
-    ) {
-      prodObject = node.initializer;
-      return;
-    }
-    ts.forEachChild(node, findProd);
-  };
-  findProd(sf);
-  if (!prodObject) return empty;
-
-  const readField = (name: string): string => {
-    for (const prop of prodObject!.properties) {
-      if (
-        ts.isPropertyAssignment(prop) &&
-        ts.isIdentifier(prop.name) &&
-        prop.name.text === name &&
-        ts.isStringLiteral(prop.initializer)
-      ) {
-        return prop.initializer.text;
-      }
-    }
-    return '';
-  };
-
-  return {
-    projectId: readField('projectId'),
-    apiKey: readField('apiKey'),
-    appId: readField('appId'),
-    authDomain: readField('authDomain'),
-  };
 }
