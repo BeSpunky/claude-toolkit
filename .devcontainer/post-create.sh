@@ -26,20 +26,26 @@ WS="$(pwd)"
 # lockfile beside the first — after which `npm ci` fails for the whole team, caused by a container rebuild.
 # scaffold.sh takes exactly this care for the commands IT runs; this file is the artifact that runs forever
 # afterwards, so it has to take the same care itself.
-if [ -f "$WS/pnpm-lock.yaml" ]; then
-  PM=pnpm;  PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec"
-elif [ -f "$WS/yarn.lock" ]; then
-  PM=yarn;  PM_INSTALL="yarn install";  PM_EXEC="yarn"
-elif [ -f "$WS/package-lock.json" ]; then
-  PM=npm;   PM_INSTALL="npm install";   PM_EXEC="npx --no-install"
-else
-  # No lockfile: honour an explicit `packageManager` field if there is one, else the house default.
-  case "$(grep -m1 '"packageManager"' "$WS/package.json" 2>/dev/null)" in
-    *pnpm*) PM=pnpm; PM_INSTALL="pnpm install"; PM_EXEC="pnpm exec" ;;
-    *npm*)  PM=npm;  PM_INSTALL="npm install";  PM_EXEC="npx --no-install" ;;
-    *)      PM=yarn; PM_INSTALL="yarn install"; PM_EXEC="yarn" ;;
-  esac
-fi
+# THE DECLARATION FIRST, then the artifacts. `packageManager` is the only signal a human deliberately wrote;
+# a lockfile is a by-product, and a STRAY one is exactly what this script used to leave behind when it ran
+# `yarn install` regardless of the project's package manager. Checking lockfiles first meant the container
+# kept trusting its own past mistake. Same order as scaffold.sh and the house-doc generator.
+case "$(grep -m1 '"packageManager"' "$WS/package.json" 2>/dev/null)" in
+  *pnpm*) PM=pnpm; PM_INSTALL="pnpm install"; PM_EXEC="pnpm exec" ;;
+  *yarn*) PM=yarn; PM_INSTALL="yarn install"; PM_EXEC="yarn" ;;
+  *npm*)  PM=npm;  PM_INSTALL="npm install";  PM_EXEC="npx --no-install" ;;
+  *)
+    if [ -f "$WS/pnpm-lock.yaml" ]; then
+      PM=pnpm;  PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec"
+    elif [ -f "$WS/yarn.lock" ]; then
+      PM=yarn;  PM_INSTALL="yarn install";  PM_EXEC="yarn"
+    elif [ -f "$WS/package-lock.json" ]; then
+      PM=npm;   PM_INSTALL="npm install";   PM_EXEC="npx --no-install"
+    else
+      PM=yarn;  PM_INSTALL="yarn install";  PM_EXEC="yarn"
+    fi
+    ;;
+esac
 echo "[post-create] package manager: $PM"
 
 # --- 0. Reclaim /home/node/.cache ownership ---
