@@ -67,11 +67,16 @@ export const LAYERS: readonly Layer[] = [
   },
   {
     id: 'agent',
-    title: 'Agent DX (Claude settings, devcontainer, window identity, HOUSE.md)',
+    title: 'Agent DX (Claude settings, devcontainer, window identity, HOUSE.rules.md + HOUSE.md)',
     requires: ['nx'],
-    // HOUSE.md is the marker: generator-owned, root-level, committed, and already the file the SessionStart
-    // hook stats. Its presence means the house generators have been applied here at least once.
-    detect: (tree) => tree.exists('HOUSE.md'),
+    // The generated house docs are the marker: generator-owned, root-level, committed, and already the files
+    // the SessionStart hook stats. Their presence means the house generators have been applied here at least
+    // once. EITHER satisfies the layer, so the layer is self-healing: if one is deleted, the layer is still
+    // detected, `house-doc` still runs on the next sync, and the missing file comes back. Requiring HOUSE.md
+    // alone would mean a tree that lost it reads as "not a house project" everywhere at once — the version
+    // hook goes quiet, the layer goes undetected, and a plain `--sync` skips the one generator that could
+    // restore it.
+    detect: (tree) => tree.exists('HOUSE.md') || tree.exists('HOUSE.rules.md'),
     ensureHint: '`scaffold.sh --sync --ensure=agent <project>`',
   },
   {

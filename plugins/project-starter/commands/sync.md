@@ -161,7 +161,7 @@ fixing forward and restoring from the tag.
 
 - **"not an Nx workspace (no nx.json)"** — expected on a repo that has never had house tooling. Relay it and
   **offer** `/sync --ensure=agent`, explaining what that does: creates an Nx workspace in place and applies
-  the stack-agnostic DX layer (devcontainer, Claude settings, window identity, `HOUSE.md`) — no framework
+  the stack-agnostic DX layer (devcontainer, Claude settings, window identity, `HOUSE.rules.md` + `HOUSE.md`) — no framework
   opinion, but it does add `nx.json`, a root `package.json`, a lockfile and `node_modules`. Wait for a yes.
 
 - **`--sync cannot ENSURE the '<layer>' layer`** — relay the message verbatim. It already names the native

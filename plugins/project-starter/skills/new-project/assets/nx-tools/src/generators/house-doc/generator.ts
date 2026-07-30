@@ -1,13 +1,21 @@
-// House generator: write the generated HOUSE.md reference + keep a bounded pointer to it in CLAUDE.md.
+// House generator: write the generated house docs + keep a bounded pointer to them in CLAUDE.md.
 //
-// The toolkit-owned conventions (architecture directives, the branch/release workflow, serving,
-// worktrees, Firebase, Nx, the shared browser) used to live inline in each project's CLAUDE.md — where
-// they went STALE, because `scaffold.sh --sync` deliberately never rewrites the hand-owned CLAUDE.md.
-// This generator moves them to HOUSE.md, a GENERATOR-OWNED reference rewritten on every run (so it always
-// matches the installed @bespunky/nx-tools), and leaves only a small, marker-delimited POINTER in
-// CLAUDE.md — the single part of CLAUDE.md it touches, so the rest stays the project's own.
+// TWO generated files, split by HOW THEY REACH THE MODEL — the distinction this generator exists to keep:
+//   - HOUSE.rules.md — the DIRECTIVES (must hold on every change). IMPORTED by CLAUDE.md (`@HOUSE.rules.md`),
+//     so it is in context every session. Small, and layer-gated so a project only carries the rules that can
+//     apply to it: a markdown repo is not told how to redesign a UI or which port not to bind.
+//   - HOUSE.md — the MECHANICAL HOW-TO (stack, generators, serving, Firebase, Nx). LINKED, read on demand.
+//     Large, and the file the version stamp and the SessionStart hook live on.
+// Getting a rule into the wrong one is not cosmetic: a directive in HOUSE.md is a directive nothing loads.
 //
-// Idempotent + --sync-safe: HOUSE.md is fully rewritten every run; the pointer is upserted between its
+// The toolkit-owned conventions used to live inline in each project's CLAUDE.md — where they went STALE,
+// because `scaffold.sh --sync` deliberately never rewrites the hand-owned CLAUDE.md. This generator owns
+// them instead, in the two files above, and leaves only a small, marker-delimited POINTER in CLAUDE.md —
+// the single part of an EXISTING CLAUDE.md it touches, so the rest stays the project's own. When there is
+// no CLAUDE.md at all it seeds one, because a pointer with nowhere to live is how both generated files end
+// up referenced by nothing.
+//
+// Idempotent + --sync-safe: both docs are fully rewritten every run; the pointer is upserted between its
 // markers (inserted if absent, replaced/restored if present), so a hand-deleted or edited pointer heals.
 //
 // It also renders the STAMP into HOUSE.md's header — a marker line recording the @bespunky/nx-tools (and,
@@ -77,9 +85,17 @@ export default async function houseDocGenerator(
   // `firebase` stays an explicit flag rather than folding into `layers`, because it is the one section set a
   // caller overrides directly (scaffold.sh --firebase renders the Firebase docs for a project that is about
   // to become a Firebase project, before firebase.json exists to detect).
+  //
+  // `ui` is DERIVED, not a layer: the layer registry answers "does something here run a dev-server"
+  // (`web`), which is a fact about the dev loop and not about whether this project has an interface to
+  // design. An Angular component library with no app — `angular` + `design-system`, no `web` — is an
+  // ordinary shape, and gating the redesign directive on `web` would tell that project every visual value
+  // must come from the design system while saying nothing about how to treat a redesign. Any of the three
+  // means there is UI here.
   const flags: Record<string, boolean> = Object.fromEntries([
     ...layers.map((id) => [id, true]),
     ['firebase', firebase],
+    ['ui', ['web', 'angular', 'design-system'].some((id) => layers.includes(id as LayerId))],
   ]);
   // The design system's REAL root, not a guess. HOUSE.md's whole job is telling a reader — human or
   // agent — where things are, and it hardcoded `packages/design-system`. Projects scaffolded before the
@@ -95,17 +111,34 @@ export default async function houseDocGenerator(
   //    tree (and the git diff) even when the toolkit hadn't moved. Version identity is the whole question.
   tree.write('HOUSE.md', render(tpl('HOUSE.md.tpl')));
 
-  // 2) The bounded pointer in CLAUDE.md — the ONLY part of CLAUDE.md this touches. Skip when CLAUDE.md
-  //    doesn't exist yet (a fresh scaffold writes CLAUDE.md from the template, which already carries the
-  //    pointer); on --sync CLAUDE.md exists and the pointer is inserted/regenerated.
-  if (tree.exists('CLAUDE.md')) {
-    const current = tree.read('CLAUDE.md', 'utf8') ?? '';
-    const pointer = render(tpl('pointer.md.tpl')).trim();
-    const next = upsertPointer(current, pointer);
-    if (next !== current) tree.write('CLAUDE.md', next);
-  }
+  // 2) The DIRECTIVES — the half that has to be in context whether or not anyone reads a link.
+  //
+  //    HOUSE.md is reached by a markdown link, and a link is only followed if the reader decides to follow
+  //    it. Claude Code loads CLAUDE.md into every session and follows its `@path` IMPORTS; it does not load
+  //    a file merely because CLAUDE.md mentions one. So for four releases the rules that say "non-negotiable"
+  //    were sitting one un-taken hop outside the context that was supposed to be governed by them — present
+  //    in the repo, absent from the session. Splitting them out is what lets the pointer IMPORT the rules
+  //    (always on, and small) while still LINKING the mechanical how-to (on demand, and large): a single
+  //    `@HOUSE.md` would have restored the rules at the cost of dragging every emulator recipe and port
+  //    table into every session forever.
+  tree.write('HOUSE.rules.md', render(tpl('HOUSE.rules.md.tpl')));
 
-  // 3) Keep the hook's SNOOZE file out of git. It records "this developer declined the sync for version
+  // 3) The bounded pointer in CLAUDE.md — the ONLY part of CLAUDE.md this touches.
+  //
+  //    CLAUDE.md is SEEDED when absent rather than skipped. It used to be skipped, on the reasoning that a
+  //    fresh scaffold writes CLAUDE.md from the skill's template and a sync therefore always finds one. That
+  //    holds for the greenfield path and fails for the one this mode exists to serve: `--sync --ensure=agent`
+  //    retrofits onto a repo of ANY shape, and an arbitrary repo need not have a CLAUDE.md at all. The result
+  //    was the worst of the two failures above — HOUSE.md and HOUSE.rules.md written, and nothing anywhere
+  //    referencing either. The seed is deliberately minimal (headings and prompts, no house prose): authoring
+  //    the real, project-specific CLAUDE.md is still the new-project skill's job, and a seed that pretended
+  //    otherwise would be a second source of truth for content this generator does not own.
+  const seeded = tree.exists('CLAUDE.md') ? (tree.read('CLAUDE.md', 'utf8') ?? '') : render(tpl('CLAUDE.seed.md.tpl'));
+  const pointer = render(tpl('pointer.md.tpl')).trim();
+  const next = upsertPointer(seeded, pointer);
+  if (!tree.exists('CLAUDE.md') || next !== tree.read('CLAUDE.md', 'utf8')) tree.write('CLAUDE.md', next);
+
+  // 4) Keep the hook's SNOOZE file out of git. It records "this developer declined the sync for version
   //    X" — a per-person, per-machine decision, the exact opposite of the stamp: it must NOT travel to
   //    other clones, or one person's "not now" would silence the notice for the whole team.
   ignoreSnoozeFile(tree);
