@@ -3,9 +3,15 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 <!-- @bespunky/house-tooling:start (generated pointer — do not edit between these markers; `scaffold.sh --sync` regenerates it) -->
-## House tooling & conventions → read [`HOUSE.md`](HOUSE.md)
+## House rules & tooling
 
-The house **architecture directives** (architect-mentality, **architecture-first**, redesign-means-rethink, **design-system-first**), the **branch & release workflow**, and the mechanical how-to — serve · worktrees · design system · shared browser · generators · Nx · Playwright — live in **[`HOUSE.md`](HOUSE.md)**, a **generator-owned** file regenerated on every `scaffold.sh --sync` to match the installed `@bespunky/nx-tools`. **Never hand-edit `HOUSE.md`.** Its directives are **mandatory, not optional reference — read `HOUSE.md` before you design, style, serve, branch, or drive the browser.**
+The house **directives** that govern every change in this project — architect mentality, **architecture-first**, the **branch & release rules**, and **a feature is a package** — are imported on the line below, so they are **always in context**. They are **mandatory, not optional reference.**
+
+@HOUSE.rules.md
+
+The **mechanical how-to** — the stack · generators · Nx — lives in **[`HOUSE.md`](HOUSE.md)**. **Read it before you branch, or reach for a house command.**
+
+Both files are **generator-owned**, regenerated on every `scaffold.sh --sync` to match the installed `@bespunky/nx-tools`. **Never hand-edit them** — this project's own guidance goes below, outside these markers.
 <!-- @bespunky/house-tooling:end -->
 
 ## What this repo is

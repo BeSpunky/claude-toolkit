@@ -16,3 +16,6 @@ node_modules/
 
 # Claude Code — this developer's "not now" on a house-tooling sync (local, never shared)
 .claude/house-snooze.json
+
+# The house sync's transient lock (machine-local; never committed)
+.bespunky-sync.lock/

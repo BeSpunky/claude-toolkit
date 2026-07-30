@@ -228,7 +228,13 @@ export default function retireInlineHouseSections(tree: Tree): void {
   const didRetarget = retargeted !== next;
   next = retargeted;
 
-  if (next !== original) tree.write(CLAUDE_MD, next);
+  // Write only when this migration actually DID something. Reassembling the document is not byte-identical to
+  // reading it — a file whose last line carries no trailing newline gains one — so testing `next !== original`
+  // made a pure no-op produce a diff. This migration lands as its own `[nx migration]` commit, so that would
+  // reach every project as a phantom commit touching CLAUDE.md and nothing else. Observed on this very repo,
+  // whose CLAUDE.md has no pre-0.5.0 sections at all and was still rewritten.
+  const didSomething = removed.length > 0 || didRetarget;
+  if (didSomething && next !== original) tree.write(CLAUDE_MD, next);
 
   if (removed.length > 0) {
     logger.info(

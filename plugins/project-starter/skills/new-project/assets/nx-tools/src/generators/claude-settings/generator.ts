@@ -39,6 +39,12 @@ export default async function claudeSettingsGenerator(tree: Tree): Promise<void>
   // invites committing machine-local cache. Additive and idempotent: an entry already present is left alone,
   // so a project that ignores these its own way is untouched.
   ensureIgnored(tree, '# Nx caches (machine-local; never committed)', ['.nx/cache', '.nx/workspace-data']);
+
+  // The sync's own transient lock directory. Nx builds its pre-migration checkpoint with `git add -A`, so a
+  // lock the sync is still holding gets swept into that commit and only released afterwards — it has landed
+  // in this repo's history twice now (`abd143e`, and again on the run that added this line). Machine-local
+  // and short-lived by definition, so it is never something a clone should receive.
+  ensureIgnored(tree, "# The house sync's transient lock (machine-local; never committed)", ['.bespunky-sync.lock/']);
 }
 
 /**
