@@ -39,6 +39,11 @@
       "version": "0.24.6",
       "description": "Delete the duplicate post-create.bespunky.sh left behind by the beside-script bug, which no sync updates and which provisions the container a second time when it was chained by hand.",
       "implementation": "./src/migrations/0.24.6/remove-orphaned-beside-post-create"
+    },
+    "retire-inline-house-sections": {
+      "version": "0.25.0",
+      "description": "Delete the frozen house sections still inline in CLAUDE.md from before 0.5.0 moved them into the generated HOUSE.md — now actively misleading, because 0.25.0 imports the live directives into the same file.",
+      "implementation": "./src/migrations/0.25.0/retire-inline-house-sections"
     }
   }
 }

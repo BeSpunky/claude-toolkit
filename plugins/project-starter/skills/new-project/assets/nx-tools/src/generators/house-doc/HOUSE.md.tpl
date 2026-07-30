@@ -3,40 +3,14 @@
 
 # HOUSE.md — house tooling & conventions
 
-> BeSpunky house directives + mechanical how-to for this project: the architecture rules, the branch & release workflow, serving, worktrees{{#firebase}}, Firebase{{/firebase}}, Nx, and the co-driven browser. **Generator-owned — never hand-edit** (regenerated from `@bespunky/nx-tools` on every `scaffold.sh --sync`). `CLAUDE.md` points here and carries the project-specific notes.
+> The **mechanical how-to** for this project: the stack{{#design-system}}, the design system{{/design-system}}{{#web}}, serving, worktrees, the co-driven browser{{/web}}{{#firebase}}, Firebase{{/firebase}}, the generators, and Nx. The house **directives** — the rules that must hold on every change — are NOT here: they live in [`HOUSE.rules.md`](HOUSE.rules.md), which `CLAUDE.md` **imports** so they are always in context. **Generator-owned — never hand-edit** (both files are regenerated from `@bespunky/nx-tools` on every `scaffold.sh --sync`). `CLAUDE.md` carries this project's own notes.
 
-## Architect mentality
-
-Approach every decision — at any scale, from a single function to the whole workspace — as a software architect. Treat **everything as a black box**: a clear boundary, a small deliberate public contract, hidden internals, dependencies received from the outside, and connections to other black boxes only through well-defined, intentionally-directed connection types (dependency injection, parent–child, layered/domain-driven dependency rules). Never reach across a boundary into another box's internals. **Place every element on purpose** — every line, `if`, constant, config, abstraction, and dependency is there deliberately; put each concern where it *belongs* (the place dedicated to it), never merely where it "fits" or happens to work. Model the missing **concept** instead of working around gaps; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the next consumer; lead with *why* and one consistent mental model; **build for the goal, not the brief** — a request is a pointer to an outcome, so deliver the outcome (including the surrounding pieces the user implied), generalize examples to the class they represent, and resolve ambiguity by reasoning over the context rather than waiting for a fully-specified brief; and **go the extra mile — always** (find or invent the elegant solution; never settle for the easy-but-complex; *easy ≠ simple*). Be lazy about repetition — **automate every repeated process** (never do the same thing by hand twice; derive from a single source of truth and make it runnable in one step) — and relentless about design quality.
-
-For the full mindset, think with the **`bespunky-engineering:architect-mentality`** skill. It is the *why*; the section below is the *operational rule* that enforces it.
-
-## Architecture-first (non-negotiable)
-
-Every change — feature, bug, edge case, or "quick fix" — is solved through **design and infrastructure, never a patch.** No special-case `if`s keyed on one input/customer/env, no magic values, no copy-paste, no boolean flags to make one unit do two things, no casts to silence a type mismatch, no bumped timeouts to mask a structural problem. **For bugs, find and fix the root cause — never mask the symptom** (no swallowed errors, defaulted bad data, or guards bolted on at the symptom site). When the current design does not account for a requirement, **redesign and refactor** the relevant seam (model the missing concept, extract, decouple, build the missing abstraction, reuse) so the new behavior is a natural case of the design — don't bolt it on. Coupling, duplication, and special-casing must never grow. **If a refactor is needed to lay infrastructure for a feature or to fix a bug, design it first, get confirmation, and only then implement** — never refactor ad hoc mid-edit; if a correct redesign is genuinely large, surface it and its cost rather than patching silently.
-
-For any non-trivial change, invoke the **`bespunky-engineering:architecture-first`** skill before writing code — it carries the full loop, the bug root-cause and refactor gates, the patch smells to refuse, and the redesign moves.
-
-## Redesign means rethink
-
-When asked to **redesign** any UI — a layout, screen, page, component, or flow — treat it as a **complete creative reconception from scratch**, never a modification or reskin of what exists. The existing implementation has **zero design authority**: do **not** read it to inform the new design, and don't even look at it before conceiving the new one. Reconceive the **form** from the intent, the requirements, and the feeling; honor the **purpose** (what the thing is for, its data and functionality), which comes from the spec and the user — never reverse-engineered from the old layout. Read the existing code **only after** the new design exists — to plan what to clean up, overwrite, or migrate, and to confirm what functionality must survive — then build the new design cleanly and **remove the old**. (A *targeted tweak* — "move this button", "change this colour" — is **not** a redesign; don't inflate it into one.)
-
-For any redesign, invoke the **`bespunky-product-ux:redesign-means-rethink`** skill — the entry gate to the experience-design trio (`envision-the-experience` → `stage-the-vision` → `realize-the-vision`, run from scratch).
-
-{{#design-system}}
-## Design-system-first (non-negotiable)
-
-Every visual value in this workspace comes from the **design system** (`{{DS_ROOT}}`) — never from the component you happen to be writing. Before you build any feature UI, **go to the design system first** and compose the screen from its components and its tokens. **Never hardcode a style value:** no raw hex/`rgb()`/`hsl()`, no magic `px`/`rem`, no ad-hoc font stack, weight, shadow, radius, duration or easing. Every colour, space, radius, type step, elevation, border, duration and easing is a **token** — a CSS custom property, consumed through the design system's SASS API (`@use 'design-system/styles' as ds;`) — and a component reads **semantic** tokens (`ds.color('on-surface')`), never a raw primitive. A feature component **composes**; it does not invent appearance (its own SCSS should be little more than layout). **The second occurrence of a UI pattern is a promotion, not a copy-paste** — the moment a card, button, panel, field, or layout shape appears twice, lift it into the design system as a reusable component (`nx g @bespunky/nx-tools:ds-component <name>` — one secondary entry point each), migrate **both** sites onto it, and delete the copies. **When the design system lacks the concept you need, model it** — add the token, add the semantic alias, extend the scale, add the component — and **never** work around the gap with a local override, an `!important`, a `::ng-deep` reaching into another component's internals, a duplicated token, or a one-off `variant` boolean. A gap in the design system is a *design gap*; patching it locally is a patch in CSS clothing, and CSS has no compiler to catch the drift — it compounds silently until "change the brand colour" is a four-hundred-file diff. The design system is the **single source of visual truth**: a re-theme, a rebrand, or a redesign must be a change to **tokens**, not to a thousand component files.
-
-For the discipline in full — the loop, the promotion loop, the styling patches to refuse, and what to do when the design system lacks the concept — invoke the **`bespunky-design-system:design-system-first`** skill; for the technique layer (token taxonomy, CSS custom properties, the SASS API, theming and modes, encapsulation, and the design system's entry points) route through **`bespunky-design-system:design-tokens-and-theming`**.
-
-{{/design-system}}
 ## Stack
 
 - **Monorepo**: Nx, integrated layout (`apps/` + `libs/`).
 {{#angular}}- **Framework**: Angular (clean `--minimal` app; no demo content).
 {{/angular}}{{#design-system}}- **Design system**: `{{DS_ROOT}}` — the single source of visual truth (see below).
-{{/design-system}}- **Package manager**: yarn.
+{{/design-system}}- **Package manager**: {{PM}}.
 - **Dev environment**: devcontainer on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the base image) with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds.
 
 {{#design-system}}
@@ -251,15 +225,9 @@ Auth and Functions callables run through the **dev-server's own origin**, not a 
 **`firebase.config.ts` is generator-owned and rewritten in full on every `--sync`** — it holds no per-project values by design, so there's no "is it customized?" guess to freeze it behind template improvements. Change behavior where it belongs: **config** (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`, `proxied`) in `environment.ts` / `environment.<env>.ts`; **providers** in `app.config.ts` beside `provideAppFirebase()`. Editing `firebase.config.ts` directly means the next sync silently reverts it.
 {{/firebase}}
 
-## Branch & release workflow (non-negotiable)
+## Branch & release parameters
 
-**You MUST invoke the `bespunky-workflow:branch-and-release` skill before any git branch, worktree, integration, promotion, or release action — this is mandatory, not a recommendation.** The skill is the operative procedure (the relevance check, per-feature git worktrees + the Nx-root override, the rebase-and-re-verify divergence rule, and the three human-gated promotions with their exact commands), not a reference to consult when convenient. Performing any of those steps from memory — skipping the skill — is a process violation; the skill is the always-on, **auto-updating** source of truth and supersedes any recollection of the flow. The project-specific parameters below are what it reads. The always-on *rules* it enforces:
-
-- **Step 0, every request — decide related vs. unrelated BEFORE touching anything.** Consciously judge whether the request continues the *current* worktree's in-flight work or is something else (a different feature/bug, tooling, docs). **Related** → keep working in the current tree. **Unrelated** → **open a new worktree off `development` and do all of it there** — don't ask, and don't "just start" in the current tree meaning to relocate later. This classification is a precondition for touching files, never a cleanup step; never pile unrelated changes onto an in-flight branch.
-- **Never commit directly onto `development`, `staging`, or `main`** — they advance only by merging the branch directly upstream, so promotions stay clean fast-forwards.
-- **Commit small increments as you work in the worktree** — after each coherent, working step (a passing test, a completed sub-step), not one giant commit at the end. Each commit is a restore point and keeps rebases cheap; the `--no-ff` merge into `development` groups them into one revertable unit, so you get granular *and* grouped.
-- **Nothing promotes on its own.** Only the relevance check + worktree creation are automatic; every downstream move (feature→`development`, `development`→`staging`, `staging`→`main`) waits on your explicit signal.
-- **At the merge gate, write the effort's closing conclusion.** When a feature is promoted into `development` (or abandoned), finalize its `DECISION.md` and stamp it with `status:` frontmatter (`concluded | abandoned | superseded`, plus `concluded:` date, a one-line `summary:`, and `tags:`). This is the *one* legitimate moment to distil the package — additively, a conclusion laid on top of the trail, **never** by rewriting history — and it is what lets a future reader collapse the whole effort to one line (see *A feature is a package*).
+The **rules** — the mandatory `bespunky-workflow:branch-and-release` skill invocation, the Step-0 relevance check, and the four always-on promotion rules — are in [`HOUSE.rules.md`](HOUSE.rules.md), which `CLAUDE.md` imports. This section is the **project-specific parameters** those rules read.
 
 **The four branches** — work flows one way, `feature` → `development` → `staging` → `main`, each a strict ancestor of the next:
 
@@ -276,6 +244,7 @@ Auth and Functions callables run through the **dev-server's own origin**, not a 
 **Deploy binding (this project):** none yet — no deploy target is wired. `staging` and `main` are promotion checkpoints kept ready to bind to a deploy mechanism (Firebase App Hosting, a CI workflow, a container push, …): bind it to fire on push to `staging` for staging and `main` for production. Until then the pipeline is pure branch hygiene.
 {{/firebase}}
 
+{{#web}}
 **Serving an in-flight worktree** — the same `nx serve <app>` serves a tree you're **not** cwd'd into via `--worktree`, so an in-flight feature is testable in the real app before it's promoted, without merging it back:
 
 ```bash
@@ -286,26 +255,7 @@ nx serve <app> --dry-run                    # print what it would serve, without
 ```
 
 It installs the worktree's deps on first serve and applies the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you. A worktree serve shifts the **whole stack** (app dev-server{{#firebase}} **and** the emulator suite{{/firebase}}) onto the worktree's stable, verified-free offset block, so it never collides with a server on the base/forwarded ports. **A worktree serve is viewable ONLY through the shared browser** — its shifted ports aren't forwarded, so watch it in the shared browser over noVNC (the executor navigates it to the worktree's pretty `<slug>.localhost` domain), not a host tab. (A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.)
-
-## A feature is a package (non-negotiable)
-
-**Every effort's durable, non-code output lives in ONE folder, named by the effort's slug — the same slug as its branch and worktree.** Invoke `bespunky-workflow:feature-package` for the method; these rules are always on:
-
-- **The package is `docs/features/<YYYY-MM-DD>-<slug>/`** — created **with** the worktree (same slug, `date -u +%F`), not at the end. Skip it only for genuinely trivial work (a typo fix); a package for nothing is noise.
-- **Everything durable goes in it** — `BRIEF.md`, `VISION.md`, `STAGING.md`, `DECISION.md` (the design quartet), the throwaway `mocks/`, the effort's `handoffs/` batons, research notes, plans. **Never invent another home**: no `NOTES.md` at the repo root, no folder made up on the spot.
-- **Write it AS IT HAPPENS, never afterwards.** A doc written at the end is a memory — reconstructed, tidied, and confidently wrong about exactly the parts that matter (why a design was rejected, which constraint was fatal, what the user actually said).
-- **The conclusion is durable; the evidence is disposable.** Decisions and roads-not-taken are committed and permanent. Mocks, spikes, and scratch are **self-ignoring** (a `.gitignore` containing `*`) and **nothing outside them may ever depend on them** — no route, no import, no asset, no config entry — so they can be deleted without breaking a thing. Bin them by default; keep only when the user says so.
-- **Quote the user's own words.** The sentence in which they chose, rejected, or corrected something is the most valuable line in the package and settles a dozen later arguments. Never paraphrase it away.
-- **Revisiting a feature opens a NEW dated package** with the same slug — read the old one first (it says what was already tried and why), never overwrite it.
-- **The package has a lifecycle: append while live · distil at the merge boundary · archive, never erase.** State and next-steps are perishable — **append** a new timestamped baton in `handoffs/`, newest wins on read; decisions are durable — **supersede**, never delete. At the merge gate `DECISION.md` gets its `status:` frontmatter (see the branch & release rules) so a finished effort **collapses to one line** for future readers. Once concluded *and* aged, its package moves to `docs/features/archive/<year>/` by an additive `git mv` — kept, never deleted. **Never rewrite a past record to look tidy** — the smoothed-away false starts are exactly what future-you needs.
-- **Coming back is a skill, not archaeology.** Returning to this project after a gap → invoke **`bespunky-workflow:project-standing`** (the cold front door — it *derives* where things stand from git + these packages: which efforts are live, stalled, or concluded, and which baton to read first; it never trusts a hand-maintained status doc, because there isn't one). Carrying one live effort across a context boundary into a fresh session → **`bespunky-workflow:session-handoff`** (the hot relay). (A `*-auto.md` file in a `handoffs/` folder is a mechanical checkpoint the PreCompact hook drops before context is lost — distil it into a real baton, then delete it.)
-
-The package answers the question the code never can: *six months from now, why was it done this way, and what did we already rule out?*
-
-## Generator-first, manual last
-
-For anything Nx can generate - apps, libraries, components, services, project config - **use the Nx generator (`nx g ...`); never hand-create and fill files.** Before hand-writing anything structural, check what exists: `nx list <plugin>` / `nx g <generator> --help` (or the `nx-generate` skill / the Nx MCP server). Only fall back to manual file creation when no generator covers the task. **Never guess flags** - verify against `--help` / `nx_docs`.
-
+{{/web}}
 {{#js}}
 ## Publishable libraries & reusable tools
 
@@ -344,9 +294,10 @@ Libraries here are **publishable by default** — one generator owns the package
 {{PM}} nx g @nx/js:library libs/<lib-name>
 {{/angular}}
 
-# Serve / build / test / lint a project
+{{#web}}# Serve / build / test / lint a project
 {{PM}} nx serve <project>
-{{PM}} nx build <project>
+{{/web}}{{^web}}# Build / test / lint a project (no servable app in this workspace yet)
+{{/web}}{{PM}} nx build <project>
 {{PM}} nx test <project>
 {{PM}} nx lint <project>
 
@@ -369,7 +320,7 @@ Libraries here are **publishable by default** — one generator owns the package
 This project ships Angular's official AI tooling, wired in two layers that complement each other:
 
 - **Angular CLI MCP server** — declared in project-scoped `.mcp.json` (`npx -y @angular/cli mcp`, always the latest CLI, no version to maintain). It exposes Angular's **knowledge tools**: `get_best_practices`, `search_documentation`, `find_examples`, `ai_tutor`, and `onpush_zoneless_migration`. **Treat these as the source of truth for current Angular guidance** — signals, `linkedSignal`, `resource`, Signal Forms, the built-in control flow, zoneless/OnPush, SSR, ARIA — rather than training-data recall, which lags the framework. The server's *experimental* exec tools (`build`, `devserver.*`, `test`, `e2e`) are deliberately **not** enabled: this is an integrated Nx workspace with **no root `angular.json`**, so those tools (which read `angular.json` and shell out to `ng build`/`ng serve`) can't function here and would only pull you off the Nx-owned targets. Build / serve / test verification belongs to **Nx** (`{{PM}} nx build|serve|test`) and the Playwright skill — never the Angular CLI directly.
-- **Angular agent skills** — `angular-developer` and `angular-new-app` are fetched fresh from `github.com/angular/skills` into `.claude/skills/` on every container build (gitignored — a refreshable cache that tracks upstream, never a vendored fork). They load automatically and carry idiomatic, version-aware Angular patterns. **One reconciliation:** those skills are Angular-CLI-centric (they reach for `ng new` / `ng generate`); in this workspace you **always go through Nx instead** — `{{PM}} nx g @nx/angular:application|library|component …`, `{{PM}} nx build|serve|test` — per **Generator-first** above. Take their *Angular* guidance; ignore their *`ng` invocation* mechanics.
+- **Angular agent skills** — `angular-developer` and `angular-new-app` are fetched fresh from `github.com/angular/skills` into `.claude/skills/` on every container build (gitignored — a refreshable cache that tracks upstream, never a vendored fork). They load automatically and carry idiomatic, version-aware Angular patterns. **One reconciliation:** those skills are Angular-CLI-centric (they reach for `ng new` / `ng generate`); in this workspace you **always go through Nx instead** — `{{PM}} nx g @nx/angular:application|library|component …`, `{{PM}} nx build|serve|test` — per **Generator-first** in [`HOUSE.rules.md`](HOUSE.rules.md). Take their *Angular* guidance; ignore their *`ng` invocation* mechanics.
 
 {{/angular}}
 {{#web}}
@@ -382,9 +333,3 @@ Use Playwright whenever you need to **observe** or **drive** the running app ins
 For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` / `Claude_in_Chrome` MCPs, how to write a headless script, how to capture and feed back screenshots, common pitfalls), invoke the **`bespunky-browser-automation:playwright`** skill before reaching for any browser-side check.
 
 {{/web}}
-## Local servers — never clobber a running server (non-negotiable)
-
-**When you start a server to test a change, you MUST bind it to a random free port — never the default (`4200`{{#firebase}}, or the emulator ports `8080`/`9099`/…{{/firebase}}) or any container-forwarded port.** Those belong to whatever server the developer launched manually; grabbing them fails, silently attaches, or forces a disruptive restart. You verify **headless** (Playwright reaches any `localhost:<port>` directly), so you never need the forwarded ports — a random port costs nothing. Read the bound URL from the server's own startup output and point your browser there; tear the server down when done, and **never kill a server you didn't start** to free a port. Full rules — invoke the **`bespunky-workflow:local-server-isolation`** skill.
-{{#firebase}}
-The emulator suite is the trap: `tools/emulators.sh` **reaps existing emulator processes** on launch, so serving on the base ports (`--port-offset=0`, i.e. the main tree) would kill the developer's running suite (a random *app* port alone doesn't prevent that). The clean fix is to serve **from your feature worktree** — `nx serve <app>` there auto-offsets the entire stack (app + emulators, incl. the hub/logging ports) onto a free block and reaps only *its own* shifted ports, so it coexists with the developer's suite instead of killing it. Watch it in the shared browser over noVNC. (Or, if you only changed the app: reuse the running suite by serving the app alone against it — `--no-emulators` on a shifted block.) Never boot a colliding suite on the base ports.
-{{/firebase}}

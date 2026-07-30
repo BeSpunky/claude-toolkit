@@ -156,7 +156,7 @@ makes it a discipline rather than a preference.
 
 A skill only fires when it is judged relevant — not good enough for a rule that must hold on *every* UI
 change. So the policy has two halves: this skill (the depth) and an **always-on directive** in the project's
-`CLAUDE.md`. Scaffolded projects get it automatically (it lives in the generated `HOUSE.md` →
+`CLAUDE.md`. Scaffolded projects get it automatically (it lives in the generated `HOUSE.rules.md`, which `CLAUDE.md` imports into every session →
 *Design-system-first*); existing projects paste the canonical directive from the toolkit's `README.md`
 ("The always-on half").
 
