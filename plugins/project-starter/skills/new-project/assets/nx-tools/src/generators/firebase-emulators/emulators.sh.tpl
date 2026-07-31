@@ -18,6 +18,14 @@
 # A full run therefore derives the list from firebase.json's own `emulators` block; a focused
 # run passes its own. See the derivation below for why this, and not a `dev` script.
 #
+# SEEDS ARE SHARED FROM MAIN; DATA IS ISOLATED PER STACK. An isolated stack (PORT_OFFSET != 0)
+# gets its own data dir and owns it — it exports back on exit, so a worktree's session and any
+# seed work it does persist and stay its own. It is PRIMED once from the 'default' seed, resolved
+# this tree first, else the main worktree's: seeds are built artifacts and gitignored, so a fresh
+# worktree has none and would otherwise start from an empty world. Priming is a COPY, so a
+# worktree can never reach back and change what main holds. A worktree that builds or edits its
+# own seeds shadows main's for every later run — isolation, without having to set it up.
+#
 # Persistence follows the EXPLICIT flag, not the presence of `--only`: a derived list IS the
 # full suite and must still export, while a genuinely partial run (e.g. auth-only) would
 # export ONLY its slice on exit and clobber the firestore/storage data in the shared working
@@ -153,15 +161,48 @@ if [ "$EXPLICIT_ONLY" -eq 0 ]; then
   fi
 fi
 
+# ── CLONE-LEVEL RESOURCES, RESOLVED ONCE ───────────────────────────────────────────────────────
+# Two things the emulators need are gitignored, so they exist per CLONE and never arrive in a
+# freshly-created git worktree: the built emulator SEEDS and `.secret.local`. Both resolve the same
+# way — this tree's own copy wins, else the main worktree's — so resolve the main worktree once here
+# rather than twice by hand further down, which is how the two would drift apart.
+#
+# `|| true` under `set -euo pipefail`: outside a repository `git worktree list` exits 128, and
+# pipefail would propagate that into an errexit kill. Not being in a repo is ordinary here.
+MAIN_WORKTREE="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -1 || true)"
+
+# The seed to prime an isolated stack from. THIS TREE'S OWN SEEDS WIN, and that is the whole point:
+# a worktree that builds or edits seeds is doing it in isolation, and must get its own world back —
+# never the main tree's. A worktree that has NOT touched seeds has no seeds at all (they are built
+# artifacts, gitignored), and starting it from an empty world would make every isolated serve begin
+# with nothing. So it borrows the main tree's as a read-only BASE: primed by copy, so nothing a
+# worktree then does can reach back and change what main holds.
+seed_dir() {   # seed_dir <name> — echoes the resolved seed path, or nothing when there is none
+  local name="$1"
+  if [ -f "$ROOT/tools/emulator-seeds/$name/firebase-export-metadata.json" ]; then
+    printf '%s' "$ROOT/tools/emulator-seeds/$name"
+  elif [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] \
+    && [ -f "$MAIN_WORKTREE/tools/emulator-seeds/$name/firebase-export-metadata.json" ]; then
+    printf '%s' "$MAIN_WORKTREE/tools/emulator-seeds/$name"
+  fi
+}
+
 bash "$ROOT/tools/reap-emulators.sh" "${REAP_ARGS[@]}"
 if [ "$OFFSET" = "0" ]; then
   bash "$ROOT/tools/emulator-data.sh" ensure
-elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ] \
-  && [ -f "$ROOT/tools/emulator-seeds/default/firebase-export-metadata.json" ]; then
-  # Prime THIS isolated stack's own data dir from the default seed once — a known world, without
-  # touching (or importing from) the base stack's .emulator-data.
-  cp -r "$ROOT/tools/emulator-seeds/default" "$DATA_DIR"
-  echo "[emulators] isolated data dir primed from the 'default' seed: $DATA_DIR" >&2
+elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ]; then
+  # Prime THIS isolated stack's own data dir ONCE, from the resolved 'default' seed — a known world,
+  # without touching (or importing from) the base stack's .emulator-data. From here on the stack
+  # owns its data: it exports back to this dir on exit, so a worktree's session, its signups and any
+  # seed work it does persist across restarts and stay entirely its own.
+  SEED="$(seed_dir default)"
+  if [ -n "$SEED" ]; then
+    cp -r "$SEED" "$DATA_DIR"
+    case "$SEED" in
+      "$ROOT"/*) echo "[emulators] isolated data dir primed from this tree's 'default' seed: $DATA_DIR" >&2 ;;
+      *)         echo "[emulators] isolated data dir primed from the main worktree's 'default' seed: $SEED" >&2 ;;
+    esac
+  fi
 fi
 
 # Local Functions secrets: the Functions emulator reads `.secret.local` from the loaded bundle
@@ -180,12 +221,7 @@ fi
 # holds, with no per-worktree setup.
 SECRETS_FILE="$ROOT/apps/functions/.secret.local"
 if [ ! -f "$SECRETS_FILE" ]; then
-  # `|| true` is load-bearing under `set -euo pipefail`. `2>/dev/null` hides git's OUTPUT, not its exit
-  # code: outside a repository `git worktree list` exits 128, pipefail propagates that through the pipe,
-  # and the assignment then trips errexit — killing the suite silently, with no message, one line before it
-  # would have started. The worktree lookup is a best-effort convenience; not being in a repo is an ordinary
-  # state for it, not a failure.
-  MAIN_WORKTREE="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -1 || true)"
+  # Same cascade as the seeds above, off the same resolved MAIN_WORKTREE.
   if [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && [ -f "$MAIN_WORKTREE/apps/functions/.secret.local" ]; then
     echo "[emulators] .secret.local absent in this worktree; using the main worktree's copy: $MAIN_WORKTREE" >&2
     SECRETS_FILE="$MAIN_WORKTREE/apps/functions/.secret.local"
