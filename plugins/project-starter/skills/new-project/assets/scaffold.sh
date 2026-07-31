@@ -764,6 +764,166 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   rm -rf \"\$_local_stage\""
 fi
 
+# --- PREFLIGHT: the preconditions that must hold BEFORE the first write ----------------------------------------
+# A sync's most damaging failures are not bad writes. They are IRREVERSIBLE GIT ACTS performed on a repository
+# that was never asked whether it was ready.
+#
+# `nx migrate --run-migrations --create-commits` stages with `git add -A` and commits onto whatever branch HEAD
+# is. So a DIRTY TREE gets welded into a migration commit — this is how one project's in-flight libraries, its
+# functions app and its docs ended up inside a commit named after a devcontainer marker file, silently, under a
+# run that reported SYNC_OK. And on a PROTECTED BRANCH the ladder lands its commits directly on `development`,
+# which the house branch rules call non-negotiable never to do — performed by the house's own tooling, on the
+# user's behalf, without asking.
+#
+# Sync is also the command you run after being away, which is exactly the state where a tree is most likely to
+# be dirty and you are least likely to remember what was in it. The command's own use case selects for the
+# condition that breaks it.
+#
+# THE GATE CLASSIFIES; IT NEVER RESOLVES. A shell script cannot know whether the dirty work is related to this
+# sync, whether a feature package is open, whether a worktree already exists, or what the user said a minute
+# ago. The session driving the sync knows all of it. So preflight answers exactly one question — is it safe to
+# write? — and hands the decision back, in a form an agent can act on:
+#
+#   refuse  a blocking state with a required fix   (dirty tree, protected branch, detached HEAD, downgrade)
+#   ask     genuinely ambiguous, no correct default (real history on a lone 'main' — no branch model yet)
+#
+# The ASK verdict is why this is not simply a stricter refusal. A repo whose only branch is 'main' might be one
+# that has never adopted the branch model, or one where 'main' IS the working branch. Both are ordinary, and
+# guessing either way is wrong for the other half of the world. A repo with NO COMMITS is not ambiguous — it is
+# new, and being asked about a branch model while creating an empty project would be absurd.
+#
+# NO OVERRIDE FLAG, deliberately. Every resolution — commit it, stash it, branch and commit there, sync on a new
+# branch, open a worktree — ends with a clean tree on a working branch. An --allow-dirty would exist for exactly
+# one purpose: reproducing the bug this removes.
+#
+# EVERY CHECK RUNS, THEN ONE VERDICT. Checks append a verdict instead of exiting, so a run that is wrong in three
+# ways says so once instead of over three round trips. That is also why the DOWNGRADE refusal now lives here
+# rather than inside MIGRATE_PROBE: it was the first precondition and simply had no company. The two checks that
+# fire AFTER this gate — an Nx workspace and an nx binary — stay where they are on purpose: '--ensure' may
+# create what they check, so they are post-ensure conditions, not pre-write ones, and aggregating them here
+# would report a missing nx.json that the run was about to create.
+PREFLIGHT_CHECKS="
+_REFUSE_CODES=''
+_REFUSE_TEXT=''
+_ASK_CODES=''
+_ASK_TEXT=''
+_refuse() {
+  _REFUSE_CODES=\"\$_REFUSE_CODES \$1\"
+  _REFUSE_TEXT=\"\$_REFUSE_TEXT
+\$2\"
+}
+_ask() {
+  _ASK_CODES=\"\$_ASK_CODES \$1\"
+  _ASK_TEXT=\"\$_ASK_TEXT
+\$2\"
+}
+# Not a git repository at all: there is no history to damage and no branch to land on, so none of the git
+# preconditions have anything to say. Silence here is correct, not a skipped check.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  # 'git status --porcelain' rather than three diff invocations: it is the one command that also works in a
+  # repository with no commits, where 'git diff --cached' has no HEAD to compare against and errors out.
+  # Column 1 is the INDEX status, column 2 the WORKTREE status, '??' is untracked.
+  #
+  # '-uall' IS LOAD-BEARING, not a detail. By default git COLLAPSES an untracked directory to a single entry,
+  # so three new files across two new libraries report as one '?? libs/' — a count of 1 for the work least
+  # likely to be reconstructable, which is the exact figure a reader would skim past. '-uall' counts and names
+  # the files themselves. The listing is capped below and the true total always printed, so the honesty costs
+  # only a bounded amount of output. Ignored paths are excluded either way (porcelain implies
+  # --exclude-standard), so this stays proportional to genuinely untracked work.
+  _st=\"\$(git status --porcelain -uall 2>/dev/null || true)\"
+  if [ -n \"\$_st\" ]; then
+    _n_staged=\"\$(printf '%s\n' \"\$_st\" | grep -c '^[MADRCT]' || true)\"
+    _n_modified=\"\$(printf '%s\n' \"\$_st\" | grep -c '^.[MDT]' || true)\"
+    _n_untracked=\"\$(printf '%s\n' \"\$_st\" | grep -c '^??' || true)\"
+    _n_total=\"\$(printf '%s\n' \"\$_st\" | wc -l | tr -d ' ')\"
+    # UNTRACKED IS THE ONE THAT MATTERS MOST and the one a reader discounts. 'git add -A' stages untracked
+    # files too, so whole new libraries — the work least likely to be recoverable from memory — are swept in
+    # exactly like an edited line. Report the three separately so that is impossible to miss.
+    _paths=\"\$(printf '%s\n' \"\$_st\" | cut -c4- | head -10 | sed 's/^/           /')\"
+    _more=''
+    [ \"\$_n_total\" -gt 10 ] && _more=\"
+           ... and \$((_n_total - 10)) more\"
+    _refuse dirty-tree \"[preflight] dirty-tree: the working tree has uncommitted changes.
+           staged=\$_n_staged  modified=\$_n_modified  untracked=\$_n_untracked  (total \$_n_total)
+\$_paths\$_more
+           The migration ladder runs 'nx migrate --run-migrations --create-commits', which stages with
+           'git add -A'. Every path above would be committed under a migration's message, untracked
+           directories included.
+           Resolve it however suits the work — commit, stash, branch and commit there, or sync in a
+           worktree — then re-run. This gate does not choose for you.\"
+  fi
+  # A repository with no commits is NEW, not ambiguous: nothing to protect, no branch model to have adopted,
+  # and no history to strand. Every branch question below presupposes a HEAD.
+  if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    _branch=\"\$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')\"
+    # The house branch model, in one place. 'master' is included because a repo that predates the rename still
+    # has production bound to it, and landing nine migration commits there is the same act by another name.
+    _structure=0
+    git show-ref --verify --quiet refs/heads/development 2>/dev/null && _structure=1
+    git show-ref --verify --quiet refs/remotes/origin/development 2>/dev/null && _structure=1
+    if [ \"\$_branch\" = 'HEAD' ]; then
+      # Detached HEAD: --create-commits would produce commits no branch points at. They are unreachable the
+      # moment anything else is checked out, and nothing in the run would say so.
+      _refuse detached-head \"[preflight] detached-head: HEAD is not on a branch.
+           The migration ladder commits as it goes, and commits made here belong to no branch — they become
+           unreachable as soon as anything is checked out.
+           Check out a branch (or create one at this commit) and re-run.\"
+    elif [ \"\$_structure\" = '1' ]; then
+      # ONLY PROTECT WHAT EXISTS. The refusal is derived from the repository's own state, not declared: a
+      # 'development' branch is the evidence that this project has adopted the branch model and therefore has
+      # something to violate. This is what keeps a fresh scaffold and a first-time retrofit from being refused
+      # by a rule about a structure they do not have yet — one rule, no mode conditional in the one command
+      # sequence that exists specifically so scaffold and sync cannot drift.
+      case \"\$_branch\" in
+        development|staging|main|master)
+          _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', and this project has
+           adopted the house branch model ('development' exists).
+           The migration ladder commits onto the current branch, so this run would commit directly onto a
+           branch that advances only by merging the branch below it.
+           Open a worktree off 'development' and sync there, then promote it like any other change.\"
+          ;;
+      esac
+    else
+      case \"\$_branch\" in
+        main|master)
+          # Genuinely ambiguous, and the one place this gate asks instead of deciding. No 'development' exists,
+          # so either the branch model was never adopted (and '\$_branch' is simply where work happens) or it is
+          # about to be. Refusing would block an ordinary retrofit; proceeding would land migration commits on
+          # what may be the production line. Neither is a safe default, so the human chooses.
+          _ask no-branch-model \"[preflight] no-branch-model: HEAD is on '\$_branch' and no 'development' branch
+           exists, so this project has no house branch structure to check against.
+           The migration ladder will commit onto '\$_branch'. That is fine if it is where this project works,
+           and wrong if it is the production line.
+           Decide once: sync here, or establish the branch structure first and sync off 'development'.\"
+          ;;
+      esac
+    fi
+  fi
+fi"
+
+# The single verdict. Runs AFTER MIGRATE_PROBE so the report can name the ladder that would have run — the
+# probe writes nothing, it only reads node_modules and HOUSE.md, so composing the full picture first costs
+# nothing and tells the reader what they are being stopped from doing.
+#
+# The FIRST LINE IS THE CONTRACT: one token plus space-separated codes, in the same vocabulary as SYNC_OK and
+# SYNC_PARTIAL, so the /sync command can branch on it without parsing prose. The human detail follows.
+PREFLIGHT_VERDICT="
+if [ -n \"\$_REFUSE_CODES\" ] || [ -n \"\$_ASK_CODES\" ]; then
+  if [ -n \"\$_REFUSE_CODES\" ]; then
+    echo \"SYNC_REFUSED:\$_REFUSE_CODES\" >&2
+  fi
+  if [ -n \"\$_ASK_CODES\" ]; then
+    echo \"SYNC_ASK:\$_ASK_CODES\" >&2
+  fi
+  echo '[preflight] NOTHING HAS BEEN WRITTEN — the project is exactly as it was.' >&2
+  if [ -n \"\$MIGRATE_FROM\" ]; then
+    echo \"[preflight] This run would have migrated \$MIGRATE_FROM -> $NX_TOOLS_VERSION.\" >&2
+  fi
+  [ -n \"\$_REFUSE_TEXT\" ] && echo \"\$_REFUSE_TEXT\" >&2
+  [ -n \"\$_ASK_TEXT\" ] && echo \"\$_ASK_TEXT\" >&2
+  exit 1
+fi"
+
 # --- run the house MIGRATIONS (sync mode) ---------------------------------------------------------------------
 # Versioned one-way deltas, collected and ordered by `nx migrate`. This is what replaced convergence: a
 # generator no longer has to recognise every shape the toolkit ever produced, because each one-way change
@@ -930,12 +1090,18 @@ fi
 # run the older generators over the newer shape, and re-stamp HOUSE.md to the older version, recording a
 # state nothing ever migrated back down to. Migrations do not walk backwards, so there is no repair path
 # either. Refuse before anything is written.
+#
+# This registers a PREFLIGHT verdict rather than exiting on the spot. It was the first pre-write precondition
+# and for a long time the only one, so an inline 'exit 1' was indistinguishable from a gate; now that a dirty
+# tree, a protected branch and a detached HEAD are checked alongside it, exiting here would report one blocker
+# and hide the rest — three round trips for a run that is wrong in three ways. Nothing between here and
+# PREFLIGHT_VERDICT writes anything, so deferring the exit costs nothing.
 if [ -n \"\$_highest\" ] && [ \"\$_highest\" != '$NX_TOOLS_VERSION' ] && _vlt '$NX_TOOLS_VERSION' \"\$_highest\"; then
-  echo \"ERROR: this project is on house tooling \$_highest, which is NEWER than this checkout's $NX_TOOLS_VERSION.\" >&2
-  echo \"       (installed=\${_installed:-none}, HOUSE.md stamp=\${_stamped:-none})\" >&2
-  echo '       Syncing would DOWNGRADE it and re-stamp it, and migrations cannot walk backwards.' >&2
-  echo '       Update your toolkit first, then sync:  claude plugin marketplace update claude-toolkit' >&2
-  exit 1
+  _refuse downgrade \"[preflight] downgrade: this project is on house tooling \$_highest, which is NEWER than
+           this checkout's $NX_TOOLS_VERSION (installed=\${_installed:-none}, HOUSE.md stamp=\${_stamped:-none}).
+           Syncing would install an older payload, run older generators over the newer shape, and re-stamp
+           HOUSE.md downwards. Migrations do not walk backwards, so there is no repair path.
+           Update your toolkit first, then sync:  claude plugin marketplace update claude-toolkit\"
 fi"
 
 # Two collection strategies, chosen at render time because --local is known then. The PUBLISHED path is
@@ -1308,15 +1474,23 @@ $FINALIZE_LOCAL"
 else
   INNER="set -e
 cd '$WORK_ROOT/$PROJECT'
-# THE PROBE COMES FIRST — before \`nx init\`, not merely before the install. It reads only node_modules and
-# HOUSE.md, so it is safe this early, and its downgrade refusal claims to stop \"before anything is written\".
-# With ENSURE_NX_BLOCK ahead of it that claim was false: on --ensure=nx or --ensure=agent, \`nx init\` had
-# already created nx.json, a package.json and a lockfile in someone's repo before we decided the sync should
-# not happen at all. A guard that fires after the first write is a guard that arrives too late.
+# PREFLIGHT AND THE PROBE COME FIRST — before \`nx init\`, not merely before the install. Both only READ (git
+# state, node_modules, HOUSE.md), so they are safe this early, and the gate's refusals claim to stop \"before
+# anything is written\". With ENSURE_NX_BLOCK ahead of them that claim was false: on --ensure=nx or
+# --ensure=agent, \`nx init\` had already created nx.json, a package.json and a lockfile in someone's repo
+# before we decided the sync should not happen at all. A guard that fires after the first write is a guard
+# that arrives too late.
+#
+# GATHER, GATHER, DECIDE. The checks and the probe both APPEND verdicts; PREFLIGHT_VERDICT is the single place
+# that reports and exits. The probe sits between them on purpose — it writes nothing, and running it first is
+# what lets a refusal name the ladder the user is being stopped from running.
 _SYNC_PARTIAL=0
 _stage() { [ -d .bespunky-sync.lock ] && printf 'stage=%s\n' \"\$1\" > .bespunky-sync.lock/state 2>/dev/null || true; }
+_stage preflight
+$PREFLIGHT_CHECKS
 _stage probe
 $MIGRATE_PROBE
+$PREFLIGHT_VERDICT
 $ENSURE_NX_BLOCK
 if [ ! -f nx.json ]; then
   echo 'ERROR: not an Nx workspace (no nx.json), and this run was not asked to create one.' >&2
