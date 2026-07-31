@@ -23,7 +23,8 @@
     "bespunky-browser-automation@claude-toolkit": true,
     "bespunky-product-ux@claude-toolkit": true,
     "bespunky-design-system@claude-toolkit": true,
-    "bespunky-vscode-identity@claude-toolkit": true
+    "bespunky-vscode-identity@claude-toolkit": true,
+    "bespunky-communication@claude-toolkit": true
   },
   "permissions": {
     "defaultMode": "auto"

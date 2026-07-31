@@ -11,6 +11,18 @@
 // does NOT declare is PRESERVED as-is. Objects merge recursively; a leaf (scalar or array) the template
 // declares replaces the project's. So the house can never lose a setting to drift, and the project can
 // never lose a setting to a sync.
+//
+// TWO CLASSES OF HOUSE KEY, and the difference is not cosmetic. `settings.json.tpl` is OWNED — it is
+// infrastructure (which marketplaces exist, which plugins are enabled), the project has no business
+// disagreeing with it, and re-asserting it every sync is the point. `settings.seed.json.tpl` is
+// SEEDED — written only where the project has no value of its own, and never touched again.
+//
+// `outputStyle` is the seeded case and shows why the distinction has to exist. It is a BEHAVIOURAL
+// preference, only ONE can be active at a time, and a consumer choosing a different one — or writing
+// their own — is a legitimate decision. Re-asserting it would silently revert that choice on every
+// `--sync`, which is not "keeping the house standard", it is overruling a human who already answered
+// the question. Seeding gets the house default working out of the box (nobody has to know the setting
+// exists) while leaving the answer theirs the moment they give one.
 import { type Tree } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,8 +31,9 @@ type Json = Record<string, unknown>;
 
 export default async function claudeSettingsGenerator(tree: Tree): Promise<void> {
   const house = JSON.parse(readFileSync(join(__dirname, 'settings.json.tpl'), 'utf8')) as Json;
+  const seeds = JSON.parse(readFileSync(join(__dirname, 'settings.seed.json.tpl'), 'utf8')) as Json;
   const project = readJson(tree, '.claude/settings.json');
-  const merged = project ? deepMerge(project, house) : house;
+  const merged = deepSeed(project ? deepMerge(project, house) : { ...house }, seeds);
 
   tree.write('.claude/settings.json', `${JSON.stringify(merged, null, 2)}\n`);
 
@@ -104,6 +117,26 @@ function deepMerge(project: Json, house: Json): Json {
   }
 
   return merged;
+}
+
+/**
+ * Write each seed into `target` ONLY where the project has no value of its own — the inverse of
+ * `deepMerge`, which is why it cannot be expressed as a flag on it: there, the house wins every leaf
+ * it declares; here, the project wins every leaf it has already answered.
+ *
+ * Absence is judged with `in`, not truthiness: `false`, `0` and `""` are answers a project gave, and
+ * a seed must not overwrite them. Objects recurse, so a nested seed can fill one missing sub-key
+ * without disturbing its siblings.
+ */
+function deepSeed(target: Json, seeds: Json): Json {
+  for (const [key, seedValue] of Object.entries(seeds)) {
+    const current = target[key];
+
+    if (isPlainObject(seedValue) && isPlainObject(current)) deepSeed(current, seedValue);
+    else if (!(key in target)) target[key] = seedValue;
+  }
+
+  return target;
 }
 
 /** A mergeable object — a JSON object, not an array and not null (both of which are leaves here). */
