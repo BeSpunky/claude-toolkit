@@ -143,6 +143,21 @@ in the workspace root. Re-running restarts the ladder against a tree that is par
 failing migration's name, the backup ref, and the leftover `migrations.json`, and let the user decide between
 fixing forward and restoring from the tag.
 
+One failure there is worth recognising on sight, because Nx's message gives no clue what it is about:
+
+```text
+TypeError: Cannot use 'in' operator to search for '0' in <a sentence of English prose>
+```
+
+That is a **`//`-prefixed documentation key sitting inside `targets`** in some `project.json`. Inside
+`targets` — and only there — Nx reads every value as a target, so it spreads the comment string character by
+character; the `'0'` is a character index. On older Nx the same path did not throw, it wrote the spread back,
+which is how a comment becomes a several-hundred-key object in `project.json`. The `convert-target-comment-keys`
+migration (0.26.0) moves these onto the target's `metadata.description`, but migrations older than it call the
+same Nx API and will fail first on a project that is far enough behind. The fix is one edit: find the `//` key
+inside `targets` named in the message, move it onto the target it documents (or up to the project root, where
+it is harmless), and re-run. Do not delete it on the user's behalf — it is their documentation.
+
 ### The sync refused before writing anything — `SYNC_REFUSED` / `SYNC_ASK`
 
 The sync checks a handful of **preconditions before its first write** and stops if any fails. The first line

@@ -209,9 +209,16 @@ function findExistingDevServer(
 ): TargetConfiguration | undefined {
   for (const name of DEV_SERVER_NAMES) {
     const target = targets[name];
+    // IS IT AN OBJECT, not merely truthy. `Record<string, TargetConfiguration>` is what the devkit types
+    // promise, but project.json is a file a human edits: `targets` can legitimately hold a `//`-prefixed
+    // documentation string, and nothing stops one landing on a key we look up by name. A bare `target &&`
+    // admits that string, `.executor` on it is undefined, `undefined !== SERVE_EXECUTOR` holds, and the string
+    // is returned AS a TargetConfiguration — then written straight back into project.json by the caller.
+    // Checking the type here is the difference between ignoring a comment and corrupting the file with it.
+    if (!target || typeof target !== 'object' || Array.isArray(target)) continue;
     // The composer itself is not a dev-server — on a re-run it occupies `serve`, and treating it as the leaf
     // would compose it with itself.
-    if (target && target.executor !== SERVE_EXECUTOR) return target;
+    if (target.executor !== SERVE_EXECUTOR) return target;
   }
   return undefined;
 }

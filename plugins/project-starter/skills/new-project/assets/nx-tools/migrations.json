@@ -44,6 +44,11 @@
       "version": "0.25.0",
       "description": "Delete the frozen house sections still inline in CLAUDE.md from before 0.5.0 moved them into the generated HOUSE.md — now actively misleading, because 0.25.0 imports the live directives into the same file.",
       "implementation": "./src/migrations/0.25.0/retire-inline-house-sections"
+    },
+    "convert-target-comment-keys": {
+      "version": "0.26.0",
+      "description": "Move `\"//name\": \"…\"` documentation keys out of `targets` onto the target's `metadata.description`. Inside `targets` Nx reads every value as a TargetConfiguration, so such a key throws on Nx 23 and silently spreads into a character-indexed object on older Nx.",
+      "implementation": "./src/migrations/0.26.0/convert-target-comment-keys"
     }
   }
 }
