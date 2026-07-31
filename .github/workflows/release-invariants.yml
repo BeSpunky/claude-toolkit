@@ -1,39 +1,69 @@
-# Guard the release invariants that fail SILENTLY.
+# Guard the two things about this repo's product that fail SILENTLY.
 #
-# A missed `@bespunky/nx-tools` bump announces itself — publish-nx-tools skips, and the next `--sync` installs
-# the old payload. A missed PLUGIN bump does not: the repo has the change, the marketplace advertises the old
-# version, `/plugin marketplace update` is a no-op, and consumers stay behind forever with nothing to see. This
-# repo has shipped that bug twice (`bespunky-workflow` at 2c58e20, then `bespunky-engineering` +
-# `bespunky-design-system`), both times from a sweep that crossed plugin boundaries while the commit was named
-# after a different plugin. Neither was caught by review; both were caught by looking afterwards.
+# 1. A missed PLUGIN BUMP. A missed `@bespunky/nx-tools` bump announces itself — publish-nx-tools skips and
+#    the next `--sync` installs the old payload. A missed plugin bump does not: the repo has the change, the
+#    marketplace advertises the old version, `/plugin marketplace update` is a no-op, and consumers stay
+#    behind forever with nothing to see. This repo has shipped that bug three times, every time from a sweep
+#    that crossed plugin boundaries while the commit was named after a different plugin.
 #
-# So this asks, on every push, the one question nobody remembers to: did the thing that should have happened,
-# happen? It reports; it never bumps — picking patch vs minor is a judgment call about what a change means to
-# consumers, and the fix it prints is a command to run, not an edit it makes.
+# 2. A SKILL THAT CANNOT FIRE. A SKILL.md's `description` is the only text Claude sees when deciding whether
+#    to use a skill — and Claude Code drops the ENTIRE frontmatter when it fails to parse, silently, loading
+#    the skill with no metadata at all. 18 of 31 skills sat in that state undetected because their long
+#    descriptions were unquoted YAML plain scalars containing ": ". Nothing in the repo would ever have said
+#    so; `claude plugin validate --strict` says so immediately, which is why it is a gate here.
+#
+# Together: (2) is whether the content works, (1) is whether it reaches anyone. Shipping is both.
 name: release invariants
 
 on:
   push:
-    branches: [main]
+    # The house pipeline is feature → development → staging → main, and drift matters at every integration
+    # point, not only the last one.
+    branches: [main, development, staging]
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-invariants-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
+    # Forks inherit workflows but not this repo's release policy; failing there is noise on someone else's
+    # minutes. (Matches the guard publish-nx-tools already uses.)
+    if: github.repository == 'BeSpunky/claude-toolkit'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          # The check compares each plugin against the commit where its version last CHANGED, which can be far
-          # back in history. A shallow clone would make that commit unreachable and the check vacuously green —
-          # the worst outcome for a guard, since it would report success precisely when it cannot see.
+          # Each plugin is compared against the commit where its version last increased, which can be far back.
+          # The checker refuses to run on a shallow clone rather than passing vacuously, so this is what keeps
+          # the job meaningful rather than merely green.
           fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
-      # No install step: the checker deliberately uses only node builtins and `git`, so it runs anywhere and
-      # cannot be broken by a dependency that failed to resolve.
+      # No install step: the checker uses only node builtins and `git`, so it cannot be broken by a dependency
+      # that failed to resolve.
       - name: Check release invariants
         run: node tools/check-release-invariants/check.mjs
+
+      # Catches the failure class that silently disabled 18 skills: unparseable SKILL.md frontmatter, a
+      # plugin.json that does not satisfy the schema, a malformed marketplace manifest.
+      - name: Validate plugins and marketplace
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+          failed=0
+          for plugin in plugins/*/; do
+            echo "── $plugin"
+            claude plugin validate "$plugin" --strict || failed=1
+          done
+          echo "── marketplace"
+          claude plugin validate . --strict || failed=1
+          exit "$failed"

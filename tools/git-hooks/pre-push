@@ -1,34 +1,81 @@
 #!/usr/bin/env bash
-# Pre-push guard: refuse a push that would ship a change no consumer can receive.
+# Pre-push guard: refuse a push to a PROTECTED branch that would ship a change no consumer can receive.
 #
-# CI answers the same question, but it answers it AFTER the push — by which point main already advertises a
-# version that does not match what is in it, and the fix is a follow-up commit. This catches it while it is
-# still a local edit.
+# CI answers the same question, but only after the push — by which point the branch already advertises a
+# version that does not match its content, and the fix is a follow-up commit. This catches it while it is
+# still local.
 #
-# Installed by pointing git at this directory:
-#     git config core.hooksPath tools/git-hooks
-# which `.devcontainer/post-create.local.sh` does on container create. It lives in `post-create.local.sh`
-# rather than the generated `post-create.sh` on purpose: the latter is a class-A owned artifact regenerated
-# into EVERY scaffolded project, and a consumer project has no plugins to version, so putting it there would
-# push this repo's release policy onto every project the toolkit touches.
+# ── WHY IT READS STDIN, AND WHY IT ONLY GUARDS PROTECTED BRANCHES ──────────────────────────────────────────
 #
-# BYPASSABLE ON PURPOSE — `git push --no-verify`. A hook that cannot be skipped is a hook people disable
-# globally the first time it is wrong, and the CI check is the authoritative one regardless.
+# The first version of this hook ran the checker against the working tree's HEAD and ignored its arguments
+# entirely. That was wrong in BOTH directions:
+#   - standing on a feature branch while pushing a clean `main` was REFUSED (the check judged the wrong tree),
+#     which matters here because the house workflow puts every feature in its own worktree;
+#   - standing on a clean `main` while pushing a dirty feature branch was ALLOWED, silently letting through
+#     exactly what the hook exists to catch.
+# Git passes `<local ref> <local sha> <remote ref> <remote sha>` per ref on stdin, so the honest question —
+# "what is actually being pushed?" — is answerable, and is what this asks.
+#
+# It guards only `main`, `development` and `staging`. HOUSE.rules.md mandates committing small increments
+# while working in a worktree, and the bump is a dedicated `chore(release):` commit that lands at the merge
+# gate — so failing every mid-feature push would refuse the prescribed workflow by construction and train
+# everyone to type `--no-verify`, which disables every hook, not just this one. Unreleased content on a
+# feature branch is not a problem; unreleased content on an integration branch is.
+#
+# Still bypassable with `git push --no-verify`. A hook that cannot be skipped is one people disable globally
+# the first time it is wrong, and CI is the authoritative half regardless.
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 CHECK="$REPO_ROOT/tools/check-release-invariants/check.mjs"
 
-# Not this repo (the hooksPath may be inherited by a worktree of something else), or the checker is gone —
-# either way, say nothing and get out of the way.
+# Not this repo (core.hooksPath is a shared config key, so it applies to every worktree — including one on a
+# branch that predates this hook), or no node. Either way, get out of the way silently.
 [ -f "$CHECK" ] || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 
-if node "$CHECK"; then
-  exit 0
-fi
+PROTECTED_RE='^refs/heads/(main|development|staging)$'
+status=0
 
-cat >&2 <<'EOF'
+# Each line: <local ref> <local sha> <remote ref> <remote sha>. A deletion has an all-zero local sha.
+while read -r local_ref local_sha remote_ref _remote_sha; do
+  [ -n "${remote_ref:-}" ] || continue
+  [[ "$remote_ref" =~ $PROTECTED_RE ]] || continue
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac   # branch deletion — nothing to verify
+
+  # Check the commit BEING PUSHED, not whatever the working tree happens to be on. `git stash` is not an
+  # option in a hook (it would mutate the user's tree), so this re-runs the checker with the pushed commit
+  # checked out into a temporary worktree — read-only as far as the user's tree is concerned.
+  workdir="$(mktemp -d)"
+  if git worktree add --detach --quiet "$workdir" "$local_sha" 2>/dev/null; then
+    if [ -f "$workdir/tools/check-release-invariants/check.mjs" ]; then
+      node "$workdir/tools/check-release-invariants/check.mjs" || status=$?
+    fi
+    git worktree remove --force "$workdir" >/dev/null 2>&1
+  else
+    rmdir "$workdir" 2>/dev/null
+    # Could not inspect what is being pushed — say so rather than passing. Never guess green.
+    echo "pre-push: could not create a temporary worktree for $local_sha; skipping the release check." >&2
+  fi
+done
+
+case "$status" in
+  0) exit 0 ;;
+  2)
+    cat >&2 <<'EOF'
+
+Push refused: the release-invariants check could not complete (exit 2).
+
+  This is the CHECKER failing, not a release problem. Run it directly to see why:
+      node tools/check-release-invariants/check.mjs
+
+  To push anyway:  git push --no-verify
+
+EOF
+    exit 1
+    ;;
+  *)
+    cat >&2 <<'EOF'
 
 Push refused: a plugin (or the nx-tools payload) changed without a release.
 
@@ -36,7 +83,11 @@ Push refused: a plugin (or the nx-tools payload) changed without a release.
   consumers never receive, and nothing anywhere will tell you. Release it with the command printed above,
   commit, and push again.
 
-  To push anyway (e.g. an intentional WIP branch):  git push --no-verify
+  (Only pushes to main/development/staging are checked; feature branches are free.)
+
+  To push anyway:  git push --no-verify
 
 EOF
-exit 1
+    exit 1
+    ;;
+esac
