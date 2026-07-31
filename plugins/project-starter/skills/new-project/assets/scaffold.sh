@@ -446,8 +446,9 @@ ENSURE_LAYERS="${ENSURE_ARG:-$ENSURE_DEFAULT}"
 # NORMALISE AWAY WHITESPACE before anything reads this. Every consumer below matches on comma-delimited
 # globs (`*,agent,*`), while the VALIDATOR word-splits — so `--ensure="nx, agent"` passes validation, prints
 # a banner claiming both layers, and then matches nothing: the agent⇒nx implication misfires and
-# `layer_active agent` is false, so the devcontainer, Claude settings, window identity and HOUSE.md are all
-# silently skipped. A csv a human typed with spaces is a csv, not a different request.
+# `layer_active agent` is false, so the devcontainer, Claude settings and window identity are all silently
+# skipped. A csv a human typed with spaces is a csv, not a different request. (HOUSE.md/HOUSE.rules.md are
+# no longer in that list — house-doc is ungated; see the HOUSE.md step at the end of the sequence.)
 ENSURE_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | tr -d '[:space:]')"
 
 # `--firebase` IS an ensure request for the `firebase` layer — they are two spellings of one intent, and
@@ -1417,9 +1418,24 @@ if layer_active design-system; then
 fi
 # --- HOUSE.md last: it STAMPS the layer set, so it must run after every layer above has had its turn (a
 #     design system created moments ago has to appear in the stamp that records this run).
-if layer_active agent; then
-  $PM_EXEC nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION --packageManager=$PM --layers=\"\$ACTIVE\"
-fi
+#
+#     UNGATED, and that is a deliberate change from being part of the `agent` layer. HOUSE.rules.md is the
+#     mechanism by which the house directives reach a session at all — CLAUDE.md `@`-imports it, which is
+#     what puts them in context. Bundling that with the agent layer made the RULES contingent on wanting the
+#     TOOLING (devcontainer, window identity, Claude settings), which are unrelated wants. A project that has
+#     house generators applied to it is governed by the house rules; it should not have to opt into a
+#     devcontainer to be told so.
+#
+#     It also left a migration permanently unable to run: `retire-inline-house-sections` deletes the frozen
+#     pre-0.5.0 house sections from CLAUDE.md only when a HOUSE.md exists to replace them. On a project
+#     without the agent layer that condition was never satisfiable, so it refused on every sync, correctly,
+#     forever — and those projects kept carrying stale directives with nothing to say they were stale.
+#
+#     What makes this safe is the SECTION-level gating house-doc already does (it renders only what
+#     `--layers` supports, so a markdown repo is not told which port not to bind). That gating is the reason
+#     this generator can run everywhere; without it, ungating here would drag emulator recipes into projects
+#     that have no emulators.
+$PM_EXEC nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION --packageManager=$PM --layers=\"\$ACTIVE\"
 # @bespunky/nx-tools is installed UP FRONT now (see INSTALL_NX_TOOLS), so nothing is added here — it is
 # already a declared devDependency by the time any generator runs, which is what makes it survive the
 # \`installPackagesTask\` several generators fire mid-sequence.
