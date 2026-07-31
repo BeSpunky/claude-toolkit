@@ -26,7 +26,25 @@ guards, gates, ordering. Not everything the scaffolder does.
 
 | File | Covers |
 | --- | --- |
+| `render.test.sh` | That `scaffold.sh` can **assemble its program at all**, in every mode — the one failure that precedes all the others. |
 | `preflight-gate.test.sh` | The pre-write gate: dirty tree, protected branch, detached HEAD, the no-branch-model ask, per-file untracked counting, and that several blockers are reported in one pass. |
+| `emulators-only.test.sh` | What `tools/emulators.sh` hands `firebase emulators:start` — the derived `--only`, and that passing it does not silently disable export-on-exit. |
+| `emulator-seeds.test.sh` | The seed cascade: seeds shared from the main worktree, data isolated per stack, and a worktree never writing back into main's. |
+| `reap-ownership.test.sh` | That the reaper kills orphans and not a second, legitimately-running suite. |
+| `port-offset.test.sh` | Port-block derivation and isolation (assertions live in the sibling `port-offset.checks.mjs`). |
+
+**`render.test.sh` is the one that runs before the subject of every other test exists.** `scaffold.sh`'s
+product is a shell program assembled out of nested double-quoted strings, where a backtick — *including one
+inside a `#` comment* — is live command substitution at render time. That shipped: four backticked words in
+a prose comment made the render exit 127 on `--sync` and on a fresh scaffold, so no consumer's scaffolder
+could run at all. It reached users as *"after the sync, nx-tools doesn't install the latest version"* — true,
+and pointing at everything except a comment four hundred lines from the install. The script had documented
+the hazard and named the check (`--print-inner`) for a long time; what it did not have was anything that ran
+it. Now every mode is rendered, parsed, and inspected on each CI run.
+
+One thing it now makes possible but does not yet do: the rendered program is a first-class artifact in this
+suite, so the **ordering** caveat below — that preflight runs before the first write — could finally be
+asserted rather than read.
 
 ## Adding a test
 
