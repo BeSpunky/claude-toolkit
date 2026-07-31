@@ -21,10 +21,51 @@ built-in engineering behaviour intact. The style says nothing about how much des
 to confirm a refactor, or what to write down — so it cannot pull against a project's own always-on
 rules. This was a real concern raised mid-design and this frontmatter key is the answer to it.
 
-**Inert on install.** `force-for-plugin` exists (a plugin-only frontmatter option) and is
-deliberately *not* set. An output style is exclusive — one active at a time — so installing the
-plugin makes the style available and nothing more. Claiming a consumer's only slot without asking is
-the toolkit reaching for a global behavioural switch in someone else's project.
+**`force-for-plugin` still not set.** The option exists (plugin-only frontmatter) and would force the
+style on *anyone* who installs the plugin. Auto-configuration is done instead through the
+scaffolder's own settings generator, which is both narrower — it applies to projects the house
+already owns the settings of — and reversible, because it seeds rather than forces. Superseded the
+original "inert everywhere" stance without adopting the blunt instrument.
+
+**Conversation modes are a STACK, not a depth dial.** The first version modelled mode changes as
+zoom — overview versus detail — and the user named the gap:
+
+> "Like a stack push/pop, Claude should intelligently deduced 'ok, this mode has been exhausted. I
+> can now return to the previous one'. Ensure it's not a details vs. overview thing. We have many
+> conversation modes in life. That's the focus."
+
+So the model is now: many modes (planning, deciding, debugging, teaching, reviewing, negotiating,
+catching up, joking), differing in purpose, pace, formality and what would even *count* as a good
+answer; they **nest**; entering one is a **push** served on its own terms; and the half that gets
+missed is the **pop** — returning to the mode underneath, clearly enough that the other person lands
+there too. Depth shifts survive as the ordinary case, not the whole model. Two failure modes are
+named because they are the ones that actually happen: **stranding** someone in the sub-conversation,
+and **leaking** its register back into a parent it does not fit.
+
+**Asking is governed: one question per MESSAGE.** First written as "ask exactly one question,
+decide the rest," then corrected by the user — *"it's OK if there are multiple questions, just
+separate them into multiple messages."* The rule is therefore about message shape, not about
+suppressing questions. It also goes **last**, with nothing after it, and set off so it reads as a
+question. (This effort produced its own evidence: an earlier turn asked two questions at the end of
+one message, and neither got answered.)
+
+**Auto-install and auto-configure — the user overrode the inert default.** The style ships enabled
+in scaffolded projects, and `outputStyle` is written into `.claude/settings.json` by the
+`claude-settings` generator.
+
+**That required modelling a second class of house key**, which is the architecturally interesting
+part. The generator's existing rule is one-directional: house keys are re-asserted on every sync so
+drift heals. Correct for infrastructure — which marketplaces exist, which plugins are enabled — and
+**wrong for `outputStyle`**, because only one style can be active at a time and a consumer choosing
+a different one is a real decision. Re-asserting it every `--sync` would silently revert that: not
+maintaining a standard, but overruling someone who already answered the question.
+
+So `settings.seed.json.tpl` joins `settings.json.tpl`: **owned** keys are re-asserted, **seeded**
+keys are written only where the project has no value of its own, then never touched again. This is
+the same distinction the scaffolder already draws between class (A) owned template artifacts and
+class (C) seeded-but-never-owned output — `outputStyle` is class C, and the generator simply had no
+way to express that before. `deepSeed` judges absence with `in` rather than truthiness, so a project
+that deliberately set `false`, `0` or `""` keeps it.
 
 ## Ruled out
 
