@@ -1,6 +1,7 @@
 ---
 name: software-design
-description: General, language- and framework-agnostic software design techniques - the concrete cross-stack toolbox that realizes the architect mindset in code. Use when making design or refactoring decisions that aren't tied to a specific framework: decoupling and dependency inversion, replacing conditionals with polymorphism/strategy/state machines, removing duplication and extracting (or NOT extracting) abstractions, modeling a domain and making illegal states unrepresentable, handling errors and boundaries, and designing contracts/APIs. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need. For the mindset behind these, see architect-mentality; for stack-specific specializations, see advanced-typescript / angular-architecture / nx-monorepo-and-dx.
+description: >-
+  General, language- and framework-agnostic software design techniques - the concrete cross-stack toolbox that realizes the architect mindset in code. Use when making design or refactoring decisions that aren't tied to a specific framework: decoupling and dependency inversion, replacing conditionals with polymorphism/strategy/state machines, removing duplication and extracting (or NOT extracting) abstractions, modeling a domain and making illegal states unrepresentable, handling errors and boundaries, and designing contracts/APIs. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need. For the mindset behind these, see architect-mentality; for stack-specific specializations, see advanced-typescript / angular-architecture / nx-monorepo-and-dx.
 ---
 
 # Software Design (general)

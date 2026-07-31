@@ -1,6 +1,7 @@
 ---
 name: angular-native-wrappers
-description: Wrap an imperative, stateful, or third-party JavaScript API (maps, rich-text editors, charts, video/audio players, canvas/WebGL libraries, native browser APIs) in idiomatic Angular - without hand-writing a pass-through method for every native call and without losing type safety. Use when you must expose a large imperative SDK as Angular components/directives/services with declarative inputs/outputs, lifecycle integration, change-detection efficiency, and DI. Assumes modern Angular (standalone, signals, inject()). For general Angular DI/lifecycle/SSR patterns, use the angular-architecture skill; for the type-level techniques this relies on (deriving types, declaration merging), see advanced-typescript; for the agnostic mindset behind this, see architect-mentality.
+description: >-
+  Wrap an imperative, stateful, or third-party JavaScript API (maps, rich-text editors, charts, video/audio players, canvas/WebGL libraries, native browser APIs) in idiomatic Angular - without hand-writing a pass-through method for every native call and without losing type safety. Use when you must expose a large imperative SDK as Angular components/directives/services with declarative inputs/outputs, lifecycle integration, change-detection efficiency, and DI. Assumes modern Angular (standalone, signals, inject()). For general Angular DI/lifecycle/SSR patterns, use the angular-architecture skill; for the type-level techniques this relies on (deriving types, declaration merging), see advanced-typescript; for the agnostic mindset behind this, see architect-mentality.
 ---
 
 # Wrapping Imperative APIs in Angular

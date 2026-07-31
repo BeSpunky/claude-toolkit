@@ -1,6 +1,7 @@
 ---
 name: nx-monorepo-and-dx
-description: Nx monorepo architecture and developer-experience techniques - the workspace-level expression of the architect mindset. Use when structuring an Nx (or general monorepo) workspace beyond a trivial change - organizing apps and libraries, drawing library boundaries and entry points, enforcing module boundaries with tags, configuring the cache and task pipeline, writing generators or automation, setting up testing, releasing/versioning packages, or making the dev environment and commands reproducible and one-step. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need. BeSpunky is generator-first; the project-starter plugin scaffolds the house standard.
+description: >-
+  Nx monorepo architecture and developer-experience techniques - the workspace-level expression of the architect mindset. Use when structuring an Nx (or general monorepo) workspace beyond a trivial change - organizing apps and libraries, drawing library boundaries and entry points, enforcing module boundaries with tags, configuring the cache and task pipeline, writing generators or automation, setting up testing, releasing/versioning packages, or making the dev environment and commands reproducible and one-step. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need. BeSpunky is generator-first; the project-starter plugin scaffolds the house standard.
 ---
 
 # Nx Monorepo & DX

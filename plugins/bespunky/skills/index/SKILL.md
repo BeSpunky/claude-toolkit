@@ -1,6 +1,7 @@
 ---
 name: index
-description: The BeSpunky toolkit catalog / front door. Use when the user wants to discover or choose among the toolkit's skills — "what skills are available", "list the toolkit", "what can the BeSpunky toolkit do", "which skill for X", "catalog / index of skills", "/bespunky", or is browsing what's installed. Renders every installed toolkit skill (the `bespunky` plugin plus every `bespunky-…` plugin), grouped by plugin, each with its `/plugin:skill` invocation and a one-line "use when", by reading the LIVE available-skills set in the session — so it never goes stale.
+description: >-
+  The BeSpunky toolkit catalog / front door. Use when the user wants to discover or choose among the toolkit's skills — "what skills are available", "list the toolkit", "what can the BeSpunky toolkit do", "which skill for X", "catalog / index of skills", "/bespunky", or is browsing what's installed. Renders every installed toolkit skill (the `bespunky` plugin plus every `bespunky-…` plugin), grouped by plugin, each with its `/plugin:skill` invocation and a one-line "use when", by reading the LIVE available-skills set in the session — so it never goes stale.
 ---
 
 # BeSpunky toolkit — skill index

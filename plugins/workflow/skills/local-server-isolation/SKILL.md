@@ -1,6 +1,7 @@
 ---
 name: local-server-isolation
-description: How to launch a local server for your own testing WITHOUT colliding with a server the user is running. Use whenever you are about to start a dev server, app server, emulator, or any long-running local process to verify a change (nx serve, npm run dev, vite, a Firebase emulator suite, a worktree serve via `nx serve <app> --worktree=…`, a Playwright target that boots a server, etc.). The rule — bind a RANDOM free port, never the project's default/forwarded port, because that port belongs to whatever the user launched manually; you test headless so you never need the forwarded ports anyway. Covers the Firebase-emulator case (don't reap the user's suite) and how to point your headless browser at the ephemeral port.
+description: >-
+  How to launch a local server for your own testing WITHOUT colliding with a server the user is running. Use whenever you are about to start a dev server, app server, emulator, or any long-running local process to verify a change (nx serve, npm run dev, vite, a Firebase emulator suite, a worktree serve via `nx serve <app> --worktree=…`, a Playwright target that boots a server, etc.). The rule — bind a RANDOM free port, never the project's default/forwarded port, because that port belongs to whatever the user launched manually; you test headless so you never need the forwarded ports anyway. Covers the Firebase-emulator case (don't reap the user's suite) and how to point your headless browser at the ephemeral port.
 ---
 
 # Local server isolation — never clobber the user's running server

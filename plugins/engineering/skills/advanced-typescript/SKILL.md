@@ -1,6 +1,7 @@
 ---
 name: advanced-typescript
-description: Advanced TypeScript type-system techniques - the type-level expression of the architect mindset. Use when designing non-trivial types, generics, or APIs - deriving one type from another, typing dynamically-implemented or metaprogrammed code, building ergonomic string/typed APIs, validating inputs at compile time, narrowing with type guards/assertions, or making illegal states unrepresentable. TypeScript on any stack (not Angular-specific). This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need.
+description: >-
+  Advanced TypeScript type-system techniques - the type-level expression of the architect mindset. Use when designing non-trivial types, generics, or APIs - deriving one type from another, typing dynamically-implemented or metaprogrammed code, building ergonomic string/typed APIs, validating inputs at compile time, narrowing with type guards/assertions, or making illegal states unrepresentable. TypeScript on any stack (not Angular-specific). This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need.
 ---
 
 # Advanced TypeScript
