@@ -833,6 +833,9 @@ _stamped=\"\$(grep -o '@bespunky/house-tooling:stamp[^>]*' HOUSE.md 2>/dev/null 
 # here and this is not worth hand-rolling in sh a second time. Anything unparseable degrades to 'equal',
 # which makes the sync a no-op for that comparison rather than a refusal: refusing on garbage would block
 # a user over a typo they cannot see.
+# The same ordering is implemented in the toolkit's tools/check-release-invariants/rules.cjs, which
+# guards releases there. This copy exists because scaffold.sh runs in CONSUMER projects, where that
+# module does not exist. IF YOU CHANGE THE ORDERING HERE, CHANGE IT THERE TOO.
 _vlt() {
   node -e \"
     const core=v=>{const m=String(v).match(/^[0-9]+(\\.[0-9]+)*/);const n=(m?m[0]:'').split('.').filter(s=>s!=='').map(Number);while(n.length<3)n.push(0);return n};
@@ -950,6 +953,7 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   MIGRATE_COLLECT="  node -e \"const fs=require('fs'),m=require('./node_modules/@bespunky/nx-tools/migrations.json');
   const from=process.argv[1],to=process.argv[2];
   const p=v=>String(v).split('-')[0].split('.').map(Number);
+  // Also mirrors tools/check-release-invariants/rules.cjs in the toolkit repo (see _vlt above).
   // Prerelease handling must AGREE with the shell comparator in MIGRATE_PROBE, or the two halves of the
   // same decision disagree. Comparing release cores alone makes 0.24.0-rc.1 equal to 0.24.0, which drops
   // every 0.24.0 migration from a range starting at that rc — exactly the ones an rc has not had run.

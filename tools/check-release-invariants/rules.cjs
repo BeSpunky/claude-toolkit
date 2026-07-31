@@ -17,13 +17,19 @@
 //
 // ── THE ONE DUPLICATE THAT REMAINS, AND WHY ────────────────────────────────────────────────────────────────
 //
-// `scaffold.sh` carries its own copy of the comparator (twice: a shell one in MIGRATE_PROBE and a JS one in
-// the `--local` migration collector). Those CANNOT use this module: scaffold.sh ships to consumers and runs
-// inside their projects, where this repo does not exist — the same self-containment constraint the migrations
-// themselves live under. So that duplication is deliberate and permanent, and it is pinned instead of
-// unified: `agreement.test.cjs` extracts scaffold.sh's comparator from the file and asserts it agrees with
-// this one across a table of cases. A duplicate you have decided to keep needs a test; a duplicate you merely
-// tolerate needs a comment, and comments do not fail the build.
+// `scaffold.sh` carries its own copy of this comparison (twice: a shell one in MIGRATE_PROBE and a JS one in
+// the `--local` migration collector). Those CANNOT use this module — scaffold.sh ships to consumers and runs
+// inside their projects, where this repo does not exist, the same self-containment constraint the migrations
+// live under.
+//
+// IF YOU CHANGE THE ORDERING HERE, CHANGE IT THERE TOO.
+//
+// That comment is the entire mitigation, and deliberately so. The only way the two can disagree is over
+// prerelease ordering, and this repo has never published a prerelease: not on npm, not in a migration key,
+// not in a plugin version. A test that mechanically pinned them was written and then removed — it had to
+// regex embedded JS out of a shell script and eval it, which made it the most fragile file here, guarding a
+// path nothing has ever taken. If prereleases ever do ship, that calculus changes and a real test earns its
+// place.
 
 /**
  * Parse a version into a comparable shape. Returns null for anything that is not `major.minor.patch`

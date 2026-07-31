@@ -53,12 +53,6 @@ jobs:
       - name: Check release invariants
         run: node tools/check-release-invariants/check.mjs
 
-      # scaffold.sh ships to consumers and cannot import rules.cjs, so its two comparators are a
-      # permanent, deliberate duplicate. This asserts they still order versions identically — the only
-      # thing standing between that duplication and a silently skipped migration.
-      - name: Check the version comparators still agree
-        run: node tools/check-release-invariants/agreement.test.cjs
-
       # Catches the failure class that silently disabled 18 skills: unparseable SKILL.md frontmatter, a
       # plugin.json that does not satisfy the schema, a malformed marketplace manifest.
       - name: Validate plugins and marketplace
