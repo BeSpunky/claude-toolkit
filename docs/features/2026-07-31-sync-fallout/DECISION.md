@@ -1,3 +1,14 @@
+---
+status: concluded
+concluded: 2026-07-31
+summary: >-
+  Seven defects a consumer sync exposed, fixed upstream in @bespunky/nx-tools 0.26.0 — a preflight gate that
+  refuses to sync a repo it would damage, app.config.ts made seed-only, the emulator suite made
+  non-destructive, an Nx comment-key defect migrated around, devcontainer ownership made non-destructive, and
+  the house docs ungated so every project gets the rules.
+tags: [scaffolder, sync, migrations, emulators, devcontainer, house-docs, nx-defect]
+---
+
 # Decisions — sync fallout, upstream fixes
 
 Seven items, designed one at a time with the user on 2026-07-31 before any code was written.
@@ -337,3 +348,32 @@ migration above the ceiling now **fails the push** instead of failing silently.
    case against: a test pinning third-party behaviour the house does not own is a maintenance
    burden, and the same instinct produced the comparator-agreement test that `550e372` removed.
    Decide when item 4 is implemented, not before.
+
+---
+
+## What actually shipped — 2026-07-31
+
+Laid on top of the decisions above, not woven into them. Where implementation diverged from the design, the
+design text stands and the divergence is recorded here.
+
+| # | Shipped as | Divergence from the design above |
+| --- | --- | --- |
+| 1 | Preflight gate (`SYNC_REFUSED`/`SYNC_ASK`) + `commands/sync.md` | **`detached-head` added** as a fourth refusal — same failure shape, found while reading the seam. The artifact is a slash **command**, not a skill, as the design assumed. |
+| 2 | `wireProvider` gated on `ensuring`; `report-duplicate-house-providers` | Gate made a **required option** rather than three call-site `if`s, so the compiler enforces it. |
+| 3a | `--only` derived from `firebase.json` in `emulators.sh` | None. Also fixed a latent silent `exit 128` the new test exposed. |
+| 3b | Ownership-aware reaper; serve takes base ports only when free | **Data question re-decided by the user mid-implementation**: seeds shared from main via a cascade, data isolated per stack — not "extras import-only against a shared world" as first designed. |
+| 4 | `convert-target-comment-keys` | Confirmed as an **Nx defect**, not a house one. Migration is raw-JSON only, because the devkit project APIs crash on the shape it repairs. |
+| 5 | — | **Shipped independently** as `dd87697` while this was being designed. Out of scope. |
+| 6 | Ownership = additive assert | None. Parameterised the existing merge rather than duplicating it. |
+| 7 | `house-doc` ungated + retirement moved into it | **Gap found during the release audit**: a migration could never satisfy its own precondition, because the ladder runs before the generators. The cleanup had to move into `house-doc`. |
+
+**The migrations ledger for 0.26.0** is stated in full in the `chore(release)` commit, per the house rule that
+a considered "nothing to migrate" must be distinguishable from a forgotten one.
+
+**Test infrastructure created**: `tools/test-scaffold/` (5 files) — the scaffolder's guards now have somewhere
+to be verified, because a guard that stops guarding fails silently and looks identical to a guard with
+nothing to catch.
+
+**Still open, deliberately**: whether the round-trip fixture that proved the Nx defect should become a
+permanent guard (item 4, open question 4). It pins third-party behaviour we do not control, which cuts both
+ways.
