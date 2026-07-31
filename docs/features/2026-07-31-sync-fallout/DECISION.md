@@ -63,6 +63,7 @@ Scaffold ensures everything, so new projects still get wired; a sync where the l
 detected must not touch the file.
 
 **Two bugs were stacked here**, and fixing only the visible one leaves the other live:
+
 - **Class error** — `app.config.ts` is the file an Angular app is most certain to evolve.
   Writing into it at sync time is a category error regardless of *what* is written.
 - **Correctness error** — the placement is wrong for an SSR app. Firebase in the shared config
@@ -147,6 +148,7 @@ depends on.
 
 **Decision.** **Serve defaults to an isolated stack**, which makes the destructive sweep
 unreachable rather than merely conditional. Plus:
+
 - **Ownership-aware sweep** — kill only JVMs whose owner is dead (reparented to PID 1). Safe to
   run always, including for isolated stacks, because a live suite always has a living ancestor.
   This is necessary: skipping the sweep everywhere would reinstate the orphan-accumulation problem
@@ -186,6 +188,57 @@ guard checks *truthiness* where it means *is an object*.
 
 **Second open fact:** `metadata.description` must be confirmed present in the pinned Nx version;
 the whole fix rests on it.
+
+### SETTLED — 2026-07-31, by fixture test
+
+Both facts above are now answered. The hypothesis text is left standing as the honest record of
+what was believed before the evidence.
+
+**The round-trip hypothesis is CONFIRMED, and the defect is Nx's, not the house's.** A fixture
+reproducing the consumer's exact shape, put through `readProjectConfiguration` → mutate →
+`updateProjectConfiguration` on Nx **23.1.0**:
+
+```text
+TypeError: Cannot use 'in' operator to search for '0' in "Specs are TRANSPILED by the unit-test…"
+    at processKey (nx/dist/src/project-graph/utils/project-configuration/target-merging.js:319)
+    at mergeTargetConfigurations
+    at readProjectConfiguration
+```
+
+`mergeTargetConfigurations` treats the comment key's **string value as a `TargetConfiguration`**;
+the `'0'` key is a character index — the char-spread from the consumer's `project.json`, caught in
+the act. House generators trigger it merely by **reading** the project configuration; no house code
+spreads anything.
+
+**On 23.1.0 it THROWS rather than corrupting.** The consumer got a silent 555-key object, so that
+workspace is on an older Nx where the same path spread instead of failing. This inverts the
+urgency: **once that project reaches Nx 23, every house generator crashes on read** while
+`//typecheck` sits in `project.json` — which it does, because the corruption was reverted.
+Their Nx version should be checked, and this is worth telling them ahead of the fix.
+
+**The replacement survives.** The same round-trip with the documentation on
+`targets.typecheck.metadata.description`: no throw, description intact, and the generator's
+mutation lands. `TargetConfiguration.metadata?: TargetMetadata` with `description?: string` is
+declared at `nx/dist/src/config/workspace-json-project-json.d.ts:248`; the payload requires
+`@nx/devkit >= 23.0.0`.
+
+**Exactly one position is unsafe** — probed independently:
+
+| Position of the `//` key | Result |
+| --- | --- |
+| project root (sibling of `targets`) | INTACT |
+| **inside `targets`** (sibling of a target) | **THROWS** |
+| inside a target (sibling of `executor`) | INTACT |
+| inside a target's `options` | INTACT |
+
+Only where Nx expects *every value to be a `TargetConfiguration`* does it break. **The migration
+converts `//` keys that are direct children of `targets`, and leaves every other comment key
+alone** — a broader sweep would rewrite comments that are perfectly safe, which is exactly the
+over-reach the "don't delete on a guess" rule exists to prevent.
+
+**Consequence for the migration's pairing rule.** `"//typecheck"` documents `"typecheck"`, so the
+mapping is by name-after-the-slashes. Where no target of that name exists, the comment documents
+nothing that survives conversion — that is a **report, not a deletion**.
 
 **Rejected: make generators comment-safe by not round-tripping.** Broader protection (it would
 guard every unknown key, not just comments), but it costs a rewrite of how each generator edits
@@ -272,6 +325,15 @@ migration above the ceiling now **fails the push** instead of failing silently.
 
 ## Open before implementation
 
-1. **The devkit round-trip hypothesis** (item 4) — one fixture test settles it.
-2. **`metadata.description` in the pinned Nx version** (item 4) — the fix rests on it.
+1. ~~The devkit round-trip hypothesis (item 4)~~ — **SETTLED 2026-07-31.** Confirmed by fixture:
+   an Nx defect in `mergeTargetConfigurations`, triggered by `readProjectConfiguration`. Throws on
+   Nx 23.1.0, corrupts on older. See item 4.
+2. ~~`metadata.description` in the pinned Nx version (item 4)~~ — **SETTLED 2026-07-31.** Present
+   in Nx 23.1.0 (`TargetMetadata.description`), and verified to survive the round-trip intact.
 3. **The `sync.md` decision procedure** (item 1) — specified as a contract, never drafted.
+4. **Whether the round-trip fixture becomes a permanent guard.** It is currently scratch. The case
+   for keeping it: this is an *upstream* defect we do not control, so a silent Nx change in either
+   direction — fixed, or extended to another position — changes what the migration must do. The
+   case against: a test pinning third-party behaviour the house does not own is a maintenance
+   burden, and the same instinct produced the comparator-agreement test that `550e372` removed.
+   Decide when item 4 is implemented, not before.
