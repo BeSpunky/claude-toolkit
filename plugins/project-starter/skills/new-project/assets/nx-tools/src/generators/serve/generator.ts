@@ -45,6 +45,8 @@ import { wireProvider } from '../_utils/wire-provider';
 
 interface ServeSchema {
   project: string;
+  /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
+  wireProviders?: boolean;
   // Override the workspace identity used as the base-host slug in the tab label. Defaults to the
   // workspace root directory name — correct in every normal case.
   workspaceName?: string;
@@ -181,6 +183,7 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
     const wired = wireProvider(current, appConfigPath, {
       providerFn: 'provideWorktreeTabLabel',
       importFrom: './worktree-tab-label',
+      ensuring: options.wireProviders === true,
     });
     if (wired && wired !== current) {
       tree.write(appConfigPath, wired);

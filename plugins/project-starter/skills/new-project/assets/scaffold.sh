@@ -669,7 +669,8 @@ APP_STAGING_FLAG=""
 # have been. Pipe it into `bash -n /dev/stdin` to syntax-check the result.
 # ============================================================================================================
 SYNC_FIREBASE_BLOCK="
-  $PM_EXEC nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG"
+  _WIRE_FB=''; layer_ensured firebase && _WIRE_FB=' --wireProviders'
+  $PM_EXEC nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG\$_WIRE_FB"
 
 # --- house tooling: INSTALL @bespunky/nx-tools (used by both modes) ---
 # A REAL npm install, not a copy into node_modules. The copy it replaces existed for one stated reason —
@@ -1354,7 +1355,13 @@ ACTIVE=\"\$(printf '%s\\n%s\\n' \"\$DETECTED\" \"\$ENSURED\" | tr ',' '\\n' | se
 echo \"[layers] detected in workspace : \${DETECTED:-none}\"
 echo \"[layers] ensured by this run   : \${ENSURED:-none}\"
 echo \"[layers] active (union)        : \${ACTIVE:-none}\"
-layer_active() { case \",\$ACTIVE,\" in *\",\$1,\"*) return 0;; esac; return 1; }"
+layer_active() { case \",\$ACTIVE,\" in *\",\$1,\"*) return 0;; esac; return 1; }
+# ENSURED, not ACTIVE — the distinction the house keeps strictly apart, now visible to the generators.
+# ACTIVE is detected-OR-ensured; ENSURED is only what this run was explicitly asked to create. A few
+# generator writes are BASELINE acts that must never happen on a detect-only sync (wiring a provider into
+# app.config.ts, which the project owns thereafter), and this is what lets those pass --wireProviders
+# exactly when the capability is being created.
+layer_ensured() { case \",\$ENSURED,\" in *\",\$1,\"*) return 0;; esac; return 1; }"
 
 # --- per-workspace house generators, GATED BY LAYER (one sequence, both modes) ---
 # Every block below is rendered unconditionally and gated at RUN time on the layer it belongs to. That is what
@@ -1414,7 +1421,8 @@ fi
 #     for every consumer project. Idempotent in --sync (the token file is seeded, never overwritten — a
 #     sync must not restore placeholder tokens over the project's real design).
 if layer_active design-system; then
-  $PM_EXEC nx g @bespunky/nx-tools:design-system --scope=$PROJECT
+  _WIRE_DS=''; layer_ensured design-system && _WIRE_DS=' --wireProviders'
+  $PM_EXEC nx g @bespunky/nx-tools:design-system --scope=$PROJECT\$_WIRE_DS
 fi
 # --- HOUSE.md last: it STAMPS the layer set, so it must run after every layer above has had its turn (a
 #     design system created moments ago has to appear in the stamp that records this run).
@@ -1542,7 +1550,8 @@ project_exists() {
 }
 if layer_active web; then
   if project_exists '$APP'; then
-    $PM_EXEC nx g @bespunky/nx-tools:serve --project=$APP
+    _WIRE=''; layer_ensured web && _WIRE=' --wireProviders'
+    $PM_EXEC nx g @bespunky/nx-tools:serve --project=$APP\$_WIRE
     $PM_EXEC nx g @bespunky/nx-tools:serve-options --project=$APP
   else
     echo \"[layers] WARNING: web layer present, but no project named '$APP' — SKIPPING the per-app generators.\"

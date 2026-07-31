@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "BeSpunkyDesignSystem",
   "title": "Create the workspace's design-system library",
-  "description": "Scaffold the design system every BeSpunky project is born with: a publishable library (composed from publishable-lib) carrying the THEMING MECHANISM — design tokens as CSS custom properties (the runtime layer) plus a zero-output SASS API (the author-time layer: token accessors, the theme() emission, mixins, placeholders) — and NOTHING ELSE. Ships zero components and zero opinionated visual styles; token VALUES are loudly-marked placeholders that exist only so the library compiles and the app runs, and are replaced wholesale by the design phase. Also opens the sass channel on every Angular app in the workspace (via design-system-styles) and installs provideDesignSystem() into each app's config. Idempotent: styles/ and src/ are SEEDED (written only if absent, so a --sync never restores placeholder tokens over the project's real design); the config, tags, docs and app wiring are re-asserted on every run.",
+  "description": "Scaffold the design system every BeSpunky project is born with: a publishable library (composed from publishable-lib) carrying the THEMING MECHANISM \u2014 design tokens as CSS custom properties (the runtime layer) plus a zero-output SASS API (the author-time layer: token accessors, the theme() emission, mixins, placeholders) \u2014 and NOTHING ELSE. Ships zero components and zero opinionated visual styles; token VALUES are loudly-marked placeholders that exist only so the library compiles and the app runs, and are replaced wholesale by the design phase. Also opens the sass channel on every Angular app in the workspace (via design-system-styles) and installs provideDesignSystem() into each app's config. Idempotent: styles/ and src/ are SEEDED (written only if absent, so a --sync never restores placeholder tokens over the project's real design); the config, tags, docs and app wiring are re-asserted on every run.",
   "type": "object",
   "properties": {
     "name": {
@@ -42,6 +42,11 @@
       "description": "Skip formatting files.",
       "default": false,
       "x-priority": "internal"
+    },
+    "wireProviders": {
+      "type": "boolean",
+      "default": false,
+      "description": "Wire this layer's provider into the app's app.config.ts. TRUE ONLY WHEN ENSURING the layer (creating the capability) \u2014 app.config.ts is seeded, never owned, so a detect-only sync must not write to it. Any later provider change ships as a migration. Default false."
     }
   },
   "required": []

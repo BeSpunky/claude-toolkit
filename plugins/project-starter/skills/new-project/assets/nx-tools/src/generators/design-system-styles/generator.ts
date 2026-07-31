@@ -46,6 +46,8 @@ import { findDesignSystem, isAngularApp } from '../_utils/design-system';
 import { wireProvider } from '../_utils/wire-provider';
 
 interface DesignSystemStylesSchema {
+  /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
+  wireProviders?: boolean;
   project: string;
   skipFormat?: boolean;
 }
@@ -132,7 +134,7 @@ export default async function designSystemStylesGenerator(
   //    rather than in the `design-system` generator, so that BOTH the first app and every later one get
   //    it from ONE code path — a later app that got the sass but not the provider would render with the
   //    tokens but never respond to a mode change, which is the kind of half-wiring nobody debugs quickly.
-  wireDesignSystemProvider(tree, options.project, readImportPath(tree, designSystem.root));
+  wireDesignSystemProvider(tree, options.project, readImportPath(tree, designSystem.root), options.wireProviders === true);
 
   if (!options.skipFormat) await formatFiles(tree);
 }
@@ -155,7 +157,7 @@ function readImportPath(tree: Tree, designSystemRoot: string): string {
  * Idempotent (a --sync re-run is a no-op), and warns with a manual instruction rather than crashing if
  * the app.config shape is unrecognized.
  */
-function wireDesignSystemProvider(tree: Tree, projectName: string, importPath: string): void {
+function wireDesignSystemProvider(tree: Tree, projectName: string, importPath: string, ensuring: boolean): void {
   const appRoot = readProjectConfiguration(tree, projectName).root;
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (!tree.exists(appConfigPath)) return;
@@ -164,6 +166,7 @@ function wireDesignSystemProvider(tree: Tree, projectName: string, importPath: s
   const wired = wireProvider(current, appConfigPath, {
     providerFn: 'provideDesignSystem',
     importFrom: importPath,
+    ensuring,
   });
 
   if (wired && wired !== current) tree.write(appConfigPath, wired);

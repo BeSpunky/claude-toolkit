@@ -132,7 +132,9 @@ export default async function appGenerator(
   //     FIRST app, created before the DS lib exists; the `design-system` generator wires that one when it
   //     lands. The pay-off is a LATER app: `nx g @bespunky/nx-tools:app apps/admin` comes out with the
   //     design system wired, with no flag and no recollection that this workspace has one.
-  await designSystemStylesGenerator(tree, { project: projectName, skipFormat: true });
+  // The app generator only ever runs to CREATE an app, so this IS the baseline write — the one moment
+  // app.config.ts may be wired. See _utils/wire-provider.ts.
+  await designSystemStylesGenerator(tree, { project: projectName, skipFormat: true, wireProviders: true });
 
   // 3) Firebase per-app wiring — explicit flag wins; otherwise auto-detect a Firebase workspace.
   const firebase = options.firebase ?? tree.exists('firebase.json');

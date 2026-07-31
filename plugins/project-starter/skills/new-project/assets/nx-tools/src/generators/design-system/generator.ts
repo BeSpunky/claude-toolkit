@@ -64,6 +64,8 @@ import { resolveLibsDir } from '../_utils/workspace-layout';
 import { requireLayer } from '../../layers/registry';
 
 interface DesignSystemSchema {
+  /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
+  wireProviders?: boolean;
   /** The library (and project) name. Defaults to `design-system`. */
   name?: string;
   /**
@@ -206,7 +208,12 @@ export default async function designSystemGenerator(
   //    both directions: the sass channel, the implicit dependency, the stylesheet blocks, and provideDesignSystem().
   for (const [appName] of getProjects(tree)) {
     if (isAngularApp(tree, appName)) {
-      await designSystemStylesGenerator(tree, { project: appName, skipFormat: true });
+      await designSystemStylesGenerator(tree, {
+        project: appName,
+        skipFormat: true,
+        // Passed THROUGH, never decided here: whether this run is ensuring the layer is the caller's fact.
+        wireProviders: options.wireProviders === true,
+      });
     }
   }
 
