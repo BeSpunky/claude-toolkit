@@ -88,17 +88,18 @@ jobs:
           set -euo pipefail
           node -e "
             const fs=require('fs');
+            const {findUnreachableMigrations}=require('./tools/check-release-invariants/rules.cjs');
             const dir='plugins/project-starter/skills/new-project/assets/nx-tools';
             if(!fs.existsSync(dir+'/migrations.json')) process.exit(0);
             const pkg=JSON.parse(fs.readFileSync(dir+'/package.json','utf8'));
             const mig=JSON.parse(fs.readFileSync(dir+'/migrations.json','utf8'));
-            const p=v=>String(v).split('-')[0].split('.').map(Number);
-            const pre=v=>/^[^+]*-/.test(String(v));
-            const c=(a,b)=>{const x=p(a),y=p(b);for(let i=0;i<3;i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)<(y[i]||0)?-1:1}
-              if(pre(a)!==pre(b))return pre(a)?-1:1; return 0};
-            const over=Object.entries(mig.generators||{}).filter(([,g])=>g.version&&c(g.version,pkg.version)>0);
-            if(over.length){
-              console.error('::error::migrations are registered ABOVE the package version ('+pkg.version+') and can never be collected: '+over.map(([n,g])=>n+'@'+g.version).join(', '));
+            const {unreachable,unorderable}=findUnreachableMigrations(mig,pkg.version);
+            if(unorderable.length){
+              console.error('::error::migrations have versions that cannot be ordered, so reachability cannot be shown: '+unorderable.map(m=>m.name+'@'+JSON.stringify(m.version)).join(', '));
+              process.exit(1);
+            }
+            if(unreachable.length){
+              console.error('::error::migrations are registered ABOVE the package version ('+pkg.version+') and can never be collected: '+unreachable.map(m=>m.name+'@'+m.version).join(', '));
               process.exit(1);
             }
             console.log('migrations reachable: max <= '+pkg.version);

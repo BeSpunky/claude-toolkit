@@ -99,25 +99,28 @@ EOF
 # correctly did nothing, and the whole release would have silently shipped as a no-op. Check it here, where
 # a publish can still be stopped, rather than discovering it from a project that never migrated.
 if [ -f "$ASSETS_DIR/nx-tools/migrations.json" ]; then
+  # The rule itself lives in tools/check-release-invariants/rules.cjs — ONE implementation, called from here,
+  # from the publish workflow, and from the invariants checker. It used to be inlined here and re-inlined in
+  # the workflow, with a comment asking maintainers to keep the copies in sync; they had already diverged
+  # (both inline copies read only `generators`, so a `schematics`-keyed migration above the ceiling was
+  # invisible to the two checks that gate npm). This still runs on the HOST, before the Docker branch below,
+  # so the repo-relative require always resolves.
   node -e "
     const fs=require('fs');
+    const {findUnreachableMigrations}=require('$REPO_ROOT/tools/check-release-invariants/rules.cjs');
     const pkg=require('$ASSETS_DIR/nx-tools/package.json');
     const mig=JSON.parse(fs.readFileSync('$ASSETS_DIR/nx-tools/migrations.json','utf8'));
-    // Prerelease-aware, and it has to be: comparing release cores alone makes 0.25.0-rc.1 equal to a
-    // migration keyed 0.25.0, so the guard passes while the runtime comparators (scaffold.sh's probe and
-    // the --local collector, which both rank a prerelease BELOW its release) treat that migration as
-    // unreachable. The guard would then miss exactly the failure class it exists to catch. Three copies of
-    // this comparison now exist; they must agree, and this is the one that decides whether a release ships.
-    const p=v=>String(v).split('-')[0].split('.').map(Number);
-    const pre=v=>/^[^+]*-/.test(String(v));
-    const c=(a,b)=>{const x=p(a),y=p(b);for(let i=0;i<3;i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)<(y[i]||0)?-1:1}
-      if(pre(a)!==pre(b))return pre(a)?-1:1; return 0};
-    const over=Object.entries(mig.generators||{}).filter(([,g])=>g.version&&c(g.version,pkg.version)>0);
-    if(over.length){
+    const {unreachable,unorderable}=findUnreachableMigrations(mig,pkg.version);
+    if(unorderable.length){
+      console.error('ERROR: migrations have versions that cannot be ordered — reachability cannot be shown.');
+      for(const m of unorderable) console.error('       '+m.name+' @ '+JSON.stringify(m.version));
+      process.exit(1);
+    }
+    if(unreachable.length){
       console.error('ERROR: migrations are registered ABOVE the package version — they can never be collected.');
       console.error('       package.json version : '+pkg.version);
-      for(const [n,g] of over) console.error('       unreachable migration: '+n+' @ '+g.version);
-      console.error('       Bump assets/nx-tools/package.json to at least '+over.map(([,g])=>g.version).sort(c).pop()+' and re-run.');
+      for(const m of unreachable) console.error('       unreachable migration: '+m.name+' @ '+m.version);
+      console.error('       Bump assets/nx-tools/package.json to at least '+unreachable[unreachable.length-1].version+' and re-run.');
       process.exit(1);
     }
   " || exit 1

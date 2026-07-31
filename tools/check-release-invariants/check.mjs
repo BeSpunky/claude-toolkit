@@ -21,6 +21,15 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+// The rules live in a CJS sibling because publish.sh and the publish workflow load them from bash
+// `node -e`, where ESM import is not available. One rule, one implementation, three callers.
+const { parseVersion, isGreater, findUnreachableMigrations } =
+  createRequire(import.meta.url)('./rules.cjs');
+
+/** Is this string orderable as a version at all? Used to skip junk without treating it as "low". */
+const parsesAsVersion = (v) => parseVersion(v) !== null;
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MARKETPLACE = '.claude-plugin/marketplace.json';
@@ -67,26 +76,6 @@ function versionAt(ref, path) {
   } catch (error) {
     throw new Error(`Cannot parse ${path} at ${ref}: ${error.message}`);
   }
-}
-
-const semver = (v) => {
-  // Numeric core plus an optional prerelease. `Number()` on a prerelease component yields NaN, and every
-  // NaN comparison is false — which made the previous `split('.').map(Number)` silently answer "not greater"
-  // for any prerelease, i.e. exactly the safe-looking wrong answer this file exists to avoid.
-  const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(String(v ?? '').trim());
-  if (!m) return null;
-  return { core: [+m[1], +m[2], +m[3]], pre: m[4] ?? null };
-};
-
-/** Is `a` strictly greater than `b`? Null (unparseable) on either side is an error, not a comparison. */
-function isGreater(a, b) {
-  const [x, y] = [semver(a), semver(b)];
-  if (!x || !y) throw new Error(`Unparseable semver: ${JSON.stringify(!x ? a : b)}`);
-  for (let i = 0; i < 3; i++) if (x.core[i] !== y.core[i]) return x.core[i] > y.core[i];
-  if (x.pre === y.pre) return false;
-  if (x.pre === null) return true; // 1.0.0 > 1.0.0-rc.1
-  if (y.pre === null) return false;
-  return x.pre > y.pre; // lexicographic is sufficient for the ordering this repo uses
 }
 
 /**
@@ -145,7 +134,7 @@ function versionRegressed(manifestPath) {
   let highest = current;
   for (const { sha, path } of history) {
     const seen = versionAt(sha, path);
-    if (seen !== null && semver(seen) && isGreater(seen, highest)) highest = seen;
+    if (seen !== null && parsesAsVersion(seen) && isGreater(seen, highest)) highest = seen;
   }
   return highest === current ? null : highest;
 }
@@ -287,25 +276,23 @@ function main() {
   // ceiling sits there forever: never run, and silent about it.
   const pkg = readJson(`${NX_TOOLS}/package.json`);
   if (existsSync(join(ROOT, `${NX_TOOLS}/migrations.json`))) {
-    const migrations = readJson(`${NX_TOOLS}/migrations.json`);
-    // `nx migrate` honours both keys; reading only `generators` silently skipped a schematics-keyed file.
-    const all = { ...(migrations.generators ?? {}), ...(migrations.schematics ?? {}) };
-    for (const [name, migration] of Object.entries(all)) {
-      if (!semver(migration.version)) {
-        fail(
-          `migration "${name}" has an unparseable version (${JSON.stringify(migration.version)})`,
-          `  Its position relative to the payload version cannot be determined, so it cannot be guaranteed collectable.`,
-          `give it a semver version in ${NX_TOOLS}/migrations.json`
-        );
-        continue;
-      }
-      if (isGreater(migration.version, pkg.version)) {
-        fail(
-          `migration "${name}" is registered at ${migration.version}, above @bespunky/nx-tools ${pkg.version}`,
-          `  nx migrate will never collect it — it is above every range any project can walk.`,
-          `bump ${NX_TOOLS}/package.json to at least ${migration.version}`
-        );
-      }
+    const { unreachable, unorderable } = findUnreachableMigrations(
+      readJson(`${NX_TOOLS}/migrations.json`),
+      pkg.version
+    );
+    for (const { name, version } of unorderable) {
+      fail(
+        `migration "${name}" has an unorderable version (${JSON.stringify(version)})`,
+        `  Its position relative to the payload version cannot be determined, so it cannot be shown collectable.`,
+        `give it a semver version in ${NX_TOOLS}/migrations.json`
+      );
+    }
+    for (const { name, version } of unreachable) {
+      fail(
+        `migration "${name}" is registered at ${version}, above @bespunky/nx-tools ${pkg.version}`,
+        `  nx migrate will never collect it — it is above every range any project can walk.`,
+        `bump ${NX_TOOLS}/package.json to at least ${version}`
+      );
     }
   }
 
