@@ -1,0 +1,9 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "bespunky-design-system",
+  "projectType": "library",
+  "tags": [
+    "type:claude-plugin"
+  ],
+  "targets": {}
+}

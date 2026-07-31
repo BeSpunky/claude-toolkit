@@ -10,5 +10,27 @@
     "lint": {
       "cache": true
     }
+  },
+  "release": {
+    "projectsRelationship": "independent",
+    "groups": {
+      "plugins": {
+        "projects": [
+          "tag:type:claude-plugin"
+        ],
+        "projectsRelationship": "independent",
+        "version": {
+          "versionActions": "./tools/nx-release/plugin-version-actions.js",
+          "manifestRootsToUpdate": [
+            "{projectRoot}/.claude-plugin"
+          ],
+          "currentVersionResolver": "disk",
+          "specifierSource": "prompt"
+        }
+      }
+    },
+    "releaseTag": {
+      "pattern": "{projectName}@{version}"
+    }
   }
 }

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Pre-push guard: refuse a push that would ship a change no consumer can receive.
+#
+# CI answers the same question, but it answers it AFTER the push — by which point main already advertises a
+# version that does not match what is in it, and the fix is a follow-up commit. This catches it while it is
+# still a local edit.
+#
+# Installed by pointing git at this directory:
+#     git config core.hooksPath tools/git-hooks
+# which `.devcontainer/post-create.local.sh` does on container create. It lives in `post-create.local.sh`
+# rather than the generated `post-create.sh` on purpose: the latter is a class-A owned artifact regenerated
+# into EVERY scaffolded project, and a consumer project has no plugins to version, so putting it there would
+# push this repo's release policy onto every project the toolkit touches.
+#
+# BYPASSABLE ON PURPOSE — `git push --no-verify`. A hook that cannot be skipped is a hook people disable
+# globally the first time it is wrong, and the CI check is the authoritative one regardless.
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+CHECK="$REPO_ROOT/tools/check-release-invariants/check.mjs"
+
+# Not this repo (the hooksPath may be inherited by a worktree of something else), or the checker is gone —
+# either way, say nothing and get out of the way.
+[ -f "$CHECK" ] || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+
+if node "$CHECK"; then
+  exit 0
+fi
+
+cat >&2 <<'EOF'
+
+Push refused: a plugin (or the nx-tools payload) changed without a release.
+
+  `/plugin marketplace update` compares versions — so a change whose version did not move is a change
+  consumers never receive, and nothing anywhere will tell you. Release it with the command printed above,
+  commit, and push again.
+
+  To push anyway (e.g. an intentional WIP branch):  git push --no-verify
+
+EOF
+exit 1

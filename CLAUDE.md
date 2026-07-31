@@ -69,7 +69,17 @@ The generators live as TypeScript in the toolkit. Nx can't run raw TS from `node
 
 ## Release & versioning
 
-A plugin's version lives in **two** places that must agree: `plugins/<plugin>/.claude-plugin/plugin.json` and that plugin's entry in `.claude-plugin/marketplace.json`. **Bump both together** on any change to a plugin; version bumps land as dedicated `chore(release): bump …` commits. Consumers upgrade with `git pull` → `/plugin marketplace update claude-toolkit` → `/reload-plugins`.
+**Release a plugin with `nx release` — never by hand.** Every plugin is an Nx project (`plugins/<p>/project.json`, tagged `type:claude-plugin`), and `nx.json`'s `plugins` release group versions them independently:
+
+```bash
+nx release version --projects=<plugin-name> --specifier=patch|minor|major   # then commit
+```
+
+It writes `plugins/<p>/.claude-plugin/plugin.json` through a custom **`versionActions`** implementation (`tools/nx-release/plugin-version-actions.js` — Nx's documented seam for versioning a manifest that isn't a `package.json`), and then **derives `.claude-plugin/marketplace.json`** from the manifests in its `afterAllProjectsVersioned` hook. **The registry is generated: never hand-edit a version in it.** Only `version` is derived — each entry's hand-written `description` is preserved verbatim. The specifier is always explicit (`specifierSource: prompt`), so the house rule still holds: **any change to a plugin gets a bump**, including a README typo. Bumps land as dedicated `chore(release): bump …` commits. Consumers upgrade with `git pull` → `/plugin marketplace update claude-toolkit` → `/reload-plugins`.
+
+**A missed plugin bump fails SILENTLY, which is why it is machine-checked.** A missed `@bespunky/nx-tools` bump is loud — CI skips the publish and the next `--sync` installs the old payload. A missed *plugin* bump is not: the repo has the change, the marketplace advertises the old version, `/plugin marketplace update` is a no-op, and consumers stay behind forever with nothing to see. This repo shipped that bug twice — `bespunky-workflow` at `2c58e20`, then `bespunky-engineering` + `bespunky-design-system` — **both times from a sweep that crossed plugin boundaries while the commit was named after a different plugin.** That is the hazard: a repo-wide rename or ref-fix is one decision applied to N plugins, and the bump checklist fires on decisions.
+
+So `tools/check-release-invariants/check.mjs` asks, after the fact, the question nobody remembers to: *did the thing that should have happened, happen?* It checks that every plugin (and the payload) whose **shipped content** moved since its last release was released again, that the derived registry still agrees with the manifests, and that no migration sits above the payload version. It runs in CI on every push (`.github/workflows/release-invariants.yml`) and as a **pre-push hook** (`tools/git-hooks/pre-push`, wired by `core.hooksPath` in `post-create.local.sh`; bypass with `--no-verify`). It **detects and reports — it never bumps**: patch vs minor is a judgment about what a change means to consumers.
 
 **The migrations invariant: `max(version in migrations.json) <= version in assets/nx-tools/package.json`.** A migration is collected by `nx migrate` only when its declared version falls *within* the range it is walking — from the version the project has, up to the version being installed. Register a migration at a version the package hasn't reached and it sits above the ceiling forever: never collected, never run, and silent about it. So **adding a migration means bumping the payload's version in the same commit** — the migration's `version` field and `assets/nx-tools/package.json` are one decision, not two.
 
@@ -98,6 +108,8 @@ The dev loop:
 | --- | --- |
 | Load your working-tree skills into a session | `claude plugin marketplace add .` (the devcontainer's post-create does this on build) |
 | Pick up mid-session skill edits | `/reload-plugins` (or `/plugin marketplace update claude-toolkit` if added from GitHub) |
+| Release a plugin | `nx release version --projects=<name> --specifier=patch` — writes `plugin.json` **and** derives `marketplace.json`; never hand-edit either |
+| Check the release invariants | `node tools/check-release-invariants/check.mjs` (also CI + the pre-push hook) |
 | Validate the nx-tools payload | `tools/publish-nx-tools/publish.sh --dry-run` |
 | Publish nx-tools | ask the migrations question (*Release & versioning*), write any migration it owes, bump `assets/nx-tools/package.json`, then `tools/publish-nx-tools/publish.sh` |
 | Exercise the scaffolder | `bash plugins/project-starter/skills/new-project/assets/scaffold.sh <project> [app]` |
@@ -110,7 +122,8 @@ The dev loop:
 - **Router skills:** SKILL.md indexes, `reference/*.md` holds the depth — don't inline reference material back into SKILL.md.
 - **Extending the scaffolder is generator work:** add or modify an `@bespunky/nx-tools` generator (Nx-devkit `Tree`) — never hand-write file edits into `scaffold.sh`. A literal `angular-*` Nx preset forces a demo app, so the scaffold path is the `apps` preset + `nx add @nx/angular` + a `--minimal` app.
 - **A one-way change is a MIGRATION, not healing code in a generator.** "The old shape becomes the new shape" (a renamed target, a relocated project, a retired config) belongs in `src/migrations/<version>/`, bumped with the payload. Generators state *desired state* for what they own; they no longer carry the history of every shape the toolkit has shipped. **A migration is only done when the old shape is gone** — deleted, its references retargeted, its duplicates cleared, and anything deliberately left behind *reported*. Both halves of that rule — *every release ships the migrations it owes*, and *every migration cleans up after itself* — are stated in full under **Release & versioning** above; read it before you bump the payload version.
-- **Adding/renaming a plugin touches three catalogs in sync:** `marketplace.json`, the plugin's `plugin.json`, and `README.md`.
+- **Adding a plugin needs four things:** its `plugin.json`, a `project.json` tagged `type:claude-plugin` (this is what makes it a release target — without it `nx release` cannot see it and the invariants checker will not guard it), an entry in `marketplace.json`, and a row in `README.md`. Its **version** is then only ever written by `nx release`.
+- **Never hand-edit a version.** `marketplace.json` is derived from the plugin manifests; editing it directly creates the exact drift the derivation exists to make impossible.
 
 <!-- nx configuration start-->
 <!-- Leave the start & end comments to automatically receive updates. -->

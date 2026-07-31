@@ -35,3 +35,14 @@ else
   echo "[post-create.local] NOTE: audio tools skipped (offline?). Install later with:"
   echo "[post-create.local]   bash spikes/voice-audio-boundary/probe-audio.sh --install"
 fi
+
+# --- Release guard: point git at the repo's committed hooks --------------------------------------------------
+# `tools/git-hooks/pre-push` refuses a push whose plugin/payload changes carry no version bump — the failure
+# that is otherwise SILENT (the marketplace advertises the old version and consumers simply never get the
+# change). It lives here, in the never-regenerated local seam, and NOT in the generated post-create.sh: that
+# file is regenerated into every scaffolded project, and a consumer project has no plugins to version.
+# Idempotent, and cheap enough to re-assert on every container create.
+if [ -d tools/git-hooks ]; then
+  git config core.hooksPath tools/git-hooks
+  echo "[post-create.local] git hooks -> tools/git-hooks (pre-push release guard active)"
+fi

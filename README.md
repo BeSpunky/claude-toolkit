@@ -248,6 +248,21 @@ Skills are namespaced as `bespunky:index`, `bespunky-project-starter:new-project
 projects already get a `.claude/settings.json` referencing this marketplace, so the toolkit's skills are
 available inside every new project automatically.
 
+## Releasing (for maintainers)
+
+Plugin versions are written by **`nx release`**, never by hand:
+
+```bash
+nx release version --projects=<plugin-name> --specifier=patch   # then commit
+```
+
+Each plugin is an Nx project tagged `type:claude-plugin`; a custom `versionActions` implementation
+(`tools/nx-release/`) writes `plugins/<p>/.claude-plugin/plugin.json`, and `.claude-plugin/marketplace.json` is
+then **derived** from those manifests — so the registry and the manifests cannot disagree. Only `version` is
+derived; each entry's description is preserved. `node tools/check-release-invariants/check.mjs` guards the rest
+(a plugin whose shipped content changed without a release, a migration registered above the payload version)
+and runs in CI and as a pre-push hook.
+
 ## The always-on half
 
 Installing the `engineering`, `design-system`, and `workflow` plugins makes the `architect-mentality`,
