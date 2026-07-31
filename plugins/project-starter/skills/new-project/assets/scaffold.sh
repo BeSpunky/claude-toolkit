@@ -1411,8 +1411,25 @@ if [ "$MODE" = "sync" ]; then
     mkdir "$SYNC_LOCK" 2>/dev/null || { echo "ERROR: could not create the sync lock at $SYNC_LOCK." >&2; exit 1; }
   fi
   printf '%s\n' "$$" > "$SYNC_LOCK/pid" 2>/dev/null || true
+
+  # SELF-IGNORING, and it has to be created HERE rather than left to a generator.
+  #
+  # The lock lives inside the project, and the migration ladder runs `nx migrate --run-migrations
+  # --create-commits`, whose checkpoint is built with `git add -A` — so a lock this run is still holding gets
+  # swept into a commit, released moments later, and left behind as a tracked file with a phantom deletion in
+  # `git status` forever. It has happened twice in the toolkit's own history (abd143e, b8b293b).
+  #
+  # The `claude-settings` generator also writes a `.gitignore` rule for this path, but that generator runs
+  # AFTER the migration step — so on the very first sync that carries migrations, the rule lands after the
+  # commit that needed it. A guard that only takes effect once you no longer need it is not a guard. A
+  # `.gitignore` containing `*` inside the directory ignores the directory and itself, from the moment the
+  # lock exists, with no ordering assumption at all — the same self-ignoring pattern the house rules already
+  # prescribe for `mocks/` and scratch directories.
+  printf '*\n' > "$SYNC_LOCK/.gitignore" 2>/dev/null || true
+
   # Released on ANY exit, including the refusals above this line's own guards and every early failure below.
   trap 'rm -rf "$SYNC_LOCK"' EXIT INT TERM
+
 fi
 
 # --- the repository has to be in a state where committing means what it says ----------------------------------
