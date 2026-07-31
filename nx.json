@@ -25,7 +25,8 @@
             "{projectRoot}/.claude-plugin"
           ],
           "currentVersionResolver": "disk",
-          "specifierSource": "prompt"
+          "specifierSource": "prompt",
+          "adjustSemverBumpsForZeroMajorVersion": false
         }
       }
     },
