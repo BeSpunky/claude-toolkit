@@ -15,11 +15,21 @@
 #   container restart, so the only robust fix is to RECLAIM ON START — and to do it by BOTH
 #   process and port, so nothing slips through.
 #
-# WHY THIS IS SAFE
-#   Each project runs in its own (bridge-network) devcontainer, so anything bound to these ports —
-#   or running from this project's emulator cache — is unambiguously THIS project's own leftover,
-#   never another project's. And `serve` always boots its own suite, so there is no "reuse a
-#   running suite" model to break by reaping.
+# WHAT MAKES IT SAFE — AND THE ARGUMENT THAT DID NOT
+#   This block used to reason: each project runs in its own (bridge-network) devcontainer, so
+#   anything bound to these ports — or running from this project's emulator cache — is
+#   unambiguously THIS project's own leftover. The first half is true. The conclusion does not
+#   follow, because it silently equates BELONGS TO THIS PROJECT with IS STALE, and a healthy suite
+#   started thirty seconds ago belongs to this project too. Acting on it, a second `nx serve` tore
+#   down the suite a developer was using — and via SIGKILL, which skips firebase-tools'
+#   export-on-exit, so the session and seeded data went with it.
+#
+#   What actually separates the two is OWNERSHIP, and it is observable rather than assumed: the
+#   emulator JVMs are spawned as grandchildren of the dev-server task, so a live suite's JVM has a
+#   live parent, while an ungracefully-killed one is reparented to PID 1. Every kill below is gated
+#   on that test (`is_orphan`). A live, owned holder is never killed — the run stops and says what
+#   is in the way, which is the house rule this file used to break: never kill a server you didn't
+#   start.
 #
 # Two passes: (0) kill orphaned emulator BINARY processes by their cache path — this catches the
 # fallback-port and alive-but-unbound orphans the port scan cannot see; then (1) reclaim, and
@@ -63,23 +73,61 @@ mapfile -t PORTS < <(node -e '
 # firebase-tools node process (handled by the hub/UI ports below) nor our own launch shell, so
 # this can't sabotage the very start it guards.
 #
-# SKIPPED in isolated mode: this sweep matches EVERY emulator JVM in the container by cache path,
-# with no way to tell the developer's base suite from a stale orphan of this offset stack — so
-# running it would kill the coexisting base suite. An isolated stack relies on its shifted-port
-# reclaim below instead (a prior run of the SAME offset is caught there, by its own ports).
-if [ -z "$ISOLATED" ]; then
-  EMU_PROC='firebase/emulators/[^[:space:]]+\.jar'
-  if pgrep -f "$EMU_PROC" >/dev/null 2>&1; then
-    echo "[reap-emulators] stale emulator process(es) found — sending SIGTERM"
-    pkill -TERM -f "$EMU_PROC" >/dev/null 2>&1 || true
-    for ((tick = 0; tick < 15; tick++)); do
-      pgrep -f "$EMU_PROC" >/dev/null 2>&1 || break
-      sleep 0.1
-    done
-    if pgrep -f "$EMU_PROC" >/dev/null 2>&1; then
-      echo "[reap-emulators] stale emulator process(es) still alive — forcing (SIGKILL)"
-      pkill -KILL -f "$EMU_PROC" >/dev/null 2>&1 || true
-    fi
+# IT NOW RUNS IN EVERY MODE, and dropping that split is a fix rather than a simplification. The
+# sweep used to be skipped for an isolated stack because it matched EVERY emulator JVM in the
+# container with no way to tell the developer's base suite from this stack's own orphan. Ownership
+# is that way. And the skip had a cost that grows: an isolated stack that dies ungracefully strands
+# JVMs on an offset no later run enumerates, so the port reclaim can never see them — they simply
+# accumulate until the container restarts. The sweep is the only thing that catches those, which
+# makes running it everywhere the point, not a side effect.
+# ── ORPHAN, NOT MERELY PRESENT ────────────────────────────────────────────────────────────────
+# This is the distinction the sweep was missing, and the bug it caused was ugly: it killed every
+# emulator JVM in the container, so a second `nx serve` — one Claude ran while the developer had
+# the app up — tore down the RUNNING suite. Worse than an interruption: SIGKILL skips
+# firebase-tools' export-on-exit handler, so the session and seeded data went with it.
+#
+# The header below argues the sweep is safe because anything matching is "unambiguously THIS
+# project's own leftover". True, and beside the point: it silently equates BELONGS TO THIS PROJECT
+# with IS STALE. A healthy suite a developer started thirty seconds ago also belongs to this
+# project. It is also the rule HOUSE.rules.md states outright — never kill a server you didn't
+# start — broken by house tooling, automatically, on every serve.
+#
+# An orphan is identifiable rather than assumed: firebase-tools spawns the JVM as a grandchild, so
+# a LIVE suite's JVM has a live parent (the firebase-tools node process). When that parent dies
+# ungracefully the kernel reparents the JVM to PID 1. So `PPID == 1` is the question, and it is the
+# only one that separates "left behind by a crash" from "running for someone right now".
+is_orphan() {   # is_orphan <pid> — true when the process has been reparented, i.e. its owner is gone
+  local ppid
+  ppid="$(ps -o ppid= -p "$1" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "$ppid" ] && [ "$ppid" = "1" ]
+}
+
+EMU_PROC='firebase/emulators/[^[:space:]]+\.jar'
+orphans=()
+live=0
+while read -r pid; do
+  [ -n "$pid" ] || continue
+  if is_orphan "$pid"; then orphans+=("$pid"); else live=$((live + 1)); fi
+done < <(pgrep -f "$EMU_PROC" 2>/dev/null || true)
+
+if [ "$live" -gt 0 ]; then
+  # Not a warning about something to fix — a statement that we deliberately left it alone.
+  echo "[reap-emulators] $live emulator process(es) are alive and owned — leaving them running."
+fi
+if [ "${#orphans[@]}" -gt 0 ]; then
+  echo "[reap-emulators] ${#orphans[@]} orphaned emulator process(es) (reparented to PID 1) — sending SIGTERM"
+  kill -TERM "${orphans[@]}" >/dev/null 2>&1 || true
+  for ((tick = 0; tick < 15; tick++)); do
+    still=()
+    for pid in "${orphans[@]}"; do kill -0 "$pid" 2>/dev/null && still+=("$pid"); done
+    [ "${#still[@]}" -eq 0 ] && break
+    sleep 0.1
+  done
+  still=()
+  for pid in "${orphans[@]}"; do kill -0 "$pid" 2>/dev/null && still+=("$pid"); done
+  if [ "${#still[@]}" -gt 0 ]; then
+    echo "[reap-emulators] orphan(s) still alive — forcing (SIGKILL)"
+    kill -KILL "${still[@]}" >/dev/null 2>&1 || true
   fi
 fi
 
@@ -91,12 +139,38 @@ held_ports() {
   done
 }
 
-# Graceful first: ask any holder to shut down (SIGTERM). A Firestore JVM catches this and
-# unwinds cleanly, which is preferable to a hard kill.
+# The PIDs holding a port. `fuser` writes the `8080/tcp:` label to stderr and the pids to stdout.
+port_holders() { fuser "${1}/tcp" 2>/dev/null | tr -s '[:space:]' '\n' | grep -E '^[0-9]+$' || true; }
+
 mapfile -t held < <(held_ports)
 [ "${#held[@]}" -eq 0 ] && exit 0
+
+# CLASSIFY BEFORE KILLING ANYTHING. `fuser -k` is indiscriminate: it kills whoever holds the port,
+# which is fine for an orphan and catastrophic for a suite someone is using — or for an unrelated
+# process that simply happens to be on 8080. The same PPID==1 test as the sweep above decides, and
+# a live owner means we stop rather than take the port from it. The caller chains us with `&&`, so
+# exiting non-zero here stops the launch with a cause the user can act on, instead of "fixing" the
+# collision by destroying the thing it collided with.
+live_holders=()
 for port in "${held[@]}"; do
-  echo "[reap-emulators] port ${port} held by a stale process — sending SIGTERM"
+  while read -r pid; do
+    [ -n "$pid" ] || continue
+    is_orphan "$pid" || live_holders+=("port ${port} — pid ${pid} ($(ps -o comm= -p "$pid" 2>/dev/null | tr -d '[:space:]'))")
+  done < <(port_holders "$port")
+done
+if [ "${#live_holders[@]}" -gt 0 ]; then
+  echo "[reap-emulators] REFUSING to reclaim: these ports are held by LIVE, owned processes:" >&2
+  for entry in "${live_holders[@]}"; do echo "[reap-emulators]   ${entry}" >&2; done
+  echo "[reap-emulators] Something is already running here — most likely an emulator suite you started." >&2
+  echo "[reap-emulators] Nothing was killed. Stop it yourself, or serve on an isolated stack:" >&2
+  echo "[reap-emulators]   nx serve <app> --portOffset=auto" >&2
+  exit 1
+fi
+
+# Everything still held is an orphan. Graceful first: a Firestore JVM catches SIGTERM and unwinds
+# cleanly, which is preferable to a hard kill.
+for port in "${held[@]}"; do
+  echo "[reap-emulators] port ${port} held by an orphaned process — sending SIGTERM"
   fuser -k -TERM "${port}/tcp" >/dev/null 2>&1 || true
 done
 

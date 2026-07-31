@@ -27,6 +27,14 @@ export interface WireProviderOptions {
   providerFn: string;
   /** The module specifier to import it from, e.g. `'./worktree-tab-label'` or `'@acme/design-system'`. */
   importFrom: string;
+  /**
+   * True ONLY when this run is ENSURING the layer that owns this provider — i.e. creating the capability,
+   * not merely finding it already present. Wiring is a BASELINE act; see the header for why.
+   *
+   * Required rather than optional, and checked here rather than at each call site, so the compiler is what
+   * guarantees a new caller has thought about it. An `if` at three call sites is three chances to forget.
+   */
+  ensuring: boolean;
 }
 
 /**
@@ -39,8 +47,33 @@ export interface WireProviderOptions {
 export function wireProvider(
   source: string,
   sourcePath: string,
-  { providerFn, importFrom }: WireProviderOptions
+  { providerFn, importFrom, ensuring }: WireProviderOptions
 ): string | null {
+  // ── app.config.ts IS SEEDED, NEVER OWNED — SO WIRING HAPPENS ON ENSURE, NEVER ON DETECT ──────────────
+  //
+  // This used to run on every sync, and it overwrote deliberate decisions. In one project it re-added
+  // `provideAppFirebase()` to the shared app.config.ts four lines above a comment saying Firebase was
+  // deliberately NOT there — the app provided it in its browser-only config, so the re-add double-provided
+  // it and initialised Firebase during SSR/prerender. The house's own Angular guidance exists to prevent
+  // exactly that.
+  //
+  // app.config.ts is the file an Angular app is most CERTAIN to evolve: it is where every provider decision
+  // accumulates. That makes it class (C) — seeded at baseline, never owned — and a generator writing into it
+  // at sync time is a category error regardless of what it writes. Any later change to a provider is a
+  // MIGRATION, which can be reviewed and can refuse to guess.
+  //
+  // The tempting alternative was to make the idempotency check smarter — scan the whole config graph before
+  // adding. It would have prevented that exact diff, and it is the trap: the check would have to recognise
+  // every shape an app config has ever had or might be restructured into (browser/server splits, re-exports,
+  // providers assembled by a factory), forever. That is unbounded legacy healing wearing a small hat, and
+  // retiring it is why the migration ladder exists. Note the existing guard below is CORRECT and still
+  // failed here — it deliberately looks for a call inside THIS file's providers array, and no scan of a file
+  // it was never told about could have helped. The write simply should not have been happening.
+  //
+  // Returning `source` (not null) means "no change": every caller already treats that as success, so a
+  // detect-only run is a clean no-op rather than a warning about wiring nobody asked for.
+  if (!ensuring) return source;
+
   const ts = loadTypeScript();
   if (!ts) return null;
 

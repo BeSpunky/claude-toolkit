@@ -118,6 +118,8 @@ import {
 import { requireLayer } from '../../layers/registry';
 
 interface FirebaseEmulatorsSchema {
+  /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
+  wireProviders?: boolean;
   project: string;
   workspaceName?: string;
   // Opt-in: also scaffold the staging environment bundle (environment.staging.ts + a `staging` build
@@ -515,6 +517,7 @@ export default async function firebaseEmulatorsGenerator(
     const wired = wireProvider(current, appConfigPath, {
       providerFn: 'provideAppFirebase',
       importFrom: './firebase.config',
+      ensuring: options.wireProviders === true,
     });
     if (wired === current) {
       // Already wired or no changes needed.

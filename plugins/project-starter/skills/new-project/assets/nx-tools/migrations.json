@@ -42,8 +42,18 @@
     },
     "retire-inline-house-sections": {
       "version": "0.25.0",
-      "description": "Delete the frozen house sections still inline in CLAUDE.md from before 0.5.0 moved them into the generated HOUSE.md — now actively misleading, because 0.25.0 imports the live directives into the same file.",
+      "description": "Delete the frozen house sections still inline in CLAUDE.md from before 0.5.0 moved them into the generated HOUSE.md \u2014 now actively misleading, because 0.25.0 imports the live directives into the same file.",
       "implementation": "./src/migrations/0.25.0/retire-inline-house-sections"
+    },
+    "convert-target-comment-keys": {
+      "version": "0.27.0",
+      "description": "Move `\"//name\": \"\u2026\"` documentation keys out of `targets` onto the target's `metadata.description`. Inside `targets` Nx reads every value as a TargetConfiguration, so such a key throws on Nx 23 and silently spreads into a character-indexed object on older Nx.",
+      "implementation": "./src/migrations/0.27.0/convert-target-comment-keys"
+    },
+    "report-duplicate-house-providers": {
+      "version": "0.27.0",
+      "description": "Report a house provider (provideAppFirebase / provideWorktreeTabLabel / provideDesignSystem) called in more than one app config \u2014 the residue of those providers being re-asserted into app.config.ts on every sync. Reports only: which copy is correct is a question about the app, and for provideAppFirebase a copy in the shared config initialises Firebase during SSR.",
+      "implementation": "./src/migrations/0.27.0/report-duplicate-house-providers"
     }
   }
 }

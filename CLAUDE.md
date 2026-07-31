@@ -110,6 +110,7 @@ The dev loop:
 | Pick up mid-session skill edits | `/reload-plugins` (or `/plugin marketplace update claude-toolkit` if added from GitHub) |
 | Release a plugin | `nx release version --projects=<name> --specifier=patch` — writes `plugin.json` **and** derives `marketplace.json`; never hand-edit either |
 | Check the release invariants | `node tools/check-release-invariants/check.mjs` (also CI + the pre-push hook) |
+| Test the scaffolder's guards | `bash tools/test-scaffold/run.sh` — the refusals whose regression would be **silent** (~1s, bash + git only; also CI) |
 | Validate the nx-tools payload | `tools/publish-nx-tools/publish.sh --dry-run` |
 | Publish nx-tools | ask the migrations question (*Release & versioning*), write any migration it owes, bump `assets/nx-tools/package.json`, then `tools/publish-nx-tools/publish.sh` |
 | Exercise the scaffolder | `bash plugins/project-starter/skills/new-project/assets/scaffold.sh <project> [app]` |

@@ -39,9 +39,10 @@ export function isPortFree(port: number): Promise<boolean> {
  *   - undefined / '' / '0'  → 0 (base stack — no isolation, forwarded ports).
  *   - a positive integer    → that exact offset, pinned.
  *   - 'auto'                → derived from the RESOLVED TREE:
- *       · the MAIN tree is ALWAYS offset 0 (`isMain` → guaranteed base stack — the developer's
- *         forwarded ports belong to it, and there is exactly one main tree); so real Google OAuth on
- *         localhost:4200 is pinned to it.
+ *       · the MAIN tree PREFERS offset 0 — the developer's forwarded ports belong to it, and real
+ *         Google OAuth on localhost:4200 needs them — but only takes them when they are actually
+ *         FREE. Occupied means a stack is already serving there, and a preference is not a licence
+ *         to evict it, so the run shifts like any other.
  *       · a worktree gets a STABLE block derived from `treeKey` (same worktree → same ports across
  *         restarts), VERIFIED free at launch: if that block's app port is taken, walk to the next free
  *         block so two worktrees that hash alike still never collide. Throws if all blocks are busy.
@@ -68,10 +69,24 @@ export async function resolvePortOffset(
     return n;
   }
 
-  // auto: the main tree owns the base/forwarded stack — never shift it.
-  if (isMain) return 0;
+  // auto (main tree): the base/forwarded stack is the main tree's BY PREFERENCE, not by decree —
+  // taken when it is free, and stepped around when it is not.
+  //
+  // It used to return 0 unconditionally, and that is what made a second serve destructive. Two serves
+  // of the main tree then both claimed the base ports, and since the launch chain reaps before it
+  // starts, the second one took them by tearing down the first — a suite the developer was actively
+  // using, killed to satisfy a preference. (`reap-emulators.sh` no longer kills a live suite, so
+  // without this the second serve would simply refuse instead. Correct, and still useless: the whole
+  // point is that a second serve should just work.)
+  //
+  // Probing keeps the ordinary case exactly as it was — one developer, base free, base taken, real
+  // Google OAuth on the forwarded localhost:4200 where it must be — while making the contended case
+  // coexist rather than fight. The first stack to arrive owns the base ports; later ones shift.
+  if (isMain && (await probe(BASE_APP_PORT))) return 0;
 
-  // auto (worktree): stable start block, then walk to the first block whose app port is free.
+  // auto: stable start block, then walk to the first block whose app port is free. A main tree that
+  // finds its base ports busy lands here too, keyed the same way, so a second serve of the same tree
+  // gets a stable block rather than an arbitrary one.
   const start = blockForKey(treeKey);
   for (let i = 0; i < MAX_BLOCK; i++) {
     const block = ((start - 1 + i) % MAX_BLOCK) + 1;

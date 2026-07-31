@@ -99,11 +99,22 @@ export default async function devcontainerGenerator(
   // declares its own keeps it (so the house script would not).
   const foreignPostCreate = exists ? postCreateCommandOf(tree) : undefined;
 
+  // OWNERSHIP DECIDES WHETHER HOUSE KEYS ARE RE-ASSERTED — NEVER WHETHER THE PROJECT'S KEYS SURVIVE.
+  //
+  // Owning used to mean `tree.write(rendered)`: the whole file replaced, so anything the project had added
+  // to a devcontainer we own — a forwarded port, a mount, an extension, and every comment explaining why —
+  // was deleted on the next sync. That made the ownership marker a destructive binary, which in turn made
+  // `claim-legacy-devcontainer-ownership` far more consequential than it looked: a migration that flipped a
+  // flag was really arming a full rewrite of a file it had never read.
+  //
+  // Both paths now go through the same additive, comment-preserving merge. The only difference is what
+  // happens on a key BOTH declare: an owned devcontainer takes the house value (that is what ownership
+  // means), an adopted one keeps the project's. Keys the house does not know about survive in both.
   let skipped: string[] = [];
-  if (owning) {
+  if (!exists) {
     tree.write(DEVCONTAINER, rendered);
   } else {
-    skipped = mergeIntoForeign(tree, rendered);
+    skipped = mergeIntoExisting(tree, rendered, ours ? 'assert' : 'adopt');
   }
 
   // `invoked` — not merely `owning`. Writing `.devcontainer/post-create.sh` into a project whose
@@ -500,7 +511,17 @@ function portsAttributesJson(flags: Record<string, boolean>): string {
  *
  * Returns the dotted paths that were left as the project had them.
  */
-function mergeIntoForeign(tree: Tree, rendered: string): string[] {
+/**
+ * Merge the rendered house devcontainer into the one on disk, in place, preserving comments.
+ *
+ * `mode` is the ONLY difference between owning a devcontainer and adopting one:
+ *   - `'assert'` (we own it)  — a key both declare takes the HOUSE value.
+ *   - `'adopt'`  (they own it) — a key both declare keeps the PROJECT's value, and is reported.
+ *
+ * Neither mode ever removes a key the house does not know about, and neither re-serializes the file — so
+ * comments, including the ones between array members where people explain why a mount exists, survive both.
+ */
+function mergeIntoExisting(tree: Tree, rendered: string, mode: 'assert' | 'adopt'): string[] {
   const existingText = tree.read(DEVCONTAINER, 'utf8') ?? '{}';
   const existing = tryParse(existingText);
   const house = tryParse(rendered);
@@ -515,14 +536,27 @@ function mergeIntoForeign(tree: Tree, rendered: string): string[] {
 
   const added: string[] = [];
   const skipped: string[] = [];
+  const reasserted: string[] = [];
   let text = existingText;
 
-  const edit = (path: (string | number)[], value: unknown) => {
+  const write = (path: (string | number)[], value: unknown, bucket: string[]) => {
     // An EMPTY container is not an addition, it's noise — `"forwardPorts": []` in a repo that forwards
     // nothing tells the reader less than the absent key did.
     if (isEmptyContainer(value)) return;
     text = applyEdits(text, modify(text, path, value, { formattingOptions: JSONC_FORMAT }));
-    added.push(path.join('.'));
+    bucket.push(path.join('.'));
+  };
+
+  const edit = (path: (string | number)[], value: unknown) => write(path, value, added);
+
+  /**
+   * Both sides declare this key with different values. In `assert` mode the house value wins (and the
+   * project's own comment around it still survives — only the value is edited in place); in `adopt` mode
+   * the project's stands and the divergence is recorded, permanently, in the marker.
+   */
+  const conflict = (path: (string | number)[], value: unknown) => {
+    if (mode === 'assert') write(path, value, reasserted);
+    else skipped.push(path.join('.'));
   };
 
   /**
@@ -553,22 +587,31 @@ function mergeIntoForeign(tree: Tree, rendered: string): string[] {
     // Present already — recurse one useful level into the containers where "missing sub-key" is the
     // common, safe case, and leave scalars strictly alone.
     if (isPlainObject(value) && isPlainObject(existing[key])) {
-      mergeObject(key, value, existing[key] as Json, edit, appendMissing, skipped);
+      mergeObject(key, value, existing[key] as Json, edit, appendMissing, conflict);
     } else if (Array.isArray(value) && Array.isArray(existing[key])) {
       appendMissing([key], value, existing[key] as unknown[]);
     } else if (!sameValue(value, existing[key])) {
-      skipped.push(key);
+      conflict([key], value);
     }
   }
 
   tree.write(DEVCONTAINER, text);
 
-  logger.info(
-    `[devcontainer] Adopted the existing \`${DEVCONTAINER}\` (not generator-written) — merged additively.\n` +
-      `  added:      ${added.length ? added.join(', ') : '(nothing — already complete)'}\n` +
-      `  left as-is: ${skipped.length ? skipped.join(', ') : '(nothing)'}\n` +
-      `  (recorded in \`${MARKER}\` — this project keeps its own values for those keys)`
-  );
+  if (mode === 'assert') {
+    logger.info(
+      `[devcontainer] Updated the house-owned \`${DEVCONTAINER}\` in place.\n` +
+        `  added:       ${added.length ? added.join(', ') : '(nothing — already complete)'}\n` +
+        `  re-asserted: ${reasserted.length ? reasserted.join(', ') : '(nothing — already matching)'}\n` +
+        `  (keys this generator does not manage, and every comment, were left untouched)`
+    );
+  } else {
+    logger.info(
+      `[devcontainer] Adopted the existing \`${DEVCONTAINER}\` (not generator-written) — merged additively.\n` +
+        `  added:      ${added.length ? added.join(', ') : '(nothing — already complete)'}\n` +
+        `  left as-is: ${skipped.length ? skipped.join(', ') : '(nothing)'}\n` +
+        `  (recorded in \`${MARKER}\` — this project keeps its own values for those keys)`
+    );
+  }
 
   return skipped;
 }
@@ -580,7 +623,7 @@ function mergeObject(
   existing: Json,
   edit: (path: (string | number)[], value: unknown) => void,
   appendMissing: (path: (string | number)[], house: unknown[], current: unknown[]) => void,
-  skipped: string[]
+  conflict: (path: (string | number)[], value: unknown) => void
 ): void {
   for (const [key, value] of Object.entries(house)) {
     const path = [prefix, key];
@@ -598,9 +641,9 @@ function mergeObject(
         else if (isPlainObject(innerValue) && isPlainObject(have)) {
           for (const [leaf, leafValue] of Object.entries(innerValue)) {
             if (!(leaf in (have as Json))) edit([...innerPath, leaf], leafValue);
-            else if (!sameValue(leafValue, (have as Json)[leaf])) skipped.push([...innerPath, leaf].join('.'));
+            else if (!sameValue(leafValue, (have as Json)[leaf])) conflict([...innerPath, leaf], leafValue);
           }
-        } else if (!sameValue(innerValue, have)) skipped.push(innerPath.join('.'));
+        } else if (!sameValue(innerValue, have)) conflict(innerPath, innerValue);
       }
       continue;
     }
@@ -608,7 +651,7 @@ function mergeObject(
       appendMissing(path, value, existing[key] as unknown[]);
       continue;
     }
-    if (!sameValue(value, existing[key])) skipped.push(path.join('.'));
+    if (!sameValue(value, existing[key])) conflict(path, value);
   }
 }
 
