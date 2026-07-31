@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "devDependencies": {
-    "@bespunky/nx-tools": "0.25.0",
+    "@bespunky/nx-tools": "0.28.0",
     "@nx/devkit": "23.1.0",
     "nx": "23.1.0"
   }
