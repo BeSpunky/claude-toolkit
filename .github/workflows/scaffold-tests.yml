@@ -1,0 +1,41 @@
+# Guard the scaffolder's GUARDS.
+#
+# `scaffold.sh` is the one part of this repo that runs inside other people's projects and writes to them. Most
+# of what it does announces its own failure; its refusals do not. A gate that stops refusing looks exactly
+# like a gate with nothing to catch — the run reports SYNC_OK and the damage lands on someone else's
+# repository, later, with nothing in the output to suggest a check was skipped.
+#
+# Kept separate from `release invariants` on purpose. That workflow asks whether a change REACHES consumers
+# (versions, the derived marketplace, the migration ceiling); this one asks whether the scaffolder BEHAVES
+# once it gets there. Two different questions, and folding them together would leave one of them named after
+# the other.
+name: scaffold tests
+
+on:
+  # The house pipeline merges feature worktrees locally, so a feature branch is often never pushed at all —
+  # these integration points are where CI genuinely gets a look, which is why the local `run.sh` is the
+  # primary safety net and this is the backstop.
+  push:
+    branches: [main, development, staging]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scaffold-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Forks inherit workflows but not this repo's policies; failing there is noise on someone else's minutes.
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # No setup-node, no install: the tests need only bash and git, so they cannot be broken by a dependency
+      # that failed to resolve. Every fixture is a throwaway repo under `mktemp -d`.
+      - name: Run scaffolder behaviour tests
+        run: bash tools/test-scaffold/run.sh
