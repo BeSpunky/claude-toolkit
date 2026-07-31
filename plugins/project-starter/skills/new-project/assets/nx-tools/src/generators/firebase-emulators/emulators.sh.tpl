@@ -12,10 +12,17 @@
 #               EXPORTING back to it on a clean exit. That import/export pair is the
 #               "caching": onboard once and your session + data survive every serve.
 #
-# Persistence is ON for the full suite and OFF for any focused `--only` run: a partial
-# run (e.g. auth-only) would otherwise export ONLY its slice on exit and clobber the
-# firestore/storage data sitting in the shared working dir. Focused runs still IMPORT
-# the cached world (handy for debugging against real data) — they just don't write it back.
+# EVERY run passes `--only`. Left to itself, `firebase emulators:start` starts what it
+# INFERS is applicable, not what firebase.json declares — including an App Hosting emulator
+# inferred from the root apphosting.yaml, which exits 1 and takes the whole suite with it.
+# A full run therefore derives the list from firebase.json's own `emulators` block; a focused
+# run passes its own. See the derivation below for why this, and not a `dev` script.
+#
+# Persistence follows the EXPLICIT flag, not the presence of `--only`: a derived list IS the
+# full suite and must still export, while a genuinely partial run (e.g. auth-only) would
+# export ONLY its slice on exit and clobber the firestore/storage data in the shared working
+# dir. Focused runs still IMPORT the cached world (handy for debugging against real data) —
+# they just don't write it back.
 #
 #   bash tools/emulators.sh                  # full suite, cached (import + export)
 #   bash tools/emulators.sh --only auth,ui   # focused, import-only (no export)
@@ -77,15 +84,17 @@ derive_project() {
 PROJECT="${FIREBASE_EMULATOR_PROJECT:-$(derive_project || echo demo-{{workspaceName}})}"
 echo "[emulators] project: $PROJECT" >&2
 
-# Pass through an optional `--only <list>` (the focused targets use it); its presence
+# Pass through an optional `--only <list>` (the focused targets use it); an EXPLICIT one
 # is also what flips persistence off (see header).
 ONLY_ARGS=()
 PERSIST=1
+EXPLICIT_ONLY=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --only)
       ONLY_ARGS=(--only "$2")
       PERSIST=0
+      EXPLICIT_ONLY=1
       shift 2
       ;;
     *)
@@ -94,6 +103,55 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+# ── ALWAYS PASS --only, DERIVED FROM firebase.json ─────────────────────────────────────────────
+# `firebase emulators:start` with no --only does NOT start "the emulators in firebase.json" — it
+# starts everything it decides is applicable, and it AUTO-DETECTS some of them from other files.
+# The one that bites: a root `apphosting.yaml` (which the house generator writes, for deploys)
+# makes firebase-tools bring up the App Hosting emulator, whose whole job is to run the framework
+# dev server via `yarn dev`. There is no `dev` script in a house workspace, so it exits 1 — and
+# firebase-tools takes the ENTIRE suite down with it. It surfaces as a bogus, unrelated
+# `TIMEOUT: Port 5002`, which is why this cost a long afternoon before it was understood.
+#
+# Adding a `dev` script is NOT the fix. It would have to be `nx serve <app>`, the house `serve`
+# target chains this script, and this script starts the suite — so the App Hosting emulator would
+# launch a serve that launches the emulators that launch the App Hosting emulator. Defining `dev`
+# does not fix the recursion, it creates it.
+#
+# There is also nothing to delete: the App Hosting emulator has no entry in firebase.json (it is
+# inferred), so naming what we DO want is the only lever there is. That names it from firebase.json
+# itself — the single source of truth for this project's emulator set — rather than a list baked in
+# at generate time, which would silently disagree the moment the project edits its own config.
+#
+# PERSISTENCE IS DELIBERATELY UNAFFECTED. A derived list IS the full suite, so it must still import
+# AND export; only an EXPLICIT `--only` (a genuinely partial run, which would export just its slice
+# over the shared world) turns persistence off. Conflating the two would quietly stop every serve
+# from saving its data — the exact "your signups vanished" bug, introduced while fixing another.
+if [ "$EXPLICIT_ONLY" -eq 0 ]; then
+  # Selectable emulators only. `singleProjectMode` is a boolean setting, and `hub`/`logging` are
+  # infrastructure firebase-tools always runs and rejects as --only targets; everything else with a
+  # port is a real emulator (`ui` included — it is a valid --only target and the suite is far less
+  # useful without it).
+  DERIVED_ONLY="$(node -e '
+    const fs = require("fs");
+    const skip = new Set(["singleProjectMode", "hub", "logging"]);
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).emulators || {}; } catch { cfg = {}; }
+    const names = Object.keys(cfg).filter((k) => !skip.has(k) && cfg[k] && typeof cfg[k] === "object");
+    process.stdout.write(names.join(","));
+  ' "$ROOT/firebase.json" 2>/dev/null || true)"
+  if [ -n "$DERIVED_ONLY" ]; then
+    ONLY_ARGS=(--only "$DERIVED_ONLY")
+    echo "[emulators] starting only what firebase.json declares: $DERIVED_ONLY" >&2
+  else
+    # No readable emulator block. Say so rather than silently starting whatever firebase-tools
+    # infers — that is the failure this whole block exists to prevent, and a silent fallback into
+    # it would be indistinguishable from the bug.
+    echo "[emulators] WARNING: no emulators found in firebase.json — starting firebase-tools' own" >&2
+    echo "[emulators]   default selection, which may include auto-detected emulators (App Hosting)" >&2
+    echo "[emulators]   that can take the whole suite down. Check the 'emulators' block." >&2
+  fi
+fi
 
 bash "$ROOT/tools/reap-emulators.sh" "${REAP_ARGS[@]}"
 if [ "$OFFSET" = "0" ]; then
@@ -122,7 +180,12 @@ fi
 # holds, with no per-worktree setup.
 SECRETS_FILE="$ROOT/apps/functions/.secret.local"
 if [ ! -f "$SECRETS_FILE" ]; then
-  MAIN_WORKTREE="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -1)"
+  # `|| true` is load-bearing under `set -euo pipefail`. `2>/dev/null` hides git's OUTPUT, not its exit
+  # code: outside a repository `git worktree list` exits 128, pipefail propagates that through the pipe,
+  # and the assignment then trips errexit — killing the suite silently, with no message, one line before it
+  # would have started. The worktree lookup is a best-effort convenience; not being in a repo is an ordinary
+  # state for it, not a failure.
+  MAIN_WORKTREE="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -1 || true)"
   if [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && [ -f "$MAIN_WORKTREE/apps/functions/.secret.local" ]; then
     echo "[emulators] .secret.local absent in this worktree; using the main worktree's copy: $MAIN_WORKTREE" >&2
     SECRETS_FILE="$MAIN_WORKTREE/apps/functions/.secret.local"
