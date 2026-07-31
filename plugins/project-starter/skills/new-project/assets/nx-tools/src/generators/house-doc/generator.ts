@@ -32,6 +32,7 @@
 // committed, generator-owned, rewritten on every sync — and already the file the hook stats to decide
 // whether this is even a house project. One file, one truth, no new gitignore surface.
 import { type Tree, formatFiles } from '@nx/devkit';
+import { retireInlineHouseSections } from '../_utils/inline-house-sections';
 import { findDesignSystem } from '../_utils/design-system';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -137,6 +138,21 @@ export default async function houseDocGenerator(
   const pointer = render(tpl('pointer.md.tpl')).trim();
   const next = upsertPointer(seeded, pointer);
   if (!tree.exists('CLAUDE.md') || next !== tree.read('CLAUDE.md', 'utf8')) tree.write('CLAUDE.md', next);
+
+  // 3b) Retire the FROZEN pre-0.5.0 house sections now inline in CLAUDE.md, if any remain.
+  //
+  //     ORDER IS THE WHOLE REASON THIS IS HERE. The retirement may only delete once a generated HOUSE.md
+  //     exists — otherwise the inline copy is the only copy of that guidance. HOUSE.md is written a few
+  //     lines above, so the precondition now holds by construction. A migration could never satisfy it: the
+  //     ladder runs BEFORE the generators, so `retire-inline-house-sections` (0.25.0) could only ever refuse
+  //     on a project that had no HOUSE.md yet — and by the time this generator gave it one, that migration
+  //     was already below the project's floor and would never be collected again. The cleanup would have
+  //     been stranded permanently, one release after the file it needed appeared.
+  //
+  //     That matters more now that this generator is no longer gated on the `agent` layer: every project
+  //     gets HOUSE.rules.md imported into its CLAUDE.md, so any project still carrying the inline copy would
+  //     otherwise hold the same directives in two voices, with nothing to say which is live.
+  retireInlineHouseSections(tree);
 
   // 4) Keep the hook's SNOOZE file out of git. It records "this developer declined the sync for version
   //    X" — a per-person, per-machine decision, the exact opposite of the stamp: it must NOT travel to
