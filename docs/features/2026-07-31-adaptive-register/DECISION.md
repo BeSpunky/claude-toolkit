@@ -1,6 +1,11 @@
-# DECISION — how the pitch discipline is delivered
+---
+status: concluded
+concluded: 2026-07-31
+summary: Shipped `Pitch to the listener` as bespunky-communication — an output style (not a skill, because reading the room must hold on every turn) modelling conversation modes as a push/pop stack, plus shape, asking and report-brevity rules; auto-enabled and SEEDED into scaffolded projects via a new owned-vs-seeded distinction in the claude-settings generator.
+tags: [output-style, communication, plugin, scaffolder, claude-settings, seeded-keys]
+---
 
-*Live. Status frontmatter is stamped at the merge gate.*
+# DECISION — how the pitch discipline is delivered
 
 ## Decided
 
@@ -106,6 +111,16 @@ scoped strictly to presentation and sets `keep-coding-instructions`.
   agrees with the new manifest.
 - Frontmatter keys used (`name`, `description`, `keep-coding-instructions`) are the ones the loader
   recognises.
+
+- The migrations question, re-interrogated at the merge gate: `claude-settings` runs inside the
+  `agent` layer block, and that layer is **detected** (`tree.exists('HOUSE.md') ||
+  tree.exists('HOUSE.rules.md')`), not ensured — so a plain `--sync` with no `--ensure` reaches every
+  scaffolded project, re-asserts the new plugin key and applies the seed. No migration owed: the
+  owned key is a class-A template artifact regenerated every sync, and `outputStyle` is class C
+  (seeded, never owned). Nothing renamed, moved or retired, so there is no old state to clean up.
+- `tools/test-scaffold/run.sh` — all scaffolder guard tests pass.
+- `publish.sh --dry-run` — payload compiles and packs at 0.28.0, with both `settings.json.tpl` and
+  `settings.seed.json.tpl` in the tarball.
 
 **Not verified here:** the style actually taking effect at runtime. `claude plugin details` does not
 report output styles in its component inventory, there is no CLI command that lists them, and this
