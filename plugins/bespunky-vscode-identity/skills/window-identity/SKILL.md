@@ -24,7 +24,7 @@ extending the scaffolder is generator work, never a hand-written file edit).
 nx g @bespunky/nx-tools:window-identity \
   --primary=<hex>        # the design-system primary; OMIT to derive from the project-name hash
   --emoji=<glyph>        # a project-fitting emoji; OMIT to keep the current one / a neutral default
-  --surface=status       # status (default) | title | titlebar | both
+  --surface=both         # both (default) | status | titlebar | title
   --source=design-system # name-hash | design-system | manual  (usually inferred — see the ratchet)
   # --personal           # git-ignore the identity instead of committing it team-wide
 ```
@@ -57,10 +57,11 @@ input. Omit `--emoji` only when you want to keep whatever emoji is already set.
 
 ## Step 3 — surface & scope (usually just defaults)
 
-- **Surface** — default `status`: emoji + a band on the status bar. It always renders (no custom-title-bar
-  dependency) and sits in constant peripheral view. Offer `titlebar` (identity up where you switch windows —
-  needs `window.titleBarStyle: custom`) or `both` only if the user wants a stronger signal; `title` is
-  emoji-only, no colour.
+- **Surface** — default `both`: emoji + a band on the status bar AND the title bar. The status band always
+  renders; the title-bar band needs `window.titleBarStyle: custom` and, where the title bar is OS-native,
+  degrades gracefully to the status band alone (the title-bar keys are written but simply don't paint). Narrow
+  it when the user wants a quieter mark: `status` (the always-rendered status band only), `titlebar` (title bar
+  only), or `title` (emoji only, no colour).
 - **Scope** — committed by default, so the whole team shares the project's identity. Pass `--personal` only if
   the user wants their own private styling; warn them it git-ignores the *entire* `.vscode/settings.json`, not
   just the identity keys.
