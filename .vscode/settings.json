@@ -13,11 +13,15 @@
   //    peripheral view, so the signal is always present. Title bar,
   //    activity bar and editor are deliberately left untouched.
   "workbench.colorCustomizations": {
-    "statusBar.background": "#8a4a32",
-    "statusBar.foreground": "#f2e6dc",
-    "statusBar.noFolderBackground": "#8a4a32",
-    "statusBar.debuggingBackground": "#8a4a32",
-    "statusBarItem.remoteBackground": "#4a3226",
-    "statusBarItem.remoteForeground": "#f2e6dc"
+    "titleBar.activeBackground": "#603324",
+    "titleBar.activeForeground": "#f1e7e4",
+    "titleBar.inactiveBackground": "#47291f",
+    "titleBar.inactiveForeground": "#c6b0a9",
+    "statusBar.background": "#82412b",
+    "statusBar.foreground": "#f1e7e4",
+    "statusBar.noFolderBackground": "#82412b",
+    "statusBar.debuggingBackground": "#82412b",
+    "statusBarItem.remoteBackground": "#603324",
+    "statusBarItem.remoteForeground": "#f1e7e4"
   }
 }
