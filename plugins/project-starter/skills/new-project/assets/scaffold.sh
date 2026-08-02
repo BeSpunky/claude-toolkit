@@ -57,6 +57,8 @@
 #                 ASSERTS a human has explicitly agreed in this session. An agent may pass it only after
 #                 the user actually said yes — never to satisfy the gate.
 #   - CI=true   : there is no human to consent, and --yes cannot conjure one → REFUSE unconditionally.
+# The gate governs the ACT of syncing, so --print-inner (a dry render that runs nothing) is exempt from all
+# three arms — it is what the render test exercises under CI.
 # Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
 # clobber anything that already exists.
 #
@@ -545,7 +547,11 @@ fi
 # written. An unconsented sync must fail for want of CONSENT, not trip over a missing daemon on its way to
 # the same place: "docker not found" would send an agent off to fix Docker and come back (which is precisely
 # the inference this gate exists to stop) — and, worse, is now a lie, since the local Node usually suffices.
-if [ "$MODE" = "sync" ]; then
+# --print-inner is exempt: it RENDERS the program and exits (line ~1772) without running a single command
+# of it, so there is nothing here to consent to. The gate guards the *act* of syncing, not describing it —
+# and the render test (tools/test-scaffold/render.test.sh) drives exactly `--sync --yes --print-inner` under
+# CI=true, which the unconditional CI refusal below would otherwise kill before it could render anything.
+if [ "$MODE" = "sync" ] && [ "$PRINT_INNER" != "1" ]; then
   if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
     echo "ERROR: refusing to sync in CI — a sync rewrites generated files and no human is here to agree." >&2
     echo "       Run it locally, review the diff against the backup tag, and commit the result." >&2
