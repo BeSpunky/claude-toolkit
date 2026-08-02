@@ -54,6 +54,11 @@
       "version": "0.27.0",
       "description": "Report a house provider (provideAppFirebase / provideWorktreeTabLabel / provideDesignSystem) called in more than one app config \u2014 the residue of those providers being re-asserted into app.config.ts on every sync. Reports only: which copy is correct is a question about the app, and for provideAppFirebase a copy in the shared config initialises Firebase during SSR.",
       "implementation": "./src/migrations/0.27.0/report-duplicate-house-providers"
+    },
+    "migrate-window-identity-surface-to-both": {
+      "version": "0.29.0",
+      "description": "Move an existing window identity from a status-bar-only band to `both` (status bar AND title bar), following the change of the window-identity generator's default surface from `status` to `both`. Moves every marked project, including design-system/manual ones the generator's ratchet would otherwise skip; `both` is a superset of `status`, so it only adds the title-bar keys and removes nothing.",
+      "implementation": "./src/migrations/0.29.0/migrate-window-identity-surface-to-both"
     }
   }
 }

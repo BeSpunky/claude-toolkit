@@ -22,8 +22,8 @@
     "surface": {
       "type": "string",
       "enum": ["title", "status", "titlebar", "both"],
-      "default": "status",
-      "description": "Which window surfaces to drive. 'title' = emoji only. 'status' = emoji + status bar (default; always rendered, no custom-title-bar dependency). 'titlebar' = emoji + title bar (needs window.titleBarStyle: custom). 'both' = emoji + both bars."
+      "default": "both",
+      "description": "Which window surfaces to drive. 'both' = emoji + status bar AND title bar (default; the status band always renders, the title-bar band needs window.titleBarStyle: custom and otherwise degrades to the status band alone). 'status' = emoji + status bar only. 'titlebar' = emoji + title bar only. 'title' = emoji only."
     },
     "personal": {
       "type": "boolean",

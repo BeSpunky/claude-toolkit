@@ -64,7 +64,7 @@ export default async function windowIdentityGenerator(
   options: WindowIdentitySchema = {},
 ): Promise<void> {
   const name = options.name ?? workspaceName(tree) ?? 'project';
-  const surface: Surface = options.surface ?? 'status';
+  const surface: Surface = options.surface ?? 'both';
   const personal = options.personal ?? false;
   const source: Source = options.source ?? (options.primary ? 'design-system' : 'name-hash');
 
@@ -195,7 +195,7 @@ function readMarker(tree: Tree): Marker | null {
   if (typeof primary !== 'string' || typeof emoji !== 'string') return null;
 
   const s: Surface[] = ['title', 'status', 'titlebar', 'both'];
-  return { source, primary, emoji, surface: s.includes(surface as Surface) ? (surface as Surface) : 'status' };
+  return { source, primary, emoji, surface: s.includes(surface as Surface) ? (surface as Surface) : 'both' };
 }
 
 /** Insert / heal / remove the --personal gitignore block, idempotently. */

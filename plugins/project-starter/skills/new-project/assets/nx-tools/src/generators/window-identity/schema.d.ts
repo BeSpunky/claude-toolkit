@@ -10,7 +10,8 @@ export interface WindowIdentitySchema {
   // The window emoji, prepended to window.title. Defaults to the existing marker's emoji, then to a neutral
   // placeholder — the colour already makes each window distinct, so a generic emoji at baseline is fine.
   emoji?: string;
-  // Which window surfaces to drive. Defaults to 'status' (always rendered; no custom-title-bar dependency).
+  // Which window surfaces to drive. Defaults to 'both' — the status band always renders; the title-bar band
+  // needs window.titleBarStyle: custom and otherwise degrades to the status band alone.
   surface?: Surface;
   // Git-ignore the settings + provenance marker so the identity is this developer's own, not committed.
   personal?: boolean;
