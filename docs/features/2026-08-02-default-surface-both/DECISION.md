@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-08-02
+summary: window-identity default surface → both, with a migration that moves every marked project on disk.
+tags: [window-identity, nx-tools, migration, release, vscode]
+---
+
 # Default window-identity surface → `both`
 
 ## The change
