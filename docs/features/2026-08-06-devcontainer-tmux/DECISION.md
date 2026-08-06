@@ -1,6 +1,13 @@
+---
+status: concluded
+concluded: 2026-08-06
+summary: tmux ships in every BeSpunky devcontainer via one always-on apt step in the generator-owned post-create.sh, so shells opened into a container from outside can be durable; no tmux config is written, deliberately.
+tags: [devcontainer, nx-tools, provisioning, tmux, zanshin, apt]
+---
+
 # DECISION — tmux in the BeSpunky devcontainer standard
 
-**Slug:** `devcontainer-tmux` · **Opened:** 2026-08-06 · *(status stamped at the merge gate)*
+**Slug:** `devcontainer-tmux` · **Opened:** 2026-08-06 · **Concluded:** 2026-08-06
 
 ## 1. The seam: `post-create.sh` (apt), not a devcontainer feature
 
