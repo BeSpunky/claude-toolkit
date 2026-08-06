@@ -258,36 +258,49 @@ fi
 # failure must only WARN — never abort post-create (set -e) and leave the container
 # half-provisioned (same stance as the Playwright and Angular-skills steps above).
 #
-# An ARRAY, not a literal argument list, so each group can carry its own comment and the
-# hand-recovery command printed on failure is DERIVED from the same list rather than retyped —
-# a re-run instruction that has drifted from what the step installs is worse than none.
-OS_FLOOR_PACKAGES=(
-  # Shared browser (tools/shared-browser — installed ALWAYS, started ON DEMAND): a headed Chromium
-  # on a virtual X display, streamed to the human over noVNC on a port ALLOCATED from the 6080-6119
-  # band (so parallel containers never contend for one host port — the URL is printed by
-  # `shared-browser up`). xvfb = the display; x11vnc = the VNC server; novnc + websockify = the web
-  # client and its WS↔TCP bridge; fluxbox = a minimal WM so Chromium gets a window frame; fonts
-  # (liberation + colour-emoji) so rendered pages and screenshots look right.
-  xvfb x11vnc novnc websockify fluxbox fonts-liberation fonts-noto-color-emoji
-  # Durable shells. A tmux session outlives the client attached to it, which is the ONLY way an
-  # interactive shell opened into this container from the outside survives its opener restarting:
-  # the Docker Engine API has no endpoint to re-attach to an existing exec, so a bare exec's process
-  # survives but its terminal does not. With tmux that costs a redraw; without it every open shell
-  # dies. No config file and no /etc/tmux.conf is written on purpose — a caller passes its own
-  # options explicitly, and a house default set with `set-option -g` would apply SERVER-wide, i.e.
-  # to whatever the human is running in this container too. Presence on PATH is the whole contract.
-  tmux
-  # General utilities the house tooling shells out to. procps supplies `sysctl`, which the
-  # worktree-domains proxy (tools/worktree-domains) uses to lower this container's
-  # net.ipv4.ip_unprivileged_port_start so its Node reverse proxy can bind the privileged :80 as the
-  # non-root `node` user, giving each worktree a pretty http://<slug>.localhost/ domain. iproute2
-  # supplies `ss` for the port probes; curl for the fetches.
-  iproute2 procps curl
-)
+# The list lives in ONE variable, so the hand-recovery command printed on failure is DERIVED from it
+# rather than retyped — a re-run instruction that has drifted from what the step installs is worse
+# than none. (`nx serve` used to carry its own hand-typed copy of this list and had already drifted;
+# it now names this step instead of re-listing it.)
+#
+# Accumulated across three assignments rather than declared as a bash ARRAY, so each capability can
+# carry its own comment WITHOUT making the file bash-only. A bash array is the obvious shape here and
+# it was the first thing written — but it is the only non-POSIX construct in this script, and the
+# generator supports a path where a human chains this file from a `postCreateCommand` of their own
+# (`.devcontainer/post-create.bespunky.sh`, see the devcontainer generator). Under `/bin/sh` the array
+# is a PARSE error, and sh parses incrementally: the run gets as far as `yarn install` and then dies
+# at this line with a bare syntax error, skipping every step below it and every WARNING they would
+# have printed. Staying POSIX-parseable costs nothing and removes that whole class.
+#
+# Shared browser (tools/shared-browser — installed ALWAYS, started ON DEMAND): a headed Chromium on a
+# virtual X display, streamed to the human over noVNC on a port ALLOCATED from the 6080-6119 band (so
+# parallel containers never contend for one host port — the URL is printed by `shared-browser up`).
+# xvfb = the display; x11vnc = the VNC server; novnc + websockify = the web client and its WS↔TCP
+# bridge; fluxbox = a minimal WM so Chromium gets a window frame; fonts (liberation + colour-emoji)
+# so rendered pages and screenshots look right.
+OS_FLOOR_PACKAGES="xvfb x11vnc novnc websockify fluxbox fonts-liberation fonts-noto-color-emoji"
+# Durable shells. A tmux session outlives the client attached to it, which is the ONLY way an
+# interactive shell opened into this container from the outside survives its opener restarting: the
+# Docker Engine API has no endpoint to re-attach to an existing exec, so a bare exec's process
+# survives but its terminal does not. With tmux that costs a redraw; without it every open shell
+# dies. No config file and no /etc/tmux.conf is written on purpose — a caller passes its own options
+# explicitly, and a house default set with `set-option -g` would apply SERVER-wide, i.e. to whatever
+# the human is running in this container too. Presence on PATH is the whole contract.
+OS_FLOOR_PACKAGES="$OS_FLOOR_PACKAGES tmux"
+# General utilities the house tooling shells out to. procps supplies `sysctl`, which the
+# worktree-domains proxy (tools/worktree-domains) uses to lower this container's
+# net.ipv4.ip_unprivileged_port_start so its Node reverse proxy can bind the privileged :80 as the
+# non-root `node` user, giving each worktree a pretty http://<slug>.localhost/ domain. iproute2
+# supplies `ss` for the port probes; curl for the fetches.
+OS_FLOOR_PACKAGES="$OS_FLOOR_PACKAGES iproute2 procps curl"
+
 echo "[post-create] provisioning the OS floor (shared browser, tmux, utilities)"
 floor_apt_ok=0
 for attempt in 1 2 3; do
-  if sudo apt-get update && sudo apt-get install -y "${OS_FLOOR_PACKAGES[@]}"; then
+  # $OS_FLOOR_PACKAGES is deliberately UNQUOTED: word-splitting into one argument per package is the
+  # point. Safe because every member is a Debian package name — no whitespace, no glob characters.
+  # shellcheck disable=SC2086
+  if sudo apt-get update && sudo apt-get install -y $OS_FLOOR_PACKAGES; then
     floor_apt_ok=1; break
   fi
   if [ "$attempt" -lt 3 ]; then
@@ -296,12 +309,18 @@ for attempt in 1 2 3; do
   fi
 done
 if [ "$floor_apt_ok" = 1 ]; then
-  echo "[post-create] OS floor ready ($(tmux -V 2>/dev/null || echo 'tmux missing'))"
+  # No per-package probe here on purpose. `apt-get install -y` exiting 0 IS the check; a line that
+  # verified one member of the list and then announced readiness for all of them would be a false
+  # assurance — worse than no check, and it singles out a package this step's whole point is that
+  # nothing is special about.
+  echo "[post-create] OS floor ready"
 else
   echo "[post-create] WARNING: OS floor apt deps failed after 3 attempts — likely a transient network issue."
-  echo "[post-create]          The container is otherwise ready, but the shared browser and durable"
-  echo "[post-create]          (tmux-backed) terminals are NOT available until this one step completes:"
-  echo "[post-create]            sudo apt-get update && sudo apt-get install -y ${OS_FLOOR_PACKAGES[*]}"
+  echo "[post-create]          The container is otherwise ready, but EVERYTHING in this one transaction is"
+  echo "[post-create]          missing: the shared browser, durable (tmux-backed) terminals, and the"
+  echo "[post-create]          worktree-domains :80 proxy + port probes (which need sysctl from procps"
+  echo "[post-create]          and ss from iproute2). Finish this one step once the network settles:"
+  echo "[post-create]            sudo apt-get update && sudo apt-get install -y $OS_FLOOR_PACKAGES"
 fi
 
 # The one always-on prerequisite that is NOT an apt package, so it sits outside the list above.
@@ -345,7 +364,7 @@ fi
 # a manual, machine-local opt-in via the plugin's install-piper.sh — same stance as the
 # claude-toolkit repo's own devcontainer. Best-effort + retry: a transient apt blip only
 # warns, never aborts post-create (set -e) and leaves the container half-provisioned
-# (same stance as the Playwright, Angular-skills, and shared-browser steps above).
+# (same stance as the Playwright, Angular-skills and OS-floor steps above).
 if [ -d /mnt/wslg ]; then
   echo "[post-create] WSLg audio bridge detected (--voice) — provisioning bespunky-voice (espeak-ng + pulseaudio-utils)"
   voice_apt_ok=0

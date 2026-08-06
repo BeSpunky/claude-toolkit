@@ -233,10 +233,17 @@ async function setupSharedBrowser(s: SharedBrowserSetup): Promise<void> {
   } catch (err) {
     const stderr = String((err as { stderr?: string }).stderr ?? (err as Error).message ?? '');
     if (/missing dependencies/i.test(stderr)) {
+      // NAME the authority; never re-list the packages. This message used to carry its own hand-typed
+      // copy of the apt list and had drifted from the real one — it named `util-linux` (never
+      // installed) and omitted `procps`, both font packages and `tmux`. So the human most likely to
+      // read it ran an install that did not fix their problem. The devcontainer's post-create.sh owns
+      // that list in one place and prints the exact command on its own failure; the only correct
+      // thing to do here is point at it.
       logger.warn(
         '[serve] Shared browser dependencies are missing — skipping the browser layer (the dev-server is unaffected).\n' +
-        '  Install them (apt, via the devcontainer post-create): xvfb x11vnc novnc websockify fluxbox iproute2 curl util-linux\n' +
-        '  …or rebuild the devcontainer. Meanwhile open the app yourself at ' + s.localUrl,
+        '  They are installed by the devcontainer OS-floor step. Re-run it with:\n' +
+        '    bash .devcontainer/post-create.sh\n' +
+        '  …or rebuild the devcontainer (Dev Containers: Rebuild Container). Meanwhile open the app yourself at ' + s.localUrl,
       );
     } else {
       logger.warn(`[serve] Shared browser could not start — skipping the browser layer. Open the app yourself at ${s.localUrl}.\n${stderr.trim()}`);
