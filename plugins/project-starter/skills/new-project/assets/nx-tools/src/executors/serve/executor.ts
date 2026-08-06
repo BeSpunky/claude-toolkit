@@ -236,13 +236,19 @@ async function setupSharedBrowser(s: SharedBrowserSetup): Promise<void> {
       // NAME the authority; never re-list the packages. This message used to carry its own hand-typed
       // copy of the apt list and had drifted from the real one — it named `util-linux` (never
       // installed) and omitted `procps`, both font packages and `tmux`. So the human most likely to
-      // read it ran an install that did not fix their problem. The devcontainer's post-create.sh owns
-      // that list in one place and prints the exact command on its own failure; the only correct
-      // thing to do here is point at it.
+      // read it ran an install that did not fix their problem. One place owns that list and prints the
+      // exact command on its own failure; the only correct thing to do here is point at it.
+      //
+      // That place MOVED: the OS floor is no longer a step in post-create.sh but the install script of
+      // the local `os-floor` devcontainer feature, which runs at BUILD time. Re-pointing this is not
+      // cosmetic — the old text told the reader to run `bash .devcontainer/post-create.sh`, which after
+      // the move installs none of these packages, i.e. exactly the drift this comment exists to prevent,
+      // in its worst form: a confident instruction that silently does nothing. The feature's install.sh
+      // runs as root (no sudo inside it), so a hand re-run needs sudo.
       logger.warn(
         '[serve] Shared browser dependencies are missing — skipping the browser layer (the dev-server is unaffected).\n' +
-        '  They are installed by the devcontainer OS-floor step. Re-run it with:\n' +
-        '    bash .devcontainer/post-create.sh\n' +
+        '  They are installed at container BUILD time by the os-floor devcontainer feature. Re-run it with:\n' +
+        '    sudo bash .devcontainer/features/os-floor/install.sh\n' +
         '  …or rebuild the devcontainer (Dev Containers: Rebuild Container). Meanwhile open the app yourself at ' + s.localUrl,
       );
     } else {
