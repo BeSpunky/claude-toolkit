@@ -243,43 +243,87 @@ if grep -q '"@angular/core"' package.json 2>/dev/null; then
   fi
 fi
 
-# --- 6. Shared-browser prerequisites (ALWAYS-ON — provisioned in EVERY BeSpunky devcontainer) ---
-# The claude-toolkit "shared-browser" capability (tools/shared-browser, started ON DEMAND)
-# runs a headed Chromium on a virtual X display and streams it to the human over noVNC on a port
-# ALLOCATED from the 6080-6119 band (so parallel containers never contend for one host port — the URL
-# is printed by `shared-browser up`). The stack starts lazily, but its OS deps are installed ALWAYS —
-# so any container can
-# co-drive a browser with no rebuild. Deps: x11vnc (VNC server) + novnc/websockify (the
-# noVNC web client + WS↔TCP bridge) + fluxbox (a minimal WM so Chromium gets a window frame)
-# + fonts (liberation + color-emoji so rendered pages and screenshots look right). Also procps
-# (sysctl) — the worktree-domains proxy (tools/worktree-domains) lowers this container's
-# net.ipv4.ip_unprivileged_port_start so its Node reverse proxy can bind the privileged :80 as
-# the non-root `node` user, giving each worktree a pretty http://<slug>.localhost/ domain.
+# --- 6. The OS floor (ALWAYS-ON — provisioned in EVERY BeSpunky devcontainer) ---
+# The apt packages every BeSpunky devcontainer carries, whatever it is a devcontainer FOR.
+#
+# It was named "shared-browser prerequisites" while it already installed `curl`, `procps` and
+# `iproute2` — a name narrower than its own contents, which is exactly how the next always-on
+# package ends up somewhere it does not belong (or as a third copy of the retry loop below). So the
+# step is named for what it IS: one apt transaction, one list, grouped BY CAPABILITY so a reader can
+# tell why any given package is here and delete it with the capability it serves.
 #
 # UNCONDITIONAL by design: this fires on every scaffold — it is NOT gated on --firebase,
 # @playwright/test, or any other flag (unlike steps 3–5). Best-effort with retry: apt mirrors
 # and cdn.playwright.dev are both occasionally flaky over WSL+Docker DNS, so a transient
 # failure must only WARN — never abort post-create (set -e) and leave the container
 # half-provisioned (same stance as the Playwright and Angular-skills steps above).
-echo "[post-create] provisioning shared-browser prerequisites (xvfb/x11vnc/novnc/websockify/fluxbox/fonts + Chromium)"
-sb_apt_ok=0
+#
+# The list lives in ONE variable, so the hand-recovery command printed on failure is DERIVED from it
+# rather than retyped — a re-run instruction that has drifted from what the step installs is worse
+# than none. (`nx serve` used to carry its own hand-typed copy of this list and had already drifted;
+# it now names this step instead of re-listing it.)
+#
+# Accumulated across three assignments rather than declared as a bash ARRAY, so each capability can
+# carry its own comment WITHOUT making the file bash-only. A bash array is the obvious shape here and
+# it was the first thing written — but it is the only non-POSIX construct in this script, and the
+# generator supports a path where a human chains this file from a `postCreateCommand` of their own
+# (`.devcontainer/post-create.bespunky.sh`, see the devcontainer generator). Under `/bin/sh` the array
+# is a PARSE error, and sh parses incrementally: the run gets as far as `yarn install` and then dies
+# at this line with a bare syntax error, skipping every step below it and every WARNING they would
+# have printed. Staying POSIX-parseable costs nothing and removes that whole class.
+#
+# Shared browser (tools/shared-browser — installed ALWAYS, started ON DEMAND): a headed Chromium on a
+# virtual X display, streamed to the human over noVNC on a port ALLOCATED from the 6080-6119 band (so
+# parallel containers never contend for one host port — the URL is printed by `shared-browser up`).
+# xvfb = the display; x11vnc = the VNC server; novnc + websockify = the web client and its WS↔TCP
+# bridge; fluxbox = a minimal WM so Chromium gets a window frame; fonts (liberation + colour-emoji)
+# so rendered pages and screenshots look right.
+OS_FLOOR_PACKAGES="xvfb x11vnc novnc websockify fluxbox fonts-liberation fonts-noto-color-emoji"
+# Durable shells. A tmux session outlives the client attached to it, which is the ONLY way an
+# interactive shell opened into this container from the outside survives its opener restarting: the
+# Docker Engine API has no endpoint to re-attach to an existing exec, so a bare exec's process
+# survives but its terminal does not. With tmux that costs a redraw; without it every open shell
+# dies. No config file and no /etc/tmux.conf is written on purpose — a caller passes its own options
+# explicitly, and a house default set with `set-option -g` would apply SERVER-wide, i.e. to whatever
+# the human is running in this container too. Presence on PATH is the whole contract.
+OS_FLOOR_PACKAGES="$OS_FLOOR_PACKAGES tmux"
+# General utilities the house tooling shells out to. procps supplies `sysctl`, which the
+# worktree-domains proxy (tools/worktree-domains) uses to lower this container's
+# net.ipv4.ip_unprivileged_port_start so its Node reverse proxy can bind the privileged :80 as the
+# non-root `node` user, giving each worktree a pretty http://<slug>.localhost/ domain. iproute2
+# supplies `ss` for the port probes; curl for the fetches.
+OS_FLOOR_PACKAGES="$OS_FLOOR_PACKAGES iproute2 procps curl"
+
+echo "[post-create] provisioning the OS floor (shared browser, tmux, utilities)"
+floor_apt_ok=0
 for attempt in 1 2 3; do
-  if sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 procps curl fonts-liberation fonts-noto-color-emoji; then
-    sb_apt_ok=1; break
+  # $OS_FLOOR_PACKAGES is deliberately UNQUOTED: word-splitting into one argument per package is the
+  # point. Safe because every member is a Debian package name — no whitespace, no glob characters.
+  # shellcheck disable=SC2086
+  if sudo apt-get update && sudo apt-get install -y $OS_FLOOR_PACKAGES; then
+    floor_apt_ok=1; break
   fi
   if [ "$attempt" -lt 3 ]; then
-    echo "[post-create] shared-browser apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+    echo "[post-create] OS floor apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
     sleep $((attempt * 10))
   fi
 done
-if [ "$sb_apt_ok" = 1 ]; then
-  echo "[post-create] shared-browser apt deps ready"
+if [ "$floor_apt_ok" = 1 ]; then
+  # No per-package probe here on purpose. `apt-get install -y` exiting 0 IS the check; a line that
+  # verified one member of the list and then announced readiness for all of them would be a false
+  # assurance — worse than no check, and it singles out a package this step's whole point is that
+  # nothing is special about.
+  echo "[post-create] OS floor ready"
 else
-  echo "[post-create] WARNING: shared-browser apt deps failed after 3 attempts — likely a transient network issue."
-  echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
-  echo "[post-create]            sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 procps curl fonts-liberation fonts-noto-color-emoji"
+  echo "[post-create] WARNING: OS floor apt deps failed after 3 attempts — likely a transient network issue."
+  echo "[post-create]          The container is otherwise ready, but EVERYTHING in this one transaction is"
+  echo "[post-create]          missing: the shared browser, durable (tmux-backed) terminals, and the"
+  echo "[post-create]          worktree-domains :80 proxy + port probes (which need sysctl from procps"
+  echo "[post-create]          and ss from iproute2). Finish this one step once the network settles:"
+  echo "[post-create]            sudo apt-get update && sudo apt-get install -y $OS_FLOOR_PACKAGES"
 fi
 
+# The one always-on prerequisite that is NOT an apt package, so it sits outside the list above.
 # Ensure a Playwright Chromium binary exists for the shared browser to launch (the CLI resolves
 # it at runtime via whichever of playwright / playwright-core / @playwright/test is installed).
 # Step 4 already fetched it when @playwright/test is in package.json — so here we only install
@@ -320,7 +364,7 @@ fi
 # a manual, machine-local opt-in via the plugin's install-piper.sh — same stance as the
 # claude-toolkit repo's own devcontainer. Best-effort + retry: a transient apt blip only
 # warns, never aborts post-create (set -e) and leaves the container half-provisioned
-# (same stance as the Playwright, Angular-skills, and shared-browser steps above).
+# (same stance as the Playwright, Angular-skills and OS-floor steps above).
 if [ -d /mnt/wslg ]; then
   echo "[post-create] WSLg audio bridge detected (--voice) — provisioning bespunky-voice (espeak-ng + pulseaudio-utils)"
   voice_apt_ok=0
