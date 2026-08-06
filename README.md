@@ -254,9 +254,12 @@ Register new plugins in `.claude-plugin/marketplace.json`.
 
 **`bespunky-communication` ships an output style, not a skill**, so *enabling the plugin* and
 *activating the style* are two different things. **Scaffolded projects get both automatically** — the
-`claude-settings` generator enables the plugin and **seeds** `"outputStyle": "Pitch to the listener"`
-into `.claude/settings.json`. Installing it by hand anywhere else makes the style *available*; turn
-it on with `/output-style` → *Pitch to the listener*, or set the key yourself.
+`claude-settings` generator enables the plugin and **seeds**
+`"outputStyle": "bespunky-communication:Pitch to the listener"` into `.claude/settings.json`.
+Installing it by hand anywhere else makes the style *available*; turn it on with `/output-style` →
+*Pitch to the listener*, or set the key yourself. **A plugin style's id is namespaced**
+(`<plugin>:<name>`) and the setting is matched by exact key — the bare display name resolves to
+nothing, which is what payload `0.30.2`'s migration repairs in projects seeded before it.
 
 **Seeded, not owned — and the difference matters.** Only **one** output style can be active at a
 time, so the house writes `outputStyle` **only when the project has none**. Pick a different style,

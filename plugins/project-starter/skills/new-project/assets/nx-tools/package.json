@@ -1,6 +1,6 @@
 {
   "name": "@bespunky/nx-tools",
-  "version": "0.30.1",
+  "version": "0.30.2",
   "description": "BeSpunky house Nx generators and executors. Generators cover workspace and app scaffolding (app, devcontainer, Claude settings, Playwright, Firebase emulators), the dev loop (serve, shared browser, worktree domains), the design system (tokens, themes, themed components), library authoring (publishable libs, secondary entrypoints, reusable-tool extraction), and app code (navigation, docs). Plus the unified `serve` executor — one composing dev loop that runs the app dev-server with the optional Firebase emulator suite and the optional shared co-driven browser (navigated to a pretty <slug>.localhost worktree domain) under a single graceful Ctrl+C, for the current or any chosen git worktree, with whole-stack --portOffset isolation (main tree pinned to the base ports).",
   "license": "MIT",
   "repository": {
@@ -8,10 +8,17 @@
     "url": "git+https://github.com/BeSpunky/claude-toolkit.git",
     "directory": "plugins/project-starter/skills/new-project/assets/nx-tools"
   },
-  "keywords": ["nx", "nx-plugin", "generators", "bespunky"],
+  "keywords": [
+    "nx",
+    "nx-plugin",
+    "generators",
+    "bespunky"
+  ],
   "generators": "./generators.json",
   "executors": "./executors.json",
-  "nx-migrations": { "migrations": "./migrations.json" },
+  "nx-migrations": {
+    "migrations": "./migrations.json"
+  },
   "dependencies": {
     "enquirer": "^2.3.6",
     "jsonc-parser": "^3.3.1"
@@ -23,10 +30,26 @@
     "@nx/eslint": ">= 23.0.0"
   },
   "peerDependenciesMeta": {
-    "@nx/angular": { "optional": true },
-    "@nx/js": { "optional": true },
-    "@nx/eslint": { "optional": true }
+    "@nx/angular": {
+      "optional": true
+    },
+    "@nx/js": {
+      "optional": true
+    },
+    "@nx/eslint": {
+      "optional": true
+    }
   },
-  "files": ["generators.json", "executors.json", "migrations.json", "src/**/*.js", "src/**/*.json", "src/**/*.tpl", "src/**/*.template"],
-  "publishConfig": { "access": "public" }
+  "files": [
+    "generators.json",
+    "executors.json",
+    "migrations.json",
+    "src/**/*.js",
+    "src/**/*.json",
+    "src/**/*.tpl",
+    "src/**/*.template"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

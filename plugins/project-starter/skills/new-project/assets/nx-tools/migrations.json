@@ -59,6 +59,11 @@
       "version": "0.29.0",
       "description": "Move an existing window identity from a status-bar-only band to `both` (status bar AND title bar), following the change of the window-identity generator's default surface from `status` to `both`. Moves every marked project, including design-system/manual ones the generator's ratchet would otherwise skip; `both` is a superset of `status`, so it only adds the title-bar keys and removes nothing.",
       "implementation": "./src/migrations/0.29.0/migrate-window-identity-surface-to-both"
+    },
+    "namespace-seeded-output-style": {
+      "version": "0.30.2",
+      "description": "Repoint the seeded `outputStyle` from the bare `Pitch to the listener` to the style's real id, `bespunky-communication:Pitch to the listener`. A plugin style is registered under `plugin:name` and the setting is looked up by exact key, so the bare name matched nothing and the house output style was never actually active. Rewrites only that exact value, and reports instead of rewriting where the project has its own output style by that name.",
+      "implementation": "./src/migrations/0.30.2/namespace-seeded-output-style"
     }
   }
 }

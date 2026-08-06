@@ -1,3 +1,3 @@
 {
-  "outputStyle": "Pitch to the listener"
+  "outputStyle": "bespunky-communication:Pitch to the listener"
 }
