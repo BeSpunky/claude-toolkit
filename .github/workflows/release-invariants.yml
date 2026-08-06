@@ -1,4 +1,8 @@
-# Guard the two things about this repo's product that fail SILENTLY.
+# Guard the things about this repo that fail SILENTLY.
+#
+# (The file is still named for its first check. That check is a release invariant; the others are not, and
+#  the job's real subject is the failure MODE — silent — rather than the release. Renaming the workflow
+#  would break every existing status check reference, so the name stays and this comment carries the truth.)
 #
 # 1. A missed PLUGIN BUMP. A missed `@bespunky/nx-tools` bump announces itself — publish-nx-tools skips and
 #    the next `--sync` installs the old payload. A missed plugin bump does not: the repo has the change, the
@@ -12,7 +16,15 @@
 #    descriptions were unquoted YAML plain scalars containing ": ". Nothing in the repo would ever have said
 #    so; `claude plugin validate --strict` says so immediately, which is why it is a gate here.
 #
-# Together: (2) is whether the content works, (1) is whether it reaches anyone. Shipping is both.
+# 3. A SCRIPT THAT CANNOT RUN. `tools/publish-nx-tools/publish.sh` sat at mode 100644 while CLAUDE.md, its
+#    own README and docs/reusable-tool-extraction.md all documented invoking it bare. Every caller inside
+#    this repo passes scripts to an interpreter (`bash …`, `node …`), including THIS workflow's sibling —
+#    so CI ran the broken script green and only a human following the docs ever hit it. Loud when it fires,
+#    never fired: silent in practice. The hand-run sweep that "verified" the fix was itself wrong, which is
+#    the actual reason this is a machine check — the sweep is the subtle part, not the failure.
+#
+# Together: (2) is whether the content works, (3) is whether the tooling around it does, and (1) is whether
+# any of it reaches anyone. Shipping is all three.
 name: release invariants
 
 on:
@@ -52,6 +64,12 @@ jobs:
       # that failed to resolve.
       - name: Check release invariants
         run: node tools/check-release-invariants/check.mjs
+
+      # Catches a script that declares a shebang but cannot be executed — the failure that let the
+      # documented `tools/publish-nx-tools/publish.sh` invocation die on Permission denied while CI, which
+      # calls it through `bash`, stayed green. Same dependency-free constraint as the checker above.
+      - name: Check script modes
+        run: node tools/check-script-modes/check.mjs
 
       # Catches the failure class that silently disabled 18 skills: unparseable SKILL.md frontmatter, a
       # plugin.json that does not satisfy the schema, a malformed marketplace manifest.
