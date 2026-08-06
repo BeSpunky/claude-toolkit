@@ -35,6 +35,9 @@
 #                       derived from the payload's package.json rather than hardcoded here. This is the
 #                       user-visible promise ("a sync installs the current house tooling") asserted directly,
 #                       so a future refactor cannot quietly render a sequence that installs nothing.
+#   one author per flag
+#                     — no `nx g` line may pass the same flag twice. See `assert_one_author_per_flag` below
+#                       for why the interesting half of that is invisible to a human reading the line.
 #
 # HONEST LIMIT: a backtick around a command that EXISTS and SUCCEEDS (`date`, `pwd`) is still silently
 # substituted into the comment and this will not catch it. It catches every failing one, which is every
@@ -83,6 +86,89 @@ FAILED=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILED=1; }
 
+# assert_one_author_per_flag <label> <rendered program> — every flag on a generator invocation has exactly
+# one author.
+#
+# WHY THIS IS NOT JUST "GREP FOR A REPEATED WORD". A generator invocation in the rendered program is a
+# concatenation of a literal command and one or more shell variables that are filled in LATER, when the
+# program runs:
+#
+#     yarn nx g @bespunky/nx-tools:devcontainer --name=x --nodeMajor=22$DC_LAYER_FLAGS --firebase=true
+#
+# That line passed `--firebase=true` TWICE — once literally, and once from `$DC_LAYER_FLAGS`, which the
+# program had assembled from layer detection forty lines earlier. Nx coerces a repeated flag to an array,
+# the array fails a `boolean` schema, the generator exits 1, and `set -e` takes every generator after it
+# down with it (`0.29.0`, `--firebase` scaffolds, reported to the user as `SYNC_FAILED`). Nothing about the
+# line looks wrong: you cannot see the duplicate without knowing what the variable expands to, and no
+# reader of a diff knows that. `nx g` itself is the only other thing that ever checks, and it checks in
+# someone else's project.
+#
+# So the check RESOLVES THE VARIABLES rather than reading the line. Every `VAR=…--flag…` assignment in the
+# rendered program declares what that variable can emit; a generator line that names the variable AND
+# spells the same flag out has two authors for one fact. That is derived from the program itself — no list
+# of flag names lives here, so a flag added tomorrow is covered on the day it is added.
+assert_one_author_per_flag() {
+  local label="$1" out="$2" violations
+  violations="$(awk '
+    # Pass 1 — what can each run-time flag accumulator emit?  `V=" --a=1"` and `V="$V --b=2"` both count.
+    # Statement-by-statement, not line-by-line: these assignments live inside one-line conditionals
+    # (`if layer_active web; then DC_LAYER_FLAGS=" --web=true"; else …; fi`), so nothing useful is anchored
+    # to the start of a line.
+    {
+      stmt = $0; gsub(/&&|\|\|/, ";", stmt)
+      m = split(stmt, part, ";")
+      for (p = 1; p <= m; p++) {
+        s = part[p]
+        sub(/^[[:space:]]*/, "", s)
+        while (sub(/^(if|then|else|elif|do|fi|done|local|export|declare)[[:space:]]+/, "", s)) ;
+        if (s !~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
+        var = s; sub(/=.*/, "", var)
+        rest = s
+        while (match(rest, /--[A-Za-z][A-Za-z0-9-]*/)) {
+          emits[var, substr(rest, RSTART + 2, RLENGTH - 2)] = 1
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+      }
+    }
+    # Pass 2 — held until the end, because an accumulator may be assigned below the line that uses it.
+    /nx g / { gen[++n] = $0; lineno[n] = FNR }
+    END {
+      for (i = 1; i <= n; i++) {
+        line = gen[i]
+        # The flags spelled out literally on the invocation, and the variables it interpolates.
+        delete literal; delete refs
+        rest = line
+        while (match(rest, /--[A-Za-z][A-Za-z0-9-]*/)) {
+          f = substr(rest, RSTART + 2, RLENGTH - 2)
+          if (f in literal) report(lineno[i], f, "spelled out twice on the same line", line)
+          literal[f] = 1
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+        rest = line
+        while (match(rest, /\$\{?[A-Za-z_][A-Za-z0-9_]*/)) {
+          v = substr(rest, RSTART, RLENGTH); sub(/^\$\{?/, "", v)
+          refs[v] = 1
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+        for (v in refs)
+          for (f in literal)
+            if ((v, f) in emits)
+              report(lineno[i], f, "spelled out literally AND emitted by $" v, line)
+      }
+    }
+    function report(ln, flag, how, line) {
+      printf "line %d: --%s %s\n           %s\n", ln, flag, how, line
+    }
+  ' "$out")"
+
+  if [ -z "$violations" ]; then
+    ok "$label — every generator flag has exactly one author"
+  else
+    fail "$label — a generator flag is passed twice (nx coerces it to an array and rejects it):"
+    printf '%s\n' "$violations" | sed 's/^/         | /'
+  fi
+}
+
 # render <label> <flags…> — renders one arm and asserts everything above about it.
 #
 # stdout is the program, stderr is scaffold.sh's own commentary; they are captured SEPARATELY because the
@@ -129,6 +215,8 @@ render() {
   else
     fail "$label — rendered program never mentions the payload version $PAYLOAD_VERSION"
   fi
+
+  assert_one_author_per_flag "$label" "$out"
 }
 
 # `scaffold` mode resolves a BARE project name under PROJECTS_DIR and refuses a directory that already
@@ -146,6 +234,9 @@ render 'sync --ensure=agent'    --sync --yes --ensure=nx,agent "$FIX"
 render 'sync --firebase'        --sync --yes --firebase --ensure=firebase "$FIX"
 render 'scaffold'               "newproj"
 render 'scaffold --firebase'    --firebase --staging "newproj" "myapp"
+# --voice is a second opt-in that reaches the devcontainer generator by the same route as --firebase, and it
+# was broken by the same duplicate-author bug — undetected, because no arm had ever rendered it.
+render 'scaffold --voice'       --voice "newproj"
 render 'scaffold --local'       --local "newproj"
 
 if [ "$FAILED" -eq 0 ]; then

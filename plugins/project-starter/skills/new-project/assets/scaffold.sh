@@ -615,19 +615,26 @@ fi
 [ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (WSLg audio bridge + espeak-ng + bespunky-voice plugin — WSL-only)"
 
 # --- devcontainer generator args ---
-# Append (never overwrite) so --firebase and --voice compose in either order. The LAYER flags are resolved at
-# run time (they depend on detection), so they are appended inside the rendered sequence, not here.
-# SCAFFOLD-TIME ONLY. On a scaffold the flags ARE the truth: nothing exists yet to detect, so --firebase
-# and --voice are the whole instruction. On a SYNC they are not — see DC_LAYER_FLAGS in the rendered
-# sequence, which resolves these from the workspace itself. Passing the flags on a sync is what silently
-# stripped the Firebase devcontainer: /sync deliberately adds no flags of its own, so an ordinary sync told
-# the generator firebase=false about a project whose firebase layer was detected and refreshed moments
-# later — removing the Firebase CLI, the gcloud feature, vsfire, and every forwarded emulator port.
-DEVCONTAINER_FLAGS=""
-if [ "$MODE" = "scaffold" ]; then
-  [ "$FIREBASE" = "1" ] && DEVCONTAINER_FLAGS="$DEVCONTAINER_FLAGS --firebase=true"
-  [ "$VOICE" = "1" ]    && DEVCONTAINER_FLAGS="$DEVCONTAINER_FLAGS --voice=true"
-fi
+# The devcontainer's layer flags have exactly ONE author: DC_LAYER_FLAGS, resolved at run time from
+# layer detection inside the rendered sequence. Nothing is appended here, in either mode.
+#
+# There used to be a second, scaffold-only author (DEVCONTAINER_FLAGS) that translated --firebase/--voice
+# into generator flags directly, on the reasoning that a scaffold has nothing to detect yet so the flags ARE
+# the truth. It was correct for as long as it was the ONLY author. 5607eb3 ended that: it added the
+# `layer_active firebase` branch to DC_LAYER_FLAGS without retiring the flag-driven one, so from that commit
+# both fired. `nx g` saw --firebase=true twice, coerced it to an array, and rejected it against a boolean
+# schema; under `set -e` that took down every generator AFTER the devcontainer - claude-settings,
+# window-identity, playwright, shared-browser, worktree-domains, angular-ai, design-system, house-doc, and
+# the scaffold's own final `git commit`. Two authorities for one fact is the bug; one is the fix.
+#
+# THE LESSON, because it generalizes past this flag: adding a DETECTION-driven author for a fact must RETIRE
+# the flag-driven one in the same commit. render.test.sh now asserts it mechanically - no `nx g` line may
+# both name a flag variable and spell out a flag that variable can emit.
+#
+# The two inputs are covered where they belong:
+#   firebase - through ENSURE_LAYERS, which the --firebase flag populates (see the ensure-set assembly).
+#   voice    - through _dc_voice in the rendered sequence, which interpolates VOICE directly and also
+#              carries a previous answer forward from the ownership marker.
 
 # --- Firebase opt-in plumbing ---
 #   Scaffold mode: the house `app` generator owns the per-app Firebase wiring; we just tell it
@@ -1397,7 +1404,7 @@ if layer_active agent; then
     grep -q '\"voice\"[[:space:]]*:[[:space:]]*true' .devcontainer/.bespunky-devcontainer.json 2>/dev/null && _dc_voice=1
   fi
   if [ \"\$_dc_voice\" = '1' ]; then DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --voice=true\"; fi
-  $PM_EXEC nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR\$DC_LAYER_FLAGS$DEVCONTAINER_FLAGS
+  $PM_EXEC nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR\$DC_LAYER_FLAGS
   $PM_EXEC nx g @bespunky/nx-tools:claude-settings
   # The window identity — an emoji + a quiet, project-coloured status band in .vscode/settings.json, so this
   # project's VSCode window is distinguishable from every other open window. Runs BEFORE the design system, so
