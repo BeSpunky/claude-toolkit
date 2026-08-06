@@ -15,7 +15,7 @@
     "bespunky-vscode-identity@claude-toolkit": true,
     "bespunky-communication@claude-toolkit": true
   },
-  "outputStyle": "Pitch to the listener",
+  "outputStyle": "bespunky-communication:Pitch to the listener",
   "extraKnownMarketplaces": {
     "nx-claude-plugins": {
       "source": {
