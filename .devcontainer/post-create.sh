@@ -243,43 +243,68 @@ if grep -q '"@angular/core"' package.json 2>/dev/null; then
   fi
 fi
 
-# --- 6. Shared-browser prerequisites (ALWAYS-ON — provisioned in EVERY BeSpunky devcontainer) ---
-# The claude-toolkit "shared-browser" capability (tools/shared-browser, started ON DEMAND)
-# runs a headed Chromium on a virtual X display and streams it to the human over noVNC on a port
-# ALLOCATED from the 6080-6119 band (so parallel containers never contend for one host port — the URL
-# is printed by `shared-browser up`). The stack starts lazily, but its OS deps are installed ALWAYS —
-# so any container can
-# co-drive a browser with no rebuild. Deps: x11vnc (VNC server) + novnc/websockify (the
-# noVNC web client + WS↔TCP bridge) + fluxbox (a minimal WM so Chromium gets a window frame)
-# + fonts (liberation + color-emoji so rendered pages and screenshots look right). Also procps
-# (sysctl) — the worktree-domains proxy (tools/worktree-domains) lowers this container's
-# net.ipv4.ip_unprivileged_port_start so its Node reverse proxy can bind the privileged :80 as
-# the non-root `node` user, giving each worktree a pretty http://<slug>.localhost/ domain.
+# --- 6. The OS floor (ALWAYS-ON — provisioned in EVERY BeSpunky devcontainer) ---
+# The apt packages every BeSpunky devcontainer carries, whatever it is a devcontainer FOR.
+#
+# It was named "shared-browser prerequisites" while it already installed `curl`, `procps` and
+# `iproute2` — a name narrower than its own contents, which is exactly how the next always-on
+# package ends up somewhere it does not belong (or as a third copy of the retry loop below). So the
+# step is named for what it IS: one apt transaction, one list, grouped BY CAPABILITY so a reader can
+# tell why any given package is here and delete it with the capability it serves.
 #
 # UNCONDITIONAL by design: this fires on every scaffold — it is NOT gated on --firebase,
 # @playwright/test, or any other flag (unlike steps 3–5). Best-effort with retry: apt mirrors
 # and cdn.playwright.dev are both occasionally flaky over WSL+Docker DNS, so a transient
 # failure must only WARN — never abort post-create (set -e) and leave the container
 # half-provisioned (same stance as the Playwright and Angular-skills steps above).
-echo "[post-create] provisioning shared-browser prerequisites (xvfb/x11vnc/novnc/websockify/fluxbox/fonts + Chromium)"
-sb_apt_ok=0
+#
+# An ARRAY, not a literal argument list, so each group can carry its own comment and the
+# hand-recovery command printed on failure is DERIVED from the same list rather than retyped —
+# a re-run instruction that has drifted from what the step installs is worse than none.
+OS_FLOOR_PACKAGES=(
+  # Shared browser (tools/shared-browser — installed ALWAYS, started ON DEMAND): a headed Chromium
+  # on a virtual X display, streamed to the human over noVNC on a port ALLOCATED from the 6080-6119
+  # band (so parallel containers never contend for one host port — the URL is printed by
+  # `shared-browser up`). xvfb = the display; x11vnc = the VNC server; novnc + websockify = the web
+  # client and its WS↔TCP bridge; fluxbox = a minimal WM so Chromium gets a window frame; fonts
+  # (liberation + colour-emoji) so rendered pages and screenshots look right.
+  xvfb x11vnc novnc websockify fluxbox fonts-liberation fonts-noto-color-emoji
+  # Durable shells. A tmux session outlives the client attached to it, which is the ONLY way an
+  # interactive shell opened into this container from the outside survives its opener restarting:
+  # the Docker Engine API has no endpoint to re-attach to an existing exec, so a bare exec's process
+  # survives but its terminal does not. With tmux that costs a redraw; without it every open shell
+  # dies. No config file and no /etc/tmux.conf is written on purpose — a caller passes its own
+  # options explicitly, and a house default set with `set-option -g` would apply SERVER-wide, i.e.
+  # to whatever the human is running in this container too. Presence on PATH is the whole contract.
+  tmux
+  # General utilities the house tooling shells out to. procps supplies `sysctl`, which the
+  # worktree-domains proxy (tools/worktree-domains) uses to lower this container's
+  # net.ipv4.ip_unprivileged_port_start so its Node reverse proxy can bind the privileged :80 as the
+  # non-root `node` user, giving each worktree a pretty http://<slug>.localhost/ domain. iproute2
+  # supplies `ss` for the port probes; curl for the fetches.
+  iproute2 procps curl
+)
+echo "[post-create] provisioning the OS floor (shared browser, tmux, utilities)"
+floor_apt_ok=0
 for attempt in 1 2 3; do
-  if sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 procps curl fonts-liberation fonts-noto-color-emoji; then
-    sb_apt_ok=1; break
+  if sudo apt-get update && sudo apt-get install -y "${OS_FLOOR_PACKAGES[@]}"; then
+    floor_apt_ok=1; break
   fi
   if [ "$attempt" -lt 3 ]; then
-    echo "[post-create] shared-browser apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+    echo "[post-create] OS floor apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
     sleep $((attempt * 10))
   fi
 done
-if [ "$sb_apt_ok" = 1 ]; then
-  echo "[post-create] shared-browser apt deps ready"
+if [ "$floor_apt_ok" = 1 ]; then
+  echo "[post-create] OS floor ready ($(tmux -V 2>/dev/null || echo 'tmux missing'))"
 else
-  echo "[post-create] WARNING: shared-browser apt deps failed after 3 attempts — likely a transient network issue."
-  echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
-  echo "[post-create]            sudo apt-get update && sudo apt-get install -y xvfb x11vnc novnc websockify fluxbox iproute2 procps curl fonts-liberation fonts-noto-color-emoji"
+  echo "[post-create] WARNING: OS floor apt deps failed after 3 attempts — likely a transient network issue."
+  echo "[post-create]          The container is otherwise ready, but the shared browser and durable"
+  echo "[post-create]          (tmux-backed) terminals are NOT available until this one step completes:"
+  echo "[post-create]            sudo apt-get update && sudo apt-get install -y ${OS_FLOOR_PACKAGES[*]}"
 fi
 
+# The one always-on prerequisite that is NOT an apt package, so it sits outside the list above.
 # Ensure a Playwright Chromium binary exists for the shared browser to launch (the CLI resolves
 # it at runtime via whichever of playwright / playwright-core / @playwright/test is installed).
 # Step 4 already fetched it when @playwright/test is in package.json — so here we only install
