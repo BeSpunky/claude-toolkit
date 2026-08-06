@@ -2,6 +2,12 @@
 
 **Slug:** `devcontainer-features` · **Opened:** 2026-08-06
 
+> ⚠️ **SECTIONS 1–8 DESCRIBE A DESIGN THAT WAS BUILT, REVIEWED, AND REVERSED.** They are kept
+> verbatim as the trail — the reasoning below is what a five-agent adversarial review demolished, and
+> reading it is the point. **The design that shipped is in §9.** Do not take §1–§8 as current guidance;
+> in particular §3.1's adoption argument is *wrong*, and §2's "what stays" table is answering a
+> question that turned out not to be the deciding one.
+
 ## 0. This re-opens a thread the previous effort deliberately left open
 
 `docs/features/2026-08-06-devcontainer-tmux/DECISION.md` closed the feature-vs-apt seam on the JDK
@@ -150,3 +156,96 @@ Plus the repo's own gates: `check-script-modes`, `check-release-invariants`, `te
 **Not built, and worth its own effort:** this ran from a scratch harness, so it is *evidence*, not a
 regression test. The repo has no generator-level test harness (`tools/test-scaffold` only covers
 `scaffold.sh`'s refusals), and adding one is more than this effort's scope.
+
+---
+
+# §9. THE DESIGN THAT SHIPPED — one feature, and it does not install anything
+
+Everything above was built, verified at the file level, and then put through a five-agent adversarial
+review at the user's request: *"Send agents to review, highly critic and sanity check your work"* and
+*"Have them challenge your assumptions, designs, implementation."* The review found fourteen confirmed
+defects and, more importantly, refuted the premise. The user's call was one word: **"rework the branch."**
+
+## 9.1 The premise was wrong — a feature CAN chain the house script
+
+§3.1 argued that features are worth it because *"a `features` entry survives adoption by construction,
+whereas the house post-create script is written beside the project's own and never chained."* The second
+half is false. The spec:
+
+> "Commands provided by Features are always executed *before* any user-provided lifecycle commands
+> (i.e: in the `devcontainer.json`)."
+
+A feature may declare `postCreateCommand`, and it is **additive** — it does not replace the project's.
+So one feature that simply chains `.devcontainer/post-create.bespunky.sh` closes the adoption hole for
+**every** house capability: workspace deps, the Claude plugin pre-install, the apt floor, Playwright, the
+Firebase JDK.
+
+What §1–§8 built closed it for **two of roughly eight**, and never said so. The "Stays" table in §2 lists
+four capabilities and does not note that each remains exactly as silently broken under adoption as before
+the effort. That is the failure: not a bug, a *justification that would have misled the next reader into
+thinking the problem was solved.*
+
+## 9.2 The second reason, which the user found by asking the right question
+
+> "Without devcontainer features, does our `/sync` command allow upgrades without rebuilds?"
+
+Partly, and the part that works is the part features would have destroyed. A sync rewrites
+`post-create.sh` but never runs it (nothing in `scaffold.sh` does), so workspace files land immediately
+while container provisioning waits. But **`post-create.sh` is re-runnable by hand** — that is already the
+documented recovery (`serve`'s missing-dependency hint says `bash .devcontainer/post-create.sh`). So
+`/sync` plus one command upgrades provisioning with no rebuild.
+
+A feature's `install.sh` runs **only during the build, in a content-addressed cached layer**. It cannot be
+re-run in place, and a rebuild is a cache hit that re-runs nothing. Moving the apt floor into a feature
+therefore traded away upgrade-without-rebuild — a cost §3.2 recorded only as a benefit ("rebuilds stop
+re-running the apt transaction").
+
+## 9.3 What shipped
+
+**One feature, `bespunky-house-setup`, which installs nothing.** Its entire content is a
+`postCreateCommand` that runs `.devcontainer/post-create.bespunky.sh` when that file exists. Written
+unconditionally, on the owned and adopted paths alike: in an owned project the beside-path does not exist
+and the command no-ops; in an adopted one it is the thing that makes house setup run at all.
+
+Everything else went back where it was. The OS floor and the voice engine are apt steps in
+`post-create.sh` again; the voice mount and `PULSE_SERVER` are back in `devcontainer.json`.
+
+**Plus one genuine bug fix that survived review** — see §7. It is kept because the chain feature depends
+on it (a feature's value is `{}`), but it is implemented differently: the reverted attempt relaxed the
+guard by *depth* (`path.length === 1`), which review showed also affects `conflict()` and silently
+flattens a deliberate feature version pin to `{}` on an owned devcontainer. The policy is now **named**
+rather than encoded as a depth.
+
+**Deliberately not reintroduced: `retireFeature`.** It deleted a hand-written
+`.devcontainer/features/<id>/` from repos this generator had never touched, and deleted the folder while
+leaving a live reference whenever `devcontainer.json` failed to parse — logging *"(nothing referenced
+it)"*. The new feature is unconditional, so there is nothing to retire and the folder and the reference
+cannot disagree.
+
+## 9.4 The migrations question, asked again for the new shape
+
+**Nothing to migrate**, and this time the answer is small because the change is. The feature is a new
+folder with no prior shape to retire; the merge-guard fix re-asserts itself on the next sync; nothing
+moved, was renamed, or was dropped. The 0.31.0 migration written for the old design is deleted with it.
+
+## 9.5 What the review cost, and what it was worth
+
+Fourteen confirmed defects, of which three destroyed user data (the migration's editor silently ate the
+*neighbouring* entry's comment; the comment sweep deleted any block containing "pulseaudio" anywhere in
+the file, including one marked `DO NOT REMOVE`; `retireFeature` as above). Two more broke this very
+branch: this repo's own marker says `voice: false`, so the next `/sync` would have deleted the voice
+feature three commits after it was added.
+
+**The verification in §8 did not catch any of them, and it is worth being precise about why.** It ran the
+real generator and the real migration and asserted on real files — but every scenario it exercised was one
+the author had already thought of. It never ran the retirement path, never fed the migration a comment it
+did not expect, and could not have discovered that the spec permits `postCreateCommand` on a feature. A
+harness confirms the cases you imagine; it cannot supply the ones you didn't.
+
+## 9.6 Found in passing — NOT fixed here (unrelated)
+
+`src/generators/shared-browser/shared-browser.tpl`'s `preflight_deps` failure message carries its own
+hand-typed copy of the apt list, already drifted: it names `util-linux` (never installed) and omits
+`procps`, `tmux` and both font packages. This is the same drift class that was fixed in the `serve`
+executor at `dae4194`, in the sibling file one directory over. Pre-existing and unrelated to this effort,
+so it belongs in its own worktree.

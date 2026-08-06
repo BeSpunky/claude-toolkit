@@ -14,6 +14,25 @@
     "ghcr.io/devcontainers/features/github-cli": {},{{#firebase}}
     "ghcr.io/devcontainers-extra/features/firebase-cli": {},
     "ghcr.io/jajera/features/gcloud-cli": {},{{/firebase}}
+    // The one LOCAL feature. An id that starts with `./` is a PATH resolved from the folder holding THIS
+    // file, so this names `.devcontainer/features/bespunky-house-setup/` — written by the same generator
+    // that writes this file, from templates that ship inside @bespunky/nx-tools. Nothing is published to a
+    // registry, nothing is downloaded at build time, and there is no second version surface: the feature
+    // travels with the payload and is versioned by it.
+    //
+    // IT INSTALLS NOTHING. Its whole content is a `postCreateCommand` that chains
+    // `.devcontainer/post-create.bespunky.sh` when that file exists — which is where the generator parks
+    // the house setup script in a project that already had a `postCreateCommand` of its own. Without this
+    // entry that script is written and never called, so every house capability (workspace deps, the Claude
+    // plugin pre-install, the apt floor, Playwright, the Firebase JDK) silently never installs there.
+    //
+    // WHY A FEATURE AND NOT A post-create STEP: feature lifecycle commands are ADDITIVE — the spec runs
+    // them BEFORE any command declared in this file, never instead of it — and the generator's additive
+    // merge ADDS a missing `features` sub-key to a devcontainer it doesn't own. So this is the one key that
+    // can run something in an adopted project without displacing what that project already runs. In a
+    // project we DO own the beside-path doesn't exist and the command no-ops, which is why it is written
+    // unconditionally: the folder and this reference can then never disagree.
+    "./features/bespunky-house-setup": {},
     // Note: the JDK required by the Firebase emulators (Firestore / RTDB / Storage all run
     // on the JVM) is installed via apt in .devcontainer/post-create.sh — NOT as a
     // devcontainer feature. The canonical `ghcr.io/devcontainers/features/java` is

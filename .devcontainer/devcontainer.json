@@ -10,7 +10,18 @@
 
   "features": {
     "ghcr.io/devcontainers-extra/features/claude-code": {},
-    "ghcr.io/devcontainers/features/github-cli": {}
+    "ghcr.io/devcontainers/features/github-cli": {},
+    // A LOCAL feature — a `./`-prefixed id is a path resolved from this file's own folder, not a registry
+    // reference, so nothing is published, versioned separately, or downloaded. It installs nothing: its
+    // whole content is a `postCreateCommand` that runs `.devcontainer/post-create.bespunky.sh` IF that file
+    // exists.
+    //
+    // Here it is a deliberate NO-OP — this repo's `postCreateCommand` below already runs the house script
+    // under its usual name, so the beside-path does not exist and the guard is false. It is carried anyway
+    // because that is the point of the mechanism: the day this file grows a `postCreateCommand` of its own,
+    // the generator parks the house script at the beside-path and this feature is what still runs it.
+    // Feature lifecycle commands are ADDITIVE — they run before the project's own, never replacing it.
+    "./features/bespunky-house-setup": {}
   },
 
   "customizations": {
