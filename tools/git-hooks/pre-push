@@ -51,6 +51,11 @@ while read -r local_ref local_sha remote_ref _remote_sha; do
     if [ -f "$workdir/tools/check-release-invariants/check.mjs" ]; then
       node "$workdir/tools/check-release-invariants/check.mjs" || status=$?
     fi
+    # Same temp worktree, second invariant: a shebang that cannot be executed. Guarded on presence for the
+    # same reason as above — a branch predating this checker must not be refused by it.
+    if [ -f "$workdir/tools/check-script-modes/check.mjs" ]; then
+      ( cd "$workdir" && node tools/check-script-modes/check.mjs ) || status=$?
+    fi
     git worktree remove --force "$workdir" >/dev/null 2>&1
   else
     rmdir "$workdir" 2>/dev/null
