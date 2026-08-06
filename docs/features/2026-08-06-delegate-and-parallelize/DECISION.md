@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-08-06
+summary: New bespunky-workflow skill delegate-and-parallelize + its always-on directive — the session orchestrates and subagents do the work, recursively, with supervision, resumable ledgers, and isolation as a judgment.
+tags: [skill, workflow, subagents, parallelism, always-on-directive, resumability]
+---
+
 # Decision — `delegate-and-parallelize`
 
 A new `bespunky-workflow` skill plus its always-on directive: the session orchestrates, subagents do the work, recursively.
