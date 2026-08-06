@@ -118,3 +118,35 @@ and reported with the command that resolves them.
 
 Payload bumps `0.30.2` → **`0.31.0`** (a new capability, not a patch), which is also the ceiling the
 migration's version must sit under.
+
+## 7. A pre-existing bug this exposed
+
+`mergeIntoExisting`'s `write()` skipped **any** empty container as noise — and a devcontainer feature's
+value *is* `{}`. So in any project that already declared a `features` map of its own, **every** house
+feature was silently dropped: not just the new ones, but `claude-code` and `github-cli` too, and without
+even reaching the adoption report. The guard now applies at the top level only, where its original
+rationale (`"forwardPorts": []` says less than an absent key) actually holds. Affected projects heal on
+their next sync; no migration is owed, because the generator re-asserts it.
+
+## 8. How this was verified
+
+Not by inspection. The real templates were run through the real generator and the real migration against
+Nx `FsTree`s in throwaway workspaces, asserting on what landed on disk:
+
+- **Greenfield, voice on** — both feature folders written, `install.sh` at `0755`, both entries present,
+  and *no* live `PULSE_SERVER` or `/mnt/wslg` left in `devcontainer.json`, with the feature carrying all
+  three declarations instead.
+- **Greenfield, voice off** — `os-floor` written, voice folder and entry absent.
+- **Adoption** — a foreign `devcontainer.json` with its own `features` map and its own
+  `postCreateCommand`: their feature and command survive, `./features/os-floor` *and* `claude-code` are
+  merged in (the bug above), the feature folder is written anyway, and the house script parks at
+  `post-create.bespunky.sh`.
+- **Migration** — clears the house mount and `PULSE_SERVER` and sweeps the orphaned WSLg comment; leaves
+  an unrelated mount; leaves everything untouched when the marker says voice is off; leaves a non-house
+  `PULSE_SERVER` and reports it; and is idempotent on a second run.
+
+Plus the repo's own gates: `check-script-modes`, `check-release-invariants`, `test-scaffold`.
+
+**Not built, and worth its own effort:** this ran from a scratch harness, so it is *evidence*, not a
+regression test. The repo has no generator-level test harness (`tools/test-scaffold` only covers
+`scaffold.sh`'s refusals), and adding one is more than this effort's scope.
