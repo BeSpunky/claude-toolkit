@@ -1,6 +1,13 @@
+---
+status: concluded
+concluded: 2026-08-06
+summary: publish.sh was committed non-executable so its only documented invocation failed; fixed as a class across six files and machine-checked so the sweep never has to be re-run by hand.
+tags: [tooling, file-modes, ci, release-invariants, guardrails]
+---
+
 # DECISION — the exec bit on scripts that declare a shebang
 
-**Slug:** `script-exec-bits` · **Branch:** `fix/script-exec-bits` · **Opened:** 2026-08-06 · *(status stamped at the merge gate)*
+**Slug:** `script-exec-bits` · **Branch:** `fix/script-exec-bits` · **Opened:** 2026-08-06 · **Concluded:** 2026-08-06
 
 Found in passing during `2026-08-06-devcontainer-tmux`; the user's follow-up was **"Fix that publish error"**,
 so it was taken as its own effort rather than piled onto that branch.
