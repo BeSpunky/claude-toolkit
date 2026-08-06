@@ -1,7 +1,7 @@
 ---
 name: delegate-and-parallelize
 description: >-
-  The session is an ORCHESTRATOR, not a worker — delegate the work to subagents and run the independent parts at the same time, recursively, instead of grinding through it serially in the main thread. Use at the START of any request with more than one moving part, and the moment you catch yourself about to read a fifth file, grep the repo "just to check", audit N call sites, review a diff across several dimensions, research several options, or run a long build/test sweep in the main thread — and again whenever a task turns out to have independent pieces mid-flight. The core move — **decompose the goal into units, map the dependencies between them, and delegate every unit that isn't atomic; an agent that receives a still-decomposable unit decomposes it AGAIN, recursively, until a unit is atomic, trivial, strictly serial, or contended.** Two costs are paid by the same mistake of working inline: **CONTEXT** (every file dump and log in the main thread is permanent, and permanent cost is what forces compaction, which degrades every turn after it — a subagent reads forty files and hands back fifteen lines) and **WALL-CLOCK** (independent units run at once, so the cost is the slowest unit, not their sum). So the default is INVERTED: you do not delegate when the work is big, you work inline only when delegating would cost more than it saves. Three tiers — inline, subagents (`Agent`, the everyday tier, freely spawnable and recursively self-spawning), and `Workflow` (deterministic multi-stage orchestration, which needs the user's explicit opt-in). What makes or breaks it is the **delegated-task contract**: a subagent shares NONE of your context, so its prompt must be self-contained and must specify the RETURN SHAPE — a distillation, never a transcript, or you paid the context anyway and gained nothing. And spawning is not finishing: **a parent NEVER exits while a child it spawned is still running** — it waits, checks on long-running children periodically (silence reads the same whether an agent is working or wedged), does independent work between checks rather than idling, and accounts for every child before it closes, stopping deliberately any whose answer no longer matters. Ending a turn with agents in flight leaves ZOMBIES: work burning tokens toward a result nobody will read, edits landing in a tree whose owner already declared it done. And the tree must OUTLIVE the session that started it: a crash, a dropped connection, a deliberate or mistaken stop, a permissions error, a container rebuild all evaporate the orchestrator's context — so **nothing is dispatched before the plan is on disk**, and every state change is written as it happens into a resumable LEDGER in the effort's package (stable unit ids, per-unit status, the returned distillations stored INLINE rather than as references to agents that no longer exist, any `Workflow` runId verbatim since resume is impossible without it, and what was NOT covered). Every agent at every depth leaves traces — durable output written to disk first and merely summarized in its return value, its own ledger if it fanned out, and mutations announced — so a fresh session resumes the outstanding work instead of re-running the expensive work that already succeeded. Also covers the recursion's termination conditions, write-contention isolation (parallel writers need separate files or separate worktrees), what you must NEVER delegate (the decision, the user's intent, the final synthesis, the human-gated git promotions), and why agent findings are verified rather than believed. An expression of `bespunky-engineering:architect-mentality` — *work smart not hard*, *concentrate complexity so the edges stay simple*, *automate every repeated process*.
+  The session is an ORCHESTRATOR, not a worker — delegate the work to subagents and run the independent parts at the same time, recursively, instead of grinding through it serially in the main thread. Use at the START of any request with more than one moving part, and the moment you catch yourself about to read a fifth file, grep the repo "just to check", audit N call sites, review a diff across several dimensions, research several options, or run a long build/test sweep in the main thread — and again whenever a task turns out to have independent pieces mid-flight. The core move — **decompose the goal into units, map the dependencies between them, and delegate every unit that isn't atomic; an agent that receives a still-decomposable unit decomposes it AGAIN, recursively, until a unit is atomic, trivial, strictly serial, or contended.** Two costs are paid by the same mistake of working inline: **CONTEXT** (every file dump and log in the main thread is permanent, and permanent cost is what forces compaction, which degrades every turn after it — a subagent reads forty files and hands back fifteen lines) and **WALL-CLOCK** (independent units run at once, so the cost is the slowest unit, not their sum). So the default is INVERTED: you do not delegate when the work is big, you work inline only when delegating would cost more than it saves. Three tiers — inline, subagents (`Agent`, the everyday tier, freely spawnable and recursively self-spawning), and `Workflow` (deterministic multi-stage orchestration, which needs the user's explicit opt-in). What makes or breaks it is the **delegated-task contract**: a subagent shares NONE of your context, so its prompt must be self-contained and must specify the RETURN SHAPE — a distillation, never a transcript, or you paid the context anyway and gained nothing. And spawning is not finishing: **a parent NEVER exits while a child it spawned is still running** — it waits, checks on long-running children periodically (silence reads the same whether an agent is working or wedged), does independent work between checks rather than idling, and accounts for every child before it closes, stopping deliberately any whose answer no longer matters. Ending a turn with agents in flight leaves ZOMBIES: work burning tokens toward a result nobody will read, edits landing in a tree whose owner already declared it done. And the tree must OUTLIVE the session that started it: a crash, a dropped connection, a deliberate or mistaken stop, a permissions error, a container rebuild all evaporate the orchestrator's context — so **nothing is dispatched before the plan is on disk**, and every state change is written as it happens into a resumable LEDGER in the effort's package (stable unit ids, per-unit status, the returned distillations stored INLINE rather than as references to agents that no longer exist, any `Workflow` runId verbatim since resume is impossible without it, and what was NOT covered). Every agent at every depth leaves traces — durable output written to disk first and merely summarized in its return value, its own ledger if it fanned out, and mutations announced — so a fresh session resumes the outstanding work instead of re-running the expensive work that already succeeded. Also covers the recursion's termination conditions; **isolation as a JUDGMENT rather than a reflex** — first try to dissolve write contention entirely (many readers analysing in parallel, ONE writer applying), then prefer a single shared tree with declared path boundaries, and open a worktree per agent only when units genuinely edit the same files, are competing alternatives, or must build and test independently — with the chosen arrangement stated in the prompt and the child given authority to make the same call for its own sub-units; what you must NEVER delegate (the decision, the user's intent, the final synthesis, the human-gated git promotions); and why agent findings are verified rather than believed. **NOT for** work that is genuinely one unit, a change small enough that describing it costs more than doing it, or a strictly serial chain — fanning out there is theatre, and this skill says so. An expression of `bespunky-engineering:architect-mentality` — *work smart not hard*, *concentrate complexity so the edges stay simple*, *automate every repeated process*.
 ---
 
 # Delegate and Parallelize
@@ -58,7 +58,7 @@ So a delegated prompt should say, in as many words: *if this splits into indepen
 | Tier | Use it for | Cost | Authority |
 | --- | --- | --- | --- |
 | **Inline** (you) | Atomic and trivial units. Decisions. Synthesis. Anything the user must see reasoned. | Main-thread context — the expensive one | Always |
-| **Subagent** (`Agent`) | The everyday tier. Any unit that is decomposable, context-heavy, or independent of its siblings. Spawn several in **one message** so they run concurrently; each may spawn its own. | Cheap — its context dies with it | Freely, unless a project forbids it |
+| **Subagent** (`Agent`) | The everyday tier. Any unit that is decomposable, context-heavy, or independent of its siblings. Spawn several in **one message** so they run concurrently. Recursion depends on the **agent type** you pick: a general-purpose agent holds the Agent tool and can fan out again; a restricted read-only type cannot, so hand *it* only leaf work. | Cheap — its context dies with it | Freely, unless a project forbids it |
 | **Workflow** (`Workflow`) | Deterministic multi-stage orchestration — loops, conditionals, fan-out over a discovered work-list, pipelines with verification stages, anything that should run the same way twice. | Can be dozens of agents | **Explicit user opt-in only** — see *Authority* below |
 
 **The hybrid is usually right for large work:** scout inline or with one subagent to *discover* the work-list (which files, which call sites, which dimensions), then fan out over it. You do not need to know the shape before the task — only before the orchestration step.
@@ -85,13 +85,39 @@ The anatomy of a prompt that works, and the failure modes each part prevents, is
 
 ---
 
-## Isolation — parallel writers are the one way this corrupts things
+## Isolation — a judgment call, not a reflex
 
-Read-only fan-out is always safe; run as much of it as you like. Writes are where concurrency bites:
+Read-only fan-out is always safe; run as much of it as you like. Writes are where you have to actually *think*, and the thinking is not "worktree or not" — it is **choose the cheapest arrangement that makes the collision impossible**. There are three, and reaching for the heaviest by default is as much a mistake as ignoring the problem.
 
-- **Distinct files → fine.** State each agent's file boundary *in its prompt*. Boundaries that live only in your head are boundaries the agents will cross.
-- **Same files → not fine.** Two agents editing one file produce a file that reflects neither of them. Either serialize those units, or give each agent its own **git worktree** so they edit separate copies (`isolation: "worktree"`; it costs setup time and disk, so use it when writes genuinely collide and not by default).
-- **Same port, same server, same branch → not fine either.** See [[local-server-isolation]] — parallel agents each starting a dev server is exactly the collision that skill exists to prevent, multiplied.
+### First, try to dissolve the contention rather than manage it
+
+**Separate finding from applying.** Most "parallel writers" problems are not write problems at all: N agents *analyse* (read-only, so unlimited concurrency, no isolation of any kind) and **one** agent — often you — applies the resulting edits. Analysis is the slow, context-heavy part and it parallelizes perfectly; mutation is the fast part and it does not need to.
+
+Ask this before any isolation decision. When it works, it is strictly better than both options below: full concurrency where the cost is, no coordination overhead, no merge, no divergence. Reach for a real isolation strategy only for the writes that survive this question.
+
+### Then choose between one tree and many
+
+| | **Coordinate in ONE tree** | **A worktree each** |
+| --- | --- | --- |
+| **Use when** | Units touch **disjoint files**; the work is small; units must see each other's output to be correct (B compiles against A's new signature); integration is the hard part and you want the combined state immediately | Units genuinely edit the **same files**; they are **competing alternatives** you will choose between; each needs to **build or test independently**; one may be abandoned wholesale |
+| **You pay** | Coordination: boundaries must be declared and honoured, and one agent's broken intermediate state can fail another's test run | Setup time, disk, a dependency install per tree — and a merge back, with its own conflicts |
+| **Fails like** | Two agents edit one file; the result reflects neither | Divergent trees that each work alone and conflict together |
+
+**The default is one tree with declared boundaries**, because it is nearly free and most decompositions naturally partition by file. Escalate to worktrees when the table's right-hand column actually describes your units — not preemptively.
+
+Three consequences worth stating plainly:
+
+- **Declare every boundary in the prompt.** "You own `src/api/**`; do not edit outside it." A boundary that lives only in your head is a boundary the agents will cross, because they cannot see it.
+- **Transient breakage cross-contaminates.** In a shared tree, an agent that half-finishes a refactor makes *everyone else's* verification lie. If units must run builds or tests to know whether they succeeded, that alone is a reason to separate them.
+- **A unit big enough to need its own branch is not a unit.** It is its own effort, with its own worktree and package under [[branch-and-release]] — promote it out of the fan-out rather than nesting a feature inside one.
+
+### The decision recurses
+
+This is an orchestration judgment, so it belongs to whoever is doing the orchestrating — which, past depth 1, is the child. **State the isolation strategy in the prompt you hand down**, along with the authority to make the same call for its own children: *"you own these paths; if you fan out further, partition within them, and open worktrees only if your own sub-units collide on the same files."* A child that does not know the arrangement will invent one, and it will invent a different one than its sibling.
+
+### And the rest of the shared world
+
+- **Same port, same server → not fine.** See [[local-server-isolation]] — parallel agents each starting a dev server is exactly the collision that skill exists to prevent, multiplied by N.
 - **Git is single-threaded here.** Branching, merging, promoting, releasing — one actor, the main thread, under [[branch-and-release]]. Never fan out a promotion.
 
 ---
@@ -120,6 +146,8 @@ Delegates **gather and execute**. You **decide**. The line is not about difficul
 
 - **Still working** — leave it be.
 - **Stuck** — blocked on something that will never arrive (a prompt it cannot answer, a command waiting on input, a dependency that failed), or looping. It will never notify you, so waiting is waiting forever.
+
+**A stuck child needs a decision, not more patience.** Three moves, in order of preference: **unblock it** (send it the answer or the missing constraint, if the tier lets you message a running agent); **stop it and re-dispatch** a narrower version of the same unit, with whatever tripped it removed from its path; or **stop it and route around** — mark the unit failed in the ledger, and say in your report what that leaves uncovered. What you must not do is let it hang while the rest of the tree waits on a result that is never coming.
 
 Between checks, do the work that does not depend on them. Idle waiting is the one thing worse than serial execution: you paid for concurrency and then spent it standing still.
 
@@ -150,6 +178,8 @@ This is [[feature-package]]'s rule applied to the fan-out, for the same reason: 
 
 A crash is a **context boundary** — an involuntary one — so the ledger is a [[session-handoff]] baton in the ordinary sense, living in the effort's package: **`docs/features/<YYYY-MM-DD>-<slug>/handoffs/<ts>-fanout.md`**. Do not invent a parallel home for it; the one that exists is already the one a fresh session knows to look in.
 
+**A fan-out is never "trivial work", so it always has a package.** [[feature-package]] lets you skip the package for a typo fix — but work large enough to decompose and delegate is by definition not that, and a ledger with nowhere to live is a ledger that does not get written. If the effort has no package yet, opening one *is* the first step of the fan-out.
+
 It holds:
 
 - **The goal**, in one line — so a fresh reader knows what the tree was for.
@@ -157,7 +187,7 @@ It holds:
 - **The shape** — the dependency graph or stage layout, so resume knows what may run now and what is still blocked.
 - **Per unit: its status** — `pending` · `dispatched` · `returned` · `failed` · `stopped` — updated when it changes, not at the end.
 - **The returned result itself, inline.** Not a reference to an agent that no longer exists. A distillation that lives only as a return value dies with the orchestrator that received it.
-- **The `runId` and `scriptPath` of any `Workflow`**, verbatim. Its resume is genuinely cheap — an unchanged prefix of agent calls returns from the journal instantly — but it is *impossible* without the run id. Losing that one string converts a resumable run into a full re-run.
+- **The `runId` and `scriptPath` of any `Workflow`**, verbatim — both come back in the tool's own result, so copy them into the ledger *the moment it returns*, before you even read the findings. Its resume is genuinely cheap — an unchanged prefix of agent calls returns from the journal instead of re-running — but it is *impossible* without the run id. Losing that one string converts a resumable run into a full re-run.
 - **What is NOT covered** — caps applied, items skipped, agents that returned nothing. Resume needs the holes as much as the fills.
 
 **Commit the ledger as you go.** An uncommitted file survives a stopped turn but not a rebuilt container, and [[branch-and-release]] already asks for small committed increments — the ledger is one of them.
@@ -197,7 +227,7 @@ The user saw none of it: not the twelve agents, not the tree, not the retries. *
 
 - **Fan-out theatre.** Ten agents for a two-file change. Coordination is not free; below a certain size the delegation costs more than the work.
 - **The barrier that wanted to be a pipeline.** Waiting for all of stage 1 in order to `map`/`flatten`/`filter` it is not a cross-item dependency — do the transform inside the stage and let each item flow on.
-- **Sequential fan-out.** Spawning agents in separate messages, one per turn, and waiting on each. Independent agents go out **in a single message** or they are not parallel at all.
+- **Sequential fan-out.** Spawning one agent, awaiting it, spawning the next. It is *awaiting* each in turn that destroys the concurrency, not the message boundary itself — but batching independent agents into **one message** is the reliable way not to fall into it.
 - **Dispatching before the plan is on disk.** The gap between the first spawn and the first write is the window where an interruption costs you the plan itself.
 - **The ledger written at the end.** Then it is a memory of the run, not a record of it — and it never gets written at all, because the runs that need it most are the ones that don't reach the end.
 - **Losing the run id.** One unrecorded string turns a resume that costs almost nothing into a full re-run.
@@ -205,9 +235,7 @@ The user saw none of it: not the twelve agents, not the tree, not the retries. *
 - **Idle waiting.** Blocking on a child while independent work sits undone. You bought concurrency and then stood still holding it.
 - **The courier.** An agent whose whole output is the contents of what it read. That is a `Read` with extra steps and a worse signal-to-noise ratio.
 - **The blind orchestrator.** Fanning out before you know the work-list, so half the agents are told to look for things that do not exist. Scout first, then fan out.
-- **Fire-and-forget.** Spawning agents and ending the turn. The children keep running with nobody to receive them — zombies burning tokens toward a result that will never be read.
 - **Declaring done with children in flight.** "Everything checks out" while three verifiers are still working is a guess wearing a conclusion's clothes.
-- **Idle waiting.** Blocking on a slow child with independent work sitting untouched. You bought concurrency and then declined to use it.
 - **Delegating the part you actually needed to understand.** If the next decision depends on you having the shape of the thing in your head, reading it yourself *is* the cheap option.
 - **Silent truncation.** Capping at the top-N sites, skipping retries, sampling — fine, sometimes necessary. Saying nothing about it is not: an unstated cap reads as full coverage.
 
@@ -221,3 +249,22 @@ Delegation is a way of working, not a licence, and the two tiers differ:
 - **`Workflow` needs the user's explicit opt-in** — it can spawn dozens of agents and spend accordingly, so the user opts in, you do not opt in on their behalf. It counts as opt-in when they say so in their own words ("use a workflow", "fan out agents"), when a session-level setting says so, or **when the user invokes this skill by name** — `/bespunky-workflow:delegate-and-parallelize` *is* the request to orchestrate, and workflows are authorized for that turn.
 - **When this skill fires on its own** — because the request looked parallelizable — that is guidance, not consent. Delegate to subagents freely; for a workflow, **say what it would do and roughly what it would cost, and let them say yes.** A skill that auto-fired cannot authorize its own spending; that is laundering the opt-in, and the same reasoning is why this repo's version hook *detects and relays* rather than executes.
 - **A project can override any of this.** If the working repo's `CLAUDE.md` or house rules restrict subagents, that wins — read it as the parameter, this skill as the method.
+
+---
+
+## Related
+
+- **`bespunky-workflow:feature-package`** — where the ledger lives, and why the fan-out does not get a home of its own.
+- **`bespunky-workflow:session-handoff`** — the baton format the ledger is an instance of; a crash is just an involuntary context boundary.
+- **`bespunky-workflow:branch-and-release`** — worktrees, the single-threaded git rule, and the promotion gates a fan-out must never cross.
+- **`bespunky-workflow:local-server-isolation`** — the port collision, multiplied by every agent that starts a server.
+- **`bespunky-engineering:architect-mentality`** — *work smart not hard*, *concentrate complexity so the edges stay simple*, *automate every repeated process*: the mindset this skill is one application of.
+
+## Ask yourself
+
+- Did I decompose **before** touching a file, or am I rationalizing after five reads?
+- Is the plan on disk? Would a crash right now cost me anything I could have written down?
+- Does every prompt I sent state its **return shape** — and would the answer fit in a paragraph?
+- For the writes: did I try to **dissolve** the contention (many readers, one writer) before choosing an isolation strategy?
+- Is anything I spawned still running that I have stopped thinking about?
+- If I ended the turn now, could a fresh session pick this up — or would it have to start over?

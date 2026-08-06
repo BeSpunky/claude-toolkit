@@ -89,4 +89,6 @@ One final agent asking the question the busy ones didn't: *what is missing — a
 
 Real work stacks these. A thorough audit is often: **scout** → **multi-modal sweep** (barrier, to dedup) → **map** the fresh findings → **perspective-diverse verify** each → **loop until dry** → **completeness critic**. A design decision is often: **scout** → **judge panel** → synthesize.
 
+**A failed unit usually resolves to an empty result rather than an error.** In most fan-out tiers a thunk that throws, or an agent that dies after its retries, comes back as `null` in the results array instead of rejecting the whole batch — which is the right default, since one dead agent should not take out nineteen good ones. But it means a filtered-out failure is *invisible*: filter the empties before using results, count what you dropped, and say so. Under this skill's own rule, an unmentioned hole reads as coverage.
+
 Scale the composition to the ask. "Does this look right?" gets a couple of agents and one verification pass. "Audit this thoroughly" earns the full stack. Reaching for the full stack on a small question is its own failure — coordination is not free, and an org chart is not rigour.

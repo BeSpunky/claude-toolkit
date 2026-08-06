@@ -29,7 +29,7 @@ The second is the one that quietly makes the whole practice pointless. Guard it 
 
 > *"Return one row per call site: `file:line`, the argument it passes, and yes/no on whether it needs changing. No file contents, no code blocks, no commentary."*
 
-Where the tier supports a **schema**, use it — a schema is enforced at the tool boundary and retried on mismatch, where a sentence is merely requested.
+Where the tier supports a **schema** — a workflow's `agent()` call takes one — use it: a schema is validated at the tool boundary and the agent is made to retry on mismatch, where a sentence in a prompt is merely a request.
 
 **6 — Permission to recurse.** *"If this splits into independent parts, split it and run them concurrently yourself."* Without this, a child does a decomposable job serially and you lose a whole level of parallelism.
 
@@ -73,7 +73,8 @@ Blank-slate agent, unbounded scope, no anchors, no return shape. It will read br
 
 - **Agent type** — use a specialized one where it fits (read-only search agents for sweeps, planning agents for design). Specialized agents come with narrower tools, which is a *feature*: an agent that cannot write cannot accidentally write.
 - **Model and effort** — inherit by default. Override only when you are confident the tier is wrong for the task: cheap and mechanical goes down, a genuinely hard verification or judgment goes up. Unsure means omit.
-- **Isolation** — a git worktree per agent when parallel writers would collide on the same files. It costs setup time and disk, so it is for genuine collision, not routine safety.
+- **Recursion capability is a property of the type.** A general-purpose agent can fan out again; a restricted read-only type cannot spawn anything. Hand a decomposable unit to something that can actually decompose it, and give leaf work to the narrow types.
+- **Isolation** — decided per fan-out, not per habit: try to dissolve the contention first (many readers, one writer), then a shared tree with declared path boundaries, and a worktree each only when units genuinely collide, compete, or must build independently. **Whichever you choose, say so in the prompt** — including the child's authority to make the same call for its own sub-units.
 
 ---
 

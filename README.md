@@ -320,8 +320,8 @@ non-Angular repo is not handed the redesign directive, and a non-web repo is not
 
 **Existing projects** that install the plugins should paste the canonical directives below into their
 `CLAUDE.md` (or run `/sync` and let the scaffolder generate both files), so the mindset, the rule, the
-redesign discipline, and the design-system discipline are always in context — each is an always-on directive
-paired with the depth of its skill:
+redesign discipline, the design-system discipline, the packaging rule, and the delegation discipline are
+always in context — each is an always-on directive paired with the depth of its skill:
 
 ```markdown
 ## Architect mentality
@@ -362,6 +362,22 @@ For the discipline in full — the loop, the promotion loop, the styling patches
 - **Coming back is a skill, not archaeology.** Returning after a gap → **`bespunky-workflow:project-standing`** (the cold front door — derives the standing from git + these packages; there is no hand-maintained status doc). Carrying one live effort into a fresh session → **`bespunky-workflow:session-handoff`** (the hot relay). A `*-auto.md` in a `handoffs/` folder is the PreCompact hook's mechanical checkpoint — distil it into a real baton, then delete it.
 
 The package answers the question the code never can: *six months from now, why was it done this way, and what did we already rule out?*
+
+## Delegate and parallelize (non-negotiable)
+
+**You are the orchestrator, not the workforce.** Working through a multi-part request serially in the main thread pays twice: **context** (everything you read inline is permanent, and permanent cost is what forces compaction, which degrades every turn after it) and **wall-clock** (independent units cost their sum instead of the slowest one). So the default is inverted — **work inline only when delegating would cost more than it saves.**
+
+- **Decompose before you touch anything.** Before the first read, grep, or edit: name the units, map the dependencies between them (none → run at once; a chain → pipeline per item; a stage that genuinely needs the *whole* previous stage → and only then a barrier), and identify which units are atomic. Like the relevance check, this is a **precondition for touching files** — context spent inline is never refunded.
+- **Delegate every unit that isn't atomic, and let the delegation RECURSE.** An agent handed a still-decomposable unit splits it again and runs the parts concurrently. Terminate only at **atomic**, **trivial** (describing it costs more than doing it), **strictly serial** (each step needs the last one's output), or **contended** (the units would fight over the same files, port, or branch). A level must *reduce* the work, not rename it; depth is 2–3 in practice.
+- **Spawn concurrent agents in ONE message** — agents you await one at a time are not parallel.
+- **A subagent shares NONE of your context**, so its prompt is self-contained (goal, binding constraints, what's already ruled out, where to look, what not to touch) and **specifies the RETURN SHAPE** — a distillation, never a transcript. An uncapped return lands the very context you delegated to avoid.
+- **A parent NEVER exits while a child it spawned is still running.** Completion notifications are the primary signal — don't busy-wait, and run an agent **synchronously** when you need its result before the next step. Notification covers the children that finish; *checking* covers the ones that don't, because silence reads identically whether an agent is working or wedged — so look in on long-running children, do independent work between looks, and give a stuck one a decision (unblock, re-dispatch narrower, or stop and route around) rather than more patience. Account for every child before you close, reporting the ones that failed and deliberately stopping any whose answer no longer matters. Ending a turn with agents in flight leaves **zombies**.
+- **Make the tree RESUMABLE — it must outlive the session that started it.** A crash, a dropped connection, a stop (deliberate or mistaken), a permissions error or a container rebuild evaporates your context and with it the plan, what's outstanding, and every result already paid for. So **nothing is dispatched before the plan is on disk**, and each state change is written *as it happens* into a ledger in the effort's package (`docs/features/<date>-<slug>/handoffs/<ts>-fanout.md` — a fan-out is never "trivial work", so it always has a package). It carries stable unit ids, per-unit status, whether each unit is safe to re-run, the returned distillations stored **inline** (a result that lives only in a context window dies with it), any Workflow **runId** verbatim (resume is impossible without it), and what was *not* covered. Commit it as you go. **Every agent at every depth leaves traces**: durable output written to disk first and only summarized in its return value, its own ledger if it fanned out, and mutations announced. On any interruption, say what's outstanding and where the ledger is.
+- **Isolation is a judgment, not a reflex.** First try to **dissolve** the contention: N agents *analyse* read-only (unlimited concurrency, no isolation needed) and **one** applies the edits — most "parallel writers" problems disappear here. For the writes that survive, prefer **one shared tree with path boundaries declared in each prompt** (a boundary that lives only in your head is one the agents will cross), and escalate to **a worktree each** only when units genuinely edit the same files, are competing alternatives, or must build/test independently — a shared tree makes one agent's half-finished refactor fail everyone else's verification. State the arrangement in the prompt you hand down, along with the child's authority to make the same call for its own sub-units.
+- **Never delegate the decision** — which design, which tradeoff, what the user meant, the final synthesis, the human-gated promotions, or anything you couldn't verify. Delegates gather and execute; you decide. What comes back is evidence, not truth — verify anchors, and verify weighty findings *adversarially*.
+- **Report the conclusion, never the org chart.** The user didn't watch the fan-out; how many agents ran is process trivia.
+
+Subagents are the free everyday tier. **Multi-agent Workflows need the user's explicit opt-in** — propose one and say roughly what it would cost; never launch one on your own authority. For the full method — the pattern catalogue, the delegated-task contract, the termination and isolation rules — invoke the **`bespunky-workflow:delegate-and-parallelize`** skill.
 ```
 
 ## Upgrade everywhere
