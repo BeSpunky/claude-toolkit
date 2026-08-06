@@ -92,5 +92,29 @@ creation.
 Hence a migration at `0.31.0` that removes those two entries — and, where the value is *not* the house
 value, leaves it and reports it rather than guessing.
 
+### Correction — the population is every existing project, not only adopted ones
+
+The paragraph above is **wrong about who is affected**, and the error is worth keeping visible because it
+is the kind that produces a migration that silently helps a minority. It assumed *owning* a devcontainer
+still means rewriting it, so an owned file would drop the retired entries by itself.
+
+It has not meant that since `1ffe9bd` (payload `0.26.0`, *"ownership re-asserts house keys, it no longer
+rewrites the file"*). `tree.write(rendered)` now happens on exactly one path — **the file does not exist
+yet**. Every other run, owned or adopted, goes through the same additive merge, which iterates the keys
+the *house* renders and only ever appends to arrays. A key the template has **stopped** rendering is
+therefore never visited, in either mode.
+
+So ownership is not the axis; *"the file already exists"* is. The migration is deliberately blind to the
+`owned` flag, and it is owed for essentially every project that ever enabled voice.
+
+### The gate the migration added, which the brief did not ask for
+
+It deletes only where the ownership marker records `flags.voice: true` — because that is the same fact
+`scaffold.sh` reads when deciding to pass `--voice=true`, so it is exactly the condition under which the
+replacement feature gets written later in the same sync. Where voice is off, no feature is written, no
+collision can arise, and the entries in `devcontainer.json` may be the only thing giving that container
+audio. Removing them there would be a guess that silently kills someone's microphone, so they are left
+and reported with the command that resolves them.
+
 Payload bumps `0.30.2` → **`0.31.0`** (a new capability, not a patch), which is also the ceiling the
 migration's version must sit under.

@@ -64,6 +64,11 @@
       "version": "0.30.2",
       "description": "Repoint the seeded `outputStyle` from the bare `Pitch to the listener` to the style's real id, `bespunky-communication:Pitch to the listener`. A plugin style is registered under `plugin:name` and the setting is looked up by exact key, so the bare name matched nothing and the house output style was never actually active. Rewrites only that exact value, and reports instead of rewriting where the project has its own output style by that name.",
       "implementation": "./src/migrations/0.30.2/namespace-seeded-output-style"
+    },
+    "retire-devcontainer-voice-wiring": {
+      "version": "0.31.0",
+      "description": "Remove the hand-placed voice wiring from devcontainer.json — the mount targeting /mnt/wslg and the house `remoteEnv.PULSE_SERVER` — now that the local `./features/voice` DevContainer feature declares both itself. Neither merge mode ever removes, so the entries survive in owned and adopted devcontainers alike, leaving two sources of truth for one capability and two mounts claiming the same bind target. Deletes only where the ownership marker records voice as on (so the feature replaces them in the same sync) and only where the value is the house value; anything else is left and reported.",
+      "implementation": "./src/migrations/0.31.0/retire-devcontainer-voice-wiring"
     }
   }
 }
