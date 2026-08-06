@@ -14,6 +14,26 @@
     "ghcr.io/devcontainers/features/github-cli": {},{{#firebase}}
     "ghcr.io/devcontainers-extra/features/firebase-cli": {},
     "ghcr.io/jajera/features/gcloud-cli": {},{{/firebase}}
+    // LOCAL features. A feature id that starts with `./` is a RELATIVE PATH resolved from the folder
+    // holding this file — so `./features/os-floor` is `.devcontainer/features/os-floor/`, written by the
+    // SAME generator that writes this file, from templates that ship inside @bespunky/nx-tools. Nothing is
+    // published to a registry, nothing is versioned separately, and nothing is downloaded at build time:
+    // they travel with the payload and are versioned by it.
+    //
+    // WHY A FEATURE RATHER THAN A post-create.sh STEP — ADOPTION. A `features` entry survives adoption by
+    // construction: on a devcontainer.json this generator does NOT own, the merge is additive and adds a
+    // missing sub-key (mergeIntoExisting(..., 'adopt')), so `./features/os-floor` lands inside the
+    // project's own `features` map and the capability installs. A post-create step survives nothing: an
+    // adopted project keeps its own `post-create.sh`, the house script is written BESIDE it as
+    // `post-create.bespunky.sh`, and nothing ever chains it — so every capability provisioned there
+    // silently never installs, with no error anywhere and nothing to see. That asymmetry is the whole
+    // reason these two capabilities moved out of the script.
+    "./features/os-floor": {},{{#voice}}
+    // Voice (WSL only) is ONE unit: the apt packages, the WSLg mount and PULSE_SERVER are all declared by
+    // the feature itself (see its devcontainer-feature.json), which is exactly why it is a feature — the
+    // three used to be split across this file and post-create.sh, which then had to INFER the flag by
+    // testing whether /mnt/wslg happened to exist. See the notes at `remoteEnv` and `mounts` below.
+    "./features/voice": {},{{/voice}}
     // Note: the JDK required by the Firebase emulators (Firestore / RTDB / Storage all run
     // on the JVM) is installed via apt in .devcontainer/post-create.sh — NOT as a
     // devcontainer feature. The canonical `ghcr.io/devcontainers/features/java` is
@@ -169,10 +189,16 @@
     // Reliable file-watching for chokidar-based watchers over WSL/Docker mounts.
     // (Replaces the legacy `poll` option on serve targets, which the modern @angular/build:dev-server schema rejects.)
     "CHOKIDAR_USEPOLLING": "true",
-    "CHOKIDAR_INTERVAL": "1000",{{#voice}}
-    // Bridge to WSL2's WSLg PulseAudio server (mounted below) so a process in the container
-    // can reach the real speaker + mic — the sink the bespunky-voice plugin speaks/listens through.
-    "PULSE_SERVER": "unix:/mnt/wslg/PulseServer",{{/voice}}
+    "CHOKIDAR_INTERVAL": "1000"
+    // PULSE_SERVER is not missing — it MOVED. The voice feature declares it itself, in the `containerEnv`
+    // of .devcontainer/features/voice/devcontainer-feature.json, together with the /mnt/wslg mount and the
+    // apt packages. Keeping the three in one place is precisely what makes voice a feature.
+    //
+    // Note the deliberate WIDENING that comes with it: feature-declared env is `containerEnv`, not
+    // `remoteEnv`, so EVERY process in the container sees PULSE_SERVER — not only the ones the editor
+    // spawns. That is the correct scope for an audio sink (a `/voice` run from any shell, a hook, a
+    // background daemon must all reach the same PulseAudio socket), and it is the same reasoning already
+    // applied to BESPUNKY_DEVCONTAINER_ID above.
   },
   "mounts": [
     "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached",
@@ -189,11 +215,11 @@
     // the SAME volume, which makes it the one substrate where containers can see each other's noVNC
     // port claims — and one engine is exactly one host, i.e. exactly the scope where host ports
     // collide. post-create.sh chowns it to `node` (a fresh named volume is root-owned).
-    "source=bespunky-shared-ports,target=/var/opt/bespunky/ports,type=volume",{{/web}}{{#voice}}
-    // WSLg audio (bespunky-voice): exposes the host PulseAudio socket at /mnt/wslg/PulseServer.
-    // WSL-specific — this is why voice is an opt-in flag, not always-on: binding /mnt/wslg on a
-    // non-WSL host (macOS / Codespaces) has no source socket. If the socket is absent after a
-    // rebuild on the Docker Desktop WSL2 backend, swap the source to /run/desktop/mnt/host/wslg.
-    "source=/mnt/wslg,target=/mnt/wslg,type=bind",{{/voice}}
+    "source=bespunky-shared-ports,target=/var/opt/bespunky/ports,type=volume",{{/web}}
+    // The WSLg audio bind (/mnt/wslg → the host PulseAudio socket) is not missing either — like
+    // PULSE_SERVER above, the voice feature now declares it in its OWN `mounts`, so the env, the mount and
+    // the packages arrive or stay away as one unit. The WSL-specific caveats live with it in
+    // .devcontainer/features/voice/devcontainer-feature.json (notably: on the Docker Desktop WSL2 backend
+    // the source may have to be /run/desktop/mnt/host/wslg).
   ]
 }
