@@ -159,7 +159,7 @@ regression test. The repo has no generator-level test harness (`tools/test-scaff
 
 ---
 
-# §9. THE DESIGN THAT SHIPPED — one feature, and it does not install anything
+## §9. THE DESIGN THAT SHIPPED — one feature, and it does not install anything
 
 Everything above was built, verified at the file level, and then put through a five-agent adversarial
 review at the user's request: *"Send agents to review, highly critic and sanity check your work"* and
@@ -227,6 +227,12 @@ cannot disagree.
 **Nothing to migrate**, and this time the answer is small because the change is. The feature is a new
 folder with no prior shape to retire; the merge-guard fix re-asserts itself on the next sync; nothing
 moved, was renamed, or was dropped. The 0.31.0 migration written for the old design is deleted with it.
+
+**Shipped version: `0.32.0`.** The effort bumped to `0.31.0` and then `0.31.1` mid-branch, before the
+rework. While it ran, `development` moved on and released the `delegate-and-parallelize` effort at
+*those same two numbers* — so at the merge gate this branch was rebased onto current `development` (the
+single-divergence-point rule) and re-bumped to `0.32.0`. Nothing was published from this branch at any
+of the intermediate versions; CI publishes only from `main`.
 
 ## 9.5 What the review cost, and what it was worth
 
