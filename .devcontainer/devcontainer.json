@@ -4,31 +4,13 @@
 // shared-browser noVNC stack, Firebase, dev-server port forwarding, chokidar polling) and
 // kept only what a toolkit author needs: Claude CLI, gh, and the plugins dogfooded LIVE
 // from THIS working tree (see .devcontainer/post-create.sh).
-//
-// The two LOCAL features under .devcontainer/features/ are NOT trimmed — they are byte-for-byte
-// copies of the generator's templates, kept in step by hand because this file is hand-trimmed and
-// so never regenerated. What was dropped above is the devcontainer.json-LEVEL shared-browser wiring
-// (runArgs, the noVNC port band, the ports volume); the os-floor PACKAGES were always installed here,
-// they have simply moved from a post-create step to a build-time feature. If you edit a feature,
-// edit the template in the generator and re-copy — never only this copy.
 {
   "name": "claude-toolkit",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
 
   "features": {
     "ghcr.io/devcontainers-extra/features/claude-code": {},
-    "ghcr.io/devcontainers/features/github-cli": {},
-    // The two LOCAL features — a `./`-prefixed id is a path resolved from this file's own folder, not a
-    // registry reference. Nothing is published, versioned separately, or downloaded: `.devcontainer/features/`
-    // is written by the same generator that writes this file (here, mirrored by hand — see the header).
-    // They install at BUILD time, which is what makes them survive a devcontainer this generator does not
-    // own: an adopted `devcontainer.json` gets a missing `features` sub-key merged in, whereas the house
-    // post-create script is written beside the project's own and never chained.
-    "./features/os-floor": {},
-    // Voice is the WSLg audio bridge — this feature declares its mount, PULSE_SERVER and the espeak-ng
-    // engine as one unit, and exports BESPUNKY_VOICE so post-create.sh gates on a declaration rather than
-    // sniffing for the mount.
-    "./features/voice": {}
+    "ghcr.io/devcontainers/features/github-cli": {}
   },
 
   "customizations": {
@@ -73,10 +55,9 @@
 
   "remoteEnv": {
     "CLAUDE_CODE_BYPASS_ALL_PERMISSIONS": "1",
-    // PULSE_SERVER used to be declared here. It now lives in `./features/voice`'s own `containerEnv`,
-    // together with the mount it points at — one capability, one unit. Note the widening that came with
-    // the move: `containerEnv` is seen by EVERY process in the container, not only editor-spawned ones,
-    // which is what an audio sink actually wants.
+    // Bridge to WSL2's WSLg PulseAudio server (mounted below) so a process in the
+    // container can reach the real speaker + mic — foundation for the voice plugin.
+    "PULSE_SERVER": "unix:/mnt/wslg/PulseServer",
     "PATH": "${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",
     "CHOKIDAR_USEPOLLING": "true",
     "CHOKIDAR_INTERVAL": "1000"
@@ -87,10 +68,10 @@
   // clones so Docker binds a real (node-owned) directory instead of creating a root-owned one.
   "mounts": [
     "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached",
-    // The /mnt/wslg bind moved into `./features/voice`. Declaring it here TOO would give two mounts the
-    // same bind target, which fails container creation — that is exactly what migration 0.31.0 clears out
-    // of existing projects. If the socket is absent after a rebuild on the Docker Desktop WSL2 backend,
-    // change the source in the FEATURE (see spikes/voice-audio-boundary/README.md), not here.
+    // WSLg audio: exposes the host PulseAudio socket at /mnt/wslg/PulseServer.
+    // If the socket is absent after a rebuild (Docker Desktop WSL2 backend), swap the
+    // source to /run/desktop/mnt/host/wslg — see spikes/voice-audio-boundary/README.md.
+    "source=/mnt/wslg,target=/mnt/wslg,type=bind",
     "source=${localWorkspaceFolderBasename}-node_modules,target=${containerWorkspaceFolder}/node_modules,type=volume",
     "source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume"
   ],
