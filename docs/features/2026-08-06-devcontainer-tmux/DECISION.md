@@ -104,6 +104,43 @@ constant — no toolkit release required, which is precisely the argument agains
 | `publish.sh --dry-run` | `PUBLISH_DRYRUN_OK @bespunky/nx-tools@0.30.0`; tarball carries `src/generators/devcontainer/post-create.sh.tpl` |
 | Acceptance: `tmux -V` as `node`, no sudo, in this image | **`tmux 3.5a`** at `/usr/bin/tmux` |
 
+## Adversarial review (2026-08-06) — four defects found and fixed, one criticism accepted
+
+Four independent reviewers were run against this branch after the release commit. Recorded here as an
+**addition**, not a rewrite: the sections above stand as what was decided at the time, and this is what
+survived contact with review. It is why the branch carries `0.30.1` — see the re-release commit.
+
+**Fixed** (commit *"keep post-create.sh POSIX-parseable…"*):
+
+1. **The bash array made the script non-POSIX**, and it was `dash`-clean before — reproduced both ways.
+   The generator supports a human chaining this file from their own `postCreateCommand`
+   (`post-create.bespunky.sh`), and `sh` parses **incrementally**: the run got as far as `yarn install`
+   and then died at the array with a bare syntax error, skipping steps 6–8 and every WARNING they print.
+   Replaced with three accumulating assignments — same per-capability comments, POSIX-parseable, zero cost.
+   *The original design note "an ARRAY, not a literal argument list" above is superseded by this.*
+2. **A second, hand-typed copy of the package list** in the serve executor's "shared browser dependencies
+   are missing" warning (`src/executors/serve/executor.ts`) — already drifted: it named `util-linux`
+   (never installed) and omitted `procps`, both font packages and `tmux`. §2's own rationale is that a
+   drifted re-run instruction is worse than none; I derived the recovery command inside the script and
+   never grepped for other copies of the thing I was deriving. It now names the owning step.
+3. **`OS floor ready (tmux missing)` was reachable** — a success banner carrying its own refutation, and
+   it verified 1 of 11 packages. Removed: `apt-get install -y` exiting 0 *is* the check.
+4. **The failure branch under-claimed** — `procps` and `iproute2` go down in the same transaction, so the
+   worktree-domains `:80` proxy and the port probes are unavailable too. It now says so.
+
+**Accepted, not acted on (user's call — "skip the DevContainer feature for now"):** §1's seam decision
+never examined the **adoption** case. Where the generator writes the house script as
+`post-create.bespunky.sh` and nobody chains it, tmux never installs — whereas a `features` entry would
+survive adoption by construction, because `mergeIntoExisting(…, 'adopt')` **adds** a missing `features`
+sub-key. The counter is that the shared browser and voice have identical exposure, so tmux is consistent
+with every other always-on capability — but that tradeoff should have been named here rather than the
+seam being called settled by precedent. Also: *"every word of that transfers"* overstated the JDK
+comment, whose force is specifically about SDKMAN and github.com; the tmux feature is apt-based.
+
+**Rejected:** that the layer model was never consulted (a fair question, but "always-on vs a `--flag`"
+was answered by the brief's requirement of *every* devcontainer); and that this package was written at
+the end (`BRIEF.md` landed in the first commit, before implementation).
+
 ## Found in passing — NOT fixed here (unrelated)
 
 `tools/publish-nx-tools/publish.sh` is committed as mode **`100644`** (its sibling `tools/test-scaffold/run.sh`
