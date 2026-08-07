@@ -1,6 +1,14 @@
+---
+effort: devcontainer-features
+status: concluded
+concluded: 2026-08-06
+summary: Ships ONE local devcontainer feature that chains the parked house script, so adopted projects finally run house setup; the larger build-time-features design was built, adversarially reviewed, and reverted — its premise was wrong and its migration destroyed user comments.
+tags: [devcontainer, nx-tools, adoption, provisioning, adversarial-review, reverted-design]
+---
+
 # DECISION — house capabilities as locally-consumed DevContainer features
 
-**Slug:** `devcontainer-features` · **Opened:** 2026-08-06
+**Slug:** `devcontainer-features` · **Opened:** 2026-08-06 · **Concluded:** 2026-08-06
 
 > ⚠️ **SECTIONS 1–8 DESCRIBE A DESIGN THAT WAS BUILT, REVIEWED, AND REVERSED.** They are kept
 > verbatim as the trail — the reasoning below is what a five-agent adversarial review demolished, and
