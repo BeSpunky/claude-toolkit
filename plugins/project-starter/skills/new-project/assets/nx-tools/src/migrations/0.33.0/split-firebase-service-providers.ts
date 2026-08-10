@@ -5,8 +5,9 @@
 // WHAT CHANGED UPSTREAM. firebase.config.ts used to return providers for the Firebase app AND Auth,
 // Firestore, Storage and Functions, and the generator wired that single call into the app's ROOT
 // providers. Root providers are reached from `main`, so all four SDK entry points were statically imported
-// into the initial bundle of every house-scaffolded Firebase app — ~380 kB raw of Firebase before the app
-// had a feature — and AngularFire instantiated each one at bootstrap. From 0.33.0 each service has its own
+// into the initial bundle of every house-scaffolded Firebase app — measured at 479 kB raw for an app with
+// no features, against 238 kB for the Firebase app alone — and AngularFire instantiated each one at
+// bootstrap. From 0.33.0 each service has its own
 // generated file (firebase-<service>.config.ts), so an app can provide each where it is actually needed:
 // at root, or in the lazily-loaded routes file that uses it.
 //
@@ -25,12 +26,17 @@
 // SSR/prerender. So this searches the app's sources for the actual `provideAppFirebase()` call inside a
 // providers array, and inserts the services exactly there. One call site, wherever the project put it.
 //
-// WHERE IT WOULD BE A GUESS, IT REPORTS. Three cases are named in the log and left untouched rather than
-// guessed at: no call site found (the project wires Firebase some way this cannot recognise); a call site
-// whose `provideAppFirebase` import doesn't resolve to a `firebase.config` module (so the siblings' import
-// path cannot be derived from it); and more than one call site (which is a real shape — a browser config
-// and a server config — and each gets handled, but a project with several apps' worth of them should see
-// the list). An unexplained leftover is indistinguishable from an oversight.
+// WHERE IT WOULD BE A GUESS, IT REPORTS. Two cases are named in the log and left untouched rather than
+// guessed at: no call site found (the project wires Firebase some way this cannot recognise), and a call
+// site whose `provideAppFirebase` import doesn't resolve to a `firebase.config` module, so the siblings'
+// import path cannot be derived from it. Either one leaves `inject(Firestore)` about to fail, so the
+// warning says so and gives the exact lines to add. An unexplained leftover is indistinguishable from an
+// oversight.
+//
+// EVERY call site is handled, not just the first, and every one is NAMED in the log. More than one is a
+// real shape (a browser config and a server config), and it is also the shape migration 0.27.0 reports as
+// a possible duplicate-provider bug. This migration deliberately does not adjudicate that: it preserves
+// whatever the project has, at every site it has it, and lists them so a reader can see there were two.
 //
 // IT ALSO WRITES THE FILES IT IMPORTS. The house sync runs `probe → install → migrate → detect → generate`,
 // so when this runs the per-service files do not exist yet — the firebase-emulators generator writes them
@@ -78,25 +84,42 @@ export default async function splitFirebaseServiceProviders(tree: Tree): Promise
   const unresolved: string[] = [];
 
   for (const appRoot of appRoots) {
-    // Write any sibling that isn't there yet — see the header. The generator rewrites these identically
+    // FIND THE CALL SITES BEFORE WRITING ANYTHING. The per-service templates mention `provideAppFirebase()`
+    // in their own header comments, so writing them first put four files into the app that the textual
+    // prefilter below matched and the AST pass then had to reject — every app came out of the migration
+    // carrying four "could not wire" warnings that were pure noise. Searching first removes the collision
+    // at its source rather than filtering the symptom afterwards.
+    const callSites = findAnchorCallSites(tree, appRoot);
+
+    // Then write any sibling that isn't there yet — see the header. The generator rewrites these identically
     // moments later in a normal sync; this is what makes a bare `nx migrate` leave a project that compiles.
     writeFirebaseServiceConfigs(tree, appRoot);
 
-    const callSites = findAnchorCallSites(tree, appRoot);
     if (callSites.length === 0) {
       unresolved.push(`${appRoot} — no ${ANCHOR}() call found in a providers array`);
       continue;
     }
 
+    let wiredHere = 0;
     for (const path of callSites) {
       const before = tree.read(path, 'utf8') ?? '';
       const result = insertServiceProviders(before, path);
-      if (result === 'already') alreadyDone.push(path);
-      else if (result === null) unresolved.push(`${path} — ${ANCHOR}'s import does not resolve to a '${ANCHOR_MODULE_SUFFIX}' module`);
-      else {
+      if (result === 'not-a-call-site') continue; // Names the anchor in prose, never calls it.
+      if (result === 'already') {
+        alreadyDone.push(path);
+        wiredHere++;
+      } else if (result === null) {
+        unresolved.push(`${path} — ${ANCHOR}'s import does not resolve to a '${ANCHOR_MODULE_SUFFIX}' module`);
+      } else {
         tree.write(path, result);
         rewritten.push(path);
+        wiredHere++;
       }
+    }
+    // Every candidate turned out to merely MENTION the anchor — so this app has no wiring to carry, which
+    // is the same finding as no candidate at all, and gets the same report.
+    if (wiredHere === 0 && !unresolved.some((u) => u.startsWith(appRoot))) {
+      unresolved.push(`${appRoot} — no ${ANCHOR}() call found in a providers array`);
     }
   }
 
@@ -105,8 +128,9 @@ export default async function splitFirebaseServiceProviders(tree: Tree): Promise
       `[split-firebase-service-providers] ${ANCHOR}() now provides the Firebase APP only; each SDK service ` +
         `has its own file. Added ${FIREBASE_SERVICE_CONFIGS.map((c) => `${c.providerFn}()`).join(', ')} beside it in ` +
         `${rewritten.join(', ')}, so this project behaves exactly as before.\n` +
-        `  TO CLAIM THE WIN: every service listed there is in your INITIAL bundle (firestore ~235 kB raw, auth ` +
-        `~85 kB, functions ~35 kB, storage ~22 kB). Delete the ones this app doesn't use, and move the rest into ` +
+        `  TO CLAIM THE WIN: every service listed there is in your INITIAL bundle. Measured on a fresh house ` +
+        `app, all four at root cost 479 kB raw against 238 kB for the Firebase app alone. Delete the ones this ` +
+        `app doesn't use, and move the rest into ` +
         `the \`providers\` of the LAZILY-LOADED routes file that needs them — the file behind \`loadChildren\`, not ` +
         `the eager app.routes.ts, whose imports land in the initial bundle either way.\n` +
         `  KEEP AUTH AT ROOT if a route guard needs it: a guard runs before its route activates, so it cannot ` +
@@ -175,17 +199,43 @@ function findAnchorCallSites(tree: Tree, appRoot: string): string[] {
 /**
  * Insert the four service providers immediately after the `provideAppFirebase()` call, plus their imports.
  *
- * @returns the updated source, `'already'` when the services are wired there, or `null` when the anchor's
- *          import cannot be resolved to a `firebase.config` module (so sibling paths would be a guess).
+ * @returns the updated source; `'already'` when the services are wired there; `'not-a-call-site'` when the
+ *          file only MENTIONS the anchor (prose, a re-export) and never calls it inside a providers array;
+ *          or `null` when it IS a call site but the anchor's import cannot be resolved to a
+ *          `firebase.config` module, so the siblings' paths would be a guess. Only `null` is worth
+ *          reporting — the other two are ordinary and silent.
  */
-function insertServiceProviders(source: string, path: string): string | 'already' | null {
+function insertServiceProviders(source: string, path: string): string | 'already' | 'not-a-call-site' | null {
   const ts = loadTypeScript();
   if (!ts) return null;
   const sf = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS) as TsSourceFile;
 
+  // IS THIS A CALL SITE AT ALL? Asked FIRST, because the answer decides whether anything else is worth
+  // reporting. The anchor CALL must sit directly inside an array literal — the providers array, whatever the
+  // enclosing object is called. A file that merely names `provideAppFirebase()` in a comment, or re-exports
+  // it, is not a wiring site and is nobody's problem.
+  let anchorCall: TsNode | null = null;
+  const findCall = (node: TsNode): void => {
+    if (anchorCall) return;
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === ANCHOR &&
+      node.parent &&
+      ts.isArrayLiteralExpression(node.parent)
+    ) {
+      anchorCall = node;
+      return;
+    }
+    ts.forEachChild(node, findCall);
+  };
+  findCall(sf);
+  if (!anchorCall) return 'not-a-call-site';
+
   // The anchor's own import tells us where the siblings live: they are generated beside firebase.config.ts,
   // so `./firebase.config` → `./firebase-auth.config`, `../core/firebase.config` → `../core/firebase-auth.config`.
-  // Deriving the path instead of assuming `./` is what lets an app keep its config wherever it put it.
+  // Deriving the path instead of assuming `./` is what lets an app keep its config wherever it put it. This
+  // IS a call site, so failing to resolve it is a real finding — hence `null`, which the caller reports.
   let anchorModule: string | null = null;
   let lastImport: TsImportDeclaration | null = null;
   const importedNames = new Set<string>();
@@ -205,26 +255,6 @@ function insertServiceProviders(source: string, path: string): string | 'already
   if (!anchorModule || !lastImport) return null;
   if (!anchorModule.endsWith(ANCHOR_MODULE_SUFFIX)) return null;
   const moduleBase = anchorModule.slice(0, -ANCHOR_MODULE_SUFFIX.length); // './' or '../core/'
-
-  // Find the anchor CALL sitting directly inside an array literal — the providers array, whatever the
-  // enclosing object is called. A call anywhere else (a re-export helper, say) is not a wiring site.
-  let anchorCall: TsNode | null = null;
-  const findCall = (node: TsNode): void => {
-    if (anchorCall) return;
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === ANCHOR &&
-      node.parent &&
-      ts.isArrayLiteralExpression(node.parent)
-    ) {
-      anchorCall = node;
-      return;
-    }
-    ts.forEachChild(node, findCall);
-  };
-  findCall(sf);
-  if (!anchorCall) return null;
 
   // Idempotency: any service already called in this file means the split has been applied here. Checked by
   // CALL, not by imported identifier — a leftover import after a hand-edit must not read as "done".

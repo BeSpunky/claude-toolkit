@@ -24,9 +24,15 @@
 //     inside the LAZILY-LOADED routes file (the one behind `loadChildren`), not in the eager app.routes.ts,
 //     or the import pins the chunk anyway and nothing is saved.
 //
-// Rough weight of each service on the initial chunk when it is provided at root (raw, uncompressed):
-// firestore ~235 kB (its webchannel transport included) · auth ~85 kB (pulls app-check in with it) ·
-// storage ~22 kB · functions ~35 kB. This file's own cost is ~23 kB (@firebase/app + @firebase/util).
+// MEASURED initial-bundle totals for a freshly scaffolded house app (raw, uncompressed): 207 kB with no
+// Firebase at all, 238 kB providing this file alone, and 479 kB with all four services at root — which is
+// what this file used to return on its own. Per service, the total with THAT service and nothing else:
+// firestore 413 kB · auth 342 kB · storage 336 kB · functions 327 kB.
+//
+// THOSE NUMBERS DO NOT ADD UP, and it matters. Whichever service arrives first drags in Firebase's shared
+// core, so the first one you provide costs ~90–175 kB and every one after it is far cheaper (the four
+// deltas sum to ~464 kB; all four together cost ~240 kB). So the saving is largest when a bundle needs NO
+// service on the critical path, and shrinks — it does not vanish — once one is there.
 //
 // AUTH IS THE SHARP ONE. A route guard runs BEFORE its route activates, so a guard that needs Auth
 // cannot get it from the providers of the route it is guarding. An auth-gated app either provides Auth

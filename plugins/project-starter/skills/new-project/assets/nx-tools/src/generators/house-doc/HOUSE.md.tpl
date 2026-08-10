@@ -155,13 +155,16 @@ The `@bespunky/nx-tools:serve` executor runs the emulator suite alongside the ap
 
 **A Firebase service is provided where it is USED, not once at the root by default.** Each has its own generator-owned file under `apps/<app>/src/app/`:
 
-| Provider | File | Raw kB added to the INITIAL bundle when provided at root |
+| Provider | File | Measured initial bundle with THIS service and nothing else |
 | --- | --- | --- |
-| `provideAppFirebase()` | `firebase.config.ts` | ~23 — the Firebase app itself. **Always at root**; every service below calls `getApp()`. |
-| `provideAppAuth()` | `firebase-auth.config.ts` | ~85 (pulls app-check in with it) |
-| `provideAppFirestore()` | `firebase-firestore.config.ts` | ~235 — by far the heaviest (its webchannel transport included) |
-| `provideAppFunctions()` | `firebase-functions.config.ts` | ~35 |
-| `provideAppStorage()` | `firebase-storage.config.ts` | ~22 |
+| `provideAppFirebase()` | `firebase.config.ts` | **238 kB** — the Firebase app itself (207 kB with no Firebase at all). **Always at root**; every service below calls `getApp()`. |
+| `provideAppAuth()` | `firebase-auth.config.ts` | 342 kB (app-check rides in with it) |
+| `provideAppFirestore()` | `firebase-firestore.config.ts` | 413 kB — the heaviest |
+| `provideAppStorage()` | `firebase-storage.config.ts` | 336 kB |
+| `provideAppFunctions()` | `firebase-functions.config.ts` | 327 kB |
+| *all four at root* | | **479 kB** — what `provideAppFirebase()` used to return on its own |
+
+**Those per-service numbers do not add up, and that is the point.** Whichever service arrives first drags in Firebase's shared core, so the first one costs ~90–175 kB and each one after it is far cheaper. The saving is largest for a bundle that needs **no** service on the critical path, and shrinks — without vanishing — once one is there. (Raw, uncompressed, measured on a freshly scaffolded house app with no features.)
 
 Provide each one either in **`app.config.ts`** (root — it is then in the initial bundle, which is correct for something bootstrap genuinely needs) or in the **`providers` of a lazily-loaded routes file** (it then rides that lazy chunk and never touches the critical path). A newly scaffolded app wires only `provideAppFirebase()` and leaves the four as a commented menu in `app.config.ts` — so **the first `inject(Firestore)` in a fresh app throws `NullInjectorError` until you place it.** That is deliberate: the alternative is every app paying ~380 kB for services it may never call.
 

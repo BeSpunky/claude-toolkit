@@ -26,13 +26,29 @@ export interface FirebaseServiceConfig {
   /** Template file name, resolved beside this module. */
   readonly template: string;
   /**
-   * Approximate raw kB this service adds to the INITIAL chunk when provided at root. Quoted in the
-   * app.config.ts note so the choice of where to provide it is made with the number in view.
+   * MEASURED initial-bundle total (raw kB) for a freshly scaffolded house app providing
+   * `provideAppFirebase()` plus THIS service and nothing else. Quoted in the app.config.ts note so the
+   * choice of where to provide a service is made with the number in view.
+   *
+   * Deliberately a TOTAL, not a per-service delta: the deltas do not add up, and publishing them as if
+   * they did would be a lie a reader could act on. Firebase's shared core rides in behind whichever
+   * service arrives first, so the first one costs ~90–175 kB and the rest are far cheaper — the four
+   * measured deltas sum to ~464 kB while all four together cost only ~240 kB over the app-only baseline.
    */
-  readonly initialKb: number;
+  readonly initialKbWithThisOnly: number;
   /** One line on where this service usually belongs, for the same note. */
   readonly placement: string;
 }
+
+/** Measured initial-bundle totals (raw kB) for a fresh house app, as reference points for the note. */
+export const FIREBASE_INITIAL_KB = {
+  /** No Firebase providers at all. */
+  none: 207,
+  /** `provideAppFirebase()` alone — the Firebase app, the new scaffold default. */
+  appOnly: 238,
+  /** All four services at root — what `provideAppFirebase()` used to return on its own. */
+  allFour: 479,
+} as const;
 
 export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
   {
@@ -41,7 +57,7 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
     providerFn: 'provideAppAuth',
     importFrom: './firebase-auth.config',
     template: 'firebase-auth.config.ts.tpl',
-    initialKb: 85,
+    initialKbWithThisOnly: 342,
     placement: 'usually root: a route GUARD cannot get Auth from the route it guards',
   },
   {
@@ -50,8 +66,8 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
     providerFn: 'provideAppFirestore',
     importFrom: './firebase-firestore.config',
     template: 'firebase-firestore.config.ts.tpl',
-    initialKb: 235,
-    placement: 'the heaviest by far; prefer the lazy route that reads it',
+    initialKbWithThisOnly: 413,
+    placement: 'the heaviest; prefer the lazy route that reads it',
   },
   {
     service: 'storage',
@@ -59,7 +75,7 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
     providerFn: 'provideAppStorage',
     importFrom: './firebase-storage.config',
     template: 'firebase-storage.config.ts.tpl',
-    initialKb: 22,
+    initialKbWithThisOnly: 336,
     placement: 'the lazy route that uploads or reads files',
   },
   {
@@ -68,7 +84,7 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
     providerFn: 'provideAppFunctions',
     importFrom: './firebase-functions.config',
     template: 'firebase-functions.config.ts.tpl',
-    initialKb: 35,
+    initialKbWithThisOnly: 327,
     placement: 'the lazy route that calls a callable — often none, so often nowhere',
   },
 ];
@@ -100,8 +116,8 @@ export function writeFirebaseServiceConfigs(tree: Tree, appRoot: string): string
  */
 export function firebaseProvidersNote(): string {
   const lines = FIREBASE_SERVICE_CONFIGS.map(
-    ({ providerFn, initialKb, placement }) =>
-      `  ${`${providerFn}(),`.padEnd(24)}~${initialKb} kB — ${placement}`
+    ({ providerFn, initialKbWithThisOnly, placement }) =>
+      `  ${`${providerFn}(),`.padEnd(24)}${initialKbWithThisOnly} kB — ${placement}`
   );
   return [
     'Firebase SERVICES are provided where they are USED — each has its own file, so a service this app',
@@ -109,6 +125,11 @@ export function firebaseProvidersNote(): string {
     '  • move it into the `providers` of the LAZILY-LOADED routes file that needs it (keeps it off the',
     '    critical path — it must be the file behind `loadChildren`, not the eager app.routes.ts), or',
     '  • uncomment it here, accepting its weight in the initial bundle.',
+    '',
+    `Measured initial bundle (raw) for a fresh app: ${FIREBASE_INITIAL_KB.none} kB with no Firebase, ` +
+      `${FIREBASE_INITIAL_KB.appOnly} kB as generated, ${FIREBASE_INITIAL_KB.allFour} kB with all four at root.`,
+    'Below is the total with THAT service alone — they do NOT add up, because whichever service arrives',
+    "first drags in Firebase's shared core and the rest are much cheaper after it:",
     '',
     ...lines,
   ].join('\n');

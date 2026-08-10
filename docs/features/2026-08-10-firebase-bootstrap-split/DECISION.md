@@ -88,3 +88,59 @@ intermediate state that only the house sync path happens to heal.
 - **A transfer-size budget** (the handoff's item 3) — Angular's budgets measure raw bytes; a compressed
   budget appears not to be expressible at all. Not asserted, not built.
 - **Their `libs/spine` barrel** — `secondary-entrypoint` already exists for it.
+
+---
+
+## Measured, on a real throwaway scaffold (2026-08-10)
+
+`scaffold.sh --firebase --local fbsplit web`, then `nx build web --configuration=production`, varying only
+what `app.config.ts` provides. Raw / estimated transfer, initial bundle:
+
+| `app.config.ts` provides | raw | transfer |
+| --- | --- | --- |
+| nothing (no Firebase) | 207.44 kB | 55.62 kB |
+| `provideAppFirebase()` — **the new default** | 238.42 kB | 64.38 kB |
+| + auth | 341.56 kB | 86.92 kB |
+| + firestore | 412.61 kB | 108.58 kB |
+| + storage | 336.01 kB | 83.94 kB |
+| + functions | 327.06 kB | 81.19 kB |
+| + all four — **the old behaviour** | 478.74 kB | 120.63 kB |
+
+**Two things the measurement corrected, both of which had reached the docs before it ran:**
+
+1. **The per-service costs are not additive, and the estimates were wrong.** The single-module sizes taken
+   from the consuming project's report (auth 85, firestore 235, storage 22, functions 35) describe modules,
+   not marginal bundle cost. Measured deltas over the app-only baseline are auth +103, firestore +174,
+   storage +98, functions +89 — summing to ~464 kB, while all four together cost only +240 kB. Whichever
+   service arrives first pays for Firebase's shared core. Every published figure is now a measured TOTAL
+   with that service alone, with the non-additivity stated beside it, because a reader who added the deltas
+   would plan against a number that does not exist.
+
+2. **A fresh app was never actually over budget.** 478.74 kB sits 21 kB *under* Angular's stock 500 kB
+   warning. The earlier claim (~650–680 kB, "over from birth") was extrapolated from the consuming
+   project's numbers, which include its own code and its `libs/spine`. The honest statement is narrower and
+   still damning: the old default spent **96% of the budget before the app had a single feature**, so the
+   first real screen pushed it over — which is exactly what happened to `our-journey` at 744 kB.
+
+The delta the split actually buys a fresh app: **271 kB raw / 65 kB compressed** off the critical path.
+
+## A pre-existing bug the verification exposed
+
+The build came in at 207 kB — *no Firebase at all*. `provideAppFirebase()` had not been wired into
+`app.config.ts`, and neither had `provideWorktreeTabLabel()`.
+
+Cause: the `app` generator composes `serve`, `design-system-styles` and `firebase-emulators`, and passed
+`wireProviders: true` to **only the design-system one**. The comment above that call states the principle
+exactly — *"the app generator only ever runs to CREATE an app, so this IS the baseline write"* — and the
+other two calls simply never got the flag.
+
+So **no app the house scaffolder has ever created had its Firebase providers wired.** It went unnoticed
+because the *sync* path passes `--wireProviders` on its own `nx g firebase-emulators` invocation and was
+correct all along; only the scaffold path was silent. The failure surfaced far from its cause, at the app's
+first `inject(Auth)`.
+
+Fixed here (both calls now pass `wireProviders: true`). **No migration owed**: the `app` generator only ever
+runs to create an app, so the fix cannot reach a project already on disk. An existing project that was
+never wired is reported by the 0.33.0 migration as *"no `provideAppFirebase()` call found in a providers
+array"* — which is the honest finding, and adding the call would be guessing at a decision the project may
+have made deliberately.
