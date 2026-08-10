@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-08-10
+summary: /sync now completes in one pass — it resolves the just-installed plugin root instead of stopping at the frozen CLAUDE_PLUGIN_ROOT, installs missing workspace deps rather than bailing, and states exactly one end-of-run boundary (SYNC_NEXT) instead of leaving people to guess.
+tags: [sync, project-starter, scaffolder, developer-experience, session-boundaries, devcontainer]
+---
+
 # DECISION — `/sync` completes in one run
 
 Read `BRIEF.md` first: it holds the diagnosis (four session boundaries, not one bug) and the target
