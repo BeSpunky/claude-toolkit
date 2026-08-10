@@ -110,6 +110,7 @@ import { join } from 'node:path';
 //
 // The TypeScript compiler API is reached through `_utils/typescript-api` — see that file.
 import { wireProvider } from '../_utils/wire-provider';
+import { firebaseProvidersNote, writeFirebaseServiceConfigs } from './service-configs';
 import {
   loadTypeScript,
   type TsArrayLiteralExpression,
@@ -356,6 +357,16 @@ export default async function firebaseEmulatorsGenerator(
   }
   tree.write(firebaseConfigPath, template('firebase.config.ts.tpl'));
 
+  //     …and ONE FILE PER SDK SERVICE beside it. firebase.config.ts provides the Firebase *app* only;
+  //     Auth, Firestore, Storage and Functions each live in their own generated file so an app can put
+  //     each where it is actually needed — at root, or in the lazily-loaded routes file that uses it.
+  //     Separate FILES rather than separate exports because a static import is what pins a chunk: an
+  //     export split lets an unused service tree-shake, but only a separate file lets a USED one leave
+  //     the initial bundle. Same ownership contract as firebase.config.ts — no per-project values, so
+  //     always rewritten. (The list, the templates and the app.config note live in ./service-configs,
+  //     shared with migration 0.33.0, which wires these into projects that predate the split.)
+  writeFirebaseServiceConfigs(tree, appRoot);
+
   // 2c) apps/<app>/proxy.conf.mjs — dev-server proxy that relays Functions callables through the app's own
   //     origin (see the file header). Generator-owned, always rewritten. Baked with THIS app's env path so
   //     it reads the project id (its single source of truth). The serve executor auto-wires it for a
@@ -510,7 +521,12 @@ export default async function firebaseEmulatorsGenerator(
     }
   }
 
-  // 5) Best-effort: wire provideAppFirebase() into app.config.ts.
+  // 5) Best-effort: wire provideAppFirebase() into app.config.ts — the Firebase APP, and only it.
+  //    The four SDK services are left as a commented menu beneath it (see firebaseProvidersNote): a new
+  //    app therefore boots with none of the SDK on its critical path beyond @firebase/app, and each
+  //    service is placed deliberately — in the lazy route that uses it, or here at root. The cost of that
+  //    default is a NullInjectorError on the first `inject(Firestore)`, which is why the note naming both
+  //    moves is written into the very file the developer opens to fix it.
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (tree.exists(appConfigPath)) {
     const current = tree.read(appConfigPath, 'utf8') ?? '';
@@ -518,6 +534,7 @@ export default async function firebaseEmulatorsGenerator(
       providerFn: 'provideAppFirebase',
       importFrom: './firebase.config',
       ensuring: options.wireProviders === true,
+      note: firebaseProvidersNote(),
     });
     if (wired === current) {
       // Already wired or no changes needed.

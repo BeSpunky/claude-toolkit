@@ -64,6 +64,11 @@
       "version": "0.30.2",
       "description": "Repoint the seeded `outputStyle` from the bare `Pitch to the listener` to the style's real id, `bespunky-communication:Pitch to the listener`. A plugin style is registered under `plugin:name` and the setting is looked up by exact key, so the bare name matched nothing and the house output style was never actually active. Rewrites only that exact value, and reports instead of rewriting where the project has its own output style by that name.",
       "implementation": "./src/migrations/0.30.2/namespace-seeded-output-style"
+    },
+    "split-firebase-service-providers": {
+      "version": "0.33.0",
+      "description": "provideAppFirebase() now provides the Firebase APP only — Auth, Firestore, Storage and Functions each got their own generated file, so an app can provide each where it is used instead of pinning all four into the initial bundle. Finds the project's actual provideAppFirebase() call site (wherever it put it) and adds the four service providers beside it, preserving today's behaviour exactly; writes any missing per-service file so a bare `nx migrate` still compiles; reports instead of guessing where the call site or its import path cannot be resolved.",
+      "implementation": "./src/migrations/0.33.0/split-firebase-service-providers"
     }
   }
 }
