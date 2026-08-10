@@ -127,6 +127,26 @@ r="$(fixture settings-local)"
 printf '{}\n' > "$r/.claude/settings.local.json"
 check "a machine-local settings file is not a boundary" "$r" none
 
+# THE ONE THAT WOULD POISON THE WHOLE LINE. The house devcontainer bind-mounts
+# `${localWorkspaceFolder}/.claude/data` onto `/home/node/.claude`, so the plugin cache, the installed-plugin
+# manifest and Claude's auth all sit INSIDE the project being synced — and `/sync` step 1 writes there itself
+# (`claude plugin update`) before the sync even starts. If the detection ever widened from
+# `^\.claude/settings\.json$` to `^\.claude/`, every sync would report `restart-session` earned by nothing
+# but its own bookkeeping, and the verdict would become noise nobody reads. Untracked AND tracked, because
+# `.claude/data/` being gitignored must not be the only thing standing between us and that.
+r="$(fixture claude-runtime-state)"
+mkdir -p "$r/.claude/data/plugins/cache/claude-toolkit/bespunky-project-starter/0.33.0"
+printf '{"version":2}\n' > "$r/.claude/data/plugins/installed_plugins.json"
+check "plugin-cache churn under .claude/data/ is NOT a boundary" "$r" none
+
+r="$(fixture claude-runtime-tracked)"
+mkdir -p "$r/.claude/data"
+printf '{"version":2}\n' > "$r/.claude/data/installed_plugins.json"
+git -C "$r" add -A >/dev/null 2>&1 && git -C "$r" commit -qm "track runtime state"
+git -C "$r" rev-parse HEAD > "$r/.base"
+printf '{"version":3}\n' > "$r/.claude/data/installed_plugins.json"
+check "…even when the project TRACKS .claude/data/" "$r" none
+
 r="$(fixture nested-name)"
 mkdir -p "$r/docs/.devcontainer"
 printf 'x\n' > "$r/docs/.devcontainer/notes.md"

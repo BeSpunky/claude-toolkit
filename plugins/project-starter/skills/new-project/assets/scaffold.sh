@@ -1960,6 +1960,16 @@ _sync_next() {   # <target> <base-sha|''> — sets SYNC_NEXT and SYNC_RELOAD
   changed="$( { git -C "$target" diff --name-only "$base" 2>/dev/null
                 git -C "$target" ls-files --others --exclude-standard 2>/dev/null; } | sort -u )"
   SYNC_NEXT="none"
+  # THE ANCHORS ARE LOAD-BEARING — do not relax `^\.claude/settings\.json$` to `^\.claude/`.
+  #
+  # The house devcontainer bind-mounts `${localWorkspaceFolder}/.claude/data` onto `/home/node/.claude`, so
+  # Claude Code's entire runtime state — the plugin cache, installed_plugins.json, auth — physically lives
+  # INSIDE the project this function is diffing. And `/sync` step 1 runs `claude plugin update`, which writes
+  # there on the way in. Match `.claude/` as a prefix and every sync ever run reports `restart-session`,
+  # earned by nothing but the sync's own bookkeeping — and a boundary that fires on every run is a boundary
+  # everyone learns to ignore, which is exactly what this line exists to prevent. `.claude/data/` is also
+  # gitignored, so this is belt and braces; the anchor is the half that does not depend on a project having
+  # been synced yet.
   if printf '%s\n' "$changed" | grep -q '^\.devcontainer/'; then
     SYNC_NEXT="rebuild-container"
   elif printf '%s\n' "$changed" | grep -qE '^(\.claude/settings\.json|\.mcp\.json)$'; then

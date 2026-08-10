@@ -38,6 +38,13 @@ PLUGIN_ID="${1:-bespunky-project-starter@claude-toolkit}"
 PLUGIN_NAME="${PLUGIN_ID%@*}"
 MARKETPLACE="${PLUGIN_ID#*@}"
 
+# INSIDE A HOUSE DEVCONTAINER THIS PATH IS IN THE WORKSPACE. The generated devcontainer bind-mounts
+# `${localWorkspaceFolder}/.claude/data` onto `/home/node/.claude`, so `$HOME/.claude` resolves to a folder
+# of the project itself. Three things follow, and all of them are wanted: the plugin cache is per-workspace
+# (two projects can sit on different toolkit versions without fighting), it is a BIND mount rather than a
+# volume so it survives `Rebuild Container` intact, and the manifest read below is a plain file read either
+# way. Nothing here needs to know which of the two it is looking at — but `scaffold.sh`'s SYNC_NEXT reporter
+# does, since this state churns inside the tree it diffs; see the anchoring note there.
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 MANIFEST="$CONFIG_DIR/plugins/installed_plugins.json"
 CACHE_DIR="$CONFIG_DIR/plugins/cache/$MARKETPLACE/$PLUGIN_NAME"
