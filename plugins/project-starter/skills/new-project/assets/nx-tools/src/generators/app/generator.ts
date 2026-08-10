@@ -119,7 +119,11 @@ export default async function appGenerator(
   //    agnostic — the worktree and shared-browser axes are flags on the one serve — so it applies to
   //    every app regardless of the Firebase opt-in below. MUST run before serve-options, which routes
   //    `host` onto the `dev-server` leaf this creates.
-  await serveGenerator(tree, { project: projectName, workspaceName });
+  // `wireProviders` here for the same reason it is set on the design-system call below and the Firebase one
+  // further down: this generator only ever runs to CREATE an app, so every call it makes IS the baseline
+  // write. Omitting it left `provideWorktreeTabLabel()` out of every scaffolded app.config.ts — silently,
+  // because a missing dev-only tab label looks like nothing at all.
+  await serveGenerator(tree, { project: projectName, workspaceName, wireProviders: true });
 
   // 2b) Per-app house config: make the dev server reachable from outside the devcontainer (host 0.0.0.0
   //     on the `dev-server` leaf).
@@ -145,6 +149,13 @@ export default async function appGenerator(
         project: projectName,
         workspaceName,
         staging: options.staging,
+        // Baseline write — see the serve call above. Its absence meant NO scaffolded app has ever had
+        // `provideAppFirebase()` in its providers: the whole Firebase layer was generated, wired into
+        // project.json and the emulator suite, and then never actually initialised at runtime. It failed
+        // quietly at the app's first `inject(Auth)`, far from the generator that owed the wiring. The sync
+        // path passed `--wireProviders` and was therefore correct all along, which is precisely why the
+        // scaffold path's silence went unnoticed.
+        wireProviders: true,
       })) ?? noop;
   }
 

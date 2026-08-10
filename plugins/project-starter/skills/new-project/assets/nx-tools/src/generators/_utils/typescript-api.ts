@@ -17,9 +17,17 @@
 // DELIBERATELY MINIMAL. Every member below is one this toolkit calls; nothing is here "for completeness".
 // A wider surface would be a bigger lie to keep true, and each addition should be driven by a real call.
 
-/** Any AST node. `getEnd()` is the only universal member the callers use — they splice text by offset. */
+/**
+ * Any AST node. `getEnd()` is the offset the callers splice text at.
+ *
+ * `parent` is present only when the source file was created with `setParentNodes` — every caller here does,
+ * and a caller that didn't would read `undefined` rather than crash, which is why it is optional. It is what
+ * lets a caller ask about a node's CONTEXT (is this call inside an array literal?) instead of matching on
+ * shape alone.
+ */
 export interface TsNode {
   getEnd(): number;
+  readonly parent?: TsNode;
 }
 
 /** An identifier or string literal — both carry the `text` the callers compare against. */
@@ -68,6 +76,8 @@ export interface TsNamedImports extends TsNode {
 
 export interface TsImportDeclaration extends TsNode {
   readonly importClause?: { readonly namedBindings?: TsNode };
+  /** The `'…'` a declaration imports FROM — how a caller derives a sibling module's path from a known one. */
+  readonly moduleSpecifier: TsNode;
 }
 
 /**

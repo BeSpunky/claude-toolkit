@@ -64,6 +64,16 @@
       "version": "0.30.2",
       "description": "Repoint the seeded `outputStyle` from the bare `Pitch to the listener` to the style's real id, `bespunky-communication:Pitch to the listener`. A plugin style is registered under `plugin:name` and the setting is looked up by exact key, so the bare name matched nothing and the house output style was never actually active. Rewrites only that exact value, and reports instead of rewriting where the project has its own output style by that name.",
       "implementation": "./src/migrations/0.30.2/namespace-seeded-output-style"
+    },
+    "split-firebase-service-providers": {
+      "version": "0.33.0",
+      "description": "provideAppFirebase() now provides the Firebase APP only — Auth, Firestore, Storage and Functions each got their own generated file, so an app can provide each where it is used instead of pinning all four into the initial bundle. Adds the four service providers at every real provideAppFirebase() call site (wherever the project put it), preserving today's behaviour exactly, with import paths COMPUTED from the app root rather than derived from what it finds. Rewrites the whole generated config set so a bare `nx migrate`, a partial sync and every app in a multi-app workspace still compile. Decides `already wired` by identity, not by name, and reports a name collision instead of wiring somebody else's function.",
+      "implementation": "./src/migrations/0.33.0/split-firebase-service-providers"
+    },
+    "wire-missing-baseline-providers": {
+      "version": "0.33.1",
+      "description": "Wire the house providers the `app` generator generated files for and then never wired. Composing serve/design-system-styles/firebase-emulators, it passed the baseline `wireProviders` flag to the design-system call ALONE, so every app scaffolded on 0.26.0-0.32.x carries worktree-tab-label.ts and firebase.config.ts on disk with nothing calling either \u2014 Firebase is generated and never initialised, failing at the app's first inject(Auth). Adds each call only where the generated file exists AND nothing in the app already calls it, so a hand-wired or deliberately relocated provider is left alone; reports where the app config's shape is unrecognised.",
+      "implementation": "./src/migrations/0.33.1/wire-missing-baseline-providers"
     }
   }
 }

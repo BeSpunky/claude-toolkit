@@ -35,6 +35,17 @@ export interface WireProviderOptions {
    * guarantees a new caller has thought about it. An `if` at three call sites is three chances to forget.
    */
   ensuring: boolean;
+  /**
+   * Optional prose left in the providers array immediately BELOW the wired call, one `//` line per input
+   * line. For a layer whose provider is only half the story — the Firebase layer wires the app here and
+   * leaves four per-service providers for the app to place — the note is where the remaining choice is
+   * stated, in the file where the choice is made.
+   *
+   * Written only when the call is (i.e. only on ENSURE, only when not already wired), so a re-run never
+   * accumulates copies of it. Deliberately not templated or parsed afterwards: it is a comment, and the
+   * moment a generator starts reading its own comments back they have become state.
+   */
+  note?: string;
 }
 
 /**
@@ -47,7 +58,7 @@ export interface WireProviderOptions {
 export function wireProvider(
   source: string,
   sourcePath: string,
-  { providerFn, importFrom, ensuring }: WireProviderOptions
+  { providerFn, importFrom, ensuring, note }: WireProviderOptions
 ): string | null {
   // ── app.config.ts IS SEEDED, NEVER OWNED — SO WIRING HAPPENS ON ENSURE, NEVER ON DETECT ──────────────
   //
@@ -145,8 +156,23 @@ export function wireProvider(
 
   const elements = providers.elements;
   const call = `${providerFn}()`;
+  // The note's trailing newline is load-bearing: without it the array's closing `]` lands on the last
+  // comment line and is commented out — a syntax error the generator would have written itself.
+  const noteBlock = note
+    ? `\n${note
+        .split('\n')
+        .map((line) => (line ? `// ${line}` : '//'))
+        .join('\n')}\n`
+    : '';
+  // A note always follows a comma-terminated call, so the three placements below differ only in what has
+  // to come BEFORE the call (nothing / a space / a separating comma).
+  const entry = note ? `${call},${noteBlock}` : call;
   const arrSnippet =
-    elements.length === 0 ? call : elements.hasTrailingComma ? ` ${call},` : `, ${call}`;
+    elements.length === 0
+      ? entry
+      : elements.hasTrailingComma
+        ? ` ${entry}${note ? '' : ','}`
+        : `, ${entry}`;
 
   const changes: StringChange[] = [
     {
