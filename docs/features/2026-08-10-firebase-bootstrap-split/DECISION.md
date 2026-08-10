@@ -1,3 +1,13 @@
+---
+status: concluded
+concluded: 2026-08-10
+summary: Split the generated Firebase bootstrap one file per SDK service so an app pays only for what it
+  provides and only where it provides it (fresh scaffold 479 kB -> 238 kB initial); fixed the app generator's
+  missing baseline provider wiring, found by building a throwaway scaffold; shipped migrations 0.33.0 and
+  0.33.1 to carry existing projects across without behaviour change.
+tags: [firebase, nx-tools, bundle-size, migrations, generators, angular]
+---
+
 # Decisions — splitting the generated Firebase bootstrap
 
 *Live document. Appended as the work happens.*
