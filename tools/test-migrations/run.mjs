@@ -119,9 +119,19 @@ function snapshot(tree) {
 }
 
 async function main() {
-  if (!existsSync(join(REPO, 'node_modules/@nx/devkit'))) {
-    console.error('Migration tests need the workspace installed (the fixtures use @nx/devkit\'s Tree).');
-    console.error('  yarn install   # then re-run');
+  // Both preconditions, named individually. A raw module-resolution stack trace out of the compile step is
+  // a genuinely bad first experience for a tool nobody has run before — and `typescript` is the one that
+  // actually bites, because it was added to this repo FOR this harness, so any checkout predating it has
+  // @nx/devkit present and TypeScript absent.
+  const missing = [
+    ['@nx/devkit', "the fixtures use @nx/devkit's in-memory Tree"],
+    ['typescript', 'the payload is transpiled, and the migrations use the TypeScript compiler API'],
+  ].filter(([pkg]) => !existsSync(join(REPO, 'node_modules', pkg)));
+
+  if (missing.length > 0) {
+    console.error('Migration tests need the workspace installed:');
+    for (const [pkg, why] of missing) console.error(`  • ${pkg} is not installed — ${why}`);
+    console.error('\n  yarn install   # then re-run');
     process.exit(2);
   }
 
