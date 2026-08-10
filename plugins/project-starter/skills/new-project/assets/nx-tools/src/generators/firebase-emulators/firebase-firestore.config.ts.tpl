@@ -22,11 +22,14 @@ import { emulatorFor, portOffset } from './firebase.config';
 
 declare const ngDevMode: boolean;
 
-// Latched so the emulator is connected once per SDK instance even when this provider is used in more
-// than one injector (two sibling lazy routes, say) — see firebase-auth.config.ts for the full note.
-// Connecting Firestore twice is the sharp case: once the instance has been used, changing its settings
-// throws. DEV ONLY — tree-shaken from prod with the rest of the emulator wiring.
-let emulatorConnected = false;
+// Emulator wiring must happen ONCE PER SDK INSTANCE — and the latch is keyed to the instance, not to
+// this module. A plain module-level boolean looks equivalent and is not: it survives the SDK instance.
+// Tear the Firebase app down and re-create it in the same JS realm — `deleteApp()` in a TestBed
+// `afterEach`, then provide again — and the boolean still reads `true`, so the NEW instance is never
+// connected and silently talks to the REAL backend from a dev/test run. Measured, not theorised.
+// A WeakSet keyed on the instance answers the question actually being asked ("has THIS one been
+// connected?"), tree-shakes exactly the same way, and cannot outlive what it is tracking.
+const emulatorConnected = new WeakSet<object>();
 
 /** Cloud Firestore, wired to the Firestore emulator in dev when `environment` asks for it. */
 export function provideAppFirestore(): EnvironmentProviders {
@@ -37,11 +40,11 @@ export function provideAppFirestore(): EnvironmentProviders {
       // project); omitted → the project's `(default)` database.
       const databaseId = (environment.firebase as { databaseId?: string }).databaseId;
       const db = databaseId ? getFirestore(getApp(), databaseId) : getFirestore();
-      if (ngDevMode && !emulatorConnected) {
+      if (ngDevMode && !emulatorConnected.has(db)) {
         const e = emulatorFor('firestore');
         if (e) {
           connectFirestoreEmulator(db, e.host, e.port + portOffset);
-          emulatorConnected = true;
+          emulatorConnected.add(db);
         }
       }
       return db;

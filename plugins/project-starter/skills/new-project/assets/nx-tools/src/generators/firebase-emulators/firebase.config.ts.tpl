@@ -29,16 +29,24 @@
 // what this file used to return on its own. Per service, the total with THAT service and nothing else:
 // firestore 413 kB · auth 342 kB · storage 336 kB · functions 327 kB.
 //
-// THOSE NUMBERS DO NOT ADD UP, and it matters. Whichever service arrives first drags in Firebase's shared
-// core, so the first one you provide costs ~90–175 kB and every one after it is far cheaper (the four
-// deltas sum to ~464 kB; all four together cost ~240 kB). So the saving is largest when a bundle needs NO
-// service on the critical path, and shrinks — it does not vanish — once one is there.
+// THOSE NUMBERS DO NOT ADD UP, and it matters. About 74 kB of whichever service you provide FIRST is a
+// one-time @angular/fire base that all four then share, so the first costs ~89–174 kB and each one after
+// it is far cheaper (measured increments once the base is paid: auth ~29, firestore ~100, storage ~24,
+// functions ~15). The four deltas sum to ~464 kB while all four together cost ~240 kB. Practically: the
+// saving is largest for a bundle that needs NO service on the critical path, and shrinks — it does not
+// vanish — once one is there. Deferring is not quite free either: splitting hoists @firebase/app into a
+// shared chunk, which cost ~9 kB on the initial bundle in the measured case.
 //
-// AUTH IS THE SHARP ONE. A route guard runs BEFORE its route activates, so a guard that needs Auth
-// cannot get it from the providers of the route it is guarding. An auth-gated app either provides Auth
-// at root (honest: that app's critical path really does include Auth) or keeps its guard in a lazily
-// loaded routes file. A guard imported by the eager app.routes.ts drags Auth into the initial chunk no
-// matter where the provider is written.
+// AUTH IS THE SHARP ONE, AND THE REASON IS BUNDLING, NOT INJECTION. A guard NAMED in the eager
+// app.routes.ts is statically imported by the initial chunk, so its `inject(Auth)` pulls
+// @angular/fire/auth in there no matter where the provider is written. An auth-gated app therefore has
+// Auth on its critical path by construction: provide it at root and accept that honestly, or move the
+// guard itself into the lazily-loaded routes file.
+//
+// (An earlier version of this note claimed a guard cannot RECEIVE Auth from the providers of the route
+// it guards. That is false, and it was measured: Angular resolves `canActivate` — and `canMatch` and
+// `resolve` — against the route's OWN providers injector. What a guard cannot see is a CHILD route's
+// providers. The bundling argument above is the real one and stands on its own.)
 //
 // ── EMULATORS ────────────────────────────────────────────────────────────────────────────────────
 //
@@ -59,8 +67,11 @@
 // Tree-shaking: EVERY emulator concern here (and in the per-service siblings) is gated on `ngDevMode` —
 // Angular's dev-mode flag, which the optimizer folds to a literal `false` in production builds. That
 // collapses the emulate resolution to all-off and the `if (ngDevMode)` wiring blocks to nothing, so the
-// emulator-overrides module, the per-service resolver, every `connect*Emulator(...)` call, and all
-// emulator addresses are dead-code-eliminated from the production artifact. We deliberately do NOT gate
+// emulator-overrides module, the per-service resolver and every `connect*Emulator(...)` call this file
+// and its siblings make are dead-code-eliminated from the production artifact. (The emulator ADDRESSES
+// are absent for a different reason — environment.prod.ts simply has no `emulators` block. Add one and
+// they ship as data, gate or no gate. And `connectFirestoreEmulator` still appears once in any Firestore
+// build: it is a warning string inside the SDK's own retained code, not ours.) We deliberately do NOT gate
 // this on `environment.production`: that's a const-object property the esbuild-based builder does not
 // reliably inline, so it leaves the override resolver in the prod bundle — `ngDevMode` is the only signal
 // the Angular optimizer guarantees to fold.
@@ -135,8 +146,9 @@ export function offsetUrl(url: string, offset: number): string {
  * The Firebase APP — `initializeApp(environment.firebase)` and the bootstrap-time config guards.
  *
  * Provide this at ROOT (app.config.ts). Every service provider (`provideAppAuth()`,
- * `provideAppFirestore()`, …) calls `getApp()`, so the app must be initialised in an injector at or
- * above wherever the service is provided — root is the only place that is true for all of them.
+ * `provideAppFirestore()`, …) resolves the default Firebase app from the SDK when its factory runs, so the
+ * app must already be initialised in an injector at or above wherever the service is provided — root is
+ * the only place that is true for all of them.
  */
 export function provideAppFirebase(): EnvironmentProviders {
   // Fail-loud guard: throws at bootstrap if a PRODUCTION build ships with an unfilled web config, so

@@ -45,7 +45,7 @@ Measured by the consuming project (raw kB, initial chunk):
 Recorded because each one would have sent the work somewhere useless:
 
 - **"The generated default budget is 500 kB."** We never write budgets — `rg budgets` over the whole
-  payload returns nothing. The 500 kB is Angular's stock default, emitted by `@nx/angular:application`,
+  payload returns a single hit, and it is a prose comment; no generator writes a `budgets` key. The 500 kB is Angular's stock default, emitted by `@nx/angular:application`,
   which our `app` generator delegates to. So the consuming project's build **warns**, it does not
   fail (the stock error threshold is 1 MB), and "reconsider the generator's default budget" asks us
   to change a number we do not own.

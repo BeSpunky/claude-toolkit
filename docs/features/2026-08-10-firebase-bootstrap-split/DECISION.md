@@ -10,7 +10,7 @@ Four new generator-owned siblings sit beside it:
 
 | file | export | what it costs when unused |
 | --- | --- | --- |
-| `firebase.config.ts` | `provideAppFirebase()` | — (root; `@firebase/app` + `util`, ~23 kB) |
+| `firebase.config.ts` | `provideAppFirebase()` | — (root; measured at +31 kB over an app with no Firebase) |
 | `firebase-auth.config.ts` | `provideAppAuth()` | nothing |
 | `firebase-firestore.config.ts` | `provideAppFirestore()` | nothing |
 | `firebase-storage.config.ts` | `provideAppStorage()` | nothing |
@@ -123,9 +123,12 @@ what `app.config.ts` provides. Raw / estimated transfer, initial bundle:
    warning. The earlier claim (~650–680 kB, "over from birth") was extrapolated from the consuming
    project's numbers, which include its own code and its `libs/spine`. The honest statement is narrower and
    still damning: the old default spent **96% of the budget before the app had a single feature**, so the
-   first real screen pushed it over — which is exactly what happened to `our-journey` at 744 kB.
+   first real screen pushed it over — which is what the consuming project reported at 744 kB (their figure, not
+   one measured here).
 
-The delta the split actually buys a fresh app: **271 kB raw / 65 kB compressed** off the critical path.
+The delta the split actually buys a fresh app: **240 kB raw / 56 kB compressed** off the critical path.
+(An earlier draft of this line said 271/65 — that compares against *no Firebase at all*, which is not the new
+default. The new default is `provideAppFirebase()` at root, 238.42 kB, so the honest delta is 478.74 − 238.42.)
 
 ## A pre-existing bug the verification exposed
 
@@ -137,13 +140,88 @@ Cause: the `app` generator composes `serve`, `design-system-styles` and `firebas
 exactly — *"the app generator only ever runs to CREATE an app, so this IS the baseline write"* — and the
 other two calls simply never got the flag.
 
-So **no app the house scaffolder has ever created had its Firebase providers wired.** It went unnoticed
+So **no app the house scaffolder has created since nx-tools 0.26.0 had its Firebase providers wired** — `0143b3b` (2026-07-31) introduced the `ensuring` gate; before it `wireProvider` was called unconditionally, so older apps are correctly wired. It went unnoticed
 because the *sync* path passes `--wireProviders` on its own `nx g firebase-emulators` invocation and was
 correct all along; only the scaffold path was silent. The failure surfaced far from its cause, at the app's
 first `inject(Auth)`.
 
-Fixed here (both calls now pass `wireProviders: true`). **No migration owed**: the `app` generator only ever
-runs to create an app, so the fix cannot reach a project already on disk. An existing project that was
-never wired is reported by the 0.33.0 migration as *"no `provideAppFirebase()` call found in a providers
-array"* — which is the honest finding, and adding the call would be guessing at a decision the project may
-have made deliberately.
+Fixed here (both calls now pass `wireProviders: true`) — **and a migration IS owed**, which the first draft of
+this note got wrong. The house question is not *can the fix reach existing projects* but *does this alter a
+shape projects on disk have*, and it does: every app scaffolded on 0.26.0–0.32.x is sitting there with the
+files and no calls. `provideAppFirebase()` at least had a repair path (`--sync --firebase` ensures the layer,
+which passes `--wireProviders`); `provideWorktreeTabLabel()` had none, since a plain sync never ensures the
+`web` layer. So `0.33.1/wire-missing-baseline-providers` wires both — scoped to apps where the generated FILE
+exists and NOTHING in the app calls the provider, so a project that wired it by hand, or deliberately moved it
+into a browser-only config, is left alone.
+
+---
+
+## What four review agents found (2026-08-10)
+
+Four independent adversarial reviews — correctness, house-rules compliance, an Angular/bundling skeptic
+with a real build to experiment on, and a documentation fact-check. They found **eleven** things worth
+fixing, several of which would have shipped broken. Recorded because the pattern matters more than the
+list: everything they caught was a claim that had been *reasoned* rather than *measured*.
+
+**Three that would have broken consumers:**
+
+1. **The migration wrote into other git worktrees and into `dist/`.** The tree walk skipped only
+   `node_modules`/`.git`/`.nx`, and the house's own convention puts a full second checkout at
+   `.claude/worktrees/<slug>/` — at exactly the depth the walk reached. It would have silently edited
+   source on an unrelated feature branch, which the sync's git backup does not cover. Now a shared
+   `_utils/app-roots` walk excludes every dot-directory, the build-output names, and anything carrying
+   its own `.git`; it also tests the workspace root (an `nx init` retrofit has its app at `src/app`) and
+   recurses into matched roots instead of stopping.
+2. **The migration wrote siblings that could not compile.** They import `emulatorFor`/`portOffset`/
+   `offsetUrl` from `firebase.config.ts`, which only *exports* them from 0.33.0 — so writing them beside
+   a 0.32.x root file yields four files importing symbols that do not exist. Reachable three ways: a bare
+   `nx migrate`, a `SYNC_PARTIAL` run, and every app but one in a multi-app workspace. The write routine
+   is now all-five-or-none.
+3. **Identity, not name.** The idempotence check and the import handling matched on the identifier alone.
+   A project with its own `provideAppAuth` from `./auth.providers` read as "already migrated" and was
+   logged as a success while Firestore, Storage and Functions were silently dropped; a stray
+   `import { provideAppStorage } from '@acme/legacy-storage'` would have let the migration wire a call
+   resolving to somebody else's function. Both now resolve the import to a path and compare it; a name
+   collision is reported per service instead of guessed at.
+
+**Two claims that were simply wrong, and one that was unusable:**
+
+4. **"A route guard cannot receive Auth from the route it guards" — false.** Measured against Angular 22:
+   `canActivate`, `canMatch` and `resolve` all resolve against the route's *own* providers injector. Only
+   a **child** route's providers are invisible to a parent's guard. The conclusion (auth usually belongs
+   at root) survives, but on the *bundling* argument: a guard named in the eager `app.routes.ts` is
+   statically imported by the initial chunk, so its `inject(Auth)` pins `@angular/fire/auth` there
+   wherever the provider is declared. The DI sentence is deleted rather than softened — it would have
+   sent people to root for a reason that does not exist.
+5. **The emulator latch was per-module, not per-instance.** A `let emulatorConnected = false` outlives the
+   SDK instance it tracks: delete the Firebase app and re-provide (a TestBed `afterEach`) and the new
+   instance is never connected, so a dev/test run silently talks to the **real backend**. Demonstrated,
+   not theorised. Now a `WeakSet` keyed on the instance — same tree-shaking, no false positive.
+6. **The commented service menu could not actually be used.** Uncommenting a line gave a syntax error
+   (the weight and placement prose sat inside the same comment line as the call) and there was no import
+   to uncomment either. The whole "deliberate `NullInjectorError`, the fix is in the file you open"
+   design rested on a menu you could not select from. Each entry is now three lines — weight, import,
+   and the call **alone** on its own line.
+
+**And the numbers, again.** The per-service figures are not merely non-additive: about **74 kB** of
+whichever service arrives first is a one-time `@angular/fire` base the rest then share (true increments
+once paid: auth ~29, firestore ~100, storage ~24, functions ~15). Deferring also is not free — splitting
+hoists `@firebase/app` into a shared chunk, ~9 kB on the initial bundle. App-check rides in with *any*
+service, not with auth specifically. The headline delta in this document said 271 kB by comparing against
+*no Firebase at all* rather than against the new default; it is 240 kB. Four surviving pre-measurement
+estimates were replaced, including one in `HOUSE.md.tpl` — the surface consumers actually read.
+
+**The one that was a process failure, not a code one:** the `app`-generator wiring fix was first recorded
+here as "no migration owed", reasoning that the fix cannot reach projects on disk. That answers the wrong
+question — the house asks whether the change *alters a shape projects on disk have*, and it does. Hence
+`0.33.1/wire-missing-baseline-providers`.
+
+## Follow-up worth its own effort
+
+**There is no regression test for migrations.** The fixture suite written for this branch (an
+`@nx/devkit` `Tree` with a worktree, a `dist/`, a nested checkout, a name collision, a subfolder call
+site, two providers arrays in one file, and an unwired app) caught five of the eleven findings above and
+now lives only in a scratch directory. The house already has `tools/test-scaffold/run.sh` for the
+scaffolder's silent-regression guards; migrations deserve the same, and every rung added since 0.24.0
+would be a case. Not built here — it is a tool with its own maintenance, and folding it into this branch
+would be the ad-hoc mid-edit refactor the house rules forbid.

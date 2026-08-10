@@ -110,7 +110,7 @@ import { join } from 'node:path';
 //
 // The TypeScript compiler API is reached through `_utils/typescript-api` — see that file.
 import { wireProvider } from '../_utils/wire-provider';
-import { firebaseProvidersNote, writeFirebaseServiceConfigs } from './service-configs';
+import { firebaseProvidersNote, writeFirebaseConfigs } from './service-configs';
 import {
   loadTypeScript,
   type TsArrayLiteralExpression,
@@ -355,17 +355,15 @@ export default async function firebaseEmulatorsGenerator(
       `per-project values — customize via environment.ts for config, app.config.ts for providers, never this file).`
     );
   }
-  tree.write(firebaseConfigPath, template('firebase.config.ts.tpl'));
-
-  //     …and ONE FILE PER SDK SERVICE beside it. firebase.config.ts provides the Firebase *app* only;
-  //     Auth, Firestore, Storage and Functions each live in their own generated file so an app can put
-  //     each where it is actually needed — at root, or in the lazily-loaded routes file that uses it.
-  //     Separate FILES rather than separate exports because a static import is what pins a chunk: an
-  //     export split lets an unused service tree-shake, but only a separate file lets a USED one leave
-  //     the initial bundle. Same ownership contract as firebase.config.ts — no per-project values, so
-  //     always rewritten. (The list, the templates and the app.config note live in ./service-configs,
-  //     shared with migration 0.33.0, which wires these into projects that predate the split.)
-  writeFirebaseServiceConfigs(tree, appRoot);
+  //     …written together with ONE FILE PER SDK SERVICE beside it. firebase.config.ts provides the
+  //     Firebase *app* only; Auth, Firestore, Storage and Functions each live in their own generated file
+  //     so an app can put each where it is actually needed — at root, or in the lazily-loaded routes file
+  //     that uses it. Separate FILES rather than separate exports because a static import is what pins a
+  //     chunk: an export split lets an unused service tree-shake, but only a separate file lets a USED one
+  //     leave the initial bundle. The five are written by ONE routine because they are indivisible — the
+  //     siblings import symbols that only the current root file exports (see ./service-configs, shared with
+  //     migration 0.33.0, which carries projects that predate the split).
+  writeFirebaseConfigs(tree, appRoot);
 
   // 2c) apps/<app>/proxy.conf.mjs — dev-server proxy that relays Functions callables through the app's own
   //     origin (see the file header). Generator-owned, always rewritten. Baked with THIS app's env path so

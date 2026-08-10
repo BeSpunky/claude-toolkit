@@ -16,9 +16,14 @@ import { emulatorFor, portOffset } from './firebase.config';
 
 declare const ngDevMode: boolean;
 
-// Latched so the emulator is connected once per SDK instance even when this provider is used in more
-// than one injector — see firebase-auth.config.ts for the full note. DEV ONLY.
-let emulatorConnected = false;
+// Emulator wiring must happen ONCE PER SDK INSTANCE — and the latch is keyed to the instance, not to
+// this module. A plain module-level boolean looks equivalent and is not: it survives the SDK instance.
+// Tear the Firebase app down and re-create it in the same JS realm — `deleteApp()` in a TestBed
+// `afterEach`, then provide again — and the boolean still reads `true`, so the NEW instance is never
+// connected and silently talks to the REAL backend from a dev/test run. Measured, not theorised.
+// A WeakSet keyed on the instance answers the question actually being asked ("has THIS one been
+// connected?"), tree-shakes exactly the same way, and cannot outlive what it is tracking.
+const emulatorConnected = new WeakSet<object>();
 
 /** Callable Cloud Functions, wired to the Functions emulator in dev when `environment` asks for it. */
 export function provideAppFunctions(): EnvironmentProviders {
@@ -29,7 +34,7 @@ export function provideAppFunctions(): EnvironmentProviders {
       // not logic. Omitted → the SDK default region.
       const region = (environment.firebase as { functionsRegion?: string }).functionsRegion;
       const functions = region ? getFunctions(getApp(), region) : getFunctions();
-      if (ngDevMode && !emulatorConnected) {
+      if (ngDevMode && !emulatorConnected.has(functions)) {
         const e = emulatorFor('functions');
         if (e) {
           // Two ways to reach the Functions emulator (see environment.ts's `proxied`):
@@ -45,7 +50,7 @@ export function provideAppFunctions(): EnvironmentProviders {
           } else {
             connectFunctionsEmulator(functions, e.host, e.port + portOffset);
           }
-          emulatorConnected = true;
+          emulatorConnected.add(functions);
         }
       }
       return functions;

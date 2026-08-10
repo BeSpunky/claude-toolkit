@@ -38,12 +38,18 @@
 // a possible duplicate-provider bug. This migration deliberately does not adjudicate that: it preserves
 // whatever the project has, at every site it has it, and lists them so a reader can see there were two.
 //
-// IT ALSO WRITES THE FILES IT IMPORTS. The house sync runs `probe → install → migrate → detect → generate`,
-// so when this runs the per-service files do not exist yet — the firebase-emulators generator writes them
-// afterwards. That is fine for a `scaffold.sh --sync`, and broken for a project that runs `nx migrate` on
-// its own: imports pointing at absent files. So any missing sibling is written here from the SAME templates
-// the generator uses (shared via generators/firebase-emulators/service-configs), and the generator's later
-// rewrite is byte-identical.
+// IT ALSO WRITES THE FILES IT IMPORTS — ALL FIVE OF THEM. The house sync runs
+// `probe → install → migrate → detect → generate`, so when this runs the per-service files do not exist
+// yet; the firebase-emulators generator writes them afterwards. That is fine for a `scaffold.sh --sync`
+// naming the app, and broken everywhere else: a bare `nx migrate`, a SYNC_PARTIAL run (the per-app
+// generators are skipped when the sync cannot resolve the app), and every app in a multi-app workspace
+// except the one the sync names. So the whole set is written here from the SAME templates the generator
+// uses (shared via generators/firebase-emulators/service-configs), and the generator's later rewrite is
+// byte-identical.
+//
+// `firebase.config.ts` is in that set for a reason that is easy to miss: the siblings import
+// `emulatorFor` / `portOffset` / `offsetUrl` from it, and 0.32.x kept those module-PRIVATE. Write the
+// siblings beside an old root file and the project stops compiling, at `tsc`, nowhere near this migration.
 import { type Tree, logger, formatFiles, applyChangesToString, ChangeType, type StringChange } from '@nx/devkit';
 import {
   loadTypeScript,
@@ -51,26 +57,28 @@ import {
   type TsNode,
   type TsSourceFile,
 } from '../../generators/_utils/typescript-api';
+import { findProviderCallSites } from '../../generators/_utils/provider-call-sites';
+import { findAppRoots } from '../../generators/_utils/app-roots';
 import {
   FIREBASE_SERVICE_CONFIGS,
-  writeFirebaseServiceConfigs,
+  writeFirebaseConfigs,
 } from '../../generators/firebase-emulators/service-configs';
 
 /** The provider whose meaning narrowed — the anchor everything here is found by. */
 const ANCHOR = 'provideAppFirebase';
 
-/** The module the anchor is imported from, in every shape the house has generated it. */
-const ANCHOR_MODULE_SUFFIX = 'firebase.config';
+/** What happened to one service at one call site. */
+type ServiceOutcome = 'inserted' | 'already' | 'name-taken';
 
 export default async function splitFirebaseServiceProviders(tree: Tree): Promise<void> {
-  // The apps this applies to: every one carrying the generator-owned firebase.config.ts. Found by walking
-  // the tree rather than by reading project configuration, so an app whose project.json shape this
-  // migration doesn't anticipate is still covered.
-  const appRoots = findFirebaseAppRoots(tree);
+  // Every app carrying the generator-owned firebase.config.ts. Found by walking for the file rather than
+  // by reading project configuration, so an app whose project.json shape this migration doesn't
+  // anticipate is still covered. The walk refuses to enter dot-directories, build output and nested
+  // checkouts — see _utils/app-roots for why that is load-bearing and not merely tidy.
+  const appRoots = findAppRoots(tree, (root) => tree.exists(`${root}/src/app/firebase.config.ts`));
   if (appRoots.length === 0) return; // Not a Firebase project (or never wired) — nothing owed.
 
-  const ts = loadTypeScript();
-  if (!ts) {
+  if (!loadTypeScript()) {
     logger.warn(
       `[split-firebase-service-providers] Could not load the TypeScript compiler API, so ${ANCHOR}()'s ` +
         `call site could not be rewritten. After the sync, add ${FIREBASE_SERVICE_CONFIGS.map((c) => `${c.providerFn}()`).join(', ')} ` +
@@ -85,54 +93,50 @@ export default async function splitFirebaseServiceProviders(tree: Tree): Promise
 
   for (const appRoot of appRoots) {
     // FIND THE CALL SITES BEFORE WRITING ANYTHING. The per-service templates mention `provideAppFirebase()`
-    // in their own header comments, so writing them first put four files into the app that the textual
-    // prefilter below matched and the AST pass then had to reject — every app came out of the migration
-    // carrying four "could not wire" warnings that were pure noise. Searching first removes the collision
-    // at its source rather than filtering the symptom afterwards.
-    const callSites = findAnchorCallSites(tree, appRoot);
+    // in their own header prose; `findProviderCallSites` is parser-based and ignores prose, but searching
+    // first is still the honest order — the question is what THIS project wired, and files this migration
+    // is about to write are not part of the answer.
+    const callSites = findProviderCallSites(tree, `${appRoot}/src`, ANCHOR) ?? [];
 
-    // Then write any sibling that isn't there yet — see the header. The generator rewrites these identically
-    // moments later in a normal sync; this is what makes a bare `nx migrate` leave a project that compiles.
-    writeFirebaseServiceConfigs(tree, appRoot);
+    // Then write the WHOLE generated config set — see the header. Deliberately including
+    // `firebase.config.ts` itself: the siblings import `emulatorFor`/`portOffset`/`offsetUrl` from it, and
+    // those are only EXPORTED from 0.33.0 on.
+    writeFirebaseConfigs(tree, appRoot);
 
     if (callSites.length === 0) {
       unresolved.push(`${appRoot} — no ${ANCHOR}() call found in a providers array`);
       continue;
     }
 
-    let wiredHere = 0;
     for (const path of callSites) {
       const before = tree.read(path, 'utf8') ?? '';
-      const result = insertServiceProviders(before, path);
-      if (result === 'not-a-call-site') continue; // Names the anchor in prose, never calls it.
-      if (result === 'already') {
-        alreadyDone.push(path);
-        wiredHere++;
-      } else if (result === null) {
-        unresolved.push(`${path} — ${ANCHOR}'s import does not resolve to a '${ANCHOR_MODULE_SUFFIX}' module`);
-      } else {
-        tree.write(path, result);
-        rewritten.push(path);
-        wiredHere++;
+      const { source, outcomes } = insertServiceProviders(before, path, appRoot);
+      const taken = FIREBASE_SERVICE_CONFIGS.filter((c) => outcomes[c.providerFn] === 'name-taken');
+      if (taken.length > 0) {
+        unresolved.push(
+          `${path} — ${taken.map((c) => `${c.providerFn}`).join(', ')} already imported from another module, ` +
+            `so the Firebase one could not be added under that name`
+        );
       }
-    }
-    // Every candidate turned out to merely MENTION the anchor — so this app has no wiring to carry, which
-    // is the same finding as no candidate at all, and gets the same report.
-    if (wiredHere === 0 && !unresolved.some((u) => u.startsWith(appRoot))) {
-      unresolved.push(`${appRoot} — no ${ANCHOR}() call found in a providers array`);
+      if (source !== before) {
+        tree.write(path, source);
+        rewritten.push(path);
+      } else if (taken.length === 0) {
+        alreadyDone.push(path);
+      }
     }
   }
 
   if (rewritten.length > 0) {
     logger.info(
       `[split-firebase-service-providers] ${ANCHOR}() now provides the Firebase APP only; each SDK service ` +
-        `has its own file. Added ${FIREBASE_SERVICE_CONFIGS.map((c) => `${c.providerFn}()`).join(', ')} beside it in ` +
-        `${rewritten.join(', ')}, so this project behaves exactly as before.\n` +
+        `has its own file. Added the per-service providers beside it in ${rewritten.join(', ')}, so this ` +
+        `project behaves exactly as before.\n` +
         `  TO CLAIM THE WIN: every service listed there is in your INITIAL bundle. Measured on a fresh house ` +
         `app, all four at root cost 479 kB raw against 238 kB for the Firebase app alone. Delete the ones this ` +
-        `app doesn't use, and move the rest into ` +
-        `the \`providers\` of the LAZILY-LOADED routes file that needs them — the file behind \`loadChildren\`, not ` +
-        `the eager app.routes.ts, whose imports land in the initial bundle either way.\n` +
+        `app doesn't use, and move the rest into the \`providers\` of the LAZILY-LOADED routes file that needs ` +
+        `them — the file behind \`loadChildren\`, not the eager app.routes.ts, whose imports land in the ` +
+        `initial bundle either way.\n` +
         `  KEEP AUTH AT ROOT if a route guard needs it: a guard runs before its route activates, so it cannot ` +
         `receive Auth from the providers of the route it guards.`
     );
@@ -149,74 +153,34 @@ export default async function splitFirebaseServiceProviders(tree: Tree): Promise
         unresolved.map((u) => `  • ${u}`).join('\n') +
         `\n  ${ANCHOR}() no longer provides Auth, Firestore, Storage or Functions, so anything injecting them ` +
         `will fail with NullInjectorError until they are provided. Add the ones this app uses beside ` +
-        `${ANCHOR}(): ${FIREBASE_SERVICE_CONFIGS.map((c) => `import { ${c.providerFn} } from '${c.importFrom}'`).join('; ')}.`
+        `${ANCHOR}(), importing each from its './firebase-<service>.config' file. (An app that never had ` +
+        `${ANCHOR}() wired at all is repaired by migration 0.33.1 instead.)`
     );
   }
 
   await formatFiles(tree);
 }
 
-/** Every app root (the folder holding `src/app/firebase.config.ts`) in the workspace. */
-function findFirebaseAppRoots(tree: Tree): string[] {
-  const roots: string[] = [];
-  const walk = (dir: string, depth: number): void => {
-    if (depth > 4) return; // apps/<app>/src/app — no house layout puts it deeper.
-    for (const child of tree.children(dir)) {
-      if (child === 'node_modules' || child === '.git' || child.startsWith('.nx')) continue;
-      const path = dir === '.' ? child : `${dir}/${child}`;
-      if (!tree.isFile(path)) {
-        if (tree.exists(`${path}/src/app/firebase.config.ts`)) roots.push(path);
-        else walk(path, depth + 1);
-      }
-    }
-  };
-  walk('.', 0);
-  return roots;
-}
-
-/** Files under the app that CALL the anchor inside an array literal — i.e. a providers array. */
-function findAnchorCallSites(tree: Tree, appRoot: string): string[] {
-  const hits: string[] = [];
-  const walk = (dir: string): void => {
-    for (const child of tree.children(dir)) {
-      const path = `${dir}/${child}`;
-      if (!tree.isFile(path)) {
-        walk(path);
-        continue;
-      }
-      if (!path.endsWith('.ts') || path.endsWith('.spec.ts')) continue;
-      // firebase.config.ts DEFINES the anchor; it never calls it. Skipping it here keeps the AST pass
-      // from having to tell a definition from a use.
-      if (path.endsWith('/firebase.config.ts')) continue;
-      const content = tree.read(path, 'utf8') ?? '';
-      if (content.includes(`${ANCHOR}(`)) hits.push(path);
-    }
-  };
-  walk(`${appRoot}/src`);
-  return hits;
-}
-
 /**
- * Insert the four service providers immediately after the `provideAppFirebase()` call, plus their imports.
+ * Insert every missing service provider at EVERY `provideAppFirebase()` call in this file, plus the
+ * imports the new calls need.
  *
- * @returns the updated source; `'already'` when the services are wired there; `'not-a-call-site'` when the
- *          file only MENTIONS the anchor (prose, a re-export) and never calls it inside a providers array;
- *          or `null` when it IS a call site but the anchor's import cannot be resolved to a
- *          `firebase.config` module, so the siblings' paths would be a guess. Only `null` is worth
- *          reporting — the other two are ordinary and silent.
+ * @returns the updated source (unchanged when there was nothing to add) and, per provider, what happened.
  */
-function insertServiceProviders(source: string, path: string): string | 'already' | 'not-a-call-site' | null {
+function insertServiceProviders(
+  source: string,
+  path: string,
+  appRoot: string
+): { source: string; outcomes: Record<string, ServiceOutcome> } {
+  const outcomes: Record<string, ServiceOutcome> = {};
   const ts = loadTypeScript();
-  if (!ts) return null;
+  if (!ts) return { source, outcomes };
   const sf = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS) as TsSourceFile;
 
-  // IS THIS A CALL SITE AT ALL? Asked FIRST, because the answer decides whether anything else is worth
-  // reporting. The anchor CALL must sit directly inside an array literal — the providers array, whatever the
-  // enclosing object is called. A file that merely names `provideAppFirebase()` in a comment, or re-exports
-  // it, is not a wiring site and is nobody's problem.
-  let anchorCall: TsNode | null = null;
-  const findCall = (node: TsNode): void => {
-    if (anchorCall) return;
+  // EVERY anchor call inside an array literal, not just the first — a file can legitimately hold a browser
+  // config and a server config, and half-migrating it is worse than not touching it.
+  const anchorCalls: TsNode[] = [];
+  const findCalls = (node: TsNode): void => {
     if (
       ts.isCallExpression(node) &&
       ts.isIdentifier(node.expression) &&
@@ -224,68 +188,101 @@ function insertServiceProviders(source: string, path: string): string | 'already
       node.parent &&
       ts.isArrayLiteralExpression(node.parent)
     ) {
-      anchorCall = node;
+      anchorCalls.push(node);
       return;
     }
-    ts.forEachChild(node, findCall);
+    ts.forEachChild(node, findCalls);
   };
-  findCall(sf);
-  if (!anchorCall) return 'not-a-call-site';
+  findCalls(sf);
+  if (anchorCalls.length === 0) return { source, outcomes };
 
-  // The anchor's own import tells us where the siblings live: they are generated beside firebase.config.ts,
-  // so `./firebase.config` → `./firebase-auth.config`, `../core/firebase.config` → `../core/firebase-auth.config`.
-  // Deriving the path instead of assuming `./` is what lets an app keep its config wherever it put it. This
-  // IS a call site, so failing to resolve it is a real finding — hence `null`, which the caller reports.
-  let anchorModule: string | null = null;
+  // Where each symbol is imported FROM, resolved to a workspace path when the specifier is relative. This
+  // is what lets identity rather than name decide whether a service is already wired.
+  const importedFrom = new Map<string, string | null>(); // symbol → resolved path, or null when non-relative
   let lastImport: TsImportDeclaration | null = null;
-  const importedNames = new Set<string>();
   for (const stmt of sf.statements) {
     if (!ts.isImportDeclaration(stmt)) break;
     lastImport = stmt;
     const named = stmt.importClause?.namedBindings;
-    if (named && ts.isNamedImports(named)) {
-      for (const el of named.elements) {
-        importedNames.add(el.name.text);
-        if (el.name.text === ANCHOR && ts.isStringLiteral(stmt.moduleSpecifier)) {
-          anchorModule = stmt.moduleSpecifier.text;
-        }
-      }
+    if (!named || !ts.isNamedImports(named) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const spec = stmt.moduleSpecifier.text;
+    const resolved = spec.startsWith('.') ? resolveRelative(dirOf(path), spec) : null;
+    for (const el of named.elements) importedFrom.set(el.name.text, resolved);
+  }
+  if (!lastImport) return { source, outcomes };
+
+  // Which providers are called ANYWHERE in this file (by name — combined with importedFrom below, that is
+  // enough to tell our provider from a same-named one).
+  const calledNames = new Set<string>();
+  const collectCalls = (node: TsNode): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) calledNames.add(node.expression.text);
+    ts.forEachChild(node, collectCalls);
+  };
+  collectCalls(sf);
+
+  const configDir = `${appRoot}/src/app`;
+  const toInsert: string[] = [];
+  const newImports: string[] = [];
+
+  for (const cfg of FIREBASE_SERVICE_CONFIGS) {
+    const ourModulePath = `${configDir}/${cfg.fileName.replace(/\.ts$/, '')}`;
+    const importedSource = importedFrom.get(cfg.providerFn);
+
+    if (importedSource !== undefined && importedSource !== ourModulePath) {
+      // The name is taken by something else. Adding our import would be a duplicate identifier, and
+      // picking a winner is a decision about the app, not about this migration.
+      outcomes[cfg.providerFn] = 'name-taken';
+      continue;
+    }
+    if (importedSource === ourModulePath && calledNames.has(cfg.providerFn)) {
+      outcomes[cfg.providerFn] = 'already';
+      continue;
+    }
+    outcomes[cfg.providerFn] = 'inserted';
+    toInsert.push(`${cfg.providerFn}()`);
+    if (importedSource === undefined) {
+      newImports.push(`\nimport { ${cfg.providerFn} } from '${relativeSpecifier(dirOf(path), ourModulePath)}';`);
     }
   }
-  if (!anchorModule || !lastImport) return null;
-  if (!anchorModule.endsWith(ANCHOR_MODULE_SUFFIX)) return null;
-  const moduleBase = anchorModule.slice(0, -ANCHOR_MODULE_SUFFIX.length); // './' or '../core/'
 
-  // Idempotency: any service already called in this file means the split has been applied here. Checked by
-  // CALL, not by imported identifier — a leftover import after a hand-edit must not read as "done".
-  let anyServiceCalled = false;
-  const detectService = (node: TsNode): void => {
-    if (anyServiceCalled) return;
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      const called = node.expression.text;
-      if (FIREBASE_SERVICE_CONFIGS.some((c) => c.providerFn === called)) {
-        anyServiceCalled = true;
-        return;
-      }
-    }
-    ts.forEachChild(node, detectService);
-  };
-  detectService(sf);
-  if (anyServiceCalled) return 'already';
+  if (toInsert.length === 0) return { source, outcomes };
 
-  const calls = FIREBASE_SERVICE_CONFIGS.map((c) => `${c.providerFn}()`).join(', ');
-  const changes: StringChange[] = [
-    {
-      type: ChangeType.Insert,
-      index: (anchorCall as TsNode).getEnd(),
-      text: `, ${calls}`,
-    },
-  ];
-  const newImports = FIREBASE_SERVICE_CONFIGS.filter((c) => !importedNames.has(c.providerFn)).map(
-    (c) => `\nimport { ${c.providerFn} } from '${moduleBase}${c.fileName.replace(/\.ts$/, '')}';`
-  );
+  const changes: StringChange[] = anchorCalls.map((call) => ({
+    type: ChangeType.Insert,
+    index: call.getEnd(),
+    text: `, ${toInsert.join(', ')}`,
+  }));
   if (newImports.length > 0) {
     changes.push({ type: ChangeType.Insert, index: lastImport.getEnd(), text: newImports.join('') });
   }
-  return applyChangesToString(source, changes);
+  return { source: applyChangesToString(source, changes), outcomes };
+}
+
+/** The directory part of a workspace-relative file path. */
+function dirOf(path: string): string {
+  const i = path.lastIndexOf('/');
+  return i === -1 ? '.' : path.slice(0, i);
+}
+
+/** Resolve a relative module specifier against a directory, as a workspace-relative path (no extension). */
+function resolveRelative(fromDir: string, spec: string): string {
+  const parts = `${fromDir}/${spec}`.split('/');
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') out.pop();
+    else out.push(part);
+  }
+  return out.join('/');
+}
+
+/** The module specifier that gets from `fromDir` to `targetPath` (extensionless), always `./` or `../`. */
+function relativeSpecifier(fromDir: string, targetPath: string): string {
+  const from = fromDir.split('/').filter((p) => p && p !== '.');
+  const to = targetPath.split('/').filter((p) => p && p !== '.');
+  let shared = 0;
+  while (shared < from.length && shared < to.length && from[shared] === to[shared]) shared++;
+  const up = from.length - shared;
+  const down = to.slice(shared).join('/');
+  return up === 0 ? `./${down}` : `${'../'.repeat(up)}${down}`;
 }

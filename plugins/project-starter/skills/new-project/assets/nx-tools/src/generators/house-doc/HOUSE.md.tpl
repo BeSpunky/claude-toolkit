@@ -157,21 +157,23 @@ The `@bespunky/nx-tools:serve` executor runs the emulator suite alongside the ap
 
 | Provider | File | Measured initial bundle with THIS service and nothing else |
 | --- | --- | --- |
-| `provideAppFirebase()` | `firebase.config.ts` | **238 kB** — the Firebase app itself (207 kB with no Firebase at all). **Always at root**; every service below calls `getApp()`. |
+| `provideAppFirebase()` | `firebase.config.ts` | **238 kB** — the Firebase app itself (207 kB with no Firebase at all). **Always at root**: each service below resolves the default Firebase app from the SDK when its factory runs, so it must already be initialised at or above wherever the service is provided. |
 | `provideAppAuth()` | `firebase-auth.config.ts` | 342 kB (app-check rides in with it) |
 | `provideAppFirestore()` | `firebase-firestore.config.ts` | 413 kB — the heaviest |
 | `provideAppStorage()` | `firebase-storage.config.ts` | 336 kB |
 | `provideAppFunctions()` | `firebase-functions.config.ts` | 327 kB |
 | *all four at root* | | **479 kB** — what `provideAppFirebase()` used to return on its own |
 
-**Those per-service numbers do not add up, and that is the point.** Whichever service arrives first drags in Firebase's shared core, so the first one costs ~90–175 kB and each one after it is far cheaper. The saving is largest for a bundle that needs **no** service on the critical path, and shrinks — without vanishing — once one is there. (Raw, uncompressed, measured on a freshly scaffolded house app with no features.)
+**Those per-service numbers do not add up, and that is the point.** Whichever service arrives first drags in Firebase's shared core, so the first one costs ~89–174 kB and each one after it is far cheaper. The saving is largest for a bundle that needs **no** service on the critical path, and shrinks — without vanishing — once one is there. (Raw, uncompressed, measured on a freshly scaffolded house app with no features.)
 
-Provide each one either in **`app.config.ts`** (root — it is then in the initial bundle, which is correct for something bootstrap genuinely needs) or in the **`providers` of a lazily-loaded routes file** (it then rides that lazy chunk and never touches the critical path). A newly scaffolded app wires only `provideAppFirebase()` and leaves the four as a commented menu in `app.config.ts` — so **the first `inject(Firestore)` in a fresh app throws `NullInjectorError` until you place it.** That is deliberate: the alternative is every app paying ~380 kB for services it may never call.
+Provide each one either in **`app.config.ts`** (root — it is then in the initial bundle, which is correct for something bootstrap genuinely needs) or in the **`providers` of a lazily-loaded routes file** (it then rides that lazy chunk and never touches the critical path). A newly scaffolded app wires only `provideAppFirebase()` and leaves the four as a commented menu in `app.config.ts` — so **the first `inject(Firestore)` in a fresh app throws `NullInjectorError` until you place it.** That is deliberate: the alternative is every app paying ~240 kB for services it may never call.
+
+**If this project predates nx-tools 0.33.0, your `app.config.ts` already has all four at root.** Migration `0.33.0/split-firebase-service-providers` put them there deliberately, so the split changed nothing about your bundle — it only made the choice expressible. Claiming the saving is your move, at your pace: delete the services this app never injects, and move the rest down into the lazily-loaded routes file that uses them.
 
 **Two traps worth knowing:**
 
 - **A providers array in the EAGER `app.routes.ts` does not defer anything.** A static import is what pins a chunk, so `providers: [provideAppFirestore()]` written in the eagerly-loaded routes file lands in the initial bundle exactly as if it were at root. It must be the routes file behind `loadChildren`.
-- **A route GUARD cannot get Auth from the route it guards** — guards run before the route activates. An app that gates its routes on sign-in has Auth on its critical path by definition: provide it at root and accept the bytes honestly.
+- **A guard named in the eager `app.routes.ts` pins Auth into the initial bundle** — it is statically imported there, so its `inject(Auth)` drags `@angular/fire/auth` in wherever the provider itself is declared. An app that gates its routes on sign-in has Auth on its critical path by construction: provide it at root and accept the bytes honestly, or move the guard into the lazy routes file too. (Route providers *are* visible to that route's own `canActivate` — only a **child** route's providers are invisible to a parent's guard, so don't reach for root on a DI argument.)
 
 ### Per-service emulator toggling
 
