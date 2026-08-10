@@ -137,8 +137,9 @@ export default async function splitFirebaseServiceProviders(tree: Tree): Promise
         `app doesn't use, and move the rest into the \`providers\` of the LAZILY-LOADED routes file that needs ` +
         `them — the file behind \`loadChildren\`, not the eager app.routes.ts, whose imports land in the ` +
         `initial bundle either way.\n` +
-        `  KEEP AUTH AT ROOT if a route guard needs it: a guard runs before its route activates, so it cannot ` +
-        `receive Auth from the providers of the route it guards.`
+        `  KEEP AUTH AT ROOT if a guard named in the eager app.routes.ts needs it: that guard is statically ` +
+        `imported by the initial chunk, so its inject(Auth) pins @angular/fire/auth there wherever the ` +
+        `provider itself is written.`
     );
   }
   if (alreadyDone.length > 0) {
