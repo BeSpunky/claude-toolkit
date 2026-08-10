@@ -17,10 +17,9 @@ what raises that target: without it the sync faithfully installs and migrates to
 machine's plugin still names, and stamps the project with it.
 
 **Updating the marketplace is not updating the plugin.** `marketplace update` refreshes the *listing*; the
-installed plugin stays where it was, and `${CLAUDE_PLUGIN_ROOT}` keeps pointing at the old cached version. A
-sync run in that state executes an OLDER scaffolder — which, on a project that is already current, walks it
-BACKWARDS: an older stamp, an older dependency, and none of the guards that exist to prevent exactly that.
-So run both:
+installed plugin stays where it was. Skip the second command and the sync executes an OLDER scaffolder —
+which, on a project that is already current, walks it BACKWARDS: an older stamp, an older dependency, and
+none of the guards that exist to prevent exactly that. So run both:
 
 ```
 claude plugin marketplace update claude-toolkit
@@ -34,41 +33,49 @@ claude plugin update bespunky-project-starter
   installed. Do not decide that for them: syncing from a stale toolkit is a legitimate choice, but it is
   theirs, and it quietly writes an older stamp into the project.
 
-**If `claude plugin update` reports a NEW version, STOP and ask the user to restart Claude Code.** The CLI
-says so itself — *"restart required to apply"* — and it matters here more than usual: `${CLAUDE_PLUGIN_ROOT}`
-is fixed for the life of this session, so every path below would still run the version you just replaced.
-Continuing is the case that produced a silent downgrade. Tell them what was updated, that a restart is needed
-for it to take effect, and that `/sync` will pick it up next session. Do not work around this by hunting for
-the new version's directory yourself.
+**A new version does NOT end this run.** `${CLAUDE_PLUGIN_ROOT}` is frozen for the life of this session, so
+the CLI's *"restart required to apply"* is true of that variable — and of nothing else. The new version is on
+disk the moment the update returns, and step 2 resolves it. Relay what was updated and carry on.
 
-If it reports that the plugin is already up to date, carry on — nothing moved, and this session's plugin root
-is the current one.
-
-## 2. Locate the scaffolder, and check it is the one you just updated to
+## 2. Resolve the plugin root that is installed NOW — not the one this session started with
 
 ```
-ls "${CLAUDE_PLUGIN_ROOT}/skills/new-project/assets/scaffold.sh"
-grep -m1 '"version"' "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json"
+PLUGIN_NOW="$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-plugin-root.sh")" && echo "$PLUGIN_NOW"
 ```
 
-Compare that version against what `claude plugin list` reports as installed. They should match. **If the
-plugin root is older, stop** — you are about to run a scaffolder the update above was meant to replace, and
-that is the downgrade path. Report both versions and ask the user to restart.
+This reads `installPath` out of `~/.claude/plugins/installed_plugins.json` — the record the CLI itself just
+wrote — so it names the version step 1 installed, in this session, with no restart. **It exits non-zero
+rather than guess.** Two failures it reports, both of which end the run:
 
-If the path doesn't resolve at all, find it — but sort, don't guess:
+- **the resolved plugin is OLDER than the one this session is running** — the downgrade case. Running it
+  would re-stamp `HOUSE.md` backwards and apply older generators over a newer shape, which migrations cannot
+  undo. Report both versions and stop.
+- **no installed plugin could be located** — report the paths it names and stop.
+
+Use `$PLUGIN_NOW` for every path below. **Never fall back to `find … | head -1`**: that picks an arbitrary
+cached version — on a machine with several it has handed back a scaffolder ten releases old — and the cache
+retains versions that are no longer installed, so "newest directory" and "installed" are different questions.
+
+**Then check whether the procedure itself moved:**
 
 ```
-find ~/.claude -path '*project-starter*/assets/scaffold.sh' 2>/dev/null | sort -V | tail -1
+diff -q "${CLAUDE_PLUGIN_ROOT}/commands/sync.md" "$PLUGIN_NOW/commands/sync.md"
 ```
 
-An unsorted `head -1` picks an arbitrary cached version — on a machine with several, that has handed back a
-scaffolder ten releases old.
+If they differ, the steps you are reading are the *old* release's. **Read `$PLUGIN_NOW/commands/sync.md` and
+follow that instead**, from step 3 onward — the scaffolder you are about to run is its scaffolder, not this
+one's. Say in one line that you did so.
 
 ## 3. Run the sync
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}/skills/new-project/assets/scaffold.sh" --sync --yes $ARGUMENTS .
+bash "$PLUGIN_NOW/skills/new-project/assets/scaffold.sh" --sync --yes $ARGUMENTS .
 ```
+
+Running the *resolved* scaffolder is also what makes the payload right: `scaffold.sh` derives the
+`@bespunky/nx-tools` version it installs and stamps from its own directory, so whichever copy executes
+decides which payload the project lands on. The frozen root would install and stamp the old one, leaving the
+ladder for a later run to walk.
 
 **The trailing `.` is the target, and only flags may come before it.** `scaffold.sh` takes flags first and
 positionals last, so the first non-flag token it sees *is* the project path. Read what `$ARGUMENTS` actually
@@ -239,9 +246,11 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 - **`--sync cannot ENSURE the '<layer>' layer`** — relay the message verbatim. It already names the native
   command to add that layer, after which a plain sync detects it. Don't work around it.
 
-- **`ERROR: node_modules/.bin/nx not found`** — the project's dependencies were never installed (a fresh
-  clone). Relay the install command the message names, and offer to re-run the sync after it. The sync needs
-  the workspace's own `nx` both to migrate and to generate; there is nothing to work around.
+- **`[install] node_modules/.bin/nx is missing …`** — **not an error.** The project's dependencies were never
+  installed (a fresh clone), so the sync installs them itself and carries on. Nothing to relay beyond the fact
+  that it happened, and nothing to re-run. It only becomes an error two ways, both of which end the run and
+  both of which say so: the install *failed*, or it succeeded and the workspace still has no `nx` — meaning
+  this workspace does not depend on Nx at all, so there is nothing here for the sync to drive.
 
 - **`ERROR: could not read this workspace layers`** — the layer registry failed to load, so the sync stopped
   rather than guess. This is a **refusal, not a crash**: a failed detection is indistinguishable from an empty
@@ -251,13 +260,39 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 
 ## 5. Report
 
-On `SYNC_OK`, summarise from the output, not from assumption:
+**The sync is finished when it prints `SYNC_OK`. It does not need running again** — say so, because two or
+three passes used to be the habit and people still expect it.
+
+### First, close the gap the run left open — `SYNC_RELOAD`
+
+If the output carries a `SYNC_RELOAD:` line, **Read every file it names** (`HOUSE.rules.md`, `HOUSE.md`,
+`CLAUDE.md`) before you report. They are `@`-imported at session start, so the *old* text is what is in your
+context right now — and the sync just rewrote the house directives you are meant to be working under.
+Reading them puts the new content in context immediately; this needs no restart and is not a boundary. Do it
+silently and mention it in one clause.
+
+### Then report, summarising from the output, not from assumption
 
 - **whether migrations ran** (the `[migrate]` line) and between which versions — first, because it's the only
   irreversible part;
 - the layers it reported active, and the package manager it detected;
-- whether `.devcontainer/*` changed — if so, tell the user to run **Dev Containers: Rebuild Container**, and
-  **never attempt the rebuild yourself**;
 - if it printed an `[devcontainer] Adopted the existing …` line, read `.devcontainer/.bespunky-devcontainer.json`
   and tell them which keys were left as theirs — that is the divergence the sync will never fix on its own;
 - the backup ref from the `BACKUP_OK` line, so they know how to undo it.
+
+### Last, the one boundary — `SYNC_NEXT`
+
+The run states exactly one, computed from what it actually changed. **Relay it and stop there** — never
+report two, and never invent one the line didn't ask for:
+
+| `SYNC_NEXT:` | What to tell the user |
+| --- | --- |
+| `none` | Nothing further. Say it plainly — silence here reads as "restart to be safe", which is the habit we are retiring. |
+| `restart-session` | Restart Claude Code when convenient, to pick up `.claude/settings.json` / `.mcp.json`. **No rebuild.** |
+| `rebuild-container` | Run **Dev Containers: Rebuild Container** when convenient. It *subsumes* the restart — do not also ask for one. |
+| `unknown` | The run had no git base to compare against; say so and name the three paths it would have checked. |
+
+**Never perform the boundary yourself** — no rebuild, no restart, no reload of plugins on your own
+initiative. The script states the fact, the user chooses the moment; both actions throw away the session
+they are working in, and only they know what that costs right now. Same detect-don't-execute rule as the
+`SessionStart` version hook.

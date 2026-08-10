@@ -145,7 +145,12 @@ bash "${CLAUDE_SKILL_DIR}/assets/scaffold.sh" --sync [--firebase] [--yes] <PROJE
 
 **The ordinary way to run this is the `/sync` command**, which updates the claude-toolkit plugins first and
 then syncs the current project — so the sync applies the CURRENT house standard rather than whatever copy
-this machine happens to have:
+this machine happens to have. **It completes in ONE run.** A plugin update used to end the run and demand a
+restart, because `${CLAUDE_PLUGIN_ROOT}` is frozen for the life of a session; the command now resolves the
+just-installed root from `~/.claude/plugins/installed_plugins.json` (via `scripts/resolve-plugin-root.sh`)
+and runs *that* scaffolder in the same session. That also settles which payload lands, since `scaffold.sh`
+derives the `@bespunky/nx-tools` version it installs and stamps from its own directory — the frozen root
+would have installed and stamped the old one, leaving the ladder for a later run to walk.
 
 ```
 /sync [--ensure=<layers>] [--firebase] [--voice]
@@ -159,11 +164,24 @@ command always targets `.`), or when you need a flag it does not pass through (`
 
 **Sync REFUSES to run unattended — the `--yes` gate.** A sync rewrites generated files and takes minutes, so it must never happen because something *inferred* that it should. On a TTY the script prompts a human. With no TTY (your shell), it **aborts** unless `--yes` is passed — and `--yes` *asserts that the user has explicitly agreed in this conversation*. Pass it only when that is true: never to satisfy the gate, never on inferred consent. In CI it refuses outright — no flag can conjure a human. This is what makes "detection is automatic, execution is consented" (§1c) structural rather than a matter of your good behavior.
 
-(On the Docker-fallback path through WSL on Windows hosts, wrap as in step 1.) `--firebase` and `--sync` may be combined to retrofit Firebase support onto an existing project. If sync errors with "node_modules/.bin/nx not found," run `yarn install` in the project first, then re-run.
+(On the Docker-fallback path through WSL on Windows hosts, wrap as in step 1.) `--firebase` and `--sync` may be combined to retrofit Firebase support onto an existing project. A project whose dependencies were never installed (a fresh clone) needs no intervention: the sync installs them itself and carries on, rather than bailing out to make you type the command it is about to run anyway.
 
 **Sync auto-backs up to git first.** Because sync runs **migrations** (one-way rewrites, across every project in the workspace — e.g. 0.24.2, which carries a legacy `productionFirebaseConfig` out of `firebase.config.ts` into `environment.prod.ts`) and then re-runs the generators, which rewrite the files they own — `--sync` snapshots the project **before** touching anything: a clean tree just reports `HEAD` as the restore point, a dirty tree is captured (committed + uncommitted + untracked) into a tag **`sync-backup-<timestamp>`** via a throwaway index (HEAD, the branch and the working tree are left untouched). The final `SYNC_OK` line reports the ref as `backup=<tag|HEAD>`. **To recover after a sync:** review what changed with `git -C <project> diff <ref>`, and restore a clobbered file with `git -C <project> checkout <ref> -- <path>`. If the project isn't a git repo (or the snapshot fails), sync **aborts** rather than change files unprotected — `git init && git add -A && git commit` first, or pass **`--no-backup`** to skip the safety net.
 
-**Devcontainer changes need a REBUILD — tell the user, don't do it.** `--sync` rewrites `.devcontainer/*`, but mounts, `runArgs`, `containerEnv` and container-scoped editor settings only apply at container *creation*. So when a sync changes them, say so plainly and let the user run **Dev Containers: Rebuild Container** — never attempt it yourself (same detect-don't-execute rule as the `SessionStart` version hook). Until the rebuild, the shared browser's cross-container port registry isn't mounted and its `up` prints a warning that parallel containers are invisible to each other.
+**One sync, one boundary — the run tells you which, on the `SYNC_NEXT:` line.** Some of what a sync writes takes effect only when a *session* starts (`.claude/settings.json`, `.mcp.json`, the hooks of plugins it just enabled) and some only when a *container* is created (`.devcontainer/*` — mounts, `runArgs`, `containerEnv`, features). Neither can apply mid-session; that is the one irreducible cost of a sync. What is avoidable is paying it more than once, so the run computes what it actually changed and names exactly one:
+
+| `SYNC_NEXT:` | Meaning |
+| --- | --- |
+| `none` | Nothing this run wrote needs a new session or container. Say so — silence gets read as "restart to be safe". |
+| `restart-session` | Session-scoped config moved. Restart Claude Code; **no rebuild**. |
+| `rebuild-container` | `.devcontainer/*` moved. **Dev Containers: Rebuild Container** — which *subsumes* the restart (a rebuild is a new session, and its post-create reinstalls the plugins), so never ask for both. |
+| `unknown` | No git base to compare against; say so rather than guess. |
+
+Until a needed rebuild happens the tooling degrades rather than fails — the shared browser's cross-container port registry isn't mounted, and its `up` warns that parallel containers are invisible to each other.
+
+**Tell the user, don't do it.** Never rebuild a container or restart a session on your own initiative — same detect-don't-execute rule as the `SessionStart` version hook. Both throw away the session they are working in, and only they know what that costs right now.
+
+**`SYNC_RELOAD:` is NOT a boundary.** It names the generated guidance files that changed (`HOUSE.rules.md`, `HOUSE.md`, `CLAUDE.md`). They are `@`-imported at session start, so the *old* text is what is in context — but simply **reading** them puts the new content in context immediately. Read every file it names before reporting; no restart is involved.
 
 ### 1b. `--sync` touches ONLY `CLAUDE.md`'s generated pointer — the rest is preserved verbatim
 
