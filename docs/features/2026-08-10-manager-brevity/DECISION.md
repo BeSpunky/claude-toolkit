@@ -47,6 +47,34 @@ report that drops bad news is misleading, not concise.
   "be brief" would sit outside its own model and lose to any turn where explaining felt warranted.
   Naming the listener makes brevity a *consequence* of the existing mechanism.
 
+## Follow-up: the default had to be wired INTO the stack, not laid beside it
+
+> "Ensure it's still dynamic and shifts and stacks throughout the conversation"
+
+The first pass left two sections sitting side by side — *the default listener* and *conversation
+modes are a stack* — with only a single clause connecting them. Read cold, *"assume disengagement
+until they show up"* plus *"engagement decays"* can be taken as a **one-way ratchet** that mutes the
+depth-shifting the style is built on. That would have been a real regression: the whole document's
+thesis is that pitch is re-read continuously.
+
+The fix is structural rather than another caveat: **the manager check-in is the BOTTOM OF THE MODE
+STACK.** That makes it a participant in the existing push/pop mechanism instead of a rule competing
+with it — dynamic by construction, since everything the stack section already says then applies on
+top of it unchanged. Stated from both sides, so neither section can be read alone:
+
+- In the default section — a `### This default is the FLOOR of the stack, never a ceiling`
+  sub-section: they engage → **push immediately, in that turn**, at full depth, without dragging the
+  check-in register in and without making them ask twice; mode exhausted → **pop back to the floor**;
+  and **re-decided every single turn**, because *decay is not a ratchet* — it moves both ways,
+  repeatedly, within one session. Nothing about the default is sticky.
+- In the stack section — *"the stack has a bottom, and it is the check-in above"*: an **empty stack**
+  means brief, and every mode pushed onto it is served at whatever depth *it* asks for. The two
+  sections are named as **one mechanism**.
+
+And the failure mode the first pass introduced is now called out explicitly: **staying terse at
+someone visibly present** — brevity aimed at an engaged reader is the same failure as a wall of text
+aimed at an absent one. Both ignore the listener, which is the one thing the document forbids.
+
 ## Also added
 
 Two guards: **length is not diligence** (never reach for detail to demonstrate effort), and **don't
