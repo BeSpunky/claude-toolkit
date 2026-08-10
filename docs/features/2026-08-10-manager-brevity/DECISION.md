@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-08-10
+summary: "`Pitch to the listener` gained a default listener — a manager who stepped out — wired in as the FLOOR of the mode stack, so brevity is the resting state while any engagement pushes to full depth in that same turn; shipped as bespunky-communication 0.4.1."
+tags: [communication, output-style, brevity, conversation-modes, plugin-release]
+---
+
 # Decision — model the absent reader, don't add a "be brief" adjective
 
 ## The design
