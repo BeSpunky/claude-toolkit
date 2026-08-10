@@ -46,6 +46,9 @@ Consequences, accepted deliberately:
 - A fresh scaffold's initial chunk drops from ~650–680 kB to **~300 kB** (estimate on the consuming
   project's decomposition; verified against a real throwaway build below). Angular's stock 500 kB
   budget becomes a real signal about the app's own growth instead of a line everyone raises on day one.
+  **↳ SUPERSEDED by the measurement below: the real numbers are 479 kB → 238 kB, and a fresh app was
+  never over the 500 kB budget — only within 21 kB of it. Left here as written; the correction is the
+  finding.**
 - The first `inject(Firestore)` (or `Auth`, `Storage`, `Functions`) in a new app throws
   `NullInjectorError` until the developer wires it. That is the whole cost, and the fix is a commented
   line sitting in the file they will open.
