@@ -102,16 +102,38 @@ tracked churn — so `.claude/data/` being gitignored is not the only thing hold
 `Rebuild Container` intact, unlike a named volume. Both are wanted. The resolver reads `$HOME/.claude`
 either way — a plain file read whether or not it lands in the workspace.
 
+## 5. The end-to-end run, and the bug only it could find
+
+Run against a scratch clone (stamped `nx-tools=0.29.0`, no `node_modules`), three scenarios:
+
+| Scenario | Result |
+| --- | --- |
+| Fresh clone, no deps, two versions behind | Installed the deps itself, walked the ladder 0.29.0 → 0.32.0, `SYNC_NEXT: none` + `SYNC_RELOAD: HOUSE.md HOUSE.rules.md` — and the diff confirmed those were the only files touched |
+| Generator-owned `.devcontainer/post-create.sh` drifted | Generator restored it → `SYNC_NEXT: rebuild-container`, and the diff confirmed that file was the only change |
+| Steady state, nothing to do | Exit 0, `SYNC_NEXT: none`, zero changes |
+
+**The second run exposed a bug the unit test structurally could not.** `scaffold.sh` runs under
+`set -euo pipefail`. `grep` exits 1 when it matches nothing, an assignment takes its command
+substitution's status, and `set -e` does the rest — so on any sync where **no guidance file changed**
+(i.e. every steady-state run) the reporter killed the scaffolder outright: after every generator had
+run, printing no `SYNC_NEXT`, no `SYNC_OK`, and **no error at all**. Fixed with `|| true`.
+
+**Two lessons worth keeping, because the second nearly hid the first:**
+
+1. **A fragment tested under looser shell options than it ships with is a different program.** The
+   original harness called the reporter from a plain shell and passed it happily.
+2. **`out="$(set -e; …)" || DIED=1` is a worthless harness** — putting the substitution on the left of
+   `||` makes it a status-*tested* context, and bash suppresses `errexit` throughout such a context,
+   *including inside the subshell*. The second harness therefore also passed the broken reporter. Only
+   `bash -c` — a separate process, with its own live errexit — actually reproduces it. Verified by
+   reverting the fix and watching the suite go from green to 24 failures.
+
 ## What was deliberately not done
 
 - **No payload release.** `assets/nx-tools/` is untouched: no generator, template or project shape
   changed, so **nothing to migrate**. The scaffolder, the resolver and the command are the plugin's
   own driver, not something projects hold on disk. (Recorded here and in the release commit so a
   later reader can tell a considered "nothing to migrate" from a forgotten one.)
-- **No end-to-end sync was run.** The reporter is unit-tested against real git fixtures and its
-  wiring verified by reading the call site; a full `--sync` would install the payload, run the
-  migration ladder and commit onto this branch — a lot of unrelated regenerated-file noise on a
-  branch about the sync command. **This is the one thing still unverified in anger.**
 - **The `autoUpdate` ordering question is left open**, as flagged in `BRIEF.md`. If the marketplace's
   `autoUpdate: true` lands after a session's plugin root resolves, step 1 would report "already up to
   date" while the session runs a stale copy. The manifest read makes it moot either way, since

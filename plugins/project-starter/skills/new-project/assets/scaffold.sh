@@ -1975,7 +1975,12 @@ _sync_next() {   # <target> <base-sha|''> — sets SYNC_NEXT and SYNC_RELOAD
   elif printf '%s\n' "$changed" | grep -qE '^(\.claude/settings\.json|\.mcp\.json)$'; then
     SYNC_NEXT="restart-session"
   fi
-  SYNC_RELOAD="$(printf '%s\n' "$changed" | grep -E '^(HOUSE\.rules\.md|HOUSE\.md|CLAUDE\.md)$' | tr '\n' ' ')"
+  # `|| true` IS LOad-BEARING under this script's `set -euo pipefail`. grep exits 1 when it matches nothing,
+  # an assignment takes the exit status of its command substitution, and `set -e` then kills the script — so
+  # the NO-GUIDANCE-CHANGED case (an ordinary steady-state sync) would die silently right here, after every
+  # generator had run, printing no SYNC_NEXT, no SYNC_OK, and no error. Found by running a real sync twice:
+  # the first changed HOUSE.md and passed, the second did not and exited 1 with an empty tail.
+  SYNC_RELOAD="$(printf '%s\n' "$changed" | grep -E '^(HOUSE\.rules\.md|HOUSE\.md|CLAUDE\.md)$' | tr '\n' ' ' || true)"
   SYNC_RELOAD="${SYNC_RELOAD% }"
 }
 # ---8<--- SYNC_NEXT

@@ -41,10 +41,9 @@ for needle in _sync_next rebuild-container restart-session SYNC_RELOAD; do
     *) echo "FATAL: extracted block does not mention '$needle' — wrong block captured." >&2; exit 2 ;;
   esac
 done
-eval "$block"
-
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+printf '%s\n' "$block" > "$TMP/reporter.sh"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 FAILED=0
@@ -67,10 +66,40 @@ fixture() {   # fixture <name> -> repo path on stdout (base sha written to <repo
   printf '%s' "$repo"
 }
 
+# INVOKE UNDER THE SHELL OPTIONS SCAFFOLD.SH ACTUALLY SHIPS WITH — `set -euo pipefail`.
+#
+# This is not pedantry. The first version of this test called the reporter from a plain shell, and therefore
+# passed a reporter that KILLED THE SCAFFOLDER OUTRIGHT whenever no guidance file had changed: `grep` exits 1
+# when it matches nothing, an assignment takes its command substitution's status, and `set -e` does the rest —
+# after every generator had run, printing no SYNC_NEXT, no SYNC_OK and no error at all. A real sync run twice
+# is what found it (the first run changed HOUSE.md and passed; the second did not). Testing a fragment under
+# looser options than it ships with is testing a different program.
+#
+# A SEPARATE PROCESS, not a subshell — and that distinction is the whole test.
+#
+# `out="$(set -e; …)" || DIED=1` looks equivalent and is worthless: putting the substitution on the left of
+# `||` makes it a status-TESTED context, and bash suppresses errexit throughout such a context — including
+# inside the subshell. So the obvious harness silently disables the very option it means to exercise, and
+# passes the broken reporter exactly like the no-`set -e` version did. `bash -c` gives the reporter its own
+# process, where errexit is live and untested; only the outer shell tests the resulting exit code.
+DIED=0
+invoke() {   # invoke <repo> <base> -> sets SYNC_NEXT, SYNC_RELOAD, DIED
+  local out=""
+  DIED=0
+  out="$(bash -c '
+    set -euo pipefail
+    . "$1"
+    _sync_next "$2" "$3"
+    printf "%s\n%s" "$SYNC_NEXT" "$SYNC_RELOAD"
+  ' _ "$TMP/reporter.sh" "$1" "$2")" || DIED=1
+  SYNC_NEXT="$(printf '%s' "$out" | sed -n '1p')"
+  SYNC_RELOAD="$(printf '%s' "$out" | sed -n '2p')"
+}
+
 check() {   # check <label> <repo> <expected-next> [expected-reload]
   local label="$1" repo="$2" want="$3" want_reload="${4-}"
-  SYNC_NEXT=""; SYNC_RELOAD=""
-  _sync_next "$repo" "$(cat "$repo/.base")"
+  invoke "$repo" "$(cat "$repo/.base")"
+  ok "$label — survives set -e" "$([ "$DIED" = 0 ] && echo 1 || echo 0)" "the reporter exited non-zero"
   ok "$label" "$([ "$SYNC_NEXT" = "$want" ] && echo 1 || echo 0)" "got '$SYNC_NEXT', wanted '$want'"
   if [ -n "$want_reload" ]; then
     ok "$label — reload names $want_reload" "$([ "$SYNC_RELOAD" = "$want_reload" ] && echo 1 || echo 0)" "got '$SYNC_RELOAD'"
@@ -165,8 +194,8 @@ check "guidance is reported ALONGSIDE a boundary" "$r" restart-session "HOUSE.md
 
 # ── no base to compare against ────────────────────────────────────────────────────────────────────
 r="$(fixture nobase)"
-SYNC_NEXT=""; SYNC_RELOAD=""
-_sync_next "$r" ""
+invoke "$r" ""
+ok "no git base survives set -e" "$([ "$DIED" = 0 ] && echo 1 || echo 0)" "the reporter exited non-zero"
 ok "no git base reports 'unknown', never 'none'" "$([ "$SYNC_NEXT" = unknown ] && echo 1 || echo 0)" "got '$SYNC_NEXT'"
 
 if [ "$FAILED" = 0 ]; then echo "  SYNC_NEXT reporter: all cases passed"; fi
