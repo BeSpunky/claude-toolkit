@@ -1,0 +1,46 @@
+# Guard the MIGRATIONS — the only code in this repo that writes into other people's repositories.
+#
+# Kept separate from `scaffold tests` and `release invariants` because it asks a third question. Release
+# invariants ask whether a change REACHES consumers; scaffold tests ask whether the scaffolder BEHAVES once
+# it gets there; this asks whether a migration, run once against a workspace nobody here has seen, does what
+# it claims — and, just as importantly, leaves alone what it must not touch.
+#
+# Unlike the other two, this one needs an INSTALL: the fixtures use @nx/devkit's in-memory Tree, and the
+# migrations reach for the TypeScript compiler API. That cost is why it is not also in the pre-push hook,
+# which materialises a pushed commit in a bare temporary worktree — see tools/test-migrations/README.md.
+name: migration tests
+
+on:
+  # The house pipeline merges feature worktrees locally, so a feature branch is often never pushed at all —
+  # these integration points are where CI genuinely gets a look.
+  push:
+    branches: [main, development, staging]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Forks inherit workflows but not this repo's policies; failing there is noise on someone else's minutes.
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # 22.18+ is the floor: compile-generators.mts is TypeScript run directly, which relies on Node's
+      # built-in type stripping. The same floor scaffold.sh checks before deciding whether it needs Docker.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      - name: Run migration tests
+        run: node tools/test-migrations/run.mjs

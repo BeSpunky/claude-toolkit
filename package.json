@@ -5,6 +5,7 @@
   "devDependencies": {
     "@bespunky/nx-tools": "0.29.0",
     "@nx/devkit": "23.1.0",
-    "nx": "23.1.0"
+    "nx": "23.1.0",
+    "typescript": "^5.9.0"
   }
 }
