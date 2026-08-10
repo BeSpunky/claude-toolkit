@@ -1535,8 +1535,26 @@ if [ ! -f nx.json ]; then
   echo '       (devcontainer, Claude settings, window identity, HOUSE.md) — no framework opinion.' >&2
   exit 1
 fi
+# The workspace's OWN nx is what migrates and generates, so it has to be there. It routinely isn't — a fresh
+# clone has no node_modules at all — and this used to exit telling the human to run the install by hand and
+# start over. That was a whole round trip to type a command this script runs of its own accord two lines
+# below, and round trips are the thing this sync is trying to stop needing. So install, then re-check.
+#
+# Placed AFTER the preflight verdict on purpose: an install is a write (node_modules, a lockfile), and every
+# refusal promises nothing was written before it fired. It stays before \$INSTALL_NX_TOOLS because that step
+# needs a resolvable workspace to add the dependency to.
 if [ ! -x node_modules/.bin/nx ]; then
-  echo \"ERROR: node_modules/.bin/nx not found - run '$PM_INSTALL' in the project first, then re-run --sync.\" >&2
+  _stage install
+  echo '[install] node_modules/.bin/nx is missing — installing the workspace dependencies first.'
+  $PM_INSTALL || {
+    echo \"ERROR: '$PM_INSTALL' failed, so the workspace has no nx to migrate or generate with.\" >&2
+    echo '       Fix the install (network? lockfile? package manager?) and re-run the sync.' >&2
+    exit 1
+  }
+fi
+if [ ! -x node_modules/.bin/nx ]; then
+  echo \"ERROR: node_modules/.bin/nx still not found after '$PM_INSTALL'.\" >&2
+  echo '       This workspace does not depend on nx, so there is nothing here for the sync to drive.' >&2
   exit 1
 fi
 _stage install
@@ -1696,6 +1714,13 @@ fi
 #     (brand-new project). Opt out with --no-backup — but if a backup is wanted and CAN'T be made,
 #     ABORT rather than mutate unprotected ("backup before executing any changes"). ---
 BACKUP_REF="(--no-backup)"
+# The same snapshot, as a DIFFABLE ref rather than a human-readable one. BACKUP_REF is display text
+# ("HEAD(1a2b3c4)", "(--no-backup)") and cannot be handed to `git diff`; SYNC_NEXT below needs an actual
+# commit to answer "what did this run change?". Prefer the backup COMMIT where one was made, because it
+# captured untracked files too — diffing against plain HEAD would report a pre-existing untracked file as
+# something this sync created. Empty means the question is unanswerable (no git, or no HEAD yet), which the
+# reporter states rather than guesses at.
+SYNC_BASE=""
 # Say it out loud. Under convergence a sync re-asserted state and re-running was the informal undo; under
 # migrations it applies ONE-WAY deltas that have no reverse, so the restore point is the only way back and
 # turning it off is a materially bigger decision than it was. The only other trace of that choice was
@@ -1715,6 +1740,7 @@ if [ "$MODE" = "sync" ] && [ "$BACKUP" = "1" ]; then
   if [ -z "$(git -C "$TARGET" status --porcelain 2>/dev/null)" ] && git -C "$TARGET" rev-parse --verify -q HEAD >/dev/null 2>&1; then
     # Clean tree: HEAD already IS the pre-sync state — no redundant tag.
     BACKUP_REF="HEAD($(git -C "$TARGET" rev-parse --short HEAD))"
+    SYNC_BASE="$(git -C "$TARGET" rev-parse HEAD)"
     echo "BACKUP_OK: working tree clean — pre-sync restore point is $BACKUP_REF. Undo a change with: git -C \"$TARGET\" checkout HEAD -- <path>"
   else
     BACKUP_TAG="sync-backup-$(date +%Y%m%d-%H%M%S)"
@@ -1727,6 +1753,7 @@ if [ "$MODE" = "sync" ] && [ "$BACKUP" = "1" ]; then
       && git -C "$TARGET" tag "$BACKUP_TAG" "$_backup_commit" >/dev/null 2>&1; then
       rm -f "$BACKUP_INDEX"
       BACKUP_REF="$BACKUP_TAG"
+      SYNC_BASE="$_backup_commit"
       echo "BACKUP_OK: snapshotted the project (incl. uncommitted + untracked) to tag '$BACKUP_TAG'. Review sync's changes: git -C \"$TARGET\" diff $BACKUP_TAG ; restore a file: git -C \"$TARGET\" checkout $BACKUP_TAG -- <path>"
     else
       rm -f "$BACKUP_INDEX"
@@ -1734,6 +1761,14 @@ if [ "$MODE" = "sync" ] && [ "$BACKUP" = "1" ]; then
       exit 1
     fi
   fi
+fi
+
+# A --no-backup run took no snapshot, so fall back to plain HEAD as the diff base. Weaker (it cannot tell a
+# file this sync created from one that was already sitting there untracked) and it therefore over-reports
+# rather than under-reports — an unnecessary "restart" costs seconds, a missed one costs a confusing session
+# where the new settings silently are not in effect.
+if [ "$MODE" = "sync" ] && [ -z "$SYNC_BASE" ]; then
+  SYNC_BASE="$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || true)"
 fi
 
 # --- two lockfiles: damage this toolkit caused, and will otherwise keep believing ----------------------------
@@ -1881,6 +1916,82 @@ if [ "$INNER_RC" -ne 0 ]; then
     *)               echo "               git -C '$TARGET' reset --hard $BACKUP_REF" >&2 ;;
   esac
   exit "$INNER_RC"
+fi
+
+# --- what, if anything, does this run still need from the human? ---------------------------------------------
+#
+# THE SYNC IS OVER; THIS IS NOT A RE-RUN. Some of what a sync writes is read by Claude Code only when a
+# session starts (`.claude/settings.json` — enabled plugins, marketplaces, output style; `.mcp.json` — MCP
+# servers; the hooks belonging to plugins this run enabled) and some of what it writes to `.devcontainer/`
+# — mounts, runArgs, containerEnv, features — applies only when a container is CREATED. Neither can be made
+# to take effect mid-session, and that is the one genuinely irreducible boundary in the whole flow.
+#
+# What was avoidable was having MORE than one of them, and having them in the MIDDLE. So this states exactly
+# one boundary, chosen by what actually changed, and states it at the end:
+#
+#   rebuild-container  .devcontainer/ moved. It SUBSUMES a restart — a rebuild is a new session, and its
+#                      post-create reinstalls the plugins — so it is never reported alongside one.
+#   restart-session    session-scoped config moved, but nothing that needs a new container.
+#   none               nothing this run wrote requires either. The common case, and worth saying plainly:
+#                      silence here has previously been read as "probably restart, to be safe".
+#   unknown            no git base to compare against, so the honest answer is that it cannot tell.
+#
+# SEPARATELY, `SYNC_RELOAD` names the generated GUIDANCE files that changed. These are `@`-imported at
+# session start too, but their content needs no restart at all — reading the file puts it in context
+# immediately. Naming them is what lets the caller close that gap in-session instead of banking it into a
+# boundary it does not deserve.
+#
+# DETECT, DON'T EXECUTE — the same rule the SessionStart version hook lives by. This prints a fact. It never
+# rebuilds a container and never restarts anything: both throw away the session the human is working in, and
+# a script cannot know what that costs them right now.
+# A FUNCTION, and marked for extraction, because this is the half that regresses silently. A boundary that
+# stops being reported does not look like a bug — it looks like a clean run, right up until someone spends an
+# afternoon on settings that were never in effect. tools/test-scaffold/sync-next.test.sh evaluates the block
+# between these markers against real git fixtures; keep them intact and keep the function self-contained
+# (no globals beyond its arguments), or the test silently covers nothing.
+# --->8--- SYNC_NEXT
+_sync_next() {   # <target> <base-sha|''> — sets SYNC_NEXT and SYNC_RELOAD
+  local target="$1" base="$2" changed=""
+  SYNC_NEXT="unknown"
+  SYNC_RELOAD=""
+  [ -n "$base" ] || return 0
+  # Committed deltas (the migration ladder commits as it goes) + working-tree edits + brand-new untracked
+  # files, which `git diff` alone would miss entirely — and a first retrofit creates most of these files.
+  changed="$( { git -C "$target" diff --name-only "$base" 2>/dev/null
+                git -C "$target" ls-files --others --exclude-standard 2>/dev/null; } | sort -u )"
+  SYNC_NEXT="none"
+  if printf '%s\n' "$changed" | grep -q '^\.devcontainer/'; then
+    SYNC_NEXT="rebuild-container"
+  elif printf '%s\n' "$changed" | grep -qE '^(\.claude/settings\.json|\.mcp\.json)$'; then
+    SYNC_NEXT="restart-session"
+  fi
+  SYNC_RELOAD="$(printf '%s\n' "$changed" | grep -E '^(HOUSE\.rules\.md|HOUSE\.md|CLAUDE\.md)$' | tr '\n' ' ')"
+  SYNC_RELOAD="${SYNC_RELOAD% }"
+}
+# ---8<--- SYNC_NEXT
+
+if [ "$MODE" = "sync" ]; then
+  _sync_next "$TARGET" "$SYNC_BASE"
+  echo "SYNC_NEXT: $SYNC_NEXT"
+  case "$SYNC_NEXT" in
+    rebuild-container)
+      echo "  .devcontainer/ changed, and mounts, runArgs, containerEnv and features only apply when the"
+      echo "  container is created. Run 'Dev Containers: Rebuild Container' when it suits you — that also"
+      echo "  delivers the session-scoped config below, so no separate restart is needed." ;;
+    restart-session)
+      echo "  Session-scoped config changed (.claude/settings.json and/or .mcp.json). Claude Code reads those"
+      echo "  at session start, so restart the session when it suits you. No container rebuild is needed." ;;
+    none)
+      echo "  Nothing this run wrote needs a new session or a container rebuild." ;;
+    unknown)
+      echo "  No git base to compare against, so this run cannot tell what changed. If .devcontainer/,"
+      echo "  .claude/settings.json or .mcp.json moved, rebuild or restart accordingly." ;;
+  esac
+  if [ -n "$SYNC_RELOAD" ]; then
+    echo "SYNC_RELOAD: $SYNC_RELOAD"
+    echo "  Generated house guidance changed. It is @-imported at session start, but reading the file now puts"
+    echo "  it in context immediately — no restart required for its content."
+  fi
 fi
 
 if [ "$MODE" = "scaffold" ]; then
