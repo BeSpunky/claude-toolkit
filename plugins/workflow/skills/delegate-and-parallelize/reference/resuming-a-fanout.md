@@ -16,7 +16,8 @@ goal: Audit every verifyToken() call site for the missing-expiry bug
 shape: scout → map → verify  # the dependency shape, so resume knows what may run
 workflow_run: wf_a1b2c3d4    # runId — resume is IMPOSSIBLE without this
 workflow_script: /path/to/persisted/script.mjs
-budget: 10                   # total agents this tree may create; per-unit share and spent below
+estimate: 9                  # agents the pre-dispatch sketch of the tree called for
+budget: 12                   # total in force (default, project, or user-confirmed); per-unit share and spent below
 ---
 
 ## Units

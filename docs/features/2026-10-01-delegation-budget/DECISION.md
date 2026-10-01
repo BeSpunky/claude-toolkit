@@ -25,9 +25,19 @@ So the budget must bound the **total** while leaving **depth** free, and the wor
 
 ## The design
 
-- **Budget = agents the whole tree may still create.** Default 10 per request; the user can set it per request, a project's `CLAUDE.md` can set its own default.
+- **Budget = agents the whole tree may still create.** Default 12 per request (originally 10 — see the revision below); the user can set it per request, a project's `CLAUDE.md` can set its own default.
 - **Conserved, carved down the tree.** Spawning a child with share *s* costs *1 + s*; the child's share covers its entire subtree; unspent share returns to the parent.
 - **Nesting is protected by shaping the decomposition to the budget** — fewer, fatter units at the top, each with share enough to fan out, batched items per leaf — rather than spending the whole budget on width at level 1 (which is how a budget silently becomes a depth cap).
 - **Prompts state the share as permission** — "you may delegate further; your subtree may create up to N more agents" — never "do not spawn".
 - **Exhaustion degrades, it does not fail** — an agent at zero does its unit inline (batched), and may ask its parent for more share in its return.
 - **Recorded** in the ledger (total, per-unit share, spent) and **reported** whenever the budget forced batching or cut coverage.
+
+## Revision — estimate first, ask before exceeding
+
+> "Change to 12 as default, have Claude evaluate the work and estimating the agent tree that will be spawned before delegating then, if the estimation says more than the default amount is needed, ask the user to confirm a larger amount"
+
+- **Default raised to 12.**
+- **Estimate before dispatch** — Step 0 gains a fourth question: sketch the whole tree and count its agents before the first spawn.
+- **Estimate over budget → ask the user**, once, from the orchestrator, with the estimate, the shape driving it, and what the budget in force would buy instead. The answer becomes this request's budget and is recorded in the ledger.
+- Chosen over "proceed and report": the point is consent *before* the spend.
+- **Children never ask the user** — they cannot reach them and do not hold the whole tree; a child's request for more share climbs to the orchestrator, which asks again only if it would exceed what the user confirmed. **Headless runs** fit to the budget in force rather than exceed it. **A changed work-list** (a scout finding far more than assumed) triggers a re-estimate and, if needed, a new ask.
