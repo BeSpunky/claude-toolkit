@@ -83,7 +83,11 @@ export const LAYERS: readonly Layer[] = [
     id: 'js',
     title: 'TypeScript/JavaScript libraries',
     requires: ['nx'],
-    detect: (tree) => hasDependency(tree, '@nx/js') || hasProjectOfType(tree, 'library'),
+    // The @nx/js PLUGIN, or a project actually built by one of its executors — NOT "any library project".
+    // `projectType: library` says nothing about the language: the house's own tooling projects
+    // (shared-browser, worktree-domains) once declared it, which switched this layer on in every web
+    // workspace, and a Python or Go library in an Nx workspace declares it just as legitimately.
+    detect: (tree) => hasDependency(tree, '@nx/js') || hasExecutorFrom(tree, '@nx/js:'),
     ensureHint: '`nx add @nx/js`',
   },
   {
@@ -203,8 +207,11 @@ function hasDependency(tree: Tree, pkg: string): boolean {
   return Boolean(json.dependencies?.[pkg] ?? json.devDependencies?.[pkg]);
 }
 
-function hasProjectOfType(tree: Tree, projectType: 'application' | 'library'): boolean {
-  return [...getProjects(tree)].some(([, project]) => project.projectType === projectType);
+/** Does any project run a target through an executor from this plugin (`@nx/js:` …)? */
+function hasExecutorFrom(tree: Tree, prefix: string): boolean {
+  return [...getProjects(tree)].some(([, project]) =>
+    Object.values(project.targets ?? {}).some((target) => (target.executor ?? '').startsWith(prefix)),
+  );
 }
 
 /** Does any project declare a target by this name? */

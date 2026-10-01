@@ -42,7 +42,8 @@ export function resolveLibsDir(tree: Tree): string {
     if (project.projectType !== 'library') continue;
     const top = project.root.split('/').filter((s) => s && s !== '.')[0];
     // `tools/` is EXCLUDED, and it has to be. The house's own scaffolding — worktree-domains, shared-browser
-    // — lands there and declares `projectType: 'library'`, and those generators run BEFORE this one. So the
+    // — lands there and, before 0.35.0, declared `projectType: 'library'` (projects synced from then on carry
+    // no projectType at all: tooling is neither an app nor a library), and those generators run BEFORE this one. So the
     // inference was answering "where does this workspace keep its libraries?" with evidence the house itself
     // had just planted: a fresh scaffold put the design system at `tools/design-system`, contradicting every
     // document it generates in the same run (all of which say `packages/design-system`).
