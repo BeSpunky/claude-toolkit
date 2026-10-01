@@ -13,13 +13,16 @@
 //
 // The directive, event bus, selectors base and composer are INHERITED from
 // navigation-core — never regenerated. Reads its own bundled templates and substitutes
-// the standard name tokens via @nx/devkit `names()`. The developer fills in the real
-// routes, entity, events, and points the `@navigation-core` import at their lib.
+// the standard name tokens via @nx/devkit `names()`, and points the kernel import at the
+// workspace's navigation library (found by its `type:navigation` tag). The developer fills in
+// the real routes, entity and events.
 // Generator-first / concentrate complexity.
-import { type Tree, names, formatFiles } from '@nx/devkit';
+import { type Tree, names, formatFiles, readJson } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
+import { resolveLibsDir } from '../_utils/workspace-layout';
+import { findNavigationLibrary } from '../navigation-core/generator';
 
 interface DomainNavigationSchema {
   name: string;
@@ -45,7 +48,11 @@ export default async function domainNavigationGenerator(
     throw new Error('domain-navigation generator requires --name (the domain name, e.g. orders).');
   }
   const n = names(options.name);
-  const baseDir = (options.directory ?? `libs/${n.fileName}/src/lib`).replace(/\/+$/, '');
+  // Where THIS workspace keeps libraries — never a hard-coded `libs/`.
+  const baseDir = (options.directory ?? `${resolveLibsDir(tree)}/${n.fileName}/src/lib`).replace(/\/+$/, '');
+  // The kernel's import path, when the workspace has the kernel: the templates import `@navigation-core`, a
+  // placeholder the developer had to repoint by hand on every domain.
+  const kernel = navigationImportPath(tree);
   const target = `${baseDir}/navigation`;
 
   for (const [tpl, outName] of TEMPLATES) {
@@ -58,9 +65,27 @@ export default async function domainNavigationGenerator(
       .split('{{constantName}}')
       .join(n.constantName)
       .split('{{fileName}}')
-      .join(n.fileName);
+      .join(n.fileName)
+      .split("'@navigation-core'")
+      .join(`'${kernel ?? '@navigation-core'}'`);
     tree.write(`${target}/${outName(n.fileName)}`, content);
   }
 
   await formatFiles(tree);
+}
+
+/** The navigation kernel's import specifier — its package name, else the path alias pointing into it. */
+function navigationImportPath(tree: Tree): string | null {
+  const root = findNavigationLibrary(tree);
+  if (!root) return null;
+  if (tree.exists(`${root}/package.json`)) {
+    const name = readJson<{ name?: string }>(tree, `${root}/package.json`).name;
+    if (name) return name;
+  }
+  for (const tsconfig of ['tsconfig.base.json', 'tsconfig.json']) {
+    if (!tree.exists(tsconfig)) continue;
+    const paths = readJson<{ compilerOptions?: { paths?: Record<string, string[]> } }>(tree, tsconfig).compilerOptions?.paths ?? {};
+    for (const [alias, targets] of Object.entries(paths)) if (targets.some((t) => t.startsWith(`${root}/`))) return alias;
+  }
+  return null;
 }

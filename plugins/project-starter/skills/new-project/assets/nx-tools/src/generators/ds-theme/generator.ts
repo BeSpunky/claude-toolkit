@@ -2,7 +2,7 @@
 //
 //     nx g @bespunky/nx-tools:ds-theme acme
 //     -> packages/design-system/themes/acme.theme.scss   (authored in SASS, against the real tokens)
-//     -> every Angular app's build emits `theme-acme.css` as a STANDALONE file (inject: false)
+//     -> every app's build emits `theme-acme.css` as a STANDALONE file (inject: false)
 //     -> swap it at runtime:  inject(DsRuntimeTheme).use('theme-acme.css')
 //
 // WHY A CSS FILE AND NOT JAVASCRIPT — this is the whole design, so it's worth stating plainly:
@@ -17,17 +17,9 @@
 // `inject: false` + `bundleName` is Angular's own mechanism for exactly this: the stylesheet is compiled
 // and emitted as its own file, but NOT linked into index.html automatically — which is what makes it
 // swappable rather than always-on.
-import {
-  type Tree,
-  formatFiles,
-  getProjects,
-  readProjectConfiguration,
-  updateProjectConfiguration,
-  names,
-  logger,
-  joinPathFragments,
-} from '@nx/devkit';
-import { findDesignSystem, isAngularApp } from '../_utils/design-system';
+import { type Tree, formatFiles, names, logger, joinPathFragments } from '@nx/devkit';
+import { findDesignSystem } from '../_utils/design-system';
+import { applicationsWith } from '../../adapters/registry';
 
 interface DsThemeSchema {
   /** The theme name, e.g. `acme` -> themes/acme.theme.scss -> theme-acme.css. */
@@ -59,12 +51,12 @@ export default async function dsThemeGenerator(tree: Tree, options: DsThemeSchem
     logger.info(`[ds-theme] ${themePath} already exists — left untouched; re-asserting the build wiring only.`);
   }
 
-  // 2) Register it on every Angular app's build target as a STANDALONE stylesheet. Idempotent: matched by
-  //    bundleName, so a re-run updates rather than duplicating.
+  // 2) Register it on every app's build as a STANDALONE, not-auto-injected stylesheet — through the app's
+  //    stack's `styles` port (Angular: `{ input, bundleName, inject: false }` in build.options.styles). Idempotent:
+  //    matched by bundleName, so a re-run updates rather than duplicating.
   let wired = 0;
-  for (const [appName] of getProjects(tree)) {
-    if (!isAngularApp(tree, appName)) continue;
-    if (registerThemeBundle(tree, appName, themePath, bundleName)) wired++;
+  for (const { project, port } of applicationsWith(tree, 'styles')) {
+    if (port.registerStylesheet(tree, project, { input: themePath, bundleName })) wired++;
   }
 
   if (!options.skipFormat) await formatFiles(tree);
@@ -75,35 +67,6 @@ export default async function dsThemeGenerator(tree: Tree, options: DsThemeSchem
       `    <link id="ds-theme" rel="stylesheet" href="${bundleName}.css">\n` +
       `…or swap it at runtime: \`inject(DsRuntimeTheme).use('${bundleName}.css')\`.`
   );
-}
-
-/**
- * Add `{ input, bundleName, inject: false }` to the app's build `styles`.
- *
- * `inject: false` is what makes the theme SWAPPABLE: Angular compiles and emits the stylesheet as its own
- * file but does not add it to index.html, so the app links whichever theme it wants (or none). Without it
- * the theme would be force-applied to everyone, always — the opposite of a theme.
- */
-function registerThemeBundle(tree: Tree, appName: string, input: string, bundleName: string): boolean {
-  const project = readProjectConfiguration(tree, appName);
-  const build = project.targets?.build;
-  if (!build) return false;
-
-  build.options ??= {};
-  const options = build.options as Record<string, unknown>;
-  const styles = [...((options.styles as unknown[]) ?? [])];
-
-  const existing = styles.findIndex(
-    (entry) => typeof entry === 'object' && entry !== null && (entry as { bundleName?: string }).bundleName === bundleName
-  );
-  const entry = { input, bundleName, inject: false };
-
-  if (existing >= 0) styles[existing] = entry;
-  else styles.push(entry);
-
-  options.styles = styles;
-  updateProjectConfiguration(tree, appName, project);
-  return true;
 }
 
 /** The starting theme file — authored in SASS, so every token name is checked at BUILD time. */

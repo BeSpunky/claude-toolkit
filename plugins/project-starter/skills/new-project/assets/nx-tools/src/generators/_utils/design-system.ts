@@ -1,9 +1,10 @@
-// Shared generator util: find the workspace's design system, and decide which projects consume it.
+// Shared generator util: find the workspace's design system. (Which projects CONSUME it is no longer decided
+// here: an app consumes it when its stack has a `styles` port — see src/adapters.)
 //
 // Used by the `design-system` generator (to wire every existing app) and by `design-system-styles`
 // (which the `app` generator composes, so a LATER app is wired with no flag) — the same self-detecting
 // idiom firebase-emulators uses with `tree.exists('firebase.json')`.
-import { type Tree, getProjects, readProjectConfiguration } from '@nx/devkit';
+import { type Tree, getProjects } from '@nx/devkit';
 
 /**
  * The Nx tag that marks the design system. This — not a path, not a marker file — is the detection key.
@@ -44,20 +45,4 @@ export function findDesignSystem(tree: Tree): DesignSystemProject | null {
 
   const byName = projects.get('design-system');
   return byName && byName.projectType === 'library' ? { name: 'design-system', root: byName.root } : null;
-}
-
-/**
- * Is this project an Angular APPLICATION — i.e. something that should consume the design system's sass?
- *
- * Both halves of the test are load-bearing. `projectType === 'application'` alone is not enough: a
- * Firebase workspace's `apps/functions` is an application too, and it is a Node bundle with no
- * stylesheet, no `stylePreprocessorOptions`, and no business consuming a browser design system. So we
- * also require an Angular browser builder.
- */
-export function isAngularApp(tree: Tree, projectName: string): boolean {
-  const project = readProjectConfiguration(tree, projectName);
-  if (project.projectType !== 'application') return false;
-
-  const executor = project.targets?.build?.executor ?? '';
-  return executor.startsWith('@angular/build:') || executor.startsWith('@angular-devkit/build-angular:');
 }

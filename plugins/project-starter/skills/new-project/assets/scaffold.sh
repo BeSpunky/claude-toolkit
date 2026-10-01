@@ -1561,8 +1561,10 @@ $INSTALL_NX_TOOLS
 # command a developer runs to add any LATER app — first app and Nth app share one code path, so a
 # second app can never silently miss the configuration the first app got. Only when the ensure set
 # asked for Angular: the app IS the angular layer (and, through its dev-server, the web layer).
+# --layers hands it the ensure set: the app ATTACHES every capability the workspace wears (each layer's
+# per-app steps), and at first-app time nothing this run ensures exists yet to be detected.
 if layer_ensured angular; then
-  $NX_RUN g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG
+  $NX_RUN g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG --layers=\$ENSURED
 fi
 $LAYER_RESOLVE_BLOCK
 $PLAN_RUN_BLOCK

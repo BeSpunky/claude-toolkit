@@ -140,6 +140,20 @@ const FIXTURES = {
     });
     return tree;
   },
+  // Phase 4 — capabilities on the Nx floor, no framework.
+  'plain npm repo wearing firebase and a neutral design system': () => {
+    const tree = createTreeWithEmptyWorkspace();
+    writeJson(tree, 'package.json', { name: 'backend', devDependencies: { nx: '23.1.0' } });
+    tree.write('firebase.json', '{}');
+    addProjectConfiguration(tree, 'design-system', { root: 'packages/design-system', projectType: 'library', tags: ['type:design-system'] });
+    return tree;
+  },
+  'navigation library found by its tag, under any name': () => {
+    const tree = createTreeWithEmptyWorkspace();
+    writeJson(tree, 'package.json', { name: 'shop', devDependencies: { '@nx/angular': '23.1.0' } });
+    addProjectConfiguration(tree, 'routing-kernel', { root: 'libs/routing-kernel', projectType: 'library', tags: ['type:navigation'] });
+    return tree;
+  },
   'python service with its own serve target, no agent': () => {
     const tree = createTreeWithEmptyWorkspace();
     tree.delete('package.json');
@@ -160,6 +174,8 @@ const EXPECTED_DETECTION = {
   'angular web app with firebase and a design system': 'nx,agent,node,js,web,angular,design-system,firebase',
   'python repo with a hand-written dev declaration': 'nx,agent,web',
   'python service with its own serve target, no agent': 'nx,web',
+  'plain npm repo wearing firebase and a neutral design system': 'nx,node,design-system,firebase',
+  'navigation library found by its tag, under any name': 'nx,node,angular,navigation',
 };
 
 console.log('\ndetection');
@@ -250,17 +266,21 @@ check('voice is carried forward from the devcontainer marker', (ok) => {
 check('full house sync: per-app steps first, then workspace steps in registry order, stamp last', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { ensured: ['nx', 'firebase'], staging: true }), STAMP));
   const order = got.map((l) => l.split(' ')[0]);
-  const want = ['serve', 'serve-options', 'worktree-tab-label', 'firebase-emulators', 'devcontainer', 'claude-settings', 'window-identity', 'playwright', 'port-claim', 'shared-browser', 'worktree-domains', 'dev', 'angular-ai', 'design-system', 'house-doc'];
+  const want = ['serve', 'serve-options', 'worktree-tab-label', 'design-system-styles', 'firebase-client', 'devcontainer', 'claude-settings', 'window-identity', 'playwright', 'port-claim', 'shared-browser', 'worktree-domains', 'dev', 'angular-ai', 'design-system', 'firebase-emulators', 'house-doc'];
   ok(JSON.stringify(order) === JSON.stringify(want), `order ${order.join(',')}`);
-  ok(got.includes('firebase-emulators --project=shop --workspaceName=shop --staging=true --wireProviders'), 'firebase args');
   ok(got.includes('serve --project=shop'), 'serve takes only the project');
   ok(got.includes('worktree-tab-label --project=shop'), 'the tab label gets no --wireProviders on a detect-only angular');
   ok(got.includes('design-system --scope=shop'), 'design-system gets no --wireProviders on a detect-only sync');
-  ok(got[4].endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${got[4]}`);
+  // Phase 4: the Firebase CLIENT attaches per app (through the app's stack adapter), the neutral CORE is a
+  // workspace step that runs after it and follows the client app.
+  ok(got.includes('firebase-client --project=shop --workspaceName=shop --staging=true --wireProviders'), 'firebase client args');
+  ok(got.includes('firebase-emulators --workspaceName=shop --staging=true --clientApp=shop'), 'firebase core args');
+  const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';
+  ok(devcontainer.endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${devcontainer}`);
 });
 check('scaffold mode runs no per-app steps (the app generator composes them)', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { mode: 'scaffold' }), STAMP));
-  ok(!got.some((l) => /^(serve|serve-options|firebase-emulators) /.test(l)), `got ${got.join(' | ')}`);
+  ok(!got.some((l) => /^(serve|serve-options|firebase-client|design-system-styles) /.test(l)), `got ${got.join(' | ')}`);
 });
 check('web without agent: web generators skipped, reported, sync marked partial', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['python service with its own serve target, no agent'](), { app: 'api' }), STAMP));
@@ -277,6 +297,17 @@ check('declaration-only web (no Nx-served app): per-app Nx steps skipped quietly
   ok(!got.includes('PARTIAL'), `a declaration-only project is not a partial sync: ${got.join(' | ')}`);
   ok(!got.some((l) => /^(serve|serve-options|playwright) /.test(l) || l === 'playwright'), `no Nx/JS step: ${got.join(' | ')}`);
   for (const step of ['port-claim', 'shared-browser', 'worktree-domains', 'dev']) ok(got.includes(step), `${step} runs`);
+});
+check('firebase and the design system on the Nx floor alone: core steps run, nothing partial', (ok) => {
+  const got = render(plan(ctxFor(FIXTURES['plain npm repo wearing firebase and a neutral design system'](), { app: 'backend' }), STAMP));
+  ok(!got.includes('PARTIAL'), `a backend-only Firebase is a legitimate shape, not a partial sync: ${got.join(' | ')}`);
+  ok(!got.some((l) => l.startsWith('firebase-client ')), 'no client attached — there is no app');
+  ok(got.includes('firebase-emulators --workspaceName=shop'), `core without a client app: ${got.join(' | ')}`);
+  ok(got.includes('design-system --scope=shop'), 'the design-system core runs without a framework');
+});
+check('firebase with apps the client could go into, but the named app missing: partial', (ok) => {
+  const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { app: 'nope' }), STAMP));
+  ok(got.includes('firebase-emulators --workspaceName=shop'), `the core still runs: ${got.join(' | ')}`);
 });
 check('an unknown layer id is refused, not ignored', (ok) => {
   let threw = false;

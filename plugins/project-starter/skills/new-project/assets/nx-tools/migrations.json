@@ -119,6 +119,12 @@
       "layer": "js",
       "description": "Pin a `\"@playwright/test\": \"latest\"` the playwright generator wrote to the version installed in node_modules (no upgrade, no downgrade — what the lockfile already says), else the house version. Any other spec is the project's own and stays.",
       "implementation": "./src/migrations/0.35.0/pin-playwright"
+    },
+    "tag-navigation-library": {
+      "version": "0.35.0",
+      "layer": "navigation",
+      "description": "Tag the navigation kernel's library `type:navigation`: the navigation layer is now detected by that tag instead of the hard-coded project name `navigation-core`. Tags a project named `navigation-core` and the project owning a directory that carries the vendored kernel (lib/navigation-x.providers.ts), merging into project.json or package.json's `nx` block; reports a kernel left as loose files with no project (earlier generators wrote it that way) instead of inventing one.",
+      "implementation": "./src/migrations/0.35.0/tag-navigation-library"
     }
   }
 }
