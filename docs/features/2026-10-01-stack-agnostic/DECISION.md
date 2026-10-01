@@ -51,3 +51,6 @@ Settled by the orchestrator under that mandate (no further question asked; each 
 - **Stamp key stays `nx-tools=`.** Nx is the floor and the package is still `@bespunky/nx-tools`; a rename would buy nothing but a migration.
 - **One payload release for the whole effort: `0.35.0`.** Every migration this effort owes registers at `0.35.0`.
 - **Contract names fixed up front** so parallel units agree: dev declaration `.bespunky/dev.json`; stack-free engine `tools/dev/dev serve [app] [--worktree=<x>] [--port-offset=<n|auto>] [--dry-run]`; `nx serve <app>` stays as a thin wrapper over it; flags are kebab-case everywhere.
+
+## Revision 3 — 2026-10-01: payload ships as 0.36.0
+The phase-1 unit bumped the payload to 0.35.0 at its start; the release-invariants check counts the commit that set a version as its release, so every later payload change read as "changed since 0.35.0 was released". 0.35.0 was never published (CI publishes from `main` only). The release is therefore **0.36.0**, set after the last payload change; the effort's rungs stay at 0.35.0 — still inside every existing project's `from..to` range, and the migrations ceiling holds. Plugin bumps: project-starter 0.36.0, workflow 0.8.0, engineering 0.6.0 (Angular skills moved out), design-system 0.2.0, browser-automation 0.4.0 (minor); product-ux 0.11.6 (patch); bespunky-angular 0.1.0 (new).
