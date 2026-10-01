@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-01
+summary: Toolkit tips rotate three at a time into Claude Code's spinner via a bespunky SessionStart hook; each plugin owns a tips.txt; /bespunky:tips off|on|list.
+tags: [tips, hooks, onboarding, bespunky]
+---
+
 # Toolkit tips — decisions
 
 ## Surface: Claude Code's spinner tips
@@ -23,3 +30,7 @@ Roads not taken (see BRIEF.md for the surface table):
 
 - Settings are user-wide while the installed set can be per project. The tips reflect whichever project last started a session.
 - Whether Claude Code reloads spinner tips mid-session after the hook writes them is unconfirmed. At worst, a rotation shows up one session later.
+
+## Closing
+
+Merged on the user's "done, merge it". Their one follow-up asked how 34 tips square with three left behind on uninstall. The pool is 34, but only the current three sit in settings at any time.
