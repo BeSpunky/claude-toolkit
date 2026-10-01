@@ -31,6 +31,8 @@
 // leave the hook nagging forever with no way to fix it. HOUSE.md is the opposite: root-level, unambiguously
 // committed, generator-owned, rewritten on every sync — and already the file the hook stats to decide
 // whether this is even a house project. One file, one truth, no new gitignore surface.
+import { detectPackageManager } from '../_utils/package-manager';
+import { isWrapperHosted } from '../_utils/nx-host';
 import { type Tree, formatFiles } from '@nx/devkit';
 import { retireInlineHouseSections } from '../_utils/inline-house-sections';
 import { findDesignSystem } from '../_utils/design-system';
@@ -274,35 +276,12 @@ function upsertPointer(source: string, pointer: string): string {
  * it. Defaults to the house standard only when the project genuinely declares nothing.
  */
 /**
- * ONE precedence rule, shared with scaffold.sh's `detect_package_manager` and the generated post-create.sh.
- *
- * The `packageManager` field wins because it is the only signal a human deliberately WROTE; every other one
- * is an artifact, and artifacts are exactly what a stray lockfile leaves behind. This used to read neither
- * the field nor `yarn.lock`, so a yarn workspace that happened to carry a package-lock.json got a HOUSE.md
- * full of `npm` commands while the sync and the container both ran yarn — the document disagreeing with the
- * tooling it documents.
- */
-function detectPackageManager(tree: Tree): string | undefined {
-  if (!tree.exists('package.json')) return undefined;
-  const declared = /"packageManager"\s*:\s*"(yarn|npm|pnpm)@/.exec(tree.read('package.json', 'utf8') ?? '')?.[1];
-  if (declared) return declared;
-
-  if (tree.exists('pnpm-lock.yaml')) return 'pnpm';
-  if (tree.exists('yarn.lock')) return 'yarn';
-  if (tree.exists('package-lock.json')) return 'npm';
-  // A package.json that declares nothing: the house default, the same one scaffold.sh falls back to.
-  return 'yarn';
-}
-
-/**
  * The Nx invocation for this repo's HOST — the same decision scaffold.sh makes (`HOST`): a repo running the Nx
  * wrapper (its `.nx/nxw.js` plus an `installation` block in nx.json), or one with no package.json at all, is a
  * WRAPPER host → `./nx`; otherwise Nx lives in node_modules and runs through the package manager.
  */
 function nxInvocation(tree: Tree, packageManager: string): string {
-  const wrapper =
-    (tree.exists('.nx/nxw.js') && /"installation"\s*:/.test(tree.read('nx.json', 'utf8') ?? '')) || !tree.exists('package.json');
-  if (wrapper) return './nx';
+  if (isWrapperHosted(tree)) return './nx';
   return { yarn: 'yarn nx', pnpm: 'pnpm nx', npm: 'npx nx' }[packageManager] ?? 'npx nx';
 }
 

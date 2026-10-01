@@ -12,6 +12,7 @@
 // node_modules) — decided once, here, from the workspace's own package manager, instead of guessed per serve.
 import { type Tree, readProjectConfiguration } from '@nx/devkit';
 import { detectPackageManager } from '../../_utils/package-manager';
+import { isWrapperHosted } from '../../_utils/nx-host';
 import type { DevFragment } from '../declaration';
 
 /** The Angular / Nx dev-server default — the base an app is served on when its target names no port. */
@@ -23,9 +24,7 @@ export const DEV_SERVER_TARGET = 'dev-server';
  * Nx is hosted by `.nx/installation` (no package.json).
  */
 export function nxInvocation(tree: Tree): { bin: string; nodeHost: boolean } {
-  const nxJson = tree.exists('nx.json') ? (JSON.parse(tree.read('nx.json', 'utf8') ?? '{}') as { installation?: unknown }) : {};
-  const wrapper = !tree.exists('package.json') || (Boolean(nxJson.installation) && tree.exists('.nx/nxw.js'));
-  return wrapper ? { bin: './nx', nodeHost: false } : { bin: 'node_modules/.bin/nx', nodeHost: true };
+  return isWrapperHosted(tree) ? { bin: './nx', nodeHost: false } : { bin: 'node_modules/.bin/nx', nodeHost: true };
 }
 
 export const NX_TREE_ENV = { NX_DAEMON: 'false', NX_WORKSPACE_ROOT_PATH: '${TREE}' };
@@ -42,6 +41,7 @@ export function nxDevServerFragment(tree: Tree, project: string): DevFragment {
   const declared = Number(target.options?.port);
   const base = Number.isInteger(declared) && declared > 0 ? declared : DEFAULT_DEV_SERVER_PORT;
   const { bin, nodeHost } = nxInvocation(tree);
+  const pm = detectPackageManager(tree);
   return {
     processes: [
       {
@@ -53,6 +53,6 @@ export function nxDevServerFragment(tree: Tree, project: string): DevFragment {
         ready: { http: '/' },
       },
     ],
-    install: nodeHost ? { cmd: [detectPackageManager(tree), 'install'], creates: 'node_modules' } : undefined,
+    install: nodeHost && pm ? { cmd: [pm, 'install'], creates: 'node_modules' } : undefined,
   };
 }
