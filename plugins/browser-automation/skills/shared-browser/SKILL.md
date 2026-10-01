@@ -8,6 +8,8 @@ description: >-
 
 **One persistent Chromium inside the container that a human and Claude drive together, live.** The human watches and clicks it in a normal host-OS tab over noVNC; Claude attaches over a loopback CDP port to navigate, mutate DOM/CSS, and read console/network — on the *same* browser instance, at the same time.
 
+**It is stack-free.** The browser is pure CDP and drives whatever answers on a URL — any framework, any backend, a static file server. Its whole surface is one CLI, **`tools/shared-browser/shared-browser`**, plus the `tools/shared-browser/*.mjs` helpers; a house project gets them with the `web` layer (its `HOUSE.md` stamp lists `web` in `layers=`). The house dev loop *composes* it (see *Composition* below), but nothing about it needs Nx or a particular framework.
+
 ## What it is
 
 | Piece | How |
@@ -29,7 +31,7 @@ shared-browser status --json  # .url is null until .webPortAllocated is true —
                               # trust the URL; "unknown" = no route to the host, use the tab title.
 ```
 
-Hand the human what those print. `nx serve` prints it too. If you ever find yourself typing a port into a URL, that's the bug.
+Hand the human what those print. The house dev loop (`nx serve <app>` / `tools/dev/dev serve`) prints it too. If you ever find yourself typing a port into a URL, that's the bug.
 
 The browser tab is **titled with the project name**, so tell the human to check it: a tab naming a different project means they are on another container's browser. That is the one check that survives everything the allocator can't see.
 
@@ -52,8 +54,11 @@ If nobody is watching and you just need a screenshot or a scrape from a script, 
 ## The flow
 
 ```
-1. nx serve <app>                                 # serve + shared-browser up + auto-navigate, one command (browser ON by default)
-   (--no-shared-browser skips it; standalone:  tools/shared-browser/shared-browser up)
+1. tools/shared-browser/shared-browser up         # idempotent; prints the noVNC URL
+   tools/shared-browser/shared-browser navigate --url=<app-url> --wait
+                                                  # <app-url> = wherever the app answers (any stack; your own
+                                                  # server on a random port per local-server-isolation)
+   (house `web` layer: `nx serve <app>` does serve + up + navigate in one command — see Composition)
 2. Hand the human the printed noVNC URL           # allocated per container — read it, never compose it
 3. Attach:  withPage(fn)  (preferred, leak-proof) # attach() is the raw escape hatch
 4. Drive / observe                                # navigate, fill, mutate, measure, read recorder
@@ -75,7 +80,7 @@ prove       →  verify.measure  (getComputedStyle, getBoundingClientRect, overf
                verify.screenshotPair (before/after)  ·  theme (dark/light)
                viewport (mobile/tablet/desktop)  ·  pseudo (:hover/:focus/:active)
                layoutShift (rect-diff CLS check)
-PORT        →  write the fix into REAL SOURCE — the component's own SCSS/template
+PORT        →  write the fix into REAL SOURCE — the component's own styles/template
                (architecture-first: fix the root, not the symptom)
 confirm     →  reload  →  the SOURCE reproduces the live fix, unaided
 ```
@@ -100,28 +105,29 @@ tools/shared-browser/shared-browser logs --since=<ts> --level=<lvl>   # read the
 
 Co-driving is **turn-taking**, not a fight for the cursor.
 
-- **Enter observe-only before an interactive hand-off.** When the human must do something only they can — a real **OAuth** sign-in, a captcha, entering credentials — run **`shared-browser observe`** *first*. Attach/verify/recorder then **refuse to navigate/click/type** (they log "observe-only — human is driving"), so you can't move the view under their hands mid-flow. Run **`shared-browser resume`** once they're done; `shared-browser status` shows the current mode. (Real Google OAuth only completes on the **main-tree serve at `http://localhost:4200`** — the sole registered origin; emulator auth works on any tree/origin.)
+- **Enter observe-only before an interactive hand-off.** When the human must do something only they can — a real **OAuth** sign-in, a captcha, entering credentials — run **`shared-browser observe`** *first*. Attach/verify/recorder then **refuse to navigate/click/type** (they log "observe-only — human is driving"), so you can't move the view under their hands mid-flow. Run **`shared-browser resume`** once they're done; `shared-browser status` shows the current mode. (A real third-party OAuth flow only completes on an origin registered with the provider — typically the **main-tree serve on the base, forwarded port**; a worktree's shifted port or `<slug>.localhost` origin usually isn't registered. Emulated/local auth — e.g. the Firebase auth emulator — works on any tree/origin.)
 - **Observe and read while the human drives.** Default to watching (DOM/recorder) rather than grabbing control.
 - **Announce before you navigate or mutate** — "I'm going to inject a style / navigate to X" — so the view never changes under their hands.
 - **Never yank the view mid-interaction.** Wait for a natural handoff.
 - **Clean up after yourself** — remove injected styles (`injectStyle(...).remove()`), close tabs you opened. Leave the view as you found it.
 
-## Composition (the big payoff, one line)
+## Composition — the house dev loop (`web` layer)
 
-It's all folded into `nx serve` now — the shared browser comes up and is navigated **by default**, and `--worktree` composes the worktree/offset stack:
+In a house project with the `web` layer the browser is folded into the dev loop — the stack-free engine `tools/dev/dev serve` (wrapped by `nx serve <app>`) brings it up and navigates it **by default**, and `--worktree` composes the worktree/offset stack:
 
 ```
-nx serve <app> --worktree=<branch|slug>
+<pm> nx serve <app> --worktree=<branch|slug>
+tools/dev/dev serve [app] --worktree=<branch|slug>     # the same engine, no Nx in the call
 ```
 
-= **isolated worktree** (code) + **its own offset port block** (app + emulators) + the **shared browser navigated to the worktree's `<slug>.localhost` domain**, human watching over noVNC. The worktree isolates the code, the offset isolates the ports, and because a worktree's shifted ports **aren't forwarded**, the shared browser is the *only* way to view a worktree serve. `--no-shared-browser` opts out of the browser layer; `--port-offset` pins the block.
+= **isolated worktree** (code) + **its own offset port block** (every process the app declares in `.bespunky/dev.json` — the dev-server, plus e.g. an emulator suite with `firebase`) + the **shared browser navigated to the worktree's `<slug>.localhost` domain**, human watching over noVNC. The worktree isolates the code, the offset isolates the ports, and because a worktree's shifted ports **aren't forwarded**, the shared browser is the *only* way to view a worktree serve. `--no-shared-browser` opts out of the browser layer; `--port-offset` pins the block.
 
 ## CLI reference — `tools/shared-browser/shared-browser`
 
 | Verb | Does |
 |---|---|
 | `up` | Start missing components (Xvfb→fluxbox→Chromium→x11vnc→websockify), **allocate the noVNC port**, readiness-gate all three ports, auto-start recorder, print the noVNC URL. Idempotent, `flock`-serialized, reaps stale-by-PID+cmdline before starting. |
-| `navigate --url=<u> [--wait]` | Ensure up; with `--wait`, poll `<u>` until it answers; navigate the shared browser via CDP. (The single primitive the `serve` executor composes when it brings the browser up — there is no `codrive` verb.) |
+| `navigate --url=<u> [--wait]` | Ensure up; with `--wait`, poll `<u>` until it answers; navigate the shared browser via CDP. (The single primitive the house dev loop composes when it brings the browser up — there is no `codrive` verb.) |
 | `observe` | Enter **observe-only** — attach/verify/recorder refuse to navigate/click/type and log "observe-only — human is driving". Use before handing the human an interactive step (OAuth / captcha). Flag persists in `SB_RUNTIME`. |
 | `resume` | Clear observe-only — Claude may drive again. |
 | `status [--json]` | Per-component up/down + ports + URL, **and the observe-only mode**. `--json` = machine-readable preflight. |
@@ -131,7 +137,7 @@ nx serve <app> --worktree=<branch|slug>
 | `restart` | `down` + `up` (recycle Chromium when the view gets sluggish / RSS climbs). |
 | `clean` | Wipe profile + logs + screenshots — reset to a fresh session. |
 
-**Workspace Nx targets** (thin wrappers over the CLI): `shared-browser:up | down | status | restart | clean | url | logs`. The per-app **`serve`** target brings the browser up and navigates it as part of `nx serve <app>` (unless `--no-shared-browser`).
+**House Nx targets** (thin wrappers over the CLI, `web` layer): `shared-browser:up | down | status | restart | clean | url | logs`. The per-app **`serve`** target brings the browser up and navigates it as part of `nx serve <app>` (unless `--no-shared-browser`).
 
 ## Helper signatures — `tools/shared-browser/*.mjs`
 
