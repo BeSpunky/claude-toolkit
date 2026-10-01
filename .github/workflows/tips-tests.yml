@@ -1,0 +1,32 @@
+# Guard the toolkit tips engine's promises.
+#
+# `plugins/bespunky/hooks/tips.mjs` runs at every session start on every machine with the toolkit installed, and
+# writes into the user's own ~/.claude/settings.json. Everything it promises is a "never" (another tip, an
+# unparsable file, a symlink, stdout) — and a broken "never" fails silently, in someone else's settings.
+name: tips tests
+
+on:
+  push:
+    branches: [main, development, staging]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tips-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No install: the tests need only node, against throwaway config dirs under the OS temp dir.
+      - name: Run tips engine tests
+        run: node tools/test-tips/run.mjs
