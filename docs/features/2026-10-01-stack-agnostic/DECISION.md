@@ -42,3 +42,12 @@ Every phase touching project shapes ships its migrations + fixture cases with th
 - Approve the direction and phase order.
 - Repackage Angular-only skills (`angular-architecture`, `angular-native-wrappers`, Angular references) into an optional `bespunky-angular` plugin (and Nx ones into `bespunky-nx`)? Consumers who rely on them would need to install the new plugin.
 - Rename the stamp key `nx-tools=` → a neutral `house=`? (needs a migration-aware read of both.)
+
+## Revision 2 — 2026-10-01: go-ahead, and the open decisions settled
+> "implement all phases to completion and verify different scenarios work on throwaway repos." — the user (`/goal`)
+
+Settled by the orchestrator under that mandate (no further question asked; each is reversible):
+- **Angular-only skills move to a new optional plugin `bespunky-angular`** (`angular-architecture`, `angular-native-wrappers`, plus Angular adapter references split out of generic skills where they are whole files). It is "something to wear" in the user's words; the `claude-settings` generator enables it per layer (`angular` → `bespunky-angular`), so a sync re-equips existing Angular consumers. `nx-monorepo-and-dx` stays in `bespunky-engineering` — Nx is the floor now.
+- **Stamp key stays `nx-tools=`.** Nx is the floor and the package is still `@bespunky/nx-tools`; a rename would buy nothing but a migration.
+- **One payload release for the whole effort: `0.35.0`.** Every migration this effort owes registers at `0.35.0`.
+- **Contract names fixed up front** so parallel units agree: dev declaration `.bespunky/dev.json`; stack-free engine `tools/dev/dev serve [app] [--worktree=<x>] [--port-offset=<n|auto>] [--dry-run]`; `nx serve <app>` stays as a thin wrapper over it; flags are kebab-case everywhere.
