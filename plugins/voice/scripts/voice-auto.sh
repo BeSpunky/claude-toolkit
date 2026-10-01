@@ -28,9 +28,19 @@ case "${1:-status}" in
     ;;
   status)
     if [ -f "$STATE" ] && [ "$(cat "$STATE" 2>/dev/null)" = on ]; then
-      echo on
+      echo "auto-speak: on"
     else
-      echo off
+      echo "auto-speak: off"
+    fi
+    # Where the audio would go right now, and at what mic gain — resolved by the
+    # same helper speak.sh/listen.sh use, sourced from this script's own dir.
+    # shellcheck source=audio-endpoint.sh
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/audio-endpoint.sh"
+    if voice_resolve_endpoint; then
+      echo "audio endpoint: $VOICE_ENDPOINT (via $VOICE_ENDPOINT_VIA)"
+      echo "mic gain: $VOICE_MIC_GAIN ($VOICE_MIC_GAIN_WHY)"
+    else
+      echo "$VOICE_ENDPOINT_DIAGNOSIS"
     fi
     ;;
   *)

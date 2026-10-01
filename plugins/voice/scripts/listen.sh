@@ -6,15 +6,16 @@
 # ask tool) get back plain text and never touch an audio device or an STT engine.
 # On success it prints ONLY the recognized text on stdout; status/errors → stderr.
 #
-# It absorbs WSLg's weak microphone gain itself (boosts the default source before
-# recording), and records with natural push-to-talk: it waits for you to start,
-# then stops ~1.6s after you stop talking, capped by a max window. So a caller just
-# runs it and gets the sentence.
+# It resolves the audio endpoint via audio-endpoint.sh (a reachable PulseAudio-
+# protocol server — WSLg, or the host's native PulseAudio/PipeWire), sets the mic
+# to that endpoint's gain (boosted only for WSLg, whose mic arrives quiet), and
+# records a fixed window. So a caller just runs it and gets the sentence.
 #
 # Engine: whisper.cpp from install-whisper.sh (~/.claude/bespunky-voice/whisper).
 #
 # Env knobs (optional):
-#   BESPUNKY_VOICE_MIC_GAIN         default-source volume before recording (default 200%)
+#   BESPUNKY_VOICE_MIC_GAIN         default-source volume before recording
+#                                   (default: 200% via WSLg, else 100%)
 #   BESPUNKY_VOICE_LISTEN_SECONDS   length of the listen window (default 10)
 #   BESPUNKY_VOICE_WHISPER_BIN      whisper-cli path (default: the built one)
 #   BESPUNKY_VOICE_WHISPER_MODEL    ggml model path (default: base.en)
@@ -31,7 +32,6 @@ if [ -z "$MODEL" ]; then
   done
   [ -n "$MODEL" ] || MODEL="$WHDIR/models/ggml-base.en.bin"
 fi
-GAIN="${BESPUNKY_VOICE_MIC_GAIN:-200%}"
 MAXSEC="${BESPUNKY_VOICE_LISTEN_SECONDS:-10}"
 
 [ -x "$CLI" ]   || { echo "bespunky-voice: STT engine not installed — run install-whisper.sh" >&2; exit 1; }
@@ -39,11 +39,17 @@ MAXSEC="${BESPUNKY_VOICE_LISTEN_SECONDS:-10}"
 command -v parecord >/dev/null 2>&1 || { echo "bespunky-voice: no recorder (parecord)" >&2; exit 1; }
 command -v sox      >/dev/null 2>&1 || { echo "bespunky-voice: sox required for capture" >&2; exit 1; }
 
-# Boost + unmute the default mic. WSLg's RDPSource arrives near-silent at unity
-# gain; this is the one place that knows to compensate.
+# Resolve the endpoint (exports PULSE_SERVER, sets VOICE_MIC_GAIN). Sourced from
+# this script's own dir, so it works from the plugin and the published copy.
+# shellcheck source=audio-endpoint.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/audio-endpoint.sh"
+voice_resolve_endpoint || { echo "$VOICE_ENDPOINT_DIAGNOSIS" >&2; exit 1; }
+
+# Unmute the default mic and set the endpoint's gain (the gain choice — and why
+# WSLg gets a boost — lives in audio-endpoint.sh, not here).
 if command -v pactl >/dev/null 2>&1; then
-  pactl set-source-mute   @DEFAULT_SOURCE@ 0      2>/dev/null || true
-  pactl set-source-volume @DEFAULT_SOURCE@ "$GAIN" 2>/dev/null || true
+  pactl set-source-mute   @DEFAULT_SOURCE@ 0                2>/dev/null || true
+  pactl set-source-volume @DEFAULT_SOURCE@ "$VOICE_MIC_GAIN" 2>/dev/null || true
 fi
 
 W16="$(mktemp)"
@@ -51,8 +57,8 @@ RAW="$(mktemp)"
 trap 'rm -f "$W16" "$RAW"' EXIT
 
 # Record a fixed window, then resample to 16 kHz for whisper. A streaming
-# silence-stop (parecord | sox) is deliberately NOT used: under WSLg the mic gain
-# is hot enough that ambient noise sits above any silence threshold, so it never
+# silence-stop (parecord | sox) is deliberately NOT used: with a boosted mic (as on
+# WSLg) ambient noise can sit above any silence threshold, so it may never
 # self-terminates — and a timeout-killed sox never finalizes its WAV header (0
 # bytes). A plain capture always produces a clean file; whisper handles the
 # leading/trailing silence and room noise fine.

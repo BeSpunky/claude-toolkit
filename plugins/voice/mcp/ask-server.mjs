@@ -116,7 +116,15 @@ function askByVoice({ question, options }) {
   const transcript = ((rec.stdout || '').trim());
 
   if (!transcript) {
-    return JSON.stringify({ transcript: '', matched: null, note: 'No speech recognized. Call ask_by_voice again to re-ask, or fall back to a typed question.' });
+    // listen.sh explains its own failures on stderr (no reachable audio endpoint,
+    // STT not installed, nothing recognized) — pass that through verbatim.
+    const reason = (rec.stderr || '').trim();
+    return JSON.stringify({
+      transcript: '',
+      matched: null,
+      ...(reason && { error: reason }),
+      note: 'No speech recognized. Call ask_by_voice again to re-ask, or fall back to a typed question. If `error` is set, relay it to the user.',
+    });
   }
   const matched = matchOption(transcript, opts);
   return JSON.stringify({
