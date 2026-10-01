@@ -72,13 +72,19 @@ done
 
 # --- snooze: don't re-nag every session start during the same dormant stretch --------------------------------
 # The fingerprint is the last-commit epoch — stable across a dormant period, and it changes the moment the user
-# does new work (which also makes the repo "active" above, so this hook falls silent anyway). Local-only under
-# .claude/ (where per-machine state lives): one person's "seen it" must not silence teammates.
-SNOOZE="$PROJECT_DIR/.claude/.standing-snooze"
-if [ -f "$SNOOZE" ] && [ "$(cat "$SNOOZE" 2>/dev/null)" = "$last_commit" ]; then
-  exit 0
+# does new work (which also makes the repo "active" above, so this hook falls silent anyway). It lives INSIDE the
+# git dir: local to this clone by construction (one person's "seen it" must not silence teammates), and never a
+# candidate for a commit — so no project needs a .gitignore line for it. It used to live at .claude/.standing-snooze,
+# which nothing ignored, so it surfaced as an untracked file in every project the plugin ran in; that copy is
+# removed below.
+rm -f "$PROJECT_DIR/.claude/.standing-snooze" 2>/dev/null || true
+SNOOZE="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-path bespunky-standing-snooze 2>/dev/null || true)"
+if [ -n "$SNOOZE" ]; then
+  if [ -f "$SNOOZE" ] && [ "$(cat "$SNOOZE" 2>/dev/null)" = "$last_commit" ]; then
+    exit 0
+  fi
+  printf '%s' "$last_commit" > "$SNOOZE" 2>/dev/null || true
 fi
-mkdir -p "$PROJECT_DIR/.claude" 2>/dev/null && printf '%s' "$last_commit" > "$SNOOZE" 2>/dev/null || true
 
 # --- the notice: a fact to relay, not an order to obey -------------------------------------------------------
 plural=""; [ "$count" -gt 1 ] && plural="s"
