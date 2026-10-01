@@ -36,11 +36,17 @@ Engineering the Staging so each moment holds across every viewport, orientation,
 - **WCAG reflow & zoom** — content must work at 320px-equivalent and under 200–400% zoom without loss (WCAG 1.4.10) — see `accessibility-reduced-motion-and-fallbacks.md`.
 - **Heavy moments on weak phones** — a desktop 3D/video spectacle can jank or drain a mobile; load the Staging's lighter re-staging there — see `performance-and-budgets.md`.
 
-## On the house stack (Angular / Nx)
+## On your stack
 
-- **CSS-first.** Prefer container queries and fluid CSS over JS breakpoints. Reach for the **CDK `BreakpointObserver`** only when responsive logic must live in TypeScript (e.g. swapping a component, not just styles).
+- **CSS-first.** Prefer container queries and fluid CSS over JS breakpoints. Reach for a script-side breakpoint observer (`matchMedia`, or your framework's wrapper of it) only when responsive logic must live in code (e.g. swapping a component, not just styles).
+- Use **responsive images** — `srcset`/`sizes`, priority hints, lazy-loading (your framework's image component may do this for you); use `<picture>` for true art-direction.
+- **Gate heavy below-the-fold or desktop-only moments** behind lazy loading, combined with the per-device decision so phones never load the spectacle they won't show.
+
+**Angular adapter** — when the project wears Angular (its `HOUSE.md` stamp lists `angular` in `layers=`):
+
+- Reach for the **CDK `BreakpointObserver`** only when responsive logic must live in TypeScript.
 - **`NgOptimizedImage`** gives responsive `srcset`/`sizes`, priority hints, and lazy-loading out of the box; use `<picture>` for true art-direction.
-- **`@defer`** can gate heavy below-the-fold or desktop-only moments; combine with the per-device decision so phones never load the spectacle they won't show.
+- **`@defer`** can gate heavy below-the-fold or desktop-only moments.
 
 ## When NOT to
 

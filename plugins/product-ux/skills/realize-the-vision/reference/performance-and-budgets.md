@@ -36,11 +36,17 @@ Two UX non-negotiables that live at the build layer (the *why* is in `astonishin
 - **Test on a real mid-range Android phone**, not your dev laptop — it is the device that exposes jank. Throttle CPU (4–6×) and network in DevTools as a proxy.
 - Verify in the **running app** (the `browser-automation` plugin / preview tools), with the animation actually playing, on real conditions — not just in isolation.
 
-## On the house stack (Angular / Nx)
+## On your stack
+
+- **Run animation loops outside the framework's change detection / render cycle**, so each frame doesn't trigger a re-render — a top cause of animation jank in any component framework.
+- Keep experience-heavy features in **lazy-loaded routes/boundaries**, and defer below-the-fold immersive blocks until they're near the viewport (your framework's deferred/lazy-component mechanism, or a dynamic `import()` behind an IntersectionObserver).
+- Wrap imperative engines with **proper teardown** so dead scenes don't keep burning frames, and guard them for **SSR**.
+
+**Angular adapter** — when the project wears Angular (its `HOUSE.md` stamp lists `angular` in `layers=`):
 
 - **Run animation loops `outside` Angular** (`NgZone.runOutsideAngular`, or zoneless change detection) so each frame doesn't trigger change detection — a top cause of animation jank in Angular.
-- Keep experience-heavy features in **lazy-loaded routes/boundaries**; use `@defer` for below-the-fold immersive blocks.
-- Wrap imperative engines with proper teardown so dead scenes don't keep burning frames (`bespunky-engineering:angular-native-wrappers`).
+- Use **`@defer`** for below-the-fold immersive blocks.
+- Wrap imperative engines with proper teardown (`bespunky-angular:angular-native-wrappers`).
 
 ## When a budget genuinely can't hold the Vision
 
