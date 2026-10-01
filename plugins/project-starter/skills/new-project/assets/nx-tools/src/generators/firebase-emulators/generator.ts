@@ -258,7 +258,7 @@ export default async function firebaseEmulatorsGenerator(
   addDependenciesToPackageJson(
     tree,
     missing({ 'firebase-admin': '^13.6.0', 'firebase-functions': '^7.0.0' }),
-    missing({ '@nx/esbuild': nxVersion }),
+    missing({ '@nx/esbuild': nxVersion, ...functionsToolchain(tree) }),
   );
 
   await formatFiles(tree);
@@ -282,6 +282,38 @@ function resolveClientApp(tree: Tree, named: string | undefined): string | undef
     );
   }
   return wired[0]?.project;
+}
+
+/**
+ * What building a TypeScript Cloud Functions app needs beyond @nx/esbuild itself: `esbuild` (its peer), the
+ * TypeScript compiler (the executor type-checks) and Node's types (tsconfig.app.json `types: ["node"]`). An
+ * Angular workspace already provides all three (through @angular/build and its own setup); a plain repo provides
+ * none. So each is declared exactly when NOTHING provides it — never added over a working install — at the
+ * version Nx itself pins (@nx/js's versions, when resolvable), else the versions Nx 23.2 pins.
+ */
+function functionsToolchain(tree: Tree): Record<string, string> {
+  let pinned: { esbuildVersion?: string; typescriptVersion?: string; typesNodeVersion?: string } = {};
+  try {
+    pinned = require(require.resolve('@nx/js/src/utils/versions', { paths: [tree.root] }));
+  } catch {
+    // Not installed yet (it arrives with @nx/esbuild) — the fallbacks below are Nx 23.2's own pins.
+  }
+  const wanted: Record<string, string> = {
+    esbuild: pinned.esbuildVersion ?? '^0.27.0',
+    typescript: pinned.typescriptVersion ?? '~6.0.3',
+    '@types/node': pinned.typesNodeVersion ?? '^22.0.0',
+  };
+  return Object.fromEntries(Object.entries(wanted).filter(([pkg]) => !resolvable(tree, pkg)));
+}
+
+/** Does `pkg` resolve from the workspace root (declared, or provided by something that is)? */
+function resolvable(tree: Tree, pkg: string): boolean {
+  try {
+    require.resolve(`${pkg}/package.json`, { paths: [tree.root] });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function basenameOf(path: string): string {
