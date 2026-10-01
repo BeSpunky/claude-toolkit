@@ -82,10 +82,7 @@
       "default": false
     },
     "skip": {
-      "type": [
-        "string",
-        "array"
-      ],
+      "type": "array",
       "items": {
         "type": "string"
       },

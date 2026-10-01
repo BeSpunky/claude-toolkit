@@ -24,7 +24,7 @@
  * Needs `yarn install`.
  */
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -332,6 +332,22 @@ check('an unknown layer id is refused, not ignored', (ok) => {
     threw = true;
   }
   ok(threw, 'layer("reactt") did not throw');
+});
+
+// ── option schemas: what Nx's own validator accepts ─────────────────────────────────────────────────────────
+// Nx validates every `nx <target> --flag` against the executor's schema.json BEFORE the executor runs, and it
+// rejects a union type that includes `array` ("Property 'skip' does not match the schema") — so
+// `nx serve <app> --skip=emulators` failed outright while every unit test of the executor passed. Nx parses a
+// comma list or a repeated flag into an array itself; an option that takes several values is `"type": "array"`.
+console.log('\noption schemas');
+check('no schema property declares a union type containing array/object (Nx rejects it at the CLI)', (ok) => {
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : e.name === 'schema.json' ? [join(dir, e.name)] : []));
+  for (const file of walk(join(PAYLOAD, 'src'))) {
+    for (const [key, prop] of Object.entries(JSON.parse(readFileSync(file, 'utf8')).properties ?? {})) {
+      ok(!(Array.isArray(prop.type) && prop.type.some((t) => t === 'array' || t === 'object')), `${file.slice(PAYLOAD.length + 1)}: ${key} is ${JSON.stringify(prop.type)}`);
+    }
+  }
 });
 
 // ── agent artifacts: the devcontainer, the Claude settings and the house docs, COMPOSED from the layers ───────
