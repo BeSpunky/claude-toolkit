@@ -33,9 +33,9 @@ house_layer_requires() {
     js) printf '%s\n' 'nx' ;;
     web) printf '%s\n' 'agent' ;;
     angular) printf '%s\n' 'nx' ;;
-    design-system) printf '%s\n' 'angular' ;;
+    design-system) printf '%s\n' 'nx' ;;
     navigation) printf '%s\n' 'angular' ;;
-    firebase) printf '%s\n' 'angular' ;;
+    firebase) printf '%s\n' 'nx' ;;
   esac
 }
 
@@ -44,12 +44,12 @@ house_layer_hint() {
   case "$1" in
     nx) printf '%s\n' '`scaffold.sh --sync <project>` — the floor is always ensured: `nx init` in place (into node_modules when the repo has a package.json, else through the Nx wrapper, ./nx)' ;;
     agent) printf '%s\n' '`scaffold.sh --sync --ensure=agent <project>`' ;;
-    js) printf '%s\n' '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular`)' ;;
+    js) printf '%s\n' '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --stack=js`)' ;;
     web) printf '%s\n' 'an app with a dev-server target (e.g. the `angular` layer: `nx g @bespunky/nx-tools:app apps/<name>`)' ;;
     angular) printf '%s\n' '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`' ;;
     design-system) printf '%s\n' '`nx g @bespunky/nx-tools:design-system --scope=<scope>`' ;;
     navigation) printf '%s\n' '`nx g @bespunky/nx-tools:navigation-core`' ;;
-    firebase) printf '%s\n' '`scaffold.sh --sync --firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators --project=<app>`)' ;;
+    firebase) printf '%s\n' '`scaffold.sh --sync --firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)' ;;
   esac
 }
 
@@ -110,7 +110,7 @@ dependency "@nx/angular"
 project-json "executor"[[:space:]]*:[[:space:]]*"@angular/build:
 project-json "executor"[[:space:]]*:[[:space:]]*"@angular-devkit/build-angular:' ;;
     design-system) printf '%s\n' 'project-json "type:design-system"' ;;
-    navigation) printf '%s\n' 'project-json "name"[[:space:]]*:[[:space:]]*"navigation-core"' ;;
+    navigation) printf '%s\n' 'project-json "type:navigation"' ;;
     firebase) printf '%s\n' 'file firebase.json' ;;
   esac
 }

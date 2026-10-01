@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyFirebaseClient",
+  "title": "Attach the Firebase client to one app",
+  "description": "The per-app half of the Firebase layer: tags the app platform:web and asks the app's stack adapter to wire the Firebase client (Angular: environment files, firebase.config.ts + per-service configs, emulator-overrides.ts, proxy.conf.mjs, the production/staging fileReplacements, provideAppFirebase(), firebase + @angular/fire). An app whose stack has no Firebase port is reported and left alone. The emulator suite itself is the firebase-emulators generator.",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The app to attach the Firebase client to.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "Which app?"
+    },
+    "workspaceName": {
+      "type": "string",
+      "description": "Workspace identity that seeds the offline `demo-<name>` project id in the app's environment file. Defaults to the project name."
+    },
+    "staging": {
+      "type": "boolean",
+      "default": false,
+      "description": "Also scaffold the staging environment file and the `staging` build configuration that selects it."
+    },
+    "wireProviders": {
+      "type": "boolean",
+      "default": false,
+      "description": "Wire the Firebase provider into the app's bootstrap. TRUE ONLY WHEN ENSURING the layer (creating the capability) — the bootstrap file is seeded, never owned, so a detect-only sync must not write to it."
+    },
+    "skipFormat": { "type": "boolean", "default": false, "x-priority": "internal" }
+  },
+  "required": ["project"]
+}

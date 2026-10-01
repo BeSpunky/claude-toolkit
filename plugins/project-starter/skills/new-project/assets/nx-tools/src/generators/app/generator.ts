@@ -1,61 +1,42 @@
-// House generator: create a BeSpunky-standard Angular application.
+// House generator: create a BeSpunky-standard application.
 //
-// The application sibling of `publishable-lib`. It is the SINGLE SOURCE OF TRUTH for "what a
-// BeSpunky app is", so the FIRST app (created by scaffold.sh) and every LATER app a developer
-// adds go through ONE code path — a second app is configured identically to the first, with no
-// manual steps and no knowledge of the house conventions required.
+// The application sibling of `publishable-lib`, and the SINGLE SOURCE OF TRUTH for "what a BeSpunky app is", so
+// the FIRST app (created by scaffold.sh) and every LATER app a developer adds go through ONE code path — a second
+// app is configured identically to the first, with no manual steps and no knowledge of the house conventions.
 //
-// Delegate-then-configure (the same idiom as publishable-lib):
-//   1. Delegate the app scaffold to @nx/angular:application with the house defaults
-//      (minimal, scss, routing, no e2e). These defaults USED to live, duplicated, in scaffold.sh's
-//      raw `nx g @nx/angular:application` call AND in the project's CLAUDE.md "add another app"
-//      snippet; both now point here, so the app shape is defined in exactly one place.
-//   2. Compose the house per-app generators against the freshly-created project:
-//        - serve (always)                — the unified `serve` composing target + its `dev-server` leaf
-//                                          (dev-server + optional emulators + optional shared browser,
-//                                          for the current or a chosen worktree, under one Ctrl+C) and
-//                                          the dev-only worktree tab label. Runs BEFORE serve-options.
-//        - serve-options (always)        — host 0.0.0.0 on the `dev-server` leaf, so the dev server is
-//                                          reachable from outside the devcontainer.
-//        - firebase-emulators (when the workspace is a Firebase workspace) — environment files,
-//                                          firebase.config.ts, app.config wiring, the production
-//                                          fileReplacements, the platform:web tag, and the emulator
-//                                          suite. This is the per-app slice that a raw
-//                                          `nx g @nx/angular:application` leaves out entirely.
+// Two halves, and neither names a capability:
+//   1. CREATE — the stack adapter's `apps` port (src/adapters/<stack>): Angular today, with the house defaults
+//      (minimal, scss, routing, no e2e). `--stack` picks one; the default is the workspace's own.
+//   2. ATTACH — every capability the workspace wears gives the new app what it gives an app on a sync: its
+//      layer's per-app steps (the web dev loop, the design system's sass channel and provider, the Firebase
+//      client, …), run through ./attach. There is no composition list here to forget a capability in; a new
+//      capability attaches to new apps by being registered.
 //
-// Two decisions make a later app correct-by-construction:
-//   - Firebase is SELF-DETECTING. An explicit --firebase wins (the scaffolder's first app is
-//     created BEFORE firebase.json exists, so it passes the flag); otherwise it is inferred from
-//     the presence of firebase.json at the workspace root. So a developer adding a second app to a
-//     Firebase workspace just runs `nx g @bespunky/nx-tools:app apps/<name>` and gets the full
-//     Firebase wiring — no flag, no recollection that this is a Firebase workspace.
-//   - workspaceName is a WORKSPACE identity, not an app one. It seeds the emulators' offline
-//     `demo-<workspaceName>` project id and is baked into the always-rewritten tools/*.sh scripts,
-//     so it is resolved ONCE from the workspace root — never from the new app's name. (Passing the
-//     new app's name, as the firebase-emulators default would, corrupts those workspace-level
-//     scripts the moment a second app is added.)
-import {
-  type Tree,
-  type GeneratorCallback,
-  getProjects,
-  readProjectConfiguration,
-  formatFiles,
-} from '@nx/devkit';
+// What the workspace "wears" is DETECTED, plus whatever this run is bringing into being alongside the app:
+// `--layers` (scaffold.sh passes its ensure set — at first-app time nothing it ensures exists yet, so nothing
+// could be detected) and the legacy `--firebase` (an explicit true/false still overrides firebase.json detection).
+//
+// workspaceName is a WORKSPACE identity, not an app one. It seeds the emulators' offline `demo-<workspaceName>`
+// project id and the tab label's base host, so it is resolved ONCE from the workspace root — never from the new
+// app's name (which corrupted the workspace-level scripts the moment a second app was added).
+import { type Tree, type GeneratorCallback, formatFiles } from '@nx/devkit';
 import { basename } from 'node:path';
-import { requireLayer } from '../../layers/registry';
-import serveOptionsGenerator from '../serve-options/generator';
-import serveGenerator from '../serve/generator';
-import firebaseEmulatorsGenerator from '../firebase-emulators/generator';
-import designSystemStylesGenerator from '../design-system-styles/generator';
+import { detectLayers, inRegistryOrder, isPresent } from '../../layers/registry';
+import { ADAPTERS, adapter } from '../../adapters/registry';
+import { attachCapabilities } from './attach';
 
 interface AppGeneratorSchema {
   // Workspace-relative directory for the app, e.g. `apps/<name>` (positional arg 0).
   directory: string;
-  // Explicit project name. Defaults to the directory's last segment (matching @nx/angular).
+  // Explicit project name. Defaults to the directory's last segment.
   name?: string;
-  // Tri-state Firebase opt-in: true/false override; UNSET → auto-detect from firebase.json.
+  // The stack to create the app with (an adapter id). Default: the workspace's stack that can create apps.
+  stack?: string;
+  // Layers this run is bringing into being alongside the app (csv) — attached as if detected.
+  layers?: string;
+  // Legacy tri-state Firebase opt-in: true/false override; UNSET → detected from firebase.json.
   firebase?: boolean;
-  // Opt-in (Firebase only): also scaffold the staging environment bundle. Forwarded to firebase-emulators.
+  // Opt-in (Firebase only): also scaffold the staging environment bundle.
   staging?: boolean;
   // The component/directive style. House default: scss.
   style?: string;
@@ -64,143 +45,50 @@ interface AppGeneratorSchema {
   skipFormat?: boolean;
 }
 
-const noop: GeneratorCallback = () => {};
-
-export default async function appGenerator(
-  tree: Tree,
-  options: AppGeneratorSchema
-): Promise<GeneratorCallback> {
-  // The `angular` layer is this generator's precondition, not an assumption: line ~88 binds
-  // `@nx/angular/generators` by dynamic import, which on a workspace without the plugin fails as a
-  // module-resolution trace pointing at node_modules — a message that sends the reader off to install
-  // something rather than telling them this generator doesn't apply to their workspace yet.
-  requireLayer(tree, 'angular', 'app');
-
+export default async function appGenerator(tree: Tree, options: AppGeneratorSchema): Promise<GeneratorCallback> {
   if (!options.directory) {
+    throw new Error('app generator requires a directory (positional arg 0 / --directory), e.g. `apps/<name>`.');
+  }
+
+  // 1) CREATE, through the stack. Its precondition is stated here, as a sentence, rather than surfacing as a
+  //    module-resolution trace from inside the framework's own generator.
+  const stack = options.stack ? adapter(options.stack) : ADAPTERS.find((a) => a.apps && isPresent(tree, a.layer));
+  if (!stack?.apps) {
+    const creators = ADAPTERS.filter((a) => a.apps).map((a) => a.id);
     throw new Error(
-      'app generator requires a directory (positional arg 0 / --directory), e.g. `apps/<name>`.'
+      `[app] ${options.stack ? `The ${options.stack} stack cannot create apps` : 'No stack in this workspace can create apps'} ` +
+        `(stacks that can: ${creators.join(', ')}). Add one — e.g. \`nx add @nx/angular\` — and re-run.`,
     );
   }
-
-  const style = options.style ?? 'scss';
-
-  // 1) Delegate to @nx/angular:application with the house defaults. We skipFormat the delegate and
-  //    run a single formatFiles at the end (so the base output + our config land formatted once).
-  //
-  //    These option names are NOT guessed: they are the exact, proven-good CLI flags scaffold.sh
-  //    has always passed (`--minimal --style=scss --routing --e2eTestRunner=none`), expressed
-  //    programmatically. The export `applicationGenerator` from '@nx/angular/generators' mirrors the
-  //    publishable-lib generator's `libraryGenerator` import; VERIFY both against the installed
-  //    @nx/angular schema (`nx g @nx/angular:application --help`) if a future Nx renames them.
-  const { applicationGenerator } = await import('@nx/angular/generators');
-  const appCallback =
-    (await applicationGenerator(tree, {
-      directory: options.directory,
-      ...(options.name ? { name: options.name } : {}),
-      style,
-      routing: true,
-      minimal: true,
-      e2eTestRunner: 'none',
-      skipFormat: true,
-    } as Parameters<typeof applicationGenerator>[1])) ?? noop;
-
-  // Resolve the project name @nx/angular:application actually emitted, so the per-app generators
-  // target it (rather than guessing). The basename matches scaffold's historical `--project=$APP`;
-  // the getProjects() fallback covers any Nx version that derives a different name from the path.
-  const projectName = resolveEmittedProjectName(tree, options.directory, options.name);
-
-  // workspaceName is a WORKSPACE identity, not an app one — resolved ONCE from the workspace root, never
-  // the new app's name (see the file header). It seeds the emulators' demo project id and the tab
-  // label's base-host sentinel.
-  const workspaceName = options.workspaceName ?? basename(tree.root);
-
-  // 2) Per-app house config: the unified `serve` target + its `dev-server` leaf (the composing executor
-  //    plus the real @angular/build:dev-server it drives), and the dev-only worktree tab label. Framework-
-  //    agnostic — the worktree and shared-browser axes are flags on the one serve — so it applies to
-  //    every app regardless of the Firebase opt-in below. MUST run before serve-options, which routes
-  //    `host` onto the `dev-server` leaf this creates.
-  // `wireProviders` here for the same reason it is set on the design-system call below and the Firebase one
-  // further down: this generator only ever runs to CREATE an app, so every call it makes IS the baseline
-  // write. Omitting it left `provideWorktreeTabLabel()` out of every scaffolded app.config.ts — silently,
-  // because a missing dev-only tab label looks like nothing at all.
-  await serveGenerator(tree, { project: projectName, workspaceName, wireProviders: true });
-
-  // 2b) Per-app house config: make the dev server reachable from outside the devcontainer (host 0.0.0.0
-  //     on the `dev-server` leaf).
-  await serveOptionsGenerator(tree, { project: projectName });
-
-  // 2c) Design-system per-app wiring — SELF-DETECTING, exactly like the Firebase wiring below: it finds
-  //     the workspace's design system by its `type:design-system` tag and opens the sass channel (the
-  //     build target's load path, the implicit dependency (cache correctness), and the `@use`/`ds.theme()` blocks in the app's global
-  //     stylesheet). A clean no-op when there is no design system — which is the case for the SCAFFOLDER'S
-  //     FIRST app, created before the DS lib exists; the `design-system` generator wires that one when it
-  //     lands. The pay-off is a LATER app: `nx g @bespunky/nx-tools:app apps/admin` comes out with the
-  //     design system wired, with no flag and no recollection that this workspace has one.
-  // The app generator only ever runs to CREATE an app, so this IS the baseline write — the one moment
-  // app.config.ts may be wired. See _utils/wire-provider.ts.
-  await designSystemStylesGenerator(tree, { project: projectName, skipFormat: true, wireProviders: true });
-
-  // 3) Firebase per-app wiring — explicit flag wins; otherwise auto-detect a Firebase workspace.
-  const firebase = options.firebase ?? tree.exists('firebase.json');
-  let firebaseCallback: GeneratorCallback = noop;
-  if (firebase) {
-    firebaseCallback =
-      (await firebaseEmulatorsGenerator(tree, {
-        project: projectName,
-        workspaceName,
-        staging: options.staging,
-        // Baseline write — see the serve call above. Its absence meant NO scaffolded app has ever had
-        // `provideAppFirebase()` in its providers: the whole Firebase layer was generated, wired into
-        // project.json and the emulator suite, and then never actually initialised at runtime. It failed
-        // quietly at the app's first `inject(Auth)`, far from the generator that owed the wiring. The sync
-        // path passed `--wireProviders` and was therefore correct all along, which is precisely why the
-        // scaffold path's silence went unnoticed.
-        wireProviders: true,
-      })) ?? noop;
+  if (!isPresent(tree, stack.layer)) {
+    throw new Error(`[app] The ${stack.id} stack needs the \`${stack.layer}\` layer, which this workspace does not have.`);
   }
+  const { project, callback } = await stack.apps.create(tree, {
+    directory: options.directory,
+    name: options.name,
+    style: options.style ?? 'scss',
+  });
 
-  if (!options.skipFormat) {
-    await formatFiles(tree);
-  }
+  // 2) ATTACH every capability the workspace wears.
+  const active = new Set([...detectLayers(tree), ...inRegistryOrder(csv(options.layers))]);
+  if (options.firebase === true) active.add('firebase');
+  if (options.firebase === false) active.delete('firebase');
+  const attached = await attachCapabilities(tree, {
+    app: project,
+    workspaceName: options.workspaceName ?? basename(tree.root),
+    active,
+    staging: options.staging === true,
+  });
 
-  // Run both delegates' post-commit callbacks (each may trigger a package-manager install).
+  if (!options.skipFormat) await formatFiles(tree);
+
+  // Every delegate's post-commit callback (each may trigger a package-manager install).
   return () => {
-    appCallback();
-    firebaseCallback();
+    callback();
+    for (const run of attached) run();
   };
 }
 
-/**
- * Resolve the project name the base @nx/angular:application generator emitted for `directory`.
- *
- * Fast path: an explicit `name`, else the directory's last segment — which is what Nx names a
- * project created at `apps/<name>` (and what scaffold.sh has always passed as `--project=$APP`).
- * Fallback: if that name isn't in the workspace, scan for the project whose `root` matches the
- * requested directory (covers any Nx version whose path→name derivation differs). Throws an
- * actionable error rather than letting a downstream generator fail cryptically.
- */
-function resolveEmittedProjectName(
-  tree: Tree,
-  directory: string,
-  explicitName?: string
-): string {
-  if (explicitName) return explicitName;
-
-  const base = basename(directory);
-  try {
-    readProjectConfiguration(tree, base);
-    return base;
-  } catch {
-    // fall through to the root-match scan
-  }
-
-  const wanted = directory.replace(/\/+$/, '');
-  for (const [name, config] of getProjects(tree)) {
-    if (config.root === wanted) return name;
-  }
-
-  throw new Error(
-    `[app] Could not resolve the project name @nx/angular:application emitted for directory ` +
-      `"${directory}". Pass an explicit --name.`
-  );
+function csv(value: string | undefined): string[] {
+  return (value ?? '').split(',').map((part) => part.trim()).filter(Boolean);
 }

@@ -12,7 +12,7 @@ export const js: LayerDescriptor = {
   requires: ['nx'],
   evidence: { dependencies: ['@nx/js'], executors: ['@nx/js:'] },
   ensurable: { scaffold: false, sync: false },
-  ensureHint: '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular`)',
+  ensureHint: '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --stack=js`)',
   brings: 'the publishable-library and tool-extraction conventions in HOUSE.md',
   docSections: ['js'],
 };

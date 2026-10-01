@@ -12,7 +12,7 @@
     },
     "directory": {
       "type": "string",
-      "description": "Where to create the navigation folder (a `navigation/` directory is created inside). Defaults to libs/<name>/src/lib."
+      "description": "Where to create the navigation folder (a `navigation/` directory is created inside). Defaults to <libs-dir>/<name>/src/lib, where <libs-dir> is where this workspace keeps libraries."
     }
   },
   "required": ["name"]

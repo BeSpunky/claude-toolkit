@@ -1,12 +1,21 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "BeSpunkyNavigationCore",
-  "title": "Scaffold the self-contained navigation-core kernel (navigation-x vendored + BeSpunky reusable additions)",
+  "title": "Scaffold the navigation-core kernel library (navigation-x vendored + BeSpunky reusable additions)",
   "type": "object",
   "properties": {
+    "name": {
+      "type": "string",
+      "description": "The library (and Nx project) name. Defaults to navigation-core.",
+      "default": "navigation-core"
+    },
     "directory": {
       "type": "string",
-      "description": "Where to write the kernel source (an index.ts + lib/ are created inside). Defaults to libs/navigation-core/src."
+      "description": "The LIBRARY's directory (the kernel goes in its src/). Defaults to <libs-dir>/<name>, where <libs-dir> is detected from the workspace (nx.json workspaceLayout.libsDir, else where existing libraries live, else packages)."
+    },
+    "importPath": {
+      "type": "string",
+      "description": "The library's import path. Defaults to @<workspace-scope>/<name>."
     }
   }
 }

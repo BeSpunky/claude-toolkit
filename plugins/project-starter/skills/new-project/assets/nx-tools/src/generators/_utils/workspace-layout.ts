@@ -70,3 +70,34 @@ export function resolveLibsDir(tree: Tree): string {
   // (4) Nothing declared, nothing to infer from: the house default.
   return DEFAULT_LIBS_DIR;
 }
+
+/**
+ * The WORKSPACE'S npm scope, WITHOUT the leading `@` — what a library created here is published under when the
+ * caller names no import path. Derived from the root package.json `name` (which `create-nx-workspace` sets to
+ * the workspace name): an already-scoped name (`@acme/monorepo`) yields `acme`; otherwise the name itself.
+ * Without a package.json (the Nx wrapper host) or a name, the workspace directory's name.
+ *
+ * Normalized to a VALID npm scope (lowercase, URL-safe): `create-nx-workspace` seeds the name from the project
+ * dir, which a user may have called `My_App` — and `@My_App/x` is an illegal package name `npm publish` rejects.
+ *
+ * Never the toolkit's own `@bespunky`: that default once made every consumer's design system
+ * `@bespunky/design-system`.
+ */
+export function resolveWorkspaceScope(tree: Tree): string {
+  const rootName = tree.exists('package.json') ? readJson<{ name?: string }>(tree, 'package.json').name : undefined;
+  const raw = rootName
+    ? rootName.startsWith('@')
+      ? rootName.slice(1).split('/')[0]
+      : rootName
+    : tree.root.replace(/\/+$/, '').split('/').pop() ?? '';
+  return normalizeNpmScope(raw);
+}
+
+/** Coerce a scope to a valid npm scope name: lowercase; anything outside `a-z 0-9 - . ~` becomes `-`. */
+export function normalizeNpmScope(scope: string): string {
+  const normalized = scope.toLowerCase().replace(/[^a-z0-9\-.~]+/g, '-').replace(/^-+|-+$/g, '');
+  if (normalized !== scope) {
+    logger.info(`[workspace-layout] Normalized the npm scope "${scope}" -> "${normalized}" (npm names must be lowercase and URL-safe).`);
+  }
+  return normalized || 'workspace';
+}

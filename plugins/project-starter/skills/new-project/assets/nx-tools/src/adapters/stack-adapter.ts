@@ -1,0 +1,147 @@
+// THE STACK ADAPTER — what a framework IS to the house generators.
+//
+// Two kinds of layer, and the whole phase-4 split turns on telling them apart:
+//   - a STACK (`angular`; later `react-vite`, …) knows how to build things: it owns projects, creates apps and
+//     libraries, and has framework-specific places for env config, providers and styles;
+//   - a CAPABILITY (`firebase`, `design-system`, `navigation`, …) is what a project WEARS. It does its
+//     framework-neutral part itself and ATTACHES to an app only through that app's adapter's ports.
+//
+// Before this seam, each capability hard-coded Angular: `firebase-emulators` required the angular layer for the
+// whole generator although only the client wiring is Angular; the design system was an Angular library from
+// birth; "is this an Angular app?" was answered three different ways in three files. A second framework would
+// have been an `if (react)` in every one of them. Now it is ONE new file implementing this interface.
+//
+// PORTS ARE OPTIONAL, AND A MISSING ONE IS A REPORT, NEVER A CRASH. An adapter implements what its framework
+// can do; a capability that needs a port the app's adapter lacks says so (see `portOf` in ./registry) and does
+// its neutral part anyway — the same contract `requireLayer` gives a missing layer.
+//
+// Keep it as small as today's needs: every port below has a caller. A port with no caller is a guess about a
+// framework nobody has asked for yet.
+import type { GeneratorCallback, Tree } from '@nx/devkit';
+import type { LayerId } from '../layers/descriptor';
+
+export interface StackAdapter {
+  /** The adapter id. Also the value of publishable-lib's `--stack`. */
+  readonly id: string;
+  /** The layer that must be present for this adapter to act (its plugin is what the ports delegate to). */
+  readonly layer: LayerId;
+  /**
+   * Is this project built by this stack — an app OR a library? THE one rule per framework; every "is this an
+   * Angular app?" in the payload asks it (with `projectType` where only applications are wanted).
+   */
+  ownsProject(tree: Tree, project: string): boolean;
+
+  readonly apps?: AppPort;
+  readonly libs?: LibPort;
+  readonly env?: EnvPort;
+  readonly providers?: ProvidersPort;
+  readonly styles?: StylesPort;
+  /** The framework half of the design system: its runtime binding, library shape, component generator. */
+  readonly designSystem?: DesignSystemPort;
+  /** The framework half of Firebase: the client SDK wiring an app gets on top of the neutral emulator core. */
+  readonly firebase?: FirebaseClientPort;
+}
+
+export interface CreatedApp {
+  /** The project name the framework's generator actually emitted. */
+  project: string;
+  callback: GeneratorCallback;
+}
+
+export interface AppPort {
+  /** Create an application with the house defaults. Capabilities attach afterwards — this creates the app only. */
+  create(tree: Tree, options: { directory: string; name?: string; style?: string }): Promise<CreatedApp>;
+}
+
+export interface LibOptions {
+  name: string;
+  directory: string;
+  importPath: string;
+  tags?: string;
+  /** Publishable (buildable to dist, releasable) vs a workspace-internal source library. */
+  publishable: boolean;
+  /** Framework component-selector prefix; ignored by stacks without components. */
+  prefix?: string;
+  /** Framework component style language; ignored by stacks without components. */
+  style?: string;
+}
+
+export interface LibPort {
+  /** Create the library through the framework's own generator (which writes the tsconfig path alias). */
+  create(tree: Tree, options: LibOptions): Promise<GeneratorCallback>;
+  /** Framework post-processing of a PUBLISHABLE library's packaging config (e.g. ng-package.json). */
+  normalizePackaging?(tree: Tree, projectRoot: string): void;
+  /** Allow these runtime `dependencies` through the framework packager, where it gates them. */
+  allowDependencies?(tree: Tree, projectRoot: string, dependencies: string[]): void;
+}
+
+/** One application's environment-config files — where per-env values live in this framework. */
+export interface EnvFiles {
+  dir: string;
+  dev: string;
+  prod: string;
+  staging: string;
+  /** The shared shape every env file conforms to, when the framework has one (TS: an interface). */
+  shape?: string;
+}
+
+export interface EnvPort {
+  files(tree: Tree, project: string): EnvFiles;
+  /**
+   * Make build configuration `configuration` compile with `to` instead of `from` (idempotent). Returns false
+   * when the app has no build to configure — the caller reports it.
+   */
+  selectFor(tree: Tree, project: string, configuration: string, from: string, to: string, inheritFrom?: string): boolean;
+}
+
+export type WireResult = 'wired' | 'already' | 'no-bootstrap' | 'unrecognized';
+
+export interface ProvidersPort {
+  /** The file a provider is wired into (Angular: app.config.ts). */
+  bootstrapFile(tree: Tree, project: string): string;
+  /** Wire `providerFn()` from `importFrom` into the app's bootstrap. `ensuring` — see _utils/wire-provider. */
+  wire(
+    tree: Tree,
+    project: string,
+    provider: { providerFn: string; importFrom: string; ensuring: boolean; note?: string },
+  ): WireResult;
+}
+
+export interface StylesPort {
+  /** The app's global stylesheet, as the app itself declares it — or null when it has none we can find. */
+  globalStylesheet(tree: Tree, project: string): string | null;
+  /** Add a sass load path to the app's build. False when the app has no build to configure. */
+  addLoadPath(tree: Tree, project: string, loadPath: string): boolean;
+  /** Emit a standalone, NOT auto-injected stylesheet bundle from the app's build. False: no build. */
+  registerStylesheet(tree: Tree, project: string, sheet: { input: string; bundleName: string }): boolean;
+}
+
+/**
+ * The library itself is created by `publishable-lib` through the SAME adapter's `libs` port — a design system
+ * is a publishable library like any other; this port only adds what makes it the design system.
+ */
+export interface DesignSystemPort {
+  /** Directory of this binding's seeded runtime + docs templates (merged over the neutral core's styles). */
+  readonly templates: string;
+  /** Files in `templates` that are the CONTRACT (rewritten every run) rather than seeded. */
+  readonly alwaysRewrite: readonly string[];
+  /** The provider an app installs the runtime binding with. */
+  readonly provider: string;
+  /** Open the sass channel INSIDE the library, so its own component styles resolve `<dir>/styles`. */
+  openLibraryStyles(tree: Tree, root: string, specifier: string): void;
+  /** Delete what the framework generator emitted that the DS does not ship (demo components). */
+  pruneGenerated(tree: Tree, root: string): void;
+}
+
+export interface FirebaseClientPort {
+  /** Packages the platform:server firewall bans for this framework (it must never reach Cloud Functions). */
+  readonly serverBannedImports: readonly string[];
+  /** Has this app already been given the Firebase client? (the suite's scripts follow the wired app) */
+  isWired(tree: Tree, project: string): boolean;
+  /** Attach the Firebase client to the app. Returns the post-commit install callback. */
+  attach(
+    tree: Tree,
+    project: string,
+    options: { workspaceName: string; staging: boolean; wireProviders: boolean },
+  ): GeneratorCallback;
+}

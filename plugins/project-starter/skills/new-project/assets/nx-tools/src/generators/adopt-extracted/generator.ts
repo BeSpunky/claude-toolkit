@@ -79,7 +79,7 @@ export default async function adoptExtractedGenerator(
   if (!packageName) {
     throw new Error(
       `adopt-extracted: could not determine the published package name for "${options.lib}". ` +
-        `Pass --package @bespunky/<name> (or run after extract-tool has set ingestedPackage).`
+        `Pass --package <scope>/<name> (or run after extract-tool has set ingestedPackage).`
     );
   }
 

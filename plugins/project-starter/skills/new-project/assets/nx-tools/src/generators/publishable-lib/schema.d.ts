@@ -3,23 +3,25 @@
 //  `schema.d.ts` because the same shape is consumed by the delegated @nx generators and the
 //  post-processing helpers — keeping a single named type avoids drift between them.)
 export interface PublishableLibGeneratorSchema {
-  /** Library name (also the @bespunky/<name> default and the packages/<name> default). */
+  /** Library name (also seeds the `@<workspace-scope>/<name>` and `<libs-dir>/<name>` defaults). */
   name: string;
-  /** npm import path. Default `@bespunky/<name>`. */
+  /** npm import path. Default `@<workspace-scope>/<name>`. */
   importPath?: string;
-  /** Workspace-relative directory for the library. Default `packages/<name>`. */
+  /** Workspace-relative directory for the library. Default `<detected libs dir>/<name>`. */
   directory?: string;
-  /** Component/selector prefix. Default `bs`. Ignored when `nonAngular`. */
+  /** The stack (adapter id) to create it with: `angular`, `js`. Default: the workspace's most specific. */
+  stack?: string;
+  /** Component/selector prefix. Default `bs`. Used by stacks with components. */
   prefix?: string;
-  /** Component style language. Default `scss`. Ignored when `nonAngular`. */
+  /** Component style language. Default `scss`. Used by stacks with components. */
   style?: 'scss' | 'css' | 'none';
-  /** Plain-TS library (delegates to @nx/js, bundler `tsc`, no ng-package.json). Default false. */
+  /** @deprecated Use `stack: 'js'`. */
   nonAngular?: boolean;
   /** Comma-separated Nx tags applied to the library. */
   tags?: string;
   /**
-   * Sibling @bespunky package names to declare as cross-lib deps on this lib's own package.json,
-   * as real caret ranges (`"@bespunky/<dep>": "^<sibling version>"`). The published-consumer
+   * Sibling package names (short names take the workspace's scope) to declare as cross-lib deps on this lib's own package.json,
+   * as real caret ranges (`"<scope>/<dep>": "^<sibling version>"`). The published-consumer
    * contract only — in-repo resolution is the tsconfig.base.json path alias; never `workspace:*`.
    */
   workspaceDeps?: string[];

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "BeSpunkyDesignSystem",
   "title": "Create the workspace's design-system library",
-  "description": "Scaffold the design system every BeSpunky project is born with: a publishable library (composed from publishable-lib) carrying the THEMING MECHANISM \u2014 design tokens as CSS custom properties (the runtime layer) plus a zero-output SASS API (the author-time layer: token accessors, the theme() emission, mixins, placeholders) \u2014 and NOTHING ELSE. Ships zero components and zero opinionated visual styles; token VALUES are loudly-marked placeholders that exist only so the library compiles and the app runs, and are replaced wholesale by the design phase. Also opens the sass channel on every Angular app in the workspace (via design-system-styles) and installs provideDesignSystem() into each app's config. Idempotent: styles/ and src/ are SEEDED (written only if absent, so a --sync never restores placeholder tokens over the project's real design); the config, tags, docs and app wiring are re-asserted on every run.",
+  "description": "Scaffold the design system every BeSpunky project is born with: the framework-NEUTRAL core — design tokens as CSS custom properties (the runtime layer) plus a zero-output SASS API (token accessors, the theme() emission, mixins, placeholders) — bound to the workspace's framework when it has one (Angular: a publishable @nx/angular library with DsTheme/provideDesignSystem and the ng-packagr sass channel; components via ds-component), or else carrying a plain-DOM setMode() runtime as a source library. Ships zero components and zero opinionated visual styles; token VALUES are loudly-marked placeholders replaced wholesale by the design phase. Opens the sass channel on every app whose stack has a styles port (via design-system-styles) and installs the binding's provider. An existing design system keeps the binding it was born with. Idempotent: styles/ and src/ are SEEDED (written only if absent); the config, tags, docs and app wiring are re-asserted on every run.",
   "type": "object",
   "properties": {
     "name": {
@@ -13,7 +13,7 @@
     },
     "scope": {
       "type": "string",
-      "description": "The npm scope for the import path, WITHOUT the leading `@` (e.g. `acme` -> `@acme/design-system`). Defaults to the root package.json name. Load-bearing: the underlying publishable-lib generator defaults to the `@bespunky` scope (the toolkit's own), which is wrong for every consumer project.",
+      "description": "The npm scope for the import path, WITHOUT the leading `@` (e.g. `acme` -> `@acme/design-system`). Defaults to the workspace's scope (the root package.json name, else the workspace directory name).",
       "x-priority": "important"
     },
     "importPath": {
@@ -29,7 +29,7 @@
     "prefix": {
       "type": "string",
       "format": "html-selector",
-      "description": "The Angular component-selector prefix for components later promoted into the design system.",
+      "description": "The component-selector prefix for components later promoted into the design system (framework bindings only).",
       "default": "bs"
     },
     "tokenPrefix": {
@@ -46,7 +46,7 @@
     "wireProviders": {
       "type": "boolean",
       "default": false,
-      "description": "Wire this layer's provider into the app's app.config.ts. TRUE ONLY WHEN ENSURING the layer (creating the capability) \u2014 app.config.ts is seeded, never owned, so a detect-only sync must not write to it. Any later provider change ships as a migration. Default false."
+      "description": "Wire this layer's provider into the app's app.config.ts. TRUE ONLY WHEN ENSURING the layer (creating the capability) — app.config.ts is seeded, never owned, so a detect-only sync must not write to it. Any later provider change ships as a migration. Default false."
     }
   },
   "required": []
