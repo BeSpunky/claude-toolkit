@@ -180,7 +180,7 @@ port_holders() {
 }
 
 # ── noVNC port allocation: the port is a RESULT, never a constant ─────────────────────────────────────
-# The ARBITRATION lives in tools/shared-browser/port-claim.mjs, not here. That split is deliberate: bash
+# The ARBITRATION lives in tools/port-claim/port-claim.mjs, not here. That split is deliberate: bash
 # is the right material for process supervision (ss, /proc, setsid, PID lifecycle) and the wrong material
 # for a registry with ownership, expiry and atomicity — the bash version needed an flock and, on lock
 # timeout, proceeded UNLOCKED, leaving a real double-booking race. Node's `open(path,'wx')` removes the

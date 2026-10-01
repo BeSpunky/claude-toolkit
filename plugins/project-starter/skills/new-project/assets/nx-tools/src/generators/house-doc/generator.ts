@@ -40,6 +40,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type LayerId } from '../../layers/registry';
 import { activeLayers, docSections } from '../_utils/layer-contributions';
+import { matchesEvidence } from '../../layers/evidence';
+import { SERVE_EXECUTOR } from '../_utils/dev-server';
 
 interface HouseDocSchema {
   // Render the Firebase sections. Default: auto-detect firebase.json at the workspace root.
@@ -106,6 +108,14 @@ export default async function houseDocGenerator(
   // before firebase.json exists to detect).
   const flags: Record<string, boolean> = Object.fromEntries([...docSections(active)].map((flag) => [flag, true]));
   flags.firebase = firebase;
+  // HOW THIS REPO SERVES — the other command the web docs are written around. The dev loop is the stack-free
+  // engine (`tools/dev/dev serve`, reading `.bespunky/dev.json`); `nx serve <app>` is only its Nx face, and exists
+  // only where the Nx adapter wired the house `serve` executor onto an app. Rendering `nx serve` unconditionally
+  // told a Python repo (a hand-written declaration, no Nx app) to run a target it does not have — beside
+  // `@angular/build` and 4200, which it has never heard of. Evidence, never a guess from the layer list.
+  const nxServed = matchesEvidence(tree, { executors: [SERVE_EXECUTOR] });
+  flags['nx-serve'] = nxServed;
+  const serve = nxServed ? `${nx} serve` : 'tools/dev/dev serve';
   // The design system's REAL root, not a guess. HOUSE.md's whole job is telling a reader — human or
   // agent — where things are, and it hardcoded `packages/design-system`. Projects scaffolded before the
   // libs-dir inference learned to ignore `tools/` have theirs at `tools/design-system`, so the document
@@ -113,7 +123,7 @@ export default async function houseDocGenerator(
   // SECOND design system at the path the doc named. Resolved through the same tag-based lookup every
   // generator already trusts, so the doc and the generators can never disagree.
   const dsRoot = findDesignSystem(tree)?.root ?? 'packages/design-system';
-  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers, packageManager, nx, dsRoot);
+  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers, packageManager, nx, dsRoot, serve);
 
   // 1) The generated reference — rewritten every run (generator-owned; never hand-edited), carrying the
   //    stamp in its header. No timestamp anywhere: a stamp that changed on every sync would dirty the
@@ -190,6 +200,7 @@ function renderTemplate(
   packageManager: string,
   nx: string,
   dsRoot: string,
+  serve: string,
 ): string {
   // Collapse the blank-line runs a removed conditional block leaves behind — the same tidy the devcontainer
   // renderer does, and for the same reason: HOUSE.md is READ, by humans and by the agent, and a document
@@ -198,6 +209,7 @@ function renderTemplate(
     expandBlocks(src, flags)
     .replace(/\{\{DS_ROOT\}\}/g, dsRoot)
     .replace(/\{\{PM\}\}/g, packageManager)
+    .replace(/\{\{SERVE\}\}/g, serve)
     .replace(/\{\{NX\}\}/g, nx)
     .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
     .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion)

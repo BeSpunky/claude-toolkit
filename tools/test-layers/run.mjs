@@ -55,7 +55,7 @@ const registry = require_(join(BUILD, 'src/layers/registry'));
 const { plan } = require_(join(BUILD, 'src/layers/plan'));
 const { shellProjection } = require_(join(BUILD, 'src/layers/cli'));
 const { createTreeWithEmptyWorkspace } = require_('@nx/devkit/testing');
-const { addProjectConfiguration, writeJson } = require_('@nx/devkit');
+const { addProjectConfiguration, writeJson, readProjectConfiguration, updateProjectConfiguration } = require_('@nx/devkit');
 
 let failed = 0;
 let passed = 0;
@@ -418,6 +418,28 @@ checkAsync('wrapper-hosted repo (no package.json), nx+agent: neutral base, Node 
   ok(!/4200|::ng-deep|yarn|npm nx/.test(a.rules), 'HOUSE.rules.md names 4200, ::ng-deep or a package manager');
   ok(a.rules.includes('`./nx`'), 'Generator-first names the wrapper invocation');
   ok(!/prefix|apps\/|SCSS/.test(a.claude), 'the CLAUDE.md seed carries Angular/monorepo conventions');
+});
+
+checkAsync('python repo serving a hand-written dev.json (web, no Nx app): HOUSE.md serves through tools/dev/dev, never nx serve/Angular/4200', async (ok) => {
+  const tree = FIXTURES['python repo with a hand-written dev declaration']();
+  writeJson(tree, 'nx.json', { installation: { version: '23.2.1', plugins: { '@bespunky/nx-tools': '9.9.9' } } });
+  tree.write('.nx/nxw.js', '// wrapper\n');
+  const a = await artifacts(tree, registry.detectLayers(tree));
+  ok(a.house.includes('`tools/dev/dev serve <app>` is the one command') && a.house.includes('tools/dev/dev serve <app> --worktree='), 'the engine is the serve command');
+  const wrong = a.house.split('\n').filter((l) => /nx serve|4200|@angular|Angular|--configuration|NX_WORKSPACE_ROOT_PATH|\{\{/.test(l));
+  ok(wrong.length === 0, `HOUSE.md describes a serve this repo does not have: ${wrong.map((l) => l.slice(0, 140)).join(' || ')}`);
+});
+
+checkAsync('an Nx app wired to the house serve executor: HOUSE.md serves through `<pm> nx serve`', async (ok) => {
+  const tree = FIXTURES['angular web app with firebase and a design system']();
+  tree.write('yarn.lock', '');
+  const shop = readProjectConfiguration(tree, 'shop');
+  shop.targets.serve = { executor: '@bespunky/nx-tools:serve' };
+  updateProjectConfiguration(tree, 'shop', shop);
+  const a = await artifacts(tree, registry.detectLayers(tree));
+  ok(a.house.includes('`yarn nx serve <app>` is the one command') && a.house.includes('http://localhost:4200'), 'nx serve + the Angular base port');
+  ok(a.house.includes('yarn nx serve <app> --no-emulators'), 'the Nx face keeps --no-emulators');
+  ok(!a.house.includes('tools/dev/dev serve <app> --'), 'engine commands rendered where the Nx face exists');
 });
 
 checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no web floor', async (ok) => {
