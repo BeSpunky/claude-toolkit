@@ -36,7 +36,8 @@ import { retireInlineHouseSections } from '../_utils/inline-house-sections';
 import { findDesignSystem } from '../_utils/design-system';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectLayers, type LayerId } from '../../layers/registry';
+import { type LayerId } from '../../layers/registry';
+import { activeLayers, docSections } from '../_utils/layer-contributions';
 
 interface HouseDocSchema {
   // Render the Firebase sections. Default: auto-detect firebase.json at the workspace root.
@@ -76,28 +77,33 @@ export default async function houseDocGenerator(
   // DETECTED by default, never declared — the same rule the layer registry states for itself. A caller may
   // pass layers explicitly (scaffold.sh knows what it just ensured, before the tree reflects it), but a
   // direct `nx g …:house-doc` reads the workspace, so HOUSE.md can't describe a project that isn't there.
-  const layers = options.layers ?? detectLayers(tree);
+  const active = activeLayers(tree, options.layers);
+  const layers = active.map((entry) => entry.id);
   const firebase = options.firebase ?? layers.includes('firebase');
-  const packageManager = options.packageManager ?? detectPackageManager(tree);
+  // The package manager means something only where there is a package.json (the `node` layer); the sections
+  // that name it are gated on that layer. It never falls back to a guess for a repo without one — that is how a
+  // Python repo used to be told to run `yarn nx …`.
+  const packageManager = options.packageManager ?? detectPackageManager(tree) ?? 'npm';
+  // HOW THIS REPO INVOKES NX — the one command every Nx line in the docs starts with. `./nx` on the wrapper
+  // host (no package.json, or a repo already running the wrapper); the package manager's runner on a
+  // package.json host. Rendering `{{PM}} nx` instead produced `npm nx` — not a command — on every npm project
+  // and every wrapper-hosted repo.
+  const nx = nxInvocation(tree, packageManager);
   const nxTools = options.nxToolsVersion ?? UNKNOWN;
   const plugin = options.pluginVersion ?? UNKNOWN;
   const tpl = (name: string) => readFileSync(join(__dirname, name), 'utf8');
 
-  // `firebase` stays an explicit flag rather than folding into `layers`, because it is the one section set a
-  // caller overrides directly (scaffold.sh --firebase renders the Firebase docs for a project that is about
-  // to become a Firebase project, before firebase.json exists to detect).
+  // The section flags are the active layers' `docSections` (descriptor) — a layer's docs arrive with the layer.
+  // `ui` is one of them, switched on by `web`, `angular` and `design-system` alike: "does something here run a
+  // dev-server" (`web`) is a fact about the dev loop, not about whether this project has an interface to
+  // design, and an Angular component library with no app is an ordinary shape that still gets the redesign
+  // directive.
   //
-  // `ui` is DERIVED, not a layer: the layer registry answers "does something here run a dev-server"
-  // (`web`), which is a fact about the dev loop and not about whether this project has an interface to
-  // design. An Angular component library with no app — `angular` + `design-system`, no `web` — is an
-  // ordinary shape, and gating the redesign directive on `web` would tell that project every visual value
-  // must come from the design system while saying nothing about how to treat a redesign. Any of the three
-  // means there is UI here.
-  const flags: Record<string, boolean> = Object.fromEntries([
-    ...layers.map((id) => [id, true]),
-    ['firebase', firebase],
-    ['ui', ['web', 'angular', 'design-system'].some((id) => layers.includes(id as LayerId))],
-  ]);
+  // `firebase` stays an explicit override as well, because it is the one section set a caller forces directly
+  // (scaffold.sh --firebase renders the Firebase docs for a project that is about to become a Firebase project,
+  // before firebase.json exists to detect).
+  const flags: Record<string, boolean> = Object.fromEntries([...docSections(active)].map((flag) => [flag, true]));
+  flags.firebase = firebase;
   // The design system's REAL root, not a guess. HOUSE.md's whole job is telling a reader — human or
   // agent — where things are, and it hardcoded `packages/design-system`. Projects scaffolded before the
   // libs-dir inference learned to ignore `tools/` have theirs at `tools/design-system`, so the document
@@ -105,7 +111,7 @@ export default async function houseDocGenerator(
   // SECOND design system at the path the doc named. Resolved through the same tag-based lookup every
   // generator already trusts, so the doc and the generators can never disagree.
   const dsRoot = findDesignSystem(tree)?.root ?? 'packages/design-system';
-  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers, packageManager, dsRoot);
+  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers, packageManager, nx, dsRoot);
 
   // 1) The generated reference — rewritten every run (generator-owned; never hand-edited), carrying the
   //    stamp in its header. No timestamp anywhere: a stamp that changed on every sync would dirty the
@@ -180,6 +186,7 @@ function renderTemplate(
   pluginVersion: string,
   layers: readonly string[],
   packageManager: string,
+  nx: string,
   dsRoot: string,
 ): string {
   // Collapse the blank-line runs a removed conditional block leaves behind — the same tidy the devcontainer
@@ -189,6 +196,7 @@ function renderTemplate(
     expandBlocks(src, flags)
     .replace(/\{\{DS_ROOT\}\}/g, dsRoot)
     .replace(/\{\{PM\}\}/g, packageManager)
+    .replace(/\{\{NX\}\}/g, nx)
     .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
     .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion)
     // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the sync
@@ -274,14 +282,28 @@ function upsertPointer(source: string, pointer: string): string {
  * full of `npm` commands while the sync and the container both ran yarn — the document disagreeing with the
  * tooling it documents.
  */
-function detectPackageManager(tree: Tree): string {
+function detectPackageManager(tree: Tree): string | undefined {
+  if (!tree.exists('package.json')) return undefined;
   const declared = /"packageManager"\s*:\s*"(yarn|npm|pnpm)@/.exec(tree.read('package.json', 'utf8') ?? '')?.[1];
   if (declared) return declared;
 
   if (tree.exists('pnpm-lock.yaml')) return 'pnpm';
   if (tree.exists('yarn.lock')) return 'yarn';
   if (tree.exists('package-lock.json')) return 'npm';
+  // A package.json that declares nothing: the house default, the same one scaffold.sh falls back to.
   return 'yarn';
+}
+
+/**
+ * The Nx invocation for this repo's HOST — the same decision scaffold.sh makes (`HOST`): a repo running the Nx
+ * wrapper (its `.nx/nxw.js` plus an `installation` block in nx.json), or one with no package.json at all, is a
+ * WRAPPER host → `./nx`; otherwise Nx lives in node_modules and runs through the package manager.
+ */
+function nxInvocation(tree: Tree, packageManager: string): string {
+  const wrapper =
+    (tree.exists('.nx/nxw.js') && /"installation"\s*:/.test(tree.read('nx.json', 'utf8') ?? '')) || !tree.exists('package.json');
+  if (wrapper) return './nx';
+  return { yarn: 'yarn nx', pnpm: 'pnpm nx', npm: 'npx nx' }[packageManager] ?? 'npx nx';
 }
 
 /** Squeeze runs of 3+ newlines (i.e. two or more consecutive blank lines) down to a single blank line. */
