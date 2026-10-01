@@ -170,7 +170,7 @@ export function colorCustomizations(surface: Surface, shades: Shades): Record<st
     // A blurred/no-folder/debugging window keeps the same identity instead of VSCode's default blue/orange.
     out['statusBar.noFolderBackground'] = shades.band;
     out['statusBar.debuggingBackground'] = shades.band;
-    // The remote indicator (green "WSL"/container chunk) would otherwise fight the band — fold it in.
+    // The remote indicator (the coloured remote-connection chunk) would otherwise fight the band — fold it in.
     out['statusBarItem.remoteBackground'] = shades.bandDark;
     out['statusBarItem.remoteForeground'] = shades.fg;
   }
