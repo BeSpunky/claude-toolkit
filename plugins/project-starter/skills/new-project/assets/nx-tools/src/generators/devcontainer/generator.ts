@@ -1,13 +1,17 @@
 // House generator: write the BeSpunky-standard .devcontainer/ — devcontainer.json, the post-create
-// script, and the one LOCAL devcontainer feature that devcontainer.json references by relative path.
+// script, the one LOCAL devcontainer feature that devcontainer.json references by relative path, and — when
+// `voice` is on — the host probe that bridges the host's PulseAudio-protocol socket (WSLg or native
+// PulseAudio/PipeWire) into the container.
 // Reads its own bundled templates (not workspace files) and writes through the Nx Tree.
 //
 // Template supports two kinds of placeholders:
 //   - simple substitution:   {{name}}, {{nodeMajor}}, {{forwardPorts}}, {{portsAttributes}}
 //   - conditional blocks:    {{#flag}}...{{/flag}}  -> included iff the flag option is truthy
 //
-// The flags are the LAYERS this devcontainer serves (`web`, `angular`, `firebase`) plus the one host axis
-// (`voice`). They are passed in by the caller, which detects them — this generator never guesses.
+// The flags are the LAYERS this devcontainer serves (`web`, `angular`, `firebase`) plus `voice`, which is an
+// INTENT ("this project wants audio"), host-neutral: WHERE the host's audio socket lives is a per-machine
+// fact the host probe resolves at container-open time, never committed. They are passed in by the caller,
+// which detects them — this generator never guesses.
 //
 // TWO properties earn the extra machinery here:
 //
@@ -42,7 +46,10 @@ interface DevcontainerSchema {
   angular?: boolean;
   /** Layer: Firebase — CLI features, emulator ports, the JDK note. */
   firebase?: boolean;
-  /** Host axis (WSL only), not a layer: the WSLg PulseAudio bridge. */
+  /**
+   * Not a layer — an intent: bridge the host's PulseAudio-protocol socket (WSLg or native
+   * PulseAudio/PipeWire) into the container, located per machine by the host probe.
+   */
   voice?: boolean;
 }
 
@@ -142,6 +149,8 @@ export default async function devcontainerGenerator(
   // only takes that filename when something will actually call it.
   const invoked = owning || !foreignPostCreate || foreignPostCreate.includes('post-create.sh');
   writePostCreate(tree, invoked, owning);
+
+  if (flags.voice) writeHostProbe(tree);
 
   // The ADOPTION REPORT. An adopted devcontainer diverges from the house spec on every key it already
   // declared, permanently and by design — the merge is additive and never argues with the project's own
@@ -259,6 +268,37 @@ set -euo pipefail
 # Example — install a project-specific tool:
 # sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends postgresql-client
 `;
+
+const HOST_PROBE_PATH = '.devcontainer/host-probe.sh';
+/** The probe's machine-local output: the `pulse` bind source and `host.env`. Never committed. */
+const HOST_STATE_DIR = '.devcontainer/.host/';
+
+/**
+ * The host probe — `.devcontainer/host-probe.sh`, run by devcontainer.json's `initializeCommand` on the host
+ * before every container start. An OWNED template artifact: regenerated on every sync, on the owned and the
+ * adopted path alike (the adopted merge adds the `initializeCommand` entry that calls it — see
+ * `composeCommand`), because the voice mount's source only exists once the probe has run.
+ *
+ * Its output is a machine fact (this host's audio socket, or none), so `.devcontainer/.host/` is ignored —
+ * committing it would hand one developer's symlink to every teammate's host.
+ *
+ * It is not deleted when `voice` is off: an adopted devcontainer may still name it in a command this
+ * generator never removes, and a missing script there would fail the container start — the exact failure
+ * the probe exists to prevent.
+ */
+function writeHostProbe(tree: Tree): void {
+  // 0o755: the probe is invoked as `sh <path>`, so the mode is not load-bearing — it is set so a human can
+  // run it directly when debugging the bridge, and so the shebang/mode checker's rule holds in the output.
+  tree.write(HOST_PROBE_PATH, readFileSync(join(__dirname, 'host-probe.sh.tpl'), 'utf8'), { mode: 0o755 });
+
+  const gitignore = tree.exists('.gitignore') ? (tree.read('.gitignore', 'utf8') ?? '') : '';
+  if (gitignore.includes(HOST_STATE_DIR)) return;
+  const sep = gitignore === '' || gitignore.endsWith('\n') ? '' : '\n';
+  tree.write(
+    '.gitignore',
+    `${gitignore}${sep}\n# Devcontainer host probe — this machine's audio-socket link (machine-local, never shared)\n${HOST_STATE_DIR}\n`
+  );
+}
 
 /**
  * The one LOCAL devcontainer feature — `.devcontainer/features/bespunky-house-setup/`, referenced from
@@ -678,6 +718,11 @@ function mergeIntoExisting(tree: Tree, rendered: string, mode: 'assert' | 'adopt
       edit([key], value);
       continue;
     }
+    const composed = composeCommand(key, value, existing[key]);
+    if (composed) {
+      write([key], composed, added);
+      continue;
+    }
     // Present already — recurse one useful level into the containers where "missing sub-key" is the
     // common, safe case, and leave scalars strictly alone.
     if (isPlainObject(value) && isPlainObject(existing[key])) {
@@ -751,6 +796,40 @@ function mergeObject(
     }
     if (!sameValue(value, existing[key])) conflict(path, value);
   }
+}
+
+/**
+ * Lifecycle commands the house declares in the spec's OBJECT form — named entries, run in parallel.
+ *
+ * Only `initializeCommand` (the host probe) today. `postCreateCommand` is deliberately NOT here: the house
+ * reaches a foreign one through the local feature instead (see `writeHouseSetupFeature`), and its ordering
+ * relative to the project's provisioning matters in a way the probe's does not.
+ */
+const COMPOSABLE_COMMANDS = new Set(['initializeCommand']);
+
+/** The key a project's own string/array command is kept under once lifted into object form. */
+const PROJECT_COMMAND_KEY = 'project';
+
+/**
+ * When the project already has a STRING or ARRAY form of a composable command, the house value can't be
+ * added beside it — and BOTH ordinary outcomes are wrong:
+ *   - adopt mode would keep theirs and report it. But a skipped probe is not a cosmetic divergence: the voice
+ *     mount's source is the probe's output, so the container would refuse to START. A report nobody acts on
+ *     in time is a broken container.
+ *   - assert mode would write the house object over theirs, deleting a command we know nothing about.
+ *
+ * The spec's object form makes the dilemma false: `{ "project": <their command>, "bespunky-host-probe": … }`
+ * runs exactly what they ran (a string still goes through a shell, an array still doesn't) AND the probe.
+ * Lifting their value under its own key changes the SHAPE of the key, never what it does — so it is still
+ * additive in the sense adoption promises (nothing of theirs is changed or lost), and it is the same move in
+ * both modes. An existing OBJECT form needs none of this: the ordinary merge just adds the missing entry.
+ *
+ * Returns the composed value, or `undefined` when this key/shape isn't a composition case.
+ */
+function composeCommand(key: string, house: unknown, current: unknown): Json | undefined {
+  if (!COMPOSABLE_COMMANDS.has(key) || !isPlainObject(house)) return undefined;
+  if (typeof current !== 'string' && !Array.isArray(current)) return undefined;
+  return { [PROJECT_COMMAND_KEY]: current, ...house };
 }
 
 /**
