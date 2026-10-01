@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-01
+summary: delegate-and-parallelize now runs against a conserved agent budget (default 12) that caps the tree's total, never its depth; the tree is estimated before dispatch and the user confirms any larger figure.
+tags: [workflow, delegate-and-parallelize, agent-budget, usage-limits]
+---
+
 # Delegation budget — cap the tree's total, never its depth
 
 ## The problem, in the user's words
