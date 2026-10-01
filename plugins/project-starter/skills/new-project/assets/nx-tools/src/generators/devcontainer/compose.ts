@@ -44,6 +44,12 @@ type ComposedPort = Pick<DevcontainerPort, 'port' | 'label' | 'onAutoForward' | 
 /** The active fragments, resolved into one devcontainer — tokens substituted, collections merged. */
 export interface Composition {
   image: { ref: string; remoteUser: string } & Why;
+  /**
+   * Does this devcontainer run on the HOUSE image? False when an adopted devcontainer keeps an image of its own:
+   * the user (and so `{{home}}`) is then that image's, and the house must not declare a `remoteUser` the
+   * project's image may not even have.
+   */
+  houseImage: boolean;
   home: string;
   /** The image's own features (installed first — the runtime the rest of the features may need). */
   imageFeatures: ({ id: string; options: Record<string, DevcontainerJson> } & Why)[];
@@ -63,14 +69,21 @@ export interface Composition {
 /** The order the composed post-create runs its phases in; the OS packages run between `prepare` and `install`. */
 const PHASES: readonly PostCreatePhase[] = ['prepare', 'install', 'plugins', 'provision'];
 
-export function compose(contributors: readonly Contributor[], tokens: { nodeMajor: string }): Composition {
+/**
+ * `runsAs` — set when an ADOPTED devcontainer keeps its own image: the user that image runs as, which every
+ * `{{home}}`/`{{remoteUser}}` token must follow instead of the house image's.
+ */
+export function compose(
+  contributors: readonly Contributor[],
+  tokens: { nodeMajor: string; runsAs?: string },
+): Composition {
   // The image first, because `{{home}}` — which other fragments use — follows its user.
   const imageSource = [...contributors].reverse().find((entry) => entry.fragment.image);
   if (!imageSource) {
     throw new Error('[devcontainer] No active layer declares a base image — the `agent` layer always should.');
   }
   const { features: imageFeatureList, ...image } = imageSource.fragment.image!;
-  const remoteUser = image.remoteUser;
+  const remoteUser = tokens.runsAs ?? image.remoteUser;
   const home = remoteUser === 'root' ? '/root' : `/home/${remoteUser}`;
   const sub = (value: string) =>
     value.split('{{home}}').join(home).split('{{remoteUser}}').join(remoteUser).split('{{nodeMajor}}').join(tokens.nodeMajor);
@@ -123,6 +136,7 @@ export function compose(contributors: readonly Contributor[], tokens: { nodeMajo
 
   return {
     image: { ref: sub(image.ref), remoteUser, why: image.why },
+    houseImage: tokens.runsAs === undefined,
     home,
     imageFeatures,
     features,
@@ -263,7 +277,7 @@ export function renderDevcontainerJson(name: string, layers: readonly string[], 
     map(c.initializeCommand, (entry) => ({ key: entry.name, node: value(entry.command), why: entry.why })),
     'Runs ON THE HOST before the container is created. The OBJECT form on purpose: its entries are named and run\nside by side, so a project with its own initializeCommand keeps it under its own key.',
   );
-  add('remoteUser', value(c.image.remoteUser));
+  if (c.houseImage) add('remoteUser', value(c.image.remoteUser));
   add(
     'runArgs',
     list(

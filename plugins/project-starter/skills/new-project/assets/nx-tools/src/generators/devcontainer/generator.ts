@@ -112,7 +112,12 @@ export default async function devcontainerGenerator(
   const layerIds = layers.map((entry) => entry.id);
 
   const contributors: Contributor[] = [...devcontainerFragments(layers), ...(voice ? [{ id: 'voice', fragment: VOICE }] : [])];
-  const composition = compose(contributors, { nodeMajor });
+  const houseComposition = compose(contributors, { nodeMajor });
+  // An ADOPTED devcontainer that keeps an image of its own runs as THAT image's user: the house's mount targets
+  // (`{{home}}/.claude`, …) must follow it, and no house `remoteUser` may be added to an image that may not have
+  // that user at all — a container that cannot start is the worst thing an additive merge could produce.
+  const runsAs = adoptedImageUser(tree, houseComposition.image.ref);
+  const composition = runsAs === undefined ? houseComposition : compose(contributors, { nodeMajor, runsAs });
   const rendered = renderDevcontainerJson(options.name, layerIds, composition);
 
   // OWNERSHIP. The marker separates "regenerate the file we maintain" from "adopt somebody else's" — and it
@@ -192,6 +197,28 @@ export default async function devcontainerGenerator(
     };
   }
   tree.write(MARKER, `${JSON.stringify(record, null, 2)}\n`);
+}
+
+/**
+ * The user an ADOPTED devcontainer runs as, when it keeps an image of its own (`undefined` when we own the file,
+ * there is none yet, or it already runs the house image). Its declared `remoteUser`, else `containerUser`, else
+ * `root` — the user a plain language image (python, golang, …) runs as when it declares none — with a note,
+ * because that last one is an assumption about an image this generator cannot inspect.
+ */
+function adoptedImageUser(tree: Tree, houseImage: string): string | undefined {
+  if (!tree.exists(DEVCONTAINER) || readMarker(tree)?.owned === true) return undefined;
+  const existing = tryParse(tree.read(DEVCONTAINER, 'utf8') ?? '');
+  if (!existing) return undefined;
+  const ownImage = ['image', 'build', 'dockerFile', 'dockerComposeFile'].some((key) => key in existing);
+  if (!ownImage || existing.image === houseImage) return undefined;
+  const declared = [existing.remoteUser, existing.containerUser].find((user) => typeof user === 'string');
+  if (typeof declared === 'string') return declared;
+  logger.info(
+    `[devcontainer] This devcontainer keeps its own image and declares no remoteUser/containerUser, so the house ` +
+      `mounts assume it runs as root (e.g. the .claude mount targets /root/.claude). If the image runs as ` +
+      `another user, declare "remoteUser" in ${DEVCONTAINER} and re-run the sync.`,
+  );
+  return 'root';
 }
 
 interface Marker {

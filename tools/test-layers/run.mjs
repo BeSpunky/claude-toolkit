@@ -406,6 +406,20 @@ checkAsync('voice intent: host probe + bridge composed in; a second run changes 
   ok(JSON.parse(tree.read('.devcontainer/.bespunky-devcontainer.json', 'utf8')).voice === true, 'the marker carries voice forward');
 });
 
+checkAsync('adopted devcontainer on its own image: only the active layers merged in, no remoteUser imposed, mounts follow its user', async (ok) => {
+  const tree = wrapperRepo();
+  tree.write('.devcontainer/devcontainer.json', '{\n  // Our Python image.\n  "image": "python:3.12",\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n');
+  const a = await artifacts(tree, ['nx', 'agent']);
+  ok(a.dc.image === 'python:3.12' && a.dcText.includes('// Our Python image.'), 'the project image and its comment survive');
+  ok(!('remoteUser' in a.dc), `a remoteUser was imposed on an image that may not have it: ${a.dc.remoteUser}`);
+  ok(a.dc.mounts.some((m) => m.includes('target=/root/.claude')), `the .claude mount follows the image's user: ${a.dc.mounts}`);
+  ok(a.dc.features['ghcr.io/devcontainers/features/node:1'], 'Node arrives as a feature (the house tooling needs it)');
+  ok(!/node_modules|xvfb|4200|CHOKIDAR/.test(a.dcText), 'an inactive layer leaked into the adopted devcontainer');
+  ok(a.dc.postCreateCommand === 'pip install -r requirements.txt' && tree.exists('.devcontainer/post-create.bespunky.sh'), 'their postCreate kept; house script beside it');
+  const marker = JSON.parse(tree.read('.devcontainer/.bespunky-devcontainer.json', 'utf8'));
+  ok(marker.owned === false && marker.adopted.skipped.includes('image'), `adoption report: ${JSON.stringify(marker.adopted)}`);
+});
+
 for (const run of pending) await run();
 
 // ── migrations.json: every rung names a registered layer scope ─────────────────────────────────────────────
