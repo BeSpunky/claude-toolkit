@@ -14,3 +14,7 @@ tags: [workflow, project-standing, hooks]
 **Rejected:** adding a `.gitignore` line. It would have to reach every consumer project through the house generators plus a migration, all for one hook-owned file.
 
 **Cleanup:** the hook deletes the legacy `.claude/.standing-snooze` on its next run. That name was only ever written by this hook.
+
+## Revision — the cleanup ran too late (0.7.3)
+
+The first version deleted the legacy file inside the snooze section, which comes after the "is this project active?" early exits. An active project — exactly the state right after merging — exits before reaching it, so the old file survived until the next dormant stretch. The deletion now runs right after the git-repo check, on every session start.
