@@ -1,5 +1,5 @@
 // House generator: write .claude/settings.json (marketplaces + autoUpdate + enabled plugins),
-// ensure the .claude/data mount source exists, and keep the active layers' machine-local state out of git.
+// and keep the active layers' machine-local state out of git.
 //
 // COMPOSED FROM THE ACTIVE LAYERS. Which plugins a project enables is a fact about its layers — the Nx plugin
 // with the Nx floor, `bespunky-angular` with Angular, the design-system plugin with a design system — so each
@@ -51,10 +51,9 @@ export default async function claudeSettingsGenerator(tree: Tree, options: Claud
 
   tree.write('.claude/settings.json', `${JSON.stringify(merged, null, 2)}\n`);
 
-  // Ensure the devcontainer bind-mount source (.claude/data) exists locally after scaffolding.
-  if (!tree.exists('.claude/data/.gitkeep')) {
-    tree.write('.claude/data/.gitkeep', '');
-  }
+  // The devcontainer's `.claude/data` bind source is NOT created here: it is gitignored, so anything written now
+  // exists on this machine only and a fresh clone would still lack it. The devcontainer's host probe creates it
+  // on the host before every container open — the one place that holds on every machine.
 
   // Keep each active layer's machine-local state out of git — Claude Code's own (`agent`), Nx's caches and the
   // sync's lock (`nx`), whatever a later layer adds. Additive and idempotent: an entry already mentioned is left

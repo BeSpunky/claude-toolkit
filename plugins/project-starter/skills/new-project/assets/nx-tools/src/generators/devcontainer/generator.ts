@@ -1,7 +1,8 @@
 // House generator: write the BeSpunky-standard .devcontainer/ — devcontainer.json, the post-create script, the
-// one LOCAL devcontainer feature that devcontainer.json references by relative path, and — when `voice` is on —
-// the host probe that bridges the host's PulseAudio-protocol socket (WSLg or native PulseAudio/PipeWire) into the
-// container. Writes through the Nx Tree.
+// one LOCAL devcontainer feature that devcontainer.json references by relative path, and the host probe — run on
+// the host before every open, it makes each workspace bind source exist (a fresh clone has none of the
+// gitignored ones) and, when `voice` is on, bridges the host's PulseAudio-protocol socket (WSLg or native
+// PulseAudio/PipeWire) into the container. Writes through the Nx Tree.
 //
 // COMPOSED FROM THE ACTIVE LAYERS. Each layer states its share of the container as data (`descriptor.devcontainer`
 // — image, features, extensions, settings, mounts, env, run args, ports, OS packages, post-create pieces), and
@@ -64,17 +65,6 @@ const HOUSE_FEATURE_DIR = `.devcontainer/features/${HOUSE_FEATURE}`;
  * to detect — so it lives here, beside the probe it depends on, and composes exactly like a layer fragment.
  */
 const VOICE: DevcontainerFragment = {
-  initializeCommand: [
-    {
-      name: 'bespunky-host-probe',
-      command: 'sh .devcontainer/host-probe.sh',
-      why:
-        "The host probe finds this machine's PulseAudio-protocol socket (WSLg, native PulseAudio, PipeWire's pulse\n" +
-        'shim) and points .devcontainer/.host/pulse at its folder — or leaves an empty dir there, so the voice mount\n' +
-        'can never fail on a host without audio. A probe + fixed path, because `${localEnv:…}` is resolved before\n' +
-        'this command runs. It always exits 0.',
-    },
-  ],
   remoteEnv: [
     {
       name: 'PULSE_SERVER',
@@ -111,7 +101,10 @@ export default async function devcontainerGenerator(
   const layers = activeLayers(tree, options.layers);
   const layerIds = layers.map((entry) => entry.id);
 
-  const contributors: Contributor[] = [...devcontainerFragments(layers), ...(voice ? [{ id: 'voice', fragment: VOICE }] : [])];
+  const declared: Contributor[] = [...devcontainerFragments(layers), ...(voice ? [{ id: 'voice', fragment: VOICE }] : [])];
+  // The probe follows from the mounts: every workspace bind source it guarantees is one a contributor declared.
+  const bindSources = workspaceBindSources(declared);
+  const contributors: Contributor[] = bindSources.length ? [...declared, { id: 'host-probe', fragment: HOST_PROBE }] : declared;
   const houseComposition = compose(contributors, { nodeMajor });
   // An ADOPTED devcontainer that keeps an image of its own runs as THAT image's user: the house's mount targets
   // (`{{home}}/.claude`, …) must follow it, and no house `remoteUser` may be added to an image that may not have
@@ -171,7 +164,7 @@ export default async function devcontainerGenerator(
   const invoked = owning || !foreignPostCreate || foreignPostCreate.includes('post-create.sh');
   writePostCreate(tree, renderPostCreate(layerIds, composition, claudePlugins(layers)), invoked, owning);
 
-  if (voice) writeHostProbe(tree);
+  if (bindSources.length) writeHostProbe(tree, bindSources, voice);
 
   // The ADOPTION REPORT. An adopted devcontainer diverges from the house spec on every key it already
   // declared, permanently and by design — the merge is additive and never argues with the project's own
@@ -316,26 +309,64 @@ set -euo pipefail
 `;
 
 const HOST_PROBE_PATH = '.devcontainer/host-probe.sh';
-/** The probe's machine-local output: the `pulse` bind source and `host.env`. Never committed. */
+/** The probe's machine-local audio output: the `pulse` bind source and `host.env`. Never committed. */
 const HOST_STATE_DIR = '.devcontainer/.host/';
+
+/**
+ * The host probe's share of the container: the `initializeCommand` entry that runs it. No layer's — it is
+ * contributed whenever the declared mounts name a workspace bind source (see `workspaceBindSources`), which
+ * every house devcontainer does (`agent`'s `.claude/data`): the one step every container open runs on the
+ * HOST before Docker resolves a mount.
+ */
+const HOST_PROBE: DevcontainerFragment = {
+  initializeCommand: [
+    {
+      name: 'bespunky-host-probe',
+      command: 'sh .devcontainer/host-probe.sh',
+      why:
+        'The host probe makes every workspace bind mount valid before Docker resolves it: a missing source (a fresh\n' +
+        'clone has no gitignored .claude/data) becomes an empty dir. With voice it also points .devcontainer/.host/pulse\n' +
+        "at this machine's PulseAudio-protocol socket folder, or leaves an empty dir there. A probe + fixed paths,\n" +
+        'because `${localEnv:…}` is resolved before this command runs. It always exits 0.',
+    },
+  ],
+};
+
+/**
+ * The workspace-relative sources of every BIND mount the contributors declare (`source=${localWorkspaceFolder}/…`)
+ * — what the probe must make exist. Read from the declared fragments, so a new layer's mount is covered by
+ * declaring it, with nothing to keep in step. A source outside the workspace (`${localEnv:HOME}/…`) is the
+ * host's own and not ours to create.
+ */
+function workspaceBindSources(contributors: readonly Contributor[]): string[] {
+  const sources = contributors.flatMap(({ fragment }) =>
+    (fragment.mounts ?? []).flatMap(({ mount }) => {
+      if (!/(?:^|,)type=bind(?:,|$)/.test(mount)) return [];
+      const source = /(?:^|,)source=\$\{localWorkspaceFolder\}\/([^,]+)/.exec(mount)?.[1];
+      return source ? [source.replace(/\/+$/, '')] : [];
+    }),
+  );
+  return [...new Set(sources)];
+}
 
 /**
  * The host probe — `.devcontainer/host-probe.sh`, run by devcontainer.json's `initializeCommand` on the host
  * before every container start. An OWNED template artifact: regenerated on every sync, on the owned and the
  * adopted path alike (the adopted merge adds the `initializeCommand` entry that calls it — see
- * `composeCommand`), because the voice mount's source only exists once the probe has run.
+ * `composeCommand`), because a gitignored bind source exists on a fresh clone only once the probe has run.
+ * Rendered with the sources it guarantees and whether it bridges audio.
  *
- * Its output is a machine fact (this host's audio socket, or none), so `.devcontainer/.host/` is ignored —
+ * Its audio output is a machine fact (this host's socket, or none), so `.devcontainer/.host/` is ignored —
  * committing it would hand one developer's symlink to every teammate's host.
- *
- * It is not deleted when `voice` is off: an adopted devcontainer may still name it in a command this
- * generator never removes, and a missing script there would fail the container start — the exact failure
- * the probe exists to prevent.
  */
-function writeHostProbe(tree: Tree): void {
+function writeHostProbe(tree: Tree, bindSources: readonly string[], audio: boolean): void {
+  const rendered = readFileSync(join(__dirname, 'host-probe.sh.tpl'), 'utf8')
+    .replace('{{bindSources}}', bindSources.map((source) => `'${source}'`).join(' '))
+    .replace('{{audio}}', audio ? '1' : '0');
   // 0o755: the probe is invoked as `sh <path>`, so the mode is not load-bearing — it is set so a human can
-  // run it directly when debugging the bridge, and so the shebang/mode checker's rule holds in the output.
-  tree.write(HOST_PROBE_PATH, readFileSync(join(__dirname, 'host-probe.sh.tpl'), 'utf8'), { mode: 0o755 });
+  // run it directly when debugging, and so the shebang/mode checker's rule holds in the output.
+  tree.write(HOST_PROBE_PATH, rendered, { mode: 0o755 });
+  if (!audio) return;
 
   const gitignore = tree.exists('.gitignore') ? (tree.read('.gitignore', 'utf8') ?? '') : '';
   if (gitignore.includes(HOST_STATE_DIR)) return;

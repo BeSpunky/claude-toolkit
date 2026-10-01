@@ -531,6 +531,43 @@ checkAsync('voice intent: host probe + bridge composed in; a second run changes 
   ok(JSON.parse(tree.read('.devcontainer/.bespunky-devcontainer.json', 'utf8')).voice === true, 'the marker carries voice forward');
 });
 
+// A gitignored bind source (`.claude/data`) is absent from every fresh clone, and Docker refuses a bind mount
+// whose source is missing — the container does not start. The probe, run on the host before every open, is
+// what makes each one exist; this runs the RENDERED probe against an on-disk "fresh clone" of the output.
+checkAsync('every house devcontainer runs the host probe, and the probe makes each workspace bind source exist', async (ok) => {
+  const sources = (dc) => dc.mounts.flatMap((m) => (/type=bind/.test(m) ? [/source=\$\{localWorkspaceFolder\}\/([^,]+)/.exec(m)?.[1]].filter(Boolean) : []));
+  const freshClone = (tree, dc) => {
+    const dir = mkdtempSync(join(tmpdir(), 'probe-clone-'));
+    mkdirSync(join(dir, '.devcontainer'));
+    writeFileSync(join(dir, '.devcontainer/host-probe.sh'), tree.read('.devcontainer/host-probe.sh', 'utf8'));
+    const run = () => execFileSync('sh', ['.devcontainer/host-probe.sh'], { cwd: dir, env: { PATH: process.env.PATH, HOME: dir }, encoding: 'utf8' });
+    run();
+    const missing = sources(dc).filter((s) => !existsSync(join(dir, s)));
+    writeFileSync(join(dir, '.claude/data/kept'), 'state');
+    run(); // a second open never touches an existing source
+    const kept = readFileSync(join(dir, '.claude/data/kept'), 'utf8') === 'state';
+    rmSync(dir, { recursive: true, force: true });
+    return { missing, kept };
+  };
+  for (const [label, voice] of [['no voice', false], ['voice', true]]) {
+    const tree = wrapperRepo();
+    const a = await artifacts(tree, ['nx', 'agent'], { voice });
+    ok(a.dc.initializeCommand?.['bespunky-host-probe'] === 'sh .devcontainer/host-probe.sh', `${label}: the probe is the initializeCommand`);
+    ok(sources(a.dc).includes('.claude/data'), `${label}: .claude/data is a bind source`);
+    const { missing, kept } = freshClone(tree, a.dc);
+    ok(missing.length === 0, `${label}: the probe left bind sources missing on a fresh clone: ${missing}`);
+    ok(kept, `${label}: a second open clobbered an existing source`);
+    ok(!tree.exists('.claude/data/.gitkeep'), `${label}: a gitignored .gitkeep is not the mechanism (absent on every clone)`);
+    ok(a.gitignore.includes('.devcontainer/.host/') === voice, `${label}: the audio state dir is ignored exactly when there is audio state`);
+  }
+  // Adopted: a project's own STRING initializeCommand is kept, lifted beside the probe.
+  const tree = wrapperRepo();
+  tree.write('.devcontainer/devcontainer.json', '{\n  "image": "python:3.12",\n  "initializeCommand": "echo theirs"\n}\n');
+  const a = await artifacts(tree, ['nx', 'agent']);
+  ok(a.dc.initializeCommand?.project === 'echo theirs' && a.dc.initializeCommand['bespunky-host-probe'], `adopted: theirs kept beside the probe: ${JSON.stringify(a.dc.initializeCommand)}`);
+  ok(freshClone(tree, a.dc).missing.length === 0, 'adopted: bind sources exist after the probe');
+});
+
 checkAsync('adopted devcontainer on its own image: only the active layers merged in, no remoteUser imposed, mounts follow its user', async (ok) => {
   const tree = wrapperRepo();
   tree.write('.devcontainer/devcontainer.json', '{\n  // Our Python image.\n  "image": "python:3.12",\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n');
