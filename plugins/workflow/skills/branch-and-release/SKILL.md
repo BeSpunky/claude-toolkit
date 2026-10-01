@@ -37,13 +37,7 @@ mkdir -p docs/features/"$(date -u +%F)-<slug>"                             # the
 
 **The slug you choose here is the effort's identity — use it everywhere.** It names the branch, the worktree, *and* the effort's **package** ([[feature-package]]: `docs/features/<YYYY-MM-DD>-<slug>/`), which holds everything durable the effort produces that isn't code — its brief, vision, staging, decisions, throwaway mocks, and handoff batons. Create it with the tree, not at the end (a doc written afterwards is a memory, and memories are where the reasons go missing), and never invent a second name for the same effort. Skip it only for genuinely trivial work — a package for a typo fix is noise.
 
-**In an Nx workspace, EVERY nx command run from a worktree MUST be prefixed**, or the Nx daemon — which caches **one** workspace root across trees — silently builds/tests/serves the **MAIN** tree's source instead of this worktree's (builds "pass", tests "pass", against unchanged code):
-
-```bash
-NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$(pwd)" <pm> nx <target> <project>
-```
-
-The symptom that catches it: a deliberately-failing canary test in the worktree never fails; the spec count doesn't change after you edit specs. `.claude/worktrees/` is gitignored; clean up any stray package-manager store the worktree install drops at the repo root.
+**Worktree-blind tooling is the one trap a worktree adds.** A tool that caches *one* workspace root across trees (a daemon, a language server, a build cache keyed on an absolute path) can silently build, test or serve the **main** tree's source from inside a worktree — every check "passes" against unchanged code. Point such tooling at the worktree explicitly. **In an Nx workspace (every house project — Nx is the floor) this is mandatory for every `nx` command run from a worktree** — `NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$(pwd)" <pm> nx …`; the why, the symptom that catches it, and the cleanup are in [`reference/nx-worktree-override.md`](reference/nx-worktree-override.md). `.claude/worktrees/` is gitignored.
 
 ## Commit small increments as you go (inside the worktree)
 
@@ -59,17 +53,9 @@ Practical rhythm: make the change → verify it → **commit** → repeat. Don't
 
 ## Serving an in-flight worktree — without merging it back
 
-Testing a feature means serving *its* worktree — and in **BeSpunky-scaffolded (Nx) projects** the single `serve` target does this for you from anywhere, no merge required:
+Testing a feature means serving *its* worktree — its own source, on ports that can't collide with the main tree's server, without merging anything back. The generic shape: resolve the tree, install its deps if missing, serve **its** source with any worktree-blind tooling pointed at it, on an isolated port block (see [[local-server-isolation]]). **Two traps on any stack:** (1) a worktree serve often does **not** reliably hot-reload source edits over a container mount — **restart the serve after each edit** rather than trusting HMR (if a change still doesn't show, clear the framework build cache before restarting); (2) for a **long-lived** worktree, `git rebase development` *before* serving whenever `development` has moved, so you test against the latest integration, not a stale fork.
 
-```bash
-<pm> nx serve <app> --worktree=<branch|slug>                     # serve a tree you're not in (omit --worktree = current cwd tree)
-<pm> nx serve <app> --worktree=<branch|slug> --portOffset=auto   # explicit auto-offset (already the default for a worktree)
-<pm> nx serve <app> --worktree=<branch|slug> --dryRun            # print what it would serve, without serving
-```
-
-It resolves the worktree (current cwd tree if `--worktree` is omitted; accepts a branch, slug, or path), installs that tree's deps if missing, then serves *its own* source with the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides applied for you — app dev-server + optional emulators + optional shared browser, all under one Ctrl+C. (Provided by the `@bespunky/nx-tools:serve` executor, wired onto every app by the house `app` generator.) **Port isolation is now automatic per worktree:** the main tree serves on the base/forwarded ports (`--portOffset=0`), while each *worktree* gets a stable, verified-free offset block derived from the tree — so a worktree serve never collides with a server already running (the whole stack, app + any emulator suite, shifts together). Because the ports are shifted (and not forwarded), each worktree is reached at a pretty **`http://<slug>.localhost`** domain (via the `worktree-domains` proxy) and watched live in the shared co-driven browser over its **noVNC URL**. Pin a block by hand with `--portOffset=<int>` if you must. See [[local-server-isolation]] for when to isolate. Outside a scaffolded project, do the `cd` + env-override dance by hand.
-
-**Two worktree serve traps:** (1) a worktree serve often does **not** reliably hot-reload source edits over a container mount — **restart the serve after each edit** rather than trusting HMR (if a change still doesn't show, clear the framework build cache before restarting to force a fresh compile). (2) For a **long-lived** worktree, `git rebase development` *before* serving whenever `development` has moved, so you test against the latest integration, not a stale fork.
+**In a house project with the `web` layer** (its `HOUSE.md` stamp lists `layers=…web…`), one command does all of it from anywhere — `<pm> nx serve <app> --worktree=<branch|slug>` (a thin Nx wrapper over the stack-free `tools/dev/dev serve`): per-worktree port offsets, a `http://<slug>.localhost` domain, the shared browser. Flags, port isolation and the domain model are in [`reference/serving-a-worktree.md`](reference/serving-a-worktree.md). Outside a house project, do the `cd` + override dance by hand.
 
 ## The single divergence point — integrate in the feature, never on the shared branch
 
