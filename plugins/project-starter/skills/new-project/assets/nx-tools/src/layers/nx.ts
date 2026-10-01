@@ -30,7 +30,20 @@ export const nx: LayerDescriptor = {
   // the Nx extension, not an Angular one) and Nx's own Claude plugin, because Nx is in EVERY house project.
   devcontainer: {
     extensions: ['nrwl.angular-console'],
-    postCreate: [{ phase: 'install', piece: 'nx-wrapper' }],
+    // Nx's machine-local state on volumes — the CACHE and the WORKSPACE DATA, never the whole `.nx/` folder. On
+    // the Nx wrapper host `.nx/` also carries the COMMITTED `nxw.js`, and a volume over the folder hides it:
+    // `./nx` would not exist inside the container. Two exact subfolders are right on both hosts.
+    mounts: [
+      {
+        mount: 'source=${localWorkspaceFolderBasename}-nx-cache,target=${containerWorkspaceFolder}/.nx/cache,type=volume',
+        why: "Nx's cache and workspace data on volumes (machine-local; never the bind mount, never the whole .nx/).",
+      },
+      { mount: 'source=${localWorkspaceFolderBasename}-nx-workspace-data,target=${containerWorkspaceFolder}/.nx/workspace-data,type=volume' },
+    ],
+    postCreate: [
+      { phase: 'prepare', piece: 'nx-volumes' },
+      { phase: 'install', piece: 'nx-wrapper' },
+    ],
   },
   claudePlugins: ['nx@nx-claude-plugins'],
   gitignore: [

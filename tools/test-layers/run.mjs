@@ -334,6 +334,7 @@ checkAsync('wrapper-hosted repo (no package.json), nx+agent: neutral base, Node 
   ok(a.dc.features['ghcr.io/devcontainers/features/node:1']?.version === '22', 'the Node feature, pinned to the node major');
   ok(JSON.stringify(a.dc.overrideFeatureInstallOrder) === '["ghcr.io/devcontainers/features/node"]', 'Node installs first');
   ok(a.dc.mounts.some((m) => m.includes('target=/home/vscode/.claude')), 'the .claude mount follows the image user');
+  ok(a.dc.mounts.some((m) => m.endsWith('/.nx/cache,type=volume')) && !a.dc.mounts.some((m) => m.endsWith('/.nx,type=volume')), 'Nx state on exact volumes, never over .nx/ (it holds the committed nxw.js)');
   ok(!a.dcText.includes('/home/node'), '/home/node hard-coded');
   ok(!/node_modules|CHOKIDAR|eslint|prettier|\.nx,type=volume|4200|xvfb|runArgs|forwardPorts/.test(a.dcText), 'a Node/web/Angular artifact leaked into the devcontainer');
   ok(a.dcText.startsWith('// BeSpunky-standard devcontainer.'), 'the ownership fingerprint (first line) is kept');
@@ -381,7 +382,7 @@ checkAsync('full house shape (angular+firebase+design system, web): the 0.34 con
     ok(a.dc.customizations.vscode.extensions.includes(ext), `extension ${ext}`);
   }
   ok(a.dc.runArgs.includes('--sysctl') && a.dc.containerEnv.BESPUNKY_DEVCONTAINER_ID, 'web run args + container env');
-  ok(a.dc.mounts.length === 6, `mounts ${a.dc.mounts.length}`);
+  ok(a.dc.mounts.length === 7, `mounts ${a.dc.mounts.length}`);
   ok(bashParses(a.post), 'post-create.sh does not parse');
   for (const piece of ['xvfb', 'default-jdk-headless', 'angular/skills', 'playwright install --with-deps', 'zz-firebase-welcome', '/var/opt/bespunky/ports']) {
     ok(a.post.includes(piece), `post-create lacks ${piece}`);

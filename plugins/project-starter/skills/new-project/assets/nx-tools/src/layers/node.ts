@@ -56,15 +56,11 @@ export const node: LayerDescriptor = {
         mount: 'source=${localWorkspaceFolderBasename}-node_modules,target=${containerWorkspaceFolder}/node_modules,type=volume',
         why: 'node_modules on a volume, not the bind mount — installs and module resolution at native speed.',
       },
-      {
-        // `.nx` belongs to the NODE host, not to the `nx` layer: on the Nx WRAPPER host `.nx/` carries the
-        // COMMITTED `nxw.js`, and a volume over the folder would hide it — `./nx` would not exist in the
-        // container. On this host `.nx/` is machine-local cache and nothing else.
-        mount: 'source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume',
-        why: "Nx's cache and workspace data on a volume (this host's .nx/ holds machine-local state only).",
-      },
     ],
     postCreate: [{ phase: 'install', piece: 'node-install' }],
   },
   docSections: ['node'],
+  // The house installs into node_modules (the sync's devDependencies, the container's package-manager install),
+  // so it makes sure a Node repo ignores it. Substring-matched: `/node_modules`, `node_modules/` already count.
+  gitignore: [{ heading: 'Node dependencies (installed, never committed)', entries: ['node_modules'] }],
 };
