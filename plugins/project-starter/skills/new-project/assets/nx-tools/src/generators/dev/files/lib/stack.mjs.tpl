@@ -1,6 +1,38 @@
 // The process stack — N long-running children under ONE graceful Ctrl+C. GENERATOR-OWNED
 // (@bespunky/nx-tools:dev); rewritten every sync.
 import { spawn } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
+
+/** Every descendant of `pid`, deepest first — read from /proc (Linux; elsewhere none). */
+function descendants(pid) {
+  let entries;
+  try {
+    entries = readdirSync('/proc').filter((e) => /^\d+$/.test(e));
+  } catch {
+    return [];
+  }
+  const children = new Map();
+  for (const e of entries) {
+    try {
+      // /proc/<pid>/stat: "pid (comm) state ppid …" — comm may contain spaces, so split after the last ')'.
+      const stat = readFileSync(`/proc/${e}/stat`, 'utf8');
+      const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+      if (!children.has(ppid)) children.set(ppid, []);
+      children.get(ppid).push(Number(e));
+    } catch {
+      /* exited meanwhile */
+    }
+  }
+  const out = [];
+  const walk = (p) => {
+    for (const c of children.get(p) ?? []) {
+      walk(c);
+      out.push(c);
+    }
+  };
+  walk(pid);
+  return out;
+}
 
 /**
  * Run the declared processes as parallel children in OUR foreground process group, and resolve when all
@@ -14,8 +46,8 @@ import { spawn } from 'node:child_process';
  * run `onStop` once.
  *
  * The one case where WE signal: a child that dies on its OWN while siblings still run (a crash, not a
- * Ctrl+C). The group was never signalled, so each remaining child gets exactly ONE SIGTERM — the stack goes
- * down together instead of leaving orphans.
+ * Ctrl+C). The group was never signalled, so each remaining child TREE gets exactly ONE SIGTERM — the stack
+ * goes down together instead of leaving orphans.
  *
  * A child is `{ id, command, args, shell, env }`: `shell` runs `command` through `sh -c` (a hand-written
  * string command); otherwise `command` + `args` are spawned directly.
@@ -44,10 +76,22 @@ export function runStack({ children, cwd, onStop, log }) {
       }
     };
 
+    // ONE SIGTERM per remaining child. A direct (argv) child gets it alone: it may be an orchestrator (nx)
+    // that stops its own tree gracefully, and signalling that tree as well is the double signal an emulator
+    // suite reads as "force quit". A `sh -c` child is a mere wrapper that may not have exec'd, so its
+    // descendants get the one SIGTERM too — or the real server would be orphaned.
     const stopRemaining = () => {
-      for (const p of procs) {
-        if (p && p.exitCode === null && p.signalCode === null && p.pid) p.kill('SIGTERM');
-      }
+      procs.forEach((p, i) => {
+        if (!p || p.exitCode !== null || p.signalCode !== null || !p.pid) return;
+        const tree = children[i].shell ? [...descendants(p.pid), p.pid] : [p.pid];
+        for (const pid of tree) {
+          try {
+            process.kill(pid, 'SIGTERM');
+          } catch {
+            /* already gone */
+          }
+        }
+      });
     };
 
     const onSignal = () => {

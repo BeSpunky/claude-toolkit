@@ -97,7 +97,7 @@ try {
   });
   const p0 = planApp(decl, 'web', { offset: 0, tree: '/t' });
   ok('base: cmd substituted, URL clean', p0.primary.display === 'nx run web:dev-server --port=4200' && p0.localUrl === 'http://localhost:4200/');
-  ok('env: declared + PORT + PORT_<NAME>; no PORT_OFFSET at base', p0.primary.added.NX_WORKSPACE_ROOT_PATH === '/t' && p0.primary.added.PORT === '4200' && p0.primary.added.PORT_AUTH === '9099' && !('PORT_OFFSET' in p0.primary.added));
+  ok('env: declared + PORT_<NAME>, no bare PORT, no PORT_OFFSET at base', p0.primary.added.NX_WORKSPACE_ROOT_PATH === '/t' && p0.primary.added.PORT_APP === '4200' && !('PORT' in p0.primary.added) && p0.primary.added.PORT_AUTH === '9099' && !('PORT_OFFSET' in p0.primary.added));
   const p6 = planApp(decl, 'web', { offset: 6000, tree: '/t', passthrough: ['--buildTarget=web:build:production'] });
   ok('shifted: every port moves, ?portOffset added, PORT_OFFSET exported', p6.primaryPort === 10200 && p6.processes[1].ports.auth === 15099 && p6.localUrl === 'http://localhost:10200/?portOffset=6000' && p6.primary.added.PORT_OFFSET === '6000');
   ok('passthrough lands on the primary only', p6.primary.args.at(-1) === '--buildTarget=web:build:production' && !p6.processes[1].args.includes('--buildTarget=web:build:production'));

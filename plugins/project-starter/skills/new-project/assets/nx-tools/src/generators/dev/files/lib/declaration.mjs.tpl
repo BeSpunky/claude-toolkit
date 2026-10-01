@@ -23,8 +23,9 @@
 // }
 //
 // Substitutions in cmd / env / url values: ${PORT:<name>} (that port, shifted), ${OFFSET}, ${TREE} (the
-// served tree's absolute path), ${APP}. Every process also gets PORT (its own first port), PORT_<NAME> for
-// every port of the app, and PORT_OFFSET when the stack is shifted.
+// served tree's absolute path), ${APP}. Every process also gets PORT_<NAME> for every port of the app, and
+// PORT_OFFSET when the stack is shifted. A bare PORT is NOT exported: it is a convention some runtimes act on
+// (a Cloud Functions worker, say) — a server that wants it declares `"env": { "PORT": "${PORT:app}" }`.
 //
 // url[].when    always | offset (stack shifted) | running (this process runs) | skipped (--skip'ed)
 // advice[].when always | base (stack on its base ports) | offset | contended (base ports owned elsewhere)
@@ -178,10 +179,8 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
   const processes = app.processes.map((p) => {
     const where = `apps.${appName}.${p.id}`;
     const extra = p.id === primary.id ? passthrough : [];
-    const own = Object.values(p.ports ?? {});
     const added = {
       ...Object.fromEntries(Object.entries(p.env ?? {}).map(([k, v]) => [k, subst(v, `${where}.env.${k}`)])),
-      ...(own.length ? { PORT: String(own[0] + offset) } : {}),
       ...portEnv,
       ...(offset > 0 ? { PORT_OFFSET: String(offset) } : {}),
     };
