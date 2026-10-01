@@ -14,21 +14,36 @@
 // cannot invent what a project serves; it detects a declaration (or a dev-server) and wires the rest.
 import type { LayerDescriptor, PlanContext } from './descriptor';
 import { matchesEvidence, projectExists } from './evidence';
+import { type Tree, getProjects } from '@nx/devkit';
 import { NOVNC_BAND_LABEL, novncBandPorts } from '../generators/shared-browser/novnc-band';
+import { findExistingDevServer } from '../generators/_utils/dev-server';
+import { adapterOf } from '../adapters/registry';
 
 /** The Nx adapter's dev-loop targets — what makes a project "served through Nx". */
 const NX_SERVE_TARGETS = ['dev-server', 'serve'];
 
 /**
+ * Does the `serve` generator have something to compose for this project — exactly its own precondition: a
+ * dev-server of the project's own (any executor), or a stack that supplies one. A project merely EXISTING is not
+ * enough: `nx init` on a package.json makes the repo root a project, and the serve generator refuses one that
+ * serves nothing — which killed the whole sync of a declaration-only repo with a package.json.
+ */
+function nxServable(tree: Tree, app: string): boolean {
+  if (!projectExists(tree, app)) return false;
+  const targets = getProjects(tree).get(app)?.targets ?? {};
+  return Boolean(findExistingDevServer(targets) ?? adapterOf(tree, app)?.devServer);
+}
+
+/**
  * The per-app steps wire the NX adapter (the `serve` composer target + its dev-server options) onto the sync's
- * app. "The web layer is present" and "an Nx project named <app> exists" are different claims:
- *   - the project exists                          → run.
- *   - it doesn't, but some Nx project IS served   → the sync named the wrong app: SKIP and say so, partial.
- *   - no Nx project is served at all              → a declaration-only project (Python, Go, …): there is no
- *                                                   Nx wiring to refresh, and nothing was missed — skip quietly.
+ * app. "The web layer is present" and "the sync's app is served through Nx" are different claims:
+ *   - the app is Nx-servable (see above)          → run.
+ *   - it isn't, but some Nx project IS served     → the sync named the wrong app: SKIP and say so, partial.
+ *   - no Nx project is served at all              → a declaration-only project (Python, Go, a package.json
+ *                                                   repo, …): no Nx wiring to refresh, nothing missed — skip quietly.
  */
 const nxAppMustExist = (ctx: PlanContext) => {
-  if (projectExists(ctx.tree, ctx.app)) return null;
+  if (nxServable(ctx.tree, ctx.app)) return null;
   let nxServed = false;
   try {
     nxServed = matchesEvidence(ctx.tree, { targets: NX_SERVE_TARGETS });
@@ -38,7 +53,7 @@ const nxAppMustExist = (ctx: PlanContext) => {
   return nxServed
     ? {
         reason:
-          `web layer present, but no project named '${ctx.app}' — SKIPPING the per-app serve generators. ` +
+          `web layer present, but '${ctx.app}' is no Nx-served project (no such project, or nothing to serve) — SKIPPING the per-app serve generators. ` +
           `Migrations and workspace generators ran, but this app's own serve wiring was not refreshed. ` +
           `Re-run naming the app: scaffold.sh --sync <project> <app-name>`,
         partial: true,

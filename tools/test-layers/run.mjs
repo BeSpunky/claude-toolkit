@@ -313,6 +313,17 @@ check('declaration-only web (no Nx-served app): per-app Nx steps skipped quietly
   ok(!got.some((l) => /^(serve|serve-options|playwright) /.test(l) || l === 'playwright'), `no Nx/JS step: ${got.join(' | ')}`);
   for (const step of ['port-claim', 'shared-browser', 'worktree-domains', 'dev']) ok(got.includes(step), `${step} runs`);
 });
+// `nx init` on a package.json makes the repo ROOT a project. It EXISTS, so the per-app steps once ran on it — and
+// the serve generator refuses a project with nothing to serve, killing the sync of a plain npm repo that declares
+// what it serves in .bespunky/dev.json. Existing is not being Nx-served.
+check('declaration-only web on a package.json repo: the root project serves nothing, so no per-app serve steps', (ok) => {
+  const tree = FIXTURES['python repo with a hand-written dev declaration']();
+  writeJson(tree, 'package.json', { name: 'npmrepo', nx: {} });
+  addProjectConfiguration(tree, 'npmrepo', { root: '.', targets: { build: { executor: 'nx:run-commands', options: { command: 'true' } } } });
+  const got = render(plan(ctxFor(tree, { app: 'npmrepo' }), STAMP));
+  ok(!got.some((l) => /^serve(-options)? /.test(l)), `serve planned on a project with nothing to serve: ${got.join(' | ')}`);
+  ok(!got.includes('PARTIAL'), `not a partial sync: ${got.join(' | ')}`);
+});
 check('firebase and the design system on the Nx floor alone: core steps run, nothing partial', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['plain npm repo wearing firebase and a neutral design system'](), { app: 'backend' }), STAMP));
   ok(!got.includes('PARTIAL'), `a backend-only Firebase is a legitimate shape, not a partial sync: ${got.join(' | ')}`);

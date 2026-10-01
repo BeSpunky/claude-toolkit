@@ -15,6 +15,40 @@ import { type Tree, type TargetConfiguration, readProjectConfiguration, updatePr
 
 export const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
 
+// Where the app's dev-server may sit when the `serve` generator runs, in priority order:
+//   - `dev-server` — the canonical leaf, on a re-run or a project that already brought its own.
+//   - `serve`      — where a fresh framework app (e.g. @nx/angular:application) parks its dev-server, before
+//                    the serve generator reclaims that slot for the composer.
+// Pre-0.3.0 names are NOT looked for here; the 0.24.0 migration renames them to `dev-server` first.
+const DEV_SERVER_NAMES = ['dev-server', 'serve'];
+
+/**
+ * The project's existing dev-server: the canonical `dev-server` leaf, or the fresh `serve` slot before it
+ * becomes the composer.
+ *
+ * Deliberately NOT filtered by executor. That filter is what made this Angular-only: a Vite dev-server sitting
+ * on `serve` was invisible, so the generator concluded there was none and overwrote it with an Angular target
+ * the project could not run.
+ */
+export function findExistingDevServer(
+  targets: Record<string, TargetConfiguration>
+): TargetConfiguration | undefined {
+  for (const name of DEV_SERVER_NAMES) {
+    const target = targets[name];
+    // IS IT AN OBJECT, not merely truthy. `Record<string, TargetConfiguration>` is what the devkit types
+    // promise, but project.json is a file a human edits: `targets` can legitimately hold a `//`-prefixed
+    // documentation string, and nothing stops one landing on a key we look up by name. A bare `target &&`
+    // admits that string, `.executor` on it is undefined, `undefined !== SERVE_EXECUTOR` holds, and the string
+    // is returned AS a TargetConfiguration — then written straight back into project.json by the caller.
+    // Checking the type here is the difference between ignoring a comment and corrupting the file with it.
+    if (!target || typeof target !== 'object' || Array.isArray(target)) continue;
+    // The composer itself is not a dev-server — on a re-run it occupies `serve`, and treating it as the leaf
+    // would compose it with itself.
+    if (target.executor !== SERVE_EXECUTOR) return target;
+  }
+  return undefined;
+}
+
 /** The composer for this leaf. */
 export function composerFor(leaf: TargetConfiguration): TargetConfiguration {
   return {
