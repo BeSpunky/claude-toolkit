@@ -16,17 +16,18 @@ goal: Audit every verifyToken() call site for the missing-expiry bug
 shape: scout → map → verify  # the dependency shape, so resume knows what may run
 workflow_run: wf_a1b2c3d4    # runId — resume is IMPOSSIBLE without this
 workflow_script: /path/to/persisted/script.mjs
+budget: 10                   # total agents this tree may create; per-unit share and spent below
 ---
 
 ## Units
 
-| id | unit | status | re-runnable | result |
-| --- | --- | --- | --- | --- |
-| u1 | scout: list call sites | returned | yes | 7 sites — see below |
-| u2 | audit src/auth/login.ts:44 | returned | yes | exp checked — no change needed |
-| u3 | audit src/api/refresh.ts:12 | dispatched | yes | — |
-| u4 | audit src/jobs/cron.ts:88 | failed | yes | permissions error on src/jobs/ |
-| u5 | apply fix to refresh.ts | pending | **no** | blocked on u3 |
+| id | unit | status | re-runnable | share / spent | result |
+| --- | --- | --- | --- | --- | --- |
+| u1 | scout: list call sites | returned | yes | 0 / 0 | 7 sites — see below |
+| u2 | audit src/auth/login.ts:44 | returned | yes | 0 / 0 | exp checked — no change needed |
+| u3 | audit src/api/refresh.ts:12 | dispatched | yes | 0 / — | — |
+| u4 | audit src/jobs/cron.ts:88 | failed | yes | 0 / 0 | permissions error on src/jobs/ |
+| u5 | apply fix to refresh.ts | pending | **no** | 0 / — | blocked on u3 |
 
 ## Results
 
@@ -40,7 +41,7 @@ Checks `exp` before use. No change needed.
 - src/legacy/** excluded by the scout's scope. Deliberate; not audited.
 ```
 
-**Every column earns its place.** `id` is stable so resume matches by identity rather than position. `re-runnable` is what lets resume act without asking — a read-only audit re-runs for free, a mutation does not. `result` inline is the point of the whole file: a distillation stored anywhere else died with the agent that produced it.
+**Every column earns its place.** `id` is stable so resume matches by identity rather than position. `re-runnable` is what lets resume act without asking — a read-only audit re-runs for free, a mutation does not. `share / spent` keeps the agent budget conserved across the interruption — a resume spends what is left, never a fresh allowance on top. `result` inline is the point of the whole file: a distillation stored anywhere else died with the agent that produced it.
 
 ---
 

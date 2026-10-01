@@ -1,7 +1,7 @@
 ---
 name: delegate-and-parallelize
 description: >-
-  The session is an ORCHESTRATOR, not a worker — delegate the work to subagents and run the independent parts at the same time, recursively, instead of grinding through it serially in the main thread. Use at the START of any request with more than one moving part, and the moment you catch yourself about to read a fifth file, grep the repo "just to check", audit N call sites, review a diff across several dimensions, research several options, or run a long build/test sweep in the main thread — and again whenever a task turns out to have independent pieces mid-flight. The core move — **decompose the goal into units, map the dependencies between them, and delegate every unit that isn't atomic; an agent that receives a still-decomposable unit decomposes it AGAIN, recursively, until a unit is atomic, trivial, strictly serial, or contended.** Two costs are paid by the same mistake of working inline: **CONTEXT** (every file dump and log in the main thread is permanent, and permanent cost is what forces compaction, which degrades every turn after it — a subagent reads forty files and hands back fifteen lines) and **WALL-CLOCK** (independent units run at once, so the cost is the slowest unit, not their sum). So the default is INVERTED: you do not delegate when the work is big, you work inline only when delegating would cost more than it saves. Three tiers — inline, subagents (`Agent`, the everyday tier, freely spawnable and recursively self-spawning), and `Workflow` (deterministic multi-stage orchestration, which needs the user's explicit opt-in). What makes or breaks it is the **delegated-task contract**: a subagent shares NONE of your context, so its prompt must be self-contained and must specify the RETURN SHAPE — a distillation, never a transcript, or you paid the context anyway and gained nothing. And spawning is not finishing: **a parent NEVER exits while a child it spawned is still running** — it waits, checks on long-running children periodically (silence reads the same whether an agent is working or wedged), does independent work between checks rather than idling, and accounts for every child before it closes, stopping deliberately any whose answer no longer matters. Ending a turn with agents in flight leaves ZOMBIES: work burning tokens toward a result nobody will read, edits landing in a tree whose owner already declared it done. And the tree must OUTLIVE the session that started it: a crash, a dropped connection, a deliberate or mistaken stop, a permissions error, a container rebuild all evaporate the orchestrator's context — so **nothing is dispatched before the plan is on disk**, and every state change is written as it happens into a resumable LEDGER in the effort's package (stable unit ids, per-unit status, the returned distillations stored INLINE rather than as references to agents that no longer exist, any `Workflow` runId verbatim since resume is impossible without it, and what was NOT covered). Every agent at every depth leaves traces — durable output written to disk first and merely summarized in its return value, its own ledger if it fanned out, and mutations announced — so a fresh session resumes the outstanding work instead of re-running the expensive work that already succeeded. Also covers the recursion's termination conditions; **isolation as a JUDGMENT rather than a reflex** — first try to dissolve write contention entirely (many readers analysing in parallel, ONE writer applying), then prefer a single shared tree with declared path boundaries, and open a worktree per agent only when units genuinely edit the same files, are competing alternatives, or must build and test independently — with the chosen arrangement stated in the prompt and the child given authority to make the same call for its own sub-units; what you must NEVER delegate (the decision, the user's intent, the final synthesis, the human-gated git promotions); and why agent findings are verified rather than believed. **NOT for** work that is genuinely one unit, a change small enough that describing it costs more than doing it, or a strictly serial chain — fanning out there is theatre, and this skill says so. An expression of `bespunky-engineering:architect-mentality` — *work smart not hard*, *concentrate complexity so the edges stay simple*, *automate every repeated process*.
+  The session is an ORCHESTRATOR, not a worker — delegate the work to subagents and run the independent parts at the same time, recursively, instead of grinding through it serially in the main thread. Use at the START of any request with more than one moving part, and the moment you catch yourself about to read a fifth file, grep the repo "just to check", audit N call sites, review a diff across several dimensions, research several options, or run a long build/test sweep in the main thread — and again whenever a task turns out to have independent pieces mid-flight. The core move — **decompose the goal into units, map the dependencies between them, and delegate every unit that isn't atomic; an agent that receives a still-decomposable unit decomposes it AGAIN, recursively, until a unit is atomic, trivial, strictly serial, or contended.** The tree runs against an **AGENT BUDGET** — the total number of agents it may create (default 10; the user or the project can set it) — CONSERVED and carved down the tree as each child's share, so it caps the TOTAL spend against the user's usage limits without capping DEPTH: shape the decomposition to fit it (fewer, fatter units with share enough to fan out, batched leaves), word the share as an allowance to recurse never a ban, and when it runs out degrade to inline work rather than drop coverage. Two costs are paid by the same mistake of working inline: **CONTEXT** (every file dump and log in the main thread is permanent, and permanent cost is what forces compaction, which degrades every turn after it — a subagent reads forty files and hands back fifteen lines) and **WALL-CLOCK** (independent units run at once, so the cost is the slowest unit, not their sum). So the default is INVERTED: you do not delegate when the work is big, you work inline only when delegating would cost more than it saves. Three tiers — inline, subagents (`Agent`, the everyday tier, freely spawnable and recursively self-spawning), and `Workflow` (deterministic multi-stage orchestration, which needs the user's explicit opt-in). What makes or breaks it is the **delegated-task contract**: a subagent shares NONE of your context, so its prompt must be self-contained and must specify the RETURN SHAPE — a distillation, never a transcript, or you paid the context anyway and gained nothing. And spawning is not finishing: **a parent NEVER exits while a child it spawned is still running** — it waits, checks on long-running children periodically (silence reads the same whether an agent is working or wedged), does independent work between checks rather than idling, and accounts for every child before it closes, stopping deliberately any whose answer no longer matters. Ending a turn with agents in flight leaves ZOMBIES: work burning tokens toward a result nobody will read, edits landing in a tree whose owner already declared it done. And the tree must OUTLIVE the session that started it: a crash, a dropped connection, a deliberate or mistaken stop, a permissions error, a container rebuild all evaporate the orchestrator's context — so **nothing is dispatched before the plan is on disk**, and every state change is written as it happens into a resumable LEDGER in the effort's package (stable unit ids, per-unit status, the returned distillations stored INLINE rather than as references to agents that no longer exist, any `Workflow` runId verbatim since resume is impossible without it, and what was NOT covered). Every agent at every depth leaves traces — durable output written to disk first and merely summarized in its return value, its own ledger if it fanned out, and mutations announced — so a fresh session resumes the outstanding work instead of re-running the expensive work that already succeeded. Also covers the recursion's termination conditions; **isolation as a JUDGMENT rather than a reflex** — first try to dissolve write contention entirely (many readers analysing in parallel, ONE writer applying), then prefer a single shared tree with declared path boundaries, and open a worktree per agent only when units genuinely edit the same files, are competing alternatives, or must build and test independently — with the chosen arrangement stated in the prompt and the child given authority to make the same call for its own sub-units; what you must NEVER delegate (the decision, the user's intent, the final synthesis, the human-gated git promotions); and why agent findings are verified rather than believed. **NOT for** work that is genuinely one unit, a change small enough that describing it costs more than doing it, or a strictly serial chain — fanning out there is theatre, and this skill says so. An expression of `bespunky-engineering:architect-mentality` — *work smart not hard*, *concentrate complexity so the edges stay simple*, *automate every repeated process*.
 ---
 
 # Delegate and Parallelize
@@ -53,12 +53,58 @@ So a delegated prompt should say, in as many words: *if this splits into indepen
 
 ---
 
+## The agent budget — cap the tree's TOTAL, never its depth
+
+There is a third cost, and it is the one the first two hide. A subagent is cheap for **your context** — but not for **the usage bill**: every token any agent at any depth burns counts against the user's limits, and each agent also pays a fixed entry fee (its system prompt, orienting itself in the repo) before it does any work. Recursion multiplies that bill geometrically — five agents that each spawn five that each spawn five is 155 agents for one request. Left unpriced, "delegate unless it costs more" quietly spends the user's whole allowance.
+
+So every fan-out runs against **a budget: the number of agents the whole tree may still create.**
+
+| Source | Wins when |
+| --- | --- |
+| **The user, for this request** — "budget 30", "go wide on this", "keep it lean" | Always |
+| **The project** — a default stated in its `CLAUDE.md` | No per-request figure |
+| **This skill's default — 10** | Neither says anything |
+
+**The budget bounds the total, NOT the depth — and that distinction is the whole design.** A depth cap kills exactly the nested parallelism this skill exists for; a width cap still lets depth multiply. A conserved total does neither: a subtree may go as deep as its share allows.
+
+### How it flows down the tree
+
+- **It is conserved, and carved.** Spawning a child with share *s* costs **1 + s** from your remaining budget — the child itself, plus everything its subtree may create. The child's share is *its* budget, and it carves its own children's shares out of it by the same rule.
+- **Unspent share flows back up.** Every child reports `spent k of s` in its return; the remainder goes back into the parent's pool for later units, retries, or verification.
+- **Keep a small reserve** at each level that fans out — a stuck child re-dispatched, or an adversarial verifier, should not need a budget that was already handed away.
+
+### Keep nesting alive — shape the decomposition to the budget
+
+The way a budget silently turns into a depth cap is **spending all of it on width at level one**: ten children with a share of zero each is a flat queue, and nothing below them can recurse. Prevent it by fitting the decomposition to the budget, not the budget to the decomposition:
+
+- **Fewer, fatter units at the top**, each with share enough to fan out itself. With 10, three children with a share of 2 each (3 × (1 + 2) = 9, one in reserve) keeps three levels of concurrency; ten one-file children keeps one.
+- **Batch items per leaf.** One agent auditing eight call sites keeps the parallelism and pays the entry fee once. Per-item agents are the expensive shape.
+- **Give the share to the units that are still decomposable.** A genuine leaf needs a share of 0; a unit that will split needs enough to split.
+
+### How the share is worded — an allowance, never a ban
+
+A child reads its share as permission. Phrase it so it cannot read as anything else:
+
+> *"You may delegate further and run sub-units concurrently. Your subtree may create up to **4** more agents in total — carve your own children's shares out of that by the same rule, and report how many you spent."*
+
+**Never** write *"do not spawn subagents"* or *"don't delegate further"* to a unit that is still decomposable — that is a depth cap smuggled into a prompt, and it is exactly what this budget exists to avoid. A share of 0 belongs only on a unit that already meets a termination condition above; there it says *do this yourself*, which the unit would have done anyway.
+
+### When the budget runs out
+
+**The work does not stop — the parallelism does.** An agent with no share left does its unit **inline**, batched, and if that unit is too big to do well inline it says so in its return (*"needs ~N more agents"*) so the parent can grant from its reserve or re-plan. Exhaustion degrades concurrency; it never drops coverage silently.
+
+**Record it and report it.** The ledger carries the total, each unit's share, and what it spent. And if the budget forced batching, serial work, or a cut in coverage, say so in the report — a cap the user cannot see reads as full coverage.
+
+`Workflow` agents count against the same budget: its script fans out by construction, so size its `parallel()` and `pipeline()` stages to the share you gave it.
+
+---
+
 ## Three tiers — pick by what the work needs, not by size
 
 | Tier | Use it for | Cost | Authority |
 | --- | --- | --- | --- |
 | **Inline** (you) | Atomic and trivial units. Decisions. Synthesis. Anything the user must see reasoned. | Main-thread context — the expensive one | Always |
-| **Subagent** (`Agent`) | The everyday tier. Any unit that is decomposable, context-heavy, or independent of its siblings. Spawn several in **one message** so they run concurrently. Recursion depends on the **agent type** you pick: a general-purpose agent holds the Agent tool and can fan out again; a restricted read-only type cannot, so hand *it* only leaf work. | Cheap — its context dies with it | Freely, unless a project forbids it |
+| **Subagent** (`Agent`) | The everyday tier. Any unit that is decomposable, context-heavy, or independent of its siblings. Spawn several in **one message** so they run concurrently. Recursion depends on the **agent type** you pick: a general-purpose agent holds the Agent tool and can fan out again; a restricted read-only type cannot, so hand *it* only leaf work. | Cheap for *your context* — its context dies with it — but every token is still billed; each one spends the **agent budget** | Freely within the budget, unless a project forbids it |
 | **Workflow** (`Workflow`) | Deterministic multi-stage orchestration — loops, conditionals, fan-out over a discovered work-list, pipelines with verification stages, anything that should run the same way twice. | Can be dozens of agents | **Explicit user opt-in only** — see *Authority* below |
 
 **The hybrid is usually right for large work:** scout inline or with one subagent to *discover* the work-list (which files, which call sites, which dimensions), then fan out over it. You do not need to know the shape before the task — only before the orchestration step.
@@ -80,7 +126,7 @@ The anatomy of a prompt that works, and the failure modes each part prevents, is
 - **The constraints that bind** — the house rules that apply, what it must not touch, what has already been ruled out and why.
 - **Where to look**, if you know. A pointer costs one line and saves a search.
 - **The return shape** — explicitly. *"Return the file:line of each call site and one sentence on whether it needs changing. No file contents."* Where the tier supports it, a schema is better than a sentence, because it is enforced rather than requested.
-- **Permission to recurse** — if this splits, split it.
+- **Permission to recurse, with its budget share** — if this splits, split it; your subtree may create up to *N* more agents, carve your children's shares from that, and report what you spent. An allowance, never a ban (see *The agent budget*).
 - **The duty to leave traces** — write durable output to the package as you go and return a summary of what you wrote, not the only copy of it; keep your own ledger if you fan out.
 
 ---
@@ -188,6 +234,7 @@ It holds:
 - **Per unit: its status** — `pending` · `dispatched` · `returned` · `failed` · `stopped` — updated when it changes, not at the end.
 - **The returned result itself, inline.** Not a reference to an agent that no longer exists. A distillation that lives only as a return value dies with the orchestrator that received it.
 - **The `runId` and `scriptPath` of any `Workflow`**, verbatim — both come back in the tool's own result, so copy them into the ledger *the moment it returns*, before you even read the findings. Its resume is genuinely cheap — an unchanged prefix of agent calls returns from the journal instead of re-running — but it is *impossible* without the run id. Losing that one string converts a resumable run into a full re-run.
+- **The budget** — the total, each unit's share, and what each spent — so a resume knows what it may still spend instead of starting a fresh allowance on top of the old one.
 - **What is NOT covered** — caps applied, items skipped, agents that returned nothing. Resume needs the holes as much as the fills.
 
 **Commit the ledger as you go.** An uncommitted file survives a stopped turn but not a rebuilt container, and [[branch-and-release]] already asks for small committed increments — the ledger is one of them.
@@ -237,6 +284,9 @@ The user saw none of it: not the twelve agents, not the tree, not the retries. *
 - **The blind orchestrator.** Fanning out before you know the work-list, so half the agents are told to look for things that do not exist. Scout first, then fan out.
 - **Declaring done with children in flight.** "Everything checks out" while three verifiers are still working is a guess wearing a conclusion's clothes.
 - **Delegating the part you actually needed to understand.** If the next decision depends on you having the shape of the thing in your head, reading it yourself *is* the cheap option.
+- **The unpriced tree.** Fanning out with no budget, so the user's usage limits are the only thing that ever stops the recursion.
+- **The budget spent on width.** Every unit of the budget handed to level-one children with nothing left to carve — a flat queue wearing a tree's clothes, and a depth cap nobody chose.
+- **The budget as a ban.** "Don't spawn subagents" written to a unit that is still decomposable. A share is an allowance to recurse; phrase it as one.
 - **Silent truncation.** Capping at the top-N sites, skipping retries, sampling — fine, sometimes necessary. Saying nothing about it is not: an unstated cap reads as full coverage.
 
 ---
@@ -245,7 +295,7 @@ The user saw none of it: not the twelve agents, not the tree, not the retries. *
 
 Delegation is a way of working, not a licence, and the two tiers differ:
 
-- **Subagents are the default tier** and need no ceremony. Spawn them as the work calls for them.
+- **Subagents are the default tier** and need no ceremony. Spawn them as the work calls for them — within the agent budget.
 - **`Workflow` needs the user's explicit opt-in** — it can spawn dozens of agents and spend accordingly, so the user opts in, you do not opt in on their behalf. It counts as opt-in when they say so in their own words ("use a workflow", "fan out agents"), when a session-level setting says so, or **when the user invokes this skill by name** — `/bespunky-workflow:delegate-and-parallelize` *is* the request to orchestrate, and workflows are authorized for that turn.
 - **When this skill fires on its own** — because the request looked parallelizable — that is guidance, not consent. Delegate to subagents freely; for a workflow, **say what it would do and roughly what it would cost, and let them say yes.** A skill that auto-fired cannot authorize its own spending; that is laundering the opt-in, and the same reasoning is why this repo's version hook *detects and relays* rather than executes.
 - **A project can override any of this.** If the working repo's `CLAUDE.md` or house rules restrict subagents, that wins — read it as the parameter, this skill as the method.
@@ -265,6 +315,7 @@ Delegation is a way of working, not a licence, and the two tiers differ:
 - Did I decompose **before** touching a file, or am I rationalizing after five reads?
 - Is the plan on disk? Would a crash right now cost me anything I could have written down?
 - Does every prompt I sent state its **return shape** — and would the answer fit in a paragraph?
+- What is the **budget**, and did I carve it so the decomposable units still have share to recurse — or did I spend it all on width?
 - For the writes: did I try to **dissolve** the contention (many readers, one writer) before choosing an isolation strategy?
 - Is anything I spawned still running that I have stopped thinking about?
 - If I ended the turn now, could a fresh session pick this up — or would it have to start over?
