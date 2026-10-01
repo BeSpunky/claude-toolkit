@@ -31,7 +31,7 @@ The second is the one that quietly makes the whole practice pointless. Guard it 
 
 Where the tier supports a **schema** — a workflow's `agent()` call takes one — use it: a schema is validated at the tool boundary and the agent is made to retry on mismatch, where a sentence in a prompt is merely a request.
 
-**6 — Permission to recurse.** *"If this splits into independent parts, split it and run them concurrently yourself."* Without this, a child does a decomposable job serially and you lose a whole level of parallelism.
+**6 — Permission to recurse, and its budget share.** *"If this splits into independent parts, split it and run them concurrently yourself. Your subtree may create up to 4 more agents in total — carve your own children's shares out of that, and report how many you spent."* Without the permission, a child does a decomposable job serially and you lose a whole level of parallelism. Without the share, it fans out unpriced. Word the share as an **allowance**, never as *"don't spawn agents"* — that is a depth cap in disguise; a share of 0 belongs only on a genuine leaf.
 
 **7 — Its own supervision duty.** A child that spawns children owes them the same wait you owe it. Say so: *"wait for anything you spawn; don't return while your own children are still running."*
 
@@ -86,6 +86,7 @@ Blank-slate agent, unbounded scope, no anchors, no return shape. It will read br
 - **The amnesiac** — re-proposes what was already rejected. Prevented only by passing the rejected options down.
 - **The optimist** — reports success it did not verify. Ask what it *checked*, not what it *did*.
 - **The serialist** — did a decomposable job one item at a time. Prevented by the recursion clause.
+- **The spendthrift** — fanned out past any sensible size because nothing said how many agents it could afford. Prevented by the budget share.
 - **The deserter** — returned while its own children were still running. Prevented by the supervision clause.
 
 Every one of these is a missing line in the prompt. When a delegated task comes back wrong, fix the prompt before you fix the result — you will be sending that same prompt again.
