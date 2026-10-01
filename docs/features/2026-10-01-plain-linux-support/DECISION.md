@@ -1,4 +1,11 @@
-# Plain-Linux support — design (DRAFT, awaiting confirmation)
+---
+status: concluded
+concluded: 2026-10-01
+summary: WSL is one host among many — a host probe aims a fixed audio mount at whatever socket exists (WSLg, PulseAudio, PipeWire) or an empty dir; voice resolves its endpoint by socket; migration 0.34.0 retires the /mnt/wslg bind; the scaffolder asks the engine (rootless?) who owns output.
+tags: [devcontainer, voice, wsl, linux, nx-tools-0.34.0, migration, rootless-docker]
+---
+
+# Plain-Linux support — design 
 
 ## What the audit found
 Only **one mechanism** is genuinely WSL-bound: the voice **audio bridge**. Everything else is wording.
@@ -38,3 +45,6 @@ User, asked "Shall I go ahead and implement this design?": **"yes"**
 - **post-create** gates voice provisioning on a socket existing in `/run/bespunky/host/pulse/` (or `$PULSE_SERVER` answering), never on `/mnt/wslg`.
 - **Voice resolver** `plugins/voice/scripts/audio-endpoint.sh`: verified `$PULSE_SERVER` → `/run/bespunky/host/pulse/{native,PulseServer}` → `/mnt/wslg/PulseServer` (containers not yet rebuilt) → `${XDG_RUNTIME_DIR:-/run/user/$UID}/pulse/native` (running directly on a Linux host) → error listing every path tried. Mic gain default 200% only when the endpoint came via WSLg (`BESPUNKY_HOST_WSL_DISTRO` non-empty, or the `/mnt/wslg` path), else 100%; `BESPUNKY_VOICE_MIC_GAIN` overrides.
 - **Payload**: `@bespunky/nx-tools` 0.33.2 → **0.34.0**; migration `0.34.0/retire-wslg-audio-bridge`.
+
+## Conclusion — 2026-10-01
+Merged into `development` on the user's word: **"merge the feature branch into development then promote again"**. Real-host verification (rebuild + `/voice status` on plain Linux; WSL) was taken on by the user — "I'll do it" — and had not been reported at merge time. The untested points in the 2026-10-01T2015Z baton still stand.
