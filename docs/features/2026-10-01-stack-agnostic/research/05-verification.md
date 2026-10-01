@@ -180,3 +180,54 @@ Migrations question for those fixes: **nothing to migrate** — every changed ou
 regenerated on every sync (HOUSE.md, `tools/firebase-welcome.sh`, the `.gitignore` block — additive), or shipped
 inside the package/plugin itself (the serve executor schema, the hook).
 Agents spent by U-verify: 0.
+
+## Follow-up fixes (open items 1, 2, 4)
+Re-verified on throwaway repos under `scratchpad/fix/` (`--local`, port offset 29000 → :37000, everything torn down).
+
+1. **Dev engine and a lone signal — fixed (`26d301d`).** The rule is now decided by the signal's name:
+   SIGINT = the terminal's Ctrl+C, already delivered to the whole group → forward nothing, wait (as before);
+   SIGTERM/SIGHUP = a stop aimed at the engine → the existing graceful shutdown (one SIGTERM per remaining child
+   tree, then wait). First stop wins; later signals are absorbed (so Ctrl+C followed by Nx's own SIGTERM is not a
+   double). The `nx serve` executor applies the same rule one level up (forwards one SIGTERM to the engine).
+   Regression: `tools/test-scaffold/dev-engine.checks.mjs` runs real children that record every signal they get —
+   targeted SIGTERM (argv and `sh -c` child) and SIGHUP → child got exactly one SIGTERM, nothing listening; group
+   SIGINT → exactly one SIGINT; SIGINT-then-SIGTERM → only the SIGINT. (Fails on the old engine.)
+   Live, Python repo (`tools/dev/dev serve site`): `timeout 5 …` → exit 124, :37000 closed; `kill -TERM <engine>`
+   / `kill -HUP <engine>` / `kill -INT -- -<pgid>` → engine gone, :37000 closed. Through Nx (npm repo,
+   `npx nx serve site`): SIGTERM to the run-executor process alone, SIGTERM to the nx CLI process alone, group
+   SIGINT, and `timeout 8 npx nx serve …` → all down, nothing listening, no stray processes.
+   Residue, documented in `stack.mjs`: a SIGTERM/SIGHUP sent to the whole GROUP (`kill -- -<pgid>`, GNU `timeout`
+   without `--foreground`, a shell re-sending SIGHUP on terminal close) reaches the children directly AND through
+   the engine — a signal carries no readable sender. Not live-tested against a real emulator suite (no Java /
+   Firebase CLI in this container).
+2. **`.claude/data` on a fresh clone — fixed (`a011476`).** The host probe (`initializeCommand`, previously
+   voice-only) is now contributed whenever the declared mounts name a `${localWorkspaceFolder}` bind source, and is
+   rendered with those sources: it creates each missing one on the host before every open (never touching an
+   existing one), then bridges audio only with voice. The `.claude/data/.gitkeep` that claude-settings wrote is
+   gone — it was gitignored, so it only ever existed on the scaffolding machine. Regression (test-layers): no-voice
+   and voice devcontainers carry the probe; the rendered probe run on an on-disk "fresh clone" leaves no bind
+   source missing and a second run keeps existing data; an adopted string `initializeCommand` is lifted beside it.
+   Live: Python repo synced, committed, `git clone` → no `.claude/data`; `sh .devcontainer/host-probe.sh` → created,
+   exit 0, tree clean. (No Docker here, so the mount itself was not exercised.) **Migrations: none owed** — the
+   owned and adopted devcontainers are both merged on every sync and `initializeCommand` is a composable command,
+   so an adopted repo gains the probe additively; `host-probe.sh` is generator-owned.
+4. **Cosmetics — fixed (`373bd8a`).** `SYNC_OK` now reads back the stamped layer set and names the app only when it
+   exists (live: `SYNC_OK … layers=nx,agent,web voice=0 …` on the Python repo; `layers=nx,agent,node,web,firebase`
+   on the npm+Firebase repo — no `app=`, no `firebase=0`). The not-sync-ensurable hint spells `./nx add …` on a
+   wrapper host (the pure HOST decision moved ahead of the ensure validation; render.test.sh asserts it).
+   `apphosting.yaml` is seeded only with a client app (test-layers: core-only → none, also with `--staging`;
+   client app → seeded once, never clobbered; live: none in the npm+Firebase repo). An already-seeded one in a
+   core-only repo is a user-owned seed and is left as-is (deleting it would be a guess). The
+   `implicitDependencies` reorder was not in scope and is unchanged.
+
+Found while re-verifying, fixed:
+- **`6d28e0d`** — a Firebase core with no client app: `apps/functions` was the only `project.json`; the inference
+  excluded it by name, then the no-project.json fallback re-picked it by directory, so `serve --project=functions`
+  killed the sync. The fallback now applies only when no `project.json` exists under `apps/` (render.test.sh).
+- **`b4d2954`** — a plain npm repo with `.bespunky/dev.json` + `agent`: `nx init` makes the root a project, the web
+  layer ran `serve` on it because it EXISTED, and serve refused ("nothing to serve") → `SYNC_FAILED`. The per-app
+  skip predicate now asks serve's own precondition (a dev-server of its own, or a stack that supplies one);
+  `findExistingDevServer` moved to `_utils/dev-server` so both share it (test-layers; fails on the old predicate).
+  Migrations: none (planner behaviour only).
+
+Suites: test-layers 55/55, test-migrations 46/46, test-scaffold 10 files, script-modes ok. No version bumps.
