@@ -763,7 +763,19 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   $NX_WRAPPER_PIN '@bespunky/nx-tools' \"file:\$_local_stage/\$_local_tgz\" '@nx/devkit' \"\$_nxv\"
   ./nx --version >/dev/null"
   else
-    LOCAL_ADD="  $PM_ADD_DEV \"\$_local_stage/\$_local_tgz\""
+    # POINT THE MANIFEST AT THE TARBALL, THEN A PLAIN INSTALL — never the package manager's add. An add resolves
+    # the WHOLE manifest before it replaces anything, and after a previous --local run the manifest pins
+    # @bespunky/nx-tools to a version no registry has (that run's FINALIZE_LOCAL corrected the spec to the plain
+    # version, honestly). So the second --local run on the same project died in the add, on the very spec it was
+    # about to replace — and --local exists precisely to be re-run on its own output while a change is iterated.
+    # Writing the spec first removes the unresolvable entry before anything resolves, and the first run and every
+    # later one take the same path. The spec goes where the project already declares the package, else devDeps.
+    LOCAL_ADD="  # local-install:begin
+  node -e \"const fs=require('fs'),f='package.json',j=JSON.parse(fs.readFileSync(f,'utf8')),P='@bespunky/nx-tools';
+    const b=['dependencies','devDependencies'].find(k=>j[k]&&j[k][P])||'devDependencies';
+    j[b]=Object.assign(j[b]||{},{[P]:'file:'+process.argv[1]});fs.writeFileSync(f,JSON.stringify(j,null,2)+'\\\\n')\" \"\$_local_stage/\$_local_tgz\"
+  $PM_INSTALL
+  # local-install:end"
   fi
   # --local: install the WORKING TREE instead of the registry, for developing the toolkit itself.
   #
