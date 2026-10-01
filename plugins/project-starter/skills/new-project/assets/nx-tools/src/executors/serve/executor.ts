@@ -78,14 +78,24 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
 
   const args = engineArgs(project, options as ServeExecutorSchema & Record<string, unknown>);
   return new Promise((resolve) => {
-    // Same foreground process group as the engine and its children: the terminal's Ctrl+C reaches all of
-    // them once. This process only waits for the engine's own graceful shutdown — it forwards nothing.
-    const hold = () => undefined;
-    process.on('SIGINT', hold);
-    process.on('SIGTERM', hold);
+    // The engine's own signal rule, one level up (tools/dev/lib/stack.mjs states it in full): SIGINT is the
+    // terminal's Ctrl+C, already delivered to the whole foreground group — the engine and its children have
+    // it, so this process only waits. SIGTERM/SIGHUP is a stop aimed at THIS process (Nx, a supervisor,
+    // `kill`) that the engine never saw — it gets exactly one SIGTERM, and runs its graceful shutdown. The
+    // first stop wins; later signals are absorbed, so Ctrl+C followed by Nx's own SIGTERM is not a second one.
+    let stopping = false;
+    const onGroupStop = () => {
+      stopping = true;
+    };
+    const onDirectedStop = () => {
+      if (stopping) return;
+      stopping = true;
+      child.kill('SIGTERM');
+    };
+    const handlers = { SIGINT: onGroupStop, SIGTERM: onDirectedStop, SIGHUP: onDirectedStop } as const;
+    for (const [signal, handler] of Object.entries(handlers)) process.on(signal, handler);
     const done = (success: boolean) => {
-      process.off('SIGINT', hold);
-      process.off('SIGTERM', hold);
+      for (const [signal, handler] of Object.entries(handlers)) process.off(signal, handler);
       resolve({ success });
     };
     const child = spawn(process.execPath, [engine, ...args], { cwd: context.root, env: process.env, stdio: 'inherit' });

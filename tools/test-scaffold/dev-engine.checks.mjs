@@ -8,11 +8,16 @@
 //   - The block is SIZED FROM THE DECLARATION. The Firebase suite (4000..9199) must still step by 6000 in nine
 //     blocks — exactly the old hard-coded executor — while an app that declares one port gets small steps.
 //   - Planning is pure and is what a dry run prints, so a dry run and a real run cannot disagree.
+//   - The SIGNAL RULE, on real processes. A stop aimed at the engine alone (`kill <pid>`, `timeout`, a
+//     supervisor) used to be swallowed: the engine waited forever and every server kept listening. And the
+//     terminal's Ctrl+C must still reach each child exactly ONCE — a second signal is what makes an emulator
+//     suite "force quit" and skip its export. Each child here counts what it received.
 //
 // The engine ships as .tpl files in the payload; this copies them into a temp tools/dev/ as .mjs — exactly
 // what the `dev` generator writes — and imports them.
-import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -127,6 +132,73 @@ try {
   writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd: 'python3 -m http.server ${PORT:app}', ports: { app: 8000 } }] } } }));
   const out = execFileSync('sh', [join(engine, 'dev'), 'serve', '--dry-run', '--no-shared-browser', '--port-offset=3000'], { cwd: repo, encoding: 'utf8' });
   ok('the shim runs the engine with no node_modules and no git', out.includes('python3 -m http.server 11000') && out.includes('http://localhost:11000/'));
+
+  console.log('signals (real processes)');
+  // A server that records every signal it receives, and shuts down (slowly, like an emulator export) on the first.
+  writeFileSync(
+    join(repo, 'server.mjs'),
+    `import { createServer } from 'node:http';
+import { writeFileSync } from 'node:fs';
+const [port, record] = process.argv.slice(2);
+const got = [];
+const server = createServer((_, res) => res.end('ok')).listen(Number(port), '127.0.0.1');
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
+  got.push(sig);
+  writeFileSync(record, got.join(','));
+  if (got.length === 1) { server.close(); setTimeout(() => process.exit(0), 400); }
+});
+`,
+  );
+  const freePort = () => new Promise((res) => { const s = createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => res(port)); }); });
+  const listening = (port) => new Promise((res) => { const c = connect(port, '127.0.0.1'); c.on('connect', () => { c.destroy(); res(true); }); c.on('error', () => res(false)); });
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until = async (cond, ms) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) if (await cond()) return true; return cond(); };
+
+  /** Serve `server.mjs` (as an argv or a `sh -c` child), deliver `stop`, report what the engine and child saw. */
+  const scenario = async (label, { shell, stop }) => {
+    const port = await freePort();
+    const record = join(repo, `got-${port}`);
+    const server = join(repo, 'server.mjs');
+    const cmd = shell ? `node ${server} \${PORT:app} ${record}` : ['node', server, '${PORT:app}', record];
+    writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd, ports: { app: port } }] } } }));
+    // Its own process group (detached), as a terminal job is — so "the group" below is exactly this serve.
+    const eng = spawn('sh', [join(engine, 'dev'), 'serve', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: 'ignore' });
+    const exited = new Promise((res) => eng.on('exit', (code, signal) => res({ code, signal })));
+    if (!(await until(() => listening(port), 10000))) {
+      ok(`${label}: the server came up`, false);
+      process.kill(-eng.pid, 'SIGKILL');
+      return;
+    }
+    await stop(eng.pid);
+    const result = await Promise.race([exited, sleep(5000).then(() => null)]);
+    const got = existsSync(record) ? readFileSync(record, 'utf8') : '';
+    const stillUp = await listening(port);
+    try {
+      process.kill(-eng.pid, 'SIGKILL'); // whatever a failing engine left behind — never leak a server
+    } catch {
+      /* the group is already empty */
+    }
+    return { result, got, stillUp };
+  };
+
+  for (const shell of [false, true]) {
+    const kind = shell ? 'sh -c child' : 'argv child';
+    const directed = await scenario(`SIGTERM to the engine alone (${kind})`, { shell, stop: (pid) => process.kill(pid, 'SIGTERM') });
+    ok(`SIGTERM to the engine alone (${kind}): engine exits, child got ONE SIGTERM, nothing listening`, directed && directed.result && directed.got === 'SIGTERM' && !directed.stillUp);
+  }
+  const hup = await scenario('SIGHUP to the engine alone', { shell: false, stop: (pid) => process.kill(pid, 'SIGHUP') });
+  ok('SIGHUP to the engine alone: child got ONE SIGTERM, nothing listening', hup && hup.result && hup.got === 'SIGTERM' && !hup.stillUp);
+  const ctrlC = await scenario('Ctrl+C', { shell: false, stop: (pid) => process.kill(-pid, 'SIGINT') });
+  ok('Ctrl+C (SIGINT to the group): child got exactly ONE SIGINT — nothing forwarded — engine exits 0', ctrlC && ctrlC.result?.code === 0 && ctrlC.got === 'SIGINT' && !ctrlC.stillUp);
+  const both = await scenario('Ctrl+C then a supervisor SIGTERM', {
+    shell: false,
+    stop: async (pid) => {
+      process.kill(-pid, 'SIGINT');
+      await sleep(50);
+      process.kill(pid, 'SIGTERM');
+    },
+  });
+  ok('Ctrl+C then SIGTERM to the engine: the second stop is absorbed — child saw only the SIGINT', both && both.result && both.got === 'SIGINT');
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }
