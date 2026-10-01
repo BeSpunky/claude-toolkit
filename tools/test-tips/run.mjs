@@ -60,7 +60,7 @@ const cases = {
     const f = fixture();
     const { stdout } = f.run();
     assert.equal(stdout, '', 'the hook path must never write to stdout');
-    assert.deepEqual(f.settings(), { spinnerTipsOverride: { tips: ['b1', 'b2', 'w1'] } });
+    assert.deepEqual(f.settings(), { spinnerTipsOverride: { tips: ['b1', 'w1', 'b2'] } }, 'round-robin across plugins');
     f.run();
     assert.deepEqual(f.settings().spinnerTipsOverride.tips, ['w2', 'w3', 'b1'], 'the next session rotates on, wrapping round');
   },
@@ -88,7 +88,7 @@ const cases = {
     fs.symlinkSync(target, f.settingsPath);
     f.run();
     assert.ok(fs.lstatSync(f.settingsPath).isSymbolicLink(), 'the symlink survives');
-    assert.deepEqual(JSON.parse(fs.readFileSync(target, 'utf8')).spinnerTipsOverride.tips, ['b1', 'b2', 'w1']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(target, 'utf8')).spinnerTipsOverride.tips, ['b1', 'w1', 'b2']);
   },
 
   'only tips from toolkit plugins installed and enabled for this project'() {

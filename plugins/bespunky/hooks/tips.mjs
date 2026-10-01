@@ -118,8 +118,16 @@ function installedToolkitPlugins() {
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Every tip on offer, grouped by plugin. */
+function tipsByPlugin() {
+  return installedToolkitPlugins().map(({ name, root }) => ({ plugin: name, tips: readTips(root) }));
+}
+
+/** The rotation order: round-robin across plugins, so each session's handful spans the toolkit, not one plugin. */
 function tipPool() {
-  return installedToolkitPlugins().flatMap(({ name, root }) => readTips(root).map((tip) => ({ plugin: name, tip })));
+  const groups = tipsByPlugin();
+  const longest = Math.max(0, ...groups.map((group) => group.tips.length));
+  return Array.from({ length: longest }, (_, i) => groups.filter((group) => i < group.tips.length).map((group) => ({ plugin: group.plugin, tip: group.tips[i] }))).flat();
 }
 
 /** The next `TIPS_PER_SESSION` tips of the pool, starting at the cursor and wrapping round. */
@@ -209,10 +217,8 @@ const commands = {
   list() {
     const state = readState();
     console.log(`Toolkit tips are ${state.off ? 'off' : 'on'}.\n`);
-    let plugin = '';
-    for (const entry of tipPool()) {
-      if (entry.plugin !== plugin) console.log(`${plugin ? '\n' : ''}## ${(plugin = entry.plugin)}`);
-      console.log(`- ${entry.tip}`);
+    for (const { plugin, tips } of tipsByPlugin().filter((group) => group.tips.length)) {
+      console.log(`## ${plugin}\n${tips.map((tip) => `- ${tip}`).join('\n')}\n`);
     }
   },
 };
