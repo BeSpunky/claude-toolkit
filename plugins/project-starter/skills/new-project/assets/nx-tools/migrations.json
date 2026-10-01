@@ -95,6 +95,12 @@
       "layer": "agent",
       "description": "Remove the WSLg-only audio bridge `--voice` wrote into .devcontainer/devcontainer.json — the `source=/mnt/wslg,target=/mnt/wslg,type=bind` mount and `remoteEnv.PULSE_SERVER: unix:/mnt/wslg/PulseServer`. Docker refuses a bind whose source is missing, so off WSL2 the container did not start; and an adopted devcontainer, merged additively by mount target, would keep the old bind beside the new host-agnostic bridge while the old PULSE_SERVER scalar won. Removes only those exact house values (and the house comments above them) with comment-preserving splices, on owned and adopted devcontainers alike; reports any other WSLg mount or PULSE_SERVER as the project's own. The next sync with voice on adds the new bridge.",
       "implementation": "./src/migrations/0.34.0/retire-wslg-audio-bridge"
+    },
+    "tag-navigation-library": {
+      "version": "0.35.0",
+      "layer": "navigation",
+      "description": "Tag the navigation kernel's library `type:navigation`: the navigation layer is now detected by that tag instead of the hard-coded project name `navigation-core`. Tags a project named `navigation-core` and the project owning a directory that carries the vendored kernel (lib/navigation-x.providers.ts), merging into project.json or package.json's `nx` block; reports a kernel left as loose files with no project (earlier generators wrote it that way) instead of inventing one.",
+      "implementation": "./src/migrations/0.35.0/tag-navigation-library"
     }
   }
 }
