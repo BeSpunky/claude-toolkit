@@ -19,7 +19,7 @@ export class     MapWrapper extends NativeWrapper<google.maps.Map> {
 }
 ```
 
-**This is exactly what `angular-native-wrappers` uses** — that skill *applies* this; the mechanism lives here.
+**This is exactly what `bespunky-angular:angular-native-wrappers` uses** (for Angular projects) — that skill *applies* this; the mechanism lives here.
 
 ---
 

@@ -62,7 +62,7 @@ export class     GoogleMap extends NativeWrapper<google.maps.Map> {}    // metho
 
 **Keep runtime and type exclusions in lockstep:** if you forbid `setMap` at runtime, also `Omit` it from the derived interface, so the compiler blocks what the runtime would reject.
 
-> **The type-level machinery here** — deriving a type from another type, declaration merging, and keeping types and runtime in lockstep — lives in depth in the **`advanced-typescript`** skill (`reference/deriving-types-from-types.md`, `reference/declaration-merging.md`). Read those for the full technique; this piece is just its application to a wrapper.
+> **The type-level machinery here** — deriving a type from another type, declaration merging, and keeping types and runtime in lockstep — lives in depth in the **`bespunky-engineering:advanced-typescript`** skill (`reference/deriving-types-from-types.md`, `reference/declaration-merging.md`). Read those for the full technique; this piece is just its application to a wrapper.
 
 ---
 
@@ -162,4 +162,4 @@ The wrapper must expose the raw native object (typed) as a **documented** escape
 
 ## Mentality anchors
 
-*Work smart, not hard* · *Automate every repeated process* · *Concentrate complexity* · *Refuse false tradeoffs* · *Abstractions must never trap* · *Compensate for your materials' weaknesses* · *Design for the consumer* — all in the `architect-mentality` skill.
+*Work smart, not hard* · *Automate every repeated process* · *Concentrate complexity* · *Refuse false tradeoffs* · *Abstractions must never trap* · *Compensate for your materials' weaknesses* · *Design for the consumer* — all in the `bespunky-engineering:architect-mentality` skill. (Bare skill names in this file — `architect-mentality`, `advanced-typescript` — live in `bespunky-engineering`; `angular-architecture` is this plugin's sibling.)

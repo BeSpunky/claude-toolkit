@@ -3,6 +3,5 @@
 
 Ask Claude to "find the root cause" and architecture-first refuses the quick patch for a real fix
 Designing a tricky type? Mention "derive the type" and advanced-typescript brings the type-level toolbox
-Wrapping a JS library (maps, charts, editors) in Angular? angular-native-wrappers covers it without boilerplate
 resumable-state makes refresh, back and shared links land users exactly where they were
 typed-reactive-navigation replaces raw router.navigate calls with typed, per-domain navigation commands

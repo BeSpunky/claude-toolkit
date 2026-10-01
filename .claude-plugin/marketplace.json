@@ -27,8 +27,14 @@
     {
       "name": "bespunky-engineering",
       "source": "./plugins/engineering",
-      "description": "BeSpunky engineering skills. Agnostic foundation (architect-mentality + architecture-first: solve through design, never a patch; fix the root cause; design + confirm refactors) plus technique domains with progressive-disclosure references: software-design, advanced-typescript, angular-architecture, angular-native-wrappers, nx-monorepo-and-dx, resumable-state (every screen deep-linkable & refresh-safe — the URL as source of truth for navigational/view state, working state deliberately persisted to a chosen home), and typed-reactive-navigation (navigation is never a raw router call — typed per-domain navigation services that take entities not routes, URL-derived route-state selectors as the reactive read side, a domain event bus, and a pure event→command binding; partners resumable-state).",
+      "description": "BeSpunky engineering skills. Agnostic foundation (architect-mentality + architecture-first: solve through design, never a patch; fix the root cause; design + confirm refactors) plus technique domains with progressive-disclosure references: software-design, advanced-typescript, nx-monorepo-and-dx, resumable-state (every screen deep-linkable & refresh-safe — the URL as source of truth for navigational/view state, working state deliberately persisted to a chosen home), and typed-reactive-navigation (navigation is never a raw router call — typed per-domain navigation services that take entities not routes, URL-derived route-state selectors as the reactive read side, a domain event bus, and a pure event→command binding; partners resumable-state). Angular-only skills (angular-architecture, angular-native-wrappers) live in the optional bespunky-angular plugin.",
       "version": "0.5.4"
+    },
+    {
+      "name": "bespunky-angular",
+      "source": "./plugins/angular",
+      "description": "BeSpunky Angular adapter skills — OPTIONAL, something a project wears when it wears Angular (the scaffolder enables it for projects with the angular layer; nothing else needs it). angular-architecture: the modern-Angular expression of timeless design patterns (standalone, signals, inject(), provideX) as a router over progressive-disclosure clusters — DI and providers, lifecycle and reactivity, SSR/zone/change detection, extensibility and plugins, content projection and DOM bridging, component API ergonomics. angular-native-wrappers: wrap an imperative or third-party JS API (maps, editors, charts, players, canvas/WebGL, native browser APIs) in idiomatic, fully-typed Angular — convention-based delegation instead of a hand-written pass-through per native call. The stack-agnostic mindset (architect-mentality, architecture-first) and toolboxes (software-design, advanced-typescript) they specialize stay in bespunky-engineering.",
+      "version": "0.1.0"
     },
     {
       "name": "bespunky-design-system",
