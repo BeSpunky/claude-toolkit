@@ -1,5 +1,12 @@
 // House generator: write .claude/settings.json (marketplaces + autoUpdate + enabled plugins),
-// ensure the .claude/data mount source exists, and keep Claude local state out of git.
+// ensure the .claude/data mount source exists, and keep the active layers' machine-local state out of git.
+//
+// COMPOSED FROM THE ACTIVE LAYERS. Which plugins a project enables is a fact about its layers — the Nx plugin
+// with the Nx floor, `bespunky-angular` with Angular, the design-system plugin with a design system — so each
+// layer declares them (`descriptor.claudePlugins`) and this generator enables the union. The devcontainer's
+// plugin pre-install reads the SAME list (`_utils/layer-contributions.ts`), so the two can no longer drift.
+// The same goes for `.gitignore`: each layer names the machine-local paths its tooling creates
+// (`descriptor.gitignore`), and they are ignored only where that layer is.
 //
 // MERGE, never clobber. This file is co-owned: the house owns the marketplace/plugin/permission keys,
 // but the PROJECT owns everything it adds afterwards (its own `hooks`, extra `permissions.allow`
@@ -26,11 +33,18 @@
 import { type Tree } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { activeLayers, claudePlugins, gitignoreBlocks } from '../_utils/layer-contributions';
 
 type Json = Record<string, unknown>;
 
-export default async function claudeSettingsGenerator(tree: Tree): Promise<void> {
-  const house = JSON.parse(readFileSync(join(__dirname, 'settings.json.tpl'), 'utf8')) as Json;
+interface ClaudeSettingsSchema {
+  /** The layers this project has. Default: DETECTED from the workspace. */
+  layers?: string[] | string;
+}
+
+export default async function claudeSettingsGenerator(tree: Tree, options: ClaudeSettingsSchema = {}): Promise<void> {
+  const layers = activeLayers(tree, options.layers);
+  const house = { ...pluginSettings(layers), ...(JSON.parse(readFileSync(join(__dirname, 'settings.json.tpl'), 'utf8')) as Json) };
   const seeds = JSON.parse(readFileSync(join(__dirname, 'settings.seed.json.tpl'), 'utf8')) as Json;
   const project = readJson(tree, '.claude/settings.json');
   const merged = deepSeed(project ? deepMerge(project, house) : { ...house }, seeds);
@@ -42,22 +56,28 @@ export default async function claudeSettingsGenerator(tree: Tree): Promise<void>
     tree.write('.claude/data/.gitkeep', '');
   }
 
-  // Keep Claude Code local state out of git.
-  ensureIgnored(tree, '# Claude Code local state', ['.claude/data/']);
+  // Keep each active layer's machine-local state out of git — Claude Code's own (`agent`), Nx's caches and the
+  // sync's lock (`nx`), whatever a later layer adds. Additive and idempotent: an entry already mentioned is left
+  // alone, so a project that ignores these its own way is untouched.
+  for (const block of gitignoreBlocks(layers)) ensureIgnored(tree, `# ${block.heading}`, [...block.entries]);
+}
 
-  // Keep Nx's CACHES out of git — an agent-DX concern, which is why it lives in this layer's generator.
-  // `nx init` on an EXISTING repo ignores `.nx/polygraph` but not `.nx/cache` or `.nx/workspace-data`, so a
-  // retrofitted repo has three files that churn on every single `nx` invocation. For a human that is noise;
-  // for an agent it is worse, because a permanently dirty tree makes "is this change mine?" unanswerable and
-  // invites committing machine-local cache. Additive and idempotent: an entry already present is left alone,
-  // so a project that ignores these its own way is untouched.
-  ensureIgnored(tree, '# Nx caches (machine-local; never committed)', ['.nx/cache', '.nx/workspace-data']);
-
-  // The sync's own transient lock directory. Nx builds its pre-migration checkpoint with `git add -A`, so a
-  // lock the sync is still holding gets swept into that commit and only released afterwards — it has landed
-  // in this repo's history twice now (`abd143e`, and again on the run that added this line). Machine-local
-  // and short-lived by definition, so it is never something a clone should receive.
-  ensureIgnored(tree, "# The house sync's transient lock (machine-local; never committed)", ['.bespunky-sync.lock/']);
+/**
+ * The marketplace + plugin keys, from the active layers. OWNED (re-asserted every sync): which marketplaces exist
+ * and which house plugins are on is infrastructure. A plugin the project enabled itself — or one the house no
+ * longer contributes — is a key this does not declare, so the merge leaves it exactly as the project has it.
+ */
+function pluginSettings(layers: Parameters<typeof claudePlugins>[0]): Json {
+  const { plugins, marketplaces } = claudePlugins(layers);
+  return {
+    extraKnownMarketplaces: Object.fromEntries(
+      marketplaces.map(([name, market]) => [
+        name,
+        { source: { source: 'github', repo: market.repo }, ...(market.autoUpdate ? { autoUpdate: true } : {}) },
+      ]),
+    ),
+    enabledPlugins: Object.fromEntries(plugins.map((plugin) => [plugin, true])),
+  };
 }
 
 /**

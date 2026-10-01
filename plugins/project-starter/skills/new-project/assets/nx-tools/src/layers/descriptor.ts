@@ -119,14 +119,129 @@ export interface LayerDescriptor {
    */
   generators?: { workspace?: readonly GeneratorStep[]; app?: readonly GeneratorStep[] };
 
-  // ── EXTENSION POINTS for later phases. Declared now so parallel work agrees on where things go; nothing
-  //    reads them yet. Each is OPTIONAL: a layer that contributes nothing simply omits the field.
-  /** Phase 2 — this layer's devcontainer fragment (features, extensions, mounts, ports, OS packages, …). */
-  devcontainer?: Readonly<Record<string, unknown>>;
-  /** Phase 2 — HOUSE.md / HOUSE.rules.md section flags this layer switches on. */
+  // ── AGENT ARTIFACTS (phase 2) — what this layer contributes to the files the `agent` layer's generators own.
+  //    Each is OPTIONAL: a layer that contributes nothing omits the field. The generators COMPOSE the
+  //    contributions of the ACTIVE layers (registry order), so a layer's tooling arrives with the layer and
+  //    leaves with it — no generator carries a flag per layer.
+  /** This layer's devcontainer fragment — composed by the `devcontainer` generator. See `DevcontainerFragment`. */
+  devcontainer?: DevcontainerFragment;
+  /**
+   * The HOUSE.md / HOUSE.rules.md / CLAUDE.md section flags this layer switches on (`{{#flag}}…{{/flag}}` in the
+   * house-doc templates). Usually the layer's own id; a layer may also switch on a shared section (`ui`).
+   */
   docSections?: readonly string[];
-  /** Phase 2 — Claude Code plugins this layer enables (`plugin@marketplace`). */
+  /**
+   * Claude Code plugins this layer enables, as `plugin@marketplace`. ONE list feeds both `.claude/settings.json`
+   * (`enabledPlugins`) and the devcontainer's plugin pre-install, so the two can never disagree. The marketplace
+   * must be one the house knows (`generators/_utils/layer-contributions.ts`).
+   */
   claudePlugins?: readonly string[];
+  /** `.gitignore` entries this layer's tooling makes necessary, under one heading per block. */
+  gitignore?: readonly GitignoreBlock[];
   /** Phase 1/4 — the migration `layer` scope this layer answers to (defaults to its id). */
   migrationScope?: LayerId;
+}
+
+/** A `.gitignore` block: a `#` heading (without the `#`) and the entries under it. */
+export interface GitignoreBlock {
+  heading: string;
+  entries: readonly string[];
+}
+
+// ── THE DEVCONTAINER FRAGMENT ─────────────────────────────────────────────────────────────────────────────────
+//
+// A layer's share of the devcontainer, as DATA. The `devcontainer` generator composes the fragments of the active
+// layers (registry order, then the voice intent) into `.devcontainer/devcontainer.json` and ONE composed
+// `.devcontainer/post-create.sh`. Every contribution may carry a `why`, rendered as a `//` (or `#`) comment above
+// it in the generated file — the generated devcontainer is READ by the people who live in it, and the reasons
+// for a mount or a forwarded port are the part they need most.
+//
+// STRING TOKENS, substituted by the composer in every string a fragment contributes:
+//   {{home}}        the remote user's home (`/home/<remoteUser>` — it follows the image, never hard-coded)
+//   {{remoteUser}}  the user the container runs as
+//   {{nodeMajor}}   the Node major the image / Node feature is pinned to
+
+/** A JSON value as it may appear in devcontainer.json. */
+export type DevcontainerJson =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly DevcontainerJson[]
+  | { readonly [key: string]: DevcontainerJson };
+
+/** Every contribution may say WHY — rendered as a comment above it in the generated file. */
+export interface Explained {
+  why?: string;
+}
+
+export interface DevcontainerPort extends Explained {
+  port: number;
+  label: string;
+  onAutoForward: 'silent' | 'notify' | 'openPreview' | 'openBrowser' | 'ignore';
+  /**
+   * Forward at the SAME host number? Only for ports something OUTSIDE the container dials by a hardcoded
+   * address. Everything else is left to auto-forward. Two layers may name one port: `forward` is OR-ed, the
+   * label and behaviour come from the first contributor in registry order.
+   */
+  forward?: boolean;
+  /** Prompt instead of silently remapping when the host port is taken (exact-port keys only). */
+  requireLocalPort?: boolean;
+}
+
+/**
+ * When a post-create piece runs. The composed script runs the phases in this order, and within a phase the
+ * pieces in registry order:
+ *   prepare   — fix-ups the rest relies on (volume ownership); before anything installs
+ *   (the OS packages — every active layer's `osPackages`, as ONE retried apt transaction — run here)
+ *   install   — the project's own dependencies (the Nx wrapper's installation, the package-manager install)
+ *   plugins   — the Claude Code plugin pre-install
+ *   provision — layer tooling that needs the above (browsers, agent skills, banners)
+ */
+export type PostCreatePhase = 'prepare' | 'install' | 'plugins' | 'provision';
+
+export interface PostCreatePiece {
+  phase: PostCreatePhase;
+  /**
+   * The piece's script: `generators/devcontainer/post-create/<piece>.sh.tpl`, shipped beside the generator.
+   * POSIX-parseable bash fragments (the composed script may be chained from a project's own `/bin/sh`
+   * postCreateCommand), best-effort (a failure WARNS, never aborts the container create).
+   */
+  piece: string;
+}
+
+export interface DevcontainerFragment {
+  /**
+   * The base image this layer's STACK runs on, and the user it runs as. The last active layer (registry
+   * order) that declares one wins — a stack layer specialises the neutral default. A layer that only needs a
+   * tool on PATH contributes a `features` entry instead, which composes.
+   */
+  image?: {
+    ref: string;
+    remoteUser: string;
+    /** Features that belong to THIS image (the runtime it lacks) — dropped with it when a later layer replaces it. */
+    features?: DevcontainerFragment['features'];
+  } & Explained;
+  /** Devcontainer features, by id. */
+  features?: readonly ({ id: string; options?: { readonly [key: string]: DevcontainerJson } } & Explained)[];
+  /** VS Code extension ids. */
+  extensions?: readonly string[];
+  /** VS Code settings at the container (Remote) scope. */
+  settings?: readonly ({ key: string; value: DevcontainerJson } & Explained)[];
+  /** Mount specs (`source=…,target=…,type=…`). */
+  mounts?: readonly ({ mount: string } & Explained)[];
+  /** Environment for editor-spawned processes. */
+  remoteEnv?: readonly ({ name: string; value: string } & Explained)[];
+  /** Environment for EVERY process in the container. */
+  containerEnv?: readonly ({ name: string; value: string } & Explained)[];
+  /** `docker run` arguments (image-based devcontainers only). */
+  runArgs?: readonly ({ args: readonly string[] } & Explained)[];
+  /** Ports this layer serves — `forwardPorts` and `portsAttributes` are both derived from ONE list. */
+  ports?: readonly DevcontainerPort[];
+  /** Named `initializeCommand` entries (object form — they run side by side, on the HOST). */
+  initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
+  /** Debian packages, installed in the composed script's single apt transaction. */
+  osPackages?: readonly ({ packages: readonly string[] } & Explained)[];
+  /** Post-create pieces. */
+  postCreate?: readonly PostCreatePiece[];
 }

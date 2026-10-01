@@ -26,26 +26,84 @@ export const agent: LayerDescriptor = {
     workspace: [
       {
         generator: 'devcontainer',
-        // Every layer flag is passed EXPLICITLY, the false cases included: the generator defaults `web` to
-        // true (the common shape), so omitting it on a library-only repo would forward :80 and mount the
-        // shared-browser volumes into a container with nothing to serve. Phase 2 replaces these three flags
-        // with per-layer devcontainer FRAGMENTS (descriptor.devcontainer).
+        // The devcontainer is COMPOSED from the active layers' fragments (descriptor.devcontainer), so it is
+        // handed the layer set — never a flag per layer. Passed rather than re-detected because a run knows
+        // what it is about to ENSURE before the tree reflects it (the same reason house-doc takes --layers).
         args: (ctx) => [
           `--name=${ctx.project}`,
           `--nodeMajor=${ctx.nodeMajor}`,
-          `--web=${ctx.active.has('web')}`,
-          `--angular=${ctx.active.has('angular')}`,
-          `--firebase=${ctx.active.has('firebase')}`,
+          `--layers=${[...ctx.active].join(',')}`,
           ...(wantsVoice(ctx) ? ['--voice=true'] : []),
         ],
       },
-      { generator: 'claude-settings' },
+      { generator: 'claude-settings', args: (ctx) => [`--layers=${[...ctx.active].join(',')}`] },
       // Runs BEFORE the design system, so at scaffold time the colour is a stable hash of the project name;
       // it upgrades to the brand colour later (the window-identity ratchet never downgrades it).
       { generator: 'window-identity', args: (ctx) => [`--name=${ctx.project}`] },
     ],
   },
   docSections: ['agent'],
+  devcontainer: {
+    // THE NEUTRAL BASE. A repo with no stack layer that brings its own image (no package.json → no `node`)
+    // still needs Node at RUNTIME — the Nx floor runs on it, and so does the house tooling (`./nx`, the hooks,
+    // the generators) — but it is not a Node project, so Node arrives as a FEATURE on a plain Debian base
+    // rather than as the image's identity. A stack layer replaces this image (and this Node feature with it).
+    image: {
+      ref: 'mcr.microsoft.com/devcontainers/base:debian',
+      remoteUser: 'vscode',
+      features: [{ id: 'ghcr.io/devcontainers/features/node:1', options: { version: '{{nodeMajor}}' } }],
+      why: 'A neutral base: this repo brings no stack image. Node comes as a feature — the Nx floor and the house tooling run on it.',
+    },
+    features: [{ id: 'ghcr.io/devcontainers-extra/features/claude-code' }, { id: 'ghcr.io/devcontainers/features/github-cli' }],
+    extensions: [
+      'Anthropic.claude-code',
+      'EditorConfig.EditorConfig',
+      'eamodio.gitlens',
+      'GitHub.vscode-github-actions',
+      'christian-kohler.path-intellisense',
+      'usernamehw.errorlens',
+    ],
+    settings: [
+      {
+        key: 'editor.formatOnSave',
+        value: false,
+        why:
+          "Claude's permission posture is set once in .claude/settings.json (permissions.defaultMode: \"auto\")\n" +
+          '— deliberately NOT a blanket skip here. "auto" gives frictionless auto-approval WITH the background\n' +
+          'safety classifier, the right default even in an isolated container.',
+      },
+      { key: 'files.associations', value: { '*.mdc': 'markdown' } },
+    ],
+    mounts: [
+      {
+        mount: 'source=${localWorkspaceFolder}/.claude/data,target={{home}}/.claude,type=bind,consistency=cached',
+        why: "Claude Code's state, persisted across container rebuilds (the target follows the image's user).",
+      },
+    ],
+    osPackages: [
+      {
+        packages: ['tmux'],
+        why:
+          'Durable shells. A tmux session outlives the client attached to it — the ONLY way an interactive shell\n' +
+          'opened into this container from the outside survives its opener restarting (the Docker Engine API cannot\n' +
+          're-attach to an exec). No config is written on purpose: presence on PATH is the whole contract.',
+      },
+      { packages: ['curl'], why: 'General utilities the house tooling shells out to.' },
+    ],
+    postCreate: [{ phase: 'plugins', piece: 'claude-plugins' }],
+  },
+  // The house plugins every agent-DX project carries. The stack-specific ones arrive with their layers
+  // (`nx`, `web`, `angular`, `design-system`).
+  claudePlugins: [
+    'bespunky@claude-toolkit',
+    'bespunky-project-starter@claude-toolkit',
+    'bespunky-engineering@claude-toolkit',
+    'bespunky-workflow@claude-toolkit',
+    'bespunky-product-ux@claude-toolkit',
+    'bespunky-vscode-identity@claude-toolkit',
+    'bespunky-communication@claude-toolkit',
+  ],
+  gitignore: [{ heading: 'Claude Code local state', entries: ['.claude/data/'] }],
 };
 
 /**

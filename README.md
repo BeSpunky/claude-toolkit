@@ -209,7 +209,6 @@ claude-toolkit/
         ├── SKILL.md                          # the scaffolding skill (orchestrator)
         └── assets/
             ├── scaffold.sh                   # thin launcher: run house generators on the local Node (Docker fallback for old Node), bootstrap + scaffold/sync
-            ├── CLAUDE.md.tmpl                # the PROJECT-SPECIFIC half only (intentions + conventions), authored by the skill into the CLAUDE.md house-doc seeded; carries no pointer block
             └── nx-tools/                     # @bespunky/nx-tools — house Nx generators, run post-scaffold
                 ├── generators.json
                 └── src/generators/
@@ -330,7 +329,8 @@ ordinary markdown link, which made them documentation the model had to *choose* 
 always had — the always-on half was, in practice, off. The mechanical how-to stays in **`HOUSE.md`** behind
 that link, deliberately: it is large, it is needed only once you are already doing the thing, and importing it
 would spend context on emulator recipes in every session. `HOUSE.rules.md` is also **layer-gated** — a
-non-Angular repo is not handed the redesign directive, and a non-web repo is not told which port not to bind.
+repo with no UI is not handed the redesign directive, and only a repo whose stack has well-known ports
+(Angular's `4200`, Firebase's emulators) is told their numbers — every other repo gets the generic rule.
 
 **Existing projects** that install the plugins should paste the canonical directives below into their
 `CLAUDE.md` (or run `/sync` and let the scaffolder generate both files), so the mindset, the rule, the

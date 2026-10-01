@@ -27,5 +27,18 @@ export const angular: LayerDescriptor = {
     // The Angular CLI MCP server + the Angular agent skills' gitignore rule.
     workspace: [{ generator: 'angular-ai' }],
   },
-  docSections: ['angular'],
+  docSections: ['angular', 'ui', 'monorepo'],
+  devcontainer: {
+    extensions: ['Angular.ng-template'],
+    ports: [{ port: 4200, label: 'Angular Dev Server', onAutoForward: 'openPreview' }],
+    mounts: [
+      {
+        mount: 'source=${localWorkspaceFolderBasename}-angular,target=${containerWorkspaceFolder}/.angular,type=volume',
+        why: "The Angular build cache on a volume (machine-local; never on the bind mount).",
+      },
+    ],
+    postCreate: [{ phase: 'provision', piece: 'angular-skills' }],
+  },
+  // The Angular-only skills (angular-architecture, angular-native-wrappers) — "something to wear".
+  claudePlugins: ['bespunky-angular@claude-toolkit'],
 };

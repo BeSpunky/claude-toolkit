@@ -14,5 +14,5 @@ export const js: LayerDescriptor = {
   ensurable: { scaffold: false, sync: false },
   ensureHint: '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular`)',
   brings: 'the publishable-library and tool-extraction conventions in HOUSE.md',
-  docSections: ['js'],
+  docSections: ['js', 'monorepo'],
 };
