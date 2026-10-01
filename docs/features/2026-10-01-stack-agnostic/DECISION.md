@@ -1,5 +1,15 @@
 # Stack-agnostic toolkit — design (PROPOSED, awaiting confirmation)
 
+## Revision 1 — 2026-10-01: Nx stays the floor
+> "Let's keep Nx as a base assumption. If it's not there, we require/install/init it" — the user
+
+Asked first whether Nx supports Go/Python (it does: language-agnostic task core; official Gradle/Maven/.NET plugins; community Go/Python/Rust plugins; `nx init` can install via the `.nx/installation` wrapper with no root `package.json`).
+
+This **supersedes the "Runtime ≠ stack" concept below**: no toolkit-hosted runner, no in-house migration ladder — `nx g` and native `nx migrate` stay. What changes instead:
+- **Nx is the always-ensured floor.** A sync on a repo without `nx.json` inits Nx rather than refusing; every layer *above* the floor stays opt-in (`--ensure`). This amends "a sync ensures nothing by default" to "a sync ensures nothing *above the Nx floor*".
+- **Nx ≠ Node project.** Open for phase 1: in a non-JS repo, prefer the Nx wrapper (`.nx/installation`) over seeding a root `package.json` + lockfile, if `@bespunky/nx-tools`' exact pin, the probe, and `nx migrate` all work through it — to be verified, not assumed.
+- Phase 1 therefore becomes: **Nx floor auto-init + open layer registry as the single source of truth** (scaffold.sh, hook, house-doc flags all read it). Everything else — the capability/adapter split, the dev-process contract, devcontainer fragments, gated docs, skills — stands, now on an Nx floor. The `node` layer in the re-cut graph is no longer a prerequisite of `nx`; it means "this project is a JS/TS project".
+
 Evidence: `research/01..04`. Brief: `BRIEF.md`.
 
 ## What the audit found
