@@ -132,7 +132,7 @@ fi
 # required. We install it via apt — Debian's package mirrors are reliable and
 # don't depend on the build phase reaching github.com (which the SDKMAN-based
 # `ghcr.io/devcontainers/features/java` feature does, intermittently failing
-# under quirky WSL+Docker network paths).
+# under quirky Docker network paths).
 #
 # We also install a /etc/profile.d sourcer for the self-extinguishing Firebase
 # welcome banner (tools/firebase-welcome.sh in the workspace), so every login
@@ -174,7 +174,7 @@ if grep -q '"@playwright/test"' package.json 2>/dev/null; then
     echo "[post-create] reclaiming /home/node/.cache/ms-playwright volume ownership for node user"
     sudo chown -R node:node /home/node/.cache/ms-playwright
   fi
-  # The browser binary is a large download from cdn.playwright.dev. WSL+Docker DNS is
+  # The browser binary is a large download from cdn.playwright.dev. Docker DNS is
   # intermittently flaky (getaddrinfo ENOTFOUND on an otherwise-working network — apt and the
   # rest of post-create succeed, then this one host fails to resolve), and Playwright's own
   # retries fire too fast to outlast the blip. Without this, a single hiccup would abort the
@@ -186,7 +186,7 @@ if grep -q '"@playwright/test"' package.json 2>/dev/null; then
   for attempt in 1 2 3; do
     if $PM_EXEC playwright install --with-deps chromium; then pw_ok=1; break; fi
     if [ "$attempt" -lt 3 ]; then
-      echo "[post-create] Playwright browser install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+      echo "[post-create] Playwright browser install attempt $attempt/3 failed (often transient Docker DNS); retrying in $((attempt * 10))s..."
       sleep $((attempt * 10))
     fi
   done
@@ -254,7 +254,7 @@ fi
 #
 # UNCONDITIONAL by design: this fires on every scaffold — it is NOT gated on --firebase,
 # @playwright/test, or any other flag (unlike steps 3–5). Best-effort with retry: apt mirrors
-# and cdn.playwright.dev are both occasionally flaky over WSL+Docker DNS, so a transient
+# and cdn.playwright.dev are both occasionally flaky over Docker DNS, so a transient
 # failure must only WARN — never abort post-create (set -e) and leave the container
 # half-provisioned (same stance as the Playwright and Angular-skills steps above).
 #
@@ -304,7 +304,7 @@ for attempt in 1 2 3; do
     floor_apt_ok=1; break
   fi
   if [ "$attempt" -lt 3 ]; then
-    echo "[post-create] OS floor apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+    echo "[post-create] OS floor apt install attempt $attempt/3 failed (often transient Docker DNS); retrying in $((attempt * 10))s..."
     sleep $((attempt * 10))
   fi
 done
@@ -352,28 +352,30 @@ else
   fi
 fi
 
-# --- 7. Voice prerequisites (auto-detected via the WSLg audio bridge) ---
-# The bespunky-voice plugin speaks (TTS) and listens (STT) through a PulseAudio sink.
-# Voice is OPT-IN (scaffold with --voice): the devcontainer generator bridges WSL2's
-# WSLg PulseServer (remoteEnv PULSE_SERVER + the /mnt/wslg mount) ONLY when voice was
-# requested — /mnt/wslg is WSL-specific, so binding it unconditionally would break
-# non-WSL hosts (macOS, Codespaces). So this step self-adapts on that bridge's PRESENCE:
-# /mnt/wslg exists in the container IFF --voice put the mount there. When it does, install
-# the free espeak-ng TTS floor (+ pulseaudio-utils for `paplay`) and pre-install the plugin,
-# so `/voice` speaks the moment the container opens. Piper (the natural-voice upgrade) stays
-# a manual, machine-local opt-in via the plugin's install-piper.sh — same stance as the
-# claude-toolkit repo's own devcontainer. Best-effort + retry: a transient apt blip only
-# warns, never aborts post-create (set -e) and leaves the container half-provisioned
-# (same stance as the Playwright, Angular-skills and OS-floor steps above).
-if [ -d /mnt/wslg ]; then
-  echo "[post-create] WSLg audio bridge detected (--voice) — provisioning bespunky-voice (espeak-ng + pulseaudio-utils)"
+# --- 7. Voice prerequisites (auto-detected via the host audio bridge) ---
+# The bespunky-voice plugin speaks (TTS) and listens (STT) through a PulseAudio-protocol socket.
+# Voice is OPT-IN (scaffold with --voice): only then does the devcontainer carry the host probe
+# (initializeCommand) and the bind mount that lands the host's socket folder at ONE fixed
+# endpoint, /run/bespunky/host/pulse/ — WSLg, native PulseAudio and PipeWire's pulse shim alike.
+# On a host with no audio the probe mounts an empty dir instead, so the container still opens.
+# So this step self-adapts on what actually ARRIVED: a socket in that folder means there is a
+# speaker + mic to reach. When there is, install the free espeak-ng TTS floor (+ pulseaudio-utils
+# for `paplay`) and pre-install the plugin, so `/voice` speaks the moment the container opens.
+# Piper (the natural-voice upgrade) stays a manual, machine-local opt-in via the plugin's
+# install-piper.sh — same stance as the claude-toolkit repo's own devcontainer. Best-effort +
+# retry: a transient apt blip only warns, never aborts post-create (set -e) and leaves the
+# container half-provisioned (same stance as the Playwright, Angular-skills and OS-floor steps).
+# (`find -type s` rather than one fixed name: WSLg's own socket is called `PulseServer`, the
+# others `native`. pactl isn't installed yet — this step installs it — so it can't be the probe.)
+if [ -n "$(find /run/bespunky/host/pulse/ -maxdepth 1 -type s 2>/dev/null | head -n 1)" ]; then
+  echo "[post-create] host audio socket detected (--voice) — provisioning bespunky-voice (espeak-ng + pulseaudio-utils)"
   voice_apt_ok=0
   for attempt in 1 2 3; do
     if sudo apt-get update && sudo apt-get install -y pulseaudio-utils espeak-ng; then
       voice_apt_ok=1; break
     fi
     if [ "$attempt" -lt 3 ]; then
-      echo "[post-create] voice apt install attempt $attempt/3 failed (often transient WSL/Docker DNS); retrying in $((attempt * 10))s..."
+      echo "[post-create] voice apt install attempt $attempt/3 failed (often transient Docker DNS); retrying in $((attempt * 10))s..."
       sleep $((attempt * 10))
     fi
   done
@@ -387,7 +389,7 @@ if [ -d /mnt/wslg ]; then
   # Pre-install the voice plugin at project scope so /voice is live on open. Best-effort:
   # the marketplace was added in step 2; if that was offline, .claude/settings.json offers
   # install on first run. (The other house plugins are pre-installed unconditionally in
-  # step 2; bespunky-voice is gated here because without this WSLg bridge it can't play audio.)
+  # step 2; bespunky-voice is gated here because without a host audio socket it can't play audio.)
   if claude plugin install bespunky-voice@claude-toolkit --scope project; then
     echo "[post-create] bespunky-voice plugin installed at project scope"
   else
