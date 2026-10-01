@@ -16,7 +16,7 @@
 #      rather than degrading in silence.
 #   5. A container never releases a claim for a port it is serving on.
 #
-# The in-process half of this suite (tools/shared-browser/port-claim.test.mjs in a scaffolded project,
+# The in-process half of this suite (tools/port-claim/port-claim.test.mjs in a scaffolded project,
 # `node --test`) covers the race with real concurrent processes. THIS script covers what that cannot: a
 # real shared docker volume, real separate containers, real container identities.
 #
@@ -32,7 +32,7 @@ KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TPL="$REPO_ROOT/plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/shared-browser/port-claim.mjs.tpl"
+TPL="$REPO_ROOT/plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/port-claim/port-claim.mjs.tpl"
 
 pass=0; fail=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$*"; pass=$((pass+1)); }
