@@ -112,9 +112,7 @@ For the full architecture (registry shape, what belongs on the bus vs in the com
 
 `{{SERVE}} <app>` is the one command for local dev — the house's **stack-free dev engine** (`tools/dev/dev`{{#nx-serve}}, which `{{NX}} serve` wraps through the **`@bespunky/nx-tools:serve`** executor{{/nx-serve}}). What it serves is DATA — **`.bespunky/dev.json`**, each app's processes and the ports they occupy — and it runs them in parallel under one Ctrl+C:
 
-{{#angular}}- the **app dev-server** (the `dev-server` target → `@angular/build:dev-server`, host `0.0.0.0`), and
-{{/angular}}{{^angular}}- the app's **declared processes** (`.bespunky/dev.json` → `apps.<app>.processes` — edit it to change what runs; every declared port shifts by the same offset), and
-{{/angular}}
+{{#angular}}- the **app dev-server** (the `dev-server` target → `@angular/build:dev-server`, host `0.0.0.0`), and{{/angular}}{{^angular}}- the app's **declared processes** (`.bespunky/dev.json` → `apps.<app>.processes` — edit it to change what runs; every declared port shifts by the same offset), and{{/angular}}
 - the **shared co-driven browser** — a real Chromium *inside the container* that it brings up and navigates to your app, so you and Claude watch and drive the same instance together{{#firebase}}, and
 - the **Firebase emulator suite** (this is a Firebase workspace — see below){{/firebase}}.
 

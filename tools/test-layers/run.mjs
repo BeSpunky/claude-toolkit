@@ -440,6 +440,7 @@ checkAsync('an Nx app wired to the house serve executor: HOUSE.md serves through
   ok(a.house.includes('`yarn nx serve <app>` is the one command') && a.house.includes('http://localhost:4200'), 'nx serve + the Angular base port');
   ok(a.house.includes('yarn nx serve <app> --no-emulators'), 'the Nx face keeps --no-emulators');
   ok(!a.house.includes('tools/dev/dev serve <app> --'), 'engine commands rendered where the Nx face exists');
+  ok(/, and\n- the \*\*shared co-driven browser/.test(a.house), 'the serve list is one list (no blank line left by a removed block)');
 });
 
 checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no web floor', async (ok) => {
