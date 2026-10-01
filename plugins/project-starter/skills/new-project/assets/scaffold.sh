@@ -518,59 +518,6 @@ if [ "$MODE" = "scaffold" ]; then
   done
   [ -n "$_added" ] && echo "Also ensuring what those layers require:$_added"
 fi
-# One spelling of the set from here on: registry order, each layer once.
-_ordered=""
-for _l in $(printf '%s' "$HOUSE_LAYERS" | tr ',' ' '); do
-  _layer_listed "$_l" "$ENSURE_LAYERS" && _ordered="${_ordered:+$_ordered,}$_l"
-done
-ENSURE_LAYERS="$_ordered"
-for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
-  if [ "$MODE" = "scaffold" ]; then _ens="$(house_layer_ensurable_scaffold "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SCAFFOLD"
-  else _ens="$(house_layer_ensurable_sync "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SYNC"; fi
-  case "$_ens" in
-    yes) ;;
-    via:*)
-      _via="${_ens#via:}"
-      _layer_listed "$_via" "$ENSURE_LAYERS" || {
-        echo "ERROR: a $MODE can ensure the '$_l' layer only together with '$_via', whose creation produces it." >&2
-        echo "       Add it: --ensure=$ENSURE_LAYERS,$_via" >&2
-        exit 1; } ;;
-    *)
-      if [ "$MODE" = "scaffold" ]; then
-        echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
-        echo "       Scaffold the project, then add it with its own tooling:" >&2
-      else
-        echo "ERROR: --sync cannot ENSURE the '$_l' layer — it can only refresh a layer that is already there." >&2
-        echo "       A sync brings house tooling up to date; it does not add a framework to your project." >&2
-        echo "       Add the layer with its own tooling, then re-run --sync and it will be DETECTED:" >&2
-      fi
-      echo "         $(house_layer_hint "$_l")" >&2
-      echo "       Ensurable by a $MODE: $_ensurable" >&2
-      exit 1 ;;
-  esac
-done
-[ -n "$PRESET" ] && echo "Preset: $PRESET — $(house_preset_title "$PRESET")"
-[ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
-
-# --- the FIRST APP: only a layer whose stack creates apps makes one ------------------------------------------
-# Derived from the registry projection (house_layer_app_stack: the stack adapter with an `apps` port for that
-# layer), never from a layer name here. A scaffold that ensures no such layer creates no app — and an app name on
-# the command line is then refused rather than silently ignored: it would read as if something used it.
-APP_STACK=""
-for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
-  _s="$(house_layer_app_stack "$_l")"
-  [ -n "$_s" ] && { APP_STACK="$_s"; break; }
-done
-if [ "$MODE" = "scaffold" ] && [ -n "$APP_ARG" ] && [ -z "$APP_STACK" ]; then
-  echo "ERROR: an app name ('$APP_ARG') was given, but nothing this scaffold ensures creates an app" >&2
-  echo "       (layers: $ENSURE_LAYERS). Ask for a stack that does, e.g.:  scaffold.sh --preset=angular $PROJECT $APP_ARG" >&2
-  exit 1
-fi
-
-# --- resolve the package manager + the three commands the rendered sequences use -------------------------------
-# Scaffold sets the house standard (it is creating the project); sync adopts whatever the project already
-# uses. Everything downstream goes through these three variables, so a new package manager is one case here
-# rather than twenty call sites.
 # --- how does this project HOST Nx? ----------------------------------------------------------------------------
 # Nx is the floor under every house run, but "has Nx" must not mean "is a Node project". Two hosting models:
 #
@@ -597,6 +544,63 @@ if [ "$MODE" = "sync" ]; then
 elif ! _layer_listed node "$ENSURE_LAYERS"; then
   HOST="wrapper"
 fi
+
+# One spelling of the set from here on: registry order, each layer once.
+_ordered=""
+for _l in $(printf '%s' "$HOUSE_LAYERS" | tr ',' ' '); do
+  _layer_listed "$_l" "$ENSURE_LAYERS" && _ordered="${_ordered:+$_ordered,}$_l"
+done
+ENSURE_LAYERS="$_ordered"
+for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+  if [ "$MODE" = "scaffold" ]; then _ens="$(house_layer_ensurable_scaffold "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SCAFFOLD"
+  else _ens="$(house_layer_ensurable_sync "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SYNC"; fi
+  case "$_ens" in
+    yes) ;;
+    via:*)
+      _via="${_ens#via:}"
+      _layer_listed "$_via" "$ENSURE_LAYERS" || {
+        echo "ERROR: a $MODE can ensure the '$_l' layer only together with '$_via', whose creation produces it." >&2
+        echo "       Add it: --ensure=$ENSURE_LAYERS,$_via" >&2
+        exit 1; } ;;
+    *)
+      if [ "$MODE" = "scaffold" ]; then
+        echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
+        echo "       Scaffold the project, then add it with its own tooling:" >&2
+      else
+        echo "ERROR: --sync cannot ENSURE the '$_l' layer — it can only refresh a layer that is already there." >&2
+        echo "       A sync brings house tooling up to date; it does not add a framework to your project." >&2
+        echo "       Add the layer with its own tooling, then re-run --sync and it will be DETECTED:" >&2
+      fi
+      # The hint is written host-neutrally (`nx …`); spell it the way THIS repo runs Nx — `./nx` on a wrapper host.
+      _hint="$(house_layer_hint "$_l")"
+      [ "$HOST" = "wrapper" ] && _hint="$(printf '%s' "$_hint" | sed 's/`nx /`.\/nx /g')"
+      echo "         $_hint" >&2
+      echo "       Ensurable by a $MODE: $_ensurable" >&2
+      exit 1 ;;
+  esac
+done
+[ -n "$PRESET" ] && echo "Preset: $PRESET — $(house_preset_title "$PRESET")"
+[ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
+
+# --- the FIRST APP: only a layer whose stack creates apps makes one ------------------------------------------
+# Derived from the registry projection (house_layer_app_stack: the stack adapter with an `apps` port for that
+# layer), never from a layer name here. A scaffold that ensures no such layer creates no app — and an app name on
+# the command line is then refused rather than silently ignored: it would read as if something used it.
+APP_STACK=""
+for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+  _s="$(house_layer_app_stack "$_l")"
+  [ -n "$_s" ] && { APP_STACK="$_s"; break; }
+done
+if [ "$MODE" = "scaffold" ] && [ -n "$APP_ARG" ] && [ -z "$APP_STACK" ]; then
+  echo "ERROR: an app name ('$APP_ARG') was given, but nothing this scaffold ensures creates an app" >&2
+  echo "       (layers: $ENSURE_LAYERS). Ask for a stack that does, e.g.:  scaffold.sh --preset=angular $PROJECT $APP_ARG" >&2
+  exit 1
+fi
+
+# --- resolve the package manager + the three commands the rendered sequences use -------------------------------
+# Scaffold sets the house standard (it is creating the project); sync adopts whatever the project already
+# uses. Everything downstream goes through these three variables, so a new package manager is one case here
+# rather than twenty call sites.
 
 if [ "$HOST" = "node" ] && [ "$MODE" = "scaffold" ]; then
   PM="yarn"; PM_SOURCE="house-default"
@@ -2096,5 +2100,20 @@ fi
 if [ "$MODE" = "scaffold" ]; then
   echo "SCAFFOLD_OK $TARGET ($RUNTIME_DESC layers=$ENSURE_LAYERS host=$HOST${APP_STACK:+ app=apps/$APP} voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
 else
-  echo "SYNC_OK $TARGET ($RUNTIME_DESC app=apps/$APP firebase=$FIREBASE voice=$VOICE backup=$BACKUP_REF)"
+  # THE SUMMARY STATES WHAT THE PROJECT IS NOW, read back from the project — never the run's own inputs. It used
+  # to echo them: `app=apps/<repo>` was the DEFAULT app name, printed for a repo that has no app at all, and
+  # `firebase=0` was "--firebase was not passed", printed for a project whose Firebase layer the sync had just
+  # detected and synced. So: the layer set house-doc STAMPED (the final, detected one — firebase included when
+  # present), and the app only when it exists (by directory, or by an apps/*/project.json naming it).
+  _final_layers="$(grep -o '@bespunky/house-tooling:stamp[^>]*' "$TARGET/HOUSE.md" 2>/dev/null | head -1 \
+    | grep -o 'layers=[a-z0-9,-]*' | head -1 | cut -d= -f2)"
+  _app_dir=""
+  if [ -d "$TARGET/apps/$APP" ]; then
+    _app_dir="apps/$APP"
+  else
+    for _pj in "$TARGET"/apps/*/project.json; do
+      [ -f "$_pj" ] && grep -qE "\"name\"[[:space:]]*:[[:space:]]*\"$APP\"" "$_pj" && { _app_dir="${_pj#"$TARGET"/}"; _app_dir="${_app_dir%/project.json}"; break; }
+    done
+  fi
+  echo "SYNC_OK $TARGET ($RUNTIME_DESC layers=${_final_layers:-unknown}${_app_dir:+ app=$_app_dir} voice=$VOICE backup=$BACKUP_REF)"
 fi

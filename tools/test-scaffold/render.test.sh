@@ -293,6 +293,13 @@ if printf '%s\n' "$_prog" | grep -q 'useDotNxInstallation=true' && ! printf '%s\
 else
   fail "wrapper host renders a Node-project install"
 fi
+# A refusal's hint is a command the user will paste: on a wrapper host Nx is `./nx`, and a bare `nx add …` fails.
+_err="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=angular "$FIXW" 2>&1 >/dev/null)"
+if printf '%s\n' "$_err" | grep -q '`./nx add @nx/angular`' && ! printf '%s\n' "$_err" | grep -q '`nx add'; then
+  ok "wrapper host: the not-sync-ensurable hint says ./nx"
+else
+  fail "wrapper host: the not-sync-ensurable hint does not say ./nx:"; printf '%s\n' "$_err" | sed 's/^/         | /'
+fi
 
 if [ "$FAILED" -eq 0 ]; then
   echo "scaffold.sh renders cleanly in every mode"

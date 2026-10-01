@@ -680,6 +680,20 @@ checkAsync('a first scaffold: the Firebase core, arriving after the web seeding,
   ok(after.apps.shop.processes.some((p) => p.id === 'emulators'), `emulators not declared: ${JSON.stringify(after.apps.shop.processes.map((p) => p.id))}`);
 });
 
+// App Hosting builds and serves a WEB app: a core-only repo (functions + emulators) must not be handed its config.
+checkAsync('apphosting.yaml is seeded only with a client app — and then once, never clobbered', async (ok) => {
+  const core = createTreeWithEmptyWorkspace();
+  writeJson(core, 'package.json', { name: 'api', devDependencies: { nx: '23.2.1' } });
+  await generator('firebase-emulators')(core, { staging: true });
+  ok(!core.exists('apphosting.yaml') && !core.exists('apphosting.staging.yaml'), 'core-only: App Hosting config seeded with no web app');
+  const shop = angularShop();
+  await generator('firebase-emulators')(shop, { project: 'shop' });
+  ok(shop.exists('apphosting.yaml'), 'client app: apphosting.yaml not seeded');
+  shop.write('apphosting.yaml', '# mine\n');
+  await generator('firebase-emulators')(shop, {});
+  ok(shop.read('apphosting.yaml', 'utf8') === '# mine\n', 'a re-run clobbered the seeded apphosting.yaml');
+});
+
 checkAsync('firebase core on an old-shaped eslint.config.mjs (no trailing comma): a well-formed splice, idempotent', async (ok) => {
   const tree = createTreeWithEmptyWorkspace();
   writeJson(tree, 'package.json', { name: 'shop', devDependencies: { nx: '23.2.1' } });

@@ -1,6 +1,6 @@
 // `firebase` — the emulator suite, Cloud Functions, App Hosting config, env bundles, devcontainer wiring.
 //
-// A CAPABILITY on the Nx floor, not an Angular feature. firebase.json, apphosting.yaml, the emulator/seed/secrets
+// A CAPABILITY on the Nx floor, not an Angular feature. firebase.json, the emulator/seed/secrets
 // scripts, apps/functions and the workspace `firebase` project are framework-neutral — the `firebase-emulators`
 // core, a WORKSPACE step. Only the client wiring is framework-specific, and it attaches PER APP through the app's
 // stack adapter (`firebase-client`, src/adapters/<stack>/firebase-client.ts). A repo with no frontend at all gets

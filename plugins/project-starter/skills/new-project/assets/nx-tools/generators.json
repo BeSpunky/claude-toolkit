@@ -44,7 +44,7 @@
     "firebase-emulators": {
       "factory": "./src/generators/firebase-emulators/generator",
       "schema": "./src/generators/firebase-emulators/schema.json",
-      "description": "The Firebase CORE, framework-neutral (needs only the Nx floor): firebase.json (emulator suite + functions source, singleProjectMode; never .firebaserc), apphosting.yaml, the emulator/seed/secrets tooling under tools/, Cloud Functions as the apps/functions Nx app, the workspace-level `firebase` emulator project, the .gitignore entries and the platform: ESLint firewall. --project=<app> additionally attaches the Firebase client to that app (via firebase-client), so one command still retrofits Firebase onto an app."
+      "description": "The Firebase CORE, framework-neutral (needs only the Nx floor): firebase.json (emulator suite + functions source, singleProjectMode; never .firebaserc), apphosting.yaml (only with a client app — App Hosting serves a web app), the emulator/seed/secrets tooling under tools/, Cloud Functions as the apps/functions Nx app, the workspace-level `firebase` emulator project, the .gitignore entries and the platform: ESLint firewall. --project=<app> additionally attaches the Firebase client to that app (via firebase-client), so one command still retrofits Firebase onto an app."
     },
     "firebase-client": {
       "factory": "./src/generators/firebase-client/generator",

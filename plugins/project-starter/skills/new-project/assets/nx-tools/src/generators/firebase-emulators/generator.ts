@@ -30,7 +30,9 @@
 //                        fatally abort. The generator asserts the `emulators` + `functions` keys
 //                        and preserves any other top-level keys the user added. NO top-level `hosting`
 //                        block — the BeSpunky default is Firebase App Hosting, configured in apphosting.yaml.
-//   - apphosting.yaml (+ apphosting.staging.yaml with --staging and a client app) — written only if absent.
+//   - apphosting.yaml (+ apphosting.staging.yaml with --staging) — only with a client app, and only if absent:
+//                        App Hosting builds and serves a web app, so a core-only repo (functions + emulators)
+//                        has nothing for it to deploy. A later sync seeds it once a client app is wired.
 //   - .gitignore        — emulator debug logs, the working data dirs, apps/functions/.secret.local.
 //   - apps/functions/   — Cloud Functions as a first-class Nx app: esbuild-bundled to dist/apps/functions with a
 //                        generated deploy-manifest package.json; runtime deps at the WORKSPACE ROOT. Source
@@ -173,15 +175,16 @@ export default async function firebaseEmulatorsGenerator(
   firebaseJson.functions = canonicalFunctionsBlock(lint);
   writeJson(tree, 'firebase.json', firebaseJson);
 
-  // 1b) App Hosting's deploy config — never clobbered. The staging override builds the client app's `staging`
-  //     configuration, so it needs one; without a client app there is nothing for it to name.
-  if (!tree.exists('apphosting.yaml')) tree.write('apphosting.yaml', template('apphosting.yaml.tpl'));
-  if (options.staging && !tree.exists('apphosting.staging.yaml')) {
-    if (clientApp) {
+  // 1b) App Hosting's deploy config — seeded, never clobbered, and only for a CLIENT APP: App Hosting builds and
+  //     serves a web app, so without one there is nothing for it to deploy (and the staging override, which
+  //     builds the client app's `staging` configuration, nothing to name). Functions deploy without it.
+  if (clientApp) {
+    if (!tree.exists('apphosting.yaml')) tree.write('apphosting.yaml', template('apphosting.yaml.tpl'));
+    if (options.staging && !tree.exists('apphosting.staging.yaml')) {
       tree.write('apphosting.staging.yaml', template('apphosting.staging.yaml.tpl').split('{{projectName}}').join(clientApp));
-    } else {
-      logger.warn('[firebase-emulators] --staging: no client app to build, so apphosting.staging.yaml was not written.');
     }
+  } else if (options.staging) {
+    logger.warn('[firebase-emulators] --staging: no client app to build, so apphosting.staging.yaml was not written.');
   }
 
   // 1c) .gitignore — the emulator block, then the secrets block under its own marker (so a project already past
