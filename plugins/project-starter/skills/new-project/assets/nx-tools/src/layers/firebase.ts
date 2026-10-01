@@ -69,6 +69,10 @@ export const firebase: LayerDescriptor = {
     ],
   },
   docSections: ['firebase'],
+  // The Cloud Functions bundle lands in `dist/apps/functions`. create-nx-workspace ignores `/dist`; `nx init` on an
+  // existing repo does not — and this layer brings that build, so it owns ignoring its output, or the first
+  // `nx build functions` leaves an untracked tree behind.
+  gitignore: [{ heading: 'Build output (Nx writes builds to dist/)', entries: ['/dist'] }],
   devcontainer: {
     features: [{ id: 'ghcr.io/devcontainers-extra/features/firebase-cli' }, { id: 'ghcr.io/jajera/features/gcloud-cli' }],
     extensions: ['toba.vsfire'],

@@ -443,6 +443,23 @@ checkAsync('an Nx app wired to the house serve executor: HOUSE.md serves through
   ok(/, and\n- the \*\*shared co-driven browser/.test(a.house), 'the serve list is one list (no blank line left by a removed block)');
 });
 
+checkAsync('a build-bringing layer on an nx-init repo (firebase, no create-nx-workspace .gitignore): /dist is ignored, once', async (ok) => {
+  const tree = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
+  tree.write('.gitignore', 'node_modules\n');
+  await artifacts(tree, [...registry.detectLayers(tree), 'agent']);
+  await generator('claude-settings')(tree, { layers: [...registry.detectLayers(tree), 'agent'] });
+  const lines = (tree.read('.gitignore', 'utf8') ?? '').split('\n');
+  ok(lines.filter((l) => l === '/dist').length === 1, `/dist ignored exactly once: ${JSON.stringify(lines)}`);
+});
+
+checkAsync('firebase core without Angular (no served app): HOUSE.md documents the core, not the Angular client', async (ok) => {
+  const tree = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
+  const a = await artifacts(tree, [...registry.detectLayers(tree), 'agent']);
+  ok(a.house.includes('## Firebase') && a.house.includes('run firebase:emulators') && a.house.includes('### Cloud Functions'), 'the Firebase core is documented');
+  const wrong = a.house.split('\n').filter((l) => /environment\.ts|environment\.prod\.ts|provideApp|proxy\.conf|app\.config\.ts|@angular\/(fire|build)|4200|tools\/dev\/dev serve|nx serve|\{\{/.test(l));
+  ok(wrong.length === 0, `Angular-client / dev-loop docs in a core-only Firebase project: ${wrong.map((l) => l.slice(0, 120)).join(' || ')}`);
+});
+
 checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no web floor', async (ok) => {
   const tree = createTreeWithEmptyWorkspace();
   tree.write('package-lock.json', '{}');
