@@ -23,6 +23,10 @@ case "$STALE_DAYS" in '' | *[!0-9]*) STALE_DAYS=14 ;; esac
 
 # A git repo with a feature-package convention, or there's nothing to reason about.
 git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+
+# Legacy snooze location (see the snooze section below). Removed HERE, before any early exit: the dormancy checks
+# exit on every active session, so cleanup placed after them would wait for the next dormant stretch to run.
+rm -f "$PROJECT_DIR/.claude/.standing-snooze" 2>/dev/null || true
 FEATURES="$PROJECT_DIR/docs/features"
 [ -d "$FEATURES" ] || exit 0
 
@@ -76,8 +80,7 @@ done
 # git dir: local to this clone by construction (one person's "seen it" must not silence teammates), and never a
 # candidate for a commit — so no project needs a .gitignore line for it. It used to live at .claude/.standing-snooze,
 # which nothing ignored, so it surfaced as an untracked file in every project the plugin ran in; that copy is
-# removed below.
-rm -f "$PROJECT_DIR/.claude/.standing-snooze" 2>/dev/null || true
+# removed near the top of this script.
 SNOOZE="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-path bespunky-standing-snooze 2>/dev/null || true)"
 if [ -n "$SNOOZE" ]; then
   if [ -f "$SNOOZE" ] && [ "$(cat "$SNOOZE" 2>/dev/null)" = "$last_commit" ]; then
