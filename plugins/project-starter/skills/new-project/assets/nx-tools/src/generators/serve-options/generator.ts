@@ -3,7 +3,7 @@
 //
 // Sets `host: '0.0.0.0'` so the dev server is reachable from outside the devcontainer.
 // Polling is NOT set here. Modern Angular's `@angular/build:dev-server` schema does not accept `poll`;
-// reliable file-watching over WSL/Docker mounts is enabled via env vars
+// reliable file-watching over Docker bind mounts is enabled via env vars
 // (CHOKIDAR_USEPOLLING + CHOKIDAR_INTERVAL) set on the devcontainer (see the devcontainer generator),
 // which is respected by any chokidar-based watcher across both old and new Angular builders.
 //

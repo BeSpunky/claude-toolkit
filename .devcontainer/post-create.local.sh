@@ -23,8 +23,8 @@ if [ -d /home/node/.claude ] && [ "$(stat -c %U /home/node/.claude)" != "node" ]
 fi
 
 # --- Audio toolset (voice-plugin spike + bespunky-voice) ---
-# WSLg audio is bridged in via devcontainer.json (PULSE_SERVER + the /mnt/wslg mount). The house script
-# installs espeak-ng + pulseaudio-utils when it sees that bridge; this adds the two tools it doesn't —
+# Host audio is bridged in via devcontainer.json (the host probe + the /run/bespunky/host/pulse mount). The
+# house script installs espeak-ng + pulseaudio-utils when a socket arrives there; this adds the two tools it doesn't —
 # `alsa-utils` and `sox` — which the audio-boundary spike uses to record and inspect, not merely to speak.
 # Best-effort: an offline rebuild must not fail the build. Verify the bridge with:
 #   bash spikes/voice-audio-boundary/probe-audio.sh

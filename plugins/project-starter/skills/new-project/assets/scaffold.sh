@@ -15,11 +15,13 @@
 #                  generator additionally scaffolds Cloud Functions as an Nx app (apps/functions), the
 #                  workspace-level `firebase` emulator project, and the seed/cache/reset tooling.
 #                  NEVER enabled by default.
-# Voice opt-in   : when --voice is passed, the devcontainer bridges WSL2's WSLg PulseAudio server
-#                  (remoteEnv PULSE_SERVER + the /mnt/wslg bind mount) and post-create.sh self-adapts
-#                  on that mount to install the espeak-ng TTS floor + pulseaudio-utils and pre-install
-#                  the bespunky-voice plugin — so /voice speaks the moment the container opens. WSL-only
-#                  (the /mnt/wslg source is WSL-specific), which is why it's opt-in, not always-on.
+# Voice opt-in   : when --voice is passed, the devcontainer bridges the HOST's audio server — WSLg, or a
+#                  native PulseAudio/PipeWire socket — (a host probe on every open + one bind mount +
+#                  remoteEnv PULSE_SERVER) and post-create.sh self-adapts to a socket being present
+#                  to install the espeak-ng TTS floor + pulseaudio-utils and pre-install the
+#                  bespunky-voice plugin — so /voice speaks the moment the container opens. Opt-in
+#                  because it records the project's INTENT ("this project wants audio"); where the
+#                  socket is stays a per-machine fact, resolved on the host at open time.
 #                  NEVER enabled by default.
 # GitHub repo    : full scaffold creates a PRIVATE GitHub repo via `gh` and pushes to it. This runs
 #                  host-side AFTER the Docker scaffold (gh auth lives on the host, not in the bare base
@@ -97,7 +99,8 @@ Flags must come BEFORE the project path.
                     stack-agnostic DX layer (devcontainer, Claude settings, window identity, HOUSE.md).
   --firebase        Include the Firebase layer (emulator suite, Cloud Functions app, devcontainer wiring).
   --staging         Also scaffold the staging environment bundle. Requires --firebase.
-  --voice           Bridge WSLg audio into the devcontainer and provision bespunky-voice (WSL only).
+  --voice           Bridge the host's audio (WSLg or native PulseAudio/PipeWire) into the devcontainer
+                    and provision bespunky-voice.
   --local           Install @bespunky/nx-tools from the WORKING TREE (npm pack) instead of the registry.
                     For developing the toolkit itself; leaves the project holding an unpublished build.
   --yes, -y         Assert that a human explicitly agreed to this sync, in this conversation. The sync
@@ -116,7 +119,7 @@ USAGE
 
 MODE="scaffold"
 FIREBASE=0
-VOICE=0    # --voice: bridge WSLg audio into the devcontainer + provision bespunky-voice (WSL-only; opt-in).
+VOICE=0    # --voice: bridge the host's audio (WSLg or PulseAudio/PipeWire) into the devcontainer + provision bespunky-voice (opt-in).
 STAGING=0  # --staging: also scaffold a first-class staging environment (requires --firebase).
 GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
 BACKUP=1   # sync snapshots the project to a git tag BEFORE mutating; --no-backup opts out.
@@ -245,6 +248,10 @@ else
 fi
 
 ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Base-image lookup + engine-aware file ownership for the Docker fallback, shared with tools/extract-tool
+# (see the header of container-engine.sh for why it lives beside this script).
+# shellcheck source=container-engine.sh
+. "$ASSETS_DIR/container-engine.sh"
 # Pin the workspace's @bespunky/nx-tools to the SAME version these assets ship (read from
 # the source package.json), so the installed runtime executors can never lag the applied project.json
 # shape — a 0.x MINOR bump (e.g. 0.3→0.4) would otherwise fall outside a hard-coded caret and silently
@@ -601,18 +608,17 @@ else
   docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
   command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
   echo "Resolving latest typescript-node base image..."
-  MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
-    | grep -oE '[0-9]+-bookworm' | sed 's/-bookworm//' | sort -rn | awk '$1>=18' | head -1 || true)"
-  [ -n "${MAJOR:-}" ] || MAJOR=24
-  IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
+  MAJOR="$(base_image_node_major)"
+  IMAGE="$(base_image_for_major "$MAJOR")"
   echo "Base image: $IMAGE"
+  echo "Container engine: $(container_engine_describe)"
   WORK_ROOT="/work"                  # PROJECTS_DIR is mounted here (see docker run -v below)
   ASSETS_ROOT="/assets"              # ASSETS_DIR is mounted here (ro)
   RUNTIME_DESC="image=$IMAGE"
 fi
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
-[ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (WSLg audio bridge + espeak-ng + bespunky-voice plugin — WSL-only)"
+[ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (host audio bridge — WSLg or PulseAudio/PipeWire — + espeak-ng + bespunky-voice plugin)"
 
 # --- devcontainer generator args ---
 # The devcontainer's layer flags have exactly ONE author: DC_LAYER_FLAGS, resolved at run time from
@@ -1398,7 +1404,8 @@ if layer_active agent; then
   if layer_active firebase; then DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --firebase=true\"; else DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --firebase=false\"; fi
   # voice has no layer to detect — nothing it installs leaves a trace in the workspace. Its previous answer
   # lives in the ownership marker the generator itself wrote, so carry that forward rather than silently
-  # revoking it; an explicit --voice on this run still wins.
+  # revoking it; an explicit --voice on this run still wins. That answer is the project's INTENT (\"this project
+  # wants audio\"), host-neutral — where the audio socket lives is resolved per machine when the container opens.
   _dc_voice='$VOICE'
   if [ \"\$_dc_voice\" != '1' ] && [ -f .devcontainer/.bespunky-devcontainer.json ]; then
     grep -q '\"voice\"[[:space:]]*:[[:space:]]*true' .devcontainer/.bespunky-devcontainer.json 2>/dev/null && _dc_voice=1
@@ -1835,25 +1842,21 @@ if [ "$RUNTIME" = "native" ]; then
   # already bound to the real host paths.
   bash -c "$INNER" || INNER_RC=$?
 else
-  docker run --rm \
-    -u "$(id -u):$(id -g)" \
+  container_run_as_host_user \
     -e HOME=/home/node \
     -v "$PROJECTS_DIR":/work -v "$ASSETS_DIR":/assets:ro -w /work \
     "$IMAGE" \
     bash -lc "$INNER" || INNER_RC=$?
 
   # --- normalize ownership back to the invoking host user (Docker path only) ---
-  # Some Docker backends (notably Docker Desktop's WSL2 integration) leave freshly created files
-  # owned by root despite the `-u` flag above, which makes every later host-side operation
-  # (git, yarn, the Claude CLI) fail with permission errors. A throwaway ROOT container hands the
-  # whole project tree back to the host uid:gid — the only context that can chown root-owned files
-  # without host sudo. Idempotent: a no-op when files are already user-owned. Runs before the gh
-  # push so git operations on the tree don't hit permission errors. (The native path never creates
-  # root-owned files, so it needs none of this.)
-  docker run --rm \
-    -v "$PROJECTS_DIR":/work -w /work \
-    "$IMAGE" \
-    chown -R "$(id -u):$(id -g)" "/work/$PROJECT"
+  # On a rootful engine some backends (notably Docker Desktop's WSL2 integration) leave freshly created
+  # files owned by root despite running as the host uid, which makes every later host-side operation
+  # (git, yarn, the Claude CLI) fail with permission errors; a throwaway ROOT container hands the tree
+  # back. On a rootless engine (rootless Docker, Podman) container root already IS the host user, so
+  # this is a no-op — chowning there would hand the tree to a subuid. The engine decides; see
+  # container-engine.sh. Runs before the gh push so git operations on the tree don't hit permission
+  # errors. (The native path never creates foreign-owned files, so it needs none of this.)
+  container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT"
 fi
 
 # --- create + push a private GitHub repo (scaffold mode only; gh auth lives on the host) ---

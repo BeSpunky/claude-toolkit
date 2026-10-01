@@ -35,11 +35,11 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
   ```
   bash ~/.claude/bespunky-voice/listen.sh
   ```
-  It boosts the mic, records until they stop talking, and prints the transcript on
-  stdout. Take that transcript as the user's answer to the question you last asked
-  them, echo it back in one line so they can catch a misrecognition ("You said:
-  …"), and then continue acting on it. If it exits non-zero (nothing recognized, or
-  STT not installed), relay the stderr message and offer to retry — do NOT guess an
+  It sets the mic gain for the resolved audio endpoint, records a short window,
+  and prints the transcript on stdout. Take that transcript as the user's answer
+  to the question you last asked them, echo it back in one line so they can catch a misrecognition ("You said:
+  …"), and then continue acting on it. If it exits non-zero (nothing recognized, STT
+  not installed, or no reachable audio endpoint), relay the stderr message and offer to retry — do NOT guess an
   answer. If speech-to-text isn't installed yet, tell them to run
   `bash ~/.claude/bespunky-voice/install-whisper.sh` once.
 
@@ -49,7 +49,12 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
 
 - **test** — Run
   `bash ~/.claude/bespunky-voice/speak.sh "Voice check. If you can hear this clearly, the voice plugin is working."`
-  and confirm to the user whether it should have played.
+  and confirm to the user whether it should have played. If it fails with "no
+  reachable audio endpoint", relay that diagnosis: voice needs a reachable
+  PulseAudio-protocol sink (WSLg, or the host's native PulseAudio/PipeWire),
+  bridged by the BeSpunky devcontainer.
 
 - **status** — Run `bash ~/.claude/bespunky-voice/voice-auto.sh status` and tell
-  the user whether auto-speak is currently on or off.
+  the user whether auto-speak is currently on or off, which audio endpoint was
+  resolved (and the mic gain it implies) — or, if none was reachable, relay the
+  diagnosis it printed (every endpoint tried, why each failed, and the fix).

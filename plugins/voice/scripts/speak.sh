@@ -18,8 +18,9 @@
 #   3. macOS `say` — the zero-install floor on a Mac (built in; synth + play in one).
 #
 # Playback (for engines 1–2 that produce a WAV): paplay (PulseAudio) → aplay
-# (ALSA) → afplay (macOS). Audio reaches the host via whatever PULSE_SERVER the
-# environment already sets (WSLg here) — deliberately NOT hardcoded, for portability.
+# (ALSA) → afplay (macOS). WHERE the audio goes is resolved by audio-endpoint.sh
+# (a reachable PulseAudio-protocol server — WSLg, or the host's native
+# PulseAudio/PipeWire, bridged by the BeSpunky devcontainer) — never hardcoded here.
 #
 # Runtime deps: one of {piper+voice, espeak-ng, say} for synthesis, and (for the
 # first two) one of {paplay, aplay, afplay} for playback. Missing everything ⇒
@@ -55,8 +56,15 @@ CLEAN="$(printf '%s' "$TEXT" | tr '\n\t' '  ' | sed -E \
   -e 's/ +$//')"
 [ -n "$CLEAN" ] || exit 0
 
-# --- 3. resolve the synthesis engine -----------------------------------------
+# --- 3. resolve the audio endpoint and the synthesis engine ------------------
 VOICE_HOME="${HOME}/.claude/bespunky-voice"
+
+# Sourced from this script's own dir, so it works from the plugin and from the
+# published copy in $VOICE_HOME alike. A miss is NOT fatal here: macOS say/afplay
+# need no PulseAudio — the diagnosis is only printed if playback then fails.
+# shellcheck source=audio-endpoint.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/audio-endpoint.sh"
+voice_resolve_endpoint || true
 
 PIPER_BIN="${BESPUNKY_VOICE_PIPER_BIN:-}"
 [ -z "$PIPER_BIN" ] && command -v piper >/dev/null 2>&1 && PIPER_BIN="$(command -v piper)"
@@ -115,4 +123,11 @@ if [ "$synth_ok" = 0 ]; then
   exit 1
 fi
 
-play "$TMP" || { echo "bespunky-voice: playback failed — is a sink reachable (PULSE_SERVER)?" >&2; exit 1; }
+if ! play "$TMP"; then
+  if [ -n "${VOICE_ENDPOINT_DIAGNOSIS:-}" ]; then
+    echo "$VOICE_ENDPOINT_DIAGNOSIS" >&2
+  else
+    echo "bespunky-voice: playback failed on audio endpoint ${VOICE_ENDPOINT:-?} (via ${VOICE_ENDPOINT_VIA:-?})" >&2
+  fi
+  exit 1
+fi

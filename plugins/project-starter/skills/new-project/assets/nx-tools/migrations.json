@@ -74,6 +74,11 @@
       "version": "0.33.1",
       "description": "Wire the house providers the `app` generator generated files for and then never wired. Composing serve/design-system-styles/firebase-emulators, it passed the baseline `wireProviders` flag to the design-system call ALONE, so every app scaffolded on 0.26.0-0.32.x carries worktree-tab-label.ts and firebase.config.ts on disk with nothing calling either \u2014 Firebase is generated and never initialised, failing at the app's first inject(Auth). Adds each call only where the generated file exists AND nothing in the app already calls it, so a hand-wired or deliberately relocated provider is left alone; reports where the app config's shape is unrecognised.",
       "implementation": "./src/migrations/0.33.1/wire-missing-baseline-providers"
+    },
+    "retire-wslg-audio-bridge": {
+      "version": "0.34.0",
+      "description": "Remove the WSLg-only audio bridge `--voice` wrote into .devcontainer/devcontainer.json \u2014 the `source=/mnt/wslg,target=/mnt/wslg,type=bind` mount and `remoteEnv.PULSE_SERVER: unix:/mnt/wslg/PulseServer`. Docker refuses a bind whose source is missing, so off WSL2 the container did not start; and an adopted devcontainer, merged additively by mount target, would keep the old bind beside the new host-agnostic bridge while the old PULSE_SERVER scalar won. Removes only those exact house values (and the house comments above them) with comment-preserving splices, on owned and adopted devcontainers alike; reports any other WSLg mount or PULSE_SERVER as the project's own. The next sync with voice on adds the new bridge.",
+      "implementation": "./src/migrations/0.34.0/retire-wslg-audio-bridge"
     }
   }
 }

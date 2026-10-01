@@ -21,7 +21,7 @@
 // `design-system-styles` keys off the `type:design-system` tag, and `post-create.sh` keys off `@angular/core`
 // in package.json.
 //
-// WHAT IS NOT A LAYER. Host facts — a WSL audio bridge (`--voice`), a GitHub remote, Docker — describe the
+// WHAT IS NOT A LAYER. Host facts — a host audio bridge (`--voice`), a GitHub remote, Docker — describe the
 // MACHINE, not the project, and are not detectable from a Tree. They stay opt-in flags on scaffold.sh.
 import { type Tree, getProjects, readJson } from '@nx/devkit';
 import { findDesignSystem } from '../generators/_utils/design-system';

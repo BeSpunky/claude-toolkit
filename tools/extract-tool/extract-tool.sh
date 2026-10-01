@@ -16,6 +16,11 @@
 set -euo pipefail
 
 TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Base-image lookup + engine-aware file ownership, shared with scaffold.sh. The helper ships with the
+# project-starter plugin (scaffold.sh runs from the installed plugin, where this repo's tools/ does not
+# exist), so this repo-local tool reaches it by its repo-relative path rather than owning a copy.
+# shellcheck source=../../plugins/project-starter/skills/new-project/assets/container-engine.sh
+. "$TOOL_DIR/../../plugins/project-starter/skills/new-project/assets/container-engine.sh"
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
 
 FROM_INPUT=""
@@ -46,24 +51,18 @@ command -v curl >/dev/null    || { echo "ERROR: curl not found" >&2; exit 1; }
 
 # --- resolve newest typescript-node base image (same source as scaffold.sh) ---
 echo "Resolving latest typescript-node base image..."
-MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
-  | grep -oE '[0-9]+-bookworm' | sed 's/-bookworm//' | sort -rn | awk '$1>=18' | head -1 || true)"
-[ -n "${MAJOR:-}" ] || MAJOR=24
-IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
+IMAGE="$(base_image_for_major "$(base_image_node_major)")"
 echo "Base image: $IMAGE"
+echo "Container engine: $(container_engine_describe)"
 
 # --- run the tool inside the container; ~/projects at /work, the tool dir read-only at /tool ---
-docker run --rm \
-  -u "$(id -u):$(id -g)" \
+container_run_as_host_user \
   -e HOME=/home/node \
   -v "$PROJECTS_DIR":/work -v "$TOOL_DIR":/tool:ro -w /work \
   "$IMAGE" \
   node /tool/extract-tool.mjs --from "/work/$FROM_BASE" --into "/work/$INTO_BASE" "${PASS[@]}"
 
-# --- normalize ownership back to the host user (Docker Desktop/WSL2 can leave root-owned files) ---
-docker run --rm \
-  -v "$PROJECTS_DIR":/work -w /work \
-  "$IMAGE" \
-  chown -R "$(id -u):$(id -g)" "/work/$FROM_BASE" "/work/$INTO_BASE"
+# --- normalize ownership back to the host user (rootful engines only — see container-engine.sh) ---
+container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$FROM_BASE" "/work/$INTO_BASE"
 
 echo "EXTRACT_OK (image=$IMAGE from=$FROM_BASE into=$INTO_BASE)"

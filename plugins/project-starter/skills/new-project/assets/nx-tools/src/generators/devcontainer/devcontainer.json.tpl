@@ -1,8 +1,8 @@
 // BeSpunky-standard devcontainer. Node from the base image; Claude CLI (feature) + Claude VS Code extension.
 //
 // Conditional blocks (`{{#flag}}...{{/flag}}`) are expanded by the devcontainer generator before writing.
-// The flags are LAYERS — `web` (something to serve), `angular`, `firebase` — plus `voice`, the one host
-// axis. Write members naively inside a block and DON'T hand-place commas around it: the generator strips
+// The flags are LAYERS — `web` (something to serve), `angular`, `firebase` — plus `voice`, which asks
+// for an audio bridge (an intent — WHERE the host's audio socket lives is probed per machine at open time). Write members naively inside a block and DON'T hand-place commas around it: the generator strips
 // the commas a removed block orphans and then parses the result, so an unbalanced block is caught at
 // generation time rather than at somebody's next Rebuild Container.
 {
@@ -90,7 +90,18 @@
   // All post-create setup (yarn install, claude-toolkit plugin pre-install, Firebase
   // prerequisites when firebase.json is present) lives in .devcontainer/post-create.sh
   // so this stays a one-liner. The script is self-adapting — no mustache conditional needed.
-  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",{{#voice}}
+  // Runs ON THE HOST before the container is created, on every open: .devcontainer/host-probe.sh finds this
+  // machine's PulseAudio-protocol socket (WSLg, native PulseAudio, PipeWire's pulse shim) and points
+  // .devcontainer/.host/pulse at its folder — or leaves an empty dir there, so the voice mount below can
+  // never fail on a host without audio. It has to be a probe + fixed path rather than a computed mount
+  // source because `${localEnv:…}` is resolved before this command runs. The probe always exits 0.
+  //
+  // The OBJECT form on purpose: its entries are named and run side by side, so a project with its own
+  // initializeCommand keeps it under its own key instead of being displaced by — or displacing — the probe.
+  "initializeCommand": {
+    "bespunky-host-probe": "sh .devcontainer/host-probe.sh"
+  },{{/voice}}
   "remoteUser": "node",
 
 {{#web}}  // `--sysctl`: let the non-root `node` user bind privileged ports — the worktree-domains reverse proxy
@@ -185,13 +196,18 @@
     // No CLAUDE_CODE_BYPASS_ALL_PERMISSIONS here: Claude's permission mode is governed by
     // .claude/settings.json (permissions.defaultMode: "auto"), not a hard bypass override — a
     // bypass env var would win over settings.json and defeat the "auto" default.
-    // Reliable file-watching for chokidar-based watchers over WSL/Docker mounts.
+    // Reliable file-watching for chokidar-based watchers over Docker bind mounts.
     // (Replaces the legacy `poll` option on serve targets, which the modern @angular/build:dev-server schema rejects.)
     "CHOKIDAR_USEPOLLING": "true",
     "CHOKIDAR_INTERVAL": "1000",{{#voice}}
-    // Bridge to WSL2's WSLg PulseAudio server (mounted below) so a process in the container
-    // can reach the real speaker + mic — the sink the bespunky-voice plugin speaks/listens through.
-    "PULSE_SERVER": "unix:/mnt/wslg/PulseServer",{{/voice}}
+    // The host's PulseAudio-protocol socket (WSLg, or native PulseAudio/PipeWire), bridged in by the
+    // mount below at ONE fixed in-container endpoint — so this value is the same constant on every host,
+    // and the bespunky-voice plugin speaks/listens through it. (On a host that only exposes WSLg's
+    // `PulseServer` name the plugin's resolver finds that one beside it.)
+    "PULSE_SERVER": "unix:/run/bespunky/host/pulse/native",
+    // A host FACT passed through, empty off WSL. Read only by the voice plugin to pick its default mic gain
+    // (WSLg's mic is quiet; boosting a native mic would clip) — never as a switch for the bridge itself.
+    "BESPUNKY_HOST_WSL_DISTRO": "${localEnv:WSL_DISTRO_NAME}",{{/voice}}
   },
   "mounts": [
     "source=${localWorkspaceFolder}/.claude/data,target=/home/node/.claude,type=bind,consistency=cached",
@@ -209,10 +225,11 @@
     // port claims — and one engine is exactly one host, i.e. exactly the scope where host ports
     // collide. post-create.sh chowns it to `node` (a fresh named volume is root-owned).
     "source=bespunky-shared-ports,target=/var/opt/bespunky/ports,type=volume",{{/web}}{{#voice}}
-    // WSLg audio (bespunky-voice): exposes the host PulseAudio socket at /mnt/wslg/PulseServer.
-    // WSL-specific — this is why voice is an opt-in flag, not always-on: binding /mnt/wslg on a
-    // non-WSL host (macOS / Codespaces) has no source socket. If the socket is absent after a
-    // rebuild on the Docker Desktop WSL2 backend, swap the source to /run/desktop/mnt/host/wslg.
-    "source=/mnt/wslg,target=/mnt/wslg,type=bind",{{/voice}}
+    // Host audio (bespunky-voice). The source is the FIXED path the host probe (initializeCommand above)
+    // just pointed at this machine's socket folder — a symlink, which a bind mount follows — or an empty
+    // dir when the host has no audio. So the mount is valid on every host; only what it carries varies.
+    // Unverified: Docker Desktop's WSL2 backend resolves bind sources in its own VM, and whether it
+    // follows this symlink has not been tested.
+    "source=${localWorkspaceFolder}/.devcontainer/.host/pulse,target=/run/bespunky/host/pulse,type=bind",{{/voice}}
   ]
 }

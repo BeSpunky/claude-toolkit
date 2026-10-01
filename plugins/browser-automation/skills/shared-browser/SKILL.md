@@ -159,7 +159,7 @@ recorder.mjs
 
 ## Approach A — the real-profile escape hatch (opt-in, not default)
 
-If (and only if) the task **must** use the human's real logged-in profile (their live cookies/sessions on the host browser), Approach A attaches to the *host* browser over CDP instead. It's documented as an opt-in escape hatch, **not the default** — it depends on the WSL→Docker network hop and Chrome's DevTools Host-header guard, needs a host-side launch each session, and is fragile across WSL networking modes. The default (this skill's approach B) uses a **fresh in-container profile** — usually *desirable* for testing, and it carries no host credentials.
+If (and only if) the task **must** use the human's real logged-in profile (their live cookies/sessions on the host browser), Approach A attaches to the *host* browser over CDP instead. It's documented as an opt-in escape hatch, **not the default** — it depends on the host→container network hop (WSL networking modes; on plain Linux, the docker bridge / host-gateway — unverified there) and Chrome's DevTools Host-header guard, and needs a host-side launch each session. The default (this skill's approach B) uses a **fresh in-container profile** — usually *desirable* for testing, and it carries no host credentials.
 
 ## Pitfalls (already fixed in the tooling — recognize them if you port to a new base)
 

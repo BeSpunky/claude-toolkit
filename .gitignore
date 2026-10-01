@@ -19,3 +19,6 @@ node_modules/
 
 # The house sync's transient lock (machine-local; never committed)
 .bespunky-sync.lock/
+
+# Devcontainer host probe — this machine's audio-socket link (machine-local, never shared)
+.devcontainer/.host/

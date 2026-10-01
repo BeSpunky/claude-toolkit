@@ -44,7 +44,7 @@ The fix removes the assumption rather than handling the conflict — the port is
 ### Still open after this change
 
 - **Rejected alternatives**, recorded so this isn't re-litigated: *read the editor's remap* — no in-container surface exposes it; *a fixed per-project port chosen at scaffold time* — cannot verify freeness and collides by birthday paradox within a handful of projects; *bind `0.0.0.0` plus a side discovery channel* — widens the CDP/VNC blast radius for nothing; *a host bind-mount instead of a named volume* — needs `${localEnv:HOME}` to resolve and creates root-owned dirs on a missing path.
-- **Two Docker engines on one host** (Docker Desktop plus a native engine in a WSL distro, or rootful + rootless) have two registries and one host port space. `requireLocalPort` and the token round-trip both still catch it; the registry cannot. Accepted.
+- **Two Docker engines on one host** (Docker Desktop plus a native engine in a WSL distro, Docker Desktop for Linux alongside native `dockerd`, or rootful + rootless) have two registries and one host port space. `requireLocalPort` and the token round-trip both still catch it; the registry cannot. Accepted.
 - **`port-offset.ts` stays separate** from `port-claim.mjs` despite sharing the walk shape. They solve different problems: one picks a *container-local* block with no persistence and an injected probe (already unit-testable), the other arbitrates a *shared host* resource with durable, owned, expiring claims. Merging them would couple an executor to a project-local runtime file across a package boundary.
 
 ## Locked decisions (from discussion)
