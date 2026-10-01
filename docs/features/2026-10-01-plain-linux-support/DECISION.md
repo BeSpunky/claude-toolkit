@@ -26,3 +26,15 @@ Only **one mechanism** is genuinely WSL-bound: the voice **audio bridge**. Every
 
 ## Not verifiable in this environment
 No WSL box and no host audio here: socket paths (notably WSLg's `XDG_RUNTIME_DIR` contents), PulseAudio cookie / uid-match needs, and the "100% gain off WSLg" default are reasoned, not tested.
+
+## Confirmed — 2026-10-01
+User, asked "Shall I go ahead and implement this design?": **"yes"**
+
+### The shared contract (fixed before fan-out so every unit agrees)
+- **Host probe**: generator-owned `.devcontainer/host-probe.sh`, run by `initializeCommand` (only when voice is on). On every open it (re)creates `.devcontainer/.host/pulse` as a **symlink to the host directory holding the socket** — first that exists of: dirname of `$PULSE_SERVER` (unix: form), `${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse`, `/mnt/wslg/runtime-dir/pulse`, `/mnt/wslg` — else an **empty real directory**. It also writes `.devcontainer/.host/host.env` (facts, for logs). `.devcontainer/.host/` is gitignored.
+  - Why a symlink: devcontainer `${localEnv:…}` resolves BEFORE `initializeCommand`, so the probe cannot choose the mount source; it can only make a fixed source point somewhere real. A bind mount follows a symlinked source.
+- **Mount**: `source=${localWorkspaceFolder}/.devcontainer/.host/pulse,target=/run/bespunky/host/pulse,type=bind`.
+- **remoteEnv**: `PULSE_SERVER=unix:/run/bespunky/host/pulse/native` and `BESPUNKY_HOST_WSL_DISTRO=${localEnv:WSL_DISTRO_NAME}` (a host fact passed through; empty off WSL — consumed only by the voice gain default).
+- **post-create** gates voice provisioning on a socket existing in `/run/bespunky/host/pulse/` (or `$PULSE_SERVER` answering), never on `/mnt/wslg`.
+- **Voice resolver** `plugins/voice/scripts/audio-endpoint.sh`: verified `$PULSE_SERVER` → `/run/bespunky/host/pulse/{native,PulseServer}` → `/mnt/wslg/PulseServer` (containers not yet rebuilt) → `${XDG_RUNTIME_DIR:-/run/user/$UID}/pulse/native` (running directly on a Linux host) → error listing every path tried. Mic gain default 200% only when the endpoint came via WSLg (`BESPUNKY_HOST_WSL_DISTRO` non-empty, or the `/mnt/wslg` path), else 100%; `BESPUNKY_VOICE_MIC_GAIN` overrides.
+- **Payload**: `@bespunky/nx-tools` 0.33.2 → **0.34.0**; migration `0.34.0/retire-wslg-audio-bridge`.
