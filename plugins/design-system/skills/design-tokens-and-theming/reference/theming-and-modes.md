@@ -38,8 +38,10 @@ Three questions, and they have different answers:
 not a class on `<body>` (too late for anything painted above it). One attribute, written by one owner.
 
 **The runtime owner** — **one** service, in the design system. Something must write that attribute, and if the
-design system doesn't own it, every app hand-rolls its own copy and the two drift. The house `DsTheme` holds a
-`mode` signal (`'light' | 'dark' | 'system'`) and an `effect` that sets or **removes** the attribute.
+design system doesn't own it, every app hand-rolls its own copy and the two drift. Its shape is the same on any
+stack — a reactive `mode` (`'light' | 'dark' | 'system'`) and one reaction that sets or **removes** the
+attribute. (In the house Angular adapter that is `DsTheme`: a `mode` signal and an `effect`; on another stack it
+is a store, a composable, or a tiny module with a subscriber.)
 
 `'system'` maps to **removing** the attribute, not to setting `data-ds-mode="system"` — because "follow the OS"
 is the *absence* of a choice, and the selector chain above is built on that absence. Setting a third value
@@ -55,11 +57,11 @@ mode lives is a product question with a real trade-off:
 | Nothing (session only) | Nothing | Honest for a kiosk; infuriating anywhere else |
 
 Choose it explicitly — that is exactly what `bespunky-engineering:resumable-state` is for. The design system
-exposes the signal; the app decides where it lives.
+exposes the mode; the app decides where it lives.
 
 ## Restoring without a flash
 
-If you restore the mode **after** Angular boots, the user watches the app load light and then snap to dark.
+If you restore the mode **after** the framework boots, the user watches the app load light and then snap to dark.
 Everyone sees it, nobody can reproduce it on demand, and it reads as *cheap*.
 
 The fix is unglamorous and it is the only one that works: **set the attribute before first paint**, from a tiny
@@ -74,7 +76,7 @@ synchronous inline script in `index.html`'s `<head>` — before the stylesheet, 
 </script>
 ```
 
-Then let `DsTheme` hydrate from the same key. Yes, this is a blocking inline script; it is a handful of bytes,
+Then let the theming owner (`DsTheme`, on the Angular adapter) hydrate from the same key. Yes, this is a blocking inline script; it is a handful of bytes,
 and it is the price of not flashing. (On SSR, render the attribute into the served HTML — same idea, no script.)
 
 ## Multi-brand is the same mechanism
