@@ -46,12 +46,16 @@ The tell: if hand-coding it would be a *heroic effort with an ugly result* — t
 
 The richest results are **sourced + coded**. The couple kissing might be a generated illustration that code then *brings to life*: color-graded to the palette, revealed on scroll, drifting with parallax, masked into the scene, framed by motion the code owns. Source the thing code can't make; code the behavior an asset can't have. (`architect-mentality` — concentrate complexity: the asset is the hard-made part, the motion around it stays simple.)
 
-## On the house stack (Angular / Nx)
+## On your stack
 
-- Place assets under the app's assets path; keep large/experience-heavy media in a **lazy-loaded boundary** so first load isn't taxed (`bespunky-engineering:nx-monorepo-and-dx`).
+- Place assets under the app's assets path; keep large/experience-heavy media in a **lazy-loaded boundary** so first load isn't taxed (in an Nx workspace, `bespunky-engineering:nx-monorepo-and-dx`).
 - Optimize in the build pipeline (compression, modern formats, responsive variants) rather than committing giant originals.
-- Feed assets to components **through inputs / a clean seam**, so build-vs-source stays an internal decision the component is agnostic to (`bespunky-engineering:software-design`, `bespunky-engineering:angular-native-wrappers`).
+- Feed assets to components **through inputs/props / a clean seam**, so build-vs-source stays an internal decision the component is agnostic to (`bespunky-engineering:software-design`).
 - Record each asset's **source and license** alongside it (a manifest or adjacent note) so provenance is recoverable (`architect-mentality` — preserve understanding).
+
+**Angular adapter** — when the project wears Angular (its `HOUSE.md` stamp lists `angular` in `layers=`):
+
+- Feed assets through signal inputs; when the asset is driven by an imperative runtime (Lottie, Rive, a video player), wrap it per `bespunky-angular:angular-native-wrappers`.
 
 ## When NOT to (and when to hand it to a human)
 

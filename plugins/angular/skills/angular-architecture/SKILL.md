@@ -34,5 +34,8 @@ All six clusters have full reference files — read only the one(s) you need.
 ## Related skills
 
 - **`angular-native-wrappers`** — the dedicated pattern for wrapping an imperative/third-party JS API (maps, editors, charts, players) in idiomatic Angular: convention-based delegation, a fully-typed phantom surface, and an auto-wired component base. Reach for it when *that* is the task.
-- **`architect-mentality`** — the agnostic mindset every technique here expresses.
-- **`architecture-first`** — the operational discipline that governs how changes are made.
+- **`bespunky-engineering:architect-mentality`** — the agnostic mindset every technique here expresses.
+- **`bespunky-engineering:architecture-first`** — the operational discipline that governs how changes are made.
+- **`bespunky-engineering:advanced-typescript`** · **`bespunky-engineering:software-design`** — the type-level and cross-stack toolboxes these Angular techniques specialize.
+
+This plugin (`bespunky-angular`) is the **Angular adapter** of the toolkit: the mindset, the discipline and the stack-neutral techniques live in `bespunky-engineering`; bare skill names in these files (`architect-mentality`, `architecture-first`, `advanced-typescript`) refer to that plugin.

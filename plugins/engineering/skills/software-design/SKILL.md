@@ -1,14 +1,14 @@
 ---
 name: software-design
 description: >-
-  General, language- and framework-agnostic software design techniques - the concrete cross-stack toolbox that realizes the architect mindset in code. Use when making design or refactoring decisions that aren't tied to a specific framework: decoupling and dependency inversion, replacing conditionals with polymorphism/strategy/state machines, removing duplication and extracting (or NOT extracting) abstractions, modeling a domain and making illegal states unrepresentable, handling errors and boundaries, and designing contracts/APIs. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need. For the mindset behind these, see architect-mentality; for stack-specific specializations, see advanced-typescript / angular-architecture / nx-monorepo-and-dx.
+  General, language- and framework-agnostic software design techniques - the concrete cross-stack toolbox that realizes the architect mindset in code. Use when making design or refactoring decisions that aren't tied to a specific framework: decoupling and dependency inversion, replacing conditionals with polymorphism/strategy/state machines, removing duplication and extracting (or NOT extracting) abstractions, modeling a domain and making illegal states unrepresentable, handling errors and boundaries, and designing contracts/APIs. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need. For the mindset behind these, see architect-mentality; for stack-specific specializations, see advanced-typescript / nx-monorepo-and-dx (and, for a project that wears Angular, bespunky-angular:angular-architecture).
 ---
 
 # Software Design (general)
 
 Concrete, **language- and framework-agnostic** techniques that turn the architect mindset into code. The *why* lives in **`architect-mentality`** (principles, no techniques); the operational discipline lives in **`architecture-first`** (root-cause, no patches, design-and-confirm refactors). **This skill is the cross-stack *toolbox*** — the moves you reach for on any project, in any language.
 
-The stack-specific skills are specializations of what's here: Angular DI and Nx module boundaries are concrete instances of *decoupling & dependency inversion*; TypeScript branded types are an instance of *make illegal states unrepresentable*. Learn the agnostic move here; apply it everywhere.
+The stack-specific skills are specializations of what's here: a framework's DI (e.g. Angular's), React context, or Nx module boundaries are concrete instances of *decoupling & dependency inversion*; TypeScript branded types are an instance of *make illegal states unrepresentable*. Learn the agnostic move here; apply it everywhere.
 
 Code snippets are illustrative (TypeScript-flavored) but the patterns are language-neutral.
 
@@ -38,4 +38,4 @@ Read only the one(s) you need.
 
 - **`architect-mentality`** — the agnostic mindset every technique here expresses.
 - **`architecture-first`** — the operational discipline governing how changes are made.
-- **`advanced-typescript`**, **`angular-architecture`**, **`nx-monorepo-and-dx`** — stack-specific specializations of these patterns.
+- **`advanced-typescript`**, **`nx-monorepo-and-dx`** — stack-specific specializations of these patterns; per-framework ones live in optional adapter plugins (e.g. **`bespunky-angular:angular-architecture`**).

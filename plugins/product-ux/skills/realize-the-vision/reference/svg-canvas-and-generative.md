@@ -48,11 +48,16 @@ Don't fake a premium optical effect with a gradient/blur/overlay — **simulate 
 
 Caveats: filters can be expensive (they rasterize a region every frame when animated — keep the filter region tight, prefer compositor properties for the *motion*, throttle/pause off-screen); `backdrop-filter` support and stacking-context behavior vary, so provide a graceful fallback; and give the filtered graphic accessible meaning (the filter is skin over a real DOM/SVG element).
 
-## On the house stack (Angular / Nx)
+## On your stack
 
-- **Inline SVG** binds naturally to templates/signals — animate via CSS or a wrapped GSAP timeline.
-- Wrap **canvas/p5/Lottie/Rive** runtimes behind a directive/service (`bespunky-engineering:angular-native-wrappers`): own the draw loop, `runOutsideAngular`, dispose on destroy.
+- **Inline SVG** binds naturally to your framework's templates and reactive state — animate via CSS or a wrapped GSAP timeline.
+- Wrap **canvas/p5/Lottie/Rive** runtimes behind a seam (one owned component/hook/directive/service): own the draw loop, run it **outside the framework's change detection / render cycle**, dispose on teardown, guard for **SSR**.
 - For data-driven drawing, keep generation pure and **derive** the visual from a single source of truth (`bespunky-engineering:software-design`).
+
+**Angular adapter** — when the project wears Angular (its `HOUSE.md` stamp lists `angular` in `layers=`):
+
+- Inline SVG binds to templates/signals.
+- Wrap **canvas/p5/Lottie/Rive** runtimes behind a directive/service (`bespunky-angular:angular-native-wrappers`): own the draw loop, `runOutsideAngular`, dispose on destroy.
 
 ## When NOT to
 

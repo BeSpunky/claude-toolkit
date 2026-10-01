@@ -2,5 +2,5 @@
 # One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
 
 Reaching for a hex colour or magic px? design-system-first turns it into a token instead
-A UI pattern used twice? Generate it once with nx g @bespunky/nx-tools:ds-component <name>
+A UI pattern used twice? Promote it into the design system once (house: nx g @bespunky/nx-tools:ds-component <name>)
 Adding dark mode? design-tokens-and-theming rebinds tokens per mode, no swapped stylesheets, no flash

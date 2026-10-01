@@ -31,11 +31,17 @@ An immersive interface that excludes or harms people is not finished — it's br
 - **Feature-detect, then enhance** (WebGPU→WebGL, scroll-timeline→IntersectionObserver, View Transitions→plain swap). Never assume support; design the fallback as a first-class state, not an afterthought.
 - **The fallback should still carry the feeling** in a simpler form — a calm static hero instead of a 3D scene is fine; a broken blank canvas is not.
 
-## On the house stack (Angular / Nx)
+## On your stack
 
-- Centralize a **reduced-motion signal/service** the whole app reads, so every animation seam honors it by default.
+- Centralize a **reduced-motion preference** (one reactive value, a store, a context — your stack's idiom) the whole app reads, so every animation seam honors it by default rather than each component re-checking the media query.
+- Use your framework's (or the platform's) **focus and announcement primitives** — focus trapping, a live-region announcer, focus-origin monitoring, roving tabindex — for custom immersive widgets, rather than hand-rolling them per widget.
+- Keep **semantics in the markup** and the **spectacle in a wrapped, disposable layer** (an imperative engine behind a seam you create and tear down), so the accessible core never depends on the effect.
+
+**Angular adapter** — when the project wears Angular (its `HOUSE.md` stamp lists `angular` in `layers=`):
+
+- The reduced-motion preference is a **signal/service** the whole app injects.
 - Angular **CDK a11y** (`FocusTrap`, `LiveAnnouncer`, `FocusMonitor`, roving tabindex) gives focus/announcement primitives for custom immersive widgets.
-- Keep semantics in the template and the spectacle in a wrapped, disposable layer (`bespunky-engineering:angular-native-wrappers`) so the accessible core never depends on the effect.
+- Keep semantics in the template and the spectacle in a wrapped, disposable layer (`bespunky-angular:angular-native-wrappers`) so the accessible core never depends on the effect.
 
 ## The rule
 

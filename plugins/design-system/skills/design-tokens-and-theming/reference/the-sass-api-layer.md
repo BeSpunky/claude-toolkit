@@ -1,6 +1,9 @@
 # The SASS API layer — and how it's summoned
 
-The author-time half of the system. Its job is to make **reading a token easier than typing a value** — because
+The author-time half of the system. What a design system *requires* here is a **zero-output author-time API** —
+something that makes the tokens easy to reach and emits nothing until called. **The house uses SASS** for it, so
+this file is written in SASS; another preprocessor (or a typed CSS-in-JS token module) can play the same role
+under the same rules. The runtime layer — CSS custom properties — is not a choice; it is universal. Its job is to make **reading a token easier than typing a value** — because
 that is the only thing that actually holds the discipline. A design system whose API is awkward loses to a hex
 code every single time, and no amount of policy fixes that.
 
@@ -95,8 +98,8 @@ Three consumers, three channels — and they are genuinely different mechanisms,
 
 | Consumer | Channel |
 | --- | --- |
-| **The app**, in-repo | A **sass load path** on the build target (`stylePreprocessorOptions.includePaths`) |
-| **The library's own components**, under ng-packagr | `ng-package.json` → `lib.styleIncludePaths` (ng-packagr does *not* read the app's builder options) |
+| **The app**, in-repo | A **sass load path** on the build target (Angular: `stylePreprocessorOptions.includePaths`; Vite: `css.preprocessorOptions.scss.loadPaths`) |
+| **The library's own components**, under its packager | The packager's own load-path option — it does *not* read the app's builder options (Angular adapter: `ng-package.json` → `lib.styleIncludePaths`; see `reference/adapters/angular-ds-library.md`) |
 | **A published consumer** | The package's `exports` map (`"./styles": { "sass": "…" }`), with the raw `.scss` shipped to `dist` as an asset |
 
 **Why a load path in-repo, and not a package import?** Because an Nx workspace that links via
@@ -119,7 +122,7 @@ That is how you find out the contract is wrong before a consumer does.
 > **⚠️ The Nx cache trap.** The app reaches the design system's *sass* through a **load path**, which on its
 > own creates **no edge in the Nx project graph** — so if the app didn't also import the DS in TypeScript,
 > editing a token would not invalidate `nx build <app>` and Nx would replay a cached bundle with the *old*
-> tokens. In practice the house wiring also imports `provideDesignSystem` from the DS (a tsconfig-path
+> tokens. In practice the house (Angular) wiring also imports `provideDesignSystem` from the DS (a tsconfig-path
 > alias, which Nx *does* resolve into an edge), so the edge usually exists — but relying on that coupling is
 > fragile. Declare the dependency **explicitly** instead: the idiomatic Nx tool is
 > `implicitDependencies: ['<ds-project>']` on the app (a real graph edge — `nx affected` stays correct too),
@@ -136,7 +139,7 @@ That is how you find out the contract is wrong before a consumer does.
 | **Placeholder + `@extend`** | Once, merged into a shared selector | A **fixed, argument-less** rule body used many times in *one* stylesheet: `%visually-hidden` |
 
 `@extend` merges selectors within the stylesheet it runs in, so it **cannot cross a component-stylesheet
-boundary** (each Angular component compiles alone), and it can produce surprising selector explosions when
+boundary** (each scoped component stylesheet compiles alone — an Angular component, a Vue SFC, a CSS module), and it can produce surprising selector explosions when
 extended from many places. Reach for a mixin unless the rule body is fixed and argument-less.
 
 ## Pitfalls
