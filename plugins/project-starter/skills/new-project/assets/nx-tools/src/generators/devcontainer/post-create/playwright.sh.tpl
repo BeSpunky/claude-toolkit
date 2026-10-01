@@ -1,18 +1,12 @@
-# --- Playwright: Chromium + its system deps (web; when @playwright/test is in package.json) ---
-# `playwright install --with-deps chromium` downloads the browser into ~/.cache/ms-playwright (a per-workspace
-# volume, so rebuilds reuse it) and runs the apt step for Chromium's libs itself, through sudo — the house
-# images grant the remote user passwordless sudo. Self-adapting: fires only when the workspace declares
-# @playwright/test (the `@bespunky/nx-tools:playwright` generator adds it).
+# --- Playwright: Chromium + its system deps for the project's OWN browser tests (js; when @playwright/test is declared) ---
+# `playwright install --with-deps chromium` downloads the browser into ~/.cache/ms-playwright and runs the apt
+# step for Chromium's libs itself, through sudo — the house images grant the remote user passwordless sudo.
+# Self-adapting: fires only when the workspace declares @playwright/test (the `@bespunky/nx-tools:playwright`
+# generator adds it, pinned to the shared browser's runtime version — so in a web project this is the SAME
+# browser build the shared-browser step fetches, and whichever runs second finds it present).
 if grep -q '"@playwright/test"' "$WS/package.json" 2>/dev/null; then
   echo "[post-create] @playwright/test detected — installing Chromium + system deps"
   PW_EXEC="${PM_EXEC:-npx --no-install}"
-  # Reclaim the cache VOLUME's mount point: Docker creates a fresh named volume root-owned, and `playwright
-  # install` (running as the remote user) hits EACCES the first time it mkdirs inside it. Guarded on ownership:
-  # runs only on a fresh (empty → instant) volume.
-  if [ -d "$HOME/.cache/ms-playwright" ] && [ "$(stat -c %U "$HOME/.cache/ms-playwright")" != "$ME" ]; then
-    echo "[post-create] reclaiming $HOME/.cache/ms-playwright volume ownership for $ME"
-    sudo chown -R "$ME:$ME_GROUP" "$HOME/.cache/ms-playwright"
-  fi
   # A large download from cdn.playwright.dev; Docker DNS is intermittently flaky and Playwright's own retries
   # fire too fast to outlast the blip. Retry with backoff, and WARN (never fail the build) if it still fails.
   pw_ok=0

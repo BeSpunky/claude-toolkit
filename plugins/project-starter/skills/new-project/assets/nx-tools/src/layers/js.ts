@@ -20,4 +20,6 @@ export const js: LayerDescriptor = {
     workspace: [{ generator: 'playwright' }],
   },
   docSections: ['js', 'monorepo'],
+  // The project's OWN browser tests: Chromium for @playwright/test, when it is declared (self-adapting piece).
+  devcontainer: { postCreate: [{ phase: 'provision', piece: 'playwright' }] },
 };

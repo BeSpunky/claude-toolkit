@@ -157,8 +157,7 @@ export const web: LayerDescriptor = {
     ],
     postCreate: [
       { phase: 'prepare', piece: 'web-volumes' },
-      { phase: 'provision', piece: 'playwright' },
-      { phase: 'provision', piece: 'shared-browser-chromium' },
+      { phase: 'provision', piece: 'shared-browser-runtime' },
     ],
   },
   // Its skills drive the shared browser and Playwright, which only a web container provisions.

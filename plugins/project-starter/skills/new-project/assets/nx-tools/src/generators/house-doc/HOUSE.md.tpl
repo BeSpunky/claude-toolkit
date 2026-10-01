@@ -287,8 +287,8 @@ It installs the worktree's deps on first serve and applies the `NX_WORKSPACE_ROO
 Libraries here are **publishable by default** — one generator owns the package config (build target, `package.json` exports, the tsconfig path alias, the test runner and the `nx release` wiring), so no library has to re-derive it:
 
 ```bash
-{{NX}} g @bespunky/nx-tools:publishable-lib <name>               # Angular library
-{{NX}} g @bespunky/nx-tools:publishable-lib <name> --nonAngular  # plain TypeScript (@nx/js, tsc)
+{{NX}} g @bespunky/nx-tools:publishable-lib <name>               # the workspace's stack (Angular when it wears it)
+{{NX}} g @bespunky/nx-tools:publishable-lib <name> --stack=js     # plain TypeScript (@nx/js, tsc)
 ```
 
 **A tool that has proved itself in one project belongs to every project.** Rather than copy-pasting it into the next repo, MARK it — that records the intent to lift it into the shared toolkit, and the extraction tooling takes it from there:
@@ -312,7 +312,7 @@ Libraries here are **publishable by default** — one generator owns the package
 {{NX}} g @bespunky/nx-tools:app apps/<app-name>
 {{NX}} g @nx/angular:library libs/<lib-name>
 {{/angular}}{{^angular}}{{#js}}# Generate the next library (generator-first!)
-{{NX}} g @bespunky/nx-tools:publishable-lib <lib-name> --nonAngular
+{{NX}} g @bespunky/nx-tools:publishable-lib <lib-name> --stack=js
 {{NX}} g @nx/js:library libs/<lib-name>
 {{/js}}{{^js}}# Generate structure through a generator (generator-first!) — Nx's, a plugin's, or this stack's own scaffolder
 {{NX}} list                                   # the Nx plugins installed here, and what they can generate
@@ -358,9 +358,9 @@ This project ships Angular's official AI tooling, wired in two layers that compl
 {{#web}}
 ## Playwright (available out of the box)
 
-This devcontainer ships with **Chromium + Playwright pre-installed** (the devcontainer's `post-create.sh` runs `playwright install --with-deps chromium` when it detects `@playwright/test` in `package.json`, and the browser binary is cached in a per-workspace volume so rebuilds don't re-download). You can drive a real browser from a Bash script today — no `playwright install`, no apt step, no `sudo`.
+This devcontainer ships with **a Playwright Chromium pre-installed**: the shared browser carries its own pinned Playwright runtime, and `post-create.sh` provisions it with `bash tools/shared-browser/shared-browser install --with-deps` (the browser binary is cached in a per-workspace volume, so rebuilds don't re-download){{#js}} — and, when `package.json` declares `@playwright/test` (pinned to the same version), the project's own test runner gets the same Chromium via `playwright install --with-deps chromium`{{/js}}. You can drive a real browser from a script today — no `playwright install`, no apt step, no `sudo`.
 
-Use Playwright whenever you need to **observe** or **drive** the running app instead of reasoning about source: verify a UI change end-to-end, reproduce a user-reported bug in the actual browser, capture before/after screenshots, scrape Angular-rendered output, or generate test scaffolding via codegen. Always headless — there is no display in the container.
+Use Playwright whenever you need to **observe** or **drive** the running app instead of reasoning about source: verify a UI change end-to-end, reproduce a user-reported bug in the actual browser, capture before/after screenshots, scrape the rendered DOM, or generate test scaffolding via codegen. Headless for scripts; the shared browser is the headed one, on the container's virtual display.
 
 For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` / `Claude_in_Chrome` MCPs, how to write a headless script, how to capture and feed back screenshots, common pitfalls), invoke the **`bespunky-browser-automation:playwright`** skill before reaching for any browser-side check.
 

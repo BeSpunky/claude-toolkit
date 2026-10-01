@@ -8,6 +8,13 @@ if [ -d "$HOME/.cache" ] && [ "$(stat -c %U "$HOME/.cache")" != "$ME" ]; then
   echo "[post-create] reclaiming $HOME/.cache ownership for $ME"
   sudo chown "$ME:$ME_GROUP" "$HOME/.cache"
 fi
+# …and the Playwright cache VOLUME itself: a fresh named volume is root-owned, and the browser install below
+# (running as the remote user) hits EACCES the first time it mkdirs inside it. Guarded on ownership: runs only
+# on a fresh (empty → instant) volume.
+if [ -d "$HOME/.cache/ms-playwright" ] && [ "$(stat -c %U "$HOME/.cache/ms-playwright")" != "$ME" ]; then
+  echo "[post-create] reclaiming $HOME/.cache/ms-playwright volume ownership for $ME"
+  sudo chown -R "$ME:$ME_GROUP" "$HOME/.cache/ms-playwright"
+fi
 
 # /var/opt/bespunky/ports is the FIXED-name docker volume every BeSpunky devcontainer on this engine
 # mounts (see devcontainer.json). It is how containers see each other's noVNC port claims, so the

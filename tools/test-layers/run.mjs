@@ -469,6 +469,18 @@ checkAsync('adopted devcontainer on its own image: only the active layers merged
   ok(marker.owned === false && marker.adopted.skipped.includes('image'), `adoption report: ${JSON.stringify(marker.adopted)}`);
 });
 
+checkAsync('post-create: web provisions the shared browser through its own runtime; @playwright/test is the js layer\'s', async (ok) => {
+  const web = await artifacts(wrapperRepo(), ['nx', 'agent', 'web']);
+  ok(web.post.includes('shared-browser" install --with-deps'), 'web: no `shared-browser install --with-deps`');
+  ok(!web.post.includes('@playwright/test'), 'web (no js): still keyed on @playwright/test');
+  ok(bashParses(web.post), 'web post-create does not parse');
+  const tree = createTreeWithEmptyWorkspace();
+  const both = await artifacts(tree, ['nx', 'agent', 'node', 'js', 'web']);
+  ok(both.post.includes('"@playwright/test"') && both.post.includes('install --with-deps'), 'js+web: both pieces');
+  ok(both.post.indexOf('reclaiming $HOME/.cache/ms-playwright') < both.post.indexOf('@playwright/test detected'), 'the cache volume is reclaimed before any install');
+  ok(bashParses(both.post), 'js+web post-create does not parse');
+});
+
 // ── the dev-loop seams between units: stack adapters, the composer mirror, the TUI, the platform firewall ────
 const ts_ = require_('typescript');
 const angularShop = () => {
