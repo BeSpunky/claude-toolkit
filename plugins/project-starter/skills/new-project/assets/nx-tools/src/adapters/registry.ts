@@ -18,7 +18,7 @@ export type { StackAdapter } from './stack-adapter';
 export const ADAPTERS: readonly StackAdapter[] = [angular, js];
 
 /** The ports a capability can ask an app's adapter for. */
-export type Port = 'apps' | 'libs' | 'env' | 'providers' | 'styles' | 'designSystem' | 'firebase';
+export type Port = 'apps' | 'libs' | 'env' | 'providers' | 'styles' | 'devServer' | 'designSystem' | 'firebase';
 
 /** The adapter with this id. Throws on an unknown id — a typo is a bug, and the message lists what exists. */
 export function adapter(id: string): StackAdapter {

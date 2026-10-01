@@ -17,7 +17,7 @@
 //
 // Keep it as small as today's needs: every port below has a caller. A port with no caller is a guess about a
 // framework nobody has asked for yet.
-import type { GeneratorCallback, Tree } from '@nx/devkit';
+import type { GeneratorCallback, TargetConfiguration, Tree } from '@nx/devkit';
 import type { LayerId } from '../layers/descriptor';
 
 export interface StackAdapter {
@@ -36,6 +36,8 @@ export interface StackAdapter {
   readonly env?: EnvPort;
   readonly providers?: ProvidersPort;
   readonly styles?: StylesPort;
+  /** The app's dev-server, as an Nx `dev-server` target — what the web layer's `serve` composer drives. */
+  readonly devServer?: DevServerPort;
   /** The framework half of the design system: its runtime binding, library shape, component generator. */
   readonly designSystem?: DesignSystemPort;
   /** The framework half of Firebase: the client SDK wiring an app gets on top of the neutral emulator core. */
@@ -114,6 +116,23 @@ export interface StylesPort {
   addLoadPath(tree: Tree, project: string, loadPath: string): boolean;
   /** Emit a standalone, NOT auto-injected stylesheet bundle from the app's build. False: no build. */
   registerStylesheet(tree: Tree, project: string, sheet: { input: string; bundleName: string }): boolean;
+}
+
+/**
+ * The stack's DEV-SERVER LEAF — the `dev-server` target the `serve` composer (web layer) drives by name. The
+ * composer itself is stack-free; only the leaf is the framework's. A project that already has a dev-server of its
+ * own (any executor) keeps it — the stack supplies one only when there is none.
+ */
+export interface DevServerPort {
+  /** The executor this stack's leaf runs — how a re-run recognises a leaf it owns (and may re-assert). */
+  readonly executor: string;
+  /** The leaf for `project`, carrying `preserved` (the options a user tuned on the previous leaf). */
+  leaf(tree: Tree, project: string, preserved: Record<string, unknown>): TargetConfiguration;
+  /**
+   * Point the app's dev-server at a dev proxy config (workspace-relative). True when set (or already set); false
+   * when the app has no dev-server of this stack's to configure — the caller reports it.
+   */
+  useProxy(tree: Tree, project: string, proxyConfig: string): boolean;
 }
 
 /**

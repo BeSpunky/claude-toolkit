@@ -469,6 +469,121 @@ checkAsync('adopted devcontainer on its own image: only the active layers merged
   ok(marker.owned === false && marker.adopted.skipped.includes('image'), `adoption report: ${JSON.stringify(marker.adopted)}`);
 });
 
+// ── the dev-loop seams between units: stack adapters, the composer mirror, the TUI, the platform firewall ────
+const ts_ = require_('typescript');
+const angularShop = () => {
+  const tree = createTreeWithEmptyWorkspace();
+  writeJson(tree, 'package.json', { name: 'shop', devDependencies: { '@nx/angular': '23.1.0' } });
+  addProjectConfiguration(tree, 'shop', {
+    root: 'apps/shop',
+    projectType: 'application',
+    targets: {
+      build: { executor: '@angular/build:application' },
+      // where a fresh @nx/angular:application parks its dev-server
+      serve: { executor: '@angular/build:dev-server', options: { port: 4300 } },
+    },
+  });
+  return tree;
+};
+const targetsOf = (tree, name) => JSON.parse(tree.read(`apps/${name}/project.json`, 'utf8')).targets;
+
+checkAsync('serve: the Angular leaf comes from the adapter; the composer mirrors it; the TUI is turned off', async (ok) => {
+  const tree = angularShop();
+  await generator('serve')(tree, { project: 'shop' });
+  const t = targetsOf(tree, 'shop');
+  ok(t['dev-server'].executor === '@angular/build:dev-server' && t['dev-server'].options.host === '0.0.0.0', `leaf: ${JSON.stringify(t['dev-server'])}`);
+  ok(t['dev-server'].options.port === 4300, 'a user-tuned leaf option survives');
+  ok(t.serve.executor === '@bespunky/nx-tools:serve', 'composer on `serve`');
+  ok(JSON.stringify(t.serve.options) === JSON.stringify(t['dev-server'].options), 'composer options mirror the leaf');
+  ok(JSON.stringify(t.serve.configurations) === JSON.stringify(t['dev-server'].configurations), 'composer configurations mirror the leaf');
+  ok(JSON.parse(tree.read('nx.json', 'utf8')).tui?.enabled === false, 'nx.json tui.enabled=false');
+});
+
+checkAsync('serve: a workspace that chose its TUI keeps the choice', async (ok) => {
+  const tree = angularShop();
+  const nxJson = JSON.parse(tree.read('nx.json', 'utf8'));
+  writeJson(tree, 'nx.json', { ...nxJson, tui: { enabled: true } });
+  await generator('serve')(tree, { project: 'shop' });
+  ok(JSON.parse(tree.read('nx.json', 'utf8')).tui.enabled === true, 'tui.enabled was overridden');
+});
+
+checkAsync('serve: a project no stack builds, with no dev-server, is told what is missing (no Angular leaf invented)', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  addProjectConfiguration(tree, 'api', { root: 'apps/api', projectType: 'application', targets: { build: { executor: 'nx:run-commands' } } });
+  let message = '';
+  try {
+    await generator('serve')(tree, { project: 'api' });
+  } catch (error) {
+    message = error.message;
+  }
+  ok(/nothing to serve/.test(message) && /no registered stack builds it/.test(message), `got: ${message || '(no error)'}`);
+});
+
+checkAsync('serve: an existing non-Angular dev-server is composed as-is', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  addProjectConfiguration(tree, 'site', { root: 'apps/site', projectType: 'application', targets: { 'dev-server': { executor: '@nx/vite:dev-server', options: { port: 5173 } } } });
+  await generator('serve')(tree, { project: 'site' });
+  const t = targetsOf(tree, 'site');
+  ok(t['dev-server'].executor === '@nx/vite:dev-server' && !('buildTarget' in t['dev-server'].options), `leaf touched: ${JSON.stringify(t['dev-server'])}`);
+  ok(t.serve.options.port === 5173 && !('buildTarget' in t.serve.options), `composer: ${JSON.stringify(t.serve)}`);
+});
+
+checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-server proxyConfig, on the leaf AND its mirror; idempotent', async (ok) => {
+  const tree = angularShop();
+  tree.write('apps/shop/src/app/app.config.ts', "import { ApplicationConfig } from '@angular/core';\nexport const appConfig: ApplicationConfig = { providers: [] };\n");
+  await generator('serve')(tree, { project: 'shop' });
+  const { angular } = require_(join(BUILD, 'src/adapters/angular'));
+  angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: true });
+  const once = tree.read('apps/shop/project.json', 'utf8');
+  const t = JSON.parse(once).targets;
+  ok(tree.exists('apps/shop/proxy.conf.mjs'), 'proxy.conf.mjs written');
+  ok(t['dev-server'].options.proxyConfig === 'apps/shop/proxy.conf.mjs', `leaf: ${JSON.stringify(t['dev-server'].options)}`);
+  ok(t.serve.options.proxyConfig === 'apps/shop/proxy.conf.mjs', 'the composer mirror carries it too');
+  // the next sync's order: serve, then the client again — nothing may move
+  await generator('serve')(tree, { project: 'shop' });
+  angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: false });
+  ok(tree.read('apps/shop/project.json', 'utf8') === once, 'a re-run changed project.json');
+});
+
+checkAsync('firebase core on an old-shaped eslint.config.mjs (no trailing comma): a well-formed splice, idempotent', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  writeJson(tree, 'package.json', { name: 'shop', devDependencies: { nx: '23.2.1' } });
+  const eslint = [
+    "import nx from '@nx/eslint-plugin';",
+    'export default [',
+    '    {',
+    "        files: ['**/*.ts'],",
+    '        rules: {',
+    "            '@nx/enforce-module-boundaries': [",
+    "                'error',",
+    '                {',
+    '                    depConstraints: [',
+    '                        {',
+    '                            sourceTag: "*",',
+    '                            onlyDependOnLibsWithTags: [',
+    '                                "*"',
+    '                            ]',
+    '                        }',
+    '                    ]',
+    '                }',
+    '            ]',
+    '        }',
+    '    }',
+    '];',
+    '',
+  ].join('\n');
+  tree.write('eslint.config.mjs', eslint);
+  await generator('firebase-emulators')(tree, {});
+  const out = tree.read('eslint.config.mjs', 'utf8');
+  const sf = ts_.createSourceFile('eslint.config.mjs', out, ts_.ScriptTarget.Latest, true, ts_.ScriptKind.JS);
+  ok(sf.parseDiagnostics.length === 0, `does not parse: ${sf.parseDiagnostics.map((d) => d.messageText).join('; ')}`);
+  ok(!/^\s*,\s*$/m.test(out) && !/},\]/.test(out), `malformed splice:\n${out}`);
+  ok(/\n {24}},\n {24}\/\/ by platform:/.test(out), `not at the neighbours' indentation:\n${out}`);
+  ok(/sourceTag: 'platform:server'[\s\S]*\n {24}}\n {20}\]/.test(out), `closing bracket not on its own line:\n${out}`);
+  await generator('firebase-emulators')(tree, {});
+  ok(tree.read('eslint.config.mjs', 'utf8') === out, 'a re-run changed eslint.config.mjs');
+});
+
 for (const run of pending) await run();
 
 // ── migrations.json: every rung names a registered layer scope ─────────────────────────────────────────────

@@ -21,6 +21,7 @@ import {
 } from '@nx/devkit';
 import type { StackAdapter, CreatedApp, WireResult } from '../stack-adapter';
 import { wireProvider } from '../../generators/_utils/wire-provider';
+import { setLeafOption } from '../../generators/_utils/dev-server';
 import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
@@ -33,6 +34,11 @@ import { angularFirebaseClient } from './firebase-client';
 const ANGULAR_BUILDERS = ['@angular/build:', '@angular-devkit/build-angular:', '@nx/angular:'];
 
 const noop: GeneratorCallback = () => {};
+
+/** Angular's dev-server builder — the leaf this adapter writes (and recognises as its own on a re-run). */
+const DEV_SERVER_EXECUTOR = '@angular/build:dev-server';
+/** Dev-server builders that take Angular's options (`proxyConfig`, …): today's and the legacy devkit one. */
+const DEV_SERVER_EXECUTORS = [DEV_SERVER_EXECUTOR, '@angular-devkit/build-angular:dev-server'];
 
 /** An Angular app's bootstrap: its ApplicationConfig. */
 const bootstrapFile = (tree: Tree, project: string): string =>
@@ -179,6 +185,36 @@ export const angular: StackAdapter = {
       options.styles = styles;
       updateProjectConfiguration(tree, project, config);
       return true;
+    },
+  },
+
+  devServer: {
+    executor: DEV_SERVER_EXECUTOR,
+
+    // Env pinned via configurations (development default / production); host 0.0.0.0 so it is reachable from
+    // outside the devcontainer. buildTarget + configurations are owned here; every other option a user tuned
+    // (proxyConfig, ssl, port, …) is carried over — IN PLACE: overwriting a key keeps its position, so a re-run
+    // writes the same project.json rather than reshuffling keys.
+    leaf(_tree, project, preserved) {
+      return {
+        continuous: true,
+        executor: DEV_SERVER_EXECUTOR,
+        options: { ...preserved, buildTarget: `${project}:build`, host: (preserved.host as string | undefined) ?? '0.0.0.0' },
+        configurations: {
+          development: { buildTarget: `${project}:build:development` },
+          production: { buildTarget: `${project}:build:production` },
+        },
+        defaultConfiguration: 'development',
+      };
+    },
+
+    // The dev-server's OWN option (Angular's `proxyConfig`), so a direct `nx run <app>:dev-server` gets it too;
+    // set-if-absent, so a project that points elsewhere keeps its choice. Through setLeafOption, which keeps the
+    // `serve` composer's mirror of the leaf true.
+    useProxy(tree, project, proxyConfig) {
+      const leaf = projectOf(tree, project)?.targets?.['dev-server'];
+      if (!leaf || !DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) return false;
+      return setLeafOption(tree, project, 'proxyConfig', proxyConfig);
     },
   },
 

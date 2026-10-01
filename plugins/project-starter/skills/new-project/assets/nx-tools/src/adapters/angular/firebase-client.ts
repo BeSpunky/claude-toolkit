@@ -59,7 +59,15 @@ export const angularFirebaseClient: FirebaseClientPort = {
     }
     writeFirebaseConfigs(tree, appRoot);
     // Baked with THIS app's env path so it reads the project id from its single source of truth.
-    tree.write(`${appRoot}/proxy.conf.mjs`, firebaseTemplate('proxy.conf.mjs.tpl').split('{{appEnvPath}}').join(env.dev));
+    const proxy = `${appRoot}/proxy.conf.mjs`;
+    tree.write(proxy, firebaseTemplate('proxy.conf.mjs.tpl').split('{{appEnvPath}}').join(env.dev));
+    // …and the dev-server uses it. (0.34.x appended --proxyConfig at serve time; the declare-dev-processes
+    // migration moved it onto existing apps' dev-server leaf — a new app gets it here.) An app with no Angular
+    // dev-server yet (no web layer) has nothing to point; a later sync wires it once one exists (this step runs
+    // after the web layer's serve step, every sync).
+    if (!angular.devServer!.useProxy(tree, project, proxy)) {
+      logger.info(`[firebase-emulators] \`${project}\` has no Angular dev-server target — ${proxy} is not wired to one.`);
+    }
 
     // 3) Per-env build configuration: production (and, opted in, staging) swap the dev env file.
     if (!angular.env!.selectFor(tree, project, 'production', env.dev, env.prod)) {

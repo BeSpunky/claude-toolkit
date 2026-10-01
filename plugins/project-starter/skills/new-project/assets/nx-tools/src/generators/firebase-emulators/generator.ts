@@ -591,33 +591,36 @@ function addPlatformBoundaries(source: string, sourcePath: string, serverBanned:
   if (!constraintsArray) return null;
 
   const found: TsArrayLiteralExpression = constraintsArray;
-  const snippet =
-    `// by platform: the server-only Firebase Admin/Functions SDKs belong to Cloud\n` +
-    `// Functions alone — they must never reach browser/SSR code (they pull in\n` +
-    `// Node-native modules and admin credentials). Symmetrically, the browser Firebase\n` +
-    `// SDK and the client framework have no place in the functions runtime.\n` +
-    `{\n` +
-    `  sourceTag: 'platform:web',\n` +
-    `  bannedExternalImports: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*'],\n` +
-    `},\n` +
-    `{\n` +
-    `  sourceTag: 'platform:server',\n` +
-    `  bannedExternalImports: [${serverBanned.map((pkg) => `'${pkg}'`).join(', ')}],\n` +
-    `},`;
   const elements = found.elements;
-  const text =
-    elements.length === 0
-      ? snippet
-      : elements.hasTrailingComma
-      ? `\n${snippet}`
-      : `,\n${snippet}`;
-
+  // THE SPLICE IS SHAPED BY ITS NEIGHBOURS, not dropped before the closing bracket. Inserting at `]` put the
+  // comma and the snippet AFTER whatever whitespace preceded the bracket — valid JS, but an ugly `}\n   ,\n// …`
+  // that lands as-is wherever prettier is absent (formatFiles only formats when it is installed), and on a
+  // project that never asked for it. So: after the last element (and its trailing comma, if any), at that
+  // element's own indentation; into an empty array, one level inside the property's indentation.
+  const indentOfLineAt = (pos: number): string => /^[ \t]*/.exec(source.slice(source.lastIndexOf('\n', pos - 1) + 1))![0];
+  const last = elements.length ? elements[elements.length - 1] : null;
+  const indent = last ? indentOfLineAt(last.getStart(sf)) : `${indentOfLineAt(found.getStart(sf))}  `;
+  const lines = [
+    `// by platform: the server-only Firebase Admin/Functions SDKs belong to Cloud`,
+    `// Functions alone — they must never reach browser/SSR code (they pull in`,
+    `// Node-native modules and admin credentials). Symmetrically, the browser Firebase`,
+    `// SDK and the client framework have no place in the functions runtime.`,
+    `{`,
+    `  sourceTag: 'platform:web',`,
+    `  bannedExternalImports: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*'],`,
+    `},`,
+    `{`,
+    `  sourceTag: 'platform:server',`,
+    `  bannedExternalImports: [${serverBanned.map((pkg) => `'${pkg}'`).join(', ')}],`,
+    `}`,
+  ];
+  const block = lines.map((line) => `${indent}${line}`).join('\n');
+  // Where the last element ends — past its trailing comma when it has one.
+  const afterLast = last ? (elements.hasTrailingComma ? source.indexOf(',', last.getEnd()) + 1 : last.getEnd()) : -1;
   const changes: StringChange[] = [
-    {
-      type: ChangeType.Insert,
-      index: found.getEnd() - 1, // position just before the closing `]`
-      text,
-    },
+    last
+      ? { type: ChangeType.Insert, index: afterLast, text: `${elements.hasTrailingComma ? '' : ','}\n${block}${elements.hasTrailingComma ? ',' : ''}` }
+      : { type: ChangeType.Insert, index: found.getStart(sf) + 1, text: `\n${block},\n${indentOfLineAt(found.getStart(sf))}` },
   ];
   return applyChangesToString(source, changes);
 }
