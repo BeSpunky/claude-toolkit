@@ -1,0 +1,6 @@
+# Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
+# One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
+
+"Open it so I can watch" starts a shared browser that you and Claude drive together
+Ask Claude to "verify in the browser" and it checks the running app, not just the source
+Debugging CSS live? The shared browser gives measured proof (computed styles, bounding boxes)

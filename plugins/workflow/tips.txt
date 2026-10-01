@@ -1,0 +1,9 @@
+# Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
+# One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
+
+Back after a break? Ask "where did I leave off?" and project-standing works it out from git and feature packages
+Context getting long? Say "hand this off" to write a baton a fresh session can resume from
+Unrelated requests get their own git worktree off development automatically, so branches never mix
+Every effort's notes, mocks and decisions live in docs/features/<date>-<slug>/, next to its branch
+Big task? Claude can split it into subagents running in parallel; you can set the agent budget
+Testing a server? The house rule binds a random port, so your own dev server on 4200 is never clobbered

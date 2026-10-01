@@ -1,0 +1,6 @@
+# Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
+# One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
+
+Type /bespunky in the slash menu to filter it down to the whole BeSpunky toolkit at once
+Not sure which BeSpunky skill fits? Ask "which skill for <task>?" and /bespunky:index will recommend one
+Spinner tips from BeSpunky getting old? Run /bespunky:tips off (or /bespunky:tips list to see them all)
