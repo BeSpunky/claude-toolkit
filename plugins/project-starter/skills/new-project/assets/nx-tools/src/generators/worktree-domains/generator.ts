@@ -12,7 +12,8 @@
 //
 // Why workspace-level (not per-app): the proxy is a single workspace-wide resource shared by every app's
 // serve. So it is generated ONCE per workspace, from scaffold.sh's WORKSPACE_GEN_BLOCK (always-on). The
-// serve executor drives it per-serve via `bash tools/worktree-domains/worktree-domains register|unregister`.
+// dev engine (tools/dev/dev serve, and `nx serve` through it) drives it per-serve via
+// `bash tools/worktree-domains/worktree-domains register|unregister`.
 //
 // Idempotent + --sync-safe: every generator-owned file is rewritten on each run (the CLI, the proxy,
 // and project.json carry no user values), so a fresh run and a --sync run converge to the same tree —

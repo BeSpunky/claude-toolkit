@@ -20,6 +20,7 @@
 // Exits cleanly on SIGTERM/SIGINT.
 
 import fs from 'node:fs';
+import { loadPlaywright } from './runtime.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────────────────
 const DEFAULT_CDP = 'http://127.0.0.1:9223';
@@ -235,17 +236,9 @@ function attachToBrowser(browser) {
 }
 
 // ── Playwright resolution ─────────────────────────────────────────────────────────
+/** Playwright's `chromium`, from the shared browser's OWN pinned runtime (runtime.mjs) — never the workspace's. */
 async function loadChromium() {
-  for (const pkg of ['playwright', 'playwright-core', '@playwright/test']) {
-    try {
-      const mod = await import(pkg);
-      const chromium = mod.chromium ?? mod.default?.chromium;
-      if (chromium) return chromium;
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  throw new Error('Playwright not found. Install one of: playwright, playwright-core, @playwright/test.');
+  return loadPlaywright().chromium;
 }
 
 // ── Connect / reconnect loop ──────────────────────────────────────────────────────

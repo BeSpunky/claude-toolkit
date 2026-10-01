@@ -1,36 +1,32 @@
-// House generator: give a project the unified `serve` target + its `dev-server` leaf.
+// House generator: the NX ADAPTER of the dev loop — give a project the `serve` target + its `dev-server` leaf,
+// and declare it in `.bespunky/dev.json`.
 //
-// The per-app sibling of serve-options, and the SINGLE home of the house dev loop. It parks two
-// targets on the app, one composing the other — and they sit on OPPOSITE sides of the layer line, which is
-// the thing to keep straight when editing this file (see THE SEAM in the generator body):
+// The dev loop itself is stack-free: `tools/dev/dev serve` runs what `.bespunky/dev.json` declares. This
+// generator is how an Nx project joins it. It parks two targets on the app, one composing the other — on
+// OPPOSITE sides of the layer line (see THE SEAM in the generator body):
 //   - `dev-server` — the app's real dev-server. Written here as @angular/build:dev-server (host 0.0.0.0, so
 //     it's reachable from outside the devcontainer; configurations development (default) / production;
 //     buildTarget <app>:build) ONLY when the project has none of its own and is an Angular app. A project
-//     that already has a dev-server — Vite, Next, anything — keeps it untouched. An internal leaf the
-//     composing executor drives, also runnable directly.
-//   - `serve`      — the @bespunky/nx-tools:serve composing executor: it runs `dev-server` plus, on a
-//     Firebase tree, the emulator suite, plus the shared co-driven browser, under one graceful Ctrl+C,
-//     for the current worktree or any chosen one. This REPLACES the old trio (serve / serve-worktree /
-//     serve-with-shared-browser) — the worktree and shared-browser axes are now flags on this one serve.
+//     that already has a dev-server — Vite, Next, anything — keeps it untouched.
+//   - `serve`      — the @bespunky/nx-tools:serve executor: a THIN WRAPPER over `tools/dev/dev serve <app>`.
+//     `nx serve <app> --worktree=… --port-offset=…` is the engine with Nx's option parsing in front; every
+//     option the wrapper does not own (buildTarget, host, …) is forwarded to the app's primary process.
+// …and it SEEDS the app's entry in `.bespunky/dev.json` from the adapters that apply (the dev-server process;
+// the Firebase emulators when the workspace has them) — only what the app does not declare yet, so a later
+// `nx g @bespunky/nx-tools:app` is servable before the next sync.
 //
-// It also wires the LAYER-1 worktree tab label into the app (worktree-tab-label.ts + provider in
-// app.config.ts): a dev-only initializer that, when the app is viewed on a `<slug>.localhost` worktree
-// domain, prefixes the tab title with `[slug]` and tints the favicon by a hue hashed from the slug, so
-// each worktree tab is visually distinct. Tree-shaken from prod (gated on ngDevMode).
+// The dev-only worktree TAB LABEL is no longer written here — it is Angular's, and lives in the
+// `worktree-tab-label` generator (the `angular` layer's per-app step).
 //
 // Why per-app (not workspace-level): every app — the scaffolder's first and every later
 // `nx g @bespunky/nx-tools:app` — needs its own dev-server leaf + serve target, so it is applied here,
 // on the same code path serve-options runs on, and can't drift as apps are added.
 //
-// Idempotent + --sync-safe: re-running re-asserts the same targets (reclaiming the raw @nx/angular
-// `serve` slot into the `dev-server` leaf), rewrites the generator-owned tab-label glue, and re-wires
-// the provider only if absent.
+// Idempotent + --sync-safe: re-running re-asserts the same targets (reclaiming the raw @nx/angular `serve`
+// slot into the `dev-server` leaf).
 //
 // It asserts the CURRENT shape only. Collapsing a project that still carries the pre-0.3.0 fan of serve
-// targets (`serve-app`/`serve-standalone`/`serve-no-emulators`/`serve-with-emulators`, `serve-worktree`,
-// `serve-with-shared-browser`) is the job of the versioned migration
-// src/migrations/0.24.0/unify-serve-targets.ts, which sweeps EVERY project once rather than only the apps
-// a sync happens to run this per-app generator against.
+// targets is the job of the versioned migration src/migrations/0.24.0/unify-serve-targets.ts.
 import {
   type Tree,
   type TargetConfiguration,
@@ -39,16 +35,15 @@ import {
   formatFiles,
   logger,
 } from '@nx/devkit';
-import { readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { wireProvider } from '../_utils/wire-provider';
+import { seedFromAdapters } from '../dev/fragments';
 
 interface ServeSchema {
   project: string;
-  /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
+  /**
+   * DEPRECATED, ignored: they configured the worktree tab label, which moved to the `worktree-tab-label`
+   * generator. Still accepted so a caller passing them keeps working.
+   */
   wireProviders?: boolean;
-  // Override the workspace identity used as the base-host slug in the tab label. Defaults to the
-  // workspace root directory name — correct in every normal case.
   workspaceName?: string;
 }
 
@@ -67,7 +62,6 @@ const DEV_SERVER_NAMES = ['dev-server', 'serve'];
 
 export default async function serveGenerator(tree: Tree, options: ServeSchema): Promise<void> {
   const projectName = options.project;
-  const workspaceName = options.workspaceName ?? basename(tree.root);
 
   const project = readProjectConfiguration(tree, projectName);
   project.targets ??= {};
@@ -134,15 +128,15 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
     );
   }
 
-  // The composing `serve` — one command, one graceful Ctrl+C: dev-server + optional emulators + optional
-  // shared browser, for the current worktree or any chosen one. Defaults cover the common case (emulators
-  // + shared browser on, auto port offset); flags (`--no-emulators`, `--no-shared-browser`, `--worktree`,
-  // `--portOffset`, `--configuration`) tune it.
+  // The composing `serve` — the Nx face of `tools/dev/dev serve <app>`: every process the app declares, one
+  // graceful Ctrl+C, the current worktree or any chosen one. Flags (`--worktree`, `--port-offset`, `--skip`,
+  // `--no-shared-browser`, `--configuration`) tune it.
   //
   // Enrich, don't hide: `serve` carries the same dev-server delegation options as the leaf (host,
   // proxyConfig, buildTarget) PLUS the canonical Angular development/production configurations. The
-  // executor forwards them to the `dev-server` leaf it drives — so `nx serve <app> --configuration=production`
-  // is the native Nx config flag, and any dev-server option can be tuned on `serve` directly.
+  // executor forwards every option it does not own to the app's primary process — the `dev-server` leaf — so
+  // `nx serve <app> --configuration=production` is the native Nx config flag, and any dev-server option can be
+  // tuned on `serve` directly.
   targets.serve = {
     continuous: true,
     executor: SERVE_EXECUTOR,
@@ -154,47 +148,10 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
     defaultConfiguration: 'development',
   };
 
-  // LAYER 1: the dev-only worktree tab label. Generator-owned glue (no user values) — always rewritten
-  // so fixes propagate. Derives purely from the runtime hostname; the workspace name is baked in only as
-  // the base-host sentinel (so `<workspaceName>.localhost` is treated as the base, not a worktree).
-  //
-  // ANGULAR-ONLY, and gated as such. This half of the generator emits an Angular provider and wires it into
-  // `app.config.ts` — the composer above is framework-agnostic, this is not. Writing it unconditionally
-  // would drop an Angular source file into a Vite project that cannot compile it, for a feature that could
-  // never activate there. `app.config.ts` is the test rather than the build executor: it is the thing that
-  // must exist for the provider to have a home.
-  const appRoot = project.root;
-  const appConfigPath = `${appRoot}/src/app/app.config.ts`;
-  const angularApp = tree.exists(appConfigPath);
-
-  if (angularApp) {
-    const tabLabelPath = `${appRoot}/src/app/worktree-tab-label.ts`;
-    tree.write(
-      tabLabelPath,
-      readFileSync(join(__dirname, 'files', 'worktree-tab-label.ts.tpl'), 'utf8').split('{{workspaceName}}').join(workspaceName),
-    );
-  }
-
   updateProjectConfiguration(tree, projectName, project);
 
-  // Best-effort: wire provideWorktreeTabLabel() into app.config.ts (idempotent — only when absent).
-  if (angularApp) {
-    const current = tree.read(appConfigPath, 'utf8') ?? '';
-    const wired = wireProvider(current, appConfigPath, {
-      providerFn: 'provideWorktreeTabLabel',
-      importFrom: './worktree-tab-label',
-      ensuring: options.wireProviders === true,
-    });
-    if (wired && wired !== current) {
-      tree.write(appConfigPath, wired);
-    } else if (wired === null) {
-      logger.warn(
-        `[serve] Could not auto-wire ${appConfigPath}. Add ` +
-        `\`import { provideWorktreeTabLabel } from './worktree-tab-label';\` and include ` +
-        `\`provideWorktreeTabLabel()\` in your providers array manually (dev-only tab label).`,
-      );
-    }
-  }
+  // Declare the app for the stack-free engine the composer wraps. Only what it does not declare yet.
+  for (const line of seedFromAdapters(tree, projectName)) logger.info(`[serve] ${line}`);
 
   await formatFiles(tree);
 }

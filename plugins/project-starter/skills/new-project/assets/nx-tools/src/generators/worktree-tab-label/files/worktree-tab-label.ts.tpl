@@ -9,7 +9,7 @@
 // Purely runtime — it derives everything from `location.hostname`, so there is NO build-time coupling to
 // which worktree is being served. Dev-only: the whole payload is gated on `ngDevMode`, which the Angular
 // optimizer folds to a literal `false` in production builds, so this module tree-shakes out of prod.
-// Generator-owned (nx-tools serve generator) — do not edit by hand.
+// Generator-owned (nx-tools worktree-tab-label generator) — do not edit by hand.
 import { makeEnvironmentProviders, provideEnvironmentInitializer, type EnvironmentProviders } from '@angular/core';
 
 // The workspace identity, baked in as the base-host sentinel: a hostname whose sub-label equals this is

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyWorktreeTabLabel",
+  "title": "Dev-only worktree tab label (Angular)",
+  "description": "Write the Angular adapter's dev-only worktree tab label (worktree-tab-label.ts) into an app and, when creating the capability (--wireProviders), wire provideWorktreeTabLabel() into its app.config.ts. On a `<slug>.localhost` worktree domain it prefixes the tab title with `[slug]` and tints the favicon; tree-shaken from prod via ngDevMode.",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The Angular app to label.",
+      "$default": { "$source": "projectName" },
+      "x-prompt": "Which project?"
+    },
+    "wireProviders": {
+      "type": "boolean",
+      "default": false,
+      "description": "Wire the provider into app.config.ts. TRUE ONLY WHEN ENSURING (creating) the capability — app.config.ts is seeded, never owned, so a detect-only sync must not write to it."
+    },
+    "workspaceName": {
+      "type": "string",
+      "description": "Override the base-host sentinel. Defaults to the workspace root directory name.",
+      "x-priority": "internal"
+    }
+  },
+  "required": ["project"]
+}

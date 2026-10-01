@@ -95,6 +95,24 @@
       "layer": "agent",
       "description": "Remove the WSLg-only audio bridge `--voice` wrote into .devcontainer/devcontainer.json — the `source=/mnt/wslg,target=/mnt/wslg,type=bind` mount and `remoteEnv.PULSE_SERVER: unix:/mnt/wslg/PulseServer`. Docker refuses a bind whose source is missing, so off WSL2 the container did not start; and an adopted devcontainer, merged additively by mount target, would keep the old bind beside the new host-agnostic bridge while the old PULSE_SERVER scalar won. Removes only those exact house values (and the house comments above them) with comment-preserving splices, on owned and adopted devcontainers alike; reports any other WSLg mount or PULSE_SERVER as the project's own. The next sync with voice on adds the new bridge.",
       "implementation": "./src/migrations/0.34.0/retire-wslg-audio-bridge"
+    },
+    "declare-dev-processes": {
+      "version": "0.35.0",
+      "layer": "web",
+      "description": "Write `.bespunky/dev.json` reproducing what the 0.34.x serve executor ran for every project whose `serve` is the house composer — the `app` process (`<nx> run <app>:dev-server --port=${PORT:app}`, base 4200, NX_DAEMON=false + NX_WORKSPACE_ROOT_PATH pinned to the served tree), the `emulators` process in a Firebase workspace (ports from firebase.json, `?portOffset` on a shifted stack, `?emulate=none` when skipped, the OAuth-origin advice) and the install step — because `nx serve` is now a thin wrapper over the stack-free engine that runs exactly what the declaration says. Moves the sniffed `<app>/proxy.conf.mjs` into the Angular dev-server leaf's `proxyConfig`. Adds only missing processes; project.json's serve target is unchanged.",
+      "implementation": "./src/migrations/0.35.0/declare-dev-processes"
+    },
+    "relocate-port-claim": {
+      "version": "0.35.0",
+      "layer": "web",
+      "description": "Move host-port arbitration from tools/shared-browser/port-claim(.test).mjs to its own home, tools/port-claim/ (the shared browser, the worktree-domains proxy and the dev engine all consult it), and re-point every reference — including the house CLIs a bare `nx migrate` leaves in place until the next sync. A file at the old path without the house stamp is left and reported.",
+      "implementation": "./src/migrations/0.35.0/relocate-port-claim"
+    },
+    "pin-playwright": {
+      "version": "0.35.0",
+      "layer": "js",
+      "description": "Pin a `\"@playwright/test\": \"latest\"` the playwright generator wrote to the version installed in node_modules (no upgrade, no downgrade — what the lockfile already says), else the house version. Any other spec is the project's own and stays.",
+      "implementation": "./src/migrations/0.35.0/pin-playwright"
     }
   }
 }

@@ -11,7 +11,7 @@
 # built-ins (http + net) — no npm dep, no apt package beyond what the shared-browser stack already
 # installs. It proxies BOTH plain HTTP and the WebSocket upgrade (so Angular/Vite HMR survives).
 #
-# This is the single public seam. The serve executor calls exactly:
+# This is the single public seam. The dev engine (tools/dev/dev serve) calls exactly:
 #   worktree-domains register <slug> <port>     (idempotent; starts the proxy if down)
 #   worktree-domains unregister <slug>
 # Humans also get: list | reconcile | status | logs | stop.
@@ -139,7 +139,8 @@ kill_proxy() {
 # ATTRIBUTION: first container wins, and the rest are TOLD which one holds it. Turning "silently wrong"
 # into "named owner" is the whole deliverable; nothing fails either way.
 #
-# Shares the shared-browser registry, so one volume arbitrates every contended host port.
+# Shares the host-port registry (tools/port-claim) with the shared browser and the dev engine, so one
+# volume arbitrates every contended host port.
 # MUST match tools/shared-browser/shared-browser's container_key, or the same container would look like
 # two different claimants to the registry.
 container_key() {
@@ -152,8 +153,8 @@ container_key() {
 }
 
 advise_host_ownership() {
-  local claim="$WORKSPACE_ROOT/tools/shared-browser/port-claim.mjs" out mine owner
-  [ -f "$claim" ] || return 0                              # shared-browser tooling absent — nothing to say
+  local claim="$WORKSPACE_ROOT/tools/port-claim/port-claim.mjs" out mine owner
+  [ -f "$claim" ] || return 0                              # port-claim tooling absent — nothing to say
   out="$(node "$claim" advise --registry="${SB_REGISTRY:-/var/opt/bespunky/ports}" \
     --identity="$(container_key)" --port="$WD_PORT" 2>/dev/null || true)"
   mine="$(printf '%s' "$out" | sed -n 's/.*"mine":\([a-z]*\).*/\1/p')"
