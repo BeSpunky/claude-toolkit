@@ -214,12 +214,19 @@ function reshapeServeTargets(targets: Record<string, TargetConfiguration>, proje
       }
     }
 
-    // (3b) The orchestrator's `host` — only reachable when (3a) left the orchestrator in place. A
+    // (3b) The HOUSE orchestrator's `host` — only reachable when (3a) left the orchestrator in place. A
     //      `nx:run-commands` serve forwards its options to the child command as bare flags, so a `host`
-    //      option there becomes a stray `--host=…` appended to whatever it runs. Only that ONE key is
-    //      removed: the rest of a genuinely user-authored orchestrator is the user's.
+    //      option on the house orchestrator becomes a stray `--host=…` appended to whatever it runs. Only
+    //      that ONE key is removed: the rest of a genuinely user-authored orchestrator is the user's.
+    //
+    //      GATED ON `dangling`, exactly like (3a) — the same test that tells the house orchestrator apart from
+    //      a project's own target that merely happens to be called `serve` (see referencesCollapsedTarget).
+    //      Ungated, this stripped `host` from EVERY run-commands `serve` in the workspace: a Python
+    //      `uvicorn app:api` serve whose `host` IS the flag its command needs lost it on the way up to 0.24.0,
+    //      which is precisely the destruction of configuration this migration never wrote that the comment
+    //      on referencesCollapsedTarget promises not to commit.
     const kept = targets.serve;
-    if (kept?.executor === RUN_COMMANDS_EXECUTOR && kept.options && 'host' in kept.options) {
+    if (dangling && kept?.executor === RUN_COMMANDS_EXECUTOR && kept.options && 'host' in kept.options) {
       delete (kept.options as Record<string, unknown>).host;
       changed = true;
     }
