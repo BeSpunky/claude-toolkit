@@ -1,0 +1,4 @@
+# Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
+# One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
+
+Want Claude brief by default and detailed only when you ask? Pick "Pitch to the listener" in /output-style

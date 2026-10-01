@@ -1,0 +1,9 @@
+# Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
+# One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
+
+Say "redesign this" to get a reconception from scratch, not a reskin of what exists
+Can't pick between concepts? Ask Claude to "mock it up" and choose by eye in seconds
+Designing a screen? Start with envision-the-experience, then stage-the-vision, then realize-the-vision
+Got a messy brief or a pile of docs? distill-the-brief extracts the actual design problem first
+Building a form or dashboard? model-intent-not-data asks what the user means, not what the schema holds
+Anything users wait on gets loading, progress and done states from keep-users-oriented

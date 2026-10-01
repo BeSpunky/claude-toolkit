@@ -1,0 +1,6 @@
+# Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
+# One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
+
+Reaching for a hex colour or magic px? design-system-first turns it into a token instead
+A UI pattern used twice? Generate it once with nx g @bespunky/nx-tools:ds-component <name>
+Adding dark mode? design-tokens-and-theming rebinds tokens per mode, no swapped stylesheets, no flash

@@ -1,0 +1,4 @@
+# Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
+# One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
+
+Too many identical VS Code windows? Ask for a window identity (an emoji title plus a quiet colour band)
