@@ -300,6 +300,19 @@ if printf '%s\n' "$_err" | grep -q '`./nx add @nx/angular`' && ! printf '%s\n' "
 else
   fail "wrapper host: the not-sync-ensurable hint does not say ./nx:"; printf '%s\n' "$_err" | sed 's/^/         | /'
 fi
+# A Firebase core with no client app: apps/functions is the ONLY project.json. It is never the app a sync means —
+# the inference excludes it by name, and the no-project.json fallback once re-picked it by directory, so the
+# per-app generators ran on `functions` and the sync died ("has nothing to serve").
+_FIXF="$TMP/fbcore"
+mkdir -p "$_FIXF/apps/functions" && git -C "$_FIXF" init -q
+printf '{"name":"fbcore"}\n' > "$_FIXF/package.json"; printf '{}\n' > "$_FIXF/nx.json"
+printf '{"name":"functions","root":"apps/functions"}\n' > "$_FIXF/apps/functions/project.json"
+_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$_FIXF" 2>/dev/null)"
+if printf '%s\n' "$_prog" | grep -q -- '--app=fbcore ' && ! printf '%s\n' "$_prog" | grep -q -- '--app=functions'; then
+  ok "a Firebase core with no client app: the sync's app is not apps/functions"
+else
+  fail "the sync inferred apps/functions as its app: $(printf '%s\n' "$_prog" | grep -o -- '--app=[^ ]*' | head -1)"
+fi
 
 if [ "$FAILED" -eq 0 ]; then
   echo "scaffold.sh renders cleanly in every mode"

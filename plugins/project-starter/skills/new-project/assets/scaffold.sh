@@ -362,9 +362,10 @@ else
   # two candidate apps, inference declines and says so, which is the correct answer rather than a guess.
   APP="${2:-}"
   if [ -z "$APP" ] && [ -d "$TARGET/apps" ]; then
-    _cands=()
+    _cands=(); _any_pj=0
     for _pj in "$TARGET"/apps/*/project.json; do
       [ -f "$_pj" ] || continue
+      _any_pj=1
       _nm="$(grep -m1 '"name"' "$_pj" 2>/dev/null | sed -E 's/.*"name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
       [ -n "$_nm" ] || _nm="$(basename "$(dirname "$_pj")")"
       [ "$_nm" = "functions" ] && continue
@@ -376,9 +377,11 @@ else
       echo "NOTE: this workspace has more than one app (${_cands[*]}), so the app to refresh can't be inferred."
       echo "      Defaulting to '$PROJECT'. Pass one explicitly to target a different app:"
       echo "        scaffold.sh --sync <project> <app-name>"
-    else
+    elif [ "$_any_pj" -eq 0 ]; then
       # No project.json anywhere under apps/ — fall back to the old rule, which is right for a
-      # single-app workspace that predates project.json-per-app.
+      # single-app workspace that predates project.json-per-app. ONLY then: when the sole project.json is
+      # apps/functions (a Firebase core with no client app), the fallback used to pick apps/functions by its
+      # directory — the very app the loop above had just excluded — and the per-app generators then failed on it.
       apps_list=("$TARGET"/apps/*/)
       if [ "${#apps_list[@]}" -eq 1 ] && [ -d "${apps_list[0]}" ]; then
         APP="$(basename "${apps_list[0]}")"
