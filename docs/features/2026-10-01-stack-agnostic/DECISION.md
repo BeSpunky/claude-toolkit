@@ -54,3 +54,6 @@ Settled by the orchestrator under that mandate (no further question asked; each 
 
 ## Revision 3 — 2026-10-01: payload ships as 0.36.0
 The phase-1 unit bumped the payload to 0.35.0 at its start; the release-invariants check counts the commit that set a version as its release, so every later payload change read as "changed since 0.35.0 was released". 0.35.0 was never published (CI publishes from `main` only). The release is therefore **0.36.0**, set after the last payload change; the effort's rungs stay at 0.35.0 — still inside every existing project's `from..to` range, and the migrations ceiling holds. Plugin bumps: project-starter 0.36.0, workflow 0.8.0, engineering 0.6.0 (Angular skills moved out), design-system 0.2.0, browser-automation 0.4.0 (minor); product-ux 0.11.6 (patch); bespunky-angular 0.1.0 (new).
+
+## State at end of implementation — 2026-10-01
+All phases 0–6 implemented, released on the branch (payload 0.36.1 — 0.35.0/0.36.0 were in-branch versions, never published) and verified on throwaway repos: fresh agent-only / angular+firebase / node scaffolds; sync onto Python, Go-with-own-devcontainer and plain-npm repos; an old 0.34 Angular+Firebase+DS project migrated; Firebase without Angular; refusal paths (research/05-verification.md). Unverifiable here: a real container build, real Firebase emulators.
