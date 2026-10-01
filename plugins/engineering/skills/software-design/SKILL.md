@@ -8,7 +8,7 @@ description: >-
 
 Concrete, **language- and framework-agnostic** techniques that turn the architect mindset into code. The *why* lives in **`architect-mentality`** (principles, no techniques); the operational discipline lives in **`architecture-first`** (root-cause, no patches, design-and-confirm refactors). **This skill is the cross-stack *toolbox*** — the moves you reach for on any project, in any language.
 
-The stack-specific skills are specializations of what's here: Angular DI and Nx module boundaries are concrete instances of *decoupling & dependency inversion*; TypeScript branded types are an instance of *make illegal states unrepresentable*. Learn the agnostic move here; apply it everywhere.
+The stack-specific skills are specializations of what's here: a framework's DI (e.g. Angular's), React context, or Nx module boundaries are concrete instances of *decoupling & dependency inversion*; TypeScript branded types are an instance of *make illegal states unrepresentable*. Learn the agnostic move here; apply it everywhere.
 
 Code snippets are illustrative (TypeScript-flavored) but the patterns are language-neutral.
 
