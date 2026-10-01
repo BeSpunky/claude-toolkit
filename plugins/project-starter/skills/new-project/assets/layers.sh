@@ -6,9 +6,9 @@
 # validates --ensure before anything is installed, and the SessionStart hook, which must stay a few greps.
 # Sourcing it defines variables and functions only; it runs nothing.
 
-HOUSE_LAYERS='nx,agent,js,web,angular,design-system,navigation,firebase'
+HOUSE_LAYERS='nx,agent,node,js,web,angular,design-system,navigation,firebase'
 HOUSE_LAYER_FLOOR='nx'
-HOUSE_LAYERS_ENSURABLE_SCAFFOLD='nx,agent,web,angular,design-system,firebase'
+HOUSE_LAYERS_ENSURABLE_SCAFFOLD='nx,agent,node,web,angular,design-system,firebase'
 HOUSE_LAYERS_ENSURABLE_SYNC='nx,agent,firebase'
 
 # house_layer_title <id> — one line naming the layer.
@@ -16,6 +16,7 @@ house_layer_title() {
   case "$1" in
     nx) printf '%s\n' 'Nx workspace (the floor)' ;;
     agent) printf '%s\n' 'Agent DX (Claude settings, devcontainer, window identity)' ;;
+    node) printf '%s\n' 'Node project (a root package.json)' ;;
     js) printf '%s\n' 'TypeScript/JavaScript libraries' ;;
     web) printf '%s\n' 'Web dev loop (serve, worktree domains, shared browser)' ;;
     angular) printf '%s\n' 'Angular application' ;;
@@ -30,6 +31,7 @@ house_layer_requires() {
   case "$1" in
     nx) printf '%s\n' '' ;;
     agent) printf '%s\n' '' ;;
+    node) printf '%s\n' '' ;;
     js) printf '%s\n' 'nx' ;;
     web) printf '%s\n' 'agent' ;;
     angular) printf '%s\n' 'nx' ;;
@@ -44,6 +46,7 @@ house_layer_hint() {
   case "$1" in
     nx) printf '%s\n' '`scaffold.sh --sync <project>` — the floor is always ensured: `nx init` in place (into node_modules when the repo has a package.json, else through the Nx wrapper, ./nx)' ;;
     agent) printf '%s\n' '`scaffold.sh --sync --ensure=agent <project>`' ;;
+    node) printf '%s\n' 'a root package.json (`npm init`) — the next sync then treats the repo as a Node project' ;;
     js) printf '%s\n' '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular`)' ;;
     web) printf '%s\n' 'an app with a dev-server target (e.g. the `angular` layer: `nx g @bespunky/nx-tools:app apps/<name>`)' ;;
     angular) printf '%s\n' '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`' ;;
@@ -58,6 +61,7 @@ house_layer_brings() {
   case "$1" in
     nx) printf '%s\n' 'the Nx floor every house generator and migration runs on' ;;
     agent) printf '%s\n' 'the devcontainer, the Claude settings and the window identity' ;;
+    node) printf '%s\n' 'the typescript-node devcontainer image, the node_modules volume and the package-manager install' ;;
     js) printf '%s\n' 'the publishable-library and tool-extraction conventions in HOUSE.md' ;;
     web) printf '%s\n' 'the serve composer, worktree domains, the shared co-driven browser, Playwright, :80' ;;
     angular) printf '%s\n' 'the Angular editor extensions, the dev-server leaf, the Angular CLI MCP + agent skills' ;;
@@ -72,6 +76,7 @@ house_layer_ensurable_scaffold() {
   case "$1" in
     nx) printf '%s\n' 'yes' ;;
     agent) printf '%s\n' 'yes' ;;
+    node) printf '%s\n' 'via:nx' ;;
     js) printf '%s\n' 'no' ;;
     web) printf '%s\n' 'via:angular' ;;
     angular) printf '%s\n' 'yes' ;;
@@ -86,6 +91,7 @@ house_layer_ensurable_sync() {
   case "$1" in
     nx) printf '%s\n' 'yes' ;;
     agent) printf '%s\n' 'yes' ;;
+    node) printf '%s\n' 'no' ;;
     js) printf '%s\n' 'no' ;;
     web) printf '%s\n' 'no' ;;
     angular) printf '%s\n' 'no' ;;
@@ -101,6 +107,7 @@ house_layer_evidence() {
     nx) printf '%s\n' 'file nx.json' ;;
     agent) printf '%s\n' 'file .devcontainer/.bespunky-devcontainer.json
 file .vscode/.window-identity.json' ;;
+    node) printf '%s\n' 'file package.json' ;;
     js) printf '%s\n' 'dependency "@nx/js"
 project-json "executor"[[:space:]]*:[[:space:]]*"@nx/js:' ;;
     web) printf '%s\n' 'project-json "dev-server"[[:space:]]*:

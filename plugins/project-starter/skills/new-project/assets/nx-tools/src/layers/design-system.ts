@@ -27,5 +27,6 @@ export const designSystem: LayerDescriptor = {
       },
     ],
   },
-  docSections: ['design-system'],
+  docSections: ['design-system', 'ui'],
+  claudePlugins: ['bespunky-design-system@claude-toolkit'],
 };

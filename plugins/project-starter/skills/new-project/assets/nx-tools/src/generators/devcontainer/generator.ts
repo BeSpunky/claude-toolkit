@@ -1,51 +1,38 @@
-// House generator: write the BeSpunky-standard .devcontainer/ — devcontainer.json, the post-create
-// script, the one LOCAL devcontainer feature that devcontainer.json references by relative path, and — when
-// `voice` is on — the host probe that bridges the host's PulseAudio-protocol socket (WSLg or native
-// PulseAudio/PipeWire) into the container.
-// Reads its own bundled templates (not workspace files) and writes through the Nx Tree.
+// House generator: write the BeSpunky-standard .devcontainer/ — devcontainer.json, the post-create script, the
+// one LOCAL devcontainer feature that devcontainer.json references by relative path, and — when `voice` is on —
+// the host probe that bridges the host's PulseAudio-protocol socket (WSLg or native PulseAudio/PipeWire) into the
+// container. Writes through the Nx Tree.
 //
-// Template supports two kinds of placeholders:
-//   - simple substitution:   {{name}}, {{nodeMajor}}, {{forwardPorts}}, {{portsAttributes}}
-//   - conditional blocks:    {{#flag}}...{{/flag}}  -> included iff the flag option is truthy
+// COMPOSED FROM THE ACTIVE LAYERS. Each layer states its share of the container as data (`descriptor.devcontainer`
+// — image, features, extensions, settings, mounts, env, run args, ports, OS packages, post-create pieces), and
+// `compose.ts` assembles the shares of the layers this project has. There is no flag per layer here any more:
+// a Python repo gets a neutral Debian base with Node as a feature (the Nx floor and the house tooling run on
+// it) and nothing Node-, web- or Angular-shaped; a Node repo gets the typescript-node image, node_modules and
+// its package-manager install; the shared browser's X stack arrives only with `web`. `voice` is not a layer but
+// an INTENT ("this project wants audio"), host-neutral — WHERE the host's audio socket lives is a per-machine
+// fact the host probe resolves at container-open time — and it contributes a fragment the same way.
 //
-// The flags are the LAYERS this devcontainer serves (`web`, `angular`, `firebase`) plus `voice`, which is an
-// INTENT ("this project wants audio"), host-neutral: WHERE the host's audio socket lives is a per-machine
-// fact the host probe resolves at container-open time, never committed. They are passed in by the caller,
-// which detects them — this generator never guesses.
-//
-// TWO properties earn the extra machinery here:
-//
-// 1. COMMAS ARE THE GENERATOR'S PROBLEM, NOT THE TEMPLATE AUTHOR'S. Wrapping JSON members in conditional
-//    blocks means every block boundary is a potential `[, 4200]` or `{"a":1,}`. Hand-placing commas so that
-//    every combination of four flags stays valid is 16 cases a template author has to hold in their head,
-//    and the failure mode is a container that won't build. So the template writes members naively and the
-//    generator NORMALIZES dangling commas afterwards, then PARSES the result and throws if it isn't valid —
-//    a template mistake fails here, loudly, at generation time, instead of at someone's next rebuild.
-//
-// 2. MERGE INTO A FOREIGN DEVCONTAINER, never clobber it (the claude-settings lesson, applied to the file
-//    with the most to lose). A sync run on an EXISTING repo — the whole point of layering — will usually
-//    find a .devcontainer/devcontainer.json somebody wrote by hand, with their image, their features, their
-//    extensions. Overwriting it is the single most destructive thing this tool could do. So: a file we
-//    wrote is regenerated (we own it), and a file we did NOT write is treated as the user's, and we only
-//    ADD what's missing.
+// MERGE INTO A FOREIGN DEVCONTAINER, never clobber it (the claude-settings lesson, applied to the file with the
+// most to lose). A sync run on an EXISTING repo will usually find a .devcontainer/devcontainer.json somebody
+// wrote by hand, with their image, their features, their extensions. Overwriting it is the single most
+// destructive thing this tool could do. So: a file we wrote is regenerated (we own it), and a file we did NOT
+// write is treated as the user's, and we only ADD what's missing — of the ACTIVE layers' fragments only.
 import { type Tree, logger, parseJson } from '@nx/devkit';
 import { applyEdits, modify } from 'jsonc-parser';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { NOVNC_BAND_LABEL, novncPortsAttributesJson } from '../shared-browser/novnc-band';
+import type { DevcontainerFragment } from '../../layers/descriptor';
+import { activeLayers, claudePlugins, devcontainerFragments } from '../_utils/layer-contributions';
+import { type Contributor, compose, renderDevcontainerJson, renderPostCreate } from './compose';
 
 type Json = Record<string, unknown>;
 
 interface DevcontainerSchema {
   name: string;
   nodeMajor?: string | number;
-  /** Layer: a project with something to serve — :80 worktree domains, the shared browser, Playwright. */
-  web?: boolean;
-  /** Layer: Angular — the editor extensions and the 4200 dev-server port label. */
-  angular?: boolean;
-  /** Layer: Firebase — CLI features, emulator ports, the JDK note. */
-  firebase?: boolean;
+  /** The layers this devcontainer serves. Default: DETECTED from the workspace. */
+  layers?: string[] | string;
   /**
    * Not a layer — an intent: bridge the host's PulseAudio-protocol socket (WSLg or native
    * PulseAudio/PipeWire) into the container, located per machine by the host probe.
@@ -54,9 +41,9 @@ interface DevcontainerSchema {
 }
 
 /**
- * The line post-create.sh.tpl carries in its own header. Its presence is how a later run recognises a
- * script as generator-written rather than the project's own — provenance the file states about itself,
- * so no separate marker has to be kept in sync with it.
+ * The line every house post-create script carries in its header. Its presence is how a later run recognises a
+ * script as generator-written rather than the project's own — provenance the file states about itself, so no
+ * separate marker has to be kept in sync with it. (The 0.24.6 migration keys on the same line.)
  */
 const HOUSE_SCRIPT_MARKER = 'Generated by @bespunky/nx-tools:devcontainer';
 
@@ -64,17 +51,52 @@ const DEVCONTAINER = '.devcontainer/devcontainer.json';
 const MARKER = '.devcontainer/.bespunky-devcontainer.json';
 
 /**
- * The one LOCAL devcontainer feature: the folder this generator writes, and — one line of
- * devcontainer.json.tpl's `features` block away — the id that points at it.
- *
- * A feature id beginning with `./` is a PATH resolved from the folder holding devcontainer.json, so
- * `./features/bespunky-house-setup` and `.devcontainer/features/bespunky-house-setup/` are one fact stated
- * in two files, and they must agree: the template names the id, this constant writes the folder. A
- * reference to a folder that isn't there is a hard failure at `Rebuild Container` — which is why the
- * folder is written UNCONDITIONALLY (see `writeHouseSetupFeature`), so the two can never disagree.
+ * The one LOCAL devcontainer feature: the folder this generator writes, and — in the composed `features` map
+ * (`compose.ts` HOUSE_FEATURE_ID) — the id that points at it. A `./` id is a PATH resolved from the folder
+ * holding devcontainer.json, so the two are one fact stated in two files; the folder is written
+ * UNCONDITIONALLY (see `writeHouseSetupFeature`) so they can never disagree.
  */
 const HOUSE_FEATURE = 'bespunky-house-setup';
 const HOUSE_FEATURE_DIR = `.devcontainer/features/${HOUSE_FEATURE}`;
+
+/**
+ * The voice INTENT's share of the container. Not a layer — nothing it installs leaves a trace in the workspace
+ * to detect — so it lives here, beside the probe it depends on, and composes exactly like a layer fragment.
+ */
+const VOICE: DevcontainerFragment = {
+  initializeCommand: [
+    {
+      name: 'bespunky-host-probe',
+      command: 'sh .devcontainer/host-probe.sh',
+      why:
+        "The host probe finds this machine's PulseAudio-protocol socket (WSLg, native PulseAudio, PipeWire's pulse\n" +
+        'shim) and points .devcontainer/.host/pulse at its folder — or leaves an empty dir there, so the voice mount\n' +
+        'can never fail on a host without audio. A probe + fixed path, because `${localEnv:…}` is resolved before\n' +
+        'this command runs. It always exits 0.',
+    },
+  ],
+  remoteEnv: [
+    {
+      name: 'PULSE_SERVER',
+      value: 'unix:/run/bespunky/host/pulse/native',
+      why: 'The host audio socket, bridged in by the voice mount at ONE fixed in-container endpoint (bespunky-voice).',
+    },
+    {
+      name: 'BESPUNKY_HOST_WSL_DISTRO',
+      value: '${localEnv:WSL_DISTRO_NAME}',
+      why: 'A host FACT passed through, empty off WSL — read only by the voice plugin to pick its default mic gain.',
+    },
+  ],
+  mounts: [
+    {
+      mount: 'source=${localWorkspaceFolder}/.devcontainer/.host/pulse,target=/run/bespunky/host/pulse,type=bind',
+      why:
+        'Host audio (bespunky-voice). The source is the FIXED path the host probe just pointed at this machine\'s\n' +
+        'socket folder — or an empty dir when the host has no audio — so the mount is valid on every host.',
+    },
+  ],
+  postCreate: [{ phase: 'provision', piece: 'voice' }],
+};
 
 export default async function devcontainerGenerator(
   tree: Tree,
@@ -83,21 +105,15 @@ export default async function devcontainerGenerator(
   if (!options.name) {
     throw new Error('devcontainer generator requires --name (the devcontainer / project name).');
   }
-  // Default the image tag to the Node major we are running under (the base image), if not given.
+  // Default the image tag to the Node major we are running under, if not given.
   const nodeMajor = String(options.nodeMajor ?? process.versions.node.split('.')[0]);
-  const flags: Record<string, boolean> = {
-    web: options.web ?? true,
-    angular: options.angular ?? false,
-    firebase: !!options.firebase,
-    voice: !!options.voice,
-  };
+  const voice = !!options.voice;
+  const layers = activeLayers(tree, options.layers);
+  const layerIds = layers.map((entry) => entry.id);
 
-  const rendered = render(
-    readFileSync(join(__dirname, 'devcontainer.json.tpl'), 'utf8'),
-    options.name,
-    nodeMajor,
-    flags
-  );
+  const contributors: Contributor[] = [...devcontainerFragments(layers), ...(voice ? [{ id: 'voice', fragment: VOICE }] : [])];
+  const composition = compose(contributors, { nodeMajor });
+  const rendered = renderDevcontainerJson(options.name, layerIds, composition);
 
   // OWNERSHIP. The marker separates "regenerate the file we maintain" from "adopt somebody else's" — and it
   // records that as an EXPLICIT `owned` flag, not as its own existence.
@@ -148,9 +164,9 @@ export default async function devcontainerGenerator(
   // never says so: the worst kind of output, because it LOOKS like the setup happened. So the house script
   // only takes that filename when something will actually call it.
   const invoked = owning || !foreignPostCreate || foreignPostCreate.includes('post-create.sh');
-  writePostCreate(tree, invoked, owning);
+  writePostCreate(tree, renderPostCreate(layerIds, composition, claudePlugins(layers)), invoked, owning);
 
-  if (flags.voice) writeHostProbe(tree);
+  if (voice) writeHostProbe(tree);
 
   // The ADOPTION REPORT. An adopted devcontainer diverges from the house spec on every key it already
   // declared, permanently and by design — the merge is additive and never argues with the project's own
@@ -161,7 +177,10 @@ export default async function devcontainerGenerator(
   const record: Json = {
     generator: '@bespunky/nx-tools:devcontainer',
     owned: owning,
-    flags,
+    // What this devcontainer was composed for — a RECORD (the next run re-detects), and the carrier of the
+    // voice intent, which has nothing in the workspace to detect it by (layers/agent.ts reads it back).
+    layers: layerIds,
+    voice,
   };
   if (!owning) {
     record.adopted = {
@@ -199,8 +218,9 @@ function readMarker(tree: Tree): Marker | null {
 
 /**
  * The companion script — `.devcontainer/post-create.sh` — owns all multi-step setup so
- * devcontainer.json's postCreateCommand stays a one-liner. It is self-adapting (its Firebase, Playwright,
- * Angular and voice steps each detect their own trigger at run time), so it ships verbatim, untemplated.
+ * devcontainer.json's postCreateCommand stays a one-liner. It is COMPOSED from the active layers' pieces
+ * (`compose.ts` renderPostCreate), and each piece still self-adapts at run time where its trigger can change
+ * between syncs (a declared @playwright/test, a host audio socket).
  *
  * TWO conditions must BOTH hold for the house script to take the canonical `post-create.sh` name, and
  * conflating them produced a silent failure each way round:
@@ -215,8 +235,7 @@ function readMarker(tree: Tree): Marker | null {
  * printed for a human to place. Same "detect, don't execute" line the SessionStart hook holds: report the
  * fact, let the person who owns the file make the edit.
  */
-function writePostCreate(tree: Tree, invoked: boolean, owning: boolean): void {
-  const house = readFileSync(join(__dirname, 'post-create.sh.tpl'), 'utf8');
+function writePostCreate(tree: Tree, house: string, invoked: boolean, owning: boolean): void {
   const HOUSE_PATH = '.devcontainer/post-create.sh';
   const BESIDE_PATH = '.devcontainer/post-create.bespunky.sh';
 
@@ -356,261 +375,6 @@ function writeHouseSetupFeature(tree: Tree): void {
   if (existsSync(install)) {
     tree.write(`${HOUSE_FEATURE_DIR}/install.sh`, readFileSync(install, 'utf8'), { mode: 0o755 });
   }
-}
-
-/**
- * Template -> final JSONC text: expand conditional blocks, substitute placeholders, sync the commas the
- * blocks left behind, and PROVE the result parses.
- */
-function render(template: string, name: string, nodeMajor: string, flags: Record<string, boolean>): string {
-  // 1) Conditional blocks: {{#flag}}body{{/flag}} -> body if flag truthy, else removed.
-  const expanded = template.replace(
-    /\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g,
-    (_, flag: string, body: string) => (flags[flag] ? body : '')
-  );
-
-  // 2) Simple placeholders. forwardPorts and portsAttributes are COMPUTED rather than written as
-  //    conditional template text: they are pure data with no interleaved comments, and computing them is
-  //    what keeps the port list and its labels from drifting apart across four flag combinations.
-  //    The noVNC band in particular comes from the SHARED band constants, never hand-written here — an
-  //    entry missing for a port the allocator can pick is precisely a port that fails silently.
-  const content = expanded
-    .split('{{name}}')
-    .join(name)
-    .split('{{nodeMajor}}')
-    .join(nodeMajor)
-    .split('{{forwardPorts}}')
-    .join(forwardPortsJson(flags))
-    .split('{{portsAttributes}}')
-    .join(portsAttributesJson(flags))
-    .split('{{novncBand}}')
-    .join(NOVNC_BAND_LABEL);
-
-  const normalized = normalizeCommas(content);
-
-  // 3) PROVE it. Every flag combination has to produce parseable JSONC, and the only moment we can cheaply
-  //    find out is now. Without this check a bad block boundary ships a devcontainer.json that fails at
-  //    `Rebuild Container`, with an error pointing at a line the author never wrote.
-  try {
-    parseJson(normalized);
-  } catch (error) {
-    throw new Error(
-      `[devcontainer] The rendered devcontainer.json is not valid JSONC for flags ` +
-        `(${Object.entries(flags).filter(([, on]) => on).map(([f]) => f).join(', ') || 'none'}): ` +
-        `${(error as Error).message}\n` +
-        `This is a bug in devcontainer.json.tpl's conditional blocks, not in the workspace.`
-    );
-  }
-
-  return normalized;
-}
-
-/**
- * Remove the commas conditional blocks orphan: before a closing bracket, after an opening one, and doubled
- * between two removed members. String-aware, so a comma inside a value (a mount spec, a label) is never
- * touched — the reason this is a small parser rather than three regexes.
- */
-function normalizeCommas(source: string): string {
-  const out: string[] = [];
-  let inString = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = 0; i < source.length; i++) {
-    const char = source[i];
-    const next = source[i + 1];
-
-    if (inLineComment) {
-      out.push(char);
-      if (char === '\n') inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      out.push(char);
-      if (char === '*' && next === '/') {
-        out.push(next);
-        i++;
-        inBlockComment = false;
-      }
-      continue;
-    }
-    if (inString) {
-      out.push(char);
-      if (char === '\\') {
-        // Escape: consume the next character verbatim so a \" can't end the string.
-        if (next !== undefined) {
-          out.push(next);
-          i++;
-        }
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-      out.push(char);
-      continue;
-    }
-    if (char === '/' && next === '/') {
-      inLineComment = true;
-      out.push(char);
-      continue;
-    }
-    if (char === '/' && next === '*') {
-      inBlockComment = true;
-      out.push(char);
-      continue;
-    }
-
-    if (char === ',') {
-      // Drop this comma when the next meaningful character closes the container (dangling), or when the
-      // previous meaningful character opened it / was itself a comma (leading or doubled).
-      const nextMeaningful = peekMeaningful(source, i + 1);
-      const prevMeaningful = lastMeaningful(out);
-      if (
-        nextMeaningful === ']' ||
-        nextMeaningful === '}' ||
-        nextMeaningful === ',' ||
-        prevMeaningful === '[' ||
-        prevMeaningful === '{' ||
-        prevMeaningful === ',' ||
-        prevMeaningful === undefined
-      ) {
-        continue;
-      }
-    }
-
-    out.push(char);
-  }
-
-  // Collapse the blank-line runs a removed block leaves behind, so the output reads as if it were written
-  // for these flags rather than edited down to them.
-  return out.join('').replace(/\n[ \t]*\n[ \t]*\n+/g, '\n\n');
-}
-
-/**
- * The next non-whitespace, non-comment character from `start`, or undefined at end of input.
- *
- * Skipping COMMENTS is the part that matters: this file is dense with them, and a member removed by a
- * conditional block routinely leaves its comma separated from the closing bracket by a paragraph of prose.
- * A scan that stopped at the first `/` would call that comma load-bearing and leave `{,}` behind.
- */
-function peekMeaningful(source: string, start: number): string | undefined {
-  let i = start;
-  while (i < source.length) {
-    const char = source[i];
-    if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
-      i++;
-      continue;
-    }
-    if (char === '/' && source[i + 1] === '/') {
-      const end = source.indexOf('\n', i);
-      if (end === -1) return undefined;
-      i = end + 1;
-      continue;
-    }
-    if (char === '/' && source[i + 1] === '*') {
-      const end = source.indexOf('*/', i);
-      if (end === -1) return undefined;
-      i = end + 2;
-      continue;
-    }
-    return char;
-  }
-  return undefined;
-}
-
-/**
- * The last emitted non-whitespace character.
- *
- * Unlike the forward scan this does NOT skip backwards over comments — and doesn't need to. It exists only
- * to catch a LEADING or DOUBLED comma, where the preceding character is `[`, `{` or `,` directly. If a
- * comment happens to precede the comma, the scan returns some prose character, which matches none of those
- * and so keeps the comma — the safe direction: this pass only ever deletes a comma it is sure about, and
- * anything it wrongly keeps is caught by the parse check.
- */
-function lastMeaningful(out: string[]): string | undefined {
-  for (let i = out.length - 1; i >= 0; i--) {
-    const char = out[i];
-    if (char === ' ' || char === '\t' || char === '\n' || char === '\r') continue;
-    return char;
-  }
-  return undefined;
-}
-
-interface Port {
-  port: number;
-  label: string;
-  onAutoForward: 'silent' | 'notify' | 'openPreview';
-  /**
-   * Forward at the SAME host number? Only for ports something OUTSIDE the container dials by a hardcoded
-   * address (the Firebase SDK in a host-loaded page). Everything else is left to auto-forward, which is
-   * free to remap — and a port that is labelled but not forwarded still gets its `onAutoForward` behaviour.
-   */
-  forward: boolean;
-}
-
-/**
- * The ports this devcontainer cares about — ONE list, from which both `forwardPorts` and `portsAttributes`
- * are derived. They were two hand-maintained lists gated on different flags, which is why `firebase` without
- * `angular` used to forward 4200 and then not label it. One list makes that class of drift unrepresentable.
- */
-function ports(flags: Record<string, boolean>): Port[] {
-  const list: Port[] = [];
-
-  if (flags.web) {
-    list.push({
-      port: 80,
-      label: 'Worktree domains (pretty <slug>.localhost URLs)',
-      onAutoForward: 'silent',
-      forward: true,
-    });
-  }
-
-  // The dev server is labelled whenever there IS one — but only Firebase needs it pinned to the same host
-  // port (the SDK inside a host-loaded page dials hardcoded localhost addresses; see the template).
-  if (flags.angular || flags.firebase) {
-    list.push({
-      port: 4200,
-      label: flags.angular ? 'Angular Dev Server' : 'Dev Server',
-      onAutoForward: 'openPreview',
-      forward: !!flags.firebase,
-    });
-  }
-
-  if (flags.firebase) {
-    list.push(
-      { port: 4000, label: 'Firebase Emulator UI', onAutoForward: 'notify', forward: true },
-      { port: 9099, label: 'Auth Emulator', onAutoForward: 'silent', forward: true },
-      { port: 8080, label: 'Firestore Emulator', onAutoForward: 'silent', forward: true },
-      { port: 9150, label: 'Firestore WebSocket', onAutoForward: 'silent', forward: true },
-      { port: 9199, label: 'Storage Emulator', onAutoForward: 'silent', forward: true },
-      { port: 5001, label: 'Functions Emulator', onAutoForward: 'silent', forward: true }
-    );
-  }
-
-  return list;
-}
-
-function forwardPortsJson(flags: Record<string, boolean>): string {
-  return `[${ports(flags)
-    .filter((entry) => entry.forward)
-    .map((entry) => entry.port)
-    .join(', ')}]`;
-}
-
-function portsAttributesJson(flags: Record<string, boolean>): string {
-  const lines = ports(flags).map(
-    ({ port, label, onAutoForward }) => `    "${port}": { "label": "${label}", "onAutoForward": "${onAutoForward}" }`
-  );
-
-  // The noVNC band is emitted as ONE EXACT KEY PER PORT by the shared band module — never hand-written
-  // here, and never as a range (see the template for why a range silently loses `requireLocalPort`).
-  if (flags.web) lines.splice(1, 0, novncPortsAttributesJson());
-
-  return `{\n${lines.join(',\n')}\n  }`;
 }
 
 /**

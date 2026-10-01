@@ -24,6 +24,7 @@ import type { LayerDescriptor, LayerId } from './descriptor';
 import { matchesEvidence } from './evidence';
 import { nx } from './nx';
 import { agent } from './agent';
+import { node } from './node';
 import { js } from './js';
 import { web } from './web';
 import { angular } from './angular';
@@ -41,7 +42,7 @@ export type Layer = LayerDescriptor;
  * planner runs generators in. To add a layer: write `layers/<id>.ts`, add it here, regenerate the shell
  * projection (`node tools/test-layers/run.mjs --write`).
  */
-const REGISTERED: readonly LayerDescriptor[] = [nx, agent, js, web, angular, designSystem, navigation, firebase];
+const REGISTERED: readonly LayerDescriptor[] = [nx, agent, node, js, web, angular, designSystem, navigation, firebase];
 
 /** The layer that is ALWAYS ensured, beneath everything else. */
 export const FLOOR: LayerId = nx.id;
