@@ -572,6 +572,16 @@ checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-serv
   ok(tree.read('apps/shop/project.json', 'utf8') === once, 'a re-run changed project.json');
 });
 
+checkAsync('a first scaffold: the Firebase core, arriving after the web seeding, still declares the emulators for served apps', async (ok) => {
+  const tree = angularShop();
+  await generator('serve')(tree, { project: 'shop' });
+  const before = JSON.parse(tree.read('.bespunky/dev.json', 'utf8'));
+  ok(!before.apps.shop.processes.some((p) => p.id === 'emulators'), 'no emulators before the suite exists');
+  await generator('firebase-emulators')(tree, {});
+  const after = JSON.parse(tree.read('.bespunky/dev.json', 'utf8'));
+  ok(after.apps.shop.processes.some((p) => p.id === 'emulators'), `emulators not declared: ${JSON.stringify(after.apps.shop.processes.map((p) => p.id))}`);
+});
+
 checkAsync('firebase core on an old-shaped eslint.config.mjs (no trailing comma): a well-formed splice, idempotent', async (ok) => {
   const tree = createTreeWithEmptyWorkspace();
   writeJson(tree, 'package.json', { name: 'shop', devDependencies: { nx: '23.2.1' } });

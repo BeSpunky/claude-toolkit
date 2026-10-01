@@ -46,6 +46,7 @@
 //
 // No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (a continuous multi-process serve),
 // not of Firebase, and belongs to the generator that owns that loop.
+import { seedServedApps } from '../dev/generator';
 import {
   type Tree,
   type GeneratorCallback,
@@ -210,6 +211,9 @@ export default async function firebaseEmulatorsGenerator(
   // 3) Cloud Functions (REQUIRED for the suite to boot at all) and the suite's own workspace project.
   ensureFunctionsProject(tree, lint);
   ensureFirebaseProject(tree);
+  // The suite is now declarable: give every app the dev engine serves its `emulators` process (only where it is
+  // not declared yet). The web layer's own seeding ran before this step on a first scaffold.
+  seedServedApps(tree, 'firebase-emulators');
 
   // 4) Best-effort: the `platform:` firewall in the root flat ESLint config.
   const serverBanned = [

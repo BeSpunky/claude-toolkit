@@ -47,11 +47,21 @@ export function servedProjects(tree: Tree): string[] {
     .sort();
 }
 
+/**
+ * Seed every served app's declaration from the adapters that apply NOW. Also called by a capability at the moment
+ * it comes into being (the Firebase core, right after it writes firebase.json): this generator runs as the web
+ * layer's step, BEFORE later layers' workspace steps, so on a first scaffold the suite did not exist yet when it
+ * ran — and a new Firebase app would otherwise serve without its emulators until the next sync.
+ */
+export function seedServedApps(tree: Tree, tag: string): void {
+  for (const project of servedProjects(tree)) {
+    for (const line of seedFromAdapters(tree, project)) logger.info(`[${tag}] ${line}`);
+  }
+}
+
 export default async function devGenerator(tree: Tree, _options: DevSchema = {}): Promise<void> {
   requireLayer(tree, 'web', 'dev');
   writeEngine(tree);
-  for (const project of servedProjects(tree)) {
-    for (const line of seedFromAdapters(tree, project)) logger.info(`[dev] ${line}`);
-  }
+  seedServedApps(tree, 'dev');
   await formatFiles(tree);
 }

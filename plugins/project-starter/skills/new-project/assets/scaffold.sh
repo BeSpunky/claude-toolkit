@@ -1653,12 +1653,14 @@ $INSTALL_NX_TOOLS
 $SCAFFOLD_APP_BLOCK
 $LAYER_RESOLVE_BLOCK
 $PLAN_RUN_BLOCK
+# --local only: correct the manifest's temp-dir tarball spec back to the plain version BEFORE the commit, or
+# the scaffold's one commit records a file: path that exists on no machine (and is deleted moments later).
+$FINALIZE_LOCAL
 # Commit the full scaffold. The floor may have made an initial commit (create-nx-workspace does), but the
 # house generators + dep installs ran after it — capture them so the host-side push (gh repo
 # create --source --push) ships a clean, complete tree on main.
 git add -A
-git commit -m 'chore: scaffold BeSpunky project (layers: $SCAFFOLD_COMMIT_LAYERS)' || true
-$FINALIZE_LOCAL"
+git commit -m 'chore: scaffold BeSpunky project (layers: $SCAFFOLD_COMMIT_LAYERS)' || true"
 else
   INNER="set -e
 cd '$WORK_ROOT/$PROJECT'
