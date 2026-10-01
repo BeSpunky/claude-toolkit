@@ -29,7 +29,7 @@ Args are argv words; the planner **refuses** a word with whitespace/shell syntax
 Current graph: `nx[]` (floor) · `agent[]` · `js[nx]` · `web[agent]` · `angular[nx]` · `design-system[angular]` ·
 `navigation[angular]` · `firebase[angular]` (phase 4 splits firebase/DS into core + adapter).
 
-**No `node` layer.** It was considered and not added: nothing runs for it (no generator, no doc section yet),
+**`node` layer — superseded (phase 2 added it; phase 6 made it decide a scaffold's host, see contracts/presets.md).** Originally it was considered and not added: nothing runs for it (no generator, no doc section yet),
 and its only job in the DECISION draft — being `nx`'s prerequisite — was removed by the wrapper host. "Is this a
 JS/TS project?" is already `js`; "does it have a package.json?" is a *hosting* fact the sync decides (below), not
 a capability a project wears. Add it when a phase gives it a generator or a devcontainer fragment.
