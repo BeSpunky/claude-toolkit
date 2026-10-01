@@ -82,6 +82,15 @@ printf 'node_modules/\n' > "$FIX/.gitignore"
 git -C "$FIX" add -A >/dev/null 2>&1
 git -C "$FIX" commit -qm init
 
+# The WRAPPER host: a repo with no package.json (a Python service). The sync lays the Nx floor through the Nx
+# wrapper (./nx) instead of making it a Node project, so it renders a different install, probe and nx command.
+FIXW="$TMP/pyproject"
+mkdir -p "$FIXW"
+printf 'print("hi")\n' > "$FIXW/main.py"
+git -C "$FIXW" init -q -b main
+git -C "$FIXW" add -A >/dev/null 2>&1
+git -C "$FIXW" commit -qm init
+
 FAILED=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILED=1; }
@@ -238,6 +247,28 @@ render 'scaffold --firebase'    --firebase --staging "newproj" "myapp"
 # was broken by the same duplicate-author bug — undetected, because no arm had ever rendered it.
 render 'scaffold --voice'       --voice "newproj"
 render 'scaffold --local'       --local "newproj"
+render 'sync (wrapper host)'    --sync --yes "$FIXW"
+render 'sync --local (wrapper)' --sync --yes --local --ensure=agent "$FIXW"
+render 'scaffold --ensure=nx,agent' --ensure=nx,agent "newproj"
+
+# SCAFFOLD = SYNC WITH AN ENSURE SET: the Angular bootstrap must be gated on the ensure set, never hard-wired.
+# It once ran unconditionally, so --ensure=nx,agent still created an Angular workspace and app.
+echo "── the scaffold bootstrap obeys the ensure set"
+_prog="$(bash "$SCAFFOLD" --print-inner --ensure=nx,agent "newproj" 2>/dev/null)"
+if printf '%s\n' "$_prog" | grep -B1 -E '^[^#]*(nx add @nx/angular|nx-tools:app )' | grep -q 'layer_ensured angular' \
+   && [ "$(printf '%s\n' "$_prog" | grep -cE '^[^#]*(nx add @nx/angular|nx-tools:app )')" -eq "$(printf '%s\n' "$_prog" | grep -B1 -E '^[^#]*(nx add @nx/angular|nx-tools:app )' | grep -c 'layer_ensured angular')" ] \
+   && printf '%s\n' "$_prog" | grep -q "^ENSURED='nx,agent'$"; then
+  ok "Angular bootstrap gated on layer_ensured angular; ENSURED='nx,agent'"
+else
+  fail "the scaffold's Angular bootstrap is not gated on the ensure set"
+fi
+# And the wrapper host never makes a Python repo a Node project: no package-manager add, ./nx throughout.
+_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=agent "$FIXW" 2>/dev/null)"
+if printf '%s\n' "$_prog" | grep -q 'useDotNxInstallation=true' && ! printf '%s\n' "$_prog" | grep -qE 'yarn add|npm install --save-dev|pnpm add'; then
+  ok "wrapper host: nx init through the wrapper, no package-manager add"
+else
+  fail "wrapper host renders a Node-project install"
+fi
 
 if [ "$FAILED" -eq 0 ]; then
   echo "scaffold.sh renders cleanly in every mode"

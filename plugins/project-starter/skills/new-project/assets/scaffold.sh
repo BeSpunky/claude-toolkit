@@ -41,8 +41,9 @@
 #           developing the toolkit itself, where the version under test is not published yet.
 #
 #   --staging (scaffold or sync) additionally scaffolds the staging environment bundle; requires --firebase.
-#   --ensure=<csv> brings layers into being: nx,agent,firebase for a sync; also web,angular,design-system
-#                  for a scaffold. Everything else is DETECTED, never ensured.
+#   --ensure=<csv> brings layers into being — which ones each mode can create comes from the layer registry
+#                  (assets/layers.sh). Everything else is DETECTED, never ensured. The Nx floor is always
+#                  ensured.
 #
 # Sync auto-backup: --sync snapshots the project to a git tag (sync-backup-<ts>) BEFORE running
 # any generator, so a regenerated file (e.g. firebase.config.ts) is always recoverable — review with
@@ -77,6 +78,15 @@
 # Force the image with --docker. Never nvm.
 set -euo pipefail
 
+ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# THE LAYER REGISTRY, as this shell sees it. assets/layers.sh is GENERATED from nx-tools/src/layers/*.ts (the
+# single source of truth) and checked for drift by tools/test-layers/run.mjs. It is a shell projection rather
+# than a node call because this outer shell validates --ensure BEFORE anything is installed — and on the
+# Docker path the host may have no usable Node at all. It defines data and functions; sourcing runs nothing.
+# Nothing in this script lists layers by hand: ids, ensurability, hints and the --help text all come from it.
+# shellcheck source=layers.sh
+. "$ASSETS_DIR/layers.sh"
+
 # The command line is the first place anyone looks, and until now it was the one place that said nothing:
 # `--help` was answered with "unknown flag", and a bare invocation printed a raw bash parameter-expansion
 # error whose usage string named only `--firebase`. Every flag below is real and several change what the
@@ -93,10 +103,15 @@ Flags must come BEFORE the project path.
   --sync            Sync an existing project instead of creating one: run the versioned house
                     migrations, then re-apply the generators that own their output.
   --ensure=<csv>    Layers to BRING INTO BEING (everything else is detected, never ensured).
-                      sync    : nx, agent, firebase
-                      scaffold: also js, web, angular, design-system, navigation
-                    `--ensure=agent` on a bare repo is the usual retrofit: Nx in place plus the
-                    stack-agnostic DX layer (devcontainer, Claude settings, window identity, HOUSE.md).
+USAGE
+  # Rendered from the registry projection, so the list a user reads is the list the script accepts.
+  printf '                      sync    : %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SYNC" | sed 's/,/, /g')"
+  printf '                      scaffold: %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SCAFFOLD" | sed 's/,/, /g')"
+  printf '                    The %s floor is ALWAYS ensured: a repo without Nx gets it initialised in place\n' "$HOUSE_LAYER_FLOOR"
+  cat <<'USAGE'
+                    (through the Nx wrapper, ./nx, when the repo has no package.json — it does not
+                    become a Node project). `--ensure=agent` on a bare repo is the usual retrofit: the
+                    stack-agnostic DX layer (devcontainer, Claude settings, window identity).
   --firebase        Include the Firebase layer (emulator suite, Cloud Functions app, devcontainer wiring).
   --staging         Also scaffold the staging environment bundle. Requires --firebase.
   --voice           Bridge the host's audio (WSLg or native PulseAudio/PipeWire) into the devcontainer
@@ -146,7 +161,7 @@ while [ "${1:-}" != "" ]; do
     # they hadn't consented rather than that they'd mistyped. Reject a flag-shaped value outright.
     --ensure)     case "${2:-}" in
                     ''|-*) echo "ERROR: --ensure needs a comma-separated layer list, got '${2:-}'." >&2
-                           echo "       Did you mean --ensure=<layers>? Known layers: nx,agent,js,web,angular,design-system,navigation,firebase" >&2
+                           echo "       Did you mean --ensure=<layers>? Known layers: $HOUSE_LAYERS" >&2
                            exit 1;;
                   esac
                   ENSURE_ARG="$2"; shift 2;;
@@ -247,7 +262,6 @@ else
   CREATE_WORKSPACE="yarn create nx-workspace"
 fi
 
-ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Base-image lookup + engine-aware file ownership for the Docker fallback, shared with tools/extract-tool
 # (see the header of container-engine.sh for why it lives beside this script).
 # shellcheck source=container-engine.sh
@@ -387,8 +401,32 @@ _check_name app "$APP"
 # Scaffold sets the house standard (it is creating the project); sync adopts whatever the project already
 # uses. Everything downstream goes through these three variables, so a new package manager is one case here
 # rather than twenty call sites.
+# --- how does this project HOST Nx? ----------------------------------------------------------------------------
+# Nx is the floor under every house run, but "has Nx" must not mean "is a Node project". Two hosting models:
+#
+#   node     a root package.json — Nx, @nx/devkit and @bespunky/nx-tools are devDependencies in node_modules,
+#            run through the project's package manager. Every scaffold, and every JS/TS repo.
+#   wrapper  NO root package.json (Python, Go, docs, …) — Nx's own wrapper: `./nx`, `.nx/nxw.js`, packages
+#            under the gitignored `.nx/installation`, versions pinned EXACTLY in nx.json `installation`
+#            (`plugins` holds @bespunky/nx-tools and @nx/devkit). The repo gains nx.json, ./nx and .nx/nxw.js,
+#            and NOTHING that makes it a Node project — no package.json, no lockfile, no node_modules.
+#
+# The wrapper was once refused here ("cannot host devkit plugins"); that is no longer true on Nx 23 and was
+# re-verified before relying on it: exact pin, generators, native nx migrate collect + run, and a fresh clone
+# reinstalling the pins all work (docs/features/2026-10-01-stack-agnostic/contracts/layers.md). A repo that
+# already runs the wrapper keeps it even if it also has a package.json.
+HOST="node"
+if [ "$MODE" = "sync" ]; then
+  if { [ -f "$TARGET/.nx/nxw.js" ] && grep -q '"installation"' "$TARGET/nx.json" 2>/dev/null; } || [ ! -f "$TARGET/package.json" ]; then
+    HOST="wrapper"
+  fi
+fi
+
 if [ "$MODE" = "scaffold" ]; then
   PM="yarn"; PM_SOURCE="house-default"
+elif [ "$HOST" = "wrapper" ]; then
+  # The wrapper installs with npm into .nx/installation; the project itself has no package manager to honour.
+  PM="npm"; PM_SOURCE="nx-wrapper"
 else
   read -r PM PM_SOURCE <<< "$(detect_package_manager "$TARGET")"
 fi
@@ -413,7 +451,9 @@ case "$PM" in
         [ -f "$TARGET/pnpm-workspace.yaml" ] && PM_ADD_DEV="pnpm add -D -w -E" ;;
 esac
 if [ "$MODE" = "sync" ]; then
-  if [ "$PM_SOURCE" = "house-default" ]; then
+  if [ "$HOST" = "wrapper" ]; then
+    echo "Nx host: the Nx wrapper (./nx) — this repo has no package.json and does not become a Node project"
+  elif [ "$PM_SOURCE" = "house-default" ]; then
     echo "Package manager: $PM (this project declares none — using the house default)"
   else
     echo "Package manager: $PM (from $PM_SOURCE — the project's choice, not imposed)"
@@ -454,8 +494,8 @@ fi
 ENSURE_LAYERS="${ENSURE_ARG:-$ENSURE_DEFAULT}"
 # NORMALISE AWAY WHITESPACE before anything reads this. Every consumer below matches on comma-delimited
 # globs (`*,agent,*`), while the VALIDATOR word-splits — so `--ensure="nx, agent"` passes validation, prints
-# a banner claiming both layers, and then matches nothing: the agent⇒nx implication misfires and
-# `layer_active agent` is false, so the devcontainer, Claude settings and window identity are all silently
+# a banner claiming both layers, and then matches nothing: the floor is added a second time and `agent` never
+# reaches the planner as ensured, so the devcontainer, Claude settings and window identity are all silently
 # skipped. A csv a human typed with spaces is a csv, not a different request. (HOUSE.md/HOUSE.rules.md are
 # no longer in that list — house-doc is ungated; see the HOUSE.md step at the end of the sequence.)
 ENSURE_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | tr -d '[:space:]')"
@@ -474,75 +514,66 @@ case ",$ENSURE_LAYERS," in
   *) [ "$FIREBASE" = "1" ] && ENSURE_LAYERS="${ENSURE_LAYERS:+$ENSURE_LAYERS,}firebase" ;;
 esac
 
-# `agent` is the one layer a run cannot sensibly omit once it is touching the project at all: it is the
-# devcontainer, the Claude settings and HOUSE.md — the reason to run this tool. Ensuring it implies `nx`,
-# because every house generator runs through `nx g`.
+# THE FLOOR IS ALWAYS ENSURED. Nx is the mechanism under every house run — the generators are devkit generators
+# run through `nx g`, the migration ladder is native `nx migrate` — so a repo without it gets it initialised in
+# place instead of a refusal ("Let's keep Nx as a base assumption. If it's not there, we require/install/init
+# it" — the user). This amends "a sync ensures nothing by default" to "a sync ensures nothing ABOVE THE FLOOR".
+# It replaces the old agent⇒nx implication, which encoded the same fact as if it were a property of one layer.
 case ",$ENSURE_LAYERS," in
-  *,agent,*) case ",$ENSURE_LAYERS," in *,nx,*) ;; *) ENSURE_LAYERS="nx,$ENSURE_LAYERS" ;; esac ;;
+  *",$HOUSE_LAYER_FLOOR,"*) ;;
+  *) ENSURE_LAYERS="$HOUSE_LAYER_FLOOR${ENSURE_LAYERS:+,$ENSURE_LAYERS}" ;;
 esac
 
-# Validate against the registry's ids here, in the outer shell, where the error still has a human in front of
-# it — rather than letting a typo silently ensure nothing at all.
-KNOWN_LAYERS="nx,agent,js,web,angular,design-system,navigation,firebase"
-# WHAT THIS SCRIPT CAN ACTUALLY ENSURE IN SYNC MODE, and nothing more. `nx` (nx init) and `agent` (the
-# house generators) are the two it has code for. The rest are created by the SCAFFOLD path — an Nx preset,
-# `nx add @nx/angular`, the app generator — which exists only for a brand-new project.
+# Validated against the REGISTRY (assets/layers.sh), here in the outer shell, where the error still has a human
+# in front of it — rather than letting a typo silently ensure nothing at all. Every list, hint and rule below
+# comes from the layer descriptors; nothing here names a layer.
 #
-# So accepting `--ensure=web` on an existing repo would be a promise the script cannot keep. It ran the
-# `web` generators against an app that isn't there and died mid-sequence; worse, had it survived it would
-# have STAMPED `web` as applied, and the next run — which re-detects — would not see it, so the tooling
-# would rot silently with the stamp claiming otherwise. Refusing up front, with the registry's own hint for
-# how to add the layer natively, is the honest move: add the layer with Nx's tooling, then sync, and
-# detection picks it up on its own. This is the same reason the ensure/detect split exists at all.
-#
-# `firebase` IS ensurable here, unlike the rest: the `firebase-emulators` generator genuinely creates that
-# layer from nothing (firebase.json, apps/functions, the env files, the emulator project) against an app
-# that already exists. That is precisely the "retrofit Firebase onto an existing project" case, and it is
-# reached through `--firebase`, which the block above folds into this ensure set.
-SYNC_ENSURABLE="nx,agent,firebase"
-# Scaffold can create more — it builds the workspace from nothing — but still not everything. `js` and
-# `navigation` have no creating step on this path either (their generators are on-demand), so accepting
-# them here would silently produce a workspace missing the very layer that was asked for.
-SCAFFOLD_ENSURABLE="nx,agent,web,angular,design-system,firebase"
-if [ -n "$ENSURE_LAYERS" ]; then
-  for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
-    case ",$KNOWN_LAYERS," in
-      *",$_l,"*) ;;
-      *) echo "ERROR: unknown layer '$_l' in --ensure. Known layers: $KNOWN_LAYERS" >&2; exit 1;;
-    esac
-    if [ "$MODE" = "scaffold" ]; then
-      case ",$SCAFFOLD_ENSURABLE," in
-        *",$_l,"*) ;;
-        *)
-          echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
-          echo "       Scaffold the project, then add it with its own generator:" >&2
-          case "$_l" in
-            js)         echo "         nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular" >&2;;
-            navigation) echo "         nx g @bespunky/nx-tools:navigation-core" >&2;;
-          esac
-          echo "       Ensurable by a scaffold: $SCAFFOLD_ENSURABLE" >&2
-          exit 1;;
-      esac
-    fi
-    if [ "$MODE" = "sync" ]; then
-      case ",$SYNC_ENSURABLE," in
-        *",$_l,"*) ;;
-        *)
-          echo "ERROR: --sync cannot ENSURE the '$_l' layer — it can only refresh a layer that is already there." >&2
-          echo "       A sync brings house tooling up to date; it does not add a framework to your project." >&2
-          echo "       Add the layer with Nx's own tooling, then re-run --sync and it will be DETECTED:" >&2
-          case "$_l" in
-            js)            echo "         nx add @nx/js" >&2;;
-            web|angular)   echo "         nx add @nx/angular  # then: nx g @bespunky/nx-tools:app apps/<name>" >&2;;
-            design-system) echo "         nx g @bespunky/nx-tools:design-system --scope=<scope>" >&2;;
-            navigation)    echo "         nx g @bespunky/nx-tools:navigation-core" >&2;;
-          esac
-          echo "       Ensurable by --sync: $SYNC_ENSURABLE" >&2
-          exit 1;;
-      esac
-    fi
-  done
-fi
+#   known       — is it a registered layer?
+#   ensurable   — does THIS MODE have a step that creates it? A sync can only create what a generator genuinely
+#                 builds from nothing (the floor, the agent DX, the Firebase retrofit); the rest are added with
+#                 their own native tooling and then DETECTED. Accepting more would be a promise the script
+#                 cannot keep — and worse, it would STAMP the layer as applied while the next run, which
+#                 re-detects, does not see it, so the tooling would rot with the stamp claiming otherwise.
+#   via:<id>    — creatable only together with <id>, whose creation produces it (a scaffold's `web` is the
+#                 dev-server of the Angular app the `angular` layer creates).
+#   requires    — a SCAFFOLD starts from an empty directory, so nothing can be detected: everything a requested
+#                 layer requires must be in the set too. (A sync may satisfy it by detection instead, and each
+#                 generator's own requireLayer guard says so precisely if it does not.)
+_layer_listed() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }
+for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+  _layer_listed "$_l" "$HOUSE_LAYERS" || {
+    echo "ERROR: unknown layer '$_l' in --ensure. Known layers: $HOUSE_LAYERS" >&2; exit 1; }
+  if [ "$MODE" = "scaffold" ]; then _ens="$(house_layer_ensurable_scaffold "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SCAFFOLD"
+  else _ens="$(house_layer_ensurable_sync "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SYNC"; fi
+  case "$_ens" in
+    yes) ;;
+    via:*)
+      _via="${_ens#via:}"
+      _layer_listed "$_via" "$ENSURE_LAYERS" || {
+        echo "ERROR: a $MODE can ensure the '$_l' layer only together with '$_via', whose creation produces it." >&2
+        echo "       Add it: --ensure=$ENSURE_LAYERS,$_via" >&2
+        exit 1; } ;;
+    *)
+      if [ "$MODE" = "scaffold" ]; then
+        echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
+        echo "       Scaffold the project, then add it with its own tooling:" >&2
+      else
+        echo "ERROR: --sync cannot ENSURE the '$_l' layer — it can only refresh a layer that is already there." >&2
+        echo "       A sync brings house tooling up to date; it does not add a framework to your project." >&2
+        echo "       Add the layer with its own tooling, then re-run --sync and it will be DETECTED:" >&2
+      fi
+      echo "         $(house_layer_hint "$_l")" >&2
+      echo "       Ensurable by a $MODE: $_ensurable" >&2
+      exit 1 ;;
+  esac
+  if [ "$MODE" = "scaffold" ]; then
+    for _r in $(house_layer_requires "$_l" | tr ',' ' '); do
+      _layer_listed "$_r" "$ENSURE_LAYERS" || {
+        echo "ERROR: the '$_l' layer requires '$_r', and a scaffold starts from nothing — add it: --ensure=$ENSURE_LAYERS,$_r" >&2
+        exit 1; }
+    done
+  fi
+done
 [ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
 
 # --- sync consent gate (see the header) ---
@@ -589,7 +620,7 @@ fi
 #     here). Docker was never the requirement — a modern Node is. When the local Node is new enough we run
 #     the generators NATIVELY (no daemon, no image, no mounts) with the path roots bound to real host dirs;
 #     otherwise we fall back to the base image, binding the roots to the container mount points. The
-#     WORKSPACE_GEN_BLOCK/INNER below are rendered ONCE against these roots, so the two paths cannot drift. ---
+#     PLAN_RUN_BLOCK/INNER below are rendered ONCE against these roots, so the two paths cannot drift. ---
 if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
   RUNTIME="native"
   echo "Node $(node -v) is new enough — running the generators natively (no Docker)."
@@ -621,26 +652,17 @@ fi
 [ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (host audio bridge — WSLg or PulseAudio/PipeWire — + espeak-ng + bespunky-voice plugin)"
 
 # --- devcontainer generator args ---
-# The devcontainer's layer flags have exactly ONE author: DC_LAYER_FLAGS, resolved at run time from
-# layer detection inside the rendered sequence. Nothing is appended here, in either mode.
+# The devcontainer's layer flags have exactly ONE author: the `agent` layer's plan step
+# (nx-tools/src/layers/agent.ts), resolved at run time from the ACTIVE layer set. Nothing here appends any.
 #
-# There used to be a second, scaffold-only author (DEVCONTAINER_FLAGS) that translated --firebase/--voice
-# into generator flags directly, on the reasoning that a scaffold has nothing to detect yet so the flags ARE
-# the truth. It was correct for as long as it was the ONLY author. 5607eb3 ended that: it added the
-# `layer_active firebase` branch to DC_LAYER_FLAGS without retiring the flag-driven one, so from that commit
-# both fired. `nx g` saw --firebase=true twice, coerced it to an array, and rejected it against a boolean
-# schema; under `set -e` that took down every generator AFTER the devcontainer - claude-settings,
-# window-identity, playwright, shared-browser, worktree-domains, angular-ai, design-system, house-doc, and
-# the scaffold's own final `git commit`. Two authorities for one fact is the bug; one is the fix.
+# History worth keeping: there used to be a second, flag-driven author here beside a detection-driven one, and
+# from 5607eb3 both fired — `nx g` saw --firebase=true twice, coerced it to an array, rejected it against a
+# boolean schema, and under `set -e` took down every generator after the devcontainer. Two authorities for one
+# fact is the bug; one is the fix. The planner now REFUSES a step that passes any flag twice (plan.ts), and
+# render.test.sh still checks the rendered program's own `nx g` lines.
 #
-# THE LESSON, because it generalizes past this flag: adding a DETECTION-driven author for a fact must RETIRE
-# the flag-driven one in the same commit. render.test.sh now asserts it mechanically - no `nx g` line may
-# both name a flag variable and spell out a flag that variable can emit.
-#
-# The two inputs are covered where they belong:
 #   firebase - through ENSURE_LAYERS, which the --firebase flag populates (see the ensure-set assembly).
-#   voice    - through _dc_voice in the rendered sequence, which interpolates VOICE directly and also
-#              carries a previous answer forward from the ownership marker.
+#   voice    - passed to the planner, which also carries a previous answer forward from the ownership marker.
 
 # --- Firebase opt-in plumbing ---
 #   Scaffold mode: the house `app` generator owns the per-app Firebase wiring; we just tell it
@@ -658,17 +680,9 @@ APP_FIREBASE_FLAG="--firebase=false"
 [ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires --firebase." >&2; exit 1; }
 APP_STAGING_FLAG=""
 [ "$STAGING" = "1" ] && APP_STAGING_FLAG=" --staging=true"
-# Rendered UNCONDITIONALLY and gated at RUN time by `layer_active firebase`, exactly like every other layer
-# block. Building it only when `--firebase` was passed inverted the layer model: a project WITH firebase.json
-# detects the layer, reports it active — and then ran nothing, because the block was an empty string and the
-# rendered `if` contained only a `:`. So a plain `--sync` on a Firebase project silently skipped the emulator
-# wiring, which is precisely the case that needs it most: this generator owns the emulator suite's shape
-# outright and rewrites it every run. (Retiring the legacy per-app `emulators*` targets is no longer its job
-# — that is a one-way move, and it belongs to migration 0.24.1.) Projects were left carrying the old shape
-# while the sync reported success.
-#
-# DETECTION drives refresh; `--firebase` only ever controls whether the layer is ENSURED (created where it
-# does not yet exist) — which it does by joining the ensure set above, not by gating this call.
+# The SYNC side of Firebase is no longer a block here: it is the `firebase` layer's per-app generator step in
+# the registry (nx-tools/src/layers/firebase.ts), planned at run time like every other layer's generators —
+# refreshed whenever the layer is DETECTED, wired (--wireProviders) only when this run ENSURES it.
 #
 # ============================================================================================================
 # THE RENDERED BLOCKS START HERE. READ THIS BEFORE EDITING ANY OF THEM.
@@ -687,9 +701,27 @@ APP_STAGING_FLAG=""
 # executing it, and ANY stderr during rendering means something in a string was evaluated that should not
 # have been. Pipe it into `bash -n /dev/stdin` to syntax-check the result.
 # ============================================================================================================
-SYNC_FIREBASE_BLOCK="
-  _WIRE_FB=''; layer_ensured firebase && _WIRE_FB=' --wireProviders'
-  $PM_EXEC nx g @bespunky/nx-tools:firebase-emulators --project=$APP --workspaceName=$PROJECT$APP_STAGING_FLAG\$_WIRE_FB"
+# --- the HOST, rendered: how this run invokes Nx and where the toolkit lives --------------------------------------
+# Every block below goes through these three, so the node and wrapper hosting models differ in exactly one place.
+#   NX_RUN     the nx command (the package manager's, or the wrapper script)
+#   NXT_DIR    where @bespunky/nx-tools is installed, relative to the workspace root — the layer CLI, the probe
+#              and the --local collector all read the INSTALLED package from here
+#   VENDOR_DIR the installed-packages directory a per-migration commit must never sweep in
+if [ "$HOST" = "wrapper" ]; then
+  NX_RUN="./nx"
+  NXT_DIR=".nx/installation/node_modules/@bespunky/nx-tools"
+  VENDOR_DIR=".nx/installation"
+else
+  NX_RUN="$PM_EXEC nx"
+  NXT_DIR="node_modules/@bespunky/nx-tools"
+  VENDOR_DIR="node_modules"
+fi
+# Exact-pin entries into nx.json's installation.plugins — the wrapper's equivalent of a devDependency. Pairs of
+# <package> <spec> as arguments; the wrapper reinstalls .nx/installation on its next invocation to match.
+NX_WRAPPER_PIN="node -e \"const fs=require('fs'),f='nx.json',j=JSON.parse(fs.readFileSync(f,'utf8'));j.installation=j.installation||{};j.installation.plugins=j.installation.plugins||{};const a=process.argv.slice(1);for(let i=0;i<a.length;i+=2)j.installation.plugins[a[i]]=a[i+1];fs.writeFileSync(f,JSON.stringify(j,null,2)+'\\\\n')\""
+# The devkit is pinned to the wrapper's own nx version: the plugin's peer range alone would float it to the
+# newest 23.x on every fresh clone, and a devkit that does not match its nx is its own failure mode.
+NX_WRAPPER_NXV="\$(node -p \"require('./nx.json').installation.version\")"
 
 # --- house tooling: INSTALL @bespunky/nx-tools (used by both modes) ---
 # A REAL npm install, not a copy into node_modules. The copy it replaces existed for one stated reason —
@@ -710,9 +742,29 @@ SYNC_FIREBASE_BLOCK="
 # skip the whole ladder. `nx migrate` is the only thing that should ever move this. (The migrate step no
 # longer *depends* on the pin — it passes an explicit `--from` derived below — but an exact pin keeps the
 # declared version and the applied project shape describing the same thing, which is what the stamp claims.)
-INSTALL_NX_TOOLS="$PM_ADD_DEV @bespunky/nx-tools@$NX_TOOLS_VERSION"
+#
+# THE WRAPPER HOST pins instead of adding: nx.json installation.plugins is its manifest, the pin is exact by
+# construction (a literal version string, compared verbatim by .nx/nxw.js), and the next ./nx invocation
+# installs to match. @nx/devkit is pinned beside it, to the wrapper's own nx version.
+if [ "$HOST" = "wrapper" ]; then
+  INSTALL_NX_TOOLS="_nxv=\"$NX_WRAPPER_NXV\"
+  $NX_WRAPPER_PIN '@bespunky/nx-tools' '$NX_TOOLS_VERSION' '@nx/devkit' \"\$_nxv\"
+  echo \"[tools] pinned @bespunky/nx-tools@$NX_TOOLS_VERSION and @nx/devkit@\$_nxv in nx.json installation.plugins\"
+  ./nx --version >/dev/null"
+else
+  INSTALL_NX_TOOLS="$PM_ADD_DEV @bespunky/nx-tools@$NX_TOOLS_VERSION"
+fi
 FINALIZE_LOCAL=""   # only --local needs a post-run manifest correction; see below.
 if [ "$LOCAL_TOOLS" = "1" ]; then
+  # How the packed tarball is installed, per host. The wrapper takes a file: spec as its pin, which nxw.js
+  # compares verbatim, so every ./nx call for the rest of this run resolves back to the SAME build.
+  if [ "$HOST" = "wrapper" ]; then
+    LOCAL_ADD="  _nxv=\"$NX_WRAPPER_NXV\"
+  $NX_WRAPPER_PIN '@bespunky/nx-tools' \"file:\$_local_stage/\$_local_tgz\" '@nx/devkit' \"\$_nxv\"
+  ./nx --version >/dev/null"
+  else
+    LOCAL_ADD="  $PM_ADD_DEV \"\$_local_stage/\$_local_tgz\""
+  fi
   # --local: install the WORKING TREE instead of the registry, for developing the toolkit itself.
   #
   # Still a real install — npm packs the assets into a tarball and installs that, so the package is declared,
@@ -735,7 +787,7 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   (cd \"\$_local_stage/ts\" && npm init -y >/dev/null 2>&1 && npm install --no-save --no-audit --no-fund --silent 'typescript@^5' && node '$ASSETS_ROOT/compile-generators.mts' \"\$_local_stage/nx-tools\")
   _local_tgz=\"\$(cd \"\$_local_stage/nx-tools\" && npm pack --silent --pack-destination \"\$_local_stage\")\"
   echo \"[tools] --local: installing the working tree (\$_local_tgz) instead of the published package\"
-  $PM_ADD_DEV \"\$_local_stage/\$_local_tgz\"
+$LOCAL_ADD
   # AND THE MANIFEST DELIBERATELY KEEPS POINTING AT THE TARBALL for the rest of this run. Several generators
   # call installPackagesTask mid-sequence, which runs a plain install against whatever package.json says --
   # so correcting the spec to the plain version HERE meant the first such generator quietly replaced the
@@ -783,6 +835,19 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   echo \"[tools]   package.json says $NX_TOOLS_VERSION and node_modules holds that build, but no registry can\"
   echo \"[tools]   resolve it yet. Do not commit the lockfile from this run.\"
   rm -rf \"\$_local_stage\""
+  if [ "$HOST" = "wrapper" ]; then
+    # The wrapper's manifest is nx.json, and nxw.js compares the pin VERBATIM against its own record in
+    # .nx/installation/package.json. So the correction is two writes: the committed pin back to the plain
+    # version (a temp-dir file: spec would break every later ./nx), and the wrapper's record to match it — so
+    # the next ./nx keeps the build that is installed instead of reinstalling from a registry that cannot
+    # resolve it yet. No lockfile to scrub: .nx/installation is gitignored.
+    FINALIZE_LOCAL="  $NX_WRAPPER_PIN '@bespunky/nx-tools' '$NX_TOOLS_VERSION'
+  node -e \"const fs=require('fs'),f='.nx/installation/package.json';if(fs.existsSync(f)){const j=JSON.parse(fs.readFileSync(f,'utf8'));j.devDependencies=j.devDependencies||{};j.devDependencies['@bespunky/nx-tools']='$NX_TOOLS_VERSION';fs.writeFileSync(f,JSON.stringify(j))}\"
+  echo \"[tools] --local: this project now holds an UNPUBLISHED build of \$_local_tgz.\"
+  echo \"[tools]   nx.json pins $NX_TOOLS_VERSION and .nx/installation holds that build; a fresh clone cannot\"
+  echo \"[tools]   install it until the version is published.\"
+  rm -rf \"\$_local_stage\""
+  fi
 fi
 
 # --- PREFLIGHT: the preconditions that must hold BEFORE the first write ----------------------------------------
@@ -990,8 +1055,8 @@ fi"
 #                           against an already-migrated tree, and it litters the project besides.
 MIGRATE_PROBE="
 _installed=''
-[ -f node_modules/@bespunky/nx-tools/package.json ] \\
-  && _installed=\"\$(node -p \"require('./node_modules/@bespunky/nx-tools/package.json').version\" 2>/dev/null || echo '')\"
+[ -f $NXT_DIR/package.json ] \\
+  && _installed=\"\$(node -p \"require('./$NXT_DIR/package.json').version\" 2>/dev/null || echo '')\"
 # ANCHORED on the stamp marker, not on a bare 'nx-tools=' anywhere in the file. HOUSE.md is prose, and an
 # unanchored match takes the FIRST hit in the document — so a sentence like 'pin @bespunky/nx-tools=9.9.9'
 # in the guidance above the stamp becomes the project's recorded version, and the downgrade guard below then
@@ -1137,7 +1202,7 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   #
   # Worth being honest about: this means --local exercises a DIFFERENT collection path from production. It
   # proves a migration's BEHAVIOUR, not that the published range selection works. For that, publish.
-  MIGRATE_COLLECT="  node -e \"const fs=require('fs'),m=require('./node_modules/@bespunky/nx-tools/migrations.json');
+  MIGRATE_COLLECT="  node -e \"const fs=require('fs'),m=require('./$NXT_DIR/migrations.json');
   const from=process.argv[1],to=process.argv[2];
   const p=v=>String(v).split('-')[0].split('.').map(Number);
   // Also mirrors tools/check-release-invariants/rules.cjs in the toolkit repo (see _vlt above).
@@ -1149,11 +1214,11 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
     if(pre(a)!==pre(b))return pre(a)?-1:1; return 0};
   const out=Object.entries(m.generators||{}).filter(([,g])=>g.version&&c(g.version,from)>0&&c(g.version,to)<=0)
     .sort((a,b)=>c(a[1].version,b[1].version))
-    .map(([name,g])=>({version:g.version,description:g.description,implementation:g.implementation,package:'@bespunky/nx-tools',name}));
+    .map(([name,g])=>({version:g.version,layer:g.layer,description:g.description,implementation:g.implementation,package:'@bespunky/nx-tools',name}));
   if(out.length)fs.writeFileSync('migrations.json',JSON.stringify({migrations:out},null,2)+'\\n');
   console.log('[migrate] --local: collected '+out.length+' migration(s) from the working tree')\" \"\$MIGRATE_FROM\" '$NX_TOOLS_VERSION'"
 else
-  MIGRATE_COLLECT="  NX_MIGRATE_USE_LOCAL=true $PM_EXEC nx migrate '@bespunky/nx-tools@$NX_TOOLS_VERSION' --from=\"@bespunky/nx-tools@\$MIGRATE_FROM\""
+  MIGRATE_COLLECT="  NX_MIGRATE_USE_LOCAL=true $NX_RUN migrate '@bespunky/nx-tools@$NX_TOOLS_VERSION' --from=\"@bespunky/nx-tools@\$MIGRATE_FROM\""
 fi
 
 # Where a user's swept-up uncommitted work can be recovered from — which depends entirely on whether this run
@@ -1202,10 +1267,10 @@ else
       echo '[migrate] this repository has no git user.name/user.email, so commits cannot be created —'
       echo '[migrate]   running the migrations WITHOUT the per-migration commit ladder. Set an identity'
       echo '[migrate]   with git config user.email to get it.'
-    elif [ -d node_modules ] && ! git check-ignore -q node_modules 2>/dev/null; then
-      echo '[migrate] node_modules is NOT git-ignored here, and per-migration commits are built with'
+    elif [ -d $VENDOR_DIR ] && ! git check-ignore -q $VENDOR_DIR 2>/dev/null; then
+      echo '[migrate] $VENDOR_DIR is NOT git-ignored here, and per-migration commits are built with'
       echo '[migrate]   \"git add -A\" — which would commit it. Running the migrations WITHOUT commits.'
-      echo '[migrate]   Add node_modules to .gitignore to get the per-migration commit ladder.'
+      echo '[migrate]   Add $VENDOR_DIR to .gitignore to get the per-migration commit ladder.'
     else
       _do_commits=1
       # Keep our own scratch file out of that checkpoint commit. Nx writes migrations.json at the workspace
@@ -1272,9 +1337,9 @@ $MIGRATE_COLLECT
   # shell string that is executed later. Backticks are COMMAND SUBSTITUTION even in a comment, and so is
   # an unescaped dollar-paren. Prose about a flag has to be written without either.
   if [ \"\$_do_commits\" = '1' ]; then
-    NX_MIGRATE_SKIP_INSTALL=true NX_MIGRATE_USE_LOCAL=true $PM_EXEC nx migrate --run-migrations --if-exists --agentic=false --create-commits
+    NX_MIGRATE_SKIP_INSTALL=true NX_MIGRATE_USE_LOCAL=true $NX_RUN migrate --run-migrations --if-exists --agentic=false --create-commits
   else
-    NX_MIGRATE_SKIP_INSTALL=true NX_MIGRATE_USE_LOCAL=true $PM_EXEC nx migrate --run-migrations --if-exists --agentic=false
+    NX_MIGRATE_SKIP_INSTALL=true NX_MIGRATE_USE_LOCAL=true $NX_RUN migrate --run-migrations --if-exists --agentic=false
   fi
   # nx never deletes migrations.json — it only ever writes it. So if it is gone now, something else
   # removed it mid-run (a concurrent sync is the way this actually happens), and --if-exists will have
@@ -1288,37 +1353,45 @@ $MIGRATE_COLLECT
   rm -f migrations.json
 fi"
 
-# --- ensure the `nx` layer on a repo that has none (the layer-1 ENSURE) ---
+# --- lay the Nx FLOOR on a repo that has none (always ensured) ---
 # `nx init` is the Nx-native answer to "make this existing repo an Nx workspace" — as opposed to
 # create-nx-workspace, which is greenfield-only and is what the scaffold path uses. It is what makes every
-# layer above reachable in a repo that was never scaffolded by this tool.
+# layer above reachable in a repo that was never scaffolded by this tool, and it now runs on ANY sync of a repo
+# without nx.json: the floor is always ensured, everything above it stays opt-in.
 #
-# THE ROOT package.json COMES FIRST, and that is not a nicety. Run against a directory without one, `nx init`
-# chooses the "dot-nx" installation (.nx/nxw.js + a wrapper script) — in which neither `typescript` nor
-# `@nx/devkit` is resolvable from the workspace root and `nx add` FAILS OUTRIGHT. Every house generator is a
-# devkit generator, so that mode cannot host this toolkit at all. Seeding a minimal package.json first forces
-# the normal node_modules installation, which can. One hosting model, no dot-nx branch.
+# HOW depends on the host (see HOST above):
+#   node     the repo has a package.json — `nx init` into node_modules, the package manager declared first.
+#   wrapper  it has none — `nx init --useDotNxInstallation`: nx.json + ./nx + .nx/nxw.js, nothing that makes the
+#            repo a Node project. (The node path used to SEED a package.json here to dodge the wrapper; that
+#            turned every Python and Go repo into a Node project for the sake of the tooling, and the reason
+#            it was needed — devkit plugins unresolvable under the wrapper — no longer holds on Nx 23.)
 #
 # `nx init` is also a polite co-owner — it MERGES into an existing .claude/settings.json and its CLAUDE.md
 # marker block coexists with the house pointer — so this is safe to run in a repo with prior Claude setup.
-# The one thing it decides that we override: it sets defaultBase to "master".
-NX_INIT_BLOCK="
+# Agent mode is stripped for the one command, as for create-nx-workspace below, and its own AI-agent setup is
+# declined: the house configures Claude itself. The one thing it decides that we override: defaultBase master.
+NX_DEFAULT_BASE_FIX="node -e \"const f='nx.json',j=JSON.parse(require('fs').readFileSync(f,'utf8'));if(j.defaultBase==='master'){j.defaultBase='main';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\\\\n');console.log('[layers] ensure nx: defaultBase master -> main')}\" || true"
+if [ "$HOST" = "wrapper" ]; then
+  NX_INIT_BLOCK="
+if [ ! -f nx.json ]; then
+  echo '[layers] ensure nx: no nx.json and no package.json — initialising Nx through its wrapper, no Node project created'
+  env -u CLAUDECODE -u OPENCODE npx --yes nx@latest init --useDotNxInstallation=true --interactive=false --aiAgents=none --plugins=skip
+  $NX_DEFAULT_BASE_FIX
+fi"
+else
+  NX_INIT_BLOCK="
 if [ ! -f nx.json ]; then
   echo '[layers] ensure nx: no nx.json — initialising an Nx workspace in place'
-  if [ ! -f package.json ]; then
-    echo '[layers] ensure nx: seeding a minimal root package.json (forces the node_modules install mode, not dot-nx)'
-    printf '{\\n  \"name\": \"%s\",\\n  \"version\": \"0.0.0\",\\n  \"private\": true\\n}\\n' '$PROJECT' > package.json
-  fi
-  # DECLARE THE PACKAGE MANAGER BEFORE nx init RUNS, when the repo hasn't declared one itself.
+  # DECLARE THE PACKAGE MANAGER BEFORE nx init RUNS, when the repo has not declared one itself.
   #
-  # \`nx init\` picks its own — npm, absent any lockfile — and takes no flag to say otherwise. So on a repo
-  # with no lockfile at all, it would create package-lock.json while everything downstream here used the
-  # detected default (yarn), leaving TWO lockfiles that disagree: exactly the state this script refuses to
-  # inflict on an npm or pnpm project, arrived at from the other direction. An empty lockfile is the signal
-  # Nx reads, so writing one first makes nx init agree with us instead of us discovering it didn't.
+  # nx init picks its own — npm, absent any lockfile — and takes no flag to say otherwise. So on a repo with no
+  # lockfile at all, it would create package-lock.json while everything downstream here used the detected
+  # default, leaving TWO lockfiles that disagree: exactly the state this script refuses to inflict on an npm or
+  # pnpm project, arrived at from the other direction. An empty lockfile is the signal Nx reads, so writing one
+  # first makes nx init agree with us instead of us discovering it did not.
   #
-  # Only ever in the genuinely-no-signal case. A repo with any lockfile, or a \`packageManager\` field, has
-  # already decided, and \$PM above is that decision.
+  # Only ever in the genuinely-no-signal case. A repo with any lockfile, or a packageManager field, has already
+  # decided, and the detected package manager is that decision.
   if [ ! -f yarn.lock ] && [ ! -f package-lock.json ] && [ ! -f pnpm-lock.yaml ]; then
     echo '[layers] ensure nx: no lockfile — declaring $PM (the house default) so nx init agrees with the rest of this run'
     case '$PM' in
@@ -1327,43 +1400,81 @@ if [ ! -f nx.json ]; then
       npm)  : ;;
     esac
   fi
-  npx --yes nx@latest init --useDotNxInstallation=false --no-interactive
+  env -u CLAUDECODE -u OPENCODE npx --yes nx@latest init --useDotNxInstallation=false --no-interactive
   [ -x node_modules/.bin/nx ] || $PM_INSTALL
-  node -e \"const f='nx.json',j=JSON.parse(require('fs').readFileSync(f,'utf8'));if(j.defaultBase==='master'){j.defaultBase='main';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\\n');console.log('[layers] ensure nx: defaultBase master -> main')}\" || true
+  $NX_DEFAULT_BASE_FIX
 fi"
-
-# Run the layer-1 ensure only when this run was actually ASKED to create an Nx workspace. A sync that
-# merely detects must never conjure one — "this isn't an Nx workspace" is a fact to report, not to fix unasked.
-ENSURE_NX_BLOCK=""
-case ",$ENSURE_LAYERS," in *,nx,*) ENSURE_NX_BLOCK="$NX_INIT_BLOCK" ;; esac
-
-# --- resolve the ACTIVE layer set at run time, inside the target workspace ---
-# Detection reads the workspace itself through the same registry the generators guard on, so the scaffolder
-# and the generators can never disagree about what this project is. Degrades to "nothing detected" rather than
-# failing the run: on a fresh scaffold the workspace legitimately has no layers yet, and an ensure set that
-# names them is the whole instruction.
-LAYER_RESOLVE_BLOCK="
-# @bespunky/nx-tools must be INSTALLED before detection, not merely before the first generator: detection
-# reads the layer registry out of node_modules/@bespunky/nx-tools, so without it the require fails, DETECTED
-# comes back empty, and every layer the workspace actually has is silently missed. INSTALL_NX_TOOLS runs
-# above for exactly this reason.
-
-# @nx/devkit is the MECHANISM FLOOR — every house generator imports it, and so does the layer registry. A
-# workspace created by \`create-nx-workspace\` + \`nx add @nx/angular\` gets it transitively, which is why this
-# was never needed before; a workspace produced by \`nx init\` gets \`nx\` and NOTHING ELSE. So it is asserted
-# here, for every path, rather than assumed from the shape the scaffolder happens to produce. Pinned to the
-# installed nx version: a devkit that doesn't match its nx is its own failure mode.
-if ! node -e \"require.resolve('@nx/devkit')\" >/dev/null 2>&1; then
-  _nxv=\"\$(node -p \"require('nx/package.json').version\" 2>/dev/null || echo latest)\"
-  echo \"[layers] @nx/devkit missing (an \\\`nx init\\\` workspace ships only nx) — installing @nx/devkit@\$_nxv\"
-  $PM_ADD_DEV \"@nx/devkit@\$_nxv\"
 fi
 
+# --- the workspace's own Nx has to be runnable before anything migrates or generates ---
+# It routinely is not — a fresh clone has no node_modules (or no .nx/installation) at all — and this used to exit
+# telling the human to run the install by hand and start over: a whole round trip to type a command this script
+# runs of its own accord. So install, then re-check. Placed AFTER the preflight verdict on purpose: an install
+# is a write, and every refusal promises nothing was written before it fired.
+if [ "$HOST" = "wrapper" ]; then
+  NX_RUNTIME_BLOCK="
+if [ ! -f .nx/nxw.js ]; then
+  echo 'ERROR: nx.json is here, but neither a package.json nor the Nx wrapper (.nx/nxw.js) — there is no Nx' >&2
+  echo '       this sync can run. Restore the wrapper (npx nx@latest init --useDotNxInstallation) or add a' >&2
+  echo '       package.json with nx as a devDependency, then re-run.' >&2
+  exit 1
+fi
+_stage install
+# The wrapper installs .nx/installation to match nx.json on its first invocation.
+./nx --version >/dev/null"
+else
+  NX_RUNTIME_BLOCK="
+if [ ! -x node_modules/.bin/nx ]; then
+  _stage install
+  echo '[install] node_modules/.bin/nx is missing — installing the workspace dependencies first.'
+  $PM_INSTALL || {
+    echo \"ERROR: '$PM_INSTALL' failed, so the workspace has no nx to migrate or generate with.\" >&2
+    echo '       Fix the install (network? lockfile? package manager?) and re-run the sync.' >&2
+    exit 1
+  }
+fi
+if [ ! -x node_modules/.bin/nx ]; then
+  echo \"ERROR: node_modules/.bin/nx still not found after '$PM_INSTALL'.\" >&2
+  echo '       This workspace has an nx.json but does not depend on nx — add it as a devDependency' >&2
+  echo '       (nx add is not available yet), then re-run the sync.' >&2
+  exit 1
+fi"
+fi
+
+# @nx/devkit is part of the MECHANISM FLOOR — every house generator imports it, and so does the layer registry.
+# A workspace created by create-nx-workspace + nx add @nx/angular gets it transitively; a workspace produced by
+# nx init gets nx and NOTHING ELSE. So it is asserted for every node-hosted path rather than assumed from the shape
+# the scaffolder happens to produce, pinned to the installed nx version. (The wrapper pins it in nx.json beside
+# @bespunky/nx-tools, at install time — see INSTALL_NX_TOOLS.)
+DEVKIT_BLOCK=""
+if [ "$HOST" = "node" ]; then
+  DEVKIT_BLOCK="
+if ! node -e \"require.resolve('@nx/devkit')\" >/dev/null 2>&1; then
+  _nxv=\"\$(node -p \"require('nx/package.json').version\" 2>/dev/null || echo latest)\"
+  echo \"[layers] @nx/devkit missing (an nx init workspace ships only nx) — installing @nx/devkit@\$_nxv\"
+  $PM_ADD_DEV \"@nx/devkit@\$_nxv\"
+fi"
+fi
+
+# --- the ENSURE set, available to the rendered program from its first line ---
+# ENSURED, not ACTIVE — the distinction the house keeps strictly apart. ACTIVE is detected-OR-ensured; ENSURED is
+# only what this run was explicitly asked to create. The scaffold bootstrap keys off it before anything can be
+# detected, and the planner uses it for BASELINE acts (wiring a provider into app.config.ts, which the project owns
+# thereafter) that must never happen on a detect-only sync.
+ENSURED_BLOCK="
 ENSURED='$ENSURE_LAYERS'
-# Detection must not fail SILENTLY. Swallowing the error here reports 'none', which reads as a legitimate
-# bare repo — so every layer the project has would be skipped and its house tooling quietly not applied. A
-# sentinel distinguishes 'detected nothing' from 'could not detect', and the latter aborts.
-DETECTED=\"\$(node -e \"const {FsTree}=require('nx/src/generators/tree');const {detectLayers}=require('@bespunky/nx-tools/src/layers/registry');console.log(detectLayers(new FsTree(process.cwd(),false)).join(','))\" 2>/dev/null || echo '__DETECT_FAILED__')\"
+layer_ensured() { case \",\$ENSURED,\" in *\",\$1,\"*) return 0;; esac; return 1; }"
+
+# --- resolve the ACTIVE layer set at run time, inside the target workspace ---
+# Detection reads the workspace itself through the INSTALLED registry — the same one the generators guard on — so
+# the scaffolder and the generators can never disagree about what this project is. @bespunky/nx-tools must
+# therefore be installed BEFORE this runs (INSTALL_NX_TOOLS is, in both modes).
+LAYER_RESOLVE_BLOCK="
+$DEVKIT_BLOCK
+# Detection must not fail SILENTLY. Swallowing the error here reports 'none', which reads as a legitimate bare
+# repo — so every layer the project has would be skipped and its house tooling quietly not applied. A sentinel
+# distinguishes 'detected nothing' from 'could not detect', and the latter aborts.
+DETECTED=\"\$(node '$NXT_DIR/src/layers/cli.js' detect 2>/dev/null || echo '__DETECT_FAILED__')\"
 if [ \"\$DETECTED\" = '__DETECT_FAILED__' ]; then
   echo 'ERROR: could not read this workspace layers (the layer registry failed to load).' >&2
   echo '       Refusing to continue: a failed detection is indistinguishable from an empty project, and' >&2
@@ -1373,106 +1484,47 @@ fi
 ACTIVE=\"\$(printf '%s\\n%s\\n' \"\$DETECTED\" \"\$ENSURED\" | tr ',' '\\n' | sed '/^\$/d' | sort -u | paste -sd, -)\"
 echo \"[layers] detected in workspace : \${DETECTED:-none}\"
 echo \"[layers] ensured by this run   : \${ENSURED:-none}\"
-echo \"[layers] active (union)        : \${ACTIVE:-none}\"
-layer_active() { case \",\$ACTIVE,\" in *\",\$1,\"*) return 0;; esac; return 1; }
-# ENSURED, not ACTIVE — the distinction the house keeps strictly apart, now visible to the generators.
-# ACTIVE is detected-OR-ensured; ENSURED is only what this run was explicitly asked to create. A few
-# generator writes are BASELINE acts that must never happen on a detect-only sync (wiring a provider into
-# app.config.ts, which the project owns thereafter), and this is what lets those pass --wireProviders
-# exactly when the capability is being created.
-layer_ensured() { case \",\$ENSURED,\" in *\",\$1,\"*) return 0;; esac; return 1; }"
+echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 
-# --- per-workspace house generators, GATED BY LAYER (one sequence, both modes) ---
-# Every block below is rendered unconditionally and gated at RUN time on the layer it belongs to. That is what
-# collapses scaffold and sync into one path: the difference between them is now entirely in the ensure set,
-# not in two separately-maintained command lists that drifted every time one was edited.
+# --- THE PLAN: every house generator this run executes, from the layer registry (one sequence, both modes) ---
+# This replaces the hand-written, layer-gated nx g blocks that used to live here. The planner (the installed
+# @bespunky/nx-tools src/layers/cli.js plan) derives the sequence from the registered layer descriptors:
+#   per-app steps (sync only — a scaffold's app generator composes them), then workspace steps in registry order,
+#   then house-doc LAST, ungated, because it STAMPS the layer set this run applied.
+# Each line it prints is: gen TAB generator TAB argv-words | warn TAB sentence | partial. The argv words are
+# refused at plan time unless shell-safe and free of duplicated flags, so word-splitting them here is deliberate.
 #
-# The PER-APP generators (serve, serve-options, firebase-emulators) are deliberately NOT here: in scaffold
-# mode the `app` generator applies them to the new app; in sync mode they run explicitly against the
-# existing app (see each mode's INNER below).
-WORKSPACE_GEN_BLOCK="
-# --- agent layer: the stack-agnostic house DX. The ONLY block a bare, frameworkless repo runs — and the
-#     reason layering exists, since none of it needs Angular, a design system, or anything to serve.
-if layer_active agent; then
-  # Both layer flags are passed EXPLICITLY, including the false cases. The generator defaults \`web\` to true
-  # (the common shape), so omitting it on a library-only repo would silently forward :80 and mount the shared
-  # browser volumes into a container that has nothing to serve.
-  if layer_active web; then DC_LAYER_FLAGS=' --web=true'; else DC_LAYER_FLAGS=' --web=false'; fi
-  if layer_active angular; then DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --angular=true\"; else DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --angular=false\"; fi
-  # firebase comes from DETECTION, exactly like web and angular. A sync must describe the project it is
-  # looking at, not the flags it happened to be invoked with.
-  if layer_active firebase; then DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --firebase=true\"; else DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --firebase=false\"; fi
-  # voice has no layer to detect — nothing it installs leaves a trace in the workspace. Its previous answer
-  # lives in the ownership marker the generator itself wrote, so carry that forward rather than silently
-  # revoking it; an explicit --voice on this run still wins. That answer is the project's INTENT (\"this project
-  # wants audio\"), host-neutral — where the audio socket lives is resolved per machine when the container opens.
-  _dc_voice='$VOICE'
-  if [ \"\$_dc_voice\" != '1' ] && [ -f .devcontainer/.bespunky-devcontainer.json ]; then
-    grep -q '\"voice\"[[:space:]]*:[[:space:]]*true' .devcontainer/.bespunky-devcontainer.json 2>/dev/null && _dc_voice=1
-  fi
-  if [ \"\$_dc_voice\" = '1' ]; then DC_LAYER_FLAGS=\"\$DC_LAYER_FLAGS --voice=true\"; fi
-  $PM_EXEC nx g @bespunky/nx-tools:devcontainer --name=$PROJECT --nodeMajor=$MAJOR\$DC_LAYER_FLAGS
-  $PM_EXEC nx g @bespunky/nx-tools:claude-settings
-  # The window identity — an emoji + a quiet, project-coloured status band in .vscode/settings.json, so this
-  # project's VSCode window is distinguishable from every other open window. Runs BEFORE the design system, so
-  # at scaffold time there is deliberately no primary token to read and the colour is a stable hash of the
-  # project NAME (source=name-hash) — distinct per project from moment zero. It upgrades to the real brand
-  # colour later, once the design system has real tokens (the bespunky-vscode-identity skill + its offer hook).
-  # Idempotent + --sync-safe: the provenance ratchet means this name-hash pass never downgrades a colour a
-  # project has since moved to design-system or a hand-picked one.
-  $PM_EXEC nx g @bespunky/nx-tools:window-identity --name=$PROJECT
-fi
-# --- web layer: the dev loop. Framework-agnostic by design — the shared browser is pure CDP and the
-#     worktree-domains proxy forwards any localhost port, so neither needs Angular.
-if layer_active web; then
-  $PM_EXEC nx g @bespunky/nx-tools:playwright
-  $PM_EXEC nx g @bespunky/nx-tools:shared-browser
-  $PM_EXEC nx g @bespunky/nx-tools:worktree-domains
-fi
-# --- angular layer: the Angular CLI MCP server + the Angular agent skills' gitignore rule.
-if layer_active angular; then
-  $PM_EXEC nx g @bespunky/nx-tools:angular-ai
-fi
-# --- design-system layer: the workspace's single source of visual truth, present from moment zero (a design
-#     system retrofitted after five screens of hardcoded hex is not a design system, it's an archaeology dig).
-#     Runs AFTER the app exists so it can open the sass channel on it; a LATER app wires itself, because the
-#     \`app\` generator composes the same per-app design-system-styles generator. --scope is load-bearing: the
-#     underlying publishable-lib defaults to the @bespunky npm scope (the toolkit's own), which would be wrong
-#     for every consumer project. Idempotent in --sync (the token file is seeded, never overwritten — a
-#     sync must not restore placeholder tokens over the project's real design).
-if layer_active design-system; then
-  _WIRE_DS=''; layer_ensured design-system && _WIRE_DS=' --wireProviders'
-  $PM_EXEC nx g @bespunky/nx-tools:design-system --scope=$PROJECT\$_WIRE_DS
-fi
-# --- HOUSE.md last: it STAMPS the layer set, so it must run after every layer above has had its turn (a
-#     design system created moments ago has to appear in the stamp that records this run).
-#
-#     UNGATED, and that is a deliberate change from being part of the \`agent\` layer. HOUSE.rules.md is the
-#     mechanism by which the house directives reach a session at all — CLAUDE.md \`@\`-imports it, which is
-#     what puts them in context. Bundling that with the agent layer made the RULES contingent on wanting the
-#     TOOLING (devcontainer, window identity, Claude settings), which are unrelated wants. A project that has
-#     house generators applied to it is governed by the house rules; it should not have to opt into a
-#     devcontainer to be told so.
-#
-#     It also left a migration permanently unable to run: \`retire-inline-house-sections\` deletes the frozen
-#     pre-0.5.0 house sections from CLAUDE.md only when a HOUSE.md exists to replace them. On a project
-#     without the agent layer that condition was never satisfiable, so it refused on every sync, correctly,
-#     forever — and those projects kept carrying stale directives with nothing to say they were stale.
-#
-#     What makes this safe is the SECTION-level gating house-doc already does (it renders only what
-#     \`--layers\` supports, so a markdown repo is not told which port not to bind). That gating is the reason
-#     this generator can run everywhere; without it, ungating here would drag emulator recipes into projects
-#     that have no emulators.
-$PM_EXEC nx g @bespunky/nx-tools:house-doc --nxToolsVersion=$NX_TOOLS_VERSION --pluginVersion=$PLUGIN_VERSION --packageManager=$PM --layers=\"\$ACTIVE\"
-# @bespunky/nx-tools is installed UP FRONT now (see INSTALL_NX_TOOLS), so nothing is added here — it is
-# already a declared devDependency by the time any generator runs, which is what makes it survive the
-# \`installPackagesTask\` several generators fire mid-sequence.
-"
+# fd 9, not stdin: nx g may read stdin, and would swallow the rest of the plan.
+PLAN_RUN_BLOCK="
+_SYNC_PARTIAL=\${_SYNC_PARTIAL:-0}
+_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=$APP --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM)\" || {
+  echo 'ERROR: the layer planner failed — no house generators were run, and nothing has been stamped.' >&2
+  exit 1
+}
+_tab=\"\$(printf '\\t')\"
+while IFS=\"\$_tab\" read -r -u 9 _kind _gen _args; do
+  case \"\$_kind\" in
+    gen)
+      echo \"[layers] nx g @bespunky/nx-tools:\$_gen \$_args\"
+      $NX_RUN g \"@bespunky/nx-tools:\$_gen\" \$_args ;;
+    warn)
+      echo \"[layers] WARNING: \$_gen\" ;;
+    partial)
+      _SYNC_PARTIAL=1 ;;
+  esac
+done 9<<< \"\$_plan\""
+
+# --- the SCAFFOLD bootstrap: what creates the ensured layers from an empty directory ---
+# Gated on the ENSURE set (layer_ensured), never hard-wired: scaffold is sync with an ensure set against an empty
+# directory, so --ensure=nx,agent scaffolds a bare Nx workspace with the agent DX and does NOT bootstrap Angular.
+# The Nx floor itself is create-nx-workspace (always — it is the floor), with the apps preset.
+SCAFFOLD_COMMIT_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | sed 's/,/, /g')"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
 mkdir -p '$WORK_ROOT'
 cd '$WORK_ROOT'
+$ENSURED_BLOCK
 # Set the git identity only if unset. In the throwaway Docker image there is none, so this establishes it;
 # on the native path the invoking user already HAS a global identity (it's where \$GIT_NAME came from), so
 # this must not clobber it — hence the conditional. Same result on both paths, no drift.
@@ -1499,31 +1551,35 @@ git config --global init.defaultBranch >/dev/null 2>&1 || git config --global in
 # which the TS-solution layout does not use, so this is not a cosmetic preference.
 env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive --workspaces=false
 cd '$PROJECT'
-yarn nx add @nx/angular${NX_TAG}
+if layer_ensured angular; then
+  yarn nx add @nx/angular${NX_TAG}
+fi
 $INSTALL_NX_TOOLS
-# Create the first app through the HOUSE \`app\` generator (NOT raw @nx/angular:application): it
+# Create the first app through the HOUSE app generator (NOT raw @nx/angular:application): it
 # delegates to @nx/angular:application with the house defaults AND applies the per-app config
 # (serve host 0.0.0.0, plus the full Firebase wiring when --firebase=true). This is the SAME one
 # command a developer runs to add any LATER app — first app and Nth app share one code path, so a
-# second app can never silently miss the configuration the first app got.
-$PM_EXEC nx g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG
+# second app can never silently miss the configuration the first app got. Only when the ensure set
+# asked for Angular: the app IS the angular layer (and, through its dev-server, the web layer).
+if layer_ensured angular; then
+  $NX_RUN g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG
+fi
 $LAYER_RESOLVE_BLOCK
-$WORKSPACE_GEN_BLOCK
-# Commit the full scaffold. \`yarn create nx-workspace\` made an initial commit, but the
+$PLAN_RUN_BLOCK
+# Commit the full scaffold. create-nx-workspace made an initial commit, but the
 # house generators + dep installs ran after it — capture them so the host-side push (gh repo
-# create --source --push) ships a clean, complete tree on \`main\`.
+# create --source --push) ships a clean, complete tree on main.
 git add -A
-git commit -m 'chore: scaffold BeSpunky project (Nx + Angular + house generators)' || true
+git commit -m 'chore: scaffold BeSpunky project (layers: $SCAFFOLD_COMMIT_LAYERS)' || true
 $FINALIZE_LOCAL"
 else
   INNER="set -e
 cd '$WORK_ROOT/$PROJECT'
-# PREFLIGHT AND THE PROBE COME FIRST — before \`nx init\`, not merely before the install. Both only READ (git
-# state, node_modules, HOUSE.md), so they are safe this early, and the gate's refusals claim to stop \"before
-# anything is written\". With ENSURE_NX_BLOCK ahead of them that claim was false: on --ensure=nx or
-# --ensure=agent, \`nx init\` had already created nx.json, a package.json and a lockfile in someone's repo
-# before we decided the sync should not happen at all. A guard that fires after the first write is a guard
-# that arrives too late.
+$ENSURED_BLOCK
+# PREFLIGHT AND THE PROBE COME FIRST — before nx init, not merely before the install. Both only READ (git
+# state, the installed toolkit, HOUSE.md), so they are safe this early, and the gate's refusals claim to stop
+# before anything is written. With the floor ahead of them that claim would be false: nx init creates nx.json
+# (and, on the node host, a lockfile) in someone's repo before we decided the sync should not happen at all.
 #
 # GATHER, GATHER, DECIDE. The checks and the probe both APPEND verdicts; PREFLIGHT_VERDICT is the single place
 # that reports and exits. The probe sits between them on purpose — it writes nothing, and running it first is
@@ -1535,35 +1591,9 @@ $PREFLIGHT_CHECKS
 _stage probe
 $MIGRATE_PROBE
 $PREFLIGHT_VERDICT
-$ENSURE_NX_BLOCK
-if [ ! -f nx.json ]; then
-  echo 'ERROR: not an Nx workspace (no nx.json), and this run was not asked to create one.' >&2
-  echo '       Re-run with --ensure=agent to initialise Nx in place and apply the house DX layer' >&2
-  echo '       (devcontainer, Claude settings, window identity, HOUSE.md) — no framework opinion.' >&2
-  exit 1
-fi
-# The workspace's OWN nx is what migrates and generates, so it has to be there. It routinely isn't — a fresh
-# clone has no node_modules at all — and this used to exit telling the human to run the install by hand and
-# start over. That was a whole round trip to type a command this script runs of its own accord two lines
-# below, and round trips are the thing this sync is trying to stop needing. So install, then re-check.
-#
-# Placed AFTER the preflight verdict on purpose: an install is a write (node_modules, a lockfile), and every
-# refusal promises nothing was written before it fired. It stays before \$INSTALL_NX_TOOLS because that step
-# needs a resolvable workspace to add the dependency to.
-if [ ! -x node_modules/.bin/nx ]; then
-  _stage install
-  echo '[install] node_modules/.bin/nx is missing — installing the workspace dependencies first.'
-  $PM_INSTALL || {
-    echo \"ERROR: '$PM_INSTALL' failed, so the workspace has no nx to migrate or generate with.\" >&2
-    echo '       Fix the install (network? lockfile? package manager?) and re-run the sync.' >&2
-    exit 1
-  }
-fi
-if [ ! -x node_modules/.bin/nx ]; then
-  echo \"ERROR: node_modules/.bin/nx still not found after '$PM_INSTALL'.\" >&2
-  echo '       This workspace does not depend on nx, so there is nothing here for the sync to drive.' >&2
-  exit 1
-fi
+# THE FLOOR — always ensured, so there is no not-an-Nx-workspace refusal any more: a repo without Nx gets it.
+$NX_INIT_BLOCK
+$NX_RUNTIME_BLOCK
 _stage install
 $INSTALL_NX_TOOLS
 _stage migrate
@@ -1571,45 +1601,7 @@ $MIGRATE_RUN
 [ -d .bespunky-sync.lock ] && printf 'migrations=%s\n' \"\${_expected:-0}\" >> .bespunky-sync.lock/state 2>/dev/null || true
 _stage generators
 $LAYER_RESOLVE_BLOCK
-# Sync re-applies the per-app house config to the EXISTING app (the \`app\` generator CREATES apps; it is
-# not the heal path), then the workspace-level generators. All idempotent — and all gated on the layer they
-# belong to, so a repo with no app never has an app's config applied to a project that isn't there.
-# Gated on \`web\`, NOT \`angular\`: both are framework-agnostic now — the composer drives a \`dev-server\`
-# target by name, and serve-options just sets host on whatever dev-server is there. An Angular leaf is
-# written only when the project has no dev-server of its own (see the serve generator's THE SEAM).
-#
-# AND gated on the PROJECT EXISTING. \"The web layer is present\" and \"a project named \$APP exists\" are
-# different claims: the layer is satisfied by ANY project with a dev-server, while \$APP is inferred (the
-# sole dir under apps/, else the repo name) and can easily name nothing at all. Running a per-app generator
-# against a project that isn't there is how a sync dies mid-sequence on a repo whose app is called
-# something else — a failure about the wrong thing entirely.
-project_exists() {
-  node -e \"const {FsTree}=require('nx/src/generators/tree');const {getProjects}=require('@nx/devkit');process.exit([...getProjects(new FsTree(process.cwd(),false)).keys()].includes(process.argv[1])?0:1)\" \"\$1\" >/dev/null 2>&1
-}
-if layer_active web; then
-  if project_exists '$APP'; then
-    _WIRE=''; layer_ensured web && _WIRE=' --wireProviders'
-    $PM_EXEC nx g @bespunky/nx-tools:serve --project=$APP\$_WIRE
-    $PM_EXEC nx g @bespunky/nx-tools:serve-options --project=$APP
-  else
-    echo \"[layers] WARNING: web layer present, but no project named '$APP' — SKIPPING the per-app generators.\"
-    echo \"[layers]   This sync is INCOMPLETE: migrations and workspace generators ran, but this app's own\"
-    echo \"[layers]   serve wiring was not refreshed. Re-run naming the app:\"
-    echo \"[layers]     scaffold.sh --sync <project> <app-name>\"
-    _SYNC_PARTIAL=1
-  fi
-fi
-# \`angular\` is in the gate because the generator REQUIRES it (it writes environment files,
-# firebase.config.ts and the app.config.ts provider) and asserts that with its own requireLayer. Without it
-# the gate would open on any repo carrying a firebase.json — a functions-only or hosting-only site — and the
-# generator's guard would then abort the whole sync over a layer the project never claimed to have.
-if layer_active firebase && layer_active angular && project_exists '$APP'; then$SYNC_FIREBASE_BLOCK
-elif layer_active firebase; then
-  echo '[layers] WARNING: firebase detected, but the emulator wiring needs an Angular app here — SKIPPING it.'
-  echo '[layers]   This sync is INCOMPLETE for the Firebase layer.'
-  _SYNC_PARTIAL=1
-fi
-$WORKSPACE_GEN_BLOCK
+$PLAN_RUN_BLOCK
 $FINALIZE_LOCAL
 # A run that skipped generators is not a clean run, and the outer summary prints SYNC_OK either way.
 # Say so here, while the reason is still on screen, so neither a human nor a model reads that final

@@ -143,11 +143,10 @@ is_version "$STAMPED_NX" || STAMPED_NX=''
 # the devcontainer ports, the emulator wiring, the Angular editor extensions — was never applied. The stamp is
 # current, the toolkit hasn't moved, and the project is still missing house files it should now have.
 #
-# EVERY layer is detected, but only by facts a hook can afford. `angular`, `js` and `firebase` are a single
-# grep on one known file. `web`, `design-system` and `navigation` live in project.json files, so they need a
-# scan — bounded to a shallow depth and with the heavy directories pruned, which keeps it in the milliseconds
-# a session-start hook may spend. It deliberately does NOT load the Nx project graph (a Node process and
-# seconds); the greps below approximate it, and where they can't tell they say nothing.
+# EVERY registered layer is detected, but only by facts a hook can afford: each layer's declarative EVIDENCE
+# (a root file, a package.json dependency, a pattern in a project.json), evaluated by the registry's own shell
+# projection — see below. It deliberately does NOT load the Nx project graph (a Node process and seconds); the
+# greps approximate it, and where they can't tell they say nothing.
 #
 # Under-reporting stays the intended failure mode throughout: a missed notice costs a stale layer, a false
 # one costs everyone's trust in the notice. So every probe below is written to be quiet when unsure.
@@ -168,25 +167,6 @@ has_layer() {
   return 1
 }
 
-# All project.json files, excluding the directories that make a repo scan expensive. Printed once and
-# reused, so the cost is a single traversal no matter how many layers are probed.
-# Does any project.json match this pattern?
-#
-# `find … -exec grep -l {} +` rather than collecting paths first. Two reasons, both learned the hard way:
-# a plain `xargs` splits on whitespace, so `apps/my app/project.json` drops silently out of the scan; and
-# collecting `-print0` output into a shell variable does NOT fix that, because command substitution strips
-# NUL bytes (bash even warns), leaving one concatenated blob that matches nothing. `-exec … +` hands the
-# paths over as arguments, so a space is a non-event and no intermediate representation exists to corrupt.
-#
-# Each probe re-traverses. That is fine and deliberate: the traversal is pruned, and — far more importantly
-# — it happens only inside the guard below, so a project that cannot act on the answer never pays for it.
-in_projects() {
-  find "$PROJECT_DIR" \
-    \( -name node_modules -o -name .git -o -name dist -o -name .nx -o -name .angular -o -name tmp \
-       -o -name vendor -o -name target -o -name build -o -name out -o -name coverage -o -name .venv \) -prune -o \
-    -name project.json -exec grep -l "$1" {} + 2>/dev/null | grep -q .
-}
-
 DRIFTED=''
 note_drift() { DRIFTED="${DRIFTED:+$DRIFTED, }$1"; }
 
@@ -198,16 +178,22 @@ note_drift() { DRIFTED="${DRIFTED:+$DRIFTED, }$1"; }
 #
 # Asking that question up front also means the probes — including the filesystem scan — never run for a
 # project that could not act on their answer.
-if [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none" ]; then
-  grep -q '"@angular/core"' "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer angular && note_drift angular
-  grep -q '"@nx/js"'        "$PROJECT_DIR/package.json" 2>/dev/null && ! has_layer js      && note_drift js
-  [ -f "$PROJECT_DIR/firebase.json" ] && ! has_layer firebase && note_drift firebase
-  # `web` — a project with something to serve. The registry's own test is a `dev-server` or `serve` TARGET.
-  in_projects '"dev-server"' && ! has_layer web && note_drift web
-  # `design-system` — the tag is the key, exactly as the registry and design-system-styles use it.
-  in_projects '"type:design-system"' && ! has_layer design-system && note_drift design-system
-  # `navigation` — a project NAMED navigation-core (the registry matches on project name).
-  in_projects '"name": *"navigation-core"' && ! has_layer navigation && note_drift navigation
+#
+# THE DETECTORS ARE THE REGISTRY'S. The layer list, each layer's evidence and the evaluator itself come from
+# assets/layers.sh — the shell projection GENERATED from nx-tools/src/layers/*.ts, the same descriptors the
+# generators and the sync detect with — so a new layer is noticed here the day it is registered, and this hook
+# can no longer disagree with the registry about what a layer is. It stays a few greps: the projection is pure
+# bash (no Node, no node_modules in the project), and its evaluator reads every project.json in ONE pruned
+# traversal however many layers there are. Sourcing it defines functions only. If it is missing (a partial
+# install), there is nothing trustworthy to compare, so this stays silent — under-reporting is the intended
+# failure mode.
+LAYERS_SH="$PLUGIN_ROOT/skills/new-project/assets/layers.sh"
+if [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none" ] && [ -f "$LAYERS_SH" ]; then
+  # shellcheck source=../skills/new-project/assets/layers.sh
+  . "$LAYERS_SH"
+  for _id in $(house_layers_evident "$PROJECT_DIR" | tr ',' ' '); do
+    has_layer "$_id" || note_drift "$_id"
+  done
 fi
 
 if [ -n "$DRIFTED" ]; then
@@ -220,13 +206,7 @@ if [ -n "$DRIFTED" ]; then
   stamp records                                 : layers=$STAMPED_LAYERS
 
 So the house files for that layer are missing. What each one brings:
-  angular       — the Angular editor extensions, the dev-server leaf, the Angular CLI MCP + agent skills
-  web           — the serve composer, worktree domains, the shared co-driven browser, Playwright, :80
-  design-system — the design-system config, STRUCTURE.md, and every app's sass/provider wiring
-  navigation    — nothing generated per-sync (its generators are on-demand), but HOUSE.md gains the
-                  typed-navigation conventions, so the stamp is what makes the layer visible at all
-  js            — the publishable-library and tool-extraction conventions in HOUSE.md
-  firebase      — the emulator wiring, the JDK step, and the forwarded emulator ports
+$(for _id in $(printf '%s' "$DRIFTED" | tr -d ' ' | tr ',' ' '); do printf '  %-14s— %s\n' "$_id" "$(house_layer_brings "$_id")"; done)
 
 A sync adds them: the sync path of the bespunky-project-starter:new-project skill — or, in one step, the
 \`/sync\` command, which updates the toolkit first and then syncs this project.
