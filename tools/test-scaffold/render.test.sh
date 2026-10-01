@@ -242,25 +242,49 @@ render 'sync --local'           --sync --yes --local "$FIX"
 render 'sync --ensure=agent'    --sync --yes --ensure=nx,agent "$FIX"
 render 'sync --firebase'        --sync --yes --firebase --ensure=firebase "$FIX"
 render 'scaffold'               "newproj"
-render 'scaffold --firebase'    --firebase --staging "newproj" "myapp"
+render 'scaffold --preset=angular' --preset=angular "newproj" "myapp"
+render 'scaffold --firebase'    --preset=angular --firebase --staging "newproj" "myapp"
 # --voice is a second opt-in that reaches the devcontainer generator by the same route as --firebase, and it
 # was broken by the same duplicate-author bug — undetected, because no arm had ever rendered it.
 render 'scaffold --voice'       --voice "newproj"
 render 'scaffold --local'       --local "newproj"
+render 'scaffold --local angular' --local --preset=angular "newproj"
 render 'sync (wrapper host)'    --sync --yes "$FIXW"
 render 'sync --local (wrapper)' --sync --yes --local --ensure=agent "$FIXW"
 render 'scaffold --ensure=nx,agent' --ensure=nx,agent "newproj"
 
-# SCAFFOLD = SYNC WITH AN ENSURE SET: the Angular bootstrap must be gated on the ensure set, never hard-wired.
-# It once ran unconditionally, so --ensure=nx,agent still created an Angular workspace and app.
-echo "── the scaffold bootstrap obeys the ensure set"
-_prog="$(bash "$SCAFFOLD" --print-inner --ensure=nx,agent "newproj" 2>/dev/null)"
-if printf '%s\n' "$_prog" | grep -B1 -E '^[^#]*(nx add @nx/angular|nx-tools:app )' | grep -q 'layer_ensured angular' \
-   && [ "$(printf '%s\n' "$_prog" | grep -cE '^[^#]*(nx add @nx/angular|nx-tools:app )')" -eq "$(printf '%s\n' "$_prog" | grep -B1 -E '^[^#]*(nx add @nx/angular|nx-tools:app )' | grep -c 'layer_ensured angular')" ] \
-   && printf '%s\n' "$_prog" | grep -q "^ENSURED='nx,agent'$"; then
-  ok "Angular bootstrap gated on layer_ensured angular; ENSURED='nx,agent'"
+# SCAFFOLD = SYNC WITH AN ENSURE SET: the bootstrap is rendered FROM the ensure set, never hard-wired. It once ran
+# the Angular bootstrap unconditionally, so --ensure=nx,agent still created an Angular workspace and app; and the
+# default project is now the agent preset — wrapper-hosted, no package.json, no stack.
+echo "── the scaffold bootstrap is the ensure set's"
+_bootstrap() { printf '%s\n' "$1" | grep -vE '^[[:space:]]*#' | grep -E 'create nx-workspace|create-nx-workspace|nx add |nx-tools:app |useDotNxInstallation=true|^git init'; }
+_prog="$(bash "$SCAFFOLD" --print-inner "newproj" 2>/dev/null)"
+_b="$(_bootstrap "$_prog")"
+if printf '%s\n' "$_prog" | grep -q "^ENSURED='nx,agent'$" && printf '%s\n' "$_b" | grep -q 'useDotNxInstallation=true' \
+   && ! printf '%s\n' "$_b" | grep -qE 'nx-workspace|nx add |nx-tools:app '; then
+  ok "default scaffold = the agent preset: wrapper floor, no create-nx-workspace, no plugin, no app"
 else
-  fail "the scaffold's Angular bootstrap is not gated on the ensure set"
+  fail "the default scaffold is not the agent preset on the wrapper floor:"; printf '%s\n' "$_b" | sed 's/^/         | /'
+fi
+_prog="$(bash "$SCAFFOLD" --print-inner --ensure=nx,agent "newproj" 2>/dev/null)"
+if ! _bootstrap "$_prog" | grep -qE 'nx-workspace|nx add |nx-tools:app '; then
+  ok "--ensure=nx,agent bootstraps no stack"
+else
+  fail "--ensure=nx,agent renders a stack bootstrap"
+fi
+_prog="$(bash "$SCAFFOLD" --print-inner --preset=angular --firebase "newproj" "shop" 2>/dev/null)"
+_b="$(_bootstrap "$_prog")"
+if printf '%s\n' "$_b" | grep -q 'create nx-workspace' && printf '%s\n' "$_b" | grep -q 'nx add @nx/angular' \
+   && printf '%s\n' "$_b" | grep -q "nx-tools:app 'apps/shop' --stack=angular" && ! printf '%s\n' "$_b" | grep -q 'useDotNxInstallation=true' \
+   && printf '%s\n' "$_prog" | grep -q "^ENSURED='nx,agent,node,web,angular,design-system,firebase'$"; then
+  ok "--preset=angular --firebase: package.json host, @nx/angular, the first app through the adapter"
+else
+  fail "--preset=angular does not render the Angular bootstrap:"; printf '%s\n' "$_b" | sed 's/^/         | /'
+fi
+if ! bash "$SCAFFOLD" --print-inner "newproj" "shop" >/dev/null 2>&1; then
+  ok "an app name with nothing that creates an app is refused"
+else
+  fail "scaffold.sh newproj shop (agent preset) accepted an app name nothing uses"
 fi
 # And the wrapper host never makes a Python repo a Node project: no package-manager add, ./nx throughout.
 _prog="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=agent "$FIXW" 2>/dev/null)"

@@ -20,7 +20,10 @@ const attachable = (ctx: PlanContext): boolean =>
 export const firebase: LayerDescriptor = {
   id: 'firebase',
   title: 'Firebase',
-  requires: ['nx'],
+  // `node`: Cloud Functions are a Node app and the suite cannot boot without them (firebase-admin,
+  // firebase-functions and @nx/esbuild live in the root package.json). A scaffold therefore creates the
+  // package.json host for it; a sync on a repo without one reports the layer as unmet instead of half-wiring it.
+  requires: ['nx', 'node'],
   evidence: { files: ['firebase.json'] },
   ensurable: { scaffold: true, sync: true },
   ensureHint:

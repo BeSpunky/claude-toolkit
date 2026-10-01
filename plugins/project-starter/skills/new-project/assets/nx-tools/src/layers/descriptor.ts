@@ -110,6 +110,12 @@ export interface LayerDescriptor {
   ensurable: { scaffold: Ensurability; sync: Ensurability };
   /** How a human brings this layer into being. Quoted verbatim when a precondition fails. */
   ensureHint: string;
+  /**
+   * The Nx plugin whose installation brings this layer into being (`nx add <it>`) — what a SCAFFOLD that ensures
+   * the layer runs before any generator. (Whether the layer then creates the first app is not declared here: it
+   * is the stack adapter's `apps` port — see adapters/registry.)
+   */
+  nxPlugin?: string;
   /** What the house tooling for this layer brings — one line, shown when the hook reports drift. */
   brings: string;
   /**

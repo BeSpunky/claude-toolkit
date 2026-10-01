@@ -1,8 +1,9 @@
 // `angular` — an Angular application (or component library).
 //
-// REQUIRES ONLY `nx` (DECISION re-cut). It used to require `web`, but a component-library-only Angular
+// REQUIRES `nx` and `node` (DECISION re-cut). It used to require `web`, but a component-library-only Angular
 // workspace — no dev-server, nothing to serve — is a legitimate shape, and requiring `web` declared it
-// impossible.
+// impossible. `node` it does need: an Angular workspace IS a Node project (its plugin, compiler and app live in
+// package.json), so a scaffold that ensures Angular creates the package.json host for it (phase 6).
 //
 // `@nx/angular` counts, and must. What every guard on this layer actually protects is a dynamic
 // `import('@nx/angular/generators')` — so the honest question is "is the Angular PLUGIN here?", not "has an
@@ -16,13 +17,14 @@ import { projectExists } from './evidence';
 export const angular: LayerDescriptor = {
   id: 'angular',
   title: 'Angular application',
-  requires: ['nx'],
+  requires: ['nx', 'node'],
   evidence: {
     dependencies: ['@angular/core', '@nx/angular'],
     executors: ['@angular/build:', '@angular-devkit/build-angular:'],
   },
   ensurable: { scaffold: true, sync: false },
   ensureHint: '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`',
+  nxPlugin: '@nx/angular',
   brings: 'the Angular editor extensions, the dev-server leaf, the Angular CLI MCP + agent skills',
   generators: {
     // The Angular adapter's half of the worktree dev loop: the dev-only tab label (glue rewritten every sync; the

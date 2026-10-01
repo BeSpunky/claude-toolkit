@@ -22,6 +22,8 @@ import { FsTree } from 'nx/src/generators/tree';
 import type { LayerDescriptor, LayerEvidence } from './descriptor';
 import { FLOOR, LAYERS, detectLayers, inRegistryOrder } from './registry';
 import { plan } from './plan';
+import { DEFAULT_PRESET, PRESETS } from './presets';
+import { ADAPTERS } from '../adapters/registry';
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
@@ -94,14 +96,18 @@ const q = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 /** Escape a literal for a grep BASIC regex. */
 const bre = (value: string) => value.replace(/[.[\]*^$\\]/g, '\\$&');
 
-/** A `case "$1" in id) … ;; esac` function over the registered layers. */
-function byIdFunction(name: string, doc: string, value: (entry: LayerDescriptor) => string | null): string {
-  const arms = LAYERS.map((entry) => {
+/** A `case "$1" in id) … ;; esac` function over `entries` (anything with an id). */
+function caseFunction<T extends { id: string }>(name: string, doc: string, entries: readonly T[], value: (entry: T) => string | null): string {
+  const arms = entries.map((entry) => {
     const v = value(entry);
     return v === null ? null : `    ${entry.id}) printf '%s\\n' ${q(v)} ;;`;
   }).filter(Boolean);
   return `# ${doc}\n${name}() {\n  case "$1" in\n${arms.join('\n')}\n  esac\n}\n`;
 }
+
+/** A `case` function over the registered layers. */
+const byIdFunction = (name: string, doc: string, value: (entry: LayerDescriptor) => string | null): string =>
+  caseFunction(name, doc, LAYERS, value);
 
 /**
  * Evidence as `<kind> <grep pattern | path>` lines. `file` is a root-relative path; `dependency` is a fixed
@@ -146,6 +152,8 @@ export function shellProjection(): string {
     `HOUSE_LAYER_FLOOR=${q(FLOOR)}`,
     `HOUSE_LAYERS_ENSURABLE_SCAFFOLD=${q(ensurableIn('scaffold'))}`,
     `HOUSE_LAYERS_ENSURABLE_SYNC=${q(ensurableIn('sync'))}`,
+    `HOUSE_PRESETS=${q(PRESETS.map((p) => p.id).join(','))}`,
+    `HOUSE_PRESET_DEFAULT=${q(DEFAULT_PRESET)}`,
     '',
     byIdFunction('house_layer_title', 'house_layer_title <id> — one line naming the layer.', (e) => e.title),
     byIdFunction('house_layer_requires', 'house_layer_requires <id> — comma-separated required layers.', (e) =>
@@ -161,10 +169,22 @@ export function shellProjection(): string {
     byIdFunction('house_layer_ensurable_sync', 'house_layer_ensurable_sync <id> — yes | no | via:<id>.', (e) =>
       ensurability(e, 'sync'),
     ),
+    byIdFunction('house_layer_nx_plugin', 'house_layer_nx_plugin <id> — the Nx plugin a scaffold `nx add`s to create it (or nothing).', (e) =>
+      e.nxPlugin ?? null,
+    ),
+    byIdFunction(
+      'house_layer_app_stack',
+      'house_layer_app_stack <id> — the stack adapter that creates the first app when a scaffold ensures this layer (or nothing).',
+      (e) => ADAPTERS.find((stack) => stack.layer === e.id && stack.apps)?.id ?? null,
+    ),
     byIdFunction(
       'house_layer_evidence',
       'house_layer_evidence <id> — `file <path>` | `dependency <fixed string>` | `project-json <grep BRE>` lines.',
       (e) => evidenceLines(e.evidence) || null,
+    ),
+    caseFunction('house_preset_title', 'house_preset_title <preset> — one line naming the preset.', PRESETS, (p) => p.title),
+    caseFunction('house_preset_layers', 'house_preset_layers <preset> — its ensure set, comma-separated.', PRESETS, (p) =>
+      p.layers.join(','),
     ),
     EVIDENT_FUNCTION,
   ].join('\n');

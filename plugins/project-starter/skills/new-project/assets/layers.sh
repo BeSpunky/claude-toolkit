@@ -10,6 +10,8 @@ HOUSE_LAYERS='nx,agent,node,js,web,angular,design-system,navigation,firebase'
 HOUSE_LAYER_FLOOR='nx'
 HOUSE_LAYERS_ENSURABLE_SCAFFOLD='nx,agent,node,web,angular,design-system,firebase'
 HOUSE_LAYERS_ENSURABLE_SYNC='nx,agent,firebase'
+HOUSE_PRESETS='agent,node,angular'
+HOUSE_PRESET_DEFAULT='agent'
 
 # house_layer_title <id> — one line naming the layer.
 house_layer_title() {
@@ -34,10 +36,10 @@ house_layer_requires() {
     node) printf '%s\n' '' ;;
     js) printf '%s\n' 'nx' ;;
     web) printf '%s\n' 'agent' ;;
-    angular) printf '%s\n' 'nx' ;;
+    angular) printf '%s\n' 'nx,node' ;;
     design-system) printf '%s\n' 'nx' ;;
     navigation) printf '%s\n' 'angular' ;;
-    firebase) printf '%s\n' 'nx' ;;
+    firebase) printf '%s\n' 'nx,node' ;;
   esac
 }
 
@@ -76,7 +78,7 @@ house_layer_ensurable_scaffold() {
   case "$1" in
     nx) printf '%s\n' 'yes' ;;
     agent) printf '%s\n' 'yes' ;;
-    node) printf '%s\n' 'via:nx' ;;
+    node) printf '%s\n' 'yes' ;;
     js) printf '%s\n' 'no' ;;
     web) printf '%s\n' 'via:angular' ;;
     angular) printf '%s\n' 'yes' ;;
@@ -101,6 +103,20 @@ house_layer_ensurable_sync() {
   esac
 }
 
+# house_layer_nx_plugin <id> — the Nx plugin a scaffold `nx add`s to create it (or nothing).
+house_layer_nx_plugin() {
+  case "$1" in
+    angular) printf '%s\n' '@nx/angular' ;;
+  esac
+}
+
+# house_layer_app_stack <id> — the stack adapter that creates the first app when a scaffold ensures this layer (or nothing).
+house_layer_app_stack() {
+  case "$1" in
+    angular) printf '%s\n' 'angular' ;;
+  esac
+}
+
 # house_layer_evidence <id> — `file <path>` | `dependency <fixed string>` | `project-json <grep BRE>` lines.
 house_layer_evidence() {
   case "$1" in
@@ -120,6 +136,24 @@ project-json "executor"[[:space:]]*:[[:space:]]*"@angular-devkit/build-angular:'
     design-system) printf '%s\n' 'project-json "type:design-system"' ;;
     navigation) printf '%s\n' 'project-json "type:navigation"' ;;
     firebase) printf '%s\n' 'file firebase.json' ;;
+  esac
+}
+
+# house_preset_title <preset> — one line naming the preset.
+house_preset_title() {
+  case "$1" in
+    agent) printf '%s\n' 'the house DX on the Nx floor — no package.json, no framework (Nx through its wrapper)' ;;
+    node) printf '%s\n' 'a Node workspace — root package.json (create-nx-workspace), the toolkit as exact devDependencies' ;;
+    angular) printf '%s\n' 'the house web app — Angular app, dev loop, design system (add --firebase for Firebase)' ;;
+  esac
+}
+
+# house_preset_layers <preset> — its ensure set, comma-separated.
+house_preset_layers() {
+  case "$1" in
+    agent) printf '%s\n' 'nx,agent' ;;
+    node) printf '%s\n' 'nx,agent,node' ;;
+    angular) printf '%s\n' 'nx,agent,node,web,angular,design-system' ;;
   esac
 }
 

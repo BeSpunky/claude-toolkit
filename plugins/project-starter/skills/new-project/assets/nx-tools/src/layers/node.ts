@@ -13,8 +13,9 @@
 // stays the narrower claim "TypeScript/JavaScript LIBRARIES here" — a Node app with no library is `node`
 // without `js`.
 //
-// NOT ENSURABLE BY A SYNC: a sync never turns a repo into a Node project (no package.json → the Nx wrapper). A
-// scaffold creates one as part of laying the Nx floor (create-nx-workspace), hence `via: nx`.
+// NOT ENSURABLE BY A SYNC: a sync never turns a repo into a Node project (no package.json → the Nx wrapper).
+// ENSURABLE BY A SCAFFOLD, and it is what decides the new project's Nx HOST: with `node` in the ensure set the
+// floor is laid by create-nx-workspace (a package.json host); without it, through the Nx wrapper (phase 6).
 import type { LayerDescriptor } from './descriptor';
 
 export const node: LayerDescriptor = {
@@ -22,7 +23,7 @@ export const node: LayerDescriptor = {
   title: 'Node project (a root package.json)',
   requires: [],
   evidence: { files: ['package.json'] },
-  ensurable: { scaffold: { via: 'nx' }, sync: false },
+  ensurable: { scaffold: true, sync: false },
   ensureHint: 'a root package.json (`npm init`) — the next sync then treats the repo as a Node project',
   brings: 'the typescript-node devcontainer image, the node_modules volume and the package-manager install',
   devcontainer: {

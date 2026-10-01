@@ -88,6 +88,21 @@ check('assets/layers.sh parses and defines the registered ids', (ok) => {
   ok(out === `${registry.LAYERS.map((l) => l.id).join(',')}|nx|via:angular`, `got ${out}`);
 });
 
+check('presets: projected verbatim, the default first-class, every one a set a scaffold can create', (ok) => {
+  const { PRESETS, DEFAULT_PRESET } = require_(join(BUILD, 'src/layers/presets'));
+  const out = execFileSync('bash', ['-c', `set -eu; . "$1"; printf '%s|%s' "$HOUSE_PRESETS" "$HOUSE_PRESET_DEFAULT"; for p in $(printf '%s' "$HOUSE_PRESETS" | tr , ' '); do printf '|%s=%s' "$p" "$(house_preset_layers "$p")"; done`, '_', PROJECTION]).toString();
+  ok(out === `${PRESETS.map((p) => p.id).join(',')}|${DEFAULT_PRESET}${PRESETS.map((p) => `|${p.id}=${p.layers.join(',')}`).join('')}`, `got ${out}`);
+  ok(DEFAULT_PRESET === 'agent', 'the default project is the stack-agnostic one');
+  for (const p of PRESETS) {
+    for (const id of p.layers) for (const r of registry.layer(id).requires) ok(p.layers.includes(r), `${p.id}: ${id} requires ${r}`);
+  }
+  ok(PRESETS.find((p) => p.id === 'agent').layers.join() === 'nx,agent', 'agent preset = nx,agent');
+});
+check('a scaffold knows how to bootstrap angular from the registry alone (nx plugin + app-creating stack)', (ok) => {
+  const out = execFileSync('bash', ['-c', `set -eu; . "$1"; printf '%s|%s|%s' "$(house_layer_nx_plugin angular)" "$(house_layer_app_stack angular)" "$(house_layer_app_stack js)"`, '_', PROJECTION]).toString();
+  ok(out === '@nx/angular|angular|', `got ${out}`);
+});
+
 // ── fixtures ───────────────────────────────────────────────────────────────────────────────────────────────
 const tooling = (tree, name, extra = {}) =>
   addProjectConfiguration(tree, name, {

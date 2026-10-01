@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Scaffold a BeSpunky-standard project, OR sync the house generators on an existing project.
 #
-# Default mode  : full scaffold (Nx + Angular + app + house generators + devcontainer + Claude settings).
+# Default mode  : SCAFFOLD a new project — sync with an ensure set against an empty directory. The set is a
+#                 PRESET (default `agent`: the house DX on the Nx floor, wrapper-hosted, no package.json, no
+#                 framework; `--preset=angular` is the house web app) and/or `--ensure=<csv>`. Presets are data
+#                 beside the layer registry (nx-tools/src/layers/presets.ts, projected into layers.sh).
 # Sync mode     : bring an EXISTING workspace up to the current house standard — detect which layers it has,
 #                 run the versioned MIGRATIONS between where it is and where this checkout is, then re-apply
 #                 the generators that own their output outright. Not convergence: the generators no longer
 #                 recognise every shape the toolkit ever produced. Each one-way change ships instead as a
 #                 migration keyed to the version that introduced it, collected and ordered by `nx migrate`.
-# Firebase opt-in: when --firebase is passed, the devcontainer gets the Firebase CLI + Google Cloud CLI
-#                  features, the toba.vsfire extension, labeled portsAttributes, and explicit SAME-PORT
-#                  forwardPorts for the dev server + emulator suite (required: the Firebase SDK in the
-#                  host browser calls the emulators at hardcoded localhost:<port>, which only resolves
-#                  when container ports forward to identical host ports). The firebase-emulators
-#                  generator additionally scaffolds Cloud Functions as an Nx app (apps/functions), the
-#                  workspace-level `firebase` emulator project, and the seed/cache/reset tooling.
-#                  NEVER enabled by default.
+# Firebase opt-in: --firebase is --ensure=firebase (two spellings of one intent). The layer brings the emulator
+#                  suite, Cloud Functions as an Nx app (apps/functions), the workspace-level `firebase`
+#                  project and the seed/cache/reset tooling; its devcontainer FRAGMENT (layers/firebase.ts)
+#                  brings the Firebase/Google Cloud CLIs, the JDK and the forwarded emulator ports. It requires
+#                  the `node` layer (Cloud Functions are a Node app). NEVER enabled by default.
 # Voice opt-in   : when --voice is passed, the devcontainer bridges the HOST's audio server — WSLg, or a
 #                  native PulseAudio/PipeWire socket — (a host probe on every open + one bind mount +
 #                  remoteEnv PULSE_SERVER) and post-create.sh self-adapts to a socket being present
@@ -34,8 +34,8 @@
 #                  deploy methodology). Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
-#   scaffold.sh [--firebase] [--voice] [--no-github] [--docker] <project-name> [app-name]          # full scaffold
-#   scaffold.sh --sync [--ensure=<layers>] [--firebase] [--voice] [--no-backup] [--yes] [--docker] [--local] <project-path|project-name> [app-name]
+#   scaffold.sh [--preset=<id>] [--ensure=<layers>] [--firebase] [--staging] [--voice] [--no-github] [--docker] [--local] <project-name> [app-name]
+#   scaffold.sh --sync [--preset=<id>] [--ensure=<layers>] [--firebase] [--voice] [--no-backup] [--yes] [--docker] [--local] <project-path|project-name> [app-name]
 #
 #   --local installs @bespunky/nx-tools from the WORKING TREE (npm pack) instead of the registry — for
 #           developing the toolkit itself, where the version under test is not published yet.
@@ -43,7 +43,10 @@
 #   --staging (scaffold or sync) additionally scaffolds the staging environment bundle; requires --firebase.
 #   --ensure=<csv> brings layers into being — which ones each mode can create comes from the layer registry
 #                  (assets/layers.sh). Everything else is DETECTED, never ensured. The Nx floor is always
-#                  ensured.
+#                  ensured; a scaffold also ensures whatever the requested layers require.
+#   --preset=<id>  a named ensure set (unions with --ensure). A scaffold with neither gets the default preset.
+#   [app-name]     scaffold: the first app's name (default: the project name) — only when an ensured layer's
+#                  stack creates apps (the angular preset); refused otherwise. sync: the app to refresh.
 #
 # Sync auto-backup: --sync snapshots the project to a git tag (sync-backup-<ts>) BEFORE running
 # any generator, so a regenerated file (e.g. firebase.config.ts) is always recoverable — review with
@@ -65,7 +68,7 @@
 # Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
 # clobber anything that already exists.
 #
-# Leading flags (--sync, --ensure, --firebase, --staging, --voice, --local, --no-github, --no-backup, --yes, --docker)
+# Leading flags (--sync, --preset, --ensure, --firebase, --staging, --voice, --local, --no-github, --no-backup, --yes, --docker)
 # may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 #
@@ -98,11 +101,21 @@ scaffold.sh — create a BeSpunky-standard project, or bring an existing one up 
   scaffold.sh [flags] <project-name> [app-name]              # SCAFFOLD a new project
   scaffold.sh --sync [flags] <project-path|name> [app-name]  # SYNC an existing one
 
-Flags must come BEFORE the project path.
+Flags must come BEFORE the project path. A project is a stack of LAYERS; a scaffold creates the
+ones it is asked for (a preset and/or --ensure) — by default only the house DX on the Nx floor.
 
   --sync            Sync an existing project instead of creating one: run the versioned house
                     migrations, then re-apply the generators that own their output.
-  --ensure=<csv>    Layers to BRING INTO BEING (everything else is detected, never ensured).
+  --preset=<id>     A named set of layers to start from (unions with --ensure):
+USAGE
+  for _p in $(printf '%s' "$HOUSE_PRESETS" | tr ',' ' '); do
+    _d=""; [ "$_p" = "$HOUSE_PRESET_DEFAULT" ] && _d=" (scaffold default)"
+    printf '                      %-8s %s%s\n' "$_p" "$(house_preset_layers "$_p" | sed 's/,/, /g')" "$_d"
+  done
+  cat <<'USAGE'
+                    e.g. scaffold.sh --preset=angular [--firebase] shop [app] — the house web app.
+  --ensure=<csv>    Layers to BRING INTO BEING (everything else is detected, never ensured). A
+                    scaffold also creates whatever they require.
 USAGE
   # Rendered from the registry projection, so the list a user reads is the list the script accepts.
   printf '                      sync    : %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SYNC" | sed 's/,/, /g')"
@@ -112,7 +125,8 @@ USAGE
                     (through the Nx wrapper, ./nx, when the repo has no package.json — it does not
                     become a Node project). `--ensure=agent` on a bare repo is the usual retrofit: the
                     stack-agnostic DX layer (devcontainer, Claude settings, window identity).
-  --firebase        Include the Firebase layer (emulator suite, Cloud Functions app, devcontainer wiring).
+  --firebase        Include the Firebase layer (emulator suite, Cloud Functions app, devcontainer wiring);
+                    the same as --ensure=firebase.
   --staging         Also scaffold the staging environment bundle. Requires --firebase.
   --voice           Bridge the host's audio (WSLg or native PulseAudio/PipeWire) into the devcontainer
                     and provision bespunky-voice.
@@ -141,6 +155,7 @@ BACKUP=1   # sync snapshots the project to a git tag BEFORE mutating; --no-backu
 CONSENT=0  # --yes: asserts a human explicitly agreed to this sync (see the consent gate above).
 FORCE_DOCKER=0  # --docker: use the base image even when the local Node would do (escape hatch).
 ENSURE_ARG=""   # --ensure=<csv>: layers to BRING INTO BEING (see the layer model below). Empty = detect only.
+PRESET_ARG=""   # --preset=<id>: a named ensure set (src/layers/presets.ts); unions with --ensure.
 LOCAL_TOOLS=0   # --local: install @bespunky/nx-tools from the WORKING TREE instead of npm (toolkit dev).
 PRINT_INNER=0   # --print-inner: render the command sequence to stdout and exit, running nothing.
 while [ "${1:-}" != "" ]; do
@@ -156,6 +171,12 @@ while [ "${1:-}" != "" ]; do
     --local)      LOCAL_TOOLS=1;  shift;;
     --print-inner) PRINT_INNER=1; shift;;
     --ensure=*)   ENSURE_ARG="${1#--ensure=}"; shift;;
+    --preset=*)   PRESET_ARG="${1#--preset=}"; shift;;
+    --preset)     case "${2:-}" in
+                    ''|-*) echo "ERROR: --preset needs a preset name, got '${2:-}'. Known presets: $HOUSE_PRESETS" >&2
+                           exit 1;;
+                  esac
+                  PRESET_ARG="$2"; shift 2;;
     # The space form takes the NEXT argument as its value, so `--ensure --yes <proj>` would silently swallow
     # `--yes` as a layer list — and the consent gate runs before layer validation, so the user would be told
     # they hadn't consented rather than that they'd mistyped. Reject a flag-shaped value outright.
@@ -208,6 +229,7 @@ for _arg in "$@"; do
 done
 # $3 and beyond are silently ignored otherwise, which hides a typo'd flag or a mis-quoted path.
 [ "$#" -le 2 ] || { echo "ERROR: too many arguments — expected at most <project> [app-name], got: $*" >&2; exit 1; }
+APP_ARG="${2:-}"   # the app name AS GIVEN — a scaffold refuses one when nothing it ensures creates an app
 
 # --- whose package manager is this? ---------------------------------------------------------------------------
 # A SCAFFOLD creates the project, so it sets the house standard: yarn. A SYNC does not get that choice. The
@@ -397,69 +419,6 @@ _check_name() {
 _check_name project "$PROJECT"
 _check_name app "$APP"
 
-# --- resolve the package manager + the three commands the rendered sequences use -------------------------------
-# Scaffold sets the house standard (it is creating the project); sync adopts whatever the project already
-# uses. Everything downstream goes through these three variables, so a new package manager is one case here
-# rather than twenty call sites.
-# --- how does this project HOST Nx? ----------------------------------------------------------------------------
-# Nx is the floor under every house run, but "has Nx" must not mean "is a Node project". Two hosting models:
-#
-#   node     a root package.json — Nx, @nx/devkit and @bespunky/nx-tools are devDependencies in node_modules,
-#            run through the project's package manager. Every scaffold, and every JS/TS repo.
-#   wrapper  NO root package.json (Python, Go, docs, …) — Nx's own wrapper: `./nx`, `.nx/nxw.js`, packages
-#            under the gitignored `.nx/installation`, versions pinned EXACTLY in nx.json `installation`
-#            (`plugins` holds @bespunky/nx-tools and @nx/devkit). The repo gains nx.json, ./nx and .nx/nxw.js,
-#            and NOTHING that makes it a Node project — no package.json, no lockfile, no node_modules.
-#
-# The wrapper was once refused here ("cannot host devkit plugins"); that is no longer true on Nx 23 and was
-# re-verified before relying on it: exact pin, generators, native nx migrate collect + run, and a fresh clone
-# reinstalling the pins all work (docs/features/2026-10-01-stack-agnostic/contracts/layers.md). A repo that
-# already runs the wrapper keeps it even if it also has a package.json.
-HOST="node"
-if [ "$MODE" = "sync" ]; then
-  if { [ -f "$TARGET/.nx/nxw.js" ] && grep -q '"installation"' "$TARGET/nx.json" 2>/dev/null; } || [ ! -f "$TARGET/package.json" ]; then
-    HOST="wrapper"
-  fi
-fi
-
-if [ "$MODE" = "scaffold" ]; then
-  PM="yarn"; PM_SOURCE="house-default"
-elif [ "$HOST" = "wrapper" ]; then
-  # The wrapper installs with npm into .nx/installation; the project itself has no package manager to honour.
-  PM="npm"; PM_SOURCE="nx-wrapper"
-else
-  read -r PM PM_SOURCE <<< "$(detect_package_manager "$TARGET")"
-fi
-
-# PM_ADD_DEV pins EXACTLY — every one of these carries an explicit exact-save flag, and that is load-bearing
-# rather than a style choice (see INSTALL_NX_TOOLS for why an accidental caret silently skips the migration
-# ladder). npm in particular defaults to `save-prefix=^` and WILL write `^0.24.3` without `--save-exact`;
-# yarn 1 and pnpm happen to default to exact today, but that is a default, and a project's `.npmrc` /
-# `.yarnrc` can change it under us. Say it out loud in all three.
-case "$PM" in
-  yarn) PM_INSTALL="yarn install";  PM_EXEC="yarn";           PM_ADD_DEV="yarn add -D -E" ;;
-  # `npx --no-install` deliberately: nx is in node_modules by this point, and without the flag a typo or a
-  # pruned package would silently fetch something from the registry and run it instead of failing.
-  npm)  PM_INSTALL="npm install";   PM_EXEC="npx --no-install"; PM_ADD_DEV="npm install --save-dev --save-exact" ;;
-  # `-w` is REQUIRED inside a pnpm WORKSPACE — there `pnpm add` at the root refuses outright
-  # (ERR_PNPM_ADDING_TO_ROOT) unless you say you meant the root, and the root is exactly where house tooling
-  # belongs. But it is FATAL outside one: `--workspace-root may only be used inside a workspace`, exit 1
-  # (verified on pnpm 11.9.0). This used to be tolerated because the install was gated and trailed by a
-  # `|| echo NOTE:`; now that installing the toolkit is unconditional and runs under `set -e`, passing it
-  # unconditionally would abort every sync on a plain pnpm repo. So ask the workspace which shape it is.
-  pnpm) PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec";       PM_ADD_DEV="pnpm add -D -E"
-        [ -f "$TARGET/pnpm-workspace.yaml" ] && PM_ADD_DEV="pnpm add -D -w -E" ;;
-esac
-if [ "$MODE" = "sync" ]; then
-  if [ "$HOST" = "wrapper" ]; then
-    echo "Nx host: the Nx wrapper (./nx) — this repo has no package.json and does not become a Node project"
-  elif [ "$PM_SOURCE" = "house-default" ]; then
-    echo "Package manager: $PM (this project declares none — using the house default)"
-  else
-    echo "Package manager: $PM (from $PM_SOURCE — the project's choice, not imposed)"
-  fi
-fi
-
 # Resolved and VALIDATED before the consent gate below. Argument validation is pure string work — it
 # reads nothing, writes nothing, and reaches no network — so doing it first costs nothing and stops the
 # script answering a typo with the wrong complaint: `--ensure=bogus` used to be met with "refusing to
@@ -481,23 +440,26 @@ fi
 # get created and then refreshed by the same blocks. Which is the whole simplification: SCAFFOLD IS SYNC
 # WITH A FULL ENSURE SET AGAINST AN EMPTY DIRECTORY. One rendered sequence below serves both modes, so the
 # two can no longer drift the way two hand-maintained command lists did.
-if [ "$MODE" = "scaffold" ]; then
-  # A new project is the house shape by definition — the user asked for exactly this.
-  ENSURE_DEFAULT="nx,agent,web,angular,design-system"
-  [ "$FIREBASE" = "1" ] && ENSURE_DEFAULT="$ENSURE_DEFAULT,firebase"
+# PRESETS are named ensure sets — data beside the registry (src/layers/presets.ts, projected into layers.sh),
+# so nothing here names one. --preset and --ensure UNION: the preset is a starting set, --ensure the general
+# form. A SCAFFOLD with neither gets the DEFAULT preset — the house DX on the Nx floor, no framework: a new
+# project wears a stack only when asked to (--preset=angular is the house web app). A SYNC has no default:
+# it ensures nothing above the floor unless asked — the difference between "bring my house tooling up to date"
+# and "turn my library into an Angular app".
+_layer_listed() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }
+if [ -n "$PRESET_ARG" ]; then
+  _layer_listed "$PRESET_ARG" "$HOUSE_PRESETS" || {
+    echo "ERROR: unknown preset '$PRESET_ARG'. Known presets:" >&2
+    for _p in $(printf '%s' "$HOUSE_PRESETS" | tr ',' ' '); do echo "         $_p — $(house_preset_title "$_p")" >&2; done
+    exit 1; }
+  PRESET="$PRESET_ARG"
+elif [ "$MODE" = "scaffold" ] && [ -z "$ENSURE_ARG" ]; then
+  PRESET="$HOUSE_PRESET_DEFAULT"
 else
-  # A sync ensures NOTHING by default. It refreshes what is there and adds no capability the project didn't
-  # ask for — the difference between "bring my house tooling up to date" and "turn my library into an Angular
-  # app". `--ensure=agent` on a bare repo is the interesting case: house DX, no framework opinion.
-  ENSURE_DEFAULT=""
+  PRESET=""
 fi
-ENSURE_LAYERS="${ENSURE_ARG:-$ENSURE_DEFAULT}"
-# NORMALISE AWAY WHITESPACE before anything reads this. Every consumer below matches on comma-delimited
-# globs (`*,agent,*`), while the VALIDATOR word-splits — so `--ensure="nx, agent"` passes validation, prints
-# a banner claiming both layers, and then matches nothing: the floor is added a second time and `agent` never
-# reaches the planner as ensured, so the devcontainer, Claude settings and window identity are all silently
-# skipped. A csv a human typed with spaces is a csv, not a different request. (HOUSE.md/HOUSE.rules.md are
-# no longer in that list — house-doc is ungated; see the HOUSE.md step at the end of the sequence.)
+ENSURE_LAYERS="${PRESET:+$(house_preset_layers "$PRESET")}"
+[ -n "$ENSURE_ARG" ] && ENSURE_LAYERS="${ENSURE_LAYERS:+$ENSURE_LAYERS,}$ENSURE_ARG"
 ENSURE_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | tr -d '[:space:]')"
 
 # `--firebase` IS an ensure request for the `firebase` layer — they are two spellings of one intent, and
@@ -537,12 +499,32 @@ esac
 #   via:<id>    — creatable only together with <id>, whose creation produces it (a scaffold's `web` is the
 #                 dev-server of the Angular app the `angular` layer creates).
 #   requires    — a SCAFFOLD starts from an empty directory, so nothing can be detected: everything a requested
-#                 layer requires must be in the set too. (A sync may satisfy it by detection instead, and each
-#                 generator's own requireLayer guard says so precisely if it does not.)
-_layer_listed() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }
+#                 layer requires is CREATED WITH IT (the closure below, announced — asking for `angular` and
+#                 being told to also type `node` would be the script refusing to do arithmetic it can do). A
+#                 sync may satisfy a requirement by detection instead; the planner reports one that is unmet.
 for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
   _layer_listed "$_l" "$HOUSE_LAYERS" || {
     echo "ERROR: unknown layer '$_l' in --ensure. Known layers: $HOUSE_LAYERS" >&2; exit 1; }
+done
+if [ "$MODE" = "scaffold" ]; then
+  _closed=""; _added=""
+  while [ "$_closed" != "$ENSURE_LAYERS" ]; do
+    _closed="$ENSURE_LAYERS"
+    for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+      for _r in $(house_layer_requires "$_l" | tr ',' ' '); do
+        _layer_listed "$_r" "$ENSURE_LAYERS" || { ENSURE_LAYERS="$ENSURE_LAYERS,$_r"; _added="$_added $_r (for $_l)"; }
+      done
+    done
+  done
+  [ -n "$_added" ] && echo "Also ensuring what those layers require:$_added"
+fi
+# One spelling of the set from here on: registry order, each layer once.
+_ordered=""
+for _l in $(printf '%s' "$HOUSE_LAYERS" | tr ',' ' '); do
+  _layer_listed "$_l" "$ENSURE_LAYERS" && _ordered="${_ordered:+$_ordered,}$_l"
+done
+ENSURE_LAYERS="$_ordered"
+for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
   if [ "$MODE" = "scaffold" ]; then _ens="$(house_layer_ensurable_scaffold "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SCAFFOLD"
   else _ens="$(house_layer_ensurable_sync "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SYNC"; fi
   case "$_ens" in
@@ -566,15 +548,96 @@ for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
       echo "       Ensurable by a $MODE: $_ensurable" >&2
       exit 1 ;;
   esac
-  if [ "$MODE" = "scaffold" ]; then
-    for _r in $(house_layer_requires "$_l" | tr ',' ' '); do
-      _layer_listed "$_r" "$ENSURE_LAYERS" || {
-        echo "ERROR: the '$_l' layer requires '$_r', and a scaffold starts from nothing — add it: --ensure=$ENSURE_LAYERS,$_r" >&2
-        exit 1; }
-    done
-  fi
 done
+[ -n "$PRESET" ] && echo "Preset: $PRESET — $(house_preset_title "$PRESET")"
 [ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
+
+# --- the FIRST APP: only a layer whose stack creates apps makes one ------------------------------------------
+# Derived from the registry projection (house_layer_app_stack: the stack adapter with an `apps` port for that
+# layer), never from a layer name here. A scaffold that ensures no such layer creates no app — and an app name on
+# the command line is then refused rather than silently ignored: it would read as if something used it.
+APP_STACK=""
+for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+  _s="$(house_layer_app_stack "$_l")"
+  [ -n "$_s" ] && { APP_STACK="$_s"; break; }
+done
+if [ "$MODE" = "scaffold" ] && [ -n "$APP_ARG" ] && [ -z "$APP_STACK" ]; then
+  echo "ERROR: an app name ('$APP_ARG') was given, but nothing this scaffold ensures creates an app" >&2
+  echo "       (layers: $ENSURE_LAYERS). Ask for a stack that does, e.g.:  scaffold.sh --preset=angular $PROJECT $APP_ARG" >&2
+  exit 1
+fi
+
+# --- resolve the package manager + the three commands the rendered sequences use -------------------------------
+# Scaffold sets the house standard (it is creating the project); sync adopts whatever the project already
+# uses. Everything downstream goes through these three variables, so a new package manager is one case here
+# rather than twenty call sites.
+# --- how does this project HOST Nx? ----------------------------------------------------------------------------
+# Nx is the floor under every house run, but "has Nx" must not mean "is a Node project". Two hosting models:
+#
+#   node     a root package.json — Nx, @nx/devkit and @bespunky/nx-tools are devDependencies in node_modules,
+#            run through the project's package manager. Every scaffold, and every JS/TS repo.
+#   wrapper  NO root package.json (Python, Go, docs, …) — Nx's own wrapper: `./nx`, `.nx/nxw.js`, packages
+#            under the gitignored `.nx/installation`, versions pinned EXACTLY in nx.json `installation`
+#            (`plugins` holds @bespunky/nx-tools and @nx/devkit). The repo gains nx.json, ./nx and .nx/nxw.js,
+#            and NOTHING that makes it a Node project — no package.json, no lockfile, no node_modules.
+#
+# The wrapper was once refused here ("cannot host devkit plugins"); that is no longer true on Nx 23 and was
+# re-verified before relying on it: exact pin, generators, native nx migrate collect + run, and a fresh clone
+# reinstalling the pins all work (docs/features/2026-10-01-stack-agnostic/contracts/layers.md). A repo that
+# already runs the wrapper keeps it even if it also has a package.json.
+#
+# A SCAFFOLD decides it from the ensure set: the `node` layer IS "this repo has a package.json", so a scaffold
+# that ensures it lays the floor with create-nx-workspace (a package.json host, the house package manager),
+# and one that does not lays it through the wrapper — the default project is not a Node project.
+HOST="node"
+if [ "$MODE" = "sync" ]; then
+  if { [ -f "$TARGET/.nx/nxw.js" ] && grep -q '"installation"' "$TARGET/nx.json" 2>/dev/null; } || [ ! -f "$TARGET/package.json" ]; then
+    HOST="wrapper"
+  fi
+elif ! _layer_listed node "$ENSURE_LAYERS"; then
+  HOST="wrapper"
+fi
+
+if [ "$HOST" = "node" ] && [ "$MODE" = "scaffold" ]; then
+  PM="yarn"; PM_SOURCE="house-default"
+elif [ "$HOST" = "wrapper" ]; then
+  # The wrapper installs with npm into .nx/installation; the project itself has no package manager to honour.
+  PM="npm"; PM_SOURCE="nx-wrapper"
+else
+  read -r PM PM_SOURCE <<< "$(detect_package_manager "$TARGET")"
+fi
+
+# PM_ADD_DEV pins EXACTLY — every one of these carries an explicit exact-save flag, and that is load-bearing
+# rather than a style choice (see INSTALL_NX_TOOLS for why an accidental caret silently skips the migration
+# ladder). npm in particular defaults to `save-prefix=^` and WILL write `^0.24.3` without `--save-exact`;
+# yarn 1 and pnpm happen to default to exact today, but that is a default, and a project's `.npmrc` /
+# `.yarnrc` can change it under us. Say it out loud in all three.
+case "$PM" in
+  yarn) PM_INSTALL="yarn install";  PM_EXEC="yarn";           PM_ADD_DEV="yarn add -D -E" ;;
+  # `npx --no-install` deliberately: nx is in node_modules by this point, and without the flag a typo or a
+  # pruned package would silently fetch something from the registry and run it instead of failing.
+  npm)  PM_INSTALL="npm install";   PM_EXEC="npx --no-install"; PM_ADD_DEV="npm install --save-dev --save-exact" ;;
+  # `-w` is REQUIRED inside a pnpm WORKSPACE — there `pnpm add` at the root refuses outright
+  # (ERR_PNPM_ADDING_TO_ROOT) unless you say you meant the root, and the root is exactly where house tooling
+  # belongs. But it is FATAL outside one: `--workspace-root may only be used inside a workspace`, exit 1
+  # (verified on pnpm 11.9.0). This used to be tolerated because the install was gated and trailed by a
+  # `|| echo NOTE:`; now that installing the toolkit is unconditional and runs under `set -e`, passing it
+  # unconditionally would abort every sync on a plain pnpm repo. So ask the workspace which shape it is.
+  pnpm) PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec";       PM_ADD_DEV="pnpm add -D -E"
+        [ -f "$TARGET/pnpm-workspace.yaml" ] && PM_ADD_DEV="pnpm add -D -w -E" ;;
+esac
+if [ "$HOST" = "wrapper" ] && [ "$MODE" = "scaffold" ]; then
+  echo "Nx host: the Nx wrapper (./nx) — the new project has no package.json (ensure the node layer, or --preset=node, for one)"
+elif [ "$MODE" = "sync" ]; then
+  if [ "$HOST" = "wrapper" ]; then
+    echo "Nx host: the Nx wrapper (./nx) — this repo has no package.json and does not become a Node project"
+  elif [ "$PM_SOURCE" = "house-default" ]; then
+    echo "Package manager: $PM (this project declares none — using the house default)"
+  else
+    echo "Package manager: $PM (from $PM_SOURCE — the project's choice, not imposed)"
+  fi
+fi
+
 
 # --- sync consent gate (see the header) ---
 # The point of this gate is that it cannot be satisfied by inference. A sync is a real, minutes-long,
@@ -665,16 +728,9 @@ fi
 #   voice    - passed to the planner, which also carries a previous answer forward from the ownership marker.
 
 # --- Firebase opt-in plumbing ---
-#   Scaffold mode: the house `app` generator owns the per-app Firebase wiring; we just tell it
-#     whether this is a Firebase workspace. firebase.json doesn't exist yet at first-app time, so
-#     the generator can't auto-detect — pass the answer explicitly (the generator auto-detects only
-#     for LATER apps, when firebase.json is already committed).
-#   Sync mode: the app already exists, so we re-apply the per-app Firebase generator directly to
-#     it (the `app` generator CREATES apps; it is not the heal path). The generator adds `firebase`
-#     + `@angular/fire` to package.json and runs the package-manager install post-commit (via
-#     installPackagesTask), so versions resolve to current at scaffold time. No shell-side `yarn add`.
-APP_FIREBASE_FLAG="--firebase=false"
-[ "$FIREBASE" = "1" ] && APP_FIREBASE_FLAG="--firebase=true"
+#   Scaffold mode: the house `app` generator attaches the per-app Firebase client from its --layers (the ensure
+#     set, which --firebase populates) — firebase.json does not exist yet at first-app time to be detected.
+#   Sync mode: the app already exists; the `firebase` layer's per-app step re-applies the client to it.
 # --staging (opt-in) requires Firebase; it adds environment.staging.ts + a `staging` build config +
 # apphosting.staging.yaml so the workflow's staging App Hosting backend builds its own config/database.
 [ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires --firebase." >&2; exit 1; }
@@ -1470,12 +1526,11 @@ fi
 
 # --- the ENSURE set, available to the rendered program from its first line ---
 # ENSURED, not ACTIVE — the distinction the house keeps strictly apart. ACTIVE is detected-OR-ensured; ENSURED is
-# only what this run was explicitly asked to create. The scaffold bootstrap keys off it before anything can be
+# only what this run was explicitly asked to create. The scaffold's first app attaches it before anything can be
 # detected, and the planner uses it for BASELINE acts (wiring a provider into app.config.ts, which the project owns
 # thereafter) that must never happen on a detect-only sync.
 ENSURED_BLOCK="
-ENSURED='$ENSURE_LAYERS'
-layer_ensured() { case \",\$ENSURED,\" in *\",\$1,\"*) return 0;; esac; return 1; }"
+ENSURED='$ENSURE_LAYERS'"
 
 # --- resolve the ACTIVE layer set at run time, inside the target workspace ---
 # Detection reads the workspace itself through the INSTALLED registry — the same one the generators guard on — so
@@ -1527,23 +1582,16 @@ while IFS=\"\$_tab\" read -r -u 9 _kind _gen _args; do
 done 9<<< \"\$_plan\""
 
 # --- the SCAFFOLD bootstrap: what creates the ensured layers from an empty directory ---
-# Gated on the ENSURE set (layer_ensured), never hard-wired: scaffold is sync with an ensure set against an empty
-# directory, so --ensure=nx,agent scaffolds a bare Nx workspace with the agent DX and does NOT bootstrap Angular.
-# The Nx floor itself is create-nx-workspace (always — it is the floor), with the apps preset.
+# Derived from the ENSURE set, never hard-wired: scaffold is sync with an ensure set against an empty directory.
+# The default (`agent`) scaffolds a wrapper-hosted Nx repo with the agent DX and bootstraps no stack at all; the
+# `angular` preset lays a package.json host, adds @nx/angular and creates the first app — because its layers say
+# so (node, angular's nxPlugin, angular's app-creating adapter), not because this script names them.
 SCAFFOLD_COMMIT_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | sed 's/,/, /g')"
 
-if [ "$MODE" = "scaffold" ]; then
-  INNER="set -e
-mkdir -p '$WORK_ROOT'
-cd '$WORK_ROOT'
-$ENSURED_BLOCK
-# Set the git identity only if unset. In the throwaway Docker image there is none, so this establishes it;
-# on the native path the invoking user already HAS a global identity (it's where \$GIT_NAME came from), so
-# this must not clobber it — hence the conditional. Same result on both paths, no drift.
-git config --global user.name >/dev/null 2>&1 || git config --global user.name '$GIT_NAME'
-git config --global user.email >/dev/null 2>&1 || git config --global user.email '$GIT_EMAIL'
-git config --global init.defaultBranch >/dev/null 2>&1 || git config --global init.defaultBranch main
-# THE AGENT-MODE ENV VARS ARE STRIPPED FOR THIS ONE COMMAND, and that is the difference between a working
+# THE FLOOR, by host. Every scaffold block below is RENDERED only when the ensure set calls for it — the program
+# a scaffold runs is exactly the bootstrap of the layers it ensures, nothing gated at run time on a flag.
+if [ "$HOST" = "node" ]; then
+  SCAFFOLD_FLOOR_BLOCK="# THE AGENT-MODE ENV VARS ARE STRIPPED FOR THIS ONE COMMAND, and that is the difference between a working
 # scaffold and a dead one.
 #
 # create-nx-workspace reads CLAUDECODE / OPENCODE and switches into an \"AI Agent Mode\" that IGNORES
@@ -1562,25 +1610,50 @@ git config --global init.defaultBranch >/dev/null 2>&1 || git config --global in
 # the entire house standard is built on. Every house generator reads project.json (\`readProjectConfiguration\`),
 # which the TS-solution layout does not use, so this is not a cosmetic preference.
 env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive --workspaces=false
+cd '$PROJECT'"
+else
+  # No package.json: an empty repository, then the SAME wrapper floor a sync lays on a Python or Go repo.
+  SCAFFOLD_FLOOR_BLOCK="mkdir '$PROJECT'
 cd '$PROJECT'
-if layer_ensured angular; then
-  yarn nx add @nx/angular${NX_TAG}
+git init -q
+$NX_INIT_BLOCK"
 fi
+
+# The Nx plugins of the ensured layers (descriptor nxPlugin, e.g. angular -> @nx/angular), in registry order —
+# each one is how its layer comes into being, before any house generator needs it.
+SCAFFOLD_PLUGINS_BLOCK=""
+for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+  _plugin="$(house_layer_nx_plugin "$_l")"
+  [ -n "$_plugin" ] && SCAFFOLD_PLUGINS_BLOCK="$SCAFFOLD_PLUGINS_BLOCK
+$NX_RUN add $_plugin$NX_TAG"
+done
+
+# The first app, through the HOUSE app generator (never the raw framework generator): the stack adapter creates
+# it with the house defaults, then it ATTACHES every capability the workspace wears — each layer's per-app steps,
+# the same ones a sync runs. This is the SAME one command a developer runs to add any LATER app, so the first app
+# and the Nth share one code path. --layers hands it the ensure set: at first-app time nothing this run ensures
+# exists yet to be detected (firebase.json, for one).
+SCAFFOLD_APP_BLOCK=""
+[ -n "$APP_STACK" ] && SCAFFOLD_APP_BLOCK="$NX_RUN g @bespunky/nx-tools:app 'apps/$APP' --stack=$APP_STACK$APP_STAGING_FLAG --layers=\$ENSURED"
+
+if [ "$MODE" = "scaffold" ]; then
+  INNER="set -e
+mkdir -p '$WORK_ROOT'
+cd '$WORK_ROOT'
+$ENSURED_BLOCK
+# Set the git identity only if unset. In the throwaway Docker image there is none, so this establishes it;
+# on the native path the invoking user already HAS a global identity (it's where \$GIT_NAME came from), so
+# this must not clobber it — hence the conditional. Same result on both paths, no drift.
+git config --global user.name >/dev/null 2>&1 || git config --global user.name '$GIT_NAME'
+git config --global user.email >/dev/null 2>&1 || git config --global user.email '$GIT_EMAIL'
+git config --global init.defaultBranch >/dev/null 2>&1 || git config --global init.defaultBranch main
+$SCAFFOLD_FLOOR_BLOCK
+$SCAFFOLD_PLUGINS_BLOCK
 $INSTALL_NX_TOOLS
-# Create the first app through the HOUSE app generator (NOT raw @nx/angular:application): it
-# delegates to @nx/angular:application with the house defaults AND applies the per-app config
-# (serve host 0.0.0.0, plus the full Firebase wiring when --firebase=true). This is the SAME one
-# command a developer runs to add any LATER app — first app and Nth app share one code path, so a
-# second app can never silently miss the configuration the first app got. Only when the ensure set
-# asked for Angular: the app IS the angular layer (and, through its dev-server, the web layer).
-# --layers hands it the ensure set: the app ATTACHES every capability the workspace wears (each layer's
-# per-app steps), and at first-app time nothing this run ensures exists yet to be detected.
-if layer_ensured angular; then
-  $NX_RUN g @bespunky/nx-tools:app 'apps/$APP' $APP_FIREBASE_FLAG$APP_STAGING_FLAG --layers=\$ENSURED
-fi
+$SCAFFOLD_APP_BLOCK
 $LAYER_RESOLVE_BLOCK
 $PLAN_RUN_BLOCK
-# Commit the full scaffold. create-nx-workspace made an initial commit, but the
+# Commit the full scaffold. The floor may have made an initial commit (create-nx-workspace does), but the
 # house generators + dep installs ran after it — capture them so the host-side push (gh repo
 # create --source --push) ships a clean, complete tree on main.
 git add -A
@@ -2019,7 +2092,7 @@ if [ "$MODE" = "sync" ]; then
 fi
 
 if [ "$MODE" = "scaffold" ]; then
-  echo "SCAFFOLD_OK $TARGET ($RUNTIME_DESC app=apps/$APP firebase=$FIREBASE voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
+  echo "SCAFFOLD_OK $TARGET ($RUNTIME_DESC layers=$ENSURE_LAYERS host=$HOST${APP_STACK:+ app=apps/$APP} voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
 else
   echo "SYNC_OK $TARGET ($RUNTIME_DESC app=apps/$APP firebase=$FIREBASE voice=$VOICE backup=$BACKUP_REF)"
 fi
