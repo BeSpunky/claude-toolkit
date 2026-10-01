@@ -20,9 +20,10 @@ export const js: LayerDescriptor = {
     workspace: [{ generator: 'playwright' }],
   },
   docSections: ['js', 'monorepo'],
-  // Nx writes every JS build to `/dist` (create-nx-workspace ignores it; `nx init` on an existing repo does not).
+  // Nx writes every JS build to `dist/` (create-nx-workspace ignores it as `dist`, the spelling used here so the
+  // substring check sees an existing house workspace as covered; `nx init` on an existing repo does not ignore it).
   // A layer that brings a build owns ignoring its output — or the first build leaves an untracked tree behind.
-  gitignore: [{ heading: 'Build output (Nx writes builds to dist/)', entries: ['/dist'] }],
+  gitignore: [{ heading: 'Build output (Nx writes builds to dist/)', entries: ['dist'] }],
   // The project's OWN browser tests: Chromium for @playwright/test, when it is declared (self-adapting piece).
   devcontainer: { postCreate: [{ phase: 'provision', piece: 'playwright' }] },
 };

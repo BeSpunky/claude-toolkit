@@ -459,13 +459,18 @@ checkAsync('an Nx app wired to the house serve executor: HOUSE.md serves through
   ok(/, and\n- the \*\*shared co-driven browser/.test(a.house), 'the serve list is one list (no blank line left by a removed block)');
 });
 
-checkAsync('a build-bringing layer on an nx-init repo (firebase, no create-nx-workspace .gitignore): /dist is ignored, once', async (ok) => {
+checkAsync('a build-bringing layer on an nx-init repo (firebase, no create-nx-workspace .gitignore): dist is ignored, once', async (ok) => {
   const tree = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
   tree.write('.gitignore', 'node_modules\n');
   await artifacts(tree, [...registry.detectLayers(tree), 'agent']);
   await generator('claude-settings')(tree, { layers: [...registry.detectLayers(tree), 'agent'] });
   const lines = (tree.read('.gitignore', 'utf8') ?? '').split('\n');
-  ok(lines.filter((l) => l === '/dist').length === 1, `/dist ignored exactly once: ${JSON.stringify(lines)}`);
+  ok(lines.filter((l) => l === 'dist').length === 1, `dist ignored exactly once: ${JSON.stringify(lines)}`);
+  // A create-nx-workspace .gitignore already says `dist` — a house workspace must not gain a second entry.
+  const cnw = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
+  cnw.write('.gitignore', '# compiled output\ndist\ntmp\n');
+  await generator('claude-settings')(cnw, { layers: [...registry.detectLayers(cnw), 'agent'] });
+  ok(!(cnw.read('.gitignore', 'utf8') ?? '').includes('Build output'), 'a create-nx-workspace .gitignore gained a duplicate dist block');
 });
 
 checkAsync('firebase core without Angular (no served app): HOUSE.md documents the core, not the Angular client', async (ok) => {
