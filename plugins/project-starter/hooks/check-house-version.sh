@@ -187,8 +187,15 @@ note_drift() { DRIFTED="${DRIFTED:+$DRIFTED, }$1"; }
 # traversal however many layers there are. Sourcing it defines functions only. If it is missing (a partial
 # install), there is nothing trustworthy to compare, so this stays silent — under-reporting is the intended
 # failure mode.
+#
+# AND ONLY AGAINST A STAMP WRITTEN BY THIS SAME REGISTRY. A stamp records the layers its OWN version knew how to
+# see. When the toolkit has since moved (stamp older than install), the newer registry can detect a layer the
+# older one had no name for — `node`, say, on every project stamped before it existed — and "this project has
+# grown a layer" would be a false sentence about a project that changed nothing. That case is the version
+# notice's to tell (below), and the sync it offers re-stamps the layers anyway. So layer drift is asked only when
+# the stamp and the install agree on the version.
 LAYERS_SH="$PLUGIN_ROOT/skills/new-project/assets/layers.sh"
-if [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none" ] && [ -f "$LAYERS_SH" ]; then
+if [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none" ] && [ "$STAMPED_NX" = "$INSTALLED_NX" ] && [ -f "$LAYERS_SH" ]; then
   # shellcheck source=../skills/new-project/assets/layers.sh
   . "$LAYERS_SH"
   for _id in $(house_layers_evident "$PROJECT_DIR" | tr ',' ' '); do
