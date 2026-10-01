@@ -31,7 +31,7 @@ guards, gates, ordering. Not everything the scaffolder does.
 | `emulators-only.test.sh` | What `tools/emulators.sh` hands `firebase emulators:start` — the derived `--only`, and that passing it does not silently disable export-on-exit. |
 | `emulator-seeds.test.sh` | The seed cascade: seeds shared from the main worktree, data isolated per stack, and a worktree never writing back into main's. |
 | `reap-ownership.test.sh` | That the reaper kills orphans and not a second, legitimately-running suite. |
-| `port-offset.test.sh` | Port-block derivation and isolation (assertions live in the sibling `port-offset.checks.mjs`). |
+| `dev-engine.test.sh` | The stack-free dev engine: port-block sizing and offset resolution, declaration validation and planning (substitution, URL switches, skips), argv parsing — and a real `dev serve --dry-run` in a throwaway repo (assertions in the sibling `dev-engine.checks.mjs`). |
 
 **`render.test.sh` is the one that runs before the subject of every other test exists.** `scaffold.sh`'s
 product is a shell program assembled out of nested double-quoted strings, where a backtick — *including one

@@ -10,10 +10,11 @@
 // default: it guarantees a detach even if your callback throws. Raw `attach()` is the
 // escape hatch for multi-step driving where you manage the detach yourself.
 //
-// Playwright is resolved from whichever package the workspace installed
-// (playwright / playwright-core / @playwright/test), so this file has no hard dependency.
+// Playwright comes from the shared browser's own pinned runtime (./runtime.mjs, installed on demand), so this
+// works the same in any repository — JS or not — and never depends on the workspace's node_modules.
 
 import { existsSync } from 'node:fs';
+import { loadPlaywright } from './runtime.mjs';
 
 const CDP_URL = 'http://127.0.0.1:9223';
 
@@ -33,20 +34,9 @@ function assertNotObserving() {
   }
 }
 
-/** Resolve the Playwright `chromium` object from whichever package is installed. */
+/** Playwright's `chromium`, from the shared browser's OWN pinned runtime (runtime.mjs) — never the workspace's. */
 async function loadChromium() {
-  for (const pkg of ['playwright', 'playwright-core', '@playwright/test']) {
-    try {
-      const mod = await import(pkg);
-      const chromium = mod.chromium ?? mod.default?.chromium;
-      if (chromium) return chromium;
-    } catch {
-      // Not installed — try the next candidate.
-    }
-  }
-  throw new Error(
-    'Playwright not found. Install one of: playwright, playwright-core, @playwright/test.',
-  );
+  return loadPlaywright().chromium;
 }
 
 /** Turn a glob (`*`, `?`) into an anchored RegExp; plain strings use substring matching. */

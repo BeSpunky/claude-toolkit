@@ -130,6 +130,16 @@ const FIXTURES = {
     addProjectConfiguration(tree, 'design-system', { root: 'packages/design-system', projectType: 'library', tags: ['type:design-system'] });
     return tree;
   },
+  'python repo with a hand-written dev declaration': () => {
+    const tree = createTreeWithEmptyWorkspace();
+    tree.delete('package.json');
+    tree.write('HOUSE.md', '# house\n');
+    writeJson(tree, '.devcontainer/.bespunky-devcontainer.json', { owned: true });
+    writeJson(tree, '.bespunky/dev.json', {
+      apps: { site: { processes: [{ id: 'app', cmd: 'python3 -m http.server ${PORT:app}', ports: { app: 8000 } }] } },
+    });
+    return tree;
+  },
   'python service with its own serve target, no agent': () => {
     const tree = createTreeWithEmptyWorkspace();
     tree.delete('package.json');
@@ -148,6 +158,7 @@ const EXPECTED_DETECTION = {
   'HOUSE.md only (the floor stamp, no agent tooling)': 'nx',
   'agent project with voice remembered': 'nx,agent,node',
   'angular web app with firebase and a design system': 'nx,agent,node,js,web,angular,design-system,firebase',
+  'python repo with a hand-written dev declaration': 'nx,agent,web',
   'python service with its own serve target, no agent': 'nx,web',
 };
 
@@ -239,12 +250,13 @@ check('voice is carried forward from the devcontainer marker', (ok) => {
 check('full house sync: per-app steps first, then workspace steps in registry order, stamp last', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { ensured: ['nx', 'firebase'], staging: true }), STAMP));
   const order = got.map((l) => l.split(' ')[0]);
-  const want = ['serve', 'serve-options', 'firebase-emulators', 'devcontainer', 'claude-settings', 'window-identity', 'playwright', 'shared-browser', 'worktree-domains', 'angular-ai', 'design-system', 'house-doc'];
+  const want = ['serve', 'serve-options', 'worktree-tab-label', 'firebase-emulators', 'devcontainer', 'claude-settings', 'window-identity', 'playwright', 'port-claim', 'shared-browser', 'worktree-domains', 'dev', 'angular-ai', 'design-system', 'house-doc'];
   ok(JSON.stringify(order) === JSON.stringify(want), `order ${order.join(',')}`);
   ok(got.includes('firebase-emulators --project=shop --workspaceName=shop --staging=true --wireProviders'), 'firebase args');
-  ok(got.includes('serve --project=shop'), 'serve gets no --wireProviders on a detect-only web');
+  ok(got.includes('serve --project=shop'), 'serve takes only the project');
+  ok(got.includes('worktree-tab-label --project=shop'), 'the tab label gets no --wireProviders on a detect-only angular');
   ok(got.includes('design-system --scope=shop'), 'design-system gets no --wireProviders on a detect-only sync');
-  ok(got[3].endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${got[3]}`);
+  ok(got[4].endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${got[4]}`);
 });
 check('scaffold mode runs no per-app steps (the app generator composes them)', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { mode: 'scaffold' }), STAMP));
@@ -259,6 +271,12 @@ check('app missing: per-app steps skipped and reported partial, workspace steps 
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { app: 'nope' }), STAMP));
   ok(got.filter((l) => l === 'PARTIAL').length === 3, `got ${got.join(' | ')}`);
   ok(got.includes('playwright'), 'workspace web steps still run');
+});
+check('declaration-only web (no Nx-served app): per-app Nx steps skipped quietly, the engine still written', (ok) => {
+  const got = render(plan(ctxFor(FIXTURES['python repo with a hand-written dev declaration'](), { app: 'pyrepo' }), STAMP));
+  ok(!got.includes('PARTIAL'), `a declaration-only project is not a partial sync: ${got.join(' | ')}`);
+  ok(!got.some((l) => /^(serve|serve-options|playwright) /.test(l) || l === 'playwright'), `no Nx/JS step: ${got.join(' | ')}`);
+  for (const step of ['port-claim', 'shared-browser', 'worktree-domains', 'dev']) ok(got.includes(step), `${step} runs`);
 });
 check('an unknown layer id is refused, not ignored', (ok) => {
   let threw = false;

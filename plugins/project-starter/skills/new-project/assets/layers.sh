@@ -18,7 +18,7 @@ house_layer_title() {
     agent) printf '%s\n' 'Agent DX (Claude settings, devcontainer, window identity)' ;;
     node) printf '%s\n' 'Node project (a root package.json)' ;;
     js) printf '%s\n' 'TypeScript/JavaScript libraries' ;;
-    web) printf '%s\n' 'Web dev loop (serve, worktree domains, shared browser)' ;;
+    web) printf '%s\n' 'Web dev loop (dev engine, worktree domains, shared browser)' ;;
     angular) printf '%s\n' 'Angular application' ;;
     design-system) printf '%s\n' 'Design system' ;;
     navigation) printf '%s\n' 'Typed reactive navigation' ;;
@@ -48,7 +48,7 @@ house_layer_hint() {
     agent) printf '%s\n' '`scaffold.sh --sync --ensure=agent <project>`' ;;
     node) printf '%s\n' 'a root package.json (`npm init`) — the next sync then treats the repo as a Node project' ;;
     js) printf '%s\n' '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular`)' ;;
-    web) printf '%s\n' 'an app with a dev-server target (e.g. the `angular` layer: `nx g @bespunky/nx-tools:app apps/<name>`)' ;;
+    web) printf '%s\n' 'declare what the project serves in `.bespunky/dev.json` (e.g. `{"apps":{"site":{"processes":[{"id":"app","cmd":"python3 -m http.server ${PORT:app}","ports":{"app":8000}}]}}}`), or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app apps/<name>`), then sync' ;;
     angular) printf '%s\n' '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`' ;;
     design-system) printf '%s\n' '`nx g @bespunky/nx-tools:design-system --scope=<scope>`' ;;
     navigation) printf '%s\n' '`nx g @bespunky/nx-tools:navigation-core`' ;;
@@ -62,8 +62,8 @@ house_layer_brings() {
     nx) printf '%s\n' 'the Nx floor every house generator and migration runs on' ;;
     agent) printf '%s\n' 'the devcontainer, the Claude settings and the window identity' ;;
     node) printf '%s\n' 'the typescript-node devcontainer image, the node_modules volume and the package-manager install' ;;
-    js) printf '%s\n' 'the publishable-library and tool-extraction conventions in HOUSE.md' ;;
-    web) printf '%s\n' 'the serve composer, worktree domains, the shared co-driven browser, Playwright, :80' ;;
+    js) printf '%s\n' 'the publishable-library and tool-extraction conventions in HOUSE.md, @playwright/test (pinned)' ;;
+    web) printf '%s\n' 'the stack-free dev engine (tools/dev/dev serve), worktree domains, the shared co-driven browser, :80' ;;
     angular) printf '%s\n' 'the Angular editor extensions, the dev-server leaf, the Angular CLI MCP + agent skills' ;;
     design-system) printf '%s\n' 'the design-system config, STRUCTURE.md, and every app'\''s sass/provider wiring' ;;
     navigation) printf '%s\n' 'nothing per-sync (its generators are on-demand), but HOUSE.md gains the typed-navigation conventions' ;;
@@ -110,7 +110,8 @@ file .vscode/.window-identity.json' ;;
     node) printf '%s\n' 'file package.json' ;;
     js) printf '%s\n' 'dependency "@nx/js"
 project-json "executor"[[:space:]]*:[[:space:]]*"@nx/js:' ;;
-    web) printf '%s\n' 'project-json "dev-server"[[:space:]]*:
+    web) printf '%s\n' 'file .bespunky/dev.json
+project-json "dev-server"[[:space:]]*:
 project-json "serve"[[:space:]]*:' ;;
     angular) printf '%s\n' 'dependency "@angular/core"
 dependency "@nx/angular"

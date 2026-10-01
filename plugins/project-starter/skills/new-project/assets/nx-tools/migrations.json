@@ -101,6 +101,24 @@
       "layer": "agent",
       "description": "Replace the house devcontainer volume over the WHOLE .nx/ folder (`source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume`) with two volumes at .nx/cache and .nx/workspace-data. On the Nx wrapper host (new in 0.35.0) .nx/ carries the committed nxw.js, which a whole-folder volume hides, so ./nx stops working inside the container — and the generator's additive merge would never remove the old mount by itself. Replaces only the exact house value, in place (position and comments kept), on owned and adopted devcontainers alike; reports any other whole-.nx mount as the project's own.",
       "implementation": "./src/migrations/0.35.0/retarget-nx-cache-volume"
+    },
+    "declare-dev-processes": {
+      "version": "0.35.0",
+      "layer": "web",
+      "description": "Write `.bespunky/dev.json` reproducing what the 0.34.x serve executor ran for every project whose `serve` is the house composer — the `app` process (`<nx> run <app>:dev-server --port=${PORT:app}`, base 4200, NX_DAEMON=false + NX_WORKSPACE_ROOT_PATH pinned to the served tree), the `emulators` process in a Firebase workspace (ports from firebase.json, `?portOffset` on a shifted stack, `?emulate=none` when skipped, the OAuth-origin advice) and the install step — because `nx serve` is now a thin wrapper over the stack-free engine that runs exactly what the declaration says. Moves the sniffed `<app>/proxy.conf.mjs` into the Angular dev-server leaf's `proxyConfig`. Adds only missing processes; project.json's serve target is unchanged.",
+      "implementation": "./src/migrations/0.35.0/declare-dev-processes"
+    },
+    "relocate-port-claim": {
+      "version": "0.35.0",
+      "layer": "web",
+      "description": "Move host-port arbitration from tools/shared-browser/port-claim(.test).mjs to its own home, tools/port-claim/ (the shared browser, the worktree-domains proxy and the dev engine all consult it), and re-point every reference — including the house CLIs a bare `nx migrate` leaves in place until the next sync. A file at the old path without the house stamp is left and reported.",
+      "implementation": "./src/migrations/0.35.0/relocate-port-claim"
+    },
+    "pin-playwright": {
+      "version": "0.35.0",
+      "layer": "js",
+      "description": "Pin a `\"@playwright/test\": \"latest\"` the playwright generator wrote to the version installed in node_modules (no upgrade, no downgrade — what the lockfile already says), else the house version. Any other spec is the project's own and stays.",
+      "implementation": "./src/migrations/0.35.0/pin-playwright"
     }
   }
 }

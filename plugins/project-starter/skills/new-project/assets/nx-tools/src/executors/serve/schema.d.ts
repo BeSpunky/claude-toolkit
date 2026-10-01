@@ -1,40 +1,33 @@
-// Typed options for the `serve` executor (mirrors schema.json).
+// Typed options for the `serve` executor (mirrors schema.json). Options not listed are forwarded to the app's
+// primary process as `--<key>=<value>`.
 export interface ServeExecutorSchema {
-  /** Project whose dev-server to run. Defaults to the project this target is attached to. */
+  /** Project (declared app) to serve. Defaults to the project this target is attached to. */
   project?: string;
-  /** Run the Firebase emulator suite alongside the app (no-op when the tree has no firebase.json). Default true. */
-  emulators?: boolean;
-  /** Bring up the shared co-driven browser and navigate it to the app. Default true. */
-  sharedBrowser?: boolean;
-  /**
-   * The app build target the dev-server compiles. Set by serve's `development`/`production`
-   * configurations (→ `<app>:build:<config>`) and forwarded to the `dev-server` leaf.
-   */
-  buildTarget?: string;
-  /** Dev-server host, forwarded to the `dev-server` leaf. */
-  host?: string;
-  /** Proxy config path, forwarded to the `dev-server` leaf. */
-  proxyConfig?: string;
-  /** Serve over HTTPS (forwarded to the dev-server). */
-  ssl?: boolean;
-  /** SSL certificate path (forwarded to the dev-server). */
-  sslCert?: string;
-  /** SSL key path (forwarded to the dev-server). */
-  sslKey?: string;
-  /** Open the app in a browser on start (forwarded to the dev-server). */
-  open?: boolean;
-  /** Toggle live-reload (forwarded to the dev-server). */
-  liveReload?: boolean;
-  /** Toggle HMR (forwarded to the dev-server). */
-  hmr?: boolean;
-  /** File-watch poll interval in ms (forwarded to the dev-server). */
-  poll?: number;
-  /** Which git worktree to serve. Omitted → the current cwd's tree; a value matches by branch|slug|path; empty in a TTY prompts. */
+  /** Which git worktree to serve. Omitted → the current tree; a value matches by branch|slug|path; empty in a TTY prompts. */
   worktree?: string;
-  /** Port isolation: 'auto' (main tree → 0; worktree → a stable, verified-free block), a pinned integer, or '0'/undefined for the base stack. Default 'auto'. Accepts a number too (the Nx CLI coerces `--portOffset=12000` to a number). */
+  /** 'auto' | a non-negative integer | '0'. Nx coerces a numeric value to a number. */
   portOffset?: string | number;
-  /** Run `yarn install` in the chosen worktree when it has no node_modules (worktrees start empty). Default true. */
+  /** Declared process ids not to run. */
+  skip?: string | string[];
+  /** Historic alias: false → skip the `emulators` process. */
+  emulators?: boolean;
+  /** Bring up and navigate the shared co-driven browser. Default true. */
+  sharedBrowser?: boolean;
+  /** Run the declaration's install step when the tree needs it. Default true. */
   install?: boolean;
-  /** Print the resolved tree, offset, ports, slug, layers, and URLs without serving. Default false. */
+  /** Print the plan without serving. */
   dryRun?: boolean;
+  /** Ignored (warned) — the port is the declaration's. */
+  port?: number;
+  /** Forwarded to the primary process (the Angular dev-server's options, typically). */
+  buildTarget?: string;
+  host?: string;
+  proxyConfig?: string;
+  ssl?: boolean;
+  sslCert?: string;
+  sslKey?: string;
+  open?: boolean;
+  liveReload?: boolean;
+  hmr?: boolean;
+  poll?: number;
 }

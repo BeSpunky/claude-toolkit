@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyDev",
+  "title": "The stack-free dev engine",
+  "description": "Write the stack-free dev engine (tools/dev/dev serve [app] [--worktree=<x>] [--port-offset=<n|auto>] [--dry-run]) and seed .bespunky/dev.json for every Nx project served by the @bespunky/nx-tools:serve composer. Workspace-level, no inputs; idempotent.",
+  "type": "object",
+  "properties": {},
+  "required": []
+}

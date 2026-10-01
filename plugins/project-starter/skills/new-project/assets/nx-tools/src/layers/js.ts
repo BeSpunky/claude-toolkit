@@ -13,6 +13,11 @@ export const js: LayerDescriptor = {
   evidence: { dependencies: ['@nx/js'], executors: ['@nx/js:'] },
   ensurable: { scaffold: false, sync: false },
   ensureHint: '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular`)',
-  brings: 'the publishable-library and tool-extraction conventions in HOUSE.md',
+  brings: 'the publishable-library and tool-extraction conventions in HOUSE.md, @playwright/test (pinned)',
+  generators: {
+    // @playwright/test as a pinned devDependency — a JS project's own browser tests. (The shared browser no
+    // longer leans on it: it carries its own runtime, so a non-JS project serves and co-drives just the same.)
+    workspace: [{ generator: 'playwright' }],
+  },
   docSections: ['js', 'monorepo'],
 };
