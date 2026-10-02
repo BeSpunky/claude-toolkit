@@ -161,12 +161,30 @@ house_preset_layers() {
   esac
 }
 
+# house_project_jsons <dir> — the contents of every project.json Nx would read under <dir>, concatenated.
+house_project_jsons() {
+  local dir="$1" scratch=''
+  set -- -z --cached --others --exclude-standard -- project.json '*/project.json'
+  if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    ( cd "$dir" && git ls-files "$@" 2>/dev/null | xargs -0 cat 2>/dev/null )
+  elif scratch="$(mktemp -d 2>/dev/null)" && git init -q --bare "$scratch" >/dev/null 2>&1; then
+    # Not a work tree — but Nx still honours .gitignore there, so lend git a throwaway repository to read it with.
+    ( cd "$dir" && git --git-dir="$scratch" --work-tree=. ls-files "$@" 2>/dev/null | xargs -0 cat 2>/dev/null )
+    rm -rf "$scratch"
+  else
+    # No git at all: the usual build/dependency dirs, the house worktree home and nested work trees, pruned.
+    [ -z "$scratch" ] || rm -rf "$scratch"
+    find "$dir" -mindepth 1 \( -name node_modules -o -name .git -o -name dist -o -name .nx -o -name .angular -o -name tmp \
+           -o -name vendor -o -name target -o -name build -o -name out -o -name coverage -o -name .venv \
+           -o -path '*/.claude/worktrees' -o \( -type d -exec test -e '{}/.git' \; \) \) -prune -o \
+           -name project.json -exec cat {} + 2>/dev/null
+  fi
+}
+
 # house_layers_evident <dir> — the registered layers whose evidence <dir> carries, comma-separated.
 house_layers_evident() {
   local dir="$1" id kind pat found='' pj
-  pj="$(find "$dir" \( -name node_modules -o -name .git -o -name dist -o -name .nx -o -name .angular -o -name tmp \
-         -o -name vendor -o -name target -o -name build -o -name out -o -name coverage -o -name .venv \) -prune -o \
-         -name project.json -exec cat {} + 2>/dev/null)"
+  pj="$(house_project_jsons "$dir")"
   for id in $(printf '%s' "$HOUSE_LAYERS" | tr ',' ' '); do
     while IFS=' ' read -r kind pat; do
       [ -n "$kind" ] || continue

@@ -50,3 +50,11 @@ Items from `handoffs/2026-10-02T00-review-fanout.md` → FX-layers. One entry pe
   `editor.formatOnSave` to the claude-code feature it describes; the layers/registry ↔ adapters/registry cycle is
   broken (`defaultLibStack` → `adapters/workspace.ts`), guarded by a test-layers check. A pre-existing
   intra-adapter cycle (adapters/angular/firebase-client ↔ index, call-time only) is left as is.
+- **S4 — fixed.** The bash evidence walk (`house_project_jsons` in the generated layers.sh, source in
+  `layers/cli.ts`) now reads the project.json files Nx reads: in a git work tree, `git ls-files --cached --others
+  --exclude-standard` (honours .gitignore; never descends into a nested work tree such as `.claude/worktrees/*`);
+  in a non-git directory the same through a throwaway bare repository (Nx honours .gitignore there too — verified:
+  `getProjects` on an FsTree skips a gitignored dir with no git present); only with no git binary at all a pruned
+  `find` (now also pruning `.claude/worktrees` and nested work trees). layers.sh regenerated. Test: "evidence walk:
+  gitignored and nested-worktree project.json files are invisible, exactly as to Nx" (git + non-git); the no-git
+  fallback was checked by hand with a git-less PATH.

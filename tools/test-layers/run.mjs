@@ -265,6 +265,41 @@ for (const [name, make] of Object.entries(FIXTURES)) {
   });
 }
 
+// S4 — the shell walk reads the project.json files Nx reads: never a gitignored one, never another work tree's
+// (`.claude/worktrees/*`, the house worktree home). It once did, and the hook reported a drifted layer the sync
+// could never detect — every session.
+check('evidence walk: gitignored and nested-worktree project.json files are invisible, exactly as to Nx', (ok) => {
+  const { FsTree } = require_('nx/src/generators/tree');
+  const served = JSON.stringify({ name: 'site', targets: { 'dev-server': { executor: 'nx:run-commands' } } });
+  for (const git of [true, false]) {
+    const dir = mkdtempSync(join(tmpdir(), 'layers-walk-'));
+    try {
+      writeFileSync(join(dir, 'nx.json'), '{}');
+      writeFileSync(join(dir, '.gitignore'), '.claude/worktrees/\nscratch/\n');
+      for (const sub of ['.claude/worktrees/feat/apps/site', 'scratch/site']) {
+        mkdirSync(join(dir, sub), { recursive: true });
+        writeFileSync(join(dir, sub, 'project.json'), served);
+      }
+      writeFileSync(join(dir, '.claude/worktrees/feat/.git'), 'gitdir: /elsewhere\n');
+      if (git) execFileSync('git', ['init', '-q', dir]);
+      const shell = execFileSync('bash', ['-c', '. "$1"; house_layers_evident "$2"', '_', PROJECTION, dir]).toString().trim();
+      const label = git ? 'git work tree' : 'plain directory';
+      const nx = registry.detectLayers(new FsTree(dir, false));
+      // Inside git the walk IS Nx's view. Outside git it cannot read .gitignore (no git to ask) and prunes the
+      // usual suspects instead — so it may only ever see LESS than Nx (the hook's quiet direction), never more.
+      ok(shell.split(',').every((id) => !id || nx.includes(id)), `${label}: the walk over-reports (shell=${shell}, Nx=${nx})`);
+      if (git) ok(shell === nx.join(',') && !shell.split(',').includes('web'), `${label}: shell=${shell}, Nx=${nx}`);
+      // …and a project.json that IS part of the workspace is still seen.
+      mkdirSync(join(dir, 'apps/site'), { recursive: true });
+      writeFileSync(join(dir, 'apps/site/project.json'), served);
+      const seen = execFileSync('bash', ['-c', '. "$1"; house_layers_evident "$2"', '_', PROJECTION, dir]).toString().trim();
+      ok(seen.split(',').includes('web'), `${label}: a workspace project.json was missed (shell=${seen})`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
 // ── the plan ───────────────────────────────────────────────────────────────────────────────────────────────
 console.log('\nplan');
 const STAMP = { nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', packageManager: 'yarn' };

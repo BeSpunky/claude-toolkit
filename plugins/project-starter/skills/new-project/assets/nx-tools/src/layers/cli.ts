@@ -195,15 +195,40 @@ export function shellProjection(): string {
  * code. Approximate by design (a grep over package.json and the concatenated project.json files), and wrong
  * only in the quiet direction where it can be: a missed layer costs a notice, a false one costs trust in it.
  *
+ * WHICH project.json FILES: the ones Nx itself would read — so the hook can never report a layer the sync
+ * (`getProjects`) does not detect, and then nag about it every session. Nx skips what git ignores; so does this:
+ * inside a git work tree the list is `git ls-files` (tracked + untracked, minus ignored — and git never descends
+ * into a nested work tree, which is what `.claude/worktrees/*` are). A directory that is no work tree is read the
+ * same way through a throwaway repository, because Nx honours its .gitignore all the same. Only with no git at
+ * all does a pruned `find` stand in (the usual build/dependency dirs, `.claude/worktrees`, nested work trees).
+ *
  * ONE traversal, whatever the number of layers: every project.json is read once, concatenated, and each
- * pattern greps that. (`-exec cat {} +` hands paths over as arguments, so a space in a path is a non-event.)
+ * pattern greps that. (Paths go through NUL-separated xargs / `-exec … +`, so a space in a path is a non-event.)
  */
-const EVIDENT_FUNCTION = `# house_layers_evident <dir> — the registered layers whose evidence <dir> carries, comma-separated.
+const EVIDENT_FUNCTION = `# house_project_jsons <dir> — the contents of every project.json Nx would read under <dir>, concatenated.
+house_project_jsons() {
+  local dir="$1" scratch=''
+  set -- -z --cached --others --exclude-standard -- project.json '*/project.json'
+  if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    ( cd "$dir" && git ls-files "$@" 2>/dev/null | xargs -0 cat 2>/dev/null )
+  elif scratch="$(mktemp -d 2>/dev/null)" && git init -q --bare "$scratch" >/dev/null 2>&1; then
+    # Not a work tree — but Nx still honours .gitignore there, so lend git a throwaway repository to read it with.
+    ( cd "$dir" && git --git-dir="$scratch" --work-tree=. ls-files "$@" 2>/dev/null | xargs -0 cat 2>/dev/null )
+    rm -rf "$scratch"
+  else
+    # No git at all: the usual build/dependency dirs, the house worktree home and nested work trees, pruned.
+    [ -z "$scratch" ] || rm -rf "$scratch"
+    find "$dir" -mindepth 1 \\( -name node_modules -o -name .git -o -name dist -o -name .nx -o -name .angular -o -name tmp \\
+           -o -name vendor -o -name target -o -name build -o -name out -o -name coverage -o -name .venv \\
+           -o -path '*/.claude/worktrees' -o \\( -type d -exec test -e '{}/.git' \\; \\) \\) -prune -o \\
+           -name project.json -exec cat {} + 2>/dev/null
+  fi
+}
+
+# house_layers_evident <dir> — the registered layers whose evidence <dir> carries, comma-separated.
 house_layers_evident() {
   local dir="$1" id kind pat found='' pj
-  pj="$(find "$dir" \\( -name node_modules -o -name .git -o -name dist -o -name .nx -o -name .angular -o -name tmp \\
-         -o -name vendor -o -name target -o -name build -o -name out -o -name coverage -o -name .venv \\) -prune -o \\
-         -name project.json -exec cat {} + 2>/dev/null)"
+  pj="$(house_project_jsons "$dir")"
   for id in $(printf '%s' "$HOUSE_LAYERS" | tr ',' ' '); do
     while IFS=' ' read -r kind pat; do
       [ -n "$kind" ] || continue
