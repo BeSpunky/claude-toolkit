@@ -1,7 +1,7 @@
 {
   "name": "bespunky-communication",
   "description": "How Claude speaks: ships the 'Pitch to the listener' output style, every answer pitched to the person reading it. Brief by default, for a reader who stepped out; full depth the moment they engage. One question per message, placed last; short reports of finished work that never drop a caveat; structure only where it earns its place; no unexplained jargon or bare verdicts. Presentation only. Default in BeSpunky projects; elsewhere pick it with /output-style.",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"

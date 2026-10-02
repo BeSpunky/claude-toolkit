@@ -1,7 +1,7 @@
 {
   "name": "bespunky-design-system",
   "description": "BeSpunky design-system skills - styling as a SYSTEM on any stack (Angular is one adapter). design-system-first: the discipline - every visual value is a token from the design system, no raw hex, magic px or style reach-ins, and a pattern's second occurrence is promoted into the DS. design-tokens-and-theming: the techniques - token tiers, CSS custom properties as the runtime layer, a zero-output SASS API, light/dark/brand modes, encapsulation, and the DS library's entry points.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"
