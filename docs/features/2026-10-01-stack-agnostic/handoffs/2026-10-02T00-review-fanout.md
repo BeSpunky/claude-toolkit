@@ -24,5 +24,7 @@ Spent 8/12 (5 reviewers + 3 sub-agents: shell, sane, mig).
 
 | id | status | result |
 |---|---|---|
-| FX-shell | dispatched | |
-| FX-layers | dispatched | |
+| FX-shell | returned — 25 items fixed, merged b7ecf70 | |
+| FX-layers | stopped by user mid-docs; 7 commits + docs finished by orchestrator; merged | |
+
+Final: 10 of 12 budget spent. Released nx-tools 0.36.2. Merged to development.

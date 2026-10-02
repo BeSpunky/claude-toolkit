@@ -1,4 +1,11 @@
-# Stack-agnostic toolkit — design (PROPOSED, awaiting confirmation)
+---
+status: concluded
+concluded: 2026-10-02
+summary: The toolkit fits any project — Nx is the always-ensured floor (wrapper host when there is no package.json); Angular, Firebase, design system, navigation and the dev loop are optional layers from an open per-file registry, attached through stack adapters; worktree serving runs from .bespunky/dev.json; Angular skills moved to the optional bespunky-angular plugin. Shipped as nx-tools 0.36.2.
+tags: [scaffolder, layers, nx-wrapper, adapters, dev-engine, firebase, design-system, angular, presets, nx-tools-0.36.2, migration]
+---
+
+# Stack-agnostic toolkit — design
 
 ## Revision 1 — 2026-10-01: Nx stays the floor
 > "Let's keep Nx as a base assumption. If it's not there, we require/install/init it" — the user
@@ -57,3 +64,10 @@ The phase-1 unit bumped the payload to 0.35.0 at its start; the release-invarian
 
 ## State at end of implementation — 2026-10-01
 All phases 0–6 implemented, released on the branch (payload 0.36.1 — 0.35.0/0.36.0 were in-branch versions, never published) and verified on throwaway repos: fresh agent-only / angular+firebase / node scaffolds; sync onto Python, Go-with-own-devcontainer and plain-npm repos; an old 0.34 Angular+Firebase+DS project migrated; Firebase without Angular; refusal paths (research/05-verification.md). Unverifiable here: a real container build, real Firebase emulators.
+
+## Pre-merge review — 2026-10-02
+> "Send agents to sanity check, review and critic. Fix anything that comes up, then rebase, retest and merge" — the user
+
+Five adversarial reviewers (migrations, architecture, shell/runtime, docs, clean-clone sanity) → research/06-review-*.md; two fixers → research/07-fixes-*.md. Everything confirmed was fixed with regression tests (incl. pre-existing defects in sync's refusal/recovery paths: the backup tag is gone — a clean HEAD is the restore point, recovery is `git restore`, never `reset --hard`). The second fixer was stopped mid-docs by the user; the orchestrator finished its docs pass. Released as nx-tools **0.36.2** (0.35.0–0.36.1 were in-branch, never published).
+
+**Deferred, deliberately (design, nothing fails today):** `web` ensurable `via` a single stack (A3); one devcontainer image, last layer wins — matters once a second image-owning stack (e.g. Python) exists (A4); per-layer parameters live on `PlanContext` (A8); `--local` checkpoint commits carry the `file:` spec (dev-testing only); a rung importing a live util (pre-existing pattern). Unverifiable here: a real devcontainer build, real Firebase emulators.
