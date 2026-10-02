@@ -220,7 +220,7 @@ is the round-tripping the aggregation exists to prevent.
 install, no migrations, no generators, no commits. That is the whole point of refusing at this position, and
 it is the first thing the user needs to know before they read a wall of blockers.
 
-**The gate deliberately does not resolve anything, and — `protected-branch` aside, whose answer the branch rule already fixes — neither should you on your own.** It stops because a
+**The gate deliberately does not resolve anything, and — `protected-branch` and `unwritable-mounts` aside, whose answers are already fixed — neither should you on your own.** It stops because a
 shell script cannot know what you know: whether the uncommitted work is related to this sync, whether a
 feature package is open, whether a worktree already exists for it, or what the user asked for five minutes
 ago. **Read the situation, propose the options that actually fit it, and let the user choose.** Do not stash,
@@ -241,6 +241,17 @@ someone's git state.
   the branch below it. **This is the one code you resolve yourself, without asking:** it means step 3 was
   skipped. Open the worktree off `development` exactly as step 3 says and re-run there — the answer is fixed by
   the house branch rule, so there is nothing for the user to choose.
+
+- **`unwritable-mounts`** — a directory the sync must write into (`node_modules`, `.nx`, or any workspace
+  volume the project's `devcontainer.json` mounts) exists but is not writable by the current user. The usual
+  cause: Docker creates a named volume's mount point **root-owned**, the container's post-create never reclaimed
+  it, so its install died with `EACCES` and the project has no dependencies — and the sync's own install would
+  die the same way. **Resolve this one yourself, without asking:** the remedy is a deterministic ownership fix
+  of the project's own mount points, not a choice about anyone's work. In the directory the sync ran on, run
+  the exact `sudo chown -R "$(id -un):$(id -gn)" <paths>` line the refusal prints, then re-run the container's
+  post-create it names (`bash .devcontainer/post-create.sh`, or `post-create.bespunky.sh` beside it), then
+  re-run `/sync` from the top. Tell the user in one line: *the dependency volumes were root-owned, so I
+  reclaimed them and re-ran post-create.* If `sudo` is unavailable, that is the one case to hand back.
 
 - **`detached-head`** — HEAD is on no branch, so the ladder's commits would belong to nothing and become
   unreachable the moment anything is checked out. Check out a branch, or create one at this commit, and

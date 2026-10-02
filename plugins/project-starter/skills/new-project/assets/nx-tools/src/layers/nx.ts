@@ -45,10 +45,7 @@ export const nx: LayerDescriptor = {
       },
       { mount: 'source=${localWorkspaceFolderBasename}-nx-workspace-data,target=${containerWorkspaceFolder}/.nx/workspace-data,type=volume' },
     ],
-    postCreate: [
-      { phase: 'prepare', piece: 'nx-volumes' },
-      { phase: 'install', piece: 'nx-wrapper' },
-    ],
+    postCreate: [{ phase: 'install', piece: 'nx-wrapper' }],
   },
   claudePlugins: ['nx@nx-claude-plugins'],
   gitignore: [

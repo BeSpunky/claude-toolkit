@@ -40,6 +40,11 @@ extract() {   # extract <assignment marker> — the block from its opening line 
 # Captured, checked, THEN evaluated — deliberately not `eval "$(extract ...)"`. A failure inside a command
 # substitution exits only the subshell, so the inline form would print the fatal message and carry on with an
 # empty block. Caught in testing by the assertions below, which is precisely why they are also here.
+# The gate renders the shared mount-point functions in by value (scaffold.sh does the same `declare -f`), so the
+# extracted assignment needs them defined before it is evaluated.
+# shellcheck source=../../plugins/project-starter/skills/new-project/assets/house-mounts.sh
+. "$ROOT/plugins/project-starter/skills/new-project/assets/house-mounts.sh"
+HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_post_create)"
 checks_src="$(extract 'PREFLIGHT_CHECKS="')"   || exit 2
 verdict_src="$(extract 'PREFLIGHT_VERDICT="')" || exit 2
 eval "$checks_src"
@@ -47,7 +52,7 @@ eval "$verdict_src"
 
 # Belt and braces: prove the extracted text is actually the gate, not some other block that happens to end
 # in `fi"`. Without this, a marker collision degrades to a vacuous pass exactly like an empty extraction.
-for needle in dirty-tree protected-branch detached-head no-branch-model; do
+for needle in dirty-tree protected-branch detached-head no-branch-model unwritable-mounts; do
   case "${PREFLIGHT_CHECKS:-}" in
     *"$needle"*) ;;
     *) echo "FATAL: extracted PREFLIGHT_CHECKS does not mention '$needle' — wrong block?" >&2; exit 2 ;;
@@ -59,7 +64,8 @@ case "${PREFLIGHT_VERDICT:-}" in
 esac
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# Root-owned fixtures (the unwritable-mounts cases) may not be removable by this user; sudo cleans those up.
+trap 'rm -rf "$TMP" 2>/dev/null || sudo -n rm -rf "$TMP"' EXIT
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 mkrepo()  { local d="$TMP/$1"; mkdir -p "$d"; git -C "$d" init -q -b main; echo "$d"; }
@@ -134,5 +140,47 @@ fi
 d="$(mkrepo both)"; commit "$d"; git -C "$d" branch development; git -C "$d" checkout -q development
 echo change >> "$d/f.txt"
 check 'dirty + protected together' 'SYNC_REFUSED: dirty-tree protected-branch' "$d"
+
+# ── Unwritable mount points: a root-owned node_modules / volume mount refuses before anything is written ─────
+# Docker creates a named volume's mount point ROOT-OWNED; unless post-create reclaims it, every install into it
+# dies with EACCES — the sync's own included. The fixtures need a directory this user cannot write, so they need
+# sudo and a non-root user; where either is missing the cases are skipped, said out loud, never passed.
+if [ "$(id -u)" = 0 ] || ! sudo -n true 2>/dev/null; then
+  echo "  skip unwritable-mounts cases — need a non-root user with passwordless sudo"
+else
+  d="$(mkrepo vol)"; commit "$d"; git -C "$d" branch development; git -C "$d" checkout -q -b fix/v
+  check 'writable node_modules' 'PASS' "$d"
+  sudo -n mkdir "$d/node_modules"
+  before="$(git -C "$d" status --porcelain -uall; ls -A "$d")"
+  check 'root-owned node_modules' 'SYNC_REFUSED: unwritable-mounts' "$d"
+  [ "$(git -C "$d" status --porcelain -uall; ls -A "$d")" = "$before" ] \
+    && printf '  ok   %-32s\n' 'refusal wrote nothing' \
+    || { printf '  FAIL %-32s\n' 'refusal wrote nothing'; FAILED=1; }
+
+  # The mount points come from the PROJECT's devcontainer.json — a layer's volume (here .angular) is covered
+  # with no list to update — and the remedy names every path, its owner, and the post-create to re-run.
+  mkdir -p "$d/.devcontainer"
+  cat > "$d/.devcontainer/devcontainer.json" <<'JSON'
+{
+  "mounts": [
+    // "source=x-old,target=${containerWorkspaceFolder}/commented-out,type=volume",
+    "source=x-nm,target=${containerWorkspaceFolder}/node_modules,type=volume",
+    "source=x-ng,target=${containerWorkspaceFolder}/.angular,type=volume",
+    "source=x-pw,target=/home/node/.cache/ms-playwright,type=volume"
+  ]
+}
+JSON
+  echo 'echo hi' > "$d/.devcontainer/post-create.sh"
+  git -C "$d" add -A && git -C "$d" commit -qm dc
+  sudo -n mkdir "$d/.angular" "$d/commented-out"
+  out="$( cd "$d" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT" ) 2>&1 )"
+  want_all=1
+  for needle in 'SYNC_REFUSED: unwritable-mounts' '.angular' 'owner: root' \
+      'sudo chown -R "$(id -un):$(id -gn)" .angular node_modules' 'bash .devcontainer/post-create.sh'; do
+    case "$out" in *"$needle"*) ;; *) want_all=0; printf '  FAIL %-32s missing [%s]\n' 'remedy names paths + fix' "$needle" ;; esac
+  done
+  case "$out" in *commented-out*) want_all=0; printf '  FAIL %-32s\n' 'a commented-out mount was read' ;; esac
+  [ "$want_all" = 1 ] && printf '  ok   %-32s\n' 'remedy names paths + fix' || FAILED=1
+fi
 
 exit "$FAILED"
