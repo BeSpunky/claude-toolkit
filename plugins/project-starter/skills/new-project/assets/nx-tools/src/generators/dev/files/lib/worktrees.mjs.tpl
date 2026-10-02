@@ -54,18 +54,36 @@ export function parseWorktrees(porcelain, currentRoot) {
 }
 
 /**
- * The repository's worktrees, the one containing `cwd` flagged current. A directory that is not a git
- * repository is served as a single tree (it is its own main tree) — the engine needs no git to run.
+ * The repository's worktrees AS WORKSPACES: each entry's `path` is the directory a serve runs in — the workspace
+ * root inside that worktree, not the worktree's git toplevel. An Nx workspace may live in a subdirectory of its
+ * repository (`mono/services/web`), and then every tree serves from `<worktree>/services/web`: the same prefix,
+ * read once from git (`--show-prefix`), joined onto every worktree. Equating the tree with the git toplevel ran
+ * every process, and the install, in the repository root.
+ *
+ * `root` is this workspace's root (the directory holding tools/dev). A directory that is not a git repository is
+ * served as a single tree (it is its own main tree) — the engine needs no git to run.
  */
-export function collectWorktrees(cwd) {
-  let top;
+export function collectWorktrees(root) {
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  let top, prefix;
   try {
-    top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    top = git('rev-parse', '--show-toplevel').trim();
+    prefix = git('rev-parse', '--show-prefix').trim();
   } catch {
-    return [{ path: resolve(cwd), detached: false, isMain: true, isCurrent: true }];
+    return [{ path: resolve(root), detached: false, isMain: true, isCurrent: true }];
   }
-  const porcelain = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: top, encoding: 'utf8' });
-  return parseWorktrees(porcelain, top);
+  return parseWorktrees(git('worktree', 'list', '--porcelain'), top).map((w) => ({ ...w, path: prefix ? resolve(w.path, prefix) : w.path }));
+}
+
+/**
+ * The slug a tree is served at — `<slug>.localhost`. The MAIN tree is reached at the workspace's name (the main
+ * tree's directory); every other tree at its own worktreeSlug. ONE function, because two parties must agree on
+ * it: the engine registers this slug, and worktree-domains' reconcile keeps a route only while some tree still
+ * answers to it. Two copies of the rule is how live routes were dropped as "worktree gone".
+ */
+export function servedSlug(tree, worktrees) {
+  const main = worktrees.find((w) => w.isMain) ?? worktrees[0];
+  return worktreeSlug(tree, basename(main.path));
 }
 
 /** A one-line, human-readable label for a worktree (branch, markers, path). */

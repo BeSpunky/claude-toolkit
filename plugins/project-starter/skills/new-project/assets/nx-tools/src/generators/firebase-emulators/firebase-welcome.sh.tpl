@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # BeSpunky Firebase setup nudge — self-extinguishing.
 #
 # Sourced into every interactive login bash session inside the devcontainer via
@@ -12,7 +12,11 @@
 # client the house does not wire) is done at `.firebaserc`: there is no file of ours to fill,
 # and a nudge that can never be satisfied is one everybody learns to ignore.
 
-_fb_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)"
+# POSIX throughout: /etc/profile.d is sourced by /bin/sh (dash) too, where the ARRAY form BASH_SOURCE[0] is a
+# syntax error. The profile.d line passes the workspace in BESPUNKY_FIREBASE_WS. Without it — run directly, or
+# sourced by a hook written before that variable existed (a container not yet rebuilt) — the plain
+# ${BASH_SOURCE:-$0} is valid in every shell: this file under bash, $0 elsewhere.
+_fb_root="${BESPUNKY_FIREBASE_WS:-$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." 2>/dev/null && pwd)}"
 
 # Only act inside a workspace that was scaffolded with --firebase.
 [ -f "$_fb_root/firebase.json" ] || return 0 2>/dev/null

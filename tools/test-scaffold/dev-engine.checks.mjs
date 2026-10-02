@@ -16,7 +16,7 @@
 // The engine ships as .tpl files in the payload; this copies them into a temp tools/dev/ as .mjs — exactly
 // what the `dev` generator writes — and imports them.
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -51,7 +51,7 @@ const copy = (from, to) => {
 };
 copy(FILES, engine);
 const load = (rel) => import(pathToFileURL(join(engine, rel)).href);
-const { portBlock, blockForKey, resolvePortOffset } = await load('lib/ports.mjs');
+const { portBlock, blockForKey, resolvePortOffset, isPortFree } = await load('lib/ports.mjs');
 const { validate, planApp, pickApp } = await load('lib/declaration.mjs');
 const { parseArgs } = await load('dev.mjs');
 const { parseWorktrees, worktreeSlug } = await load('lib/worktrees.mjs');
@@ -62,12 +62,19 @@ try {
   ok('Firebase suite: step 6000 × 9 blocks (the old constants, unchanged)', firebase.step === 6000 && firebase.blocks === 9);
   const single = portBlock([4200]);
   ok('one declared port: step 1000, dozens of blocks', single.step === 1000 && single.blocks === 61);
-  ok('no room for a block throws', await throws(() => portBlock([1000, 65000])));
+  // Ports declared high up leave no room to SHIFT — which only a shifted serve needs. The base stack must still serve.
+  const high = portBlock([65000]);
+  ok('no room for a block is not an error by itself (blocks = 0)', high.blocks === 0);
+  const highBase = { key: 'k', isMain: false, probed: [65000], block: high, probe: async () => true };
+  ok('…the base stack still serves (--port-offset=0)', (await resolvePortOffset('0', highBase)) === 0);
+  ok('…the main tree still takes the free base ports on auto', (await resolvePortOffset('auto', { ...highBase, isMain: true })) === 0);
+  ok('…and a serve that must SHIFT is refused plainly', await throws(() => resolvePortOffset('auto', highBase)));
 
   const free = async () => true;
   const busy = (...ports) => async (p) => !ports.includes(p);
   const base = { key: 'k', isMain: false, probed: [4200], block: firebase, probe: free };
-  ok("'' and '0' → base stack", (await resolvePortOffset('', base)) === 0 && (await resolvePortOffset('0', base)) === 0);
+  ok("'0' → base stack", (await resolvePortOffset('0', base)) === 0);
+  ok("an EMPTY offset is refused, never read as the base stack", await throws(() => resolvePortOffset('', base)));
   ok('a pinned integer is honoured', (await resolvePortOffset('12000', base)) === 12000 && (await resolvePortOffset(12000, base)) === 12000);
   ok('a bad spec throws rather than guessing', await throws(() => resolvePortOffset('nonsense', base)));
   ok('a pin past 65535 throws', await throws(() => resolvePortOffset('60000', base)));
@@ -121,7 +128,11 @@ try {
   console.log('argv + worktrees');
   const args = parseArgs(['serve', 'web', '--worktree=feat/x', '--port-offset=auto', '--skip=emulators,ui', '--no-shared-browser', '--dry-run', '--', '--hmr']);
   ok('flags parse', args.app === 'web' && args.worktree === 'feat/x' && args.skip.join() === 'emulators,ui' && !args.sharedBrowser && args.dryRun && args.passthrough.join() === '--hmr');
-  ok('bare --worktree means "pick"', parseArgs(['serve', '--worktree']).worktree === '');
+  ok('bare --worktree means "pick"', parseArgs(['serve', '--worktree']).worktree === '' && parseArgs(['serve', '--worktree', '--dry-run']).worktree === '');
+  const spaced = parseArgs(['serve', '--worktree', 'feat/x', 'web']);
+  ok('--worktree <x> (space form) takes x as the tree, not the app', spaced.worktree === 'feat/x' && spaced.app === 'web');
+  ok('a bare --port-offset is refused, never silently 0', await throws(() => parseArgs(['serve', '--port-offset'])) && await throws(() => parseArgs(['serve', '--port-offset', '--dry-run'])));
+  ok('--port-offset <n> (space form) parses', parseArgs(['serve', '--port-offset', '3000']).portOffset === '3000');
   ok('an unknown flag is refused', await throws(() => parseArgs(['serve', '--portOffset=1'])));
   const trees = parseWorktrees('worktree /r\nHEAD a\nbranch refs/heads/main\n\nworktree /r/.claude/worktrees/x\nHEAD b\nbranch refs/heads/feat/x\n\n', '/r/.claude/worktrees/x');
   ok('porcelain: main first, current flagged', trees[0].isMain && trees[1].isCurrent && worktreeSlug(trees[1], 'r') === 'feat-x' && worktreeSlug(trees[0], 'My Repo') === 'my-repo');
@@ -132,6 +143,52 @@ try {
   writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd: 'python3 -m http.server ${PORT:app}', ports: { app: 8000 } }] } } }));
   const out = execFileSync('sh', [join(engine, 'dev'), 'serve', '--dry-run', '--no-shared-browser', '--port-offset=3000'], { cwd: repo, encoding: 'utf8' });
   ok('the shim runs the engine with no node_modules and no git', out.includes('python3 -m http.server 11000') && out.includes('http://localhost:11000/'));
+
+  console.log('a workspace in a SUBDIRECTORY of its repository');
+  // mono/ is the git root; the workspace (tools/dev, .bespunky) is mono/services/web. Every process, and the install,
+  // must run in the WORKSPACE — and a symlinked spelling of the engine's path must still run it.
+  const mono = mkdtempSync(join(tmpdir(), 'dev-mono-'));
+  try {
+    const ws = join(mono, 'services', 'web');
+    copy(FILES, join(ws, 'tools', 'dev'));
+    mkdirSync(join(ws, '.bespunky'));
+    writeFileSync(join(ws, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd: 'node server.js ${PORT:app}', ports: { app: 8000 } }] } } }));
+    const git = (...a) => execFileSync('git', a, { cwd: mono, stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    git('init', '-q', '-b', 'main');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+    git('worktree', 'add', '-q', '-b', 'feat/sub', join(mono, '.wt', 'sub'));
+    const dry = (cwd, ...extra) => execFileSync('sh', [join(cwd, 'tools', 'dev', 'dev'), 'serve', '--dry-run', '--no-shared-browser', '--port-offset=0', ...extra], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const here = dry(ws);
+    ok('cwd is the workspace, not the git root', here.includes(`cwd        : ${ws}\n`));
+    ok('the main tree is reached at the workspace name', here.includes('slug       : web.localhost'));
+    const other = dry(ws, '--worktree=feat/sub');
+    ok('another worktree serves from the SAME subdirectory inside it', other.includes(`cwd        : ${join(mono, '.wt', 'sub', 'services', 'web')}\n`) && !other.includes('has no'));
+    symlinkSync(mono, `${mono}-link`);
+    const viaLink = execFileSync('sh', [join(`${mono}-link`, 'services', 'web', 'tools', 'dev', 'dev'), 'serve', '--dry-run', '--no-shared-browser', '--port-offset=0'], { cwd: ws, encoding: 'utf8' });
+    ok('invoked through a SYMLINKED path, the engine still runs (it printed the plan)', viaLink.includes('DRY RUN'));
+  } finally {
+    rmSync(`${mono}-link`, { force: true });
+    rmSync(mono, { recursive: true, force: true });
+  }
+
+  console.log('the free-port probe');
+  {
+    const v6 = createServer();
+    const v6port = await new Promise((res, rej) => { v6.once('error', rej); v6.listen(0, '::1', () => res(v6.address().port)); }).catch(() => null);
+    if (v6port === null) console.log('  skip  no IPv6 loopback here');
+    else ok('a server on ::1 (where `localhost` resolves first) reads as BUSY', (await isPortFree(v6port)) === false);
+    v6.close();
+    const v4 = createServer();
+    const v4port = await new Promise((res) => v4.listen(0, '127.0.0.1', () => res(v4.address().port)));
+    ok('a server on 127.0.0.1 reads as busy', (await isPortFree(v4port)) === false);
+    v4.close();
+    const any = createServer();
+    const anyPort = await new Promise((res) => any.listen(0, () => res(any.address().port)));
+    ok('a server on every interface reads as busy', (await isPortFree(anyPort)) === false);
+    await new Promise((r) => any.close(r));
+    ok('…and a released port reads as free', (await isPortFree(anyPort)) === true);
+  }
 
   console.log('signals (real processes)');
   // A server that records every signal it receives, and shuts down (slowly, like an emulator export) on the first.
@@ -199,6 +256,17 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
     },
   });
   ok('Ctrl+C then SIGTERM to the engine: the second stop is absorbed — child saw only the SIGINT', both && both.result && both.got === 'SIGINT');
+  // A child the OOM killer (or anything) SIGKILLs is a crash, not a stop: the engine must fail, or \`nx serve\`
+  // reports success for a stack that died.
+  const crashed = await scenario('the child is SIGKILLed', {
+    shell: false,
+    stop: (pid) => {
+      const kids = execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+      // the engine runs under the sh shim (exec'd), so its children are the servers
+      for (const k of kids) process.kill(Number(k), 'SIGKILL');
+    },
+  });
+  ok('a SIGKILLed child makes the engine exit NON-ZERO', crashed && crashed.result && crashed.result.code !== 0);
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }

@@ -19,8 +19,9 @@
 # Lifecycle mirrors tools/shared-browser/shared-browser by construction: an flock so two starts can't
 # race, a PID file validated by PID *and* cmdline signature (a recycled PID owned by something else is
 # NEVER killed — never `pkill -f`), a readiness gate on the listen port, and a `stop` that verifies the
-# port is actually freed. Route mutations are atomic (tmp-file + rename) so the live proxy — which
-# re-reads routes.json on mtime change — never reads a half-written file.
+# proxy is actually gone. Route mutations are SERIALISED (an flock around every read-modify-write — two
+# worktrees registering at once used to lose each other's routes) and atomic (a per-writer tmp file +
+# rename) so the live proxy — which re-reads routes.json on mtime change — never reads a half-written file.
 #
 # NOTE on `set`: -u + pipefail, but deliberately NOT -e — many legitimate non-zero probes (kill -0,
 # port checks) whose failure is data, not an abort. Errors are handled explicitly.
@@ -41,6 +42,7 @@ ROUTES="$WD_RUNTIME/routes.json"                           # the slug→port reg
 LOGS="$WD_RUNTIME/logs"
 PROXY_LOG="$LOGS/proxy.log"
 LOCK="$WD_RUNTIME/up.lock"
+ROUTES_LOCK="$WD_RUNTIME/routes.lock"                      # serialises every read-modify-write of routes.json
 PIDF="$WD_RUNTIME/proxy.pid"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -114,6 +116,7 @@ spawn_proxy() {
 
 # Stop the proxy by its PID file: SIGTERM, grace-poll, then SIGKILL. Only ever touches a process that is
 # STILL ours (alive + matching cmdline) — a stale/recycled pid is simply forgotten, never killed.
+# Fails (and KEEPS the PID file, so status and a retry still see it) when our proxy survived even SIGKILL.
 kill_proxy() {
   local pid t
   [ -f "$PIDF" ] || return 0
@@ -124,6 +127,10 @@ kill_proxy() {
     if proc_alive "$pid"; then
       kill -KILL "$pid" 2>/dev/null || true
       for ((t=0; t<20; t++)); do proc_alive "$pid" || break; sleep 0.1; done
+    fi
+    if proc_alive "$pid" && proc_matches "$pid" "$PROXY_SIG"; then
+      err "the proxy (pid $pid) survived SIGKILL"
+      return 1
     fi
   fi
   rm -f "$PIDF"
@@ -195,30 +202,41 @@ ensure_proxy_up() {
   return 1
 }
 
-# ── Route registry mutations (done in Node — robust JSON, atomic tmp+rename so the live proxy is safe) ─
-route_set() {
-  WD_ROUTES="$ROUTES" WD_SLUG="$1" WD_PORT_VAL="$2" node - <<'NODE'
+# ── Route registry mutations ─────────────────────────────────────────────────────────────────────────
+# ONE writer at a time, and one place that writes. Every mutation is a read-modify-write of routes.json, so two
+# unserialised writers — two worktrees' serves registering at once — each read the old table and the second
+# rename silently dropped the first's route (12 parallel registers left 9 routes, and every one of them still
+# reported success). And they shared ONE tmp file, so a writer could rename a file another was still writing.
+# So: an flock around the whole read-modify-write, and a tmp file per writer.
+#
+#   routes_mutate <op>...    op = set:<slug>:<port> | del:<slug> | del-if:<slug>:<port>
+#
+# `del-if` deletes only while the route still points at <port>: reconcile probes OUTSIDE the lock (a probe can
+# take half a second per route, and a register must not wait on that), so a route re-registered meanwhile to a
+# new port must survive the stale verdict. Exits 3 when a `del` found nothing to delete.
+routes_mutate() {
+  flock -w 30 "$ROUTES_LOCK" env WD_ROUTES="$ROUTES" node - "$@" <<'NODE' || return $?
 const fs = require('fs');
-const f = process.env.WD_ROUTES, slug = process.env.WD_SLUG, port = Number(process.env.WD_PORT_VAL);
+const f = process.env.WD_ROUTES;
 let r = {}; try { r = JSON.parse(fs.readFileSync(f, 'utf8') || '{}'); } catch (e) { r = {}; }
-r[slug] = port;
-fs.writeFileSync(f + '.tmp', JSON.stringify(r, null, 2) + '\n');
-fs.renameSync(f + '.tmp', f);
+let missing = false;
+for (const op of process.argv.slice(2)) {
+  const [kind, slug, port] = op.split(':');
+  const has = Object.prototype.hasOwnProperty.call(r, slug);
+  if (kind === 'set') r[slug] = Number(port);
+  else if (kind === 'del') { if (!has) missing = true; delete r[slug]; }
+  else if (kind === 'del-if') { if (has && String(r[slug]) === port) delete r[slug]; }
+  else { console.error(`unknown route op ${op}`); process.exit(2); }
+}
+const tmp = `${f}.tmp-${process.pid}`;
+fs.writeFileSync(tmp, JSON.stringify(r, null, 2) + '\n');
+fs.renameSync(tmp, f);
+process.exit(missing ? 3 : 0);
 NODE
 }
 
-route_del() {
-  WD_ROUTES="$ROUTES" WD_SLUG="$1" node - <<'NODE'
-const fs = require('fs');
-const f = process.env.WD_ROUTES, slug = process.env.WD_SLUG;
-let r = {}; try { r = JSON.parse(fs.readFileSync(f, 'utf8') || '{}'); } catch (e) { r = {}; }
-const had = Object.prototype.hasOwnProperty.call(r, slug);
-delete r[slug];
-fs.writeFileSync(f + '.tmp', JSON.stringify(r, null, 2) + '\n');
-fs.renameSync(f + '.tmp', f);
-process.exit(had ? 0 : 3);
-NODE
-}
+route_set() { routes_mutate "set:$1:$2"; }
+route_del() { routes_mutate "del:$1"; }
 
 # ── Validation ───────────────────────────────────────────────────────────────────────────────────────
 valid_slug() {
@@ -237,7 +255,7 @@ cmd_register() {
   valid_port "$port" || die "register: '$port' is not a valid port (1–65535)"
 
   ensure_dirs
-  route_set "$slug" "$port"
+  route_set "$slug" "$port" || die "register: could not record the route (routes.json locked or unwritable: $ROUTES)"
   say "route  $slug.localhost → 127.0.0.1:$port"
 
   if ensure_proxy_up; then
@@ -252,8 +270,13 @@ cmd_unregister() {
   local slug="${1:-}"
   [ -n "$slug" ] || die "usage: worktree-domains unregister <slug>"
   ensure_dirs
-  if route_del "$slug"; then say "unregistered $slug.localhost"; else say "no route for '$slug' (nothing to do)"; fi
-  return 0
+  local rc=0
+  route_del "$slug" || rc=$?
+  case "$rc" in
+    0) say "unregistered $slug.localhost" ;;
+    3) say "no route for '$slug' (nothing to do)" ;;
+    *) die "unregister: could not update the routes (routes.json locked or unwritable: $ROUTES)" ;;
+  esac
 }
 
 cmd_list() {
@@ -268,28 +291,32 @@ for (const k of keys) console.log(`  ${(k + '.localhost').padEnd(w)}  → 127.0.
 NODE
 }
 
+# Which routes are dead: no listener, or no tree answers to the slug any more. The LIVE slugs come from the dev
+# engine's own rule (tools/dev/lib/worktrees.mjs — collectWorktrees + servedSlug), never a copy of it: the engine
+# registers exactly that slug, so a second, subtly different slugify here dropped live routes as "worktree gone"
+# (branches with '--', a trailing '.', names past 63 characters). Without the engine there is nothing to compare
+# against, so only the listener check applies — and the run says so.
+#
+# The probing happens OUTSIDE the routes lock (half a second per dead port is too long to make a register wait);
+# the deletions go through routes_mutate as del-if, so a route re-registered meanwhile survives.
 cmd_reconcile() {
   ensure_dirs
-  WD_ROUTES="$ROUTES" node - <<'NODE'
-const fs = require('fs');
-const net = require('net');
-const cp = require('child_process');
-const f = process.env.WD_ROUTES;
-let r = {}; try { r = JSON.parse(fs.readFileSync(f, 'utf8') || '{}'); } catch (e) { r = {}; }
+  local verdicts ops=() slug port why
+  verdicts="$(WD_ROUTES="$ROUTES" WD_ENGINE="$WORKSPACE_ROOT/tools/dev/lib/worktrees.mjs" WD_ROOT="$WORKSPACE_ROOT" \
+    node --input-type=module - <<'NODE'
+import fs from 'node:fs';
+import net from 'node:net';
+import { pathToFileURL } from 'node:url';
+let r = {}; try { r = JSON.parse(fs.readFileSync(process.env.WD_ROUTES, 'utf8') || '{}'); } catch { r = {}; }
 
-function basename(p) { return p.replace(/\/+$/, '').split('/').pop().toLowerCase().replace(/[^a-z0-9-]/g, '-'); }
-function slugify(b) { return b.toLowerCase().replace(/\//g, '-').replace(/[^a-z0-9-]/g, '-'); }
-
-// Live worktree slugs (best-effort): dir basename + sanitized branch for every worktree, incl. main.
 let liveSlugs = null;
-try {
-  const out = cp.execSync('git worktree list --porcelain', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  liveSlugs = new Set();
-  for (const line of out.split('\n')) {
-    if (line.startsWith('worktree ')) { const d = line.slice(9).trim(); if (d) liveSlugs.add(basename(d)); }
-    else if (line.startsWith('branch ')) { const b = line.slice(7).trim().replace(/^refs\/heads\//, ''); if (b) liveSlugs.add(slugify(b)); }
-  }
-} catch (e) { liveSlugs = null; }
+if (fs.existsSync(process.env.WD_ENGINE)) {
+  const { collectWorktrees, servedSlug } = await import(pathToFileURL(process.env.WD_ENGINE).href);
+  const trees = collectWorktrees(process.env.WD_ROOT);
+  liveSlugs = new Set(trees.map((t) => servedSlug(t, trees)));
+} else {
+  console.error(`[worktree-domains] the dev engine is absent (${process.env.WD_ENGINE}) — checking listeners only`);
+}
 
 const probe = (port) => new Promise((res) => {
   const s = net.connect(port, '127.0.0.1');
@@ -300,20 +327,16 @@ const probe = (port) => new Promise((res) => {
   s.setTimeout(500, () => fin(false));
 });
 
-(async () => {
-  const kept = {}, dropped = [];
-  for (const [slug, port] of Object.entries(r)) {
-    const listening = await probe(Number(port));
-    const worktreeGone = liveSlugs !== null && !liveSlugs.has(slug);
-    if (!listening || worktreeGone) dropped.push([slug, port, !listening ? 'no listener' : 'worktree gone']);
-    else kept[slug] = port;
-  }
-  fs.writeFileSync(f + '.tmp', JSON.stringify(kept, null, 2) + '\n');
-  fs.renameSync(f + '.tmp', f);
-  if (!dropped.length) console.log('no dead routes');
-  else for (const [slug, port, why] of dropped) console.log(`dropped ${slug}.localhost → :${port} (${why})`);
-})();
+for (const [slug, port] of Object.entries(r)) {
+  if (liveSlugs !== null && !liveSlugs.has(slug)) console.log(`${slug} ${port} worktree-gone`);
+  else if (!(await probe(Number(port)))) console.log(`${slug} ${port} no-listener`);
+}
 NODE
+)" || die "reconcile: could not read the routes or the worktrees"
+  [ -n "$verdicts" ] || { say "no dead routes"; return 0; }
+  while read -r slug port why; do ops+=("del-if:$slug:$port"); done <<< "$verdicts"
+  routes_mutate "${ops[@]}" || die "reconcile: could not update the routes (routes.json locked or unwritable: $ROUTES)"
+  while read -r slug port why; do say "dropped $slug.localhost → :$port (${why//-/ })"; done <<< "$verdicts"
 }
 
 cmd_status() {
@@ -331,8 +354,10 @@ cmd_logs() {
 
 cmd_stop() {
   ensure_dirs
-  kill_proxy
-  if port_listening "$WD_PORT" && proxy_running; then err "after stop, proxy still listening on :$WD_PORT"; return 1; fi
+  kill_proxy || { err "proxy NOT stopped — see above"; return 1; }
+  if port_listening "$WD_PORT"; then
+    err "proxy stopped, but :$WD_PORT is still held by another process (not ours, left alone)."
+  fi
   ok "proxy stopped."
   return 0
 }

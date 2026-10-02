@@ -12,19 +12,28 @@
 // Node built-ins only, and no project node_modules: this must serve a Python or Go repo exactly as it serves
 // an Nx one. `nx serve <app>` (the @bespunky/nx-tools:serve executor) is a thin wrapper over this file.
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { get } from 'node:http';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { attachBrowser, detachRoute, foreignOwner, sharedBrowserUrl } from './lib/browser.mjs';
 import { DECLARATION_PATH, DeclarationError, declaredPorts, loadDeclaration, pickApp, planApp, primaryOf } from './lib/declaration.mjs';
-import { portBlock, resolvePortOffset } from './lib/ports.mjs';
+import { PortError, portBlock, resolvePortOffset } from './lib/ports.mjs';
 import { runStack } from './lib/stack.mjs';
-import { collectWorktrees, matchWorktree, worktreeKey, worktreeLabel, worktreeSlug } from './lib/worktrees.mjs';
+import { collectWorktrees, matchWorktree, servedSlug, worktreeKey, worktreeLabel } from './lib/worktrees.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** One directory, however it is spelled: compared by REAL path, since a symlinked spelling is the same tree. */
+function samePath(a, b) {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return resolve(a) === resolve(b);
+  }
+}
 
 const log = (m) => console.log(`[serve] ${m}`);
 const warn = (m) => console.error(`[serve] WARNING: ${m}`);
@@ -38,6 +47,9 @@ const USAGE = `Usage:
 
 Serves an app declared in ${DECLARATION_PATH}. --worktree with no value picks one interactively.`;
 
+/** Is an argv item a flag's value (present, and not itself a flag or the passthrough separator)? */
+const isValue = (next) => next !== undefined && !next.startsWith('-');
+
 /** Parse argv into `{ command, app, flags, passthrough }`. Unknown flags are refused, never ignored. */
 export function parseArgs(argv) {
   const out = { command: argv[0], app: undefined, passthrough: [], worktree: undefined, portOffset: 'auto', skip: [], sharedBrowser: true, install: true, dryRun: false };
@@ -50,16 +62,25 @@ export function parseArgs(argv) {
     }
     const [flag, ...v] = arg.split('=');
     const value = v.length ? v.join('=') : undefined;
-    const takeValue = () => (value !== undefined ? value : rest[++i]);
+    // A value flag takes `--flag=<v>` or `--flag <v>`, the same for every one of them. A MISSING value is refused,
+    // never defaulted: a bare `--port-offset` used to read as '' and silently mean "the base stack".
+    const takeValue = () => {
+      const got = value !== undefined ? value : isValue(rest[i + 1]) ? rest[++i] : undefined;
+      if (got === undefined || got === '') throw new UsageError(`${flag} needs a value (${flag}=<value>)`);
+      return got;
+    };
     switch (flag) {
+      // The one flag whose value is OPTIONAL: bare (or followed by another flag) it means "let me pick". The space
+      // form is accepted like every other value flag — `--worktree feat/x` used to leave the value empty and turn
+      // `feat/x` into the app name.
       case '--worktree':
-        out.worktree = value ?? '';
+        out.worktree = value ?? (isValue(rest[i + 1]) ? rest[++i] : '');
         break;
       case '--port-offset':
         out.portOffset = takeValue();
         break;
       case '--skip':
-        out.skip.push(...String(takeValue() ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+        out.skip.push(...takeValue().split(',').map((s) => s.trim()).filter(Boolean));
         break;
       case '--no-shared-browser':
         out.sharedBrowser = false;
@@ -118,7 +139,7 @@ async function selectWorktree(worktrees, spec) {
 function declarationFor(tree) {
   const own = loadDeclaration(tree.path);
   if (own) return own;
-  const here = resolve(tree.path) === ROOT ? null : loadDeclaration(ROOT);
+  const here = samePath(tree.path, ROOT) ? null : loadDeclaration(ROOT);
   if (here) {
     warn(`${tree.path} has no ${DECLARATION_PATH} — serving it with this tree's declaration.`);
     return here;
@@ -163,8 +184,6 @@ function announceReady(url, appUrl, until) {
 
 async function serve(opts) {
   const worktrees = collectWorktrees(ROOT);
-  const mainTree = worktrees.find((w) => w.isMain) ?? worktrees[0];
-  const workspaceName = basename(mainTree.path);
   const tree = await selectWorktree(worktrees, opts.worktree);
 
   const decl = declarationFor(tree);
@@ -181,7 +200,7 @@ async function serve(opts) {
   });
   const plan = planApp(decl, appName, { offset, tree: tree.path, skip: opts.skip, passthrough: opts.passthrough, baseEnv: process.env });
   for (const id of plan.ignoredSkips) warn(`--skip=${id}: app "${appName}" declares no such process — nothing to skip.`);
-  const slug = worktreeSlug(tree, workspaceName);
+  const slug = servedSlug(tree, worktrees);
   const prettyUrl = `http://${slug}.localhost/${plan.query}`;
   const browserOn = opts.sharedBrowser;
 
@@ -277,11 +296,14 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run as a program, not imported (the tests import parseArgs). Compared by REAL path: import.meta.url is always the
+// resolved file, while argv[1] is the path as invoked — through a symlinked home, macOS's /tmp, or the logical
+// NX_WORKSPACE_ROOT_PATH the house sets — and a plain comparison then made `dev serve` print nothing and exit 0.
+if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))) {
   main(process.argv.slice(2)).then(
     (ok) => process.exit(ok ? 0 : 1),
     (err) => {
-      if (err instanceof UsageError || err instanceof DeclarationError) {
+      if (err instanceof UsageError || err instanceof DeclarationError || err instanceof PortError) {
         console.error(`[serve] ${err.message}`);
         if (err instanceof UsageError && /unknown|unexpected/.test(err.message)) console.error(USAGE);
       } else {

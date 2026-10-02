@@ -24,6 +24,13 @@ import { fileURLToPath } from 'node:url';
 
 export const PLAYWRIGHT_VERSION = '{{playwrightVersion}}';
 
+/**
+ * The shared Chromium's DevTools endpoint (loopback only). SB_CDP overrides the port, exactly as it does for the
+ * CLI — which exports it, so the recorder it spawns and every attach agree with the browser it started. Defined
+ * once here for every node-side reader; a hard-coded 9223 in each of them silently ignored the override.
+ */
+export const CDP_URL = `http://127.0.0.1:${process.env.SB_CDP || 9223}`;
+
 /** Where the runtime lives. SB_PLAYWRIGHT_RUNTIME overrides (e.g. a volume that survives rebuilds). */
 export const RUNTIME_DIR =
   process.env.SB_PLAYWRIGHT_RUNTIME ||

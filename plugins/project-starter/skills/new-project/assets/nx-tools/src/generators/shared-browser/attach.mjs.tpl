@@ -1,7 +1,7 @@
 // tools/shared-browser/attach.mjs — Claude's attach/detach ergonomics for the shared browser.
 //
 // The shared Chromium is a PERSISTENT object the human watches over noVNC. Claude
-// attaches to it over loopback CDP (127.0.0.1:9223), drives it, then detaches — WITHOUT
+// attaches to it over loopback CDP (127.0.0.1:$SB_CDP, default 9223), drives it, then detaches — WITHOUT
 // disturbing the human's session.
 //
 // IMPORTANT: `browser.close()` on a CDP-attached browser only DETACHES the CDP session.
@@ -14,9 +14,7 @@
 // works the same in any repository — JS or not — and never depends on the workspace's node_modules.
 
 import { existsSync } from 'node:fs';
-import { loadPlaywright } from './runtime.mjs';
-
-const CDP_URL = 'http://127.0.0.1:9223';
+import { CDP_URL, loadPlaywright } from './runtime.mjs';
 
 // observe-only: while this lock exists (set by `shared-browser observe`), the human is driving the
 // shared window over noVNC. Attaching to DRIVE it is refused so automation can't fight the human —
