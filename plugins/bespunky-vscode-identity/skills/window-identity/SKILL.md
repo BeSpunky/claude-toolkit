@@ -1,7 +1,7 @@
 ---
 name: window-identity
 description: >-
-  Give a project's VSCode window a recognizable IDENTITY — an emoji in the window title (dock / Alt-Tab / window switcher) plus a quiet, design-system-coloured band on a bar — so that when several projects are open in several windows they stop looking identical, WITHOUT Peacock's whole-window glow. Use when the user says windows are hard to tell apart, asks to colour/label/badge a project's window, mentions Peacock (or that it's too loud/ugly), wants a project-relevant window accent sourced from the design system, or asks to (re)apply / change / remove a window identity, switch which bar is coloured, upgrade the placeholder colour to the brand colour, or make it personal vs team-shared. This skill is the INTELLIGENCE half: it finds the project's design-system primary colour and a project-fitting emoji, then invokes the `@bespunky/nx-tools:window-identity` generator (the deterministic writer) with them. Colours are DERIVED, never hand-typed — from the design-system primary when one exists, else from a stable hash of the project name, so a window is distinct from birth and later SNAPS to the brand colour when the design system arrives. Requires an Nx workspace with @bespunky/nx-tools (the generator runs there); it is wired into the scaffold/--sync baseline, so most house projects already have a name-hash identity and this skill's main job is enriching the emoji and upgrading the colour to the design system. NOT for general VSCode settings, themes, or colour-theme design — only the per-window identity (window.title + the identity bar colours).
+  Give a project's VSCode window a recognizable IDENTITY — an emoji in the window title (dock / Alt-Tab / window switcher) plus a quiet, design-system-coloured band on a bar — so several open project windows stop looking identical, WITHOUT Peacock's whole-window glow. Use when the user says windows are hard to tell apart, asks to colour/label/badge a project's window, mentions Peacock (or that it's too loud/ugly), wants a window accent sourced from the design system, or asks to (re)apply / change / remove a window identity, switch which bar is coloured, upgrade the placeholder colour to the brand colour, or make it personal vs team-shared. It picks the colour and emoji, then runs the `@bespunky/nx-tools:window-identity` generator (needs an Nx workspace). NOT for general VSCode settings, themes, or colour-theme design — only the per-window identity.
 ---
 
 # window-identity — make each window recognizable, sourced from the project
@@ -17,6 +17,12 @@ instead of clobbering, and enforces the no-clobber ratchet. Your job is the two 
 well: **find the design-system primary colour**, and **choose an emoji that fits this project**. Then you call
 the generator with them. Never hand-edit `.vscode/settings.json` — that's the generator's file (the house rule:
 extending the scaffolder is generator work, never a hand-written file edit).
+
+Colours are **derived, never hand-typed** — from the design-system primary when one exists, else from a stable
+hash of the project name, so a window is distinct from birth and later **snaps** to the brand colour when the
+design system arrives. The generator is wired into the scaffold / `--sync` baseline, so most house projects
+already carry a name-hash identity; your usual job is enriching the emoji and upgrading the colour to the
+design system.
 
 ## The one command
 

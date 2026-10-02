@@ -1,6 +1,6 @@
 {
   "name": "bespunky",
-  "description": "The BeSpunky toolkit front door. /bespunky:index is a self-maintaining catalog: it lists every installed toolkit skill (grouped by plugin, each with its /bespunky-… invocation and a one-line 'use when') by reading the live available-skills set, so it never goes stale. All toolkit plugins share the bespunky- namespace prefix, so typing /bespunky in the slash menu filters the autocomplete to the whole toolkit at once — this index plus every skill. It also slips a few rotating toolkit tips into Claude Code's working spinner, outside the conversation, covering only installed plugins. Turn them off, on or list them with /bespunky:tips.",
+  "description": "The BeSpunky toolkit front door. /bespunky:index is a self-maintaining catalog of every installed toolkit skill, grouped by plugin with its invocation and a one-line 'use when', read from the live skill set so it never goes stale. Typing /bespunky in the slash menu filters to the whole toolkit. Also rotates a few tips for installed toolkit plugins into Claude Code's working spinner; turn them off, on or list them with /bespunky:tips.",
   "version": "0.2.0",
   "author": {
     "name": "BeSpunky",

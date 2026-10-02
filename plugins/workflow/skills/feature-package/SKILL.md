@@ -1,7 +1,7 @@
 ---
 name: feature-package
 description: >-
-  A feature is a PACKAGE, not a scatter of files — one effort, one slug, one folder that holds everything about it. Use whenever an effort produces something durable that isn't code: a brief, a vision, a staging, a mock, a decision, a research note, a plan, a handoff baton — and the moment you catch yourself asking "where should I put this doc?", inventing a new folder for a write-up, dropping a `NOTES.md` at the repo root, or about to hand the user an important decision that will only ever exist in a chat transcript. The core move — **the effort's slug is its identity, and its package is `docs/features/<YYYY-MM-DD>-<slug>/`.** The SAME slug names the git branch (`feat/<slug>`) and worktree (`.claude/worktrees/<slug>`) from `branch-and-release`, so the code and the thinking behind it carry one name and can always be found from each other; the DATE prefix makes the trail chronological and lets a second pass at the same feature (a redesign, a year on) sit beside the first instead of overwriting it. The package is born WITH the worktree, at the start of the effort — not written up at the end — and every skill that produces a durable artifact writes INTO it rather than into a private home of its own: the design quartet's `BRIEF.md` / `VISION.md` / `STAGING.md` / `DECISION.md` (`distill-the-brief` → `envision-the-experience` → `stage-the-vision` → `mock-to-choose`), the throwaway self-ignoring `mocks/`, the effort's `handoffs/` batons (`session-handoff`), and whatever else the effort genuinely produces. Two rules keep a package honest — **the CONCLUSION is durable, the EVIDENCE is disposable** (a decision, in the user's own words, and the roads not taken, survive; the mocks, the scratch, the explorations are thrown at will and NOTHING may depend on them), and **a package is written as it happens, never reconstructed afterwards** (a doc written at the end is a memory, and memories are where the reasons go missing). It is NOT a documentation ritual, NOT a required set of files (an effort writes only the artifacts it actually has), and NOT a second memory system — it is the answer to "six months from now, why was it done this way, and what did we already rule out?" An expression of `bespunky-engineering:architect-mentality` — *place everything on purpose* (never because it merely fits), *model the missing concept* (the effort is a thing, so give it a home), *automate every repeated process*, and *preserve understanding and proof*.
+  A feature is a PACKAGE — one effort, one slug, one folder (docs/features/YYYY-MM-DD-slug/, the same slug as its branch and worktree) holding everything durable it produces. Use whenever an effort produces something durable that isn't code — a brief, vision, staging, mock, decision, research note, plan or handoff baton — and the moment you catch yourself asking "where should I put this doc?", inventing a new folder for a write-up, dropping a NOTES.md at the repo root, or about to leave an important decision only in a chat transcript. The package is born with the worktree and written as it happens, never reconstructed at the end; the conclusion is durable, the evidence (mocks, scratch) disposable. NOT a documentation ritual, a required set of files, or a second memory system. To orient across many efforts use bespunky-workflow:project-standing; to relay one live effort into a fresh session, bespunky-workflow:session-handoff.
 ---
 
 # A Feature Is a Package
@@ -13,6 +13,15 @@ Almost none of that survives. It lives in a chat transcript that gets cleared, a
 The fix is not "write more docs." It is to notice that **the effort is a thing** — it has an identity, a lifespan, and a set of artifacts — and to give that thing a **home**.
 
 > **One effort. One slug. One folder.**
+
+---
+
+## When to use
+
+- **Whenever an effort produces something durable that isn't code** — a brief, a vision, a staging, a mock, a decision, a research note, a plan, a handoff baton.
+- **The moment you catch yourself** asking "where should I put this doc?", inventing a new folder for a write-up, dropping a `NOTES.md` at the repo root, or about to hand the user an important decision that will only ever exist in a chat transcript.
+- **What it is not:** a documentation ritual, a required set of files (an effort writes only the artifacts it actually has), or a second memory system. It is the answer to *"six months from now, why was it done this way, and what did we already rule out?"*
+- **Neighbours:** orienting across many efforts after a gap is [[project-standing]]; carrying one live effort into a fresh session is [[session-handoff]] (whose batons live in this package's `handoffs/`).
 
 ---
 
