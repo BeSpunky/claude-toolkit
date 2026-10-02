@@ -5,7 +5,7 @@ allowed-tools: Bash, Read
 ---
 
 The user ran `/sync $ARGUMENTS`, which means **they have explicitly asked for this sync, in this
-conversation, right now**. That matters for step 3 — it is the one thing that authorises `--yes`.
+conversation, right now**. That matters for step 4 — it is the one thing that authorises `--yes`.
 
 Do these in order, stopping at the first that genuinely fails.
 
@@ -66,10 +66,40 @@ If they differ, the steps you are reading are the *old* release's. **Read `$PLUG
 follow that instead**, from step 3 onward — the scaffolder you are about to run is its scaffolder, not this
 one's. Say in one line that you did so.
 
-## 3. Run the sync
+## 3. Decide WHERE it runs — before it runs, without asking
+
+A sync is a change like any other: the ladder commits as it goes, and the generators rewrite files. So the
+always-on branch rule applies to it exactly as to any other request (`bespunky-workflow:branch-and-release`,
+*Step 0*): classify first, and when the answer is "not this tree", **open the worktree yourself — don't ask,
+and don't run the sync here to see whether it refuses.** The `protected-branch` refusal below is the
+scaffolder's backstop for when this step was skipped, not a question for the user.
+
+- **On `development`, `staging`, `main` or `master`, and a `development` branch exists** — the sync is its own
+  unit of work. Open a worktree off `development` and sync THERE:
+
+  ```
+  SLUG="house-sync-$(date -u +%F)"
+  git worktree add ".claude/worktrees/$SLUG" -b "chore/$SLUG" development
+  ```
+
+  If that worktree already exists (an earlier sync today, not yet merged), it is the same effort — use it.
+  Run step 4 from inside the worktree, with the Nx workspace-root override the branch rule requires for any
+  Nx command in a worktree (`NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$PWD"`). A fresh worktree is clean, so
+  uncommitted work in the tree you started from is untouched and irrelevant to this run. A sync needs no
+  feature package — its migration commits and `SYNC_OK` are the record.
+- **On a feature branch** — sync there only if the sync belongs to that branch's in-flight work (it is
+  testing a toolkit change, say, or the branch exists to adopt the house tooling). Otherwise it is unrelated:
+  open the worktree off `development` exactly as above.
+- **On `main`/`master` with no `development` branch** — there is no branch model to follow, so this stays a
+  genuine question (`no-branch-model`, below). Run in place and let the gate ask it.
+
+Say in one line where the sync is running and why. Promotion afterwards waits for the user's signal like any
+other change — the worktree is where the sync happens, not a licence to merge it.
+
+## 4. Run the sync
 
 ```
-bash "$PLUGIN_NOW/skills/new-project/assets/scaffold.sh" --sync --yes $ARGUMENTS .
+NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$PWD" bash "$PLUGIN_NOW/skills/new-project/assets/scaffold.sh" --sync --yes $ARGUMENTS .
 ```
 
 Running the *resolved* scaffolder is also what makes the payload right: `scaffold.sh` derives the
@@ -101,7 +131,7 @@ for. The one layer a sync always ensures without being asked is the **Nx floor**
 Make no assumption about the stack either: the project may be Angular, plain TypeScript, Python, Go or docs;
 the sync detects what it wears and refreshes exactly that.
 
-## 4. Handle the outcomes that aren't plain success
+## 5. Handle the outcomes that aren't plain success
 
 ### The `[migrate]` line — read it, it is the most consequential thing the sync prints
 
@@ -190,7 +220,7 @@ is the round-tripping the aggregation exists to prevent.
 install, no migrations, no generators, no commits. That is the whole point of refusing at this position, and
 it is the first thing the user needs to know before they read a wall of blockers.
 
-**The gate deliberately does not resolve anything, and neither should you on your own.** It stops because a
+**The gate deliberately does not resolve anything, and — `protected-branch` aside, whose answer the branch rule already fixes — neither should you on your own.** It stops because a
 shell script cannot know what you know: whether the uncommitted work is related to this sync, whether a
 feature package is open, whether a worktree already exists for it, or what the user asked for five minutes
 ago. **Read the situation, propose the options that actually fit it, and let the user choose.** Do not stash,
@@ -208,8 +238,9 @@ someone's git state.
 - **`protected-branch`** — HEAD is on `development`, `staging`, `main` or `master`, **and** this project has
   adopted the house branch model (the gate only fires when a `development` branch exists). The ladder commits
   as it goes, so syncing here would commit straight onto a branch that is supposed to advance only by merging
-  the branch below it. The house answer is a worktree off `development` — sync there, then promote it like
-  any other change. Invoke `bespunky-workflow:branch-and-release` rather than improvising the commands.
+  the branch below it. **This is the one code you resolve yourself, without asking:** it means step 3 was
+  skipped. Open the worktree off `development` exactly as step 3 says and re-run there — the answer is fixed by
+  the house branch rule, so there is nothing for the user to choose.
 
 - **`detached-head`** — HEAD is on no branch, so the ladder's commits would belong to nothing and become
   unreachable the moment anything is checked out. Check out a branch, or create one at this commit, and
@@ -272,7 +303,7 @@ mid-way. Step 1 may matter again, and the gate is cheap.
   toolkit-side fault (usually a broken or partial `@bespunky/nx-tools` install); a reinstall and re-run is
   the fix, not a different flag.
 
-## 5. Report
+## 6. Report
 
 **The sync is finished when it prints `SYNC_OK`. It does not need running again** — say so, because two or
 three passes used to be the habit and people still expect it.
