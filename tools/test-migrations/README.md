@@ -63,7 +63,8 @@ a line that is not a comment.
 the tree, so no fixture needs to remember it. The claim is per *rung*, not per ladder: re-running a whole
 ladder legitimately is not idempotent, because a later rung can create the anchor an earlier one looks for.
 
-**Coverage today is `0.33.0` and `0.33.1`.** The eleven earlier rungs have no cases. Back-filling them is
+**Coverage today is `0.33.0`, `0.33.1`, `0.34.0`, and `0.24.0`'s `unify-serve-targets`** (back-filled for the
+`host`-stripping fix). The other earlier rungs have no cases. Back-filling them is
 real work with its own judgement calls about what each should assert — worth doing, deliberately left out
 of the effort that built the harness.
 

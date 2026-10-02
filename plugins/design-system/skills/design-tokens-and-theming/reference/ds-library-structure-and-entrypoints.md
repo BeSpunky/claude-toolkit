@@ -4,11 +4,15 @@ The general rule (`bespunky-engineering:nx-monorepo-and-dx` → library boundari
 folder = one entry point*, and **the entry-point config is the only thing that declares the boundary**. This
 file is that rule applied to a design system, where it has three consequences people routinely miss.
 
+It is framework-neutral: *what* the entry-point config is depends on your packager (a subpath in the package's
+`exports` map, an ng-packagr secondary entry point, a package per component in a workspace), so the per-stack
+mechanics live in **adapters** — see the end of this file.
+
 ## The shape
 
 ```
 packages/design-system/
-├── styles/                      the SASS surface
+├── styles/                      the SASS surface (the house's author-time choice)
 │   ├── _index.scss              ★ PUBLIC — @forward … show; the only file anyone outside @use's
 │   ├── _core/                   the TOKEN ENGINE (private)
 │   │   ├── _tokens.scss         the token maps — the ONLY file with a literal value in it
@@ -20,11 +24,11 @@ packages/design-system/
 ├── src/
 │   ├── index.ts                 ★ PUBLIC — the primary entry point (@scope/design-system)
 │   └── lib/                     the implementation. NO COMPONENTS.
-└── button/                      one promoted component = one SECONDARY ENTRY POINT
-    ├── ng-package.json          ← THIS FILE IS THE BOUNDARY
+└── button/                      one promoted component = one ENTRY POINT of its own
+    ├── <entry-point config>     ← THIS IS THE BOUNDARY (whatever your packager reads)
     └── src/
         ├── index.ts             ★ PUBLIC — the entry's contract
-        ├── button.component.ts
+        ├── button.*             the component, in your stack's form
         └── _parts/              helpers, sub-components, types a consumer must not depend on
 ```
 
@@ -35,14 +39,14 @@ tipped into.
 
 Three kinds of surface, and each publishes differently:
 
-1. **The SASS entry point** — the only one with a side effect (the theme emission), and even that only when
-   *called*. Resolved in-repo via a **sass load path** and published via the package `exports` map. (See *The
-   SASS API layer* — SASS cannot read tsconfig paths, so the load path is not a workaround, it's the only
+1. **The stylesheet entry point** — the only one with a side effect (the theme emission), and even that only
+   when *called*. Resolved in-repo via a **sass load path** and published via the package `exports` map. (See
+   *The SASS API layer* — SASS cannot read tsconfig paths, so the load path is not a workaround, it's the only
    channel.)
 2. **The primary TS entry point** — deliberately tiny. In a design system, TypeScript is *not* the main
-   surface: the theming service is about all that belongs here, because it's the one part of the mechanism CSS
-   can't express.
-3. **One secondary entry point per component** — `@scope/design-system/button`.
+   surface: the theming owner (the one thing that writes the mode attribute) is about all that belongs here,
+   because it's the one part of the mechanism CSS can't express.
+3. **One entry point per component** — `@scope/design-system/button`.
 
 ## Public vs private, enforced twice
 
@@ -64,8 +68,8 @@ The alternative — a single `@scope/design-system/components` barrel re-exporti
 costs you three things:
 
 - **Tree-shaking.** Import one component, and the barrel's module graph drags the rest in. Bundlers are better
-  at this than they used to be; they are not perfect, and Angular components with providers and side-effectful
-  decorators are exactly the case where they aren't.
+  at this than they used to be; they are not perfect, and components with side-effectful registration
+  (decorators, providers, `customElements.define`) are exactly the case where they aren't.
 - **Boundaries.** Each component is its own black box, with its own dependency surface. A shared barrel makes
   them one box with a very wide contract.
 - **Peace.** A single ever-growing barrel is a merge-conflict hotspot on every branch that adds a component.
@@ -83,26 +87,28 @@ So the library ships **structure, conventions, and the mechanism**. Components a
 they've earned it: on the **second occurrence** of a pattern
 (`bespunky-design-system:design-system-first` → the promotion loop).
 
-## Adding a component is a generator call
+## Adding a component — promote it into its own entry point, never by hand
 
-```bash
-nx g @bespunky/nx-tools:ds-component button
-```
+Promoting a component means giving it **its own entry point / package export**, declared in whatever config your
+packager reads. Wherever a generator exists for that, use it (in a house project wearing the design-system
+layer: `nx g @bespunky/nx-tools:ds-component <name>` — see the adapter); otherwise write the entry declaration
+**first**, as the deliberate act it is.
 
-**Never hand-create the folder.** This is the consequence people miss: the `ng-package.json` **is** the entry
-point. Without it, the component still *resolves in your editor* (the tsconfig path alias sees the file), it
-still compiles, and it still works in dev — and then it **vanishes from the published package**, because
-ng-packagr never knew the entry existed. The failure surfaces at a consumer's `npm install`, weeks later.
+**Never hand-create just the folder.** This is the consequence people miss: the entry-point declaration **is**
+the entry point. Without it, the component still *resolves in your editor* (the tsconfig path alias sees the
+file), it still compiles, and it still works in dev — and then it **vanishes from the published package**,
+because the packager never knew the entry existed. The failure surfaces at a consumer's `npm install`, weeks
+later.
 
-The generator also wires the entry's own sass load path and seeds a SCSS in which every value is already a
-token — which is not cosmetic. That file is where a developer's first styling instinct lands, and an empty one
-invites a hex.
+A good generator also wires the entry's own sass load path and seeds a stylesheet in which every value is
+already a token — which is not cosmetic. That file is where a developer's first styling instinct lands, and an
+empty one invites a hex.
 
 ## Keeping it publishable
 
 - **The design system never imports from an app.** Not a type, not a constant, not "just this one enum". It is
   publishable; a reach-back makes that a lie, and it will be discovered by the build, at the worst moment.
-- **Its dependencies are its own.** A component that quietly needs the app's `AuthService` is not a
+- **Its dependencies are its own.** A component that quietly needs the app's auth service is not a
   design-system component — it's a feature component in the wrong folder.
 - **Version it as a unit.** All entry points ship together at one version; that's what makes the deep imports
   safe.
@@ -117,17 +123,27 @@ own subpath.
 
 ## Pitfalls
 
-- **A hand-made component folder** — resolves in dev, missing from the package. The single most expensive
-  mistake in this file.
+- **A hand-made component folder with no entry declaration** — resolves in dev, missing from the package. The
+  single most expensive mistake in this file.
 - **Reaching into a `_`-prefixed folder** from an app — works, until the library reorganizes.
 - **A private folder called `internal`** — the `_` already told the reader it's private; the name was your one chance to say *what it is*, and a bucket named for its access level becomes a junk drawer.
 - **A barrel that re-exports everything** — tree-shaking loss, merge conflicts, one giant contract.
 - **Shipping the SASS source but forgetting the `exports` entry** (or vice versa) — resolves in-repo, fails on
   `npm install`. Verify by building the package and reading the emitted `dist/**/package.json`, not by trusting
   the source.
-- **Forgetting to declare the app→DS dependency** (via `implicitDependencies`) — if nothing else couples them, the app replays a cached bundle with stale tokens. (See
-  *The SASS API layer*.)
+- **Forgetting to declare the app→DS dependency** (in Nx, via `implicitDependencies`) — if nothing else couples
+  them, the app replays a cached bundle with stale tokens. (See *The SASS API layer*.)
 - **A design system with an app-shaped dependency** — it was never publishable; you just hadn't tried yet.
+
+## Adapters — your packager's spelling of the above
+
+| Stack | Adapter | The entry-point boundary is… |
+| --- | --- | --- |
+| **Angular** (house layers `angular` + `design-system`) | `reference/adapters/angular-ds-library.md` | an **ng-packagr secondary entry point** — its `ng-package.json` — generated by `nx g @bespunky/nx-tools:ds-component <name>` |
+| **Any npm package** (React, Vue, web components, plain TS) | *(no house adapter)* | a **subpath in the package's `exports` map** (plus the matching tsconfig path in-repo) — or, at larger scale, a package per component in the workspace |
+
+A stack without a house adapter applies this file directly; the rules don't change, only the name of the file
+that declares the boundary.
 
 **Mentality anchors:** *Everything is a black box* (the entry-point config is what makes the boundary real —
 without it there is no box) · *Automate every repeated process* (a component enters through a generator, never

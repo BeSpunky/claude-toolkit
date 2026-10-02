@@ -1,5 +1,9 @@
-// House generator: write .claude/settings.json (marketplaces + autoUpdate + enabled plugins),
-// ensure the .claude/data mount source exists, and keep Claude local state out of git.
+// House generator: write .claude/settings.json (marketplaces + autoUpdate + enabled plugins).
+//
+// COMPOSED FROM THE ACTIVE LAYERS. Which plugins a project enables is a fact about its layers — the Nx plugin
+// with the Nx floor, `bespunky-angular` with Angular, the design-system plugin with a design system — so each
+// layer declares them (`descriptor.claudePlugins`) and this generator enables the union. The devcontainer's
+// plugin pre-install reads the SAME list (`_utils/layer-contributions.ts`), so the two can no longer drift.
 //
 // MERGE, never clobber. This file is co-owned: the house owns the marketplace/plugin/permission keys,
 // but the PROJECT owns everything it adds afterwards (its own `hooks`, extra `permissions.allow`
@@ -26,65 +30,48 @@
 import { type Tree } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { activeLayers, claudePlugins } from '../_utils/layer-contributions';
 
 type Json = Record<string, unknown>;
 
-export default async function claudeSettingsGenerator(tree: Tree): Promise<void> {
-  const house = JSON.parse(readFileSync(join(__dirname, 'settings.json.tpl'), 'utf8')) as Json;
+interface ClaudeSettingsSchema {
+  /** The layers this project has. Default: DETECTED from the workspace. */
+  layers?: string[] | string;
+}
+
+export default async function claudeSettingsGenerator(tree: Tree, options: ClaudeSettingsSchema = {}): Promise<void> {
+  const layers = activeLayers(tree, options.layers);
+  const house = { ...pluginSettings(layers), ...(JSON.parse(readFileSync(join(__dirname, 'settings.json.tpl'), 'utf8')) as Json) };
   const seeds = JSON.parse(readFileSync(join(__dirname, 'settings.seed.json.tpl'), 'utf8')) as Json;
   const project = readJson(tree, '.claude/settings.json');
   const merged = deepSeed(project ? deepMerge(project, house) : { ...house }, seeds);
 
   tree.write('.claude/settings.json', `${JSON.stringify(merged, null, 2)}\n`);
 
-  // Ensure the devcontainer bind-mount source (.claude/data) exists locally after scaffolding.
-  if (!tree.exists('.claude/data/.gitkeep')) {
-    tree.write('.claude/data/.gitkeep', '');
-  }
+  // The devcontainer's `.claude/data` bind source is NOT created here: it is gitignored, so anything written now
+  // exists on this machine only and a fresh clone would still lack it. The devcontainer's host probe creates it
+  // on the host before every container open — the one place that holds on every machine.
 
-  // Keep Claude Code local state out of git.
-  ensureIgnored(tree, '# Claude Code local state', ['.claude/data/']);
-
-  // Keep Nx's CACHES out of git — an agent-DX concern, which is why it lives in this layer's generator.
-  // `nx init` on an EXISTING repo ignores `.nx/polygraph` but not `.nx/cache` or `.nx/workspace-data`, so a
-  // retrofitted repo has three files that churn on every single `nx` invocation. For a human that is noise;
-  // for an agent it is worse, because a permanently dirty tree makes "is this change mine?" unanswerable and
-  // invites committing machine-local cache. Additive and idempotent: an entry already present is left alone,
-  // so a project that ignores these its own way is untouched.
-  ensureIgnored(tree, '# Nx caches (machine-local; never committed)', ['.nx/cache', '.nx/workspace-data']);
-
-  // The sync's own transient lock directory. Nx builds its pre-migration checkpoint with `git add -A`, so a
-  // lock the sync is still holding gets swept into that commit and only released afterwards — it has landed
-  // in this repo's history twice now (`abd143e`, and again on the run that added this line). Machine-local
-  // and short-lived by definition, so it is never something a clone should receive.
-  ensureIgnored(tree, "# The house sync's transient lock (machine-local; never committed)", ['.bespunky-sync.lock/']);
+  // The layers' `.gitignore` blocks are NOT written here: they are a floor concern (the `gitignore` generator,
+  // the nx layer's step), so a repo without the agent layer still ignores what its layers' tooling creates.
 }
 
 /**
- * Append any of `entries` that aren't already mentioned in `.gitignore`, under a single heading.
- *
- * Substring matching is deliberate and sufficient here: these are distinctive paths, and the question being
- * asked is "does this repo already deal with this?", not "is there an exactly-equal line". A repo that
- * ignores `.nx/` wholesale already covers `.nx/cache`, and re-adding it would be noise.
+ * The marketplace + plugin keys, from the active layers. OWNED (re-asserted every sync): which marketplaces exist
+ * and which house plugins are on is infrastructure. A plugin the project enabled itself — or one the house no
+ * longer contributes — is a key this does not declare, so the merge leaves it exactly as the project has it.
  */
-function ensureIgnored(tree: Tree, heading: string, entries: string[]): void {
-  const current = tree.exists('.gitignore') ? (tree.read('.gitignore', 'utf8') ?? '') : '';
-  const missing = entries.filter((entry) => !current.includes(entry));
-
-  const appended =
-    missing.length === 0
-      ? current
-      : `${current}${current === '' || current.endsWith('\n') ? '' : '\n'}\n${heading}\n${missing.join('\n')}\n`;
-
-  // Tidy the whole file, even on a run that appends NOTHING.
-  //
-  // `.gitignore` is written by several hands — `nx init` appends its own block with leading newlines, and
-  // so does every generator that owns a rule here — and the result accumulates runs of blank lines that no
-  // single author is responsible for. This layer owns .gitignore hygiene, so it normalises the file it
-  // touches rather than only the lines it contributed; anything else leaves the mess for a human to notice.
-  // Idempotent by construction: collapsing is a fixed point, so a second run rewrites nothing.
-  const tidied = appended.replace(/\n{3,}/g, '\n\n');
-  if (tidied !== current) tree.write('.gitignore', tidied);
+function pluginSettings(layers: Parameters<typeof claudePlugins>[0]): Json {
+  const { plugins, marketplaces } = claudePlugins(layers);
+  return {
+    extraKnownMarketplaces: Object.fromEntries(
+      marketplaces.map(([name, market]) => [
+        name,
+        { source: { source: 'github', repo: market.repo }, ...(market.autoUpdate ? { autoUpdate: true } : {}) },
+      ]),
+    ),
+    enabledPlugins: Object.fromEntries(plugins.map((plugin) => [plugin, true])),
+  };
 }
 
 /**

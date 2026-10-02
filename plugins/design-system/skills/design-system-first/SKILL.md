@@ -1,7 +1,7 @@
 ---
 name: design-system-first
 description: >-
-  Design-system-first discipline - before you build any feature UI you go to the design system, and every visual value in the codebase comes from it. Use BEFORE writing or changing any component template or SCSS - and the moment you reach for a raw hex/rgb/hsl, a magic px/rem/em, an ad-hoc font stack or weight, a box-shadow, a border-radius, a hand-typed `transition: 200ms ease`, a copy-pasted card/button/panel/field, a `::ng-deep` reaching into another component, an `!important`, a one-off `@Input() variant` boolean, or a "just style it here for now". The core move - the design system is the SINGLE SOURCE OF VISUAL TRUTH, and a feature component is a COMPOSITION of design-system components and tokens, never a place where new visual values are invented: every colour, space, radius, type step, elevation, border, duration and easing is a TOKEN (a CSS custom property, consumed through the DS's SASS API), a component reads SEMANTIC tokens only (never a raw primitive), and every UI pattern that appears a SECOND time is PROMOTED into the design system as a reusable component (`nx g @bespunky/nx-tools:ds-component <name>` - one secondary entry point each) rather than copy-pasted, with BOTH sites migrated onto it and the copies deleted. When the design system LACKS the concept you need, you MODEL it (add the token, add the semantic alias, extend the scale, add the component) - you never work around the gap with a local override, an !important, a ::ng-deep reach-in, a duplicated token, or a variant boolean; a gap in the DS is a design gap, and patching it locally is the styling flavour of the patch that `bespunky-engineering:architecture-first` forbids, exactly as a magic literal is in logic - and it is worse, because CSS has no compiler to catch the drift, so it compounds silently until "change the brand colour" is a four-hundred-file diff. This is what makes a re-theme, a rebrand, or a redesign a change of TOKENS instead of a change to a thousand component files (the styling twin of `bespunky-product-ux:redesign-means-rethink` - re-token, don't re-hardcode). Triggers - "style this", "add a button/card/modal/table/form", "match the design", "make it look like X", "add dark mode", "change the brand colour", "this component needs its own styles", "make it consistent", any new feature UI, any new or edited component SCSS file. It is NOT the technique layer: for token taxonomy and naming, CSS custom properties, the SASS API, theming and modes, encapsulation, and the design system library's structure and entry points, route through `bespunky-design-system:design-tokens-and-theming`. It also does NOT invent the look - the visual system (palette, type, composition, motion language) comes from `bespunky-product-ux:stage-the-vision`; this skill enforces that the look lives in ONE place and is consumed, never re-typed.
+  Design-system-first discipline - before you build any feature UI you go to the design system, and every visual value in the codebase comes from it. Any stack (Angular, React, Vue, Svelte, web components, plain CSS). Use BEFORE writing or changing any component template, markup or stylesheet - and the moment you reach for a raw hex/rgb/hsl, a magic px/rem/em, an ad-hoc font stack or weight, a box-shadow, a border-radius, a hand-typed `transition: 200ms ease`, a copy-pasted card/button/panel/field, a style reach-in across a component boundary (`::ng-deep`, `:global`, `>>>`/`/deep/`), an `!important`, a one-off variant boolean prop/input, or a "just style it here for now". The core move - the design system is the SINGLE SOURCE OF VISUAL TRUTH, and a feature component is a COMPOSITION of design-system components and tokens, never a place where new visual values are invented: every colour, space, radius, type step, elevation, border, duration and easing is a TOKEN (a CSS custom property at runtime, consumed through the DS's author-time API - the house uses SASS), a component reads SEMANTIC tokens only (never a raw primitive), and every UI pattern that appears a SECOND time is PROMOTED into the design system as a reusable component - its own entry point / package export (in a house project whose design system has the Angular binding, `nx g @bespunky/nx-tools:ds-component <name>`) - rather than copy-pasted, with BOTH sites migrated onto it and the copies deleted. When the design system LACKS the concept you need, you MODEL it (add the token, add the semantic alias, extend the scale, add the component) - you never work around the gap with a local override, an !important, a reach-in, a duplicated token, or a variant boolean; a gap in the DS is a design gap, and patching it locally is the styling flavour of the patch that `bespunky-engineering:architecture-first` forbids, exactly as a magic literal is in logic - and it is worse, because CSS has no compiler to catch the drift, so it compounds silently until "change the brand colour" is a four-hundred-file diff. This is what makes a re-theme, a rebrand, or a redesign a change of TOKENS instead of a change to a thousand component files (the styling twin of `bespunky-product-ux:redesign-means-rethink` - re-token, don't re-hardcode). Triggers - "style this", "add a button/card/modal/table/form", "match the design", "make it look like X", "add dark mode", "change the brand colour", "this component needs its own styles", "make it consistent", any new feature UI, any new or edited component stylesheet. It is NOT the technique layer: for token taxonomy and naming, CSS custom properties, the author-time (SASS) API, theming and modes, encapsulation and its per-framework adapters, and the design system library's structure and entry points, route through `bespunky-design-system:design-tokens-and-theming`. It also does NOT invent the look - the visual system (palette, type, composition, motion language) comes from `bespunky-product-ux:stage-the-vision`; this skill enforces that the look lives in ONE place and is consumed, never re-typed.
 ---
 
 # Design-system-first — the DS is the single source of visual truth
@@ -18,14 +18,14 @@ it.
 
 **The rule.** Every colour, space, radius, type step, elevation, border, duration and easing comes from the
 design system, as a **token**. A feature component **composes** design-system components and tokens; it does
-not **invent** appearance. Its own SCSS should be little more than layout.
+not **invent** appearance. Its own stylesheet should be little more than layout.
 
 ## What a styling patch is (refuse these)
 
 Each of these is a way of routing *around* the system instead of *evolving* it. They are the same smells
 `bespunky-engineering:architecture-first` already forbids, wearing CSS.
 
-- **A raw colour** — a hex, `rgb()`, `hsl()`, or a named colour in a component's SCSS or template. Exactly
+- **A raw colour** — a hex, `rgb()`, `hsl()`, or a named colour in a component's stylesheet or template. Exactly
   one file in the workspace is allowed to contain a literal colour: the token file. A raw colour **is** a
   magic value.
 - **A magic dimension** — a bare `px`/`rem` for spacing, radius, border width, font size, line height. If
@@ -36,14 +36,16 @@ Each of these is a way of routing *around* the system instead of *evolving* it. 
 - **A copy-pasted pattern** — the second card, the second toolbar, the second empty state. This is not a
   shortcut; it is a **promotion signal** (see below), and ignoring it is how a design system dies with a
   full component library.
-- **`::ng-deep`** (or a global selector reaching into another component's internals). This is
-  *"reach into another module's internals"*, in CSS. It is banned outright — not discouraged, banned. A
-  component you cannot style from outside is missing a **token** or a **part**; *that* is the finding, and
-  a piercing selector buries it.
+- **A style reach-in across a component boundary** — Angular's `::ng-deep`, CSS Modules' `:global(…)`,
+  Vue's `>>>` / `/deep/` / `:deep()`, or any global selector written to land inside another component's
+  internals. This is *"reach into another module's internals"*, in CSS. It is banned outright — not
+  discouraged, banned. A component you cannot style from outside is missing a **token** or a **part**;
+  *that* is the finding, and a piercing selector buries it.
 - **`!important`** — an admission that specificity is being *fought* rather than designed.
-- **A one-off `variant` boolean** — `@Input() isCompact`, `@Input() isDanger`, `@Input() isBig`. Three
-  booleans are eight states, of which you designed three. Variants are **data**: a union type rendered as a
-  host attribute the SCSS selects on.
+- **A one-off variant boolean prop/input** — `isCompact`, `isDanger`, `isBig` (an Angular `@Input()`, a
+  React/Vue prop, a web-component attribute — the shape is the same). Three booleans are eight states, of
+  which you designed three. Variants are **data**: a union type rendered as a host/root attribute the
+  stylesheet selects on.
 - **A duplicated token** — re-declaring `--brand-500` locally "so it's handy here". Now there are two
   truths, and one of them will drift.
 - **A local override of a DS component's internals** — wrapping it in a div and re-styling its guts. If the
@@ -74,16 +76,21 @@ You are allowed to write a UI pattern **once**.
   **concept** rather than a coincidence, and two real use-sites are *exactly* enough evidence to design its
   API honestly. (One is a guess. Three is debt — by then the copies have diverged and the migration is
   archaeology.)
-- **Promote it:**
+- **Promote it** — into the design system as **its own entry point / package export**, importable on its
+  own (e.g. `@<scope>/design-system/<name>`) and independently tree-shakeable. The boundary is the
+  *export*, not the folder: whatever your packaging mechanism (a subpath in `package.json` `exports`, a
+  secondary entry point, a package per component), the component is not promoted until it is publicly
+  importable by that path. In a house project whose design system has the **Angular** binding (the
+  `design-system` layer worn with the `angular` one), the Angular adapter generates exactly that — a design
+  system on the neutral core has no component generator, and you add the export by your stack's own means:
   ```bash
   nx g @bespunky/nx-tools:ds-component <name>
   ```
-  One secondary entry point, importable as `@<scope>/design-system/<name>`, independently tree-shakeable.
   **Never hand-create the folder** — the entry-point config *is* the boundary; a hand-made folder resolves
   in the editor and vanishes on publish.
 - **Design its API from the two real consumers** — not from imagination. Inputs are **data**; variants are a
-  **union**; structure is **projected content**; the styling surface is **tokens in, parts out**. (See
-  `bespunky-engineering:angular-architecture` → component API ergonomics.)
+  **union**; structure is **projected/slotted content**; the styling surface is **tokens in, parts out**. (When the
+  project wears Angular, see `bespunky-angular:angular-architecture` → component API ergonomics.)
 - **Migrate BOTH sites and delete the copies.** A promotion that leaves the original behind is not a
   promotion — it is a third copy, and now the divergence has a blessed version to hide behind.
 
@@ -101,7 +108,7 @@ The gap **is the finding**. Name it precisely, because the fix differs:
 | A **semantic alias** | The value exists but not the *meaning* — you need `--surface-raised`, and all you can find is `--gray-100` | Add the semantic name. A component that reads a primitive is reading a swatch, and a swatch cannot survive a re-theme |
 | A **scale step** | The space scale jumps 16 → 24 and you want 20 | Either the scale is wrong, or your design is off-system. Decide which — don't split the difference with a literal |
 | A **component** | The pattern is real and reusable | `ds-component`, then migrate |
-| A **styling hook** | A DS component won't bend, and you were about to `::ng-deep` past it | Give it a token or a `::part`. The reach-in is the symptom; the missing hook is the bug |
+| A **styling hook** | A DS component won't bend, and you were about to reach in past it (`::ng-deep`, `:global`, `:deep()`) | Give it a token or a part (`::part`, a documented class/attribute hook). The reach-in is the symptom; the missing hook is the bug |
 
 Then **consume** what you added. It now exists for everyone, forever — which is the entire return on the
 thirty seconds it cost.
@@ -117,7 +124,7 @@ Two roles, and confusing them is how the system rots:
 
 - A **design-system component** *defines* appearance. It owns a look, exposes a contract (tokens in, parts
   out, variants as data), and is the only place that look exists.
-- A **feature component** *composes*. Its SCSS should be mostly **layout** — grid, flex, gap, using space
+- A **feature component** *composes*. Its stylesheet should be mostly **layout** — grid, flex, gap, using space
   tokens. The moment a feature component starts defining *appearance* (a shadow, a border treatment, a
   hover state with a colour it chose), that appearance belongs in the design system, and you are watching
   the fork happen in real time.
@@ -137,7 +144,7 @@ token layer — that is a real finding about the token layer, not a licence to s
 ## Stop signals
 
 > "I'll just use `#3b82f6` here." · "It's only one pixel value." · "Let me copy this card and tweak it." ·
-> "I'll add an `isCompact` input." · "I'll `::ng-deep` into it — it's faster." · "`!important` will fix it."
+> "I'll add an `isCompact` input." · "I'll `::ng-deep` / `:global` into it — it's faster." · "`!important` will fix it."
 > · "I'll add the token later." · "The DS doesn't have it, so I'll do it locally for now." · "It's just this
 > one screen."
 
@@ -147,9 +154,9 @@ makes it a discipline rather than a preference.
 ## Done criteria
 
 - **Zero** raw colours, magic dimensions, and hand-typed durations outside the token file.
-- **Zero** `::ng-deep`. **Zero** `!important`.
+- **Zero** reach-ins across a component boundary (`::ng-deep`, `:global`, `:deep()`, …). **Zero** `!important`.
 - Every pattern that appeared twice was **promoted**, and **both** call sites migrated.
-- Every concept the DS was missing was **added to the DS**, at the right tier, via the generator.
+- Every concept the DS was missing was **added to the DS**, at the right tier, via the generator (where there is one).
 - A re-theme would touch **tokens only**. (Ask it out loud. If the honest answer is "and also these six
   components", you are not done.)
 
@@ -168,9 +175,10 @@ change. So the policy has two halves: this skill (the depth) and an **always-on 
 > **Related.** `bespunky-engineering:architecture-first` (the same no-patch logic — a raw hex *is* a magic
 > value, a duplicated card *is* copy-paste) · `bespunky-engineering:architect-mentality` (*model the missing
 > concept*, *place everything on purpose*, *never do the same thing by hand twice*, *design for the
-> consumer*) · `bespunky-design-system:design-tokens-and-theming` (the *how* — tokens, the SASS API,
-> theming, encapsulation, the library's entry points) · `bespunky-product-ux:stage-the-vision` (where the
+> consumer*) · `bespunky-design-system:design-tokens-and-theming` (the *how* — tokens, the author-time
+> SASS API, theming, encapsulation and its framework adapters, the library's entry points) · `bespunky-product-ux:stage-the-vision` (where the
 > visual system comes *from* — this skill doesn't invent the look, it makes it live in one place) ·
 > `bespunky-product-ux:redesign-means-rethink` (a redesign changes tokens, not a thousand files) ·
-> `bespunky-engineering:angular-architecture` (a promoted component's input/output API) ·
+> `bespunky-angular:angular-architecture` (when the project wears Angular — a promoted component's
+> input/output API) ·
 > `bespunky-engineering:nx-monorepo-and-dx` (the design system's boundaries and entry points).

@@ -44,11 +44,17 @@ Much of what people reach for a library or a scroll listener to do is now **nati
 
 The rule: research the **native** engine for the motion the Staging calls for before adding a dependency or a scroll handler — the platform is usually both lighter and smoother.
 
-## On the house stack (Angular / Nx)
+## On your stack
+
+- **Prefer the platform first** — native CSS transitions/animations and the Web Animations API — before your framework's own animation module, which is usually heavier; reach for the module only when its state/trigger ergonomics genuinely fit.
+- **Route changes** can use the native **View Transitions API**; many routers now wire it in for you.
+- **Wrap GSAP/imperative engines behind a seam:** create and kill the timeline in one owned unit (a component, hook, directive, or service), run the animation **outside the framework's change detection / render loop** to avoid thrash, **clean up on teardown** (`gsap.context()` + revert), and guard for **SSR** (no DOM, no `window`, until you're client-side). Never let the library leak across the component boundary.
+
+**Angular adapter** — when the project wears Angular (its `HOUSE.md` stamp lists `angular` in `layers=`):
 
 - Modern Angular leans on **native CSS + Web Animations API**; `@angular/animations` is comparatively heavy and de-emphasized — reach for it only when its trigger/state ergonomics genuinely fit.
 - **Router-level View Transitions are built in:** `provideRouter(routes, withViewTransitions())` animates route changes with the native API.
-- **Wrap GSAP/imperative engines behind a seam** (`bespunky-engineering:angular-native-wrappers`): create/kill in a directive or service, run animation outside Angular (`NgZone.runOutsideAngular`) to avoid change-detection thrash, and clean up on destroy (`gsap.context()` + `DestroyRef`/`ngOnDestroy`). Never let the library leak across the component boundary.
+- **Wrap GSAP/imperative engines behind a seam** (`bespunky-angular:angular-native-wrappers`): create/kill in a directive or service, run animation outside Angular (`NgZone.runOutsideAngular`) to avoid change-detection thrash, and clean up on destroy (`gsap.context()` + `DestroyRef`/`ngOnDestroy`).
 
 ## When NOT to
 

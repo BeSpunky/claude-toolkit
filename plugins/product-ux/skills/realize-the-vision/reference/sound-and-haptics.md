@@ -28,11 +28,16 @@ The senses past sight. A world can *sound* like somewhere and *feel* like someth
 - **Performance & weight:** audio assets add bundle and memory; lazy-load, compress, pool short sounds, and dispose the audio graph on teardown.
 - **Lifecycle:** suspend/resume the `AudioContext` on tab visibility changes; stop sounds when leaving the scene.
 
-## On the house stack (Angular / Nx)
+## On your stack
 
-- Wrap the **`AudioContext`/audio graph** in a service (`bespunky-engineering:angular-native-wrappers`): own creation behind a user gesture, expose a small play/mute API, run scheduling `outside` Angular, and dispose on destroy.
-- Keep a single **sound-preference signal/service** (muted? opted-in?) the whole app honors — like the reduced-motion signal — so consent is enforced by design, not per component.
-- Lazy-load audio assets with the immersive feature's Nx boundary; don't tax first load.
+- Wrap the **`AudioContext`/audio graph** behind a seam (one owned service/module): own creation behind a user gesture, expose a small play/mute API, run scheduling **outside the framework's change detection / render loop**, dispose on teardown, and guard for **SSR** (no `AudioContext` on the server).
+- Keep a single **sound-preference** value (muted? opted-in?) the whole app honors — like the reduced-motion preference — so consent is enforced by design, not per component.
+- Lazy-load audio assets with the immersive feature's boundary; don't tax first load.
+
+**Angular adapter** — when the project wears Angular (its `HOUSE.md` stamp lists `angular` in `layers=`):
+
+- The audio graph lives in an injectable **service** (`bespunky-angular:angular-native-wrappers`), scheduling runs `outside` Angular, and it disposes on destroy.
+- The sound preference is a **signal/service**, beside the reduced-motion one.
 
 ## When NOT to
 

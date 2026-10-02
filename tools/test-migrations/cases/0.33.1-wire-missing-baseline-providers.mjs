@@ -47,6 +47,22 @@ export default {
     },
 
     {
+      // A ladder REPLAYED from a lagging stamp: a sync committed these rungs, then died before house-doc
+      // re-stamped, so the next sync collects 0.33.0 again. By then 0.33.1 has wired provideAppFirebase(), and
+      // 0.33.0 — deciding "not migrated yet" from the stamp — added all four services at the root (+241 kB
+      // initial bundle). "Already migrated" is decided from disk: the per-service files are there.
+      name: 'a replayed ladder (stamp lagging) does not re-add the services 0.33.1 left commented',
+      ladder: [...LADDER, ...LADDER],
+      setup: (tree) => unwiredApp(tree, 'apps/unwired'),
+      expect: (tree, t) => {
+        t.wired('apps/unwired/src/app/app.config.ts', 'provideAppFirebase');
+        for (const fn of ['provideAppAuth', 'provideAppFirestore', 'provideAppStorage', 'provideAppFunctions']) {
+          t.notWired('apps/unwired/src/app/app.config.ts', fn);
+        }
+      },
+    },
+
+    {
       // A project that wired the anchor by hand — or deliberately moved it into a browser-only config — has
       // made a decision. Re-adding it is how Firebase gets double-provided and initialised during SSR, which
       // _utils/wire-provider's header records as a real incident.

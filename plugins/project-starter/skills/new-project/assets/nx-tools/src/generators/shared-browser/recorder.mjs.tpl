@@ -16,13 +16,13 @@
 // request headers and common token query params are REDACTED before anything is written.
 // Never share or commit events.jsonl.
 //
-// Usage:  node recorder.mjs [--cdp=http://127.0.0.1:9223] [--bodies]
+// Usage:  node recorder.mjs [--cdp=<url>] [--bodies]     (default: runtime.mjs's CDP_URL — SB_CDP, else 9223)
 // Exits cleanly on SIGTERM/SIGINT.
 
 import fs from 'node:fs';
+import { CDP_URL as DEFAULT_CDP, loadPlaywright } from './runtime.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────────────────
-const DEFAULT_CDP = 'http://127.0.0.1:9223';
 const RUNTIME = process.env.SB_RUNTIME || `${process.env.XDG_RUNTIME_DIR || '/tmp'}/shared-browser`;
 const LOG_DIR = `${RUNTIME}/logs`;
 const EVENTS = `${LOG_DIR}/events.jsonl`;
@@ -235,17 +235,9 @@ function attachToBrowser(browser) {
 }
 
 // ── Playwright resolution ─────────────────────────────────────────────────────────
+/** Playwright's `chromium`, from the shared browser's OWN pinned runtime (runtime.mjs) — never the workspace's. */
 async function loadChromium() {
-  for (const pkg of ['playwright', 'playwright-core', '@playwright/test']) {
-    try {
-      const mod = await import(pkg);
-      const chromium = mod.chromium ?? mod.default?.chromium;
-      if (chromium) return chromium;
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  throw new Error('Playwright not found. Install one of: playwright, playwright-core, @playwright/test.');
+  return loadPlaywright().chromium;
 }
 
 // ── Connect / reconnect loop ──────────────────────────────────────────────────────

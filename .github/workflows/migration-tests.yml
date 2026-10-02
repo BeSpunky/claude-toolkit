@@ -44,3 +44,8 @@ jobs:
 
       - name: Run migration tests
         run: node tools/test-migrations/run.mjs
+
+      # The layer registry and its generated shell projection (assets/layers.sh): drift between the two, and
+      # the detection/plan behaviour scaffold.sh and the SessionStart hook rely on. Same install, same reason.
+      - name: Run layer registry tests
+        run: node tools/test-layers/run.mjs

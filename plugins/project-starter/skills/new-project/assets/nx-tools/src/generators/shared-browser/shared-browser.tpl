@@ -20,7 +20,7 @@
 #   • a foreign process holding one of our ports is reported, never killed.
 #
 # The seven brief gotchas are baked in by construction (see the inline "gotcha #N" markers):
-#   #1 software-GL flags   #2 unset Wayland   #3 resolve Chromium via playwright/-core/@playwright/test
+#   #1 software-GL flags   #2 unset Wayland   #3 Chromium from OUR pinned runtime (runtime.mjs)
 #   #4 own Xvfb not ambient :12   #5 PID-file lifecycle, never `pkill -f`   #6 validated/explicit param passing
 #   #7 loopback CDP
 #
@@ -34,6 +34,7 @@ SB_DISPLAY="${SB_DISPLAY:-:99}"
 SB_GEOM="${SB_GEOM:-1440x900x24}"
 SB_VNC="${SB_VNC:-5900}"                                   # x11vnc RFB port (loopback)
 SB_CDP="${SB_CDP:-9223}"                                   # Chromium DevTools port (loopback ONLY)
+export SB_CDP                                              # so the recorder and attach.mjs (runtime.mjs CDP_URL) reach the SAME port
 
 # ── The noVNC port: the ONE host-facing port, and therefore the ONE that is ALLOCATED ────────────────
 # VNC and CDP are loopback-only, so they live in this container's own netns and can never collide with
@@ -91,10 +92,11 @@ HOST_VERIFIED_FILE="$SB_RUNTIME/host-verified"             # result of the last 
 OBSERVE="$SB_RUNTIME/observe-only"                         # presence = observe-only (human is driving; attach/verify/navigate refuse to drive)
 PORT_FILE="$SB_RUNTIME/web.port"                           # the allocated noVNC port — so every later verb agrees with the RUNNING stack
 
-# Where the sibling helpers live, and the workspace root (for Node module resolution — gotcha #3).
+# Where the sibling helpers live, and the workspace root (the daemons' working directory).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RECORDER="$SCRIPT_DIR/recorder.mjs"
-PORT_CLAIM="$SCRIPT_DIR/port-claim.mjs"                    # host-port arbitration (see its header for why not bash)
+PORT_CLAIM="$SCRIPT_DIR/../port-claim/port-claim.mjs"      # host-port arbitration — shared with worktree-domains + tools/dev
+PW_RUNTIME="$SCRIPT_DIR/runtime.mjs"                       # the self-contained Playwright runtime (gotcha #3)
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd || echo "$SCRIPT_DIR")"
 
 # The identity the human SEES. noVNC titles the browser tab from the VNC desktop name, so stamping the
@@ -179,7 +181,7 @@ port_holders() {
 }
 
 # ── noVNC port allocation: the port is a RESULT, never a constant ─────────────────────────────────────
-# The ARBITRATION lives in tools/shared-browser/port-claim.mjs, not here. That split is deliberate: bash
+# The ARBITRATION lives in tools/port-claim/port-claim.mjs, not here. That split is deliberate: bash
 # is the right material for process supervision (ss, /proc, setsid, PID lifecycle) and the wrong material
 # for a registry with ownership, expiry and atomicity — the bash version needed an flock and, on lock
 # timeout, proceeded UNLOCKED, leaving a real double-booking race. Node's `open(path,'wx')` removes the
@@ -336,7 +338,7 @@ resolve_web_port() {
 # (reparented to init/PID 1, which reaps it — no zombies). We record the pid via `$$` from inside the
 # wrapper and then `exec`, so the PID file names the ACTUAL daemon regardless of whether setsid forks
 # (a job-control group leader makes it fork; $$+exec pins the real pid either way). Also `cd` to the
-# workspace root so Node resolves `playwright` from node_modules (gotcha #3), and detach stdin.
+# workspace root (a stable cwd for every daemon), and detach stdin.
 spawn() {
   local comp="$1"; shift
   local pidf logf
@@ -422,14 +424,11 @@ preflight_deps() {
   fi
 }
 
-# gotcha #3: resolve Chromium via whichever Playwright package is installed. Printed path, empty on failure.
+# gotcha #3: Chromium comes from the shared browser's OWN pinned Playwright runtime (runtime.mjs) — never
+# the workspace's node_modules, which a Python/Go repo doesn't have and a JS repo pins to its own needs.
+# Installs the runtime + its Chromium on first use (progress on stderr). Printed path, empty on failure.
 resolve_chromium() {
-  ( cd "$WORKSPACE_ROOT" && node -e '
-    for (const m of ["playwright", "playwright-core", "@playwright/test"]) {
-      try { const p = require(m).chromium.executablePath(); if (p) { console.log(p); process.exit(0); } } catch (e) {}
-    }
-    process.exit(3);
-  ' 2>/dev/null )
+  node "$PW_RUNTIME" chromium
 }
 
 # Drop stale PID files so `up` restarts what actually died — but NEVER kill (dead already, or the pid
@@ -493,19 +492,29 @@ teardown_started() {
 }
 
 # ── Verbs ─────────────────────────────────────────────────────────────────────────────────────────────
+# Serialize concurrent `up`s so two callers can't half-start the stack (design: "concurrent up races") — and
+# RELEASE the lock when `up` is done. `exec 9>` opens it on the whole shell, so without the release it stayed
+# held for as long as this process lived: `navigate --wait` (up, then up to SB_WAIT_TIMEOUT of polling) kept
+# every other worktree's `up` waiting on a stack that was long since up, until its 60s flock gave up and its
+# serve died. The lock guards starting the stack, and nothing after it.
 cmd_up() {
   ensure_dirs
-  # Serialize concurrent `up`s so two callers can't half-start the stack (design: "concurrent up races").
   exec 9>"$LOCK" || die "cannot open lock file $LOCK"
   flock -w 60 9 || die "another shared-browser 'up' is in progress (lock held) — try again shortly"
+  local rc=0
+  up_locked || rc=$?
+  exec 9>&-
+  return "$rc"
+}
 
+up_locked() {
   preflight_deps || exit 1
   prepare_env
   resolve_web_port allocate                                # decide the ONE host-facing port before anything binds
 
   local chrome_bin
   chrome_bin="$(resolve_chromium || true)"
-  { [ -n "$chrome_bin" ] && [ -x "$chrome_bin" ]; } || die "Chromium not found via Playwright — run: npx playwright install chromium"
+  { [ -n "$chrome_bin" ] && [ -x "$chrome_bin" ]; } || die "Chromium unavailable from the shared-browser runtime — run: bash tools/shared-browser/shared-browser install"
 
   reap_stale
   preflight_ports || die "refusing to start: a foreign process holds one of our ports (see message above)"
@@ -574,7 +583,7 @@ cmd_up() {
   fi
 
   # 6. Recorder — auto-start once CDP is live (so connectOverCDP succeeds). Streams events to JSONL.
-  if ! component_running recorder; then spawn recorder node "$RECORDER"; STARTED+=(recorder); else say "recorder already running"; fi
+  if ! component_running recorder; then spawn recorder node "$RECORDER" --cdp="$CDP_URL"; STARTED+=(recorder); else say "recorder already running"; fi
 
   ok "shared-browser is UP."
   printf '  noVNC (open this in your browser): %s\n' "$NOVNC_URL"
@@ -713,12 +722,10 @@ wait_for_url() {
 # NAME=val positional after `node -e`, which becomes an arg, not an env var). connectOverCDP → goto → close.
 # browser.close() only DETACHES the CDP session; the shared browser (and the human's session) stays up.
 navigate_cdp() {
-  ( cd "$WORKSPACE_ROOT" && SB_NAV_URL="$1" SB_CDP_URL="$CDP_URL" SB_NAV_TIMEOUT_MS="$SB_NAV_TIMEOUT_MS" node - ) <<'NODE'
-const requireFirst = (mods) => {
-  for (const m of mods) { try { return require(m); } catch (e) {} }
-  throw new Error('Playwright not found (tried playwright / playwright-core / @playwright/test)');
-};
-const { chromium } = requireFirst(['playwright', 'playwright-core', '@playwright/test']);
+  local pw_module
+  pw_module="$(node "$PW_RUNTIME" module)" || { err "navigate: the shared-browser Playwright runtime is unavailable"; return 1; }
+  ( cd "$WORKSPACE_ROOT" && SB_NAV_URL="$1" SB_CDP_URL="$CDP_URL" SB_NAV_TIMEOUT_MS="$SB_NAV_TIMEOUT_MS" SB_PW_MODULE="$pw_module" node - ) <<'NODE'
+const { chromium } = require(process.env.SB_PW_MODULE);
 const url = process.env.SB_NAV_URL;
 const cdp = process.env.SB_CDP_URL;
 const timeout = Number(process.env.SB_NAV_TIMEOUT_MS) || 30000;
@@ -902,6 +909,7 @@ usage() {
 shared-browser — a browser a human and Claude drive together (in-container).
 
 USAGE
+  shared-browser install [--with-deps]           install the pinned Playwright runtime + its Chromium (+ OS deps; needs sudo)
   shared-browser up                              start missing components, readiness-gate, auto-start recorder, print noVNC URL
   shared-browser navigate --url=<u> [--wait]     ensure up; (optionally wait for <u>); drive the shared browser to it via CDP
   shared-browser observe                         hand the shared window to the human — automation stands down (no navigate/click/type)
@@ -933,6 +941,7 @@ main() {
   # is actually running. `up` re-resolves in allocate mode once it holds the lock.
   resolve_web_port read
   case "$verb" in
+    install)            node "$PW_RUNTIME" install "$@" ;;
     up)                 cmd_up "$@" ;;
     navigate)           cmd_navigate "$@" ;;
     observe)            cmd_observe ;;

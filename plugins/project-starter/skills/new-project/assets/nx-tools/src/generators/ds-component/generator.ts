@@ -34,6 +34,7 @@ import { basename } from 'node:path';
 import secondaryEntrypointGenerator from '../secondary-entrypoint/generator';
 import { findDesignSystem } from '../_utils/design-system';
 import { requireLayer } from '../../layers/registry';
+import { adapter } from '../../adapters/registry';
 
 interface DsComponentSchema {
   /** The component (and entry-point) name, e.g. `button` -> `@scope/design-system/button`. */
@@ -61,6 +62,17 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
     throw new Error(
       'ds-component: no design system in this workspace. Run `nx g @bespunky/nx-tools:design-system` ' +
         'first (or pass --library=<project> to target a specific library).'
+    );
+  }
+
+  // THE ANGULAR ADAPTER'S COMPONENT GENERATOR: a component is framework code, and this one is an Angular
+  // standalone component in an ng-packagr secondary entry point. A framework-neutral design system (the core
+  // with the plain-DOM runtime) has no component shape to give it — say so instead of half-building one.
+  if (!adapter('angular').ownsProject(tree, designSystem.name)) {
+    throw new Error(
+      `ds-component: \`${designSystem.name}\` is not an Angular library, and ds-component creates Angular ` +
+        `components (one ng-packagr secondary entry point each). A framework-neutral design system carries tokens ` +
+        `and the SASS API only; build components in your framework against \`@use '<ds>/styles'\`.`
     );
   }
 

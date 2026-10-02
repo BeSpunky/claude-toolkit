@@ -22,6 +22,7 @@ import { type Tree, formatFiles } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { NOVNC_BAND_SIZE, NOVNC_BAND_START } from './novnc-band';
 import { join } from 'node:path';
+import { PLAYWRIGHT_VERSION } from '../_utils/playwright';
 
 // Workspace-level: no inputs today. Kept as a named type for parity with the sibling generators
 // (and a place to grow options into) without tripping the no-empty-interface lint rule.
@@ -41,7 +42,9 @@ export default async function sharedBrowserGenerator(
       .split('{{novncBandStart}}')
       .join(String(NOVNC_BAND_START))
       .split('{{novncBandSize}}')
-      .join(String(NOVNC_BAND_SIZE));
+      .join(String(NOVNC_BAND_SIZE))
+      .split('{{playwrightVersion}}')
+      .join(PLAYWRIGHT_VERSION);
   const root = 'tools/shared-browser';
 
   // The CLI (bash) — the single entry point for up|down|status|restart|clean|url|logs|navigate.
@@ -56,11 +59,13 @@ export default async function sharedBrowserGenerator(
   tree.write(`${root}/verify.mjs`, template('verify.mjs.tpl'));
   tree.write(`${root}/recorder.mjs`, template('recorder.mjs.tpl'));
 
-  // Host-port arbitration + its validation. This is the piece that makes parallel devcontainers safe,
-  // and the ONLY part of the stack with a real test suite — including a multi-process race, because the
-  // failure it prevents cannot be reproduced with a single container. `node --test tools/shared-browser/`
-  tree.write(`${root}/port-claim.mjs`, template('port-claim.mjs.tpl'), { mode: 0o755 });
-  tree.write(`${root}/port-claim.test.mjs`, template('port-claim.test.mjs.tpl'));
+  // The browser's OWN Playwright runtime: one pinned playwright-core + its Chromium, installed on demand into
+  // a per-user cache outside the repo. The CLI, attach.mjs and recorder.mjs all load Playwright through it,
+  // so the shared browser never resolves the workspace's node_modules (a Python or Go repo has none).
+  tree.write(`${root}/runtime.mjs`, template('runtime.mjs.tpl'));
+
+  // Host-port arbitration (the noVNC band) lives in tools/port-claim/ — its own generator, because the
+  // worktree-domains proxy and the dev engine consult the same registry.
 
   // The workspace Nx project that surfaces the lifecycle verbs as targets (each runs the CLI verb).
   tree.write(`${root}/project.json`, template('project.json.tpl'));

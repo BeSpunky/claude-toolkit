@@ -192,6 +192,25 @@ printf 'new house rules\n' > "$r/HOUSE.md"
 printf '{"enabledPlugins":{"x":true}}\n' > "$r/.claude/settings.json"
 check "guidance is reported ALONGSIDE a boundary" "$r" restart-session "HOUSE.md"
 
+# ── a project that is a SUBDIRECTORY of its repository ───────────────────────────────────────────
+# git diff names paths from the REPOSITORY root (web/.devcontainer/…) while ls-files names them from the project;
+# the anchors are project-relative, so a modified, tracked devcontainer.json in a subdir project was reported as
+# `none`. Both halves must speak project-relative paths.
+r="$(fixture monorepo)"
+mkdir -p "$r/web/.devcontainer" "$r/web/.claude"
+printf '{}\n' > "$r/web/.devcontainer/devcontainer.json"
+printf '{}\n' > "$r/web/.claude/settings.json"
+git -C "$r" add -A >/dev/null 2>&1 && git -C "$r" commit -qm "a project in web/"
+base="$(git -C "$r" rev-parse HEAD)"
+printf '{"mounts":["x"]}\n' > "$r/web/.devcontainer/devcontainer.json"
+invoke "$r/web" "$base"
+ok "subdir project: a modified devcontainer.json wants a rebuild" "$([ "$SYNC_NEXT" = rebuild-container ] && echo 1 || echo 0)" "got '$SYNC_NEXT'"
+git -C "$r" checkout -q -- web/.devcontainer/devcontainer.json
+printf '{"enabledPlugins":{"x":true}}\n' > "$r/web/.claude/settings.json"
+printf 'changed\n' > "$r/README.md"
+invoke "$r/web" "$base"
+ok "subdir project: settings change → restart; the repo root's files are not this project's" "$([ "$SYNC_NEXT" = restart-session ] && echo 1 || echo 0)" "got '$SYNC_NEXT'"
+
 # ── no base to compare against ────────────────────────────────────────────────────────────────────
 r="$(fixture nobase)"
 invoke "$r" ""

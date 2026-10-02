@@ -1,20 +1,22 @@
 ---
 name: design-tokens-and-theming
 description: >-
-  Design tokens, theming, and the styling architecture of a design-system library - the styling-layer expression of the architect mindset. Use when you must decide HOW a visual value is defined, named, layered, themed, encapsulated, or consumed: designing or extending a token set (colour, space, radius, type, elevation, border, motion); naming and TIERING tokens (primitive -> semantic -> component); choosing between a CSS custom property and a SASS variable; writing or SUMMONING a design system's SASS API (functions, mixins, placeholders, @use/@forward); adding light/dark/brand modes and deciding where a mode LIVES, how it is detected, overridden, and persisted without a flash; styling across a component boundary (:host, :host-context, ::part, ViewEncapsulation, host classes and data attributes - and why ::ng-deep is banned); keeping contrast honest in EVERY mode; or laying out the design-system library itself - its public vs internal surfaces and its secondary entry points (one component = one entry point, generated with `nx g @bespunky/nx-tools:ds-component <name>`). The core move - TWO LAYERS, ONE TRUTH: CSS custom properties are the RUNTIME layer (live, cascading, themeable - a mode is a RE-BINDING of tokens on a scope, never a swapped stylesheet and never a rebuild), and the SASS API is the AUTHOR-TIME layer (zero-output functions/mixins/placeholders that emit nothing until called, summoned per-file with @use, never a global side-effect); a component reads SEMANTIC tokens and nothing else, so re-theming, rebranding, or adding a mode never touches a component file. This skill is a ROUTER - it indexes technique clusters and points to a reference file for each; read only the cluster you need. It is the HOW; the DISCIPLINE that says you MUST (go to the design system first, never hardcode a value, promote a pattern on its second occurrence, model the missing concept instead of overriding locally) is `bespunky-design-system:design-system-first`. Assumes SASS + modern Angular in an Nx workspace with the house-scaffolded publishable design-system library. It does NOT invent the look: the visual system it encodes (palette, type, composition, motion language) comes from `bespunky-product-ux:stage-the-vision`, and the moments that consume it are engineered in `bespunky-product-ux:realize-the-vision`. For library boundaries and entry points in general, see `bespunky-engineering:nx-monorepo-and-dx`; for a component's input/output API, `bespunky-engineering:angular-architecture`; for where a user's chosen mode persists, `bespunky-engineering:resumable-state`.
+  Design tokens, theming, and the styling architecture of a design-system library - the styling-layer expression of the architect mindset, on any stack (Angular, React, Vue, web components, plain CSS). Use when you must decide HOW a visual value is defined, named, layered, themed, encapsulated, or consumed: designing or extending a token set (colour, space, radius, type, elevation, border, motion); naming and TIERING tokens (primitive -> semantic -> component); choosing between a CSS custom property and a SASS variable; writing or SUMMONING a design system's author-time API (the house uses SASS - functions, mixins, placeholders, @use/@forward); adding light/dark/brand modes and deciding where a mode LIVES, how it is detected, overridden, and persisted without a flash; styling across a component boundary (scoped vs shadow encapsulation, the host/root box, ::part, slots, data attributes - and why a reach-in like ::ng-deep, :global or :deep() is banned; per-framework ADAPTERS, Angular's :host/ViewEncapsulation among them); keeping contrast honest in EVERY mode; or laying out the design-system library itself - its public vs internal surfaces and one entry point / package export per component (in a house project, `nx g @bespunky/nx-tools:ds-component <name>`). The core move - TWO LAYERS, ONE TRUTH: CSS custom properties are the RUNTIME layer (live, cascading, themeable - a mode is a RE-BINDING of tokens on a scope, never a swapped stylesheet and never a rebuild), and the author-time API is a ZERO-OUTPUT layer (functions/mixins/placeholders that emit nothing until called, summoned per-file with @use, never a global side-effect); a component reads SEMANTIC tokens and nothing else, so re-theming, rebranding, or adding a mode never touches a component file. This skill is a ROUTER - it indexes technique clusters and points to a reference file for each (plus per-stack adapter files); read only the cluster you need. It is the HOW; the DISCIPLINE that says you MUST (go to the design system first, never hardcode a value, promote a pattern on its second occurrence, model the missing concept instead of overriding locally) is `bespunky-design-system:design-system-first`. The core is framework-neutral; the house-scaffolded design-system library (SASS, Nx, the Angular adapter) is the worked example. It does NOT invent the look: the visual system it encodes (palette, type, composition, motion language) comes from `bespunky-product-ux:stage-the-vision`, and the moments that consume it are engineered in `bespunky-product-ux:realize-the-vision`. For library boundaries and entry points in general, see `bespunky-engineering:nx-monorepo-and-dx`; for a component's input/output API when the project wears Angular, `bespunky-angular:angular-architecture`; for where a user's chosen mode persists, `bespunky-engineering:resumable-state`.
 ---
 
 # Design Tokens & Theming
 
 `bespunky-engineering:architect-mentality` is the *why*. `bespunky-design-system:design-system-first` is the
 *discipline* — that every visual value comes from the design system, that you never hardcode, that the second
-occurrence is a promotion. **This skill is the *how*, in CSS and SASS.**
+occurrence is a promotion. **This skill is the *how*, in CSS — and, for the author-time layer, in SASS, the
+house's choice.** The core is framework-neutral; where a stack spells something its own way (Angular's `:host`
+and `ViewEncapsulation`, ng-packagr entry points), that lives in an **adapter** file beside the core.
 
 Two mentality principles dominate everything below:
 
 - **Everything is a black box with deliberate connections** → a component's *styleable surface* is a
-  **published contract** (tokens in, parts out), not a DOM tree you are free to reach into. This is why
-  `::ng-deep` is banned rather than merely discouraged.
+  **published contract** (tokens in, parts out), not a DOM tree you are free to reach into. This is why a
+  reach-in (`::ng-deep`, `:global`, `:deep()`) is banned rather than merely discouraged.
 - **Place every element on purpose** → every value lives at its **tier**, exactly once. A component reading a
   primitive swatch instead of a semantic name is a value placed where it merely *fits*.
 
@@ -25,7 +27,9 @@ mechanism: a theme is a **re-binding of tokens on a scope**, live — no rebuild
 flash, and no component aware it happened. This is why a SASS variable can *never* be the theming layer: it
 is compiled away before the browser ever sees it.
 
-**The author-time layer: SASS.** Functions, mixins, placeholders — a **zero-output** API. `@use`-ing it must
+**The author-time layer: a zero-output API — the house uses SASS.** Functions, mixins, placeholders — a
+**zero-output** API (any preprocessor that can hold the rules below would do; SASS is the house's choice, not
+the definition of a design system). `@use`-ing it must
 emit **no CSS at all**. It is *summoned* per-file (`@use '<ds>/styles' as ds;`) by the app and by the design
 system's own components alike, through the very same entry point a published consumer gets — so the library
 dogfoods its own contract and finds out it's wrong before a consumer does.
@@ -41,9 +45,13 @@ property — is exactly the kind of material weakness you absorb deliberately, a
 ## How to use this skill
 
 1. From the decision in front of you, identify which **cluster** applies.
-2. **Read that `reference/<file>.md`** — the techniques, how to choose, the caveats, the footguns, the house
-   (Angular/Nx/ng-packagr) specifics, and when *not* to reach for it.
-3. Read only the cluster(s) you need. Don't load them all.
+2. **Read that `reference/<file>.md`** — the techniques, how to choose, the caveats, the footguns, and when
+   *not* to reach for it.
+3. **If the cluster has an adapter for your stack, read it too** (`reference/adapters/<stack>-<topic>.md`). A
+   house project lists the layers it wears in its `HOUSE.md` header stamp, `layers=…` (e.g.
+   `layers=nx,agent,js,web,angular,design-system`) — `angular` there means the Angular adapters apply. A stack
+   with no adapter applies the core directly.
+4. Read only the cluster(s) you need. Don't load them all.
 
 ## Technique clusters
 
@@ -53,8 +61,8 @@ property — is exactly the kind of material weakness you absorb deliberately, a
 | **CSS custom properties — the runtime layer** | `reference/css-custom-properties-the-runtime-layer.md` | Where `:root` is emitted (exactly once) and why; the **cascade as the theming mechanism** — scope a re-binding to `[data-theme]`, `:host`, a section; fallbacks (`var(--x, …)`) and what a missing token *should* do (fail loudly, not silently white); `@property` for typed, animatable custom properties; the performance model (what a custom-property change actually invalidates); and the cases where a **SASS variable is still correct** | Everything is a black box · Absorb your materials' weaknesses |
 | **The SASS API layer & how it's summoned** | `reference/the-sass-api-layer.md` | The **zero-output rule** (an `@use` must emit no CSS) and how to hold it; `@use`/`@forward` and the module system (never `@import`); **public vs private** — the `@forward … show` barrel as the contract, the implementation in `_`-prefixed folders named for *what they are* (`_core`, `_utils`) rather than a bucket called `internal`, and the `-`-prefixed file-private member; the single façade the app summons and **how it resolves in-repo** (the load-path channel, because SASS cannot read tsconfig paths) versus published (`exports`); token accessors that `@error` on an unknown key, so a typo is a build failure and not a blank cell | Concentrate complexity · Design for the consumer · Abstractions must stay honest |
 | **Theming & modes** | `reference/theming-and-modes.md` | A mode is a **re-binding of semantic tokens**, never a second stylesheet and never a branch inside a component; where the mode **lives** (an attribute on `<html>`, plus `color-scheme` so native UI follows); the resolution chain — `prefers-color-scheme` → an explicit user choice → a per-scope override — and how the choice **persists and restores without a flash**; multi-brand as a second binding of the same semantic names; per-scope theming (an inverted hero is a scoped re-binding, not an `.is-dark` class on forty elements); **contrast must hold in EVERY mode — the pair, not the colour, is the unit you verify** | Model the missing concept · Refuse false tradeoffs · Design for the consumer |
-| **Component styling & encapsulation** | `reference/component-styling-and-encapsulation.md` | `ViewEncapsulation` (Emulated is the default and stays the default; `None` is a global leak; ShadowDom's real trade-offs); `:host`, `:host()` for state, `:host-context()` and its narrow legitimate use; **why `::ng-deep` is banned** — it is *"reach into another module's internals"* in CSS, it is deprecated, and it breaks silently on refactor; the **published styling contract** instead — **tokens in, parts out**, content projection for structure, host attributes for state; **variants as data, not booleans**; why `!important` is always a design failure; `@layer` for a predictable cascade | Everything is a black box · Design for the consumer · Abstractions must never trap |
-| **The DS library — structure & entry points** | `reference/ds-library-structure-and-entrypoints.md` | The shape of a publishable design system: the SASS entry point (a public barrel over `_`-prefixed private folders), the primary TS entry point, and **one component = one secondary entry point**; **zero components at scaffold time, on purpose**; adding one is a **generator** call (`nx g @bespunky/nx-tools:ds-component <name>`), never a hand-made folder — the entry-point config *is* the boundary, so a hand-made one resolves in the editor and vanishes on publish; what the app may import from where; keeping the library publishable (no reach-back into an app); the tree-shaking payoff | Everything is a black box · Automate every repeated process · Place everything on purpose |
+| **Component styling & encapsulation** | `reference/component-styling-and-encapsulation.md` · adapter: `reference/adapters/angular-encapsulation.md` | The three encapsulation models (scoped-by-rewrite stays the default; none/global is a leak; real shadow DOM's trade-offs); the component's own box, its state, and reading *up* to an ancestor; **why a style reach-in is banned** (`::ng-deep`, `:global`, `:deep()`) — it is *"reach into another module's internals"* in CSS, and it breaks silently on refactor; the **published styling contract** instead — **tokens in, parts out**, projected/slotted content for structure, root data attributes for state; **variants as data, not booleans**; why `!important` is always a design failure; `@layer` for a predictable cascade; how web components / CSS Modules / Vue map onto it. **Angular adapter:** `ViewEncapsulation`, the `:host` family, `::ng-deep`'s own aggravations, `<ng-content>`, variants as signal inputs bound to host attributes | Everything is a black box · Design for the consumer · Abstractions must never trap |
+| **The DS library — structure & entry points** | `reference/ds-library-structure-and-entrypoints.md` · adapter: `reference/adapters/angular-ds-library.md` | The shape of a publishable design system: the stylesheet entry point (a public barrel over `_`-prefixed private folders), the primary TS entry point, and **one component = one entry point / package export**; **zero components at scaffold time, on purpose**; promoting one means declaring its entry point — never a hand-made folder, because the entry-point config *is* the boundary, so a hand-made one resolves in the editor and vanishes on publish; what the app may import from where; keeping the library publishable (no reach-back into an app); the tree-shaking payoff. **Angular adapter (the house design-system layer):** ng-packagr secondary entry points, generated with `nx g @bespunky/nx-tools:ds-component <name>` | Everything is a black box · Automate every repeated process · Place everything on purpose |
 
 ## Ask yourself
 
@@ -69,7 +77,7 @@ property — is exactly the kind of material weakness you absorb deliberately, a
   part?
 - Does every foreground/background **pair** still pass contrast **in dark mode**, or did I only ever look at
   light?
-- Is this component **earning** a secondary entry point — and did I **generate** it, or hand-make the folder?
+- Is this component **earning** its own entry point — and did I **declare/generate** it, or hand-make the folder?
 - If the brand colour changed tomorrow, how many files would I touch? Say the number out loud.
 
 ## Red flags
@@ -82,16 +90,17 @@ property — is exactly the kind of material weakness you absorb deliberately, a
 - **An `@use` that emits CSS** — now importing the API has a side effect, and it duplicates for every file
   that imports it.
 - **A second stylesheet per theme** (or a rebuild per brand). The cascade already does this, for free.
-- **`::ng-deep` / `!important` / `ViewEncapsulation.None`** used as a *styling strategy*. Each is a boundary
-  violation with a different accent.
+- **A reach-in (`::ng-deep`, `:global`, `:deep()`) / `!important` / switched-off encapsulation**
+  (`ViewEncapsulation.None` and kin) used as a *styling strategy*. Each is a boundary violation with a
+  different accent.
 - **A theme that flashes on first paint** — the mode was restored after render, so the user watched the app
   change its mind.
 - **Dark mode shipped with unreadable text** — contrast was checked in light and assumed in dark. It doesn't
   transfer; it has to be verified per mode, per pair.
 - **A `variant` boolean bag** — `isCompact` + `isDanger` + `isBig` is eight states, of which three were
   designed.
-- **A design-system component hand-made** instead of generated — it resolves in the editor and disappears on
-  publish.
+- **A design-system component hand-made** without its entry-point declaration — it resolves in the editor and
+  disappears on publish.
 - **The design system importing from an app.** It is publishable; a reach-back makes that a lie.
 
 > **Origin.** The technique layer beneath `bespunky-design-system:design-system-first`. That skill says the
@@ -102,7 +111,7 @@ property — is exactly the kind of material weakness you absorb deliberately, a
 > same no-patch rule, in logic) · `bespunky-product-ux:stage-the-vision` (produces the **visual system** these
 > tokens encode) · `bespunky-product-ux:realize-the-vision` (builds the moments that consume them) ·
 > `bespunky-engineering:nx-monorepo-and-dx` (library boundaries and secondary entry points, in general) ·
-> `bespunky-engineering:angular-architecture` (component API ergonomics — variants as data, the styling
-> contract) · `bespunky-engineering:resumable-state` (where the user's chosen mode *lives*, so it survives a
+> `bespunky-angular:angular-architecture` (when the project wears Angular — component API ergonomics, variants
+> as data, the styling contract) · `bespunky-engineering:resumable-state` (where the user's chosen mode *lives*, so it survives a
 > refresh) · `bespunky-product-ux:astonishing-to-use` (contrast, focus, reduced motion are use-quality, not
 > decoration).

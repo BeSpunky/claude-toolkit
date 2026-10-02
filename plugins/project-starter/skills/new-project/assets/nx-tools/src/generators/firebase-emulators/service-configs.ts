@@ -90,6 +90,14 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
   },
 ];
 
+/**
+ * A Firebase template's contents, by file name. The templates live beside this module — and stay here, because
+ * shipped migrations resolve them by this path — whichever adapter's client half writes them.
+ */
+export function firebaseTemplate(name: string): string {
+  return readFileSync(join(__dirname, name), 'utf8');
+}
+
 /** The root config's file name and template — written alongside the siblings, never without them. */
 export const FIREBASE_ROOT_CONFIG = {
   fileName: 'firebase.config.ts',

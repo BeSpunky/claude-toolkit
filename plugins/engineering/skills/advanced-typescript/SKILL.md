@@ -1,12 +1,12 @@
 ---
 name: advanced-typescript
 description: >-
-  Advanced TypeScript type-system techniques - the type-level expression of the architect mindset. Use when designing non-trivial types, generics, or APIs - deriving one type from another, typing dynamically-implemented or metaprogrammed code, building ergonomic string/typed APIs, validating inputs at compile time, narrowing with type guards/assertions, or making illegal states unrepresentable. TypeScript on any stack (not Angular-specific). This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need.
+  Advanced TypeScript type-system techniques - the type-level expression of the architect mindset. Use when designing non-trivial types, generics, or APIs - deriving one type from another, typing dynamically-implemented or metaprogrammed code, building ergonomic string/typed APIs, validating inputs at compile time, narrowing with type guards/assertions, or making illegal states unrepresentable. TypeScript on any stack - Node, the browser, any framework. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need.
 ---
 
 # Advanced TypeScript
 
-Type-system techniques that put the architect mindset into practice at the **type level**. The *why* lives in the **`architect-mentality`** skill (agnostic principles); the *how-in-Angular* lives in **`angular-architecture`**. **This skill is the *how*, in the type system** — and it's stack-agnostic: plain TypeScript, usable anywhere.
+Type-system techniques that put the architect mindset into practice at the **type level**. The *why* lives in the **`architect-mentality`** skill (agnostic principles); stack-specific realizations (e.g. **`bespunky-angular:angular-architecture`** when the project wears Angular) lean on what's here. **This skill is the *how*, in the type system** — and it's stack-agnostic: plain TypeScript, usable anywhere.
 
 The goal of advanced types is never cleverness for its own sake. It is to make the compiler do real work for you: a **single source of truth** that derived types follow automatically, surfaces that are **impossible to misuse**, and illegal states that simply **don't typecheck**. If a type trick doesn't buy one of those, don't reach for it (`architect-mentality` → *Know when not to do it*).
 
@@ -32,6 +32,6 @@ Read only the one(s) you need.
 
 ## Related skills
 
-- **`angular-native-wrappers`** — *applies* these techniques (derive + merge a wrapper's typed surface). It links here for the type-level depth.
-- **`angular-architecture`** — the Angular-domain techniques; some lean on these types.
+- **`bespunky-angular:angular-native-wrappers`** (optional Angular plugin) — *applies* these techniques (derive + merge a wrapper's typed surface). It links here for the type-level depth.
+- **`bespunky-angular:angular-architecture`** (optional Angular plugin) — the Angular-domain techniques; some lean on these types.
 - **`architect-mentality`** — the agnostic mindset every technique here expresses.

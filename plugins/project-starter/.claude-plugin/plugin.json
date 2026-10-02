@@ -1,7 +1,7 @@
 {
   "name": "bespunky-project-starter",
-  "description": "Scaffold new BeSpunky-standard projects: integrated Nx monorepo + Angular (clean --minimal app) + devcontainer (Claude CLI & VS Code extension) + tailored CLAUDE.md. Generator-first.",
-  "version": "0.35.1",
+  "description": "Scaffold a new BeSpunky-standard project, or retrofit the house tooling onto any existing repo, as a stack of detected layers on an always-ensured Nx floor: the agent DX (composed devcontainer, Claude settings, window identity) by default, and Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. Generator-first; kept current by versioned migrations and a consented sync.",
+  "version": "0.36.2",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"

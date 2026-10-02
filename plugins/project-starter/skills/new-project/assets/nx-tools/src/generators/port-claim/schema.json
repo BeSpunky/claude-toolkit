@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyPortClaim",
+  "title": "Host-port arbitration",
+  "description": "Write tools/port-claim/ — the host-port registry the shared browser, the worktree-domains proxy and the dev engine consult. Workspace-level, no inputs; idempotent.",
+  "type": "object",
+  "properties": {},
+  "required": []
+}

@@ -7,11 +7,12 @@
 
 ## Stack
 
-- **Monorepo**: Nx, integrated layout (`apps/` + `libs/`).
+- **Workspace**: Nx — the house floor every generator and migration runs on, invoked as **`{{NX}}`**{{^node}} (the Nx wrapper: this repo has no package.json, and Nx's own packages live in the gitignored `.nx/installation`){{/node}}.{{#monorepo}} Integrated monorepo layout (`apps/` + `libs/`).{{/monorepo}}
 {{#angular}}- **Framework**: Angular (clean `--minimal` app; no demo content).
 {{/angular}}{{#design-system}}- **Design system**: `{{DS_ROOT}}` — the single source of visual truth (see below).
-{{/design-system}}- **Package manager**: {{PM}}.
-- **Dev environment**: devcontainer on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the base image) with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds.
+{{/design-system}}{{#node}}- **Package manager**: {{PM}}.
+{{/node}}{{#agent}}- **Dev environment**: a devcontainer COMPOSED from this project's layers — {{#node}}on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the image){{/node}}{{^node}}on `mcr.microsoft.com/devcontainers/base:debian`, with Node as a devcontainer feature (the Nx floor and the house tooling run on it; this repo is not a Node project){{/node}}, with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds. `.devcontainer/post-create.local.sh` is yours for project-specific setup.
+{{/agent}}
 
 {{#design-system}}
 ## The design system
@@ -25,7 +26,7 @@ Where every visual value lives. Read `{{DS_ROOT}}/STRUCTURE.md` for the full con
 ```scss
 @use 'design-system/styles' as ds;   // the PUBLIC API (styles/_index.scss). Never reach into styles/_core/ or styles/_utils/.
 
-:host {
+{{#angular}}:host{{/angular}}{{^angular}}.card{{/angular}} {
   display: grid;
   gap: ds.space(3);
   color: ds.color('on-surface');
@@ -43,15 +44,19 @@ An unknown token name is a **compile error**, not a silently-empty `var()` — s
 
 **Switching mode at runtime** — a re-binding, not a reload:
 
-```ts
+{{#angular}}```ts
 private readonly theme = inject(DsTheme);      // from the design system's primary entry point
 toggle() { this.theme.mode.set(this.theme.resolved() === 'dark' ? 'light' : 'dark'); }
 ```
-
+{{/angular}}{{^angular}}```ts
+import { setMode, resolvedMode } from '<the design system package>';   // its plain-DOM runtime (no framework binding)
+setMode(resolvedMode() === 'dark' ? 'light' : 'dark');
+```
+{{/angular}}
 **Themes** (a brand, a tenant palette, a user-selectable skin) — **a theme is a CSS file, not JavaScript.** Generate it:
 
 ```bash
-nx g @bespunky/nx-tools:ds-theme acme    # -> {{DS_ROOT}}/themes/acme.theme.scss
+{{NX}} g @bespunky/nx-tools:ds-theme acme    # -> {{DS_ROOT}}/themes/acme.theme.scss
 ```
 
 Fill in the token overrides (authored in SASS, so a typo'd token name is a **build error**):
@@ -64,24 +69,25 @@ Fill in the token overrides (authored in SASS, so a typo'd token name is a **bui
 );
 ```
 
-It builds to a standalone `theme-acme.css`. Link it in `index.html` so it applies **before first paint**:
+{{#angular}}It builds to a standalone `theme-acme.css`{{/angular}}{{^angular}}Compile it to a standalone CSS file with your app's own sass step (no stack here registers it for you){{/angular}}. Link it in `index.html` so it applies **before first paint**:
 
 ```html
 <link id="ds-theme" rel="stylesheet" href="theme-acme.css">
 ```
 
-…and swap it at runtime with one line: `inject(DsRuntimeTheme).use('theme-globex.css')`.
+{{#angular}}…and swap it at runtime with one line: `inject(DsRuntimeTheme).use('theme-globex.css')`.{{/angular}}{{^angular}}…and swap it at runtime by pointing that `<link>`'s `href` at another theme file.{{/angular}}
 
-**Why a file and not JS:** a `<link>` in `<head>` is applied before the browser paints, so the brand never flashes in after boot — a JS-applied theme *always* does, because it lands after the bundle executes. You also get browser caching and CDN delivery for free, and the compile-time token guard survives. The only case that genuinely needs JS is a value that doesn't exist until runtime (a colour dragged out of a picker) — that's `DsRuntimeTheme.setTokens()`, and it's the exception, not the default.
+**Why a file and not JS:** a `<link>` in `<head>` is applied before the browser paints, so the brand never flashes in after boot — a JS-applied theme *always* does, because it lands after the bundle executes. You also get browser caching and CDN delivery for free, and the compile-time token guard survives. The only case that genuinely needs JS is a value that doesn't exist until runtime (a colour dragged out of a picker) — that's {{#angular}}`DsRuntimeTheme.setTokens()`{{/angular}}{{^angular}}setting the token's custom property on the root element{{/angular}}, and it's the exception, not the default.
 
 A theme can only **re-bind** tokens the design system already declares; it cannot invent new ones (nothing would be reading them).
 
-**Adding a component** — always the generator, never a hand-made folder (the entry-point config *is* the boundary; a hand-made folder resolves in the editor and vanishes on publish):
+{{#angular}}**Adding a component** — always the generator (the Angular adapter's), never a hand-made folder (the entry-point config *is* the boundary; a hand-made folder resolves in the editor and vanishes on publish):
 
 ```bash
-nx g @bespunky/nx-tools:ds-component <name>    # -> {{DS_ROOT}}/<name>, imports as <package>/<name>
+{{NX}} g @bespunky/nx-tools:ds-component <name>    # -> {{DS_ROOT}}/<name>, imports as <package>/<name>
 ```
-
+{{/angular}}{{^angular}}**Adding a component** — this design system has no framework binding, so it ships tokens, the SASS API and the mode runtime, and no component generator (`ds-component` is the Angular adapter's). A component is whatever your stack calls one, built ONLY from these tokens and the SASS API — and promoted into the design system the second time it appears.
+{{/angular}}
 **Adding a token** → `{{DS_ROOT}}/styles/_core/_tokens.scss`. Colours must be declared in **every** mode — the build fails if one is missing, because a token that exists in light and not in dark is a broken theme.
 
 > **The tokens currently in that file are PLACEHOLDERS with no design authority.** They exist so the library compiles and the app runs on day zero. The design phase (`bespunky-product-ux:stage-the-vision` → `realize-the-vision`) replaces that file wholesale with the real visual system. Do not build a look on top of them, and do not tweak them into one.
@@ -101,7 +107,7 @@ This workspace has a `navigation-core` library, so **navigation is never a raw `
 Generator-first; never hand-roll a domain's navigation:
 
 ```bash
-{{PM}} nx g @bespunky/nx-tools:domain-navigation <domain>   # routes + events + navigation + selectors
+{{NX}} g @bespunky/nx-tools:domain-navigation <domain>   # routes + events + navigation + selectors
 ```
 
 For the full architecture (registry shape, what belongs on the bus vs in the command, and the overlap with resumable state) invoke the **`bespunky-engineering:typed-reactive-navigation`** skill; for making every screen reconstructible from its URL, **`bespunky-engineering:resumable-state`**.
@@ -109,27 +115,28 @@ For the full architecture (registry shape, what belongs on the bus vs in the com
 {{/navigation}}{{#web}}
 ## Serving the app
 
-`nx serve <app>` is the one command for local dev — a single **`@bespunky/nx-tools:serve`** orchestrator that composes, in parallel under one Ctrl+C:
+`{{SERVE}} <app>` is the one command for local dev — the house's **stack-free dev engine** (`tools/dev/dev`{{#nx-serve}}, which `{{NX}} serve` wraps through the **`@bespunky/nx-tools:serve`** executor{{/nx-serve}}). What it serves is DATA — **`.bespunky/dev.json`**, each app's processes and the ports they occupy — and it runs them in parallel under one Ctrl+C:
 
-- the **app dev-server** (the `dev-server` target → `@angular/build:dev-server`, host `0.0.0.0`), and
-- the **shared co-driven browser** — a real Chromium *inside the container* that it brings up and navigates to your app, so you and Claude watch and drive the same instance together{{#firebase}}, and
-- the **Firebase emulator suite** (this is a Firebase workspace — see below){{/firebase}}.
+{{#angular}}- the **app dev-server** (the `dev-server` target → `@angular/build:dev-server`, host `0.0.0.0`), and{{/angular}}{{^angular}}- the app's **declared processes** (`.bespunky/dev.json` → `apps.<app>.processes` — edit it to change what runs; every declared port shifts by the same offset), and{{/angular}}
+- the **shared co-driven browser** — a real Chromium *inside the container* that it brings up and navigates to your app, so you and Claude watch and drive the same instance together{{#firebase}}{{#nx-serve}}, and
+- the **Firebase emulator suite** (this is a Firebase workspace — see below){{/nx-serve}}{{/firebase}}.
 
-It auto-derives a **port offset** from the tree you're in — the **main tree is always offset 0** (app on `http://localhost:4200`); each git worktree gets its own stable, verified-free port block — and registers a pretty **`<slug>.localhost`** domain for the app.
+It auto-derives a **port offset** from the tree you're in — the **main tree is always offset 0** (app on {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}its declared base port{{/angular}}); each git worktree gets its own stable, verified-free port block — and registers a pretty **`<slug>.localhost`** domain for the app.
 
 | Flag | Effect |
 | --- | --- |
-| `--configuration=production\|development` | dev-server variant (Angular's canonical env-file replacements; default `development`). |
-| `--no-shared-browser` | serve without bringing up / navigating the shared browser. |
-| `--worktree=<branch\|slug\|path>` | serve a worktree you're **not** cwd'd into (see *Serving an in-flight worktree* below). Omit → current tree; pass it empty in a TTY → interactive picker. |
+{{#nx-serve}}{{#angular}}| `--configuration=production\|development` | dev-server variant (Angular's canonical env-file replacements; default `development`). `nx serve` only — the configuration is an Nx target's. |
+{{/angular}}{{/nx-serve}}| `--no-shared-browser` | serve without bringing up / navigating the shared browser. |
+| `--worktree=<branch\|slug\|path>` | serve a worktree you're **not** cwd'd into (see *Serving an in-flight worktree* below). Omit → current tree; pass it empty in a TTY → a numbered picker. |
 | `--port-offset=auto\|<n>` | `auto` (default) derives the block from the tree; `0` pins the base ports; an int pins a specific block. |
-{{#firebase}}| `--no-emulators` | serve the app **alone**, every Firebase service resolved **real** (`?emulate=none`) — no suite booted. |
-{{/firebase}}| `--dry-run` | print the resolved tree, offset, port, slug, layers, and URLs — run nothing. |
+| `--skip=<id,…>` | don't start these declared processes (the primary cannot be skipped). |
+{{#firebase}}{{#nx-serve}}| `--no-emulators` | the same as `--skip=emulators`: the app **alone**, every Firebase service resolved **real** (`?emulate=none`) — no suite booted. |
+{{/nx-serve}}{{/firebase}}| `--dry-run` | print the resolved tree, offset block, every process with its command, ports and env, and the URLs — run nothing. |
 
 ### Two ways to view the running app
 
-1. **The shared browser (default, blessed)** — a real containerized Chromium you watch over **noVNC** in any host tab, at the URL `nx serve` prints (the port is allocated per container — read it, never guess it: `tools/shared-browser/shared-browser url`); Claude attaches to the *same* instance over loopback CDP to co-drive. This surface works for **every** tree — main and worktrees alike. The allocated URL is **stable for the life of this dev container** (it survives `down`/`up` and even a rebuild), so it is safe to bookmark — but read it once from the command above rather than typing a port from memory. **The tab is titled with this project's name** — if it names a different project, you are looking at another container's browser, so re-read the URL. If the printed URL is refused, give the editor a moment (it forwards the port a second or two after the browser starts) and check the Ports panel; a project that was synced but not yet **Dev Containers: Rebuild Container**'d is missing the shared port registry, and `shared-browser up` says so on stdout.
-2. **A host browser tab** — `:80` (the worktree-domains proxy) and the base `http://localhost:4200`{{#firebase}} (+ emulator){{/firebase}} ports are forwarded, so you can open any tree's app in a host tab: the pretty **`<slug>.localhost`** URL routes through the proxy to whichever tree is served. **Caveat with several devcontainers open at once:** these are FIXED host ports on a first-come basis, and `<slug>.localhost` has no port to remap — so if another BeSpunky container started first, this tab shows *its* app, silently. Unlike the noVNC port (which is arbitrated per container), these are not. When in doubt, use surface 1 — it is always this container's browser. The **main tree** works fully there.{{#firebase}} For a **worktree**, the app loads but its *shifted emulator ports* aren't forwarded — Firebase calls only connect inside the shared browser (loopback), so use the shared browser for the full worktree experience.{{/firebase}}
+1. **The shared browser (default, blessed)** — a real containerized Chromium you watch over **noVNC** in any host tab, at the URL `{{SERVE}}` prints (the port is allocated per container — read it, never guess it: `tools/shared-browser/shared-browser url`); Claude attaches to the *same* instance over loopback CDP to co-drive. This surface works for **every** tree — main and worktrees alike. The allocated URL is **stable for the life of this dev container** (it survives `down`/`up` and even a rebuild), so it is safe to bookmark — but read it once from the command above rather than typing a port from memory. **The tab is titled with this project's name** — if it names a different project, you are looking at another container's browser, so re-read the URL. If the printed URL is refused, give the editor a moment (it forwards the port a second or two after the browser starts) and check the Ports panel; a project that was synced but not yet **Dev Containers: Rebuild Container**'d is missing the shared port registry, and `shared-browser up` says so on stdout.
+2. **A host browser tab** — `:80` (the worktree-domains proxy) and the base {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}app{{/angular}}{{#firebase}} (+ emulator){{/firebase}} ports are forwarded, so you can open any tree's app in a host tab: the pretty **`<slug>.localhost`** URL routes through the proxy to whichever tree is served. **Caveat with several devcontainers open at once:** these are FIXED host ports on a first-come basis, and `<slug>.localhost` has no port to remap — so if another BeSpunky container started first, this tab shows *its* app, silently. Unlike the noVNC port (which is arbitrated per container), these are not. When in doubt, use surface 1 — it is always this container's browser. The **main tree** works fully there.{{#firebase}} For a **worktree**, the app loads but its *shifted emulator ports* aren't forwarded — Firebase calls only connect inside the shared browser (loopback), so use the shared browser for the full worktree experience.{{/firebase}}
 
 Each worktree serve gets a pretty **`<slug>.localhost`** domain (browsers auto-resolve any `*.localhost` to loopback; the in-container proxy on the forwarded `:80` routes it to that tree's app) plus a **per-worktree tab title and tinted favicon**, so several co-driven worktrees stay visually distinct.
 
@@ -141,16 +148,17 @@ The shared browser is one instance you and Claude share. Before Claude asks *you
 {{#firebase}}
 ## Firebase
 
-This project was scaffolded with `--firebase`, so **`nx serve <app>` boots the emulator suite alongside the app** (and the shared browser) — offline, no `firebase login` / cloud project / `.firebaserc` needed (project id derived from `environment.ts` — `demo-<workspaceName>` by default). **Local dev is not forced through the emulators** — tune what's emulated with one flag, or with the per-service knobs below:
+{{#web}}{{#nx-serve}}This project wears Firebase, so **`{{SERVE}} <app>` boots the emulator suite alongside the app** (and the shared browser) — offline, no `firebase login` / cloud project / `.firebaserc` needed{{#angular}} (project id derived from `environment.ts` — `demo-<workspaceName>` by default){{/angular}}. **Local dev is not forced through the emulators** — tune what's emulated with one flag{{#angular}}, or with the per-service knobs below{{/angular}}:
 
 | Command | What it does |
 | --- | --- |
-| `nx serve <app>` | App **+ emulator suite + shared browser**, in parallel, offline. The full local Firebase stack. |
-| `nx serve <app> --no-emulators` | App **alone, no emulators** — every service resolved real (`?emulate=none`); e.g. pure UI work, or a real/staging backend. |
-| `nx run firebase:emulators` | The emulator suite **alone** (restart/run it independently of the app). |
+| `{{SERVE}} <app>` | App **+ emulator suite + shared browser**, in parallel, offline. The full local Firebase stack. |
+| `{{SERVE}} <app> --no-emulators` | App **alone, no emulators** — every service resolved real (`?emulate=none`); e.g. pure UI work, or a real/staging backend. |
+| `{{NX}} run firebase:emulators` | The emulator suite **alone** (restart/run it independently of the app). |
 
-The `@bespunky/nx-tools:serve` executor runs the emulator suite alongside the app `dev-server` (pinned to the emulator env by default) as one parallel run. The Nx TUI is disabled in `nx.json` so both stream plain prefixed logs and one Ctrl+C stops everything.
+The `@bespunky/nx-tools:serve` executor runs the emulator suite alongside the app `dev-server` (pinned to the emulator env by default) as one parallel run. The Nx TUI is disabled in `nx.json` so both stream plain prefixed logs and one Ctrl+C stops everything.{{/nx-serve}}{{^nx-serve}}This project wears Firebase, and its dev loop is DECLARED (`.bespunky/dev.json`) rather than served through an Nx app — and the house seeds the emulator suite into a declaration only for apps served through Nx. So **`{{SERVE}} <app>` runs the suite beside an app only if that app's declaration lists it**: add an `emulators` process to it (`"cmd": "{{NX}} run firebase:emulators"`, its `ports` the ones `firebase.json` configures) and the engine shifts the whole suite with the app; `--skip=emulators` then serves the app alone. Otherwise run the suite on its own — offline, no `firebase login` / cloud project / `.firebaserc` needed: **`{{NX}} run firebase:emulators`**.{{/nx-serve}}{{/web}}{{^web}}This project wears the Firebase **core** — the emulator suite, Cloud Functions as an Nx app, seeded emulator data — and serves no app through the house dev loop yet, so the suite runs on its own: **`{{NX}} run firebase:emulators`** (offline; no `firebase login` / cloud project / `.firebaserc` needed). Declare what an app serves in `.bespunky/dev.json` and sync, and the dev loop runs the suite beside it.{{/web}}
 
+{{#angular}}
 ### Where each Firebase service is provided — and what it costs
 
 **A Firebase service is provided where it is USED, not once at the root by default.** Each has its own generator-owned file under `apps/<app>/src/app/`:
@@ -188,50 +196,54 @@ You don't have to emulate everything or nothing — each Firebase service is ind
 
 **Turning a service real needs real credentials.** A service resolved to real uses the `firebase` block of the active environment file — the `demo-<workspaceName>` values only work against the emulator. Fill `firebase` with your real/**staging** web config (`firebase apps:sdkconfig WEB <appId> --project <staging>`; never production for anything you write to). **If you forget, a dev-only `ngDevMode` guard (stripped from prod) logs a loud `firebase.config.ts` console error at bootstrap** naming the real-but-demo-configured services — so the cause is up front instead of only a cryptic `auth/api-key-not-valid` later. It logs rather than throws: the app still loads (one misconfigured service shouldn't brick the whole dev app), but that service won't authenticate against the real backend until you fill in real config. One coupled caveat, now handled for you: a real `projectId` is then also used by any *still-emulated* services (`singleProjectMode`), so the emulator suite must run under it too — `tools/emulators.sh` does this automatically by deriving its `--project` from `environment.ts` (override with `FIREBASE_EMULATOR_PROJECT`). The resolver is `apps/<app>/src/app/emulator-overrides.ts` (generator-owned); `firebase.config.ts` resolves `committed-default ⊕ override` per service and each `firebase-<service>.config.ts` applies it, gated on `ngDevMode` — Angular's dev-mode flag, which the optimizer folds to `false` in production builds, so the resolver, the per-service wiring, every `connect*Emulator(...)` call, and all emulator addresses are tree-shaken out of the prod artifact. (Firebase's own SDK still carries its internal emulator support — that's library code, not ours.)
 
-`nx serve <app> --no-emulators` is the extreme of the same knob: **no** emulator suite booted and **every** service real. It carries `?emulate=none` to the app (the `emulator-overrides.ts` resolver maps `none` / `real=all` → all services real) and, like the per-service toggles above, resolves each service against `environment.ts`'s `firebase` block — the same "go real" path, no separate `no-emulators` environment file or build configuration.
+`{{SERVE}} <app> {{#nx-serve}}--no-emulators{{/nx-serve}}{{^nx-serve}}--skip=emulators{{/nx-serve}}` is the extreme of the same knob: **no** emulator suite booted and **every** service real. It carries `?emulate=none` to the app (the `emulator-overrides.ts` resolver maps `none` / `real=all` → all services real) and, like the per-service toggles above, resolves each service against `environment.ts`'s `firebase` block — the same "go real" path, no separate `no-emulators` environment file or build configuration.
+{{/angular}}
 
 ### Cloud Functions (apps/functions)
 
 Cloud Functions are a first-class Nx app: `nx build functions` (esbuild) bundles `apps/functions/src/main.ts` into `dist/apps/functions` with a generated deploy-manifest `package.json`; the emulator and `firebase deploy` both consume that dist output (`firebase.json` → `functions.source`). Runtime deps (`firebase-admin`/`firebase-functions`) live at the **workspace root** — no per-project `node_modules`. Deploy with `nx run functions:deploy`. **Platform firewall (ESLint-enforced):** `platform:web` projects must never import `firebase-admin`/`firebase-functions`; `platform:server` projects (`functions`, `firebase`) must never import `firebase`/`@angular/*`. Tag new libraries accordingly.
 
-**Functions secrets (`defineSecret`).** Secret values live in `apps/functions/.secret.local` — **gitignored**; copy `.secret.local.example` and fill it. One source of truth, two sinks: `tools/emulators.sh` injects it beside the local bundle so the **emulator** reads it, and `{{PM}} nx run functions:push-secrets` sets each `KEY` in **Google Secret Manager** for production (values piped via stdin — never on a command line or in a log). Add a `KEY=VALUE` when your functions call `defineSecret('KEY')`, then re-push and redeploy.
+**Functions secrets (`defineSecret`).** Secret values live in `apps/functions/.secret.local` — **gitignored**; copy `.secret.local.example` and fill it. One source of truth, two sinks: `tools/emulators.sh` injects it beside the local bundle so the **emulator** reads it, and `{{NX}} run functions:push-secrets` sets each `KEY` in **Google Secret Manager** for production (values piped via stdin — never on a command line or in a log). Add a `KEY=VALUE` when your functions call `defineSecret('KEY')`, then re-push and redeploy.
 
 ### Emulator seeds, caching & reset (no re-onboarding each serve)
 
 The emulators **persist and seed their data**. The launch path is `tools/emulators.sh` (all `firebase:emulators*` targets funnel through it): it reaps stale processes, primes the **gitignored working dir** `.emulator-data/` from a seed, then starts the suite with `--import .emulator-data` and (full runs only) `--export-on-exit .emulator-data`. So session + data **cache across serves**: onboard once, stay in. Sign in with a seeded email and the Auth emulator matches the existing account by email — you inherit the seeded uid and its docs.
 
 - **Seeds** are committed, known-good worlds under `tools/emulator-seeds/` (see its README for the catalog). They are **generated artifacts**, never hand-edited.
-- **Reset (on-call):** `{{PM}} nx run firebase:reset` — takes effect on the next serve. Add `reset:<seed>` targets in `firebase/project.json` for extra worlds.
-- **Rebuild seeds:** `{{PM}} nx run firebase:seed:build`.
+- **Reset (on-call):** `{{NX}} run firebase:reset` — takes effect on the next serve. Add `reset:<seed>` targets in `firebase/project.json` for extra worlds.
+- **Rebuild seeds:** `{{NX}} run firebase:seed:build`.
 
 **Directive — the seed is part of the schema contract.** The seeds' single source of truth is the **declarative** `tools/seed/world.mjs` (a description of accounts + Firestore docs, applied by a generic encoder — adding a field/collection/world is purely additive; the build orchestrator derives the seed list from it). **Whenever a Firestore document shape changes or a feature gains a backend, update the matching world in `world.mjs` and rebuild, committing `tools/emulator-seeds/`** — so the seed never drifts from the code.
 
+{{#web}}
 ### Auth in the devcontainer (the good news)
 
 The shared co-driven browser is **real Chromium with a real window manager**, running inside the container and hitting **container-localhost directly** — so the old devcontainer OAuth pain is *gone*, and the previous "prefer redirect / popups fail" guidance no longer applies:
 
 - **`signInWithPopup` works**, and so do redirect flows. There's no forwarded-port origin boundary between the browser and the app any more, so the `Sending authEvent failed` popup failure is gone — you don't have to prefer `signInWithRedirect`.
-- **`environment.ts` still ships an `authDomain`** — required for any OAuth provider sign-in (popup *and* redirect refuse without it, even against the Auth emulator). Don't remove it.
+{{#angular}}- **`environment.ts` still ships an `authDomain`** — required for any OAuth provider sign-in (popup *and* redirect refuse without it, even against the Auth emulator). Don't remove it.{{/angular}}
 - **VS Code Simple Browser / a host browser are now only *viewers*** of the shared browser over noVNC — they no longer have to *complete* the OAuth flow themselves; the containerized Chromium does. They stay fine for viewing.
 - **Emulator auth works from anywhere** — any origin, any tree, including the pretty `<slug>.localhost` domains and offset ports.
-- **Real Google OAuth is pinned to the main-tree serve on `http://localhost:4200`.** That exact origin/redirect URI is the one registered in the Google OAuth client; worktree offset ports and the `<slug>.localhost` domains are **not** registered, so real Google sign-in only works on the main tree at `:4200`. To enable it, add `http://localhost:4200` to both **Authorized JavaScript origins** and **Authorized redirect URIs** on the OAuth 2.0 client in Google Cloud. For worktrees, use the Auth **emulator** (it authenticates anywhere).
+- **Real Google OAuth is pinned to the main-tree serve on {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}the app's base origin{{/angular}}.** That exact origin/redirect URI is the one registered in the Google OAuth client; worktree offset ports and the `<slug>.localhost` domains are **not** registered, so real Google sign-in only works on the main tree at {{#angular}}`:4200`{{/angular}}{{^angular}}the app's base port{{/angular}}. To enable it, add {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}`http://localhost:<the app's base port>` (its `ports` in `.bespunky/dev.json`){{/angular}} to both **Authorized JavaScript origins** and **Authorized redirect URIs** on the OAuth 2.0 client in Google Cloud. For worktrees, use the Auth **emulator** (it authenticates anywhere).
 
-The devcontainer forwards the base dev-server + emulator ports to the **same host ports** (`forwardPorts`) — if you re-port an emulator, update `firebase.json`, `environment.ts`, AND `.devcontainer/devcontainer.json` together. When Claude needs *you* to complete a real OAuth sign-in in the shared browser, it enters **observe-only** (`shared-browser observe`) first so it won't move the view under you, and **resumes** after.
+The devcontainer forwards the base dev-server + emulator ports to the **same host ports** (`forwardPorts`) — if you re-port an emulator, update `firebase.json`{{#angular}} and `environment.ts` together{{/angular}}; the devcontainer's forwarded ports are read from `firebase.json` on the next sync (never hand-edit them in `.devcontainer/devcontainer.json`). When Claude needs *you* to complete a real OAuth sign-in in the shared browser, it enters **observe-only** (`shared-browser observe`) first so it won't move the view under you, and **resumes** after.
+{{/web}}
 
 **When the user asks to deploy this app — or otherwise connect it to a real Firebase project — walk them through these steps** (from the workspace root inside the devcontainer, where the Firebase CLI is installed). The BeSpunky default is Firebase **App Hosting** (framework-aware; config in `apphosting.yaml`), not classic static Hosting:
 
 1. `firebase login` — one-time auth against their Google account (opens a browser).
 2. `firebase use --add` — picks a project from their account and writes `.firebaserc`. If they don't have a project yet, create it first (Firebase console or `firebase projects:create <id>`).
 3. `firebase apphosting:backends:create --project <projectId>` — one-time: creates the App Hosting backend (interactive — picks region and **links a GitHub repo**). **Link the repo this project was scaffolded with** — that linkage is what sets up deploy CI: Firebase provisions its own Cloud Build pipeline and auto-deploys on every push to the configured branch.
-4. `firebase apps:sdkconfig WEB <appId> --project <projectId>` — prints the real web config for client-side SDK init.
-5. Paste the returned `firebaseConfig` fields into `firebase` in **`apps/<APP>/src/environments/environment.prod.ts`** — the production environment file, which the Angular build swaps in for `environment.ts` via `project.json`'s `targets.build.configurations.production.fileReplacements` (Angular's canonical environment-files pattern). Never edit `apps/<APP>/src/app/firebase.config.ts` or its `firebase-<service>.config.ts` siblings — that's structural code the generator owns end-to-end and rewrites on every sync. *Where* you provide each service is your call and lives in `app.config.ts` / your lazy routes.
+{{#angular}}4. `firebase apps:sdkconfig WEB <appId> --project <projectId>` — prints the real web config for client-side SDK init.
+5. Paste the returned `firebaseConfig` fields into `firebase` in **`apps/<APP>/src/environments/environment.prod.ts`** — the production environment file, which the Angular build swaps in for `environment.ts` via `project.json`'s `targets.build.configurations.production.fileReplacements` (Angular's canonical environment-files pattern). Never edit `apps/<APP>/src/app/firebase.config.ts` or its `firebase-<service>.config.ts` siblings — that's structural code the generator owns end-to-end and rewrites on every sync. *Where* you provide each service is your call and lives in `app.config.ts` / your lazy routes.{{/angular}}{{^angular}}4. `firebase apps:sdkconfig WEB <appId> --project <projectId>` — prints the real web config; wire it into the client the way that client's stack configures Firebase (this workspace has no Angular app, so no house generator owns that wiring).{{/angular}}
 
 After the backend is created, **App Hosting deploys are GitHub-driven**: pushing to the configured branch triggers a Cloud Build → Cloud Run deploy. Tweak build/runtime behavior in `apphosting.yaml` at the workspace root.
 
 **The CI/deploy pipeline is Firebase's, not ours.** This project ships **no GitHub Actions deploy workflow** — linking the repo at step 3 hands CI/CD to Firebase's GitHub integration, which creates and maintains the Cloud Build config. That's deliberate: it means deploys keep working as Firebase evolves its mechanism, with nothing in this repo to update. (The project's GitHub repo is created automatically at scaffold time, so it already exists to be linked.)
 
-**Never fabricate `.firebaserc` or the production config** — the Firebase CLI is the source of truth for cloud state. `provideAppFirebase()` throws at bootstrap if production is attempted with an empty `environment.firebase`, so silent broken deploys are impossible. Inside the devcontainer, **every interactive terminal shows a self-extinguishing banner** (`tools/firebase-welcome.sh`, sourced via `/etc/profile.d/zz-firebase-welcome.sh`) reminding the user of the recipe until setup is complete — when both `.firebaserc` exists and `environment.firebase.projectId` in `environment.prod.ts` is filled, the banner goes silent automatically. The same recipe also lives in the header of `environment.prod.ts` and in the `bespunky-project-starter:new-project` skill.
+**Never fabricate `.firebaserc` or the production config** — the Firebase CLI is the source of truth for cloud state.{{#angular}} `provideAppFirebase()` throws at bootstrap if production is attempted with an empty `environment.firebase`, so silent broken deploys are impossible.{{/angular}} Inside the devcontainer, **every interactive terminal shows a self-extinguishing banner** (`tools/firebase-welcome.sh`, sourced via `/etc/profile.d/zz-firebase-welcome.sh`) reminding the user of the recipe until setup is complete{{#angular}} — when both `.firebaserc` exists and `environment.firebase.projectId` in `environment.prod.ts` is filled, the banner goes silent automatically. The same recipe also lives in the header of `environment.prod.ts` and in the `bespunky-project-starter:new-project` skill.{{/angular}}{{^angular}} — it goes silent once `.firebaserc` exists. The same recipe also lives in the `bespunky-project-starter:new-project` skill.{{/angular}}
 
+{{#angular}}
 ### Staging environment & per-environment Firestore database
 
 A first-class **staging** environment is opt-in — `scaffold.sh --sync --firebase --staging` (or `nx g @bespunky/nx-tools:firebase-emulators --project=<app> --staging`). It scaffolds **`environment.staging.ts`** (swapped in by a `staging` build configuration in `project.json`) and **`apphosting.staging.yaml`**, which tells the App Hosting backend named `staging` to build `nx build <app> --configuration=staging` instead of the framework-default prod build — otherwise the staging backend silently ships **prod's** config. Bind it once at backend-create: `firebase apphosting:backends:create … --environment staging`.
@@ -239,7 +251,9 @@ A first-class **staging** environment is opt-in — `scaffold.sh --sync --fireba
 **Isolating staging's data** — the `firebase.databaseId` field (in the Environment interface) picks which Firestore database a build targets. Set it (e.g. `databaseId: 'staging'` in `environment.staging.ts`) and `firebase-firestore.config.ts` uses `getFirestore(app, databaseId)` instead of the `(default)` DB. To turn it on: create the named DB in the console, set `databaseId`, and add it to `firebase.json`'s `firestore` array (`[{ "database": "(default)", … }, { "database": "staging", … }]`).
 
 > **Caveat — same-project isolation is Firestore-only.** A named database isolates *client-written* data, but Auth users are shared (same project = one user pool), and the single shared Cloud Functions deployment writes via the Admin SDK's default `getFirestore()` → the `(default)` DB, so anything a callable persists still lands in prod. Full isolation (its own Auth pool + functions) needs a **separate Firebase project** — a deliberate step up in operational cost.
+{{/angular}}
 
+{{#angular}}
 ### Emulator relay (Auth + callables) & Functions region
 
 Auth and Functions callables run through the **dev-server's own origin**, not a directly-dialed emulator port. `environment.ts` marks each emulator `proxied: true`, so `firebase.config.ts` connects it to the app's origin and the generated **`apps/<APP>/proxy.conf.mjs`** relays to the emulator — **shifted by `PORT_OFFSET`**: Functions at `/<projectId>/**`, Auth at its Google-API-shaped prefixes (`/identitytoolkit.googleapis.com`, `/securetoken.googleapis.com`, `/www.googleapis.com`, `/emulator` — every one hostname-shaped or `/emulator`, so none collides with an app route). Two failure classes disappear: a **squatted or forwarded emulator port** on the host (common on Windows — a squatter that accepts TCP but never answers hangs the request to its deadline) can't stall it, and a **worktree can't silently relay to another tree's emulator**. **Auth matters most** — an app usually gates every route on auth readiness, so a stalled `:9099` is two faces of one bug: the app never renders *and* sign-in hangs then fails. The serve executor auto-wires the proxy for a Firebase serve; pass your own `--proxyConfig` to override, or set a service's `proxied: false` to dial its emulator port directly. (**Firestore** still dials its port directly — its gRPC-Web transport needs its own relay design.)
@@ -247,6 +261,7 @@ Auth and Functions callables run through the **dev-server's own origin**, not a 
 **Region** — pin callables to a region with `firebase.functionsRegion` (e.g. `'europe-west1'`) in an environment file; `firebase.config.ts` reads it for `getFunctions(app, region)`. Like `databaseId`, it's *configuration*, so it never means hand-editing the config file.
 
 **`firebase.config.ts` is generator-owned and rewritten in full on every `--sync`** — it holds no per-project values by design, so there's no "is it customized?" guess to freeze it behind template improvements. Change behavior where it belongs: **config** (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`, `proxied`) in `environment.ts` / `environment.<env>.ts`; **providers** in `app.config.ts` beside `provideAppFirebase()`. Editing `firebase.config.ts` directly means the next sync silently reverts it.
+{{/angular}}
 {{/firebase}}
 
 ## Branch & release parameters
@@ -269,16 +284,16 @@ The **rules** — the mandatory `bespunky-workflow:branch-and-release` skill inv
 {{/firebase}}
 
 {{#web}}
-**Serving an in-flight worktree** — the same `nx serve <app>` serves a tree you're **not** cwd'd into via `--worktree`, so an in-flight feature is testable in the real app before it's promoted, without merging it back:
+**Serving an in-flight worktree** — the same `{{SERVE}} <app>` serves a tree you're **not** cwd'd into via `--worktree`, so an in-flight feature is testable in the real app before it's promoted, without merging it back:
 
 ```bash
-nx serve <app>                              # serve the tree you're in (main → base ports; a worktree → its own offset block)
-nx serve <app> --worktree=<branch|slug>     # serve another worktree (pass --worktree empty in a TTY for an arrow-key picker)
-nx serve <app> --port-offset=auto           # ISOLATED: own verified-free port block, coexists with a running serve
-nx serve <app> --dry-run                    # print what it would serve, without serving
+{{SERVE}} <app>                              # serve the tree you're in (main → base ports; a worktree → its own offset block)
+{{SERVE}} <app> --worktree=<branch|slug>     # serve another worktree (pass --worktree empty in a TTY for a numbered picker)
+{{SERVE}} <app> --port-offset=auto           # ISOLATED: own verified-free port block, coexists with a running serve
+{{SERVE}} <app> --dry-run                    # print what it would serve, without serving
 ```
 
-It installs the worktree's deps on first serve and applies the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you. A worktree serve shifts the **whole stack** (app dev-server{{#firebase}} **and** the emulator suite{{/firebase}}) onto the worktree's stable, verified-free offset block, so it never collides with a server on the base/forwarded ports. **A worktree serve is viewable ONLY through the shared browser** — its shifted ports aren't forwarded, so watch it in the shared browser over noVNC (the executor navigates it to the worktree's pretty `<slug>.localhost` domain), not a host tab. (A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.)
+It runs the declaration's install (`install` in `.bespunky/dev.json`) in a worktree on its first serve{{#nx-serve}} and applies the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you{{/nx-serve}}. A worktree serve shifts the **whole stack** (every declared process{{#firebase}} **and** the emulator suite{{/firebase}}) onto the worktree's stable, verified-free offset block, so it never collides with a server on the base/forwarded ports. **A worktree serve is viewable ONLY through the shared browser** — its shifted ports aren't forwarded, so watch it in the shared browser over noVNC (the engine navigates it to the worktree's pretty `<slug>.localhost` domain), not a host tab. (A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.)
 {{/web}}
 {{#js}}
 ## Publishable libraries & reusable tools
@@ -286,15 +301,15 @@ It installs the worktree's deps on first serve and applies the `NX_WORKSPACE_ROO
 Libraries here are **publishable by default** — one generator owns the package config (build target, `package.json` exports, the tsconfig path alias, the test runner and the `nx release` wiring), so no library has to re-derive it:
 
 ```bash
-{{PM}} nx g @bespunky/nx-tools:publishable-lib <name>               # Angular library
-{{PM}} nx g @bespunky/nx-tools:publishable-lib <name> --nonAngular  # plain TypeScript (@nx/js, tsc)
+{{NX}} g @bespunky/nx-tools:publishable-lib <name>               # the workspace's stack (Angular when it wears it)
+{{NX}} g @bespunky/nx-tools:publishable-lib <name> --stack=js     # plain TypeScript (@nx/js, tsc)
 ```
 
 **A tool that has proved itself in one project belongs to every project.** Rather than copy-pasting it into the next repo, MARK it — that records the intent to lift it into the shared toolkit, and the extraction tooling takes it from there:
 
 ```bash
-{{PM}} nx g @bespunky/nx-tools:mark-extractable <lib> --summary="..." --rationale="..."
-{{PM}} nx g @bespunky/nx-tools:adopt-extracted <lib> --package=<npm-package>
+{{NX}} g @bespunky/nx-tools:mark-extractable <lib> --summary="..." --rationale="..."
+{{NX}} g @bespunky/nx-tools:adopt-extracted <lib> --package=<npm-package>
 ```
 
 `mark-extractable` declares this library reusable; `adopt-extracted` swaps a local copy for the published package (with `--keepShim` while call sites migrate, then `--finalize`). The cross-workspace half runs from the toolkit repo — see its `docs/reusable-tool-extraction.md`.
@@ -308,51 +323,58 @@ Libraries here are **publishable by default** — one generator owns the package
 # is a Firebase workspace, auto-detected from firebase.json) the full per-app Firebase wiring.
 # Same one command, same code path the scaffolder used for the first app, so a second app is
 # configured identically. No flags needed; Firebase is detected automatically.
-{{PM}} nx g @bespunky/nx-tools:app apps/<app-name>
-{{PM}} nx g @nx/angular:library libs/<lib-name>
-{{/angular}}{{^angular}}# Generate the next library (generator-first!)
-# This workspace has no Angular layer, so the house Angular generators (app, design-system,
-# ds-component, secondary-entrypoint) do not apply here — they will tell you so if you run
-# them. Add the layer with `nx add @nx/angular` to unlock them.
-{{PM}} nx g @bespunky/nx-tools:publishable-lib <lib-name> --nonAngular
-{{PM}} nx g @nx/js:library libs/<lib-name>
-{{/angular}}
+{{NX}} g @bespunky/nx-tools:app apps/<app-name>
+{{NX}} g @nx/angular:library libs/<lib-name>
+{{/angular}}{{^angular}}{{#js}}# Generate the next library (generator-first!)
+{{NX}} g @bespunky/nx-tools:publishable-lib <lib-name> --stack=js
+{{NX}} g @nx/js:library libs/<lib-name>
+{{/js}}{{^js}}# Generate structure through a generator (generator-first!) — Nx's, a plugin's, or this stack's own scaffolder
+{{NX}} list                                   # the Nx plugins installed here, and what they can generate
+{{NX}} g <plugin>:<generator> --help          # read the flags before the first run — never guess them
+{{/js}}{{/angular}}
+# What this workspace has, and what each project can run
+{{NX}} show projects
+{{NX}} show project <project>
 
-{{#web}}# Serve / build / test / lint a project
-{{PM}} nx serve <project>
-{{/web}}{{^web}}# Build / test / lint a project (no servable app in this workspace yet)
-{{/web}}{{PM}} nx build <project>
-{{PM}} nx test <project>
-{{PM}} nx lint <project>
+{{#web}}# Serve an app (what it runs is declared in .bespunky/dev.json)
+{{SERVE}} <app>
+{{/web}}{{#node}}# Build / test / lint a project
+{{NX}} build <project>
+{{NX}} test <project>
+{{NX}} lint <project>
 
 # Run a target across everything affected by your changes
-{{PM}} nx affected -t build test lint
-```
+{{NX}} affected -t build test lint
+{{/node}}{{^node}}# Run a project's target, or one target across everything affected by your changes
+{{NX}} run <project>:<target>
+{{NX}} affected -t <target>
+{{/node}}```
 
 ## Working with Nx
 
+- Invoke Nx as **`{{NX}}`**{{#node}} — through the workspace's package manager, never a globally installed CLI{{/node}}{{^node}} — the wrapper pins the exact Nx version in `nx.json` (`installation`) and installs it into `.nx/installation` on first use; there is no global or package.json Nx here{{/node}}.
 - For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies.
-- When running tasks (build, lint, test, e2e, etc.), always prefer `nx` (`nx run`, `nx run-many`, `nx affected`) over the underlying tooling directly.
-- Prefix nx commands with the workspace package manager (`{{PM}} nx ...`) - avoids the globally installed CLI.
-- You have access to the Nx MCP server and its tools - use them.
-- For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
-- For scaffolding (apps, libs, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
-
+- When running a project's tasks, prefer `nx` (`nx run`, `nx run-many`, `nx affected`) over the underlying tooling directly, so caching and the task graph apply.
+- You have access to the Nx MCP server and its tools (through the Nx plugin) - use them.
+- For Nx plugin best practices, check `{{#node}}node_modules{{/node}}{{^node}}.nx/installation/node_modules{{/node}}/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
+- For scaffolding (projects, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
+{{^js}}{{^angular}}- This workspace has no JavaScript/TypeScript layer, so the house's TypeScript generators (`app`, `publishable-lib`, `design-system`, …) do not apply — they say so if you run them. Nx itself is language-agnostic: add the plugin for this stack (`{{NX}} add <plugin>`) to give its projects targets.
+{{/angular}}{{/js}}
 {{#angular}}
 ## Angular AI tooling (MCP + agent skills)
 
 This project ships Angular's official AI tooling, wired in two layers that complement each other:
 
-- **Angular CLI MCP server** — declared in project-scoped `.mcp.json` (`npx -y @angular/cli mcp`, always the latest CLI, no version to maintain). It exposes Angular's **knowledge tools**: `get_best_practices`, `search_documentation`, `find_examples`, `ai_tutor`, and `onpush_zoneless_migration`. **Treat these as the source of truth for current Angular guidance** — signals, `linkedSignal`, `resource`, Signal Forms, the built-in control flow, zoneless/OnPush, SSR, ARIA — rather than training-data recall, which lags the framework. The server's *experimental* exec tools (`build`, `devserver.*`, `test`, `e2e`) are deliberately **not** enabled: this is an integrated Nx workspace with **no root `angular.json`**, so those tools (which read `angular.json` and shell out to `ng build`/`ng serve`) can't function here and would only pull you off the Nx-owned targets. Build / serve / test verification belongs to **Nx** (`{{PM}} nx build|serve|test`) and the Playwright skill — never the Angular CLI directly.
-- **Angular agent skills** — `angular-developer` and `angular-new-app` are fetched fresh from `github.com/angular/skills` into `.claude/skills/` on every container build (gitignored — a refreshable cache that tracks upstream, never a vendored fork). They load automatically and carry idiomatic, version-aware Angular patterns. **One reconciliation:** those skills are Angular-CLI-centric (they reach for `ng new` / `ng generate`); in this workspace you **always go through Nx instead** — `{{PM}} nx g @nx/angular:application|library|component …`, `{{PM}} nx build|serve|test` — per **Generator-first** in [`HOUSE.rules.md`](HOUSE.rules.md). Take their *Angular* guidance; ignore their *`ng` invocation* mechanics.
+- **Angular CLI MCP server** — declared in project-scoped `.mcp.json` (`npx -y @angular/cli mcp`, always the latest CLI, no version to maintain). It exposes Angular's **knowledge tools**: `get_best_practices`, `search_documentation`, `find_examples`, `ai_tutor`, and `onpush_zoneless_migration`. **Treat these as the source of truth for current Angular guidance** — signals, `linkedSignal`, `resource`, Signal Forms, the built-in control flow, zoneless/OnPush, SSR, ARIA — rather than training-data recall, which lags the framework. The server's *experimental* exec tools (`build`, `devserver.*`, `test`, `e2e`) are deliberately **not** enabled: this is an integrated Nx workspace with **no root `angular.json`**, so those tools (which read `angular.json` and shell out to `ng build`/`ng serve`) can't function here and would only pull you off the Nx-owned targets. Build / serve / test verification belongs to **Nx** (`{{NX}} build|serve|test`) and the Playwright skill — never the Angular CLI directly.
+- **Angular agent skills** — `angular-developer` and `angular-new-app` are fetched fresh from `github.com/angular/skills` into `.claude/skills/` on every container build (gitignored — a refreshable cache that tracks upstream, never a vendored fork). They load automatically and carry idiomatic, version-aware Angular patterns. **One reconciliation:** those skills are Angular-CLI-centric (they reach for `ng new` / `ng generate`); in this workspace you **always go through Nx instead** — `{{NX}} g @nx/angular:application|library|component …`, `{{NX}} build|serve|test` — per **Generator-first** in [`HOUSE.rules.md`](HOUSE.rules.md). Take their *Angular* guidance; ignore their *`ng` invocation* mechanics.
 
 {{/angular}}
 {{#web}}
 ## Playwright (available out of the box)
 
-This devcontainer ships with **Chromium + Playwright pre-installed** (the devcontainer's `post-create.sh` runs `playwright install --with-deps chromium` when it detects `@playwright/test` in `package.json`, and the browser binary is cached in a per-workspace volume so rebuilds don't re-download). You can drive a real browser from a Bash script today — no `playwright install`, no apt step, no `sudo`.
+This devcontainer ships with **a Playwright Chromium pre-installed**: the shared browser carries its own pinned Playwright runtime, and `post-create.sh` provisions it with `bash tools/shared-browser/shared-browser install --with-deps` (the browser binary is cached in a per-workspace volume, so rebuilds don't re-download){{#js}} — and, when `package.json` declares `@playwright/test` (pinned to the same version), the project's own test runner gets the same Chromium via `playwright install --with-deps chromium`{{/js}}. You can drive a real browser from a script today — no `playwright install`, no apt step, no `sudo`.
 
-Use Playwright whenever you need to **observe** or **drive** the running app instead of reasoning about source: verify a UI change end-to-end, reproduce a user-reported bug in the actual browser, capture before/after screenshots, scrape Angular-rendered output, or generate test scaffolding via codegen. Always headless — there is no display in the container.
+Use Playwright whenever you need to **observe** or **drive** the running app instead of reasoning about source: verify a UI change end-to-end, reproduce a user-reported bug in the actual browser, capture before/after screenshots, scrape the rendered DOM, or generate test scaffolding via codegen. Headless for scripts; the shared browser is the headed one, on the container's virtual display.
 
 For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` / `Claude_in_Chrome` MCPs, how to write a headless script, how to capture and feed back screenshots, common pitfalls), invoke the **`bespunky-browser-automation:playwright`** skill before reaching for any browser-side check.
 

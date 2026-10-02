@@ -1,6 +1,6 @@
 ---
 description: Bring this project up to the current house standard — update the claude-toolkit plugins, then run the layered sync on this repo.
-argument-hint: "[--ensure=<layers>] [--firebase] [--voice] [--staging] [--local] [--docker] [--no-backup]"
+argument-hint: "[--ensure=<layers>] [--preset=<id>] [--firebase] [--voice] [--staging] [--local] [--docker] [--no-backup]"
 allowed-tools: Bash, Read
 ---
 
@@ -91,11 +91,15 @@ exactly what invoking `/sync` is. **This is the only situation in which you may 
 reasoning to a sync you decided to run yourself, one suggested by the SessionStart hook, or one in a
 scripted or headless run.
 
-**Do not add `--no-backup`.** The sync tags a restore point first; that is the safety net for a command
-that rewrites files.
+**Do not add `--no-backup`.** In a git repository it changes nothing — the restore point is the clean `HEAD`
+preflight requires — and its only remaining meaning is "sync a directory that is NOT a git repository, with no
+restore point at all". That is the user's call to make, never yours.
 
-**Pass `$ARGUMENTS` through, and add nothing of your own.** In particular do not invent `--ensure`:
-ensuring a layer CREATES capability the project did not ask for.
+**Pass `$ARGUMENTS` through, and add nothing of your own.** In particular do not invent `--ensure` or
+`--preset` (a preset is only a named ensure set): ensuring a layer CREATES capability the project did not ask
+for. The one layer a sync always ensures without being asked is the **Nx floor** — see *The rest*, below.
+Make no assumption about the stack either: the project may be Angular, plain TypeScript, Python, Go or docs;
+the sync detects what it wears and refreshes exactly that.
 
 ## 4. Handle the outcomes that aren't plain success
 
@@ -103,14 +107,14 @@ ensuring a layer CREATES capability the project did not ask for.
 
 Before any generator runs, the sync hands `nx migrate` the house tooling's **versioned one-way migrations**
 (see the `new-project` skill, §1d). It works out where the project actually is with a **probe** taken before
-anything is written — the older of the version installed in `node_modules` and the one stamped in `HOUSE.md`
-— and passes that as an explicit `--from`. Exactly one `[migrate]` outcome line appears. **Match it by
+anything is written — the older of the version installed (in `node_modules`, or `.nx/installation` on the
+wrapper host) and the one stamped in `HOUSE.md` — and passes that as an explicit `--from`. Exactly one `[migrate]` outcome line appears. **Match it by
 meaning, not by its exact wording** (it is prose, and it gets tuned):
 
 - **the ladder ran**, naming the two versions it walked between. **Relay this loudly.** These are one-way
   deltas, not idempotent re-assertions: they rewrite **every project in the workspace**, not just the one app
-  the per-app generators target, and there is no reverse. Name the two versions and point at the backup ref
-  from `BACKUP_OK`, because that tag is the only way back.
+  the per-app generators target, and there is no reverse. Name the two versions and point at the restore point
+  from `BACKUP_OK` (the clean pre-sync `HEAD` sha), because that commit is the only way back.
 - **the baseline line**, saying the toolkit was not installed here before this run — normal on a first
   retrofit. There is no applied version to migrate *from*; the project is simply being brought to baseline.
 - **the steady-state line**, saying the project is already at the version being installed, so there is
@@ -144,11 +148,14 @@ one large diff. Two consequences worth relaying:
 
 Do not offer to squash, amend or reword these commits unless the user asks. They are the record.
 
-**If a migration fails mid-ladder, STOP.** Do not re-run the sync to "get past it": the package.json bump and
-the install have already happened, the project is half-migrated, and Nx leaves its `migrations.json` sitting
+**If a migration fails mid-ladder, STOP.** Do not re-run the sync to "get past it": the version bump (in
+`package.json`, or `nx.json` → `installation` on the wrapper host) and the install have already happened, the project is half-migrated, and Nx leaves its `migrations.json` sitting
 in the workspace root. Re-running restarts the ladder against a tree that is partly through it. Surface the
-failing migration's name, the backup ref, and the leftover `migrations.json`, and let the user decide between
-fixing forward and restoring from the tag.
+failing migration's name, the restore point, and the leftover `migrations.json`, and let the user decide between
+fixing forward and restoring — with the commands the failure printed: `git restore --source=<sha> --staged
+--worktree -- .` puts every tracked file back, then `git clean -n` lists what the run ADDED (review before any
+`-f`). **Never `git reset --hard`**: it moves the branch and discards the working tree wholesale, the one undo
+that can destroy something the sync did not make.
 
 One failure there is worth recognising on sight, because Nx's message gives no clue what it is about:
 
@@ -233,21 +240,28 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 - **`BACKUP_ABORT: … is not a git repository`** — very common on a first retrofit. The sync **refused to
   change anything** rather than rewrite files with no restore point. Relay the two ways out it printed:
   `git init && git add -A && git commit` in the project, or `--no-backup`. Prefer the first, and only pass
-  `--no-backup` if the user asks for it — see the rule above.
+  `--no-backup` if the user asks for it — see the rule above. (In a git repository there is no backup step to
+  fail: preflight requires a clean tree, so the restore point is simply `HEAD`.)
 
-- **`BACKUP_ABORT: could not create the git snapshot`** — same refusal, different cause (a broken or
-  unwritable repo state). Relay it; don't retry with `--no-backup` on your own initiative.
+- **`[layers] ensure nx: …`** — the repo had no `nx.json`, so the sync laid the **Nx floor** in place
+  (`nx init`). Not an error: the floor is always ensured, because every house generator and migration runs
+  through Nx; everything *above* it stays opt-in. Relay which host it chose, since it decides what the repo
+  gained. With a `package.json`, Nx went into `node_modules` through the project's own package manager. With
+  **none** (a Python, Go or docs repo), Nx came through its **wrapper**: the repo gains `nx.json`, `./nx`,
+  `nx.bat` and `.nx/nxw.js`, with the toolkit pinned exactly in `nx.json` → `installation.plugins` — and no
+  `package.json`, lockfile or `node_modules`, so it does not become a Node project. Nx commands there are
+  `./nx …`. If the user ran a plain `/sync` on such a repo, they got the floor — Nx, the house docs
+  (`HOUSE.rules.md` + `HOUSE.md`, imported from `CLAUDE.md`, seeded if absent) and each layer's `.gitignore`
+  entries — and nothing above it; **offer** `/sync --ensure=agent` for the house DX (devcontainer, Claude
+  settings, window identity) and wait for a yes.
 
-- **"not an Nx workspace (no nx.json)"** — expected on a repo that has never had house tooling. Relay it and
-  **offer** `/sync --ensure=agent`, explaining what that does: creates an Nx workspace in place and applies
-  the stack-agnostic DX layer (devcontainer, Claude settings, window identity, `HOUSE.rules.md` + `HOUSE.md`) — no framework
-  opinion, but it does add `nx.json`, a root `package.json`, a lockfile and `node_modules`. Wait for a yes.
-
-- **`--sync cannot ENSURE the '<layer>' layer`** — relay the message verbatim. It already names the native
-  command to add that layer, after which a plain sync detects it. Don't work around it.
+- **`--sync cannot ENSURE the '<layer>' layer`** — relay the message verbatim (a `--preset` naming such a
+  layer is refused the same way). It already names the native command to add that layer, after which a plain
+  sync detects it. Don't work around it.
 
 - **`[install] node_modules/.bin/nx is missing …`** — **not an error.** The project's dependencies were never
-  installed (a fresh clone), so the sync installs them itself and carries on. Nothing to relay beyond the fact
+  installed (a fresh clone), so the sync installs them itself and carries on. (On the wrapper host the same
+  thing happens silently: `./nx` reinstalls `.nx/installation` from the pins in `nx.json`.) Nothing to relay beyond the fact
   that it happened, and nothing to re-run. It only becomes an error two ways, both of which end the run and
   both of which say so: the install *failed*, or it succeeded and the workspace still has no `nx` — meaning
   this workspace does not depend on Nx at all, so there is nothing here for the sync to drive.
@@ -255,7 +269,7 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 - **`ERROR: could not read this workspace layers`** — the layer registry failed to load, so the sync stopped
   rather than guess. This is a **refusal, not a crash**: a failed detection is indistinguishable from an empty
   project, and continuing would skip the house tooling for every layer the project actually has. Relay it as a
-  toolkit-side fault (usually a broken or partial `node_modules/@bespunky/nx-tools`); a reinstall and re-run is
+  toolkit-side fault (usually a broken or partial `@bespunky/nx-tools` install); a reinstall and re-run is
   the fix, not a different flag.
 
 ## 5. Report
@@ -278,7 +292,9 @@ silently and mention it in one clause.
 - the layers it reported active, and the package manager it detected;
 - if it printed an `[devcontainer] Adopted the existing …` line, read `.devcontainer/.bespunky-devcontainer.json`
   and tell them which keys were left as theirs — that is the divergence the sync will never fix on its own;
-- the backup ref from the `BACKUP_OK` line, so they know how to undo it.
+- the restore point from the `BACKUP_OK` line (also `backup=` in `SYNC_OK`) — the clean pre-sync `HEAD` — and how
+  to use it: `git diff <sha>` reviews the sync; `git checkout <sha> -- <path>` restores one file;
+  `git restore --source=<sha> --staged --worktree -- .` (then `git clean -n`) undoes it all. Never `reset --hard`.
 
 ### Last, the one boundary — `SYNC_NEXT`
 

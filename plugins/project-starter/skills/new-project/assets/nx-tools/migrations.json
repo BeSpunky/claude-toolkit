@@ -2,83 +2,129 @@
   "generators": {
     "unify-serve-targets": {
       "version": "0.24.0",
+      "layer": "web",
       "description": "Consolidate the historic dev-server target names into the single `dev-server` leaf, and drop the retired `serve-worktree` / `serve-with-shared-browser` targets.",
       "implementation": "./src/migrations/0.24.0/unify-serve-targets"
     },
     "stamp-devcontainer-ownership": {
       "version": "0.24.0",
+      "layer": "agent",
       "description": "Resolve devcontainer ownership markers written before the `owned` flag existed, so a devcontainer the toolkit owns keeps receiving house updates.",
       "implementation": "./src/migrations/0.24.0/stamp-devcontainer-ownership"
     },
     "relocate-emulator-targets": {
       "version": "0.24.1",
+      "layer": "firebase",
       "description": "Move the per-app `emulators*` targets to the workspace-level `firebase` project, and drop the retired no-emulators build configurations and environment files.",
       "implementation": "./src/migrations/0.24.1/relocate-emulator-targets"
     },
     "carry-legacy-firebase-prod-config": {
       "version": "0.24.2",
+      "layer": "firebase",
       "description": "Rescue production Firebase credentials from a legacy `productionFirebaseConfig` in firebase.config.ts into environment.prod.ts, before the generator rewrites that file.",
       "implementation": "./src/migrations/0.24.2/carry-legacy-firebase-prod-config"
     },
     "upgrade-emulator-environment-shape": {
       "version": "0.24.3",
-      "description": "Upgrade a pre-toggle environment bundle (bare emulator endpoints, and the interface that typed them) to the per-service `default` shape firebase.config.ts reads \u2014 otherwise every service silently resolves to the real Firebase backend.",
+      "layer": "firebase",
+      "description": "Upgrade a pre-toggle environment bundle (bare emulator endpoints, and the interface that typed them) to the per-service `default` shape firebase.config.ts reads — otherwise every service silently resolves to the real Firebase backend.",
       "implementation": "./src/migrations/0.24.3/upgrade-emulator-environment-shape"
     },
     "claim-legacy-devcontainer-ownership": {
       "version": "0.24.4",
+      "layer": "agent",
       "description": "Give a devcontainer written before the ownership marker existed a marker of its own, so a house-written container resumes receiving updates instead of being treated as adopted.",
       "implementation": "./src/migrations/0.24.4/claim-legacy-devcontainer-ownership"
     },
     "relocate-design-system-out-of-tools": {
       "version": "0.24.5",
+      "layer": "design-system",
       "description": "Move a design system that a pre-0.18.0 scaffold placed under tools/ to the workspace library directory, retargeting its tsconfig path alias and the apps sass include path.",
       "implementation": "./src/migrations/0.24.5/relocate-design-system-out-of-tools"
     },
     "remove-orphaned-beside-post-create": {
       "version": "0.24.6",
+      "layer": "agent",
       "description": "Delete the duplicate post-create.bespunky.sh left behind by the beside-script bug, which no sync updates and which provisions the container a second time when it was chained by hand.",
       "implementation": "./src/migrations/0.24.6/remove-orphaned-beside-post-create"
     },
     "retire-inline-house-sections": {
       "version": "0.25.0",
-      "description": "Delete the frozen house sections still inline in CLAUDE.md from before 0.5.0 moved them into the generated HOUSE.md \u2014 now actively misleading, because 0.25.0 imports the live directives into the same file.",
+      "layer": "nx",
+      "description": "Delete the frozen house sections still inline in CLAUDE.md from before 0.5.0 moved them into the generated HOUSE.md — now actively misleading, because 0.25.0 imports the live directives into the same file.",
       "implementation": "./src/migrations/0.25.0/retire-inline-house-sections"
     },
     "convert-target-comment-keys": {
       "version": "0.27.0",
-      "description": "Move `\"//name\": \"\u2026\"` documentation keys out of `targets` onto the target's `metadata.description`. Inside `targets` Nx reads every value as a TargetConfiguration, so such a key throws on Nx 23 and silently spreads into a character-indexed object on older Nx.",
+      "layer": "nx",
+      "description": "Move `\"//name\": \"…\"` documentation keys out of `targets` onto the target's `metadata.description`. Inside `targets` Nx reads every value as a TargetConfiguration, so such a key throws on Nx 23 and silently spreads into a character-indexed object on older Nx.",
       "implementation": "./src/migrations/0.27.0/convert-target-comment-keys"
     },
     "report-duplicate-house-providers": {
       "version": "0.27.0",
-      "description": "Report a house provider (provideAppFirebase / provideWorktreeTabLabel / provideDesignSystem) called in more than one app config \u2014 the residue of those providers being re-asserted into app.config.ts on every sync. Reports only: which copy is correct is a question about the app, and for provideAppFirebase a copy in the shared config initialises Firebase during SSR.",
+      "layer": "angular",
+      "description": "Report a house provider (provideAppFirebase / provideWorktreeTabLabel / provideDesignSystem) called in more than one app config — the residue of those providers being re-asserted into app.config.ts on every sync. Reports only: which copy is correct is a question about the app, and for provideAppFirebase a copy in the shared config initialises Firebase during SSR.",
       "implementation": "./src/migrations/0.27.0/report-duplicate-house-providers"
     },
     "migrate-window-identity-surface-to-both": {
       "version": "0.29.0",
+      "layer": "agent",
       "description": "Move an existing window identity from a status-bar-only band to `both` (status bar AND title bar), following the change of the window-identity generator's default surface from `status` to `both`. Moves every marked project, including design-system/manual ones the generator's ratchet would otherwise skip; `both` is a superset of `status`, so it only adds the title-bar keys and removes nothing.",
       "implementation": "./src/migrations/0.29.0/migrate-window-identity-surface-to-both"
     },
     "namespace-seeded-output-style": {
       "version": "0.30.2",
+      "layer": "agent",
       "description": "Repoint the seeded `outputStyle` from the bare `Pitch to the listener` to the style's real id, `bespunky-communication:Pitch to the listener`. A plugin style is registered under `plugin:name` and the setting is looked up by exact key, so the bare name matched nothing and the house output style was never actually active. Rewrites only that exact value, and reports instead of rewriting where the project has its own output style by that name.",
       "implementation": "./src/migrations/0.30.2/namespace-seeded-output-style"
     },
     "split-firebase-service-providers": {
       "version": "0.33.0",
+      "layer": "firebase",
       "description": "provideAppFirebase() now provides the Firebase APP only — Auth, Firestore, Storage and Functions each got their own generated file, so an app can provide each where it is used instead of pinning all four into the initial bundle. Adds the four service providers at every real provideAppFirebase() call site (wherever the project put it), preserving today's behaviour exactly, with import paths COMPUTED from the app root rather than derived from what it finds. Rewrites the whole generated config set so a bare `nx migrate`, a partial sync and every app in a multi-app workspace still compile. Decides `already wired` by identity, not by name, and reports a name collision instead of wiring somebody else's function.",
       "implementation": "./src/migrations/0.33.0/split-firebase-service-providers"
     },
     "wire-missing-baseline-providers": {
       "version": "0.33.1",
-      "description": "Wire the house providers the `app` generator generated files for and then never wired. Composing serve/design-system-styles/firebase-emulators, it passed the baseline `wireProviders` flag to the design-system call ALONE, so every app scaffolded on 0.26.0-0.32.x carries worktree-tab-label.ts and firebase.config.ts on disk with nothing calling either \u2014 Firebase is generated and never initialised, failing at the app's first inject(Auth). Adds each call only where the generated file exists AND nothing in the app already calls it, so a hand-wired or deliberately relocated provider is left alone; reports where the app config's shape is unrecognised.",
+      "layer": "angular",
+      "description": "Wire the house providers the `app` generator generated files for and then never wired. Composing serve/design-system-styles/firebase-emulators, it passed the baseline `wireProviders` flag to the design-system call ALONE, so every app scaffolded on 0.26.0-0.32.x carries worktree-tab-label.ts and firebase.config.ts on disk with nothing calling either — Firebase is generated and never initialised, failing at the app's first inject(Auth). Adds each call only where the generated file exists AND nothing in the app already calls it, so a hand-wired or deliberately relocated provider is left alone; reports where the app config's shape is unrecognised.",
       "implementation": "./src/migrations/0.33.1/wire-missing-baseline-providers"
     },
     "retire-wslg-audio-bridge": {
       "version": "0.34.0",
-      "description": "Remove the WSLg-only audio bridge `--voice` wrote into .devcontainer/devcontainer.json \u2014 the `source=/mnt/wslg,target=/mnt/wslg,type=bind` mount and `remoteEnv.PULSE_SERVER: unix:/mnt/wslg/PulseServer`. Docker refuses a bind whose source is missing, so off WSL2 the container did not start; and an adopted devcontainer, merged additively by mount target, would keep the old bind beside the new host-agnostic bridge while the old PULSE_SERVER scalar won. Removes only those exact house values (and the house comments above them) with comment-preserving splices, on owned and adopted devcontainers alike; reports any other WSLg mount or PULSE_SERVER as the project's own. The next sync with voice on adds the new bridge.",
+      "layer": "agent",
+      "description": "Remove the WSLg-only audio bridge `--voice` wrote into .devcontainer/devcontainer.json — the `source=/mnt/wslg,target=/mnt/wslg,type=bind` mount and `remoteEnv.PULSE_SERVER: unix:/mnt/wslg/PulseServer`. Docker refuses a bind whose source is missing, so off WSL2 the container did not start; and an adopted devcontainer, merged additively by mount target, would keep the old bind beside the new host-agnostic bridge while the old PULSE_SERVER scalar won. Removes only those exact house values (and the house comments above them) with comment-preserving splices, on owned and adopted devcontainers alike; reports any other WSLg mount or PULSE_SERVER as the project's own. The next sync with voice on adds the new bridge.",
       "implementation": "./src/migrations/0.34.0/retire-wslg-audio-bridge"
+    },
+    "retarget-nx-cache-volume": {
+      "version": "0.35.0",
+      "layer": "agent",
+      "description": "Replace the house devcontainer volume over the WHOLE .nx/ folder (`source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume`) with two volumes at .nx/cache and .nx/workspace-data. On the Nx wrapper host (new in 0.35.0) .nx/ carries the committed nxw.js, which a whole-folder volume hides, so ./nx stops working inside the container — and the generator's additive merge would never remove the old mount by itself. Replaces only the exact house value, in place (position and comments kept), on owned and adopted devcontainers alike; reports any other whole-.nx mount as the project's own.",
+      "implementation": "./src/migrations/0.35.0/retarget-nx-cache-volume"
+    },
+    "declare-dev-processes": {
+      "version": "0.35.0",
+      "layer": "web",
+      "description": "Write `.bespunky/dev.json` reproducing what the 0.34.x serve executor ran for every project whose `serve` is the house composer — the `app` process (`<nx> run <app>:dev-server --port=${PORT:app}`, base 4200, NX_DAEMON=false + NX_WORKSPACE_ROOT_PATH pinned to the served tree), the `emulators` process in a Firebase workspace (ports from firebase.json, `?portOffset` on a shifted stack, `?emulate=none` when skipped, the OAuth-origin advice) and the install step — because `nx serve` is now a thin wrapper over the stack-free engine that runs exactly what the declaration says. Moves the sniffed `<app>/proxy.conf.mjs` into the Angular dev-server leaf's `proxyConfig`. Adds only missing processes; project.json's serve target is unchanged.",
+      "implementation": "./src/migrations/0.35.0/declare-dev-processes"
+    },
+    "relocate-port-claim": {
+      "version": "0.35.0",
+      "layer": "web",
+      "description": "Move host-port arbitration from tools/shared-browser/port-claim(.test).mjs to its own home, tools/port-claim/ (the shared browser, the worktree-domains proxy and the dev engine all consult it), and re-point every reference — including the house CLIs a bare `nx migrate` leaves in place until the next sync. A file at the old path without the house stamp is left and reported.",
+      "implementation": "./src/migrations/0.35.0/relocate-port-claim"
+    },
+    "pin-playwright": {
+      "version": "0.35.0",
+      "layer": "js",
+      "description": "Pin a `\"@playwright/test\": \"latest\"` the playwright generator wrote to the version installed in node_modules (no upgrade, no downgrade — what the lockfile already says), else the house version. Any other spec is the project's own and stays.",
+      "implementation": "./src/migrations/0.35.0/pin-playwright"
+    },
+    "tag-navigation-library": {
+      "version": "0.35.0",
+      "layer": "navigation",
+      "description": "Tag the navigation kernel's library `type:navigation`: the navigation layer is now detected by that tag instead of the hard-coded project name `navigation-core`. Tags a project named `navigation-core` and the project owning a directory that carries the vendored kernel (lib/navigation-x.providers.ts), merging into project.json or package.json's `nx` block; reports a kernel left as loose files with no project (earlier generators wrote it that way) instead of inventing one.",
+      "implementation": "./src/migrations/0.35.0/tag-navigation-library"
     }
   }
 }

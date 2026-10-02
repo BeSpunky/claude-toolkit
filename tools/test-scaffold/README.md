@@ -31,7 +31,11 @@ guards, gates, ordering. Not everything the scaffolder does.
 | `emulators-only.test.sh` | What `tools/emulators.sh` hands `firebase emulators:start` — the derived `--only`, and that passing it does not silently disable export-on-exit. |
 | `emulator-seeds.test.sh` | The seed cascade: seeds shared from the main worktree, data isolated per stack, and a worktree never writing back into main's. |
 | `reap-ownership.test.sh` | That the reaper kills orphans and not a second, legitimately-running suite. |
-| `port-offset.test.sh` | Port-block derivation and isolation (assertions live in the sibling `port-offset.checks.mjs`). |
+| `dev-engine.test.sh` | The stack-free dev engine: port-block sizing and offset resolution, declaration validation and planning (substitution, URL switches, skips), argv parsing — and a real `dev serve --dry-run` in a throwaway repo — including a workspace in a subdirectory of its repository, a symlinked invocation, the IPv6-aware free-port probe, and a SIGKILLed child failing the serve (assertions in the sibling `dev-engine.checks.mjs`). |
+| `writes-nothing.test.sh` | That a REFUSED sync and a `--print-inner` write nothing (no tag, no deleted lockfile), print no failure/restore advice over the verdict, and that a parent directory with a quote reaches the program as environment, never as code. |
+| `worktree-domains.test.sh` | The route registry: 12 concurrent registers keep 12 routes, and `reconcile` keeps exactly the slugs the dev engine registers (one shared rule) while dropping a dead one. |
+| `port-claim.test.sh` | Runs the shipped `tools/port-claim` suite: real multi-process races on one registry (allocation, and the takeover of an expired claim), and out-of-range ports refused. |
+| `firebase-banner.test.sh` | The `/etc/profile.d` hook for the Firebase banner: written POSIX and quoted, sourced by dash and bash from a path with a space and a quote. |
 
 **`render.test.sh` is the one that runs before the subject of every other test exists.** `scaffold.sh`'s
 product is a shell program assembled out of nested double-quoted strings, where a backtick — *including one

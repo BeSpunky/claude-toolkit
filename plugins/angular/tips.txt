@@ -1,0 +1,5 @@
+# Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
+# One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
+
+Wrapping a JS library (maps, charts, editors) in Angular? angular-native-wrappers covers it without boilerplate
+Shaping an Angular library, provider or directive? angular-architecture indexes the modern-Angular techniques

@@ -82,6 +82,15 @@ printf 'node_modules/\n' > "$FIX/.gitignore"
 git -C "$FIX" add -A >/dev/null 2>&1
 git -C "$FIX" commit -qm init
 
+# The WRAPPER host: a repo with no package.json (a Python service). The sync lays the Nx floor through the Nx
+# wrapper (./nx) instead of making it a Node project, so it renders a different install, probe and nx command.
+FIXW="$TMP/pyproject"
+mkdir -p "$FIXW"
+printf 'print("hi")\n' > "$FIXW/main.py"
+git -C "$FIXW" init -q -b main
+git -C "$FIXW" add -A >/dev/null 2>&1
+git -C "$FIXW" commit -qm init
+
 FAILED=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILED=1; }
@@ -233,11 +242,77 @@ render 'sync --local'           --sync --yes --local "$FIX"
 render 'sync --ensure=agent'    --sync --yes --ensure=nx,agent "$FIX"
 render 'sync --firebase'        --sync --yes --firebase --ensure=firebase "$FIX"
 render 'scaffold'               "newproj"
-render 'scaffold --firebase'    --firebase --staging "newproj" "myapp"
+render 'scaffold --preset=angular' --preset=angular "newproj" "myapp"
+render 'scaffold --firebase'    --preset=angular --firebase --staging "newproj" "myapp"
 # --voice is a second opt-in that reaches the devcontainer generator by the same route as --firebase, and it
 # was broken by the same duplicate-author bug — undetected, because no arm had ever rendered it.
 render 'scaffold --voice'       --voice "newproj"
 render 'scaffold --local'       --local "newproj"
+render 'scaffold --local angular' --local --preset=angular "newproj"
+render 'sync (wrapper host)'    --sync --yes "$FIXW"
+render 'sync --local (wrapper)' --sync --yes --local --ensure=agent "$FIXW"
+render 'scaffold --ensure=nx,agent' --ensure=nx,agent "newproj"
+
+# SCAFFOLD = SYNC WITH AN ENSURE SET: the bootstrap is rendered FROM the ensure set, never hard-wired. It once ran
+# the Angular bootstrap unconditionally, so --ensure=nx,agent still created an Angular workspace and app; and the
+# default project is now the agent preset — wrapper-hosted, no package.json, no stack.
+echo "── the scaffold bootstrap is the ensure set's"
+_bootstrap() { printf '%s\n' "$1" | grep -vE '^[[:space:]]*#' | grep -E 'create nx-workspace|create-nx-workspace|nx add |nx-tools:app |useDotNxInstallation=true|^git init'; }
+_prog="$(bash "$SCAFFOLD" --print-inner "newproj" 2>/dev/null)"
+_b="$(_bootstrap "$_prog")"
+if printf '%s\n' "$_prog" | grep -q "^ENSURED='nx,agent'$" && printf '%s\n' "$_b" | grep -q 'useDotNxInstallation=true' \
+   && ! printf '%s\n' "$_b" | grep -qE 'nx-workspace|nx add |nx-tools:app '; then
+  ok "default scaffold = the agent preset: wrapper floor, no create-nx-workspace, no plugin, no app"
+else
+  fail "the default scaffold is not the agent preset on the wrapper floor:"; printf '%s\n' "$_b" | sed 's/^/         | /'
+fi
+_prog="$(bash "$SCAFFOLD" --print-inner --ensure=nx,agent "newproj" 2>/dev/null)"
+if ! _bootstrap "$_prog" | grep -qE 'nx-workspace|nx add |nx-tools:app '; then
+  ok "--ensure=nx,agent bootstraps no stack"
+else
+  fail "--ensure=nx,agent renders a stack bootstrap"
+fi
+_prog="$(bash "$SCAFFOLD" --print-inner --preset=angular --firebase "newproj" "shop" 2>/dev/null)"
+_b="$(_bootstrap "$_prog")"
+if printf '%s\n' "$_b" | grep -q 'create nx-workspace' && printf '%s\n' "$_b" | grep -q 'nx add @nx/angular' \
+   && printf '%s\n' "$_b" | grep -q "nx-tools:app 'apps/shop' --stack=angular" && ! printf '%s\n' "$_b" | grep -q 'useDotNxInstallation=true' \
+   && printf '%s\n' "$_prog" | grep -q "^ENSURED='nx,agent,node,web,angular,design-system,firebase'$"; then
+  ok "--preset=angular --firebase: package.json host, @nx/angular, the first app through the adapter"
+else
+  fail "--preset=angular does not render the Angular bootstrap:"; printf '%s\n' "$_b" | sed 's/^/         | /'
+fi
+if ! bash "$SCAFFOLD" --print-inner "newproj" "shop" >/dev/null 2>&1; then
+  ok "an app name with nothing that creates an app is refused"
+else
+  fail "scaffold.sh newproj shop (agent preset) accepted an app name nothing uses"
+fi
+# And the wrapper host never makes a Python repo a Node project: no package-manager add, ./nx throughout.
+_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=agent "$FIXW" 2>/dev/null)"
+if printf '%s\n' "$_prog" | grep -q 'useDotNxInstallation=true' && ! printf '%s\n' "$_prog" | grep -qE 'yarn add|npm install --save-dev|pnpm add'; then
+  ok "wrapper host: nx init through the wrapper, no package-manager add"
+else
+  fail "wrapper host renders a Node-project install"
+fi
+# A refusal's hint is a command the user will paste: on a wrapper host Nx is `./nx`, and a bare `nx add …` fails.
+_err="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=angular "$FIXW" 2>&1 >/dev/null)"
+if printf '%s\n' "$_err" | grep -q '`./nx add @nx/angular`' && ! printf '%s\n' "$_err" | grep -q '`nx add'; then
+  ok "wrapper host: the not-sync-ensurable hint says ./nx"
+else
+  fail "wrapper host: the not-sync-ensurable hint does not say ./nx:"; printf '%s\n' "$_err" | sed 's/^/         | /'
+fi
+# A Firebase core with no client app: apps/functions is the ONLY project.json. It is never the app a sync means —
+# the inference excludes it by name, and the no-project.json fallback once re-picked it by directory, so the
+# per-app generators ran on `functions` and the sync died ("has nothing to serve").
+_FIXF="$TMP/fbcore"
+mkdir -p "$_FIXF/apps/functions" && git -C "$_FIXF" init -q
+printf '{"name":"fbcore"}\n' > "$_FIXF/package.json"; printf '{}\n' > "$_FIXF/nx.json"
+printf '{"name":"functions","root":"apps/functions"}\n' > "$_FIXF/apps/functions/project.json"
+_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$_FIXF" 2>/dev/null)"
+if printf '%s\n' "$_prog" | grep -q -- '--app=fbcore ' && ! printf '%s\n' "$_prog" | grep -q -- '--app=functions'; then
+  ok "a Firebase core with no client app: the sync's app is not apps/functions"
+else
+  fail "the sync inferred apps/functions as its app: $(printf '%s\n' "$_prog" | grep -o -- '--app=[^ ]*' | head -1)"
+fi
 
 if [ "$FAILED" -eq 0 ]; then
   echo "scaffold.sh renders cleanly in every mode"

@@ -1,47 +1,37 @@
-// House generator: create a house-standard PUBLISHABLE @bespunky library.
+// House generator: create a house-standard PUBLISHABLE library.
 //
-// Delegate-then-post-process (the xpand design-system-library idiom, stripped of every
-// design-system specific — no storybook, tailwind, styleIncludePaths, sass exports, file: deps):
-//   1. Delegate the actual library scaffold to the appropriate base generator (which, via
-//      addPathMapping, writes the lib's `tsconfig.base.json` path alias — the in-repo channel):
-//        - Angular (default) → `@nx/angular/generators` libraryGenerator with
-//          publishable+buildable+standalone+skipModule, Vitest, eslint, strict.
-//        - --nonAngular      → `@nx/js` libraryGenerator with bundler `tsc` (plain-TS leaves
-//          like typescript-utils / rxjs; NO ng-package.json).
-//   2. Read the emitted project config BACK and NORMALIZE it (we author defensively — the exact
-//      tree @nx/angular@23.1 emits is not assumed; we mutate what's there rather than overwrite).
-//   3. Add the per-PROJECT `nx release` baseline (git-tag resolver + dist packageRoot). The
-//      ROOT release config (releaseTagPattern, projectsRelationship, the projects glob) lives in
-//      nx.json and is Foundation's job — this generator NEVER touches nx.json.
-//   4. (Angular only) Normalize the root ng-package.json to the modern nested-entrypoint shape:
-//      { $schema, dest: <relative-to-dist>, lib: { entryFile: 'src/index.ts' } }, no umdModuleIds.
-//   5. Declare the published-consumer cross-lib deps: add any --workspaceDeps to the lib's own
-//      package.json as REAL caret ranges (`^<sibling's current version>`, read from the sibling's
-//      package.json in the tree). These are the publish contract only — in-repo resolution is the
-//      tsconfig.base.json path alias the base generator already wrote (we never touch that). NO
-//      `workspace:*`, and NO root tsconfig.json reference: the paths model uses neither.
-//      (Angular libs ALSO list each cross-lib dep in ng-package.json `allowedNonPeerDependencies` —
-//      ng-packagr HARD-FAILS the build on any `dependencies` entry that is neither a peerDependency
-//      nor explicitly allowed there. Mirrors the house convention, e.g. @bespunky/angular-cdk.)
-//   6. Mark TEST-ONLY peers (vitest, …) `{ optional: true }` in peerDependenciesMeta on the lib's
-//      own package.json, so consumers don't get unmet-peer warnings for a test framework the base
-//      generator declared as a hard peerDependency but they never run.
-//   7. Return an installPackagesTask callback so the workspace re-installs after generation.
+// Delegate-then-post-process:
+//   1. Delegate the library scaffold to a STACK ADAPTER's `libs` port (src/adapters) — the framework's own
+//      generator, which also writes the lib's `tsconfig.base.json` path alias (addPathMapping, the in-repo
+//      channel). `--stack` names one (`angular`: @nx/angular:library, ng-packagr, standalone, Vitest; `js`:
+//      @nx/js with bundler `tsc`, for plain-TS leaves); the default is the workspace's own most specific stack.
+//      This REPLACED a `--nonAngular` boolean that made one generator do two things behind a flag — a third
+//      stack would have been a second boolean. `--nonAngular` survives only as a deprecated alias of `--stack=js`.
+//   2. Read the emitted project config BACK and add the per-PROJECT `nx release` baseline (git-tag resolver +
+//      dist packageRoot). The ROOT release config lives in nx.json and is Foundation's job — never touched here.
+//   3. The stack's packaging post-processing (Angular: the modern nested ng-package.json shape).
+//   4. Declare the published-consumer cross-lib deps (--workspaceDeps) on the lib's own package.json as REAL
+//      caret ranges (`^<sibling's current version>`), and let the stack's packager allow them (Angular:
+//      ng-package.json `allowedNonPeerDependencies`, or ng-packagr hard-fails the build).
+//   5. Mark TEST-ONLY peers (vitest, …) `{ optional: true }` so consumers get no bogus unmet-peer warning.
+//   6. Return an install callback.
 //
-// Linking model (DECIDED 2026-06-22): the suite links in-repo via `tsconfig.base.json` PATH
-// ALIASES — NOT Nx package-manager workspaces (`workspace:*`) or TS project references. The base
-// generator's addPathMapping writes that alias (the only in-repo resolution channel); we leave it
-// untouched. Cross-lib deps are declared on the lib's own package.json as REAL version ranges
-// (`^<sibling version>`) purely as the published-consumer contract — `nx release` with
-// `updateDependents:auto` then maintains those ranges on publish.
+// WHERE AND UNDER WHICH NAME — both derived from the workspace, never the toolkit's own conventions: the
+// directory from where this workspace keeps libraries (resolveLibsDir — `libs/`, `packages/`, …), the npm scope
+// from the workspace's own name (resolveWorkspaceScope). Defaulting to `packages/` and `@bespunky` made every
+// consumer's library a BeSpunky package in a folder their repo doesn't use.
+//
+// Linking model (DECIDED 2026-06-22): in-repo resolution is the tsconfig.base.json PATH ALIAS only — NOT package
+// manager workspaces (`workspace:*`) or TS project references. Cross-lib deps on the lib's package.json are the
+// published-consumer contract, maintained by `nx release` (`updateDependents:auto`).
 import {
   type Tree,
   type GeneratorCallback,
   type ProjectConfiguration,
+  getProjects,
   readProjectConfiguration,
   updateProjectConfiguration,
   readJson,
-  writeJson,
   updateJson,
   installPackagesTask,
   formatFiles,
@@ -49,21 +39,12 @@ import {
 } from '@nx/devkit';
 import type { PublishableLibGeneratorSchema } from './schema';
 import { requireLayer } from '../../layers/registry';
+import { adapter, ADAPTERS } from '../../adapters/registry';
+import { workspaceStackWith } from '../../adapters/workspace';
+import { resolveLibsDir, resolveWorkspaceScope } from '../_utils/workspace-layout';
 
-// The npm scope every BeSpunky package lives under. Used to build the default importPath
-// and to expand --workspaceDeps short names into scoped package names.
-const SCOPE = '@bespunky';
-
-// Where a sibling lib lives in the workspace, given its short name. Mirrors the `directory`
-// default (`packages/<name>`); used to read the sibling's current version when declaring it as a
-// cross-lib dependency range.
-const siblingPackageJsonPath = (shortName: string): string => `packages/${shortName}/package.json`;
-
-// Test-only peers the base @nx generators declare as HARD peerDependencies (the chosen
-// unitTestRunner pulls these in). A consumer of the published library never runs its tests, so a
-// hard peer here yields a bogus unmet-peer warning for every consumer. We mark each one
-// `{ optional: true }` via peerDependenciesMeta — the shape @bespunky/angular-zen already uses.
-// Extend this set if a future runner adds more test-framework peers.
+// Test-only peers the base @nx generators declare as HARD peerDependencies (the chosen unitTestRunner pulls these
+// in). A consumer of the published library never runs its tests, so each is marked `{ optional: true }`.
 const TEST_ONLY_PEERS = ['vitest'];
 
 export default async function publishableLibGenerator(
@@ -74,109 +55,59 @@ export default async function publishableLibGenerator(
     throw new Error('publishable-lib generator requires a library name (positional arg 0 / --name).');
   }
 
-  // Resolve the house defaults up-front so both delegate paths and the post-processing share them.
-  const name        = options.name;
-  const importPath   = options.importPath ?? `${SCOPE}/${name}`;
-  const directory    = options.directory ?? `packages/${name}`;
-  const prefix       = options.prefix ?? 'bs';
-  const style        = options.style ?? 'scss';
-  const nonAngular   = options.nonAngular ?? false;
-  const skipFormat   = options.skipFormat ?? false;
-
-  // This generator's layer is a FUNCTION OF ITS MODE, not a fixed property — the one generator in the
-  // house set with two delegates and therefore two preconditions. `--nonAngular` needs `@nx/js`, the
-  // default needs `@nx/angular`; guarding it as flatly "Angular" would deny the plain-TS path to
-  // exactly the non-Angular workspaces this layering exists to serve.
-  requireLayer(tree, nonAngular ? 'js' : 'angular', 'publishable-lib');
-
-  // 1) Delegate the scaffold. We skipFormat on the delegate and run a single formatFiles at the
-  //    end (so the whole tree — base output + our mutations — is formatted once).
-  if (nonAngular) {
-    // ASSUMPTION (@nx/js@23.1): the export is named `libraryGenerator` from '@nx/js'. Option names
-    //   `directory`/`importPath`/`bundler`/`linter`/`unitTestRunner`/`publishable`/`strict`/`tags`/
-    //   `skipFormat` are assumed stable from the Nx 22/23 line. `bundler: 'tsc'` (tsc-only, no
-    //   esbuild/rollup) and `publishable: true` are the publishable-plain-TS shape; VERIFY the
-    //   @nx/js library schema in Docker.
-    const { libraryGenerator: jsLibraryGenerator } = await import('@nx/js');
-
-    await jsLibraryGenerator(tree, {
-      name,
-      directory,
-      importPath,
-      bundler: 'tsc',
-      publishable: true,
-      linter: 'eslint',
-      unitTestRunner: 'vitest',
-      strict: true,
-      skipFormat: true,
-      tags: options.tags,
-    } as Parameters<typeof jsLibraryGenerator>[1]);
-  } else {
-    // ASSUMPTION (@nx/angular@23.1): the export is named `libraryGenerator` from
-    //   '@nx/angular/generators'. The following option NAMES are assumed stable from the Nx 22/23
-    //   line and must be VERIFIED against the installed schema:
-    //     - `publishable` + `buildable` (publishable should imply the @nx/angular:package build
-    //       target + root ng-package.json + lib package.json; we pass both explicitly).
-    //     - `standalone: true` + `skipModule: true` (standalone-only suite, no NgModule entry).
-    //     - `unitTestRunner: 'vitest-angular'` — the Angular-native Vitest value. VERIFY this is the
-    //       correct enum member (it may be plain `'vitest'`, or Vitest may be the default/inferred).
-    //     - `linter: 'eslint'` as a string (the `Linter` enum is deprecated in newer Nx).
-    //     - `strict`, `prefix`, `style`, `importPath`, `directory`, `tags`, `skipFormat`.
-    const { libraryGenerator: angularLibraryGenerator } = await import('@nx/angular/generators');
-
-    await angularLibraryGenerator(tree, {
-      name,
-      directory,
-      importPath,
-      publishable: true,
-      buildable: true,
-      standalone: true,
-      skipModule: true,
-      prefix,
-      style,
-      linter: 'eslint',
-      strict: true,
-      unitTestRunner: 'vitest-angular',
-      skipFormat: true,
-      tags: options.tags,
-    } as Parameters<typeof angularLibraryGenerator>[1]);
+  // The stack: named, or the deprecated boolean's meaning, or the workspace's own.
+  const stackId = options.stack ?? (options.nonAngular ? 'js' : undefined);
+  if (options.nonAngular) logger.warn('[publishable-lib] --nonAngular is deprecated: pass --stack=js.');
+  const stack = stackId ? adapter(stackId) : workspaceStackWith(tree, 'libs');
+  if (!stack?.libs) {
+    throw new Error(
+      `[publishable-lib] ${stackId ? `The ${stackId} stack cannot create libraries` : 'No stack in this workspace can create libraries'} ` +
+        `(stacks that can: ${ADAPTERS.filter((a) => a.libs).map((a) => a.id).join(', ')}). ` +
+        `Add one — \`nx add @nx/js\` for plain TypeScript — and re-run.`,
+    );
   }
+  // The stack's layer is the precondition — stated as a sentence before the dynamic import of its plugin.
+  requireLayer(tree, stack.layer, 'publishable-lib');
 
-  // 2) Read the emitted project back. The base generator names the project after the library;
-  //    `readProjectConfiguration` resolves it regardless of where the files landed.
-  // ASSUMPTION: the generated project NAME equals `name`. With a nested `directory`, some Nx
-  //   versions derive a name like `<dir>-<name>`. If readProjectConfiguration throws, the
-  //   coordinator must reconcile the actual emitted project name (e.g. via getProjects()).
+  const name       = options.name;
+  const scope      = `@${resolveWorkspaceScope(tree)}`;
+  const importPath = options.importPath ?? `${scope}/${name}`;
+  const directory  = options.directory ?? `${resolveLibsDir(tree)}/${name}`;
+
+  // 1) Delegate. skipFormat on the delegate; one formatFiles at the end over base output + our mutations.
+  await stack.libs.create(tree, {
+    name,
+    directory,
+    importPath,
+    publishable: true,
+    prefix: options.prefix ?? 'bs',
+    style: options.style ?? 'scss',
+    tags: options.tags,
+  });
+
+  // 2) Read the emitted project back and add the per-project release baseline.
   const project = readProjectConfiguration(tree, name);
-  const projectRoot = project.root; // workspace-relative, e.g. `packages/<name>`
-
-  // 3) Per-project release baseline + publish source. (Root release config is Foundation's job.)
+  const projectRoot = project.root;
   applyReleaseConfig(project, projectRoot);
   updateProjectConfiguration(tree, name, project);
 
-  // 4) Angular only: normalize the root ng-package.json to the modern nested-entrypoint shape.
-  if (!nonAngular) {
-    normalizeRootNgPackage(tree, projectRoot);
-  }
+  // 3) The stack's packaging shape.
+  stack.libs.normalizePackaging?.(tree, projectRoot);
 
-  // 5) Declare any cross-lib deps on the lib's own package.json as REAL caret ranges (the
-  //    published-consumer contract). In-repo resolution is the tsconfig.base.json path alias the
-  //    base generator already wrote — there is no root tsconfig.json / project-references step.
+  // 4) Cross-lib deps — the published-consumer contract.
   if (options.workspaceDeps?.length) {
-    addWorkspaceDeps(tree, projectRoot, options.workspaceDeps, nonAngular);
+    const declared = addWorkspaceDeps(tree, projectRoot, options.workspaceDeps, scope);
+    if (declared.length) stack.libs.allowDependencies?.(tree, projectRoot, declared);
   }
 
-  // 6) Mark test-only peers (vitest, …) optional so consumers don't get unmet-peer warnings for
-  //    a test framework they never run. The base generator emits these as HARD peerDependencies.
+  // 5) Test-only peers optional.
   markTestPeersOptional(tree, projectRoot);
 
-  if (!skipFormat) {
+  if (!options.skipFormat) {
     await formatFiles(tree);
   }
 
-  // 7) Re-install after generation. `true` runs the install always (not just on a package.json
-  //    change) so the new lib's runtime deps are resolved into node_modules. (In-repo linking is
-  //    the tsconfig.base.json path alias — there are no `workspace:*` symlinks to create.)
+  // 6) Re-install (always — the new lib's runtime deps must resolve into node_modules).
   return () => installPackagesTask(tree, true);
 }
 
@@ -195,15 +126,10 @@ function applyReleaseConfig(project: ProjectConfiguration, projectRoot: string):
   //   `fallbackCurrentVersionResolver` is the supported nested shape (the legacy flat
   //   `generatorOptions` / `useLegacyVersioning` keys were removed in v22). VERIFY by running
   //   `nx release version --dry-run` against a generated lib in Docker.
-  const release = (project.release ?? {}) as Record<string, unknown>;
-  release.version = {
-    ...((release.version as Record<string, unknown>) ?? {}),
-    currentVersionResolver: 'git-tag',
-    fallbackCurrentVersionResolver: 'disk',
+  project.release = {
+    ...project.release,
+    version: { ...project.release?.version, currentVersionResolver: 'git-tag', fallbackCurrentVersionResolver: 'disk' },
   };
-  // `release` is not on the ProjectConfiguration type in some @nx/devkit versions; assign through
-  // a loose record so this compiles under `declaration:false` whatever the installed typings say.
-  (project as Record<string, unknown>).release = release;
 
   // ASSUMPTION: the publish target is named `nx-release-publish` and takes `options.packageRoot`.
   //   `dist/{projectRoot}` uses the Nx token so it resolves per-project at run time. VERIFY the
@@ -219,139 +145,47 @@ function applyReleaseConfig(project: ProjectConfiguration, projectRoot: string):
 }
 
 /**
- * Normalize the library's root ng-package.json to the house modern-entrypoint shape:
- *   { $schema, dest: <relative path to dist/<projectRoot>>, lib: { entryFile: 'src/index.ts' } }
- * and strip any `umdModuleIds` (banned by the entry-point standard).
- *
- * Defensive: reads the emitted file and mutates it (preserving any extra keys the base generator
- * added that we don't explicitly override), rather than assuming its exact contents. Logs and
- * returns if the base generator emitted no ng-package.json (shouldn't happen for a publishable
- * Angular lib, but we don't crash on it).
+ * Declare each sibling package as a cross-lib dependency on the library's OWN package.json, as a REAL caret range
+ * (`"<scope>/<dep>": "^<sibling's current version>"`). Short names are expanded with the workspace's scope; a
+ * scoped name is taken as-is. The sibling's version is read from ITS package.json, found by package name (or by
+ * project name) in the workspace — never from an assumed `packages/<name>` path. A sibling not found yet is
+ * declared against `^0.0.1`, with a warning. Never overwrites an existing entry. Returns the scoped names.
  */
-function normalizeRootNgPackage(tree: Tree, projectRoot: string): void {
-  const ngPackagePath = `${projectRoot}/ng-package.json`;
-  if (!tree.exists(ngPackagePath)) {
-    logger.warn(
-      `[publishable-lib] Expected a root ng-package.json at ${ngPackagePath} but none was emitted — ` +
-      `skipped normalization. Verify the @nx/angular publishable library output.`
-    );
-    return;
-  }
-
-  // dest is relative to the ng-package.json (which sits at <projectRoot>) and points at
-  // dist/<projectRoot>. From `packages/<name>` to `dist/packages/<name>` that is `../../dist/...`:
-  // one `..` per path segment in projectRoot, then `dist/<projectRoot>`.
-  const upToRoot = projectRoot
-    .split('/')
-    .filter(Boolean)
-    .map(() => '..')
-    .join('/');
-  const dest = `${upToRoot}/dist/${projectRoot}`;
-
-  const ngPackage = readJson<Record<string, unknown>>(tree, ngPackagePath);
-  ngPackage.$schema = '../../node_modules/ng-packagr/ng-package.schema.json';
-  ngPackage.dest = dest;
-  ngPackage.lib = {
-    ...((ngPackage.lib as Record<string, unknown>) ?? {}),
-    entryFile: 'src/index.ts',
-  };
-  // The entry-point standard bans umdModuleIds.
-  delete (ngPackage.lib as Record<string, unknown>).umdModuleIds;
-  delete ngPackage.umdModuleIds;
-
-  writeJson(tree, ngPackagePath, ngPackage);
-}
-
-/**
- * Declare each sibling package as a cross-lib dependency on the library's OWN package.json, as a
- * REAL caret range (`"@bespunky/<dep>": "^<sibling's current version>"`). This is the
- * published-consumer contract only — in-repo resolution is the tsconfig.base.json path alias the
- * base generator already wrote. On publish, `nx release` (`updateDependents:auto`) maintains the
- * range. NO `workspace:*` is ever emitted (yarn-1 rejects it under `nx release publish`).
- *
- * The sibling's version is read from its own package.json in the tree (`packages/<dep>/package.json`).
- * When the sibling isn't in the tree (its package.json is missing or carries no version), we fall
- * back to `^0.0.1` and warn, rather than crash — the coordinator can correct the range later.
- *
- * Idempotent: never overwrites an existing entry. Accepts short names (`rxjs`); scoped names
- * (`@bespunky/rxjs`) are also tolerated (the short name is recovered for the version lookup).
- */
-function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[], nonAngular: boolean): void {
+function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[], scope: string): string[] {
   const pkgPath = `${projectRoot}/package.json`;
   if (!tree.exists(pkgPath)) {
     logger.warn(
       `[publishable-lib] No package.json at ${pkgPath} — skipped adding workspaceDeps ` +
       `(${deps.join(', ')}). Verify the base generator emitted a lib package.json.`
     );
-    return;
+    return [];
   }
 
-  const scopedNames: string[] = [];
+  const scopedNames = deps.map((dep) => (dep.startsWith('@') ? dep : `${scope}/${dep}`));
   updateJson(tree, pkgPath, (json: Record<string, unknown>) => {
     const dependencies = { ...((json.dependencies as Record<string, string>) ?? {}) };
-    for (const dep of deps) {
-      const shortName = dep.startsWith(`${SCOPE}/`) ? dep.slice(SCOPE.length + 1) : dep;
-      const scoped    = `${SCOPE}/${shortName}`;
-      dependencies[scoped] ??= `^${siblingVersion(tree, shortName)}`;
-      scopedNames.push(scoped);
-    }
+    for (const scoped of scopedNames) dependencies[scoped] ??= `^${siblingVersion(tree, scoped)}`;
     json.dependencies = dependencies;
     return json;
   });
-
-  // Angular libs only: ng-packagr HARD-FAILS the build on any `dependencies` entry that is neither
-  // a peerDependency nor listed in ng-package.json `allowedNonPeerDependencies` ("Dependency X must
-  // be explicitly allowed…"). Allowlist each cross-lib dep so a generated lib actually builds —
-  // mirroring the house convention (@bespunky/angular-cdk lists its @bespunky deps there).
-  // Non-Angular @nx/js libs have no ng-package.json and no such rule.
-  if (!nonAngular) {
-    allowNonPeerDeps(tree, projectRoot, scopedNames);
-  }
+  return scopedNames;
 }
 
-/**
- * Add each scoped dependency to the Angular library's ng-package.json `allowedNonPeerDependencies`
- * (ng-packagr's escape hatch for `dependencies` that aren't peerDependencies). Creates the array if
- * absent, de-duplicates, and preserves any entries already there (e.g. `zod`, `vitest`). Warns —
- * rather than crashing — if no ng-package.json was emitted (an Angular build would then reject the
- * deps, but the generator shouldn't be the thing that throws).
- */
-function allowNonPeerDeps(tree: Tree, projectRoot: string, scopedDeps: string[]): void {
-  const ngPackagePath = `${projectRoot}/ng-package.json`;
-  if (!tree.exists(ngPackagePath)) {
-    logger.warn(
-      `[publishable-lib] No ng-package.json at ${ngPackagePath} — could not allow non-peer deps ` +
-      `(${scopedDeps.join(', ')}); an Angular build will reject them. Verify the publishable Angular output.`
-    );
-    return;
+/** A sibling's current version, from its own package.json — found by package name, then by project name. */
+function siblingVersion(tree: Tree, scopedName: string): string {
+  const shortName = scopedName.split('/').pop() ?? scopedName;
+  let fallback: string | undefined;
+  for (const [projectName, config] of getProjects(tree)) {
+    const pkgPath = `${config.root}/package.json`;
+    if (!tree.exists(pkgPath)) continue;
+    const pkg = readJson<{ name?: string; version?: string }>(tree, pkgPath);
+    if (pkg.name === scopedName && pkg.version) return pkg.version;
+    if (projectName === shortName && pkg.version) fallback ??= pkg.version;
   }
-
-  updateJson(tree, ngPackagePath, (json: Record<string, unknown>) => {
-    const allowed = new Set<string>([
-      ...((json.allowedNonPeerDependencies as string[]) ?? []),
-      ...scopedDeps,
-    ]);
-    json.allowedNonPeerDependencies = [...allowed];
-    return json;
-  });
-}
-
-/**
- * Read a sibling lib's current `version` from its package.json in the tree (the value a caret range
- * pins against). Falls back to `0.0.1` (and warns) when the sibling's package.json is absent or
- * declares no version — the cross-lib dep is still declared, just against a maiden-version baseline.
- */
-function siblingVersion(tree: Tree, shortName: string): string {
-  const siblingPath = siblingPackageJsonPath(shortName);
-  if (tree.exists(siblingPath)) {
-    const version = readJson<Record<string, unknown>>(tree, siblingPath).version;
-    if (typeof version === 'string' && version.length > 0) {
-      return version;
-    }
-  }
+  if (fallback) return fallback;
 
   logger.warn(
-    `[publishable-lib] Could not read a version for sibling "${SCOPE}/${shortName}" at ${siblingPath} — ` +
+    `[publishable-lib] Could not find a version for sibling "${scopedName}" in this workspace — ` +
     `declared the cross-lib dependency as "^0.0.1". Adjust the range once the sibling exists.`
   );
   return '0.0.1';

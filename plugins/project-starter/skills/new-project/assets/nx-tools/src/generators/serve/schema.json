@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "BeSpunkyServe",
   "title": "Add the unified serve target to a project",
-  "description": "Wire the house dev loop onto a project: a `dev-server` leaf (@angular/build:dev-server \u2014 host 0.0.0.0, configurations development (default) / production, buildTarget <app>:build) and the `serve` composing target (@bespunky/nx-tools:serve \u2014 dev-server + optional Firebase emulators + optional shared co-driven browser, for the current or a chosen git worktree, under one graceful Ctrl+C). Replaces the old serve/serve-worktree/serve-with-shared-browser trio (those axes are now flags). Also wires the dev-only worktree tab label (worktree-tab-label.ts + app.config provider). The per-app sibling of serve-options: applied by the house `app` generator to every app and re-asserted by `scaffold.sh --sync`. Idempotent + self-healing.",
+  "description": "The Nx adapter of the house dev loop: a `dev-server` leaf supplied by the project's stack adapter (Angular: @angular/build:dev-server \u2014 host 0.0.0.0, configurations development (default) / production) only when the project has no dev-server of its own and the `serve` target (@bespunky/nx-tools:serve \u2014 a thin wrapper over the stack-free `tools/dev/dev serve <app>`), plus the app's entry in `.bespunky/dev.json` seeded from the adapters that apply (only what it does not declare yet). Applied by the house `app` generator to every app and re-asserted by `scaffold.sh --sync`. Idempotent + self-healing. Also sets nx.json `tui.enabled: false` when the workspace has not chosen (the dev loop streams prefixed logs).",
   "type": "object",
   "properties": {
     "project": {
@@ -12,16 +12,6 @@
         "$source": "projectName"
       },
       "x-prompt": "Which project?"
-    },
-    "workspaceName": {
-      "type": "string",
-      "description": "Override the workspace identity used as the base-host sentinel in the dev-only tab label. Defaults to the workspace root directory name \u2014 correct in every normal case.",
-      "x-priority": "internal"
-    },
-    "wireProviders": {
-      "type": "boolean",
-      "default": false,
-      "description": "Wire this layer's provider into the app's app.config.ts. TRUE ONLY WHEN ENSURING the layer (creating the capability) \u2014 app.config.ts is seeded, never owned, so a detect-only sync must not write to it. Any later provider change ships as a migration. Default false."
     }
   },
   "required": [

@@ -26,6 +26,7 @@ import {
   formatFiles,
 } from '@nx/devkit';
 import { requireLayer } from '../../layers/registry';
+import { adapterOf } from '../../adapters/registry';
 
 interface MarkExtractableSchema {
   lib: string;
@@ -78,16 +79,11 @@ export default async function markExtractableGenerator(
   if (!project.tags.includes(EXTRACTION_TAG)) project.tags.push(EXTRACTION_TAG);
   updateProjectConfiguration(tree, options.lib, project);
 
-  // 2. Detect kind from the build executor / the lib's own deps.
+  // 2. The kind IS the stack that owns the library. The lib's package.json feeds the marker's declared deps.
   const libPkg = readJsonSafe(tree, joinPathFragments(project.root, 'package.json'));
-  const libDeps = {
-    ...((libPkg.dependencies as Record<string, string>) ?? {}),
-    ...((libPkg.peerDependencies as Record<string, string>) ?? {}),
-  };
-  const buildExecutor = String(project.targets?.build?.executor ?? '');
-  const looksAngular = /angular/i.test(buildExecutor) || '@angular/core' in libDeps;
-  const kind: 'js' | 'angular' =
-    options.kind && options.kind !== 'auto' ? options.kind : looksAngular ? 'angular' : 'js';
+  // The kind IS the stack that owns the library — the one ownership rule (src/adapters), not a regex over its
+  // executor name. A library no framework stack claims is plain TS (`js`), which extract-tool scaffolds with @nx/js.
+  const kind: string = options.kind && options.kind !== 'auto' ? options.kind : adapterOf(tree, options.lib)?.id ?? 'js';
 
   // 3. Capture the installed ranges of well-known frameworks (for the major-tracking rule).
   const rootPkg = readJsonSafe(tree, 'package.json');
@@ -100,7 +96,9 @@ export default async function markExtractableGenerator(
     if (isFramework(dep)) frameworkVersions[dep] = range;
   }
 
-  // 4. Proposed package name.
+  // 4. Proposed package name. The default scope is the SHARED LIBRARY WORKSPACE's — the extraction target
+  //    (`extract-tool --into bespunky`, scope @bespunky), not this workspace's: the package is published from
+  //    there. A house with its own shared workspace passes --scope.
   const scope = (options.scope ?? '@bespunky').replace(/\/+$/, '');
   const baseName = options.lib.split(/[\\/]/).pop()!.replace(/^@[^/]+\//, '');
   const proposedPackageDefault = `${scope}/${baseName}`;
