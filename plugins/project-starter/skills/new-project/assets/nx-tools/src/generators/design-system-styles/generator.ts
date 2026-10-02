@@ -103,11 +103,14 @@ export default async function designSystemStylesGenerator(
   }
 
   // 2) Cache correctness, the idiomatic Nx way — an implicit dependency on the design system (never on itself).
-  const project = readProjectConfiguration(tree, options.project);
+  //    Written with `targets` LAST — the order devkit's `readProjectConfiguration` hands a project back in. Adding the
+  //    key onto the object as read appended it AFTER targets, so the NEXT sync (read → write, through any port)
+  //    moved it back above them: a one-time reshuffle of every app's project.json, a diff nobody asked for
+  //    (caught by tools/test-generators' idempotence check).
+  const { targets, ...project } = readProjectConfiguration(tree, options.project);
   const deps = new Set<string>([...(project.implicitDependencies ?? []), designSystem.name]);
   deps.delete(options.project);
-  project.implicitDependencies = [...deps];
-  updateProjectConfiguration(tree, options.project, project);
+  updateProjectConfiguration(tree, options.project, { ...project, implicitDependencies: [...deps], ...(targets ? { targets } : {}) });
 
   // 3) The app's global stylesheet, as the app itself declares it.
   wireGlobalStylesheet(tree, styles.globalStylesheet(tree, options.project), specifier, options.project);

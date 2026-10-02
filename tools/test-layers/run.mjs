@@ -24,33 +24,27 @@
  * Needs `yarn install`.
  */
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { ASSETS, PAYLOAD, compilePayload, requireFromRepo, requireInstalled } from '../test-support/payload.mjs';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, '../..');
-const ASSETS = join(REPO, 'plugins/project-starter/skills/new-project/assets');
-const PAYLOAD = join(ASSETS, 'nx-tools');
 const PROJECTION = join(ASSETS, 'layers.sh');
-const BUILD = join(REPO, 'node_modules/.cache/bespunky-layer-tests');
 const write = process.argv.includes('--write');
 
-for (const pkg of ['@nx/devkit', 'typescript', 'nx']) {
-  if (!existsSync(join(REPO, 'node_modules', pkg))) {
-    console.error(`Layer tests need the workspace installed (${pkg} is missing): yarn install`);
-    process.exit(2);
-  }
-}
+requireInstalled(
+  [
+    ['@nx/devkit', "the fixtures use @nx/devkit's in-memory Tree"],
+    ['typescript', 'the payload is transpiled before it is tested'],
+    ['nx', 'the CLI reads workspaces through Nx\'s own FsTree'],
+  ],
+  'Layer tests',
+);
 
-rmSync(BUILD, { recursive: true, force: true });
-mkdirSync(BUILD, { recursive: true });
-cpSync(join(PAYLOAD, 'src'), join(BUILD, 'src'), { recursive: true });
-execFileSync(process.execPath, [join(ASSETS, 'compile-generators.mts'), BUILD], { cwd: REPO, stdio: ['ignore', 'ignore', 'inherit'] });
-
-const require_ = createRequire(join(REPO, 'noop.js'));
+// The compiled payload, as the publisher builds it — see tools/test-support/payload.mjs for why it lands where it does.
+const payload = compilePayload('bespunky-layer-tests');
+const BUILD = payload.build;
+const require_ = requireFromRepo;
 const registry = require_(join(BUILD, 'src/layers/registry'));
 const { plan } = require_(join(BUILD, 'src/layers/plan'));
 const { shellProjection } = require_(join(BUILD, 'src/layers/cli'));
@@ -1067,6 +1061,91 @@ checkAsync('house docs: Firebase serve advice follows the real serve command; An
 
 for (const run of pending) await run();
 
+// ── workspace shape: layouts, linking, and what a TS-solution workspace is evidence of ────────────────────────
+// Layouts and linking (docs/features/2026-10-02-workspace-layouts/) moved three things out of bash and into the
+// package, and each is a place where a TS-solution workspace used to be invisible: which apps a sync refreshes
+// (`cli.js apps`, which replaced an `apps/*` glob), what the SessionStart hook's evaluator reads (workspace members'
+// package.json, not just project.json), and when the js layer is present (an inferred @nx/js/typescript library
+// declares no @nx/js executor). And the scaffolder validates --layout / --linking against the projection alone.
+console.log('\nworkspace shape (layouts, linking, TS-solution evidence)');
+const tsSolution = () => {
+  const tree = createTreeWithEmptyWorkspace();
+  tree.delete('tsconfig.base.json');
+  writeJson(tree, 'tsconfig.base.json', { compilerOptions: { composite: true, declaration: true, customConditions: ['@acme/source'] } });
+  writeJson(tree, 'tsconfig.json', { extends: './tsconfig.base.json', files: [], references: [] });
+  writeJson(tree, 'package.json', { name: '@acme/source', workspaces: ['packages/*'], devDependencies: { nx: '23.1.0' } });
+  tree.write('package-lock.json', '{}');
+  const nxJson = JSON.parse(tree.read('nx.json', 'utf8'));
+  writeJson(tree, 'nx.json', { ...nxJson, plugins: [{ plugin: '@nx/js/typescript', options: {} }] });
+  return tree;
+};
+const shellEvident = (dir) => execFileSync('bash', ['-c', '. "$1"; house_layers_evident "$2"', '_', PROJECTION, dir]).toString().trim();
+
+check('projection: --layout / --linking ids, the default apps dir and each layout\'s apps dir come from the package', (ok) => {
+  const { LAYOUTS, DEFAULT_LAYOUT } = require_(join(BUILD, 'src/generators/_utils/workspace-layout'));
+  const out = execFileSync('bash', ['-c', `set -eu; . "$1"; printf '%s|%s|%s|%s' "$HOUSE_LAYOUTS" "$HOUSE_LAYOUT_DEFAULT_APPS_DIR" "$HOUSE_LINKINGS" "$HOUSE_LINKING_DEFAULT"; for l in $(printf '%s' "$HOUSE_LAYOUTS" | tr , ' '); do printf '|%s=%s' "$l" "$(house_layout_apps_dir "$l")"; [ -n "$(house_layout_title "$l")" ] || printf '(untitled)'; done; for k in $(printf '%s' "$HOUSE_LINKINGS" | tr , ' '); do [ -n "$(house_linking_title "$k")" ] || printf '|%s(untitled)' "$k"; done; printf '|bogus=%s' "$(house_layout_apps_dir bogus)"`, '_', PROJECTION]).toString();
+  const want = `${Object.keys(LAYOUTS).join(',')}|${DEFAULT_LAYOUT.appsDir}|paths,workspaces|paths${Object.entries(LAYOUTS).map(([id, l]) => `|${id}=${l.appsDir}`).join('')}|bogus=`;
+  ok(out === want, `got  ${out}\n         want ${want}`);
+});
+
+check('cli.js apps: layout- and linking-agnostic — a package.json-only app is found, a platform:server app is not', (ok) => {
+  const tree = tsSolution();
+  writeJson(tree, 'packages/web/package.json', { name: '@acme/web' }); // a TS-solution app: package.json + tsconfig.app.json
+  writeJson(tree, 'packages/web/tsconfig.app.json', {});
+  writeJson(tree, 'packages/ui/package.json', { name: '@acme/ui' }); // a library — not an app
+  writeJson(tree, 'packages/ui/tsconfig.lib.json', {});
+  addProjectConfiguration(tree, 'shop', { root: 'clients/shop', projectType: 'application', targets: { build: { executor: '@angular/build:application' } } });
+  addProjectConfiguration(tree, 'functions', { root: 'clients/functions', projectType: 'application', tags: ['platform:server'], targets: {} });
+  addProjectConfiguration(tree, 'shared-browser', { root: 'tools/shared-browser', tags: ['tooling'], targets: {} });
+  const dir = flush(tree);
+  try {
+    const out = execFileSync(process.execPath, [join(BUILD, 'src/layers/cli.js'), 'apps'], { cwd: dir }).toString();
+    ok(out === '@acme/web\tpackages/web\nshop\tclients/shop\n', `got ${JSON.stringify(out)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+check('cli.js apps: no nx.json, no apps (a repo the floor has not reached)', (ok) => {
+  const dir = mkdtempSync(join(tmpdir(), 'layers-apps-'));
+  try {
+    ok(execFileSync(process.execPath, [join(BUILD, 'src/layers/cli.js'), 'apps'], { cwd: dir }).toString() === '', 'printed apps');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+check('evidence: a workspace MEMBER\'s package.json is a project file (registry and shell agree); a non-member\'s is not', (ok) => {
+  const tree = tsSolution();
+  // A package.json project declaring its dev-server in its `nx` block — web evidence, visible only in that file.
+  writeJson(tree, 'packages/site/package.json', { name: '@acme/site', nx: { targets: { 'dev-server': { command: 'vite' } } } });
+  const exact = registry.detectLayers(tree);
+  ok(exact.includes('web'), `the registry misses the member's dev-server: ${exact}`);
+  const dir = flush(tree);
+  try {
+    execFileSync('git', ['init', '-q', dir]);
+    const shell = shellEvident(dir);
+    ok(shell.split(',').includes('web'), `the shell evaluator misses a member package.json: ${shell}`);
+    ok(shell.split(',').every((id) => exact.includes(id)), `the shell over-reports: ${shell} vs ${exact}`);
+    // The same manifest OUTSIDE every workspaces glob is no project — neither Nx nor the hook may read it.
+    mkdirSync(join(dir, 'stray/site'), { recursive: true });
+    writeFileSync(join(dir, 'stray/site/package.json'), JSON.stringify({ name: 'stray', nx: { targets: { 'dev-server': { command: 'x' } } } }));
+    rmSync(join(dir, 'packages/site'), { recursive: true, force: true });
+    const stray = shellEvident(dir);
+    ok(!stray.split(',').includes('web'), `a non-member package.json was read: ${stray}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+check('the js layer on a TS-solution workspace: an inferred library is evidence, no @nx/js dependency or executor needed', (ok) => {
+  const tree = tsSolution();
+  ok(!registry.detectLayers(tree).includes('js'), `js without any library: ${registry.detectLayers(tree)}`);
+  writeJson(tree, 'packages/lib/package.json', { name: '@acme/lib' });
+  writeJson(tree, 'packages/lib/tsconfig.lib.json', {});
+  ok(registry.detectLayers(tree).includes('js'), `an @nx/js/typescript library is not js evidence: ${registry.detectLayers(tree)}`);
+});
+
 // ── migrations.json: every rung names a registered layer scope ─────────────────────────────────────────────
 console.log('\nmigration scopes');
 check('every migrations.json entry declares a registered `layer`', (ok) => {
@@ -1075,6 +1154,6 @@ check('every migrations.json entry declares a registered `layer`', (ok) => {
   for (const [name, entry] of Object.entries(generators)) ok(ids.has(entry.layer), `${name}: layer ${entry.layer}`);
 });
 
-rmSync(BUILD, { recursive: true, force: true });
+payload.dispose();
 console.log(`\n${failed === 0 ? 'ok' : 'FAILED'}: ${passed} passed, ${failed} failed${write ? ' (layers.sh regenerated)' : ''}`);
 process.exit(failed === 0 ? 0 : 1);
