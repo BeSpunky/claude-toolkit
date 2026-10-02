@@ -9,6 +9,10 @@
 //         gen<TAB><generator><TAB><space-separated argv words>
 //         warn<TAB><sentence>
 //         partial
+//   node <nx-tools>/src/layers/cli.js apps
+//       The workspace's CLIENT applications — the apps a sync's per-app steps are for — one per line as
+//       `<project name><TAB><project root>`. Layout- and linking-agnostic: read from the project graph (project.json
+//       and package.json projects alike) and classified by `projectRole`, never by where a directory sits.
 //   node <nx-tools>/src/layers/cli.js shell
 //       The SHELL PROJECTION of the registry (assets/layers.sh): data + pure-bash functions for the two
 //       consumers that cannot load this package — scaffold.sh's outer shell (it validates --ensure BEFORE
@@ -23,7 +27,10 @@ import type { LayerDescriptor, LayerEvidence } from './descriptor';
 import { FLOOR, LAYERS, detectLayers, inRegistryOrder } from './registry';
 import { plan } from './plan';
 import { DEFAULT_PRESET, PRESETS } from './presets';
-import { ADAPTERS } from '../adapters/registry';
+import { ADAPTERS, projectRole } from '../adapters/registry';
+import { getProjects, type Tree } from '@nx/devkit';
+import { DEFAULT_LAYOUT, LAYOUTS, type LayoutId } from '../generators/_utils/workspace-layout';
+import type { LinkingKind } from '../generators/_utils/linking';
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
@@ -59,11 +66,14 @@ function main(argv: string[]): void {
       }
       return;
     }
+    case 'apps':
+      for (const app of clientApps(workspace())) process.stdout.write(`${app.name}\t${app.root}\n`);
+      return;
     case 'shell':
       process.stdout.write(shellProjection());
       return;
     default:
-      process.stderr.write('usage: cli.js detect | plan --mode=… | shell\n');
+      process.stderr.write('usage: cli.js detect | plan --mode=… | apps | shell\n');
       process.exit(2);
   }
 }
@@ -88,6 +98,56 @@ function required(flags: Record<string, string>, key: string): string {
   return value;
 }
 
+// ── the workspace's apps ──────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The apps a sync refreshes when none is named: every APPLICATION (`projectRole` — a stack recognising its own
+ * build, the declared `projectType`, Nx's tsconfig convention; so a package.json-defined project counts too) that
+ * is not SERVER-side.
+ *
+ * Why the server exclusion, and why by tag: the per-app steps a sync runs (the dev-server, the design system's
+ * sass channel, the Firebase client) are all for something a browser loads. The house's own server app — Cloud
+ * Functions, created by firebase-emulators — is an application all the same, and it used to be excluded by its
+ * NAME (`functions`) from a glob over `apps/*`. What it IS is declared on it: the house tags its deployable
+ * surfaces by platform (`platform:server` on the functions project, `platform:web` on every client the Firebase
+ * client attaches to — the same tags the ESLint platform firewall enforces). So the rule is the tag, wherever the
+ * project lives and whatever it is called; a renamed or relocated functions app is still excluded, and an
+ * untagged app (no Firebase in the workspace at all) is a candidate, exactly as before.
+ */
+export function clientApps(tree: Tree): Array<{ name: string; root: string }> {
+  if (!tree.exists('nx.json')) return [];
+  const apps: Array<{ name: string; root: string }> = [];
+  for (const [name, project] of getProjects(tree)) {
+    if (projectRole(tree, name) !== 'application') continue;
+    if (project.tags?.includes(SERVER_PLATFORM_TAG)) continue;
+    apps.push({ name, root: project.root });
+  }
+  return apps.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The house's tag for a server-side deployable (firebase-emulators sets it on Cloud Functions). */
+const SERVER_PLATFORM_TAG = 'platform:server';
+
+// ── the workspace shape a scaffold may choose ─────────────────────────────────────────────────────────────
+
+/** The named layouts, for the projection. Typed over `LayoutId`, so a layout added to LAYOUTS is a compile error here until titled. */
+const LAYOUT_TITLES: Readonly<Record<LayoutId, string>> = {
+  'apps-libs': 'apps under apps/, libraries under libs/ — the classic integrated Nx convention',
+  packages: 'every project under packages/ — the package-based convention',
+};
+
+/** The linking strategies, for the projection. Typed over `LinkingKind` for the same reason. */
+const LINKINGS: Readonly<Record<LinkingKind, string>> = {
+  paths: 'project.json projects reached through tsconfig `paths` aliases',
+  workspaces: 'a TS-solution workspace — package.json projects, package-manager workspaces, TS project references',
+};
+
+/** What a scaffold that names no linking gets: today's output. */
+const DEFAULT_LINKING: LinkingKind = 'paths';
+
+const asEntries = <K extends string>(record: Readonly<Record<K, string>>) =>
+  (Object.entries(record) as Array<[K, string]>).map(([id, title]) => ({ id, title }));
+
 // ── the shell projection ──────────────────────────────────────────────────────────────────────────────────
 
 /** Single-quote a string for bash. */
@@ -111,7 +171,8 @@ const byIdFunction = (name: string, doc: string, value: (entry: LayerDescriptor)
 
 /**
  * Evidence as `<kind> <grep pattern | path>` lines. `file` is a root-relative path; `dependency` is a fixed
- * string to find in the root package.json; `project-json` is a grep BRE to find in any project.json. The
+ * string to find in the root package.json; `project-json` is a grep BRE to find in any PROJECT CONFIGURATION —
+ * a project.json, or the package.json of a package-manager workspace member (see `house_project_jsons`). The
  * mapping from each LayerEvidence kind to one of these three is THE place the shell's approximation of
  * evidence.ts lives — keep the two in step.
  */
@@ -154,6 +215,10 @@ export function shellProjection(): string {
     `HOUSE_LAYERS_ENSURABLE_SYNC=${q(ensurableIn('sync'))}`,
     `HOUSE_PRESETS=${q(PRESETS.map((p) => p.id).join(','))}`,
     `HOUSE_PRESET_DEFAULT=${q(DEFAULT_PRESET)}`,
+    `HOUSE_LAYOUTS=${q(Object.keys(LAYOUTS).join(','))}`,
+    `HOUSE_LAYOUT_DEFAULT_APPS_DIR=${q(DEFAULT_LAYOUT.appsDir)}`,
+    `HOUSE_LINKINGS=${q(Object.keys(LINKINGS).join(','))}`,
+    `HOUSE_LINKING_DEFAULT=${q(DEFAULT_LINKING)}`,
     '',
     byIdFunction('house_layer_title', 'house_layer_title <id> — one line naming the layer.', (e) => e.title),
     byIdFunction('house_layer_requires', 'house_layer_requires <id> — comma-separated required layers.', (e) =>
@@ -186,6 +251,14 @@ export function shellProjection(): string {
     caseFunction('house_preset_layers', 'house_preset_layers <preset> — its ensure set, comma-separated.', PRESETS, (p) =>
       p.layers.join(','),
     ),
+    caseFunction('house_layout_title', 'house_layout_title <layout> — one line naming the layout.', asEntries(LAYOUT_TITLES), (l) => l.title),
+    caseFunction(
+      'house_layout_apps_dir',
+      'house_layout_apps_dir <layout> — where it keeps applications (a scaffold\'s first app lands there).',
+      asEntries(LAYOUT_TITLES),
+      (l) => LAYOUTS[l.id].appsDir,
+    ),
+    caseFunction('house_linking_title', 'house_linking_title <linking> — one line naming the linking strategy.', asEntries(LINKINGS), (l) => l.title),
     EVIDENT_FUNCTION,
   ].join('\n');
 }
@@ -195,7 +268,15 @@ export function shellProjection(): string {
  * code. Approximate by design (a grep over package.json and the concatenated project.json files), and wrong
  * only in the quiet direction where it can be: a missed layer costs a notice, a false one costs trust in it.
  *
- * WHICH project.json FILES: the ones Nx itself would read — so the hook can never report a layer the sync
+ * WHICH FILES: the project configurations Nx itself would read — every project.json, AND the package.json of every
+ * package-manager workspace member (package.json `workspaces`, pnpm-workspace.yaml `packages`), which is how a
+ * TS-solution workspace defines its projects: Nx's package-json plugin turns exactly those manifests into projects
+ * (their `nx` block, their scripts as targets). Reading project.json alone left every layer such a workspace
+ * declares invisible to the hook. The root package.json is NOT read as a project here — it is the `dependency`
+ * kind's file, and its scripts are the workspace's, not a project's (missing a root project is the quiet direction).
+ * Same quiet direction without git: the pruned `find` reads project.json files only.
+ *
+ * And only the ones Nx would read — so the hook can never report a layer the sync
  * (`getProjects`) does not detect, and then nag about it every session. Nx skips what git ignores; so does this:
  * inside a git work tree the list is `git ls-files` (tracked + untracked, minus ignored — and git never descends
  * into a nested work tree, which is what `.claude/worktrees/*` are). A directory that is no work tree is read the
@@ -205,10 +286,33 @@ export function shellProjection(): string {
  * ONE traversal, whatever the number of layers: every project.json is read once, concatenated, and each
  * pattern greps that. (Paths go through NUL-separated xargs / `-exec … +`, so a space in a path is a non-event.)
  */
-const EVIDENT_FUNCTION = `# house_project_jsons <dir> — the contents of every project.json Nx would read under <dir>, concatenated.
+const EVIDENT_FUNCTION = `# house_workspace_globs <dir> — the package-manager workspace globs <dir> declares, one per line (\`!\` kept).
+house_workspace_globs() {
+  local dir="$1"
+  [ -f "$dir/package.json" ] && tr -d '\\n\\r' < "$dir/package.json" \\
+    | grep -o '"workspaces"[[:space:]]*:[[:space:]]*[[{][^]}]*' | head -1 \\
+    | sed 's/^"workspaces"[[:space:]]*:[[:space:]]*//; s/^{[[:space:]]*"packages"[[:space:]]*:[[:space:]]*//' \\
+    | grep -o '"[^"]*"' | tr -d '"'
+  [ -f "$dir/pnpm-workspace.yaml" ] && sed -n '/^packages:/,/^[^[:space:]-]/s/^[[:space:]]*-[[:space:]]*//p' "$dir/pnpm-workspace.yaml" \\
+    | sed 's/[[:space:]]*#.*$//' | tr -d "\\"'"
+  return 0
+}
+
+# house_project_jsons <dir> — every project configuration Nx would read under <dir> (project.json files and the
+# package.json of each workspace member), concatenated.
 house_project_jsons() {
-  local dir="$1" scratch=''
+  local dir="$1" scratch='' glob
   set -- -z --cached --others --exclude-standard -- project.json '*/project.json'
+  while IFS= read -r glob; do
+    glob="\${glob#./}"; glob="\${glob%/}"
+    case "$glob" in
+      ''|'.') ;;
+      '!'*) set -- "$@" ":(exclude,glob)\${glob#!}/package.json" ;;
+      *)    set -- "$@" ":(glob)$glob/package.json" ;;
+    esac
+  done <<HOUSE_WORKSPACES
+$(house_workspace_globs "$dir")
+HOUSE_WORKSPACES
   if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     ( cd "$dir" && git ls-files "$@" 2>/dev/null | xargs -0 cat 2>/dev/null )
   elif scratch="$(mktemp -d 2>/dev/null)" && git init -q --bare "$scratch" >/dev/null 2>&1; then

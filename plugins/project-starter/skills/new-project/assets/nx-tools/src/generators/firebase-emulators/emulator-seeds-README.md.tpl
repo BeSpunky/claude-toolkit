@@ -25,7 +25,7 @@ the seed list from it automatically. Update this table when you do.
 - Sign in with a seeded email and the Auth emulator matches the existing account by
   email — you inherit its uid and its docs, no re-onboarding.
 - **Reset** to a pristine world anytime: `yarn nx run firebase:reset` (the `default`
-  seed; pass another seed by adding a `reset:<name>` target in `firebase/project.json`).
+  seed; pass another seed by adding a `reset:<name>` target to the `firebase` project).
   Takes effect on the next serve.
 
 ## The contract

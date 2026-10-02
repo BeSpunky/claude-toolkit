@@ -11,10 +11,10 @@ Never create by hand what a machine can create reliably (`architect-mentality` �
 ```bash
 nx list                      # what plugins/generators exist
 nx g @nx/js:lib --help       # exact options
-nx g @nx/angular:library libs/bookings/data --tags=type:data,scope:bookings
+nx g @nx/angular:library libs/bookings/data --tags=type:data,scope:bookings   # libs/ = this workspace's libsDir
 ```
 
-**Why.** *Work smart* + *Place everything on purpose* — generated structure is consistent, correctly wired (paths, tags, test config), and not a copy-paste of the last one. This is the **house standard** (see the `project-starter` plugin).
+**Why.** *Work smart* + *Place everything on purpose* — generated structure is consistent, correctly wired (placement per the workspace layout, linking — a `paths` alias or a workspace package — tags, test config), and not a copy-paste of the last one. This is the **house standard** (see the `project-starter` plugin).
 
 **When not.** Only fall back to hand-creating files when no generator covers the task.
 

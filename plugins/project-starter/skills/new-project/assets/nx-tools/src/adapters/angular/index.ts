@@ -25,6 +25,7 @@ import { setLeafOption } from '../../generators/_utils/dev-server';
 import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
+import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
 
 /**
  * The executors that make a project an Angular one. Applications build with `@angular/build:` (or the legacy
@@ -33,6 +34,21 @@ import { angularFirebaseClient } from './firebase-client';
  * the `angular` layer's evidence reads it from here (`angular.executors`).
  */
 const ANGULAR_BUILDERS = ['@angular/build:', '@angular-devkit/build-angular:', '@nx/angular:'];
+
+/**
+ * The builders that produce an Angular APPLICATION (as opposed to a library's `package` / `ng-packagr`): today's
+ * esbuild `application`, the legacy devkit browser builders, and Nx's wrappers of them. Exact executor names, not
+ * prefixes — every prefix above builds libraries too.
+ */
+const ANGULAR_APP_BUILDERS = new Set([
+  '@angular/build:application',
+  '@angular-devkit/build-angular:application',
+  '@angular-devkit/build-angular:browser',
+  '@angular-devkit/build-angular:browser-esbuild',
+  '@nx/angular:application',
+  '@nx/angular:browser-esbuild',
+  '@nx/angular:webpack-browser',
+]);
 
 const noop: GeneratorCallback = () => {};
 
@@ -79,13 +95,18 @@ export const angular: StackAdapter = {
     return ANGULAR_BUILDERS.some((prefix) => executor.startsWith(prefix)) || tree.exists(`${config.root}/ng-package.json`);
   },
 
+  ownsApp(project) {
+    return ANGULAR_APP_BUILDERS.has(project.targets?.build?.executor ?? '');
+  },
+
   apps: {
     async create(tree, options): Promise<CreatedApp> {
       // These option names are the exact, proven-good flags scaffold.sh always passed
       // (`--minimal --style=scss --routing --e2eTestRunner=none`), expressed programmatically.
       const { applicationGenerator } = await import('@nx/angular/generators');
+      // Through the TS-solution seam: in a workspaces-linked repo the app is created as a project.json island.
       const callback =
-        (await applicationGenerator(tree, {
+        (await angularGeneratorCall(tree, () => applicationGenerator(tree, {
           directory: options.directory,
           ...(options.name ? { name: options.name } : {}),
           style: options.style ?? 'scss',
@@ -93,8 +114,10 @@ export const angular: StackAdapter = {
           minimal: true,
           e2eTestRunner: 'none',
           skipFormat: true,
-        } as Parameters<typeof applicationGenerator>[1])) ?? noop;
-      return { project: emittedProjectName(tree, options.directory, options.name), callback };
+        } as Parameters<typeof applicationGenerator>[1]))) ?? noop;
+      const project = emittedProjectName(tree, options.directory, options.name);
+      stateAngularCompilerContract(tree, readProjectConfiguration(tree, project).root);
+      return { project, callback };
     },
   },
 

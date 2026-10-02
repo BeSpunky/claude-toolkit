@@ -2,28 +2,40 @@
 //
 // Delegate-then-post-process:
 //   1. Delegate the library scaffold to a STACK ADAPTER's `libs` port (src/adapters) — the framework's own
-//      generator, which also writes the lib's `tsconfig.base.json` path alias (addPathMapping, the in-repo
-//      channel). `--stack` names one (`angular`: @nx/angular:library, ng-packagr, standalone, Vitest; `js`:
+//      generator, the library LINKED the way the workspace links (the port's promise; see LINKING below).
+//      `--stack` names one (`angular`: @nx/angular:library, ng-packagr, standalone, Vitest; `js`:
 //      @nx/js with bundler `tsc`, for plain-TS leaves); the default is the workspace's own most specific stack.
 //      This REPLACED a `--nonAngular` boolean that made one generator do two things behind a flag — a third
 //      stack would have been a second boolean. `--nonAngular` survives only as a deprecated alias of `--stack=js`.
-//   2. Read the emitted project config BACK and add the per-PROJECT `nx release` baseline (git-tag resolver +
-//      dist packageRoot). The ROOT release config lives in nx.json and is Foundation's job — never touched here.
-//   3. The stack's packaging post-processing (Angular: the modern nested ng-package.json shape).
-//   4. Declare the published-consumer cross-lib deps (--workspaceDeps) on the lib's own package.json as REAL
-//      caret ranges (`^<sibling's current version>`), and let the stack's packager allow them (Angular:
+//   2. The stack's packaging post-processing (Angular: the modern nested ng-package.json shape; plain TS: where
+//      @nx/js publishes the package from, under the workspace's model).
+//   3. Read the emitted project config BACK and add the per-PROJECT `nx release` baseline (git-tag resolver +
+//      a packageRoot — the stack's, else `dist/<root>`). The ROOT release config lives in nx.json and is
+//      Foundation's job — never touched here.
+//   4. Declare the cross-lib deps (--workspaceDeps) on the lib's own package.json (see LINKING), and let the stack's packager allow them (Angular:
 //      ng-package.json `allowedNonPeerDependencies`, or ng-packagr hard-fails the build).
 //   5. Mark TEST-ONLY peers (vitest, …) `{ optional: true }` so consumers get no bogus unmet-peer warning.
 //   6. Return an install callback.
 //
 // WHERE AND UNDER WHICH NAME — both derived from the workspace, never the toolkit's own conventions: the
-// directory from where this workspace keeps libraries (resolveLibsDir — `libs/`, `packages/`, …), the npm scope
+// directory from where this workspace keeps libraries (its layout's libsDir — `libs/`, `packages/`, …), the npm scope
 // from the workspace's own name (resolveWorkspaceScope). Defaulting to `packages/` and `@bespunky` made every
 // consumer's library a BeSpunky package in a folder their repo doesn't use.
 //
-// Linking model (DECIDED 2026-06-22): in-repo resolution is the tsconfig.base.json PATH ALIAS only — NOT package
-// manager workspaces (`workspace:*`) or TS project references. Cross-lib deps on the lib's package.json are the
-// published-consumer contract, maintained by `nx release` (`updateDependents:auto`).
+// LINKING — detected, never assumed (`_utils/linking`). The workspace wears one of two models, and this
+// generator states only WHAT it needs; the port decides how:
+//   - `paths` (the integrated model, and the house default): in-repo resolution is the root tsconfig's PATH
+//     ALIAS, which the stack's generator writes. A cross-lib dep on the lib's package.json is then the
+//     PUBLISHED-consumer contract only — a real caret range (`^<sibling's current version>`), maintained by
+//     `nx release` (`updateDependents:auto`); a `workspace:*` there would mean nothing to anyone.
+//   - `workspaces` (TS-solution): the package.json dependency IS the in-repo link — pnpm links nothing
+//     undeclared, and with `link-workspace-packages` off (its default) a plain `^x.y.z` resolves from the
+//     REGISTRY, i.e. the last published sibling, not the one beside it. So a sibling that lives in this
+//     workspace is declared the way the package manager links one (`workspace:*` / `*` — the port's
+//     `workspaceDependencySpec`), and the package manager rewrites that to the real version at publish.
+// One rule serves both: every sibling found in the workspace is LINKED to this library as its consumer, and
+// the caret range fills whatever the linking left undeclared. A sibling not in the workspace (yet) is a
+// registry package under either model, and gets the caret range.
 import {
   type Tree,
   type GeneratorCallback,
@@ -42,6 +54,7 @@ import { requireLayer } from '../../layers/registry';
 import { adapter, ADAPTERS } from '../../adapters/registry';
 import { workspaceStackWith } from '../../adapters/workspace';
 import { resolveLibsDir, resolveWorkspaceScope } from '../_utils/workspace-layout';
+import { workspaceLinking } from '../_utils/linking';
 
 // Test-only peers the base @nx generators declare as HARD peerDependencies (the chosen unitTestRunner pulls these
 // in). A consumer of the published library never runs its tests, so each is marked `{ optional: true }`.
@@ -85,16 +98,16 @@ export default async function publishableLibGenerator(
     tags: options.tags,
   });
 
-  // 2) Read the emitted project back and add the per-project release baseline.
+  // 2) The stack's packaging shape — FIRST, because it may decide where the package is published from.
+  const projectRoot = readProjectConfiguration(tree, name).root;
+  stack.libs.normalizePackaging?.(tree, projectRoot);
+
+  // 3) Read the project back and add the per-project release baseline.
   const project = readProjectConfiguration(tree, name);
-  const projectRoot = project.root;
   applyReleaseConfig(project, projectRoot);
   updateProjectConfiguration(tree, name, project);
 
-  // 3) The stack's packaging shape.
-  stack.libs.normalizePackaging?.(tree, projectRoot);
-
-  // 4) Cross-lib deps — the published-consumer contract.
+  // 4) Cross-lib deps — linked in-repo the workspace's way, ranged for the published consumer.
   if (options.workspaceDeps?.length) {
     const declared = addWorkspaceDeps(tree, projectRoot, options.workspaceDeps, scope);
     if (declared.length) stack.libs.allowDependencies?.(tree, projectRoot, declared);
@@ -135,21 +148,25 @@ function applyReleaseConfig(project: ProjectConfiguration, projectRoot: string):
   //   `dist/{projectRoot}` uses the Nx token so it resolves per-project at run time. VERIFY the
   //   token expands inside packageRoot (it does for executor options); if not, fall back to the
   //   literal `dist/<projectRoot>`.
+  // A packageRoot the STACK recorded (step 2) is its knowledge of where its build puts the package, and wins;
+  // `dist/{projectRoot}` is the default for a stack that records none (ng-packagr emits there).
   project.targets ??= {};
   const publish = project.targets['nx-release-publish'] ?? {};
   publish.options = {
     ...(publish.options ?? {}),
-    packageRoot: 'dist/{projectRoot}',
+    packageRoot: publish.options?.packageRoot ?? 'dist/{projectRoot}',
   };
   project.targets['nx-release-publish'] = publish;
 }
 
 /**
- * Declare each sibling package as a cross-lib dependency on the library's OWN package.json, as a REAL caret range
- * (`"<scope>/<dep>": "^<sibling's current version>"`). Short names are expanded with the workspace's scope; a
- * scoped name is taken as-is. The sibling's version is read from ITS package.json, found by package name (or by
- * project name) in the workspace — never from an assumed `packages/<name>` path. A sibling not found yet is
- * declared against `^0.0.1`, with a warning. Never overwrites an existing entry. Returns the scoped names.
+ * Declare each sibling package as a cross-lib dependency on the library's OWN package.json. Short names are
+ * expanded with the workspace's scope; a scoped name is taken as-is. A sibling found in the workspace BY ITS
+ * PACKAGE NAME is linked to this library as its consumer first (under `workspaces` that declares the
+ * `workspace:*` / `*` dependency; under `paths` the global alias already covers it); then any entry still
+ * undeclared gets a REAL caret range of the sibling's current version, read from ITS package.json — never from
+ * an assumed `packages/<name>` path. A sibling not found yet is declared against `^0.0.1`, with a warning.
+ * Never overwrites an existing entry. Returns the scoped names.
  */
 function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[], scope: string): string[] {
   const pkgPath = `${projectRoot}/package.json`;
@@ -161,34 +178,42 @@ function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[], scope
     return [];
   }
 
+  const linking = workspaceLinking(tree);
   const scopedNames = deps.map((dep) => (dep.startsWith('@') ? dep : `${scope}/${dep}`));
+  const siblings = scopedNames.map((scoped) => ({ scoped, ...findSibling(tree, scoped) }));
+  for (const { scoped, root } of siblings) {
+    if (root && root !== projectRoot) linking.link(tree, { importPath: scoped, libRoot: root, consumerRoot: projectRoot });
+  }
   updateJson(tree, pkgPath, (json: Record<string, unknown>) => {
     const dependencies = { ...((json.dependencies as Record<string, string>) ?? {}) };
-    for (const scoped of scopedNames) dependencies[scoped] ??= `^${siblingVersion(tree, scoped)}`;
+    for (const { scoped, version } of siblings) dependencies[scoped] ??= `^${version}`;
     json.dependencies = dependencies;
     return json;
   });
   return scopedNames;
 }
 
-/** A sibling's current version, from its own package.json — found by package name, then by project name. */
-function siblingVersion(tree: Tree, scopedName: string): string {
+/**
+ * A sibling's current version, from its own package.json — found by package name, then by project name — and,
+ * when found by its PACKAGE NAME, its root: only then is it the package that specifier names, and so linkable.
+ */
+function findSibling(tree: Tree, scopedName: string): { version: string; root?: string } {
   const shortName = scopedName.split('/').pop() ?? scopedName;
   let fallback: string | undefined;
   for (const [projectName, config] of getProjects(tree)) {
     const pkgPath = `${config.root}/package.json`;
     if (!tree.exists(pkgPath)) continue;
     const pkg = readJson<{ name?: string; version?: string }>(tree, pkgPath);
-    if (pkg.name === scopedName && pkg.version) return pkg.version;
+    if (pkg.name === scopedName && pkg.version) return { version: pkg.version, root: config.root };
     if (projectName === shortName && pkg.version) fallback ??= pkg.version;
   }
-  if (fallback) return fallback;
+  if (fallback) return { version: fallback };
 
   logger.warn(
     `[publishable-lib] Could not find a version for sibling "${scopedName}" in this workspace — ` +
     `declared the cross-lib dependency as "^0.0.1". Adjust the range once the sibling exists.`
   );
-  return '0.0.1';
+  return { version: '0.0.1' };
 }
 
 /**

@@ -10,7 +10,7 @@ Make tests cheap to write, fast to run, and resilient to refactors — by concen
 
 ```
 jest.preset.js          // { ...nxPreset } — workspace defaults
-libs/x/jest.config.ts   // extends the preset; project-specific bits only
+<libsDir>/x/jest.config.ts   // extends the preset; project-specific bits only
 ```
 
 **Why.** *Concentrate complexity* + *Work smart* — a 30-project workspace keeps one source of test config; a change lands once. (Older Nx used `getJestProjects()`; modern Nx infers/per-project — either way, layer, don't duplicate.)

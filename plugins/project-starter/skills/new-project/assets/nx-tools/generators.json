@@ -49,7 +49,7 @@
     "firebase-emulators": {
       "factory": "./src/generators/firebase-emulators/generator",
       "schema": "./src/generators/firebase-emulators/schema.json",
-      "description": "The Firebase CORE, framework-neutral (needs only the Nx floor): firebase.json (emulator suite + functions source, singleProjectMode; never .firebaserc), apphosting.yaml (only with a client app — App Hosting serves a web app), the emulator/seed/secrets tooling under tools/, Cloud Functions as the apps/functions Nx app, the workspace-level `firebase` emulator project, the .gitignore entries and the platform: ESLint firewall. --project=<app> additionally attaches the Firebase client to that app (via firebase-client), so one command still retrofits Firebase onto an app."
+      "description": "The Firebase CORE, framework-neutral (needs only the Nx floor): firebase.json (emulator suite + functions source, singleProjectMode; never .firebaserc), apphosting.yaml (only with a client app — App Hosting serves a web app), the emulator/seed/secrets tooling under tools/, Cloud Functions as the `functions` Nx app (in the workspace's apps directory, or wherever it already lives), the workspace-level `firebase` emulator project, the .gitignore entries and the platform: ESLint firewall. --project=<app> additionally attaches the Firebase client to that app (via firebase-client), so one command still retrofits Firebase onto an app."
     },
     "firebase-client": {
       "factory": "./src/generators/firebase-client/generator",
@@ -75,6 +75,11 @@
       "factory": "./src/generators/worktree-domains/generator",
       "schema": "./src/generators/worktree-domains/schema.json",
       "description": "Install the workspace-level worktree-domains proxy + route registry (the sibling of shared-browser). Writes the CLI (tools/worktree-domains/worktree-domains, chmod +x) and its self-contained Node reverse proxy (proxy.mjs — Node built-ins only, no npm/apt dep), and registers the workspace Nx project `worktree-domains` with the housekeeping targets list|reconcile|status|logs|stop. One tiny proxy on 127.0.0.1:80 (loopback, container-internal, NOT forwarded) fronts every worktree's dev-server: a browser hitting http://<slug>.localhost/ (Chromium auto-resolves any *.localhost to loopback — no DNS/hosts) is routed by the leading DNS label to 127.0.0.1:<port> per the slug→port registry, and WebSocket upgrades are proxied so Angular/Vite HMR survives. The dev engine (tools/dev/dev serve, and `nx serve` through it) drives it per-serve via `worktree-domains register <slug> <port>` / `unregister <slug>` (idempotent; starts the proxy if down). Workspace-level and always-on — generated once per workspace for the `web` layer. Idempotent + --sync-safe: every generator-owned file is rewritten on each run."
+    },
+    "workspace-layout": {
+      "factory": "./src/generators/workspace-layout/generator",
+      "schema": "./src/generators/workspace-layout/schema.json",
+      "description": "DECLARE where this workspace keeps its projects: writes a named layout (`apps-libs` — apps/ + libs/; `packages` — packages/ for both) into nx.json `workspaceLayout`, Nx's own field, so the house generators and Nx's agree on where apps and libraries land. What `scaffold.sh --layout=<id>` runs before the first project exists (an empty workspace has nothing to infer a layout from). A sync never runs it: an existing workspace's layout is DETECTED (nx.json, then where its projects already live). Moves nothing."
     },
     "house-doc": {
       "factory": "./src/generators/house-doc/generator",

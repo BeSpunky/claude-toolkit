@@ -41,6 +41,9 @@ import { type LayerId } from '../../layers/registry';
 import { activeLayers, docSections } from '../_utils/layer-contributions';
 import { matchesEvidence } from '../../layers/evidence';
 import { SERVE_EXECUTOR } from '../_utils/dev-server';
+import { resolveWorkspaceLayout } from '../_utils/workspace-layout';
+import { detectLinking } from '../_utils/linking';
+import { houseProjectHome } from '../_utils/project-files';
 
 interface HouseDocSchema {
   // Render the Firebase sections. Default: auto-detect firebase.json at the workspace root.
@@ -116,14 +119,44 @@ export default async function houseDocGenerator(
   const nxServed = matchesEvidence(tree, { executors: [SERVE_EXECUTOR] });
   flags['nx-serve'] = nxServed;
   const serve = nxServed ? `${nx} serve` : 'tools/dev/dev serve';
+  // WHERE THINGS LIVE, and HOW THEY REACH EACH OTHER — the two workspace facts every path and import in these docs
+  // depends on. Both are DETECTED through the very resolvers the generators use (`resolveWorkspaceLayout`,
+  // `detectLinking`), so the doc and the generators can never disagree. The docs used to say `apps/<app>` and
+  // `libs/<lib-name>` outright, which was wrong for every workspace that keeps its projects under `packages/`
+  // — and an agent copying a command out of HOUSE.md then generated into a directory the workspace doesn't use.
+  const layout = resolveWorkspaceLayout(tree);
+  const linking = detectLinking(tree);
+  flags[`linking-${linking}`] = true;
+  // One home for everything (`packages`) reads as one directory, not as "apps in X, libraries in X".
+  flags['layout-shared'] = layout.appsDir === layout.libsDir;
   // The design system's REAL root, not a guess. HOUSE.md's whole job is telling a reader — human or
   // agent — where things are, and it hardcoded `packages/design-system`. Projects scaffolded before the
   // libs-dir inference learned to ignore `tools/` have theirs at `tools/design-system`, so the document
   // pointed at a directory that does not exist, and an agent following it either gives up or creates a
   // SECOND design system at the path the doc named. Resolved through the same tag-based lookup every
-  // generator already trusts, so the doc and the generators can never disagree.
-  const dsRoot = findDesignSystem(tree)?.root ?? 'packages/design-system';
-  const render = (s: string) => renderTemplate(s, flags, nxTools, plugin, layers, packageManager, nx, dsRoot, serve);
+  // generator already trusts; before one exists, where the design-system generator would put it.
+  const dsRoot = findDesignSystem(tree)?.root ?? `${layout.libsDir}/design-system`;
+  // Cloud Functions' real home — found the way firebase-emulators finds it (an existing project wins over the
+  // canonical `<appsDir>/functions`), so a project whose functions predate the layout model is described as it is.
+  const functions = firebase ? houseProjectHome(tree, 'functions', `${layout.appsDir}/functions`) : undefined;
+  const tokens: Record<string, string> = {
+    DS_ROOT: dsRoot,
+    PM: packageManager,
+    SERVE: serve,
+    NX: nx,
+    APPS_DIR: layout.appsDir,
+    LIBS_DIR: layout.libsDir,
+    FUNCTIONS_ROOT: functions?.root ?? '',
+    FUNCTIONS_PROJECT: functions?.name ?? '',
+    LINKING: linking,
+    NX_TOOLS_VERSION: nxTools,
+    PLUGIN_VERSION: plugin,
+    // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the sync
+    // re-DETECTS. Its value is drift: a project whose workspace now has `firebase` but whose stamp doesn't
+    // grew a layer that never got its house tooling, and that is a fact worth being able to see.
+    LAYERS: layers.length ? layers.join(',') : 'none',
+  };
+  const render = (s: string) => renderTemplate(s, flags, tokens);
 
   // 1) The generated reference — rewritten every run (generator-owned; never hand-edited), carrying the
   //    stamp in its header. No timestamp anywhere: a stamp that changed on every sync would dirty the
@@ -191,32 +224,15 @@ export default async function houseDocGenerator(
  * An UNKNOWN flag renders as false, which is the safe direction: a section guarded by a typo'd flag
  * disappears (visible, fixable) rather than appearing in every project regardless of shape.
  */
-function renderTemplate(
-  src: string,
-  flags: Record<string, boolean>,
-  nxToolsVersion: string,
-  pluginVersion: string,
-  layers: readonly string[],
-  packageManager: string,
-  nx: string,
-  dsRoot: string,
-  serve: string,
-): string {
+function renderTemplate(src: string, flags: Record<string, boolean>, tokens: Record<string, string>): string {
   // Collapse the blank-line runs a removed conditional block leaves behind — the same tidy the devcontainer
   // renderer does, and for the same reason: HOUSE.md is READ, by humans and by the agent, and a document
   // full of gaps where Angular or Firebase sections used to be reads as damaged rather than as tailored.
+  //
+  // Tokens are `{{UPPER_SNAKE}}`; block flags are `{{#lower-kebab}}`, so the two can never be confused. An
+  // unknown token is left verbatim — visible in the rendered doc, and therefore fixable.
   return collapseBlankRuns(
-    expandBlocks(src, flags)
-    .replace(/\{\{DS_ROOT\}\}/g, dsRoot)
-    .replace(/\{\{PM\}\}/g, packageManager)
-    .replace(/\{\{SERVE\}\}/g, serve)
-    .replace(/\{\{NX\}\}/g, nx)
-    .replace(/\{\{NX_TOOLS_VERSION\}\}/g, nxToolsVersion)
-    .replace(/\{\{PLUGIN_VERSION\}\}/g, pluginVersion)
-    // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the sync
-    // re-DETECTS. Its value is drift: a project whose workspace now has `firebase` but whose stamp doesn't
-    // grew a layer that never got its house tooling, and that is a fact worth being able to see.
-    .replace(/\{\{LAYERS\}\}/g, layers.length ? layers.join(',') : 'none'),
+    expandBlocks(src, flags).replace(/\{\{([A-Z_]+)\}\}/g, (match, token: string) => tokens[token] ?? match),
   );
 }
 

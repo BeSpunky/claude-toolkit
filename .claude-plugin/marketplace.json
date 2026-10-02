@@ -16,7 +16,7 @@
       "name": "bespunky-project-starter",
       "source": "./plugins/project-starter",
       "description": "Scaffold a new BeSpunky-standard project, or retrofit the house tooling onto any existing repo, as a stack of detected layers on an always-ensured Nx floor: the agent DX (composed devcontainer, Claude settings, window identity) by default, and Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. Generator-first; kept current by versioned migrations and a consented sync.",
-      "version": "0.36.5"
+      "version": "0.37.0"
     },
     {
       "name": "bespunky-workflow",
@@ -28,7 +28,7 @@
       "name": "bespunky-engineering",
       "source": "./plugins/engineering",
       "description": "BeSpunky engineering skills, stack-agnostic. Foundation: architect-mentality (the mindset) and architecture-first (solve through design, not patches; fix the root cause). Technique routers: software-design, advanced-typescript, nx-monorepo-and-dx. Plus resumable-state (a deliberate home for view and working state) and typed-reactive-navigation (typed per-domain navigation, never a raw router call), each with an Angular adapter. Angular-only skills live in bespunky-angular.",
-      "version": "0.6.2"
+      "version": "0.6.3"
     },
     {
       "name": "bespunky-angular",
@@ -40,7 +40,7 @@
       "name": "bespunky-design-system",
       "source": "./plugins/design-system",
       "description": "BeSpunky design-system skills - styling as a SYSTEM on any stack (Angular is one adapter). design-system-first: the discipline - every visual value is a token from the design system, no raw hex, magic px or style reach-ins, and a pattern's second occurrence is promoted into the DS. design-tokens-and-theming: the techniques - token tiers, CSS custom properties as the runtime layer, a zero-output SASS API, light/dark/brand modes, encapsulation, and the DS library's entry points.",
-      "version": "0.2.2"
+      "version": "0.2.3"
     },
     {
       "name": "bespunky-browser-automation",

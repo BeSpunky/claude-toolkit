@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyWorkspaceLayout",
+  "title": "Declare where this workspace keeps its projects",
+  "type": "object",
+  "properties": {
+    "layout": {
+      "type": "string",
+      "description": "The named layout to declare (see LAYOUTS in _utils/workspace-layout.ts): `apps-libs` (apps/, libs/) or `packages` (packages/ for both). Unknown ids are refused with the list of known ones.",
+      "$default": { "$source": "argv", "index": 0 }
+    }
+  },
+  "required": ["layout"]
+}

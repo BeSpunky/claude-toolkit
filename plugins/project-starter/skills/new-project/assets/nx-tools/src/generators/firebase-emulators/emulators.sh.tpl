@@ -206,8 +206,8 @@ elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ]; then
 fi
 
 # Local Functions secrets: the Functions emulator reads `.secret.local` from the loaded bundle
-# (firebase.json → dist/apps/functions), but the file lives with the app source
-# (apps/functions/.secret.local, gitignored). It is deliberately NOT a build asset — Nx skips
+# (firebase.json → {{functionsDist}}), but the file lives with the app source
+# ({{functionsRoot}}/.secret.local, gitignored). It is deliberately NOT a build asset — Nx skips
 # gitignored assets anyway, and routing a secret through build outputs would persist it into the
 # Nx cache. Copy it into place at launch, so it stays a runtime concern of the emulator alone.
 # (Re-run the suite after a functions rebuild — `deleteOutputPath` wipes dist.)
@@ -219,16 +219,16 @@ fi
 # in its own), else fall back to the MAIN worktree's copy (git lists it first). So serving ANY
 # worktree — `nx serve` here or `<app>:serve --worktree` — reuses the one secret the main tree
 # holds, with no per-worktree setup.
-SECRETS_FILE="$ROOT/apps/functions/.secret.local"
+SECRETS_FILE="$ROOT/{{functionsRoot}}/.secret.local"
 if [ ! -f "$SECRETS_FILE" ]; then
   # Same cascade as the seeds above, off the same resolved MAIN_WORKTREE.
-  if [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && [ -f "$MAIN_WORKTREE/apps/functions/.secret.local" ]; then
+  if [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && [ -f "$MAIN_WORKTREE/{{functionsRoot}}/.secret.local" ]; then
     echo "[emulators] .secret.local absent in this worktree; using the main worktree's copy: $MAIN_WORKTREE" >&2
-    SECRETS_FILE="$MAIN_WORKTREE/apps/functions/.secret.local"
+    SECRETS_FILE="$MAIN_WORKTREE/{{functionsRoot}}/.secret.local"
   fi
 fi
-if [ -f "$SECRETS_FILE" ] && [ -d "$ROOT/dist/apps/functions" ]; then
-  cp "$SECRETS_FILE" "$ROOT/dist/apps/functions/.secret.local"
+if [ -f "$SECRETS_FILE" ] && [ -d "$ROOT/{{functionsDist}}" ]; then
+  cp "$SECRETS_FILE" "$ROOT/{{functionsDist}}/.secret.local"
 fi
 
 # Only import when the working dir is actually primed — `--import` on a missing dir is

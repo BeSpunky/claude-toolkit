@@ -15,11 +15,12 @@
 // dev engine (tools/dev/dev serve, and `nx serve` through it) drives it per-serve via
 // `bash tools/worktree-domains/worktree-domains register|unregister`.
 //
-// Idempotent + --sync-safe: every generator-owned file is rewritten on each run (the CLI, the proxy,
-// and project.json carry no user values), so a fresh run and a --sync run converge to the same tree —
-// exactly like the shared-browser generator re-asserts its always-owned tools/shared-browser/* files.
+// Idempotent + --sync-safe: every generator-owned file is rewritten on each run (the CLI and the proxy carry
+// no user values) and the project's house targets are re-asserted, so a fresh run and a --sync run converge to
+// the same tree — exactly like the shared-browser generator re-asserts its always-owned tools/shared-browser/*.
 // formatFiles polishes the result at the end.
 import { type Tree, formatFiles } from '@nx/devkit';
+import { ensureHouseProject, houseProjectHome, type HouseProjectConfig } from '../_utils/project-files';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -46,8 +47,11 @@ export default async function worktreeDomainsGenerator(
   // The self-contained Node reverse proxy the CLI spawns (Node built-ins only — no npm/apt dependency).
   tree.write(`${root}/proxy.mjs`, template('proxy.mjs.tpl'));
 
-  // The workspace Nx project that surfaces the housekeeping verbs as targets (each runs the CLI verb).
-  tree.write(`${root}/project.json`, template('project.json.tpl'));
+  // The workspace Nx project that surfaces the housekeeping verbs as targets (each runs the CLI verb) — created the way
+  // this workspace defines projects (a project.json, or a package.json under TS-solution linking), its targets
+  // re-asserted on every run into whichever file already defines it.
+  const { name, ...config } = JSON.parse(template('project-config.json.tpl')) as { name: string } & HouseProjectConfig;
+  ensureHouseProject(tree, 'worktree-domains', houseProjectHome(tree, name, root), config);
 
   // Gitignore the runtime dir. By default WD_RUNTIME lives under ${XDG_RUNTIME_DIR:-/tmp} (outside the
   // repo) so nothing lands here — but a relocated WD_RUNTIME (e.g. into a workspace volume) would put

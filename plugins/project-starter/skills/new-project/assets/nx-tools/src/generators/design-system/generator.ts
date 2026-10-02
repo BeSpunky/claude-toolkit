@@ -21,11 +21,12 @@
 // An EXISTING design system keeps the binding it was born with — the stack that owns the library decides —
 // so an Angular project's DS stays an Angular library, byte for byte.
 //
-// THE SASS CHANNEL (the one genuinely hard problem here). The workspace links in-repo via
-// tsconfig.base.json PATH ALIASES only — no package-manager workspaces, so there is no
-// node_modules/@scope/design-system to resolve against. SASS does not read tsconfig paths, and every
-// `pkg:`-flavoured mechanism resolves through node module resolution. So the in-repo channel MUST be a
-// sass LOAD PATH, and we point it at the DS lib's PARENT dir (`packages`) rather than its styles dir.
+// THE SASS CHANNEL (the one genuinely hard problem here). SASS reads neither tsconfig path aliases nor — without a
+// `pkg:` importer every consumer's toolchain would have to configure — package `exports`. Under `paths` linking
+// there is no node_modules/@scope/design-system at all; under `workspaces` linking there is, but only for the
+// projects that declare it, and only once the package manager has run. The one channel that works under BOTH,
+// from the first build, is a sass LOAD PATH — and we point it at the DS lib's PARENT dir (`packages`) rather
+// than its styles dir.
 // That makes the in-repo specifier `design-system/styles` — literally the published specifier minus the
 // npm scope. One mental model, three consumers:
 //   (1) the app              -> its stack's `styles` port (design-system-styles; Angular: stylePreprocessorOptions)
@@ -41,10 +42,11 @@
 import {
   type Tree,
   type GeneratorCallback,
-  addProjectConfiguration,
   getProjects,
+  offsetFromRoot,
   readProjectConfiguration,
   updateProjectConfiguration,
+  readJson,
   updateJson,
   writeJson,
   formatFiles,
@@ -56,7 +58,9 @@ import publishableLibGenerator from '../publishable-lib/generator';
 import designSystemStylesGenerator from '../design-system-styles/generator';
 import { findDesignSystem, DESIGN_SYSTEM_TAG } from '../_utils/design-system';
 import { resolveLibsDir, resolveWorkspaceScope, normalizeNpmScope } from '../_utils/workspace-layout';
-import { adapterOf, applicationsWith } from '../../adapters/registry';
+import { createProject } from '../_utils/project-files';
+import { workspaceLinking, rootTsconfig } from '../_utils/linking';
+import { adapterOf, applicationsWith, projectRole } from '../../adapters/registry';
 import { workspaceStackWith } from '../../adapters/workspace';
 import type { StackAdapter } from '../../adapters/stack-adapter';
 
@@ -161,30 +165,57 @@ export default async function designSystemGenerator(
 
 /**
  * The neutral core's library: a plain SOURCE project (no build — consumers load its SCSS through a sass load path
- * and import its runtime through the path alias), tagged so it is found, with a package.json so it can be
- * published as-is.
+ * and import its runtime through the workspace's link), tagged so it is found, with a package.json so it can be
+ * published as-is. Created and linked the way THIS workspace defines and links projects (`createProject`,
+ * `workspaceLinking`): a project.json + a path alias, or a package.json workspace member whose `exports` serve
+ * its source. Its consumers are linked app by app, by design-system-styles.
  */
 function createNeutralLibrary(tree: Tree, options: { name: string; directory: string; importPath: string; tags: string[] }): void {
-  addProjectConfiguration(tree, options.name, {
-    root: options.directory,
-    sourceRoot: `${options.directory}/src`,
-    projectType: 'library',
-    tags: options.tags,
-    targets: {},
-  });
+  // Compiler options first: `createProject` references a package from the solution tsconfig only once it has one.
+  writeProjectTsconfigs(tree, options.directory);
+  createProject(
+    tree,
+    options.name,
+    { root: options.directory, sourceRoot: `${options.directory}/src`, projectType: 'library', tags: options.tags, targets: {} },
+    { name: options.importPath, version: '0.0.1' },
+  );
   if (!tree.exists(`${options.directory}/package.json`)) {
     writeJson(tree, `${options.directory}/package.json`, { name: options.importPath, version: '0.0.1' });
   }
-  // The in-repo TS channel, the same one a framework library generator writes (addPathMapping).
-  for (const tsconfig of ['tsconfig.base.json', 'tsconfig.json']) {
-    if (!tree.exists(tsconfig)) continue;
-    updateJson(tree, tsconfig, (json) => {
-      json.compilerOptions ??= {};
-      json.compilerOptions.paths ??= {};
-      json.compilerOptions.paths[options.importPath] ??= [`${options.directory}/src/index.ts`];
-      return json;
+  workspaceLinking(tree).link(tree, { importPath: options.importPath, libRoot: options.directory });
+}
+
+/**
+ * A workspace whose root compiler options are `composite` builds TypeScript as a graph of PROJECTS: every source
+ * file must belong to one (a file reached from outside its program is TS6307), and the solution references each
+ * by its tsconfig.json. A source library there therefore needs tsconfigs of its own — the shape @nx/js gives a
+ * library in such a workspace (a references-only tsconfig.json over a tsconfig.lib.json). Elsewhere the neutral
+ * library has never had one (its consumer compiles its source), and still does not.
+ *
+ * The runtime is browser code a BUNDLER consumes, so it is compiled with bundler resolution (extension-less
+ * relative imports) and the DOM lib, whatever the workspace's server-leaning defaults (`nodenext`) say.
+ */
+function writeProjectTsconfigs(tree: Tree, root: string): void {
+  const base = rootTsconfig(tree);
+  if (!base || !readJson<{ compilerOptions?: { composite?: boolean } }>(tree, base).compilerOptions?.composite) return;
+  const extendsBase = `${offsetFromRoot(root)}${base}`;
+  if (!tree.exists(`${root}/tsconfig.json`)) {
+    writeJson(tree, `${root}/tsconfig.json`, { extends: extendsBase, files: [], include: [], references: [{ path: './tsconfig.lib.json' }] });
+  }
+  if (!tree.exists(`${root}/tsconfig.lib.json`)) {
+    writeJson(tree, `${root}/tsconfig.lib.json`, {
+      extends: extendsBase,
+      compilerOptions: {
+        rootDir: 'src',
+        outDir: 'dist',
+        tsBuildInfoFile: 'dist/tsconfig.lib.tsbuildinfo',
+        module: 'esnext',
+        moduleResolution: 'bundler',
+        lib: ['es2022', 'dom'],
+        types: [],
+      },
+      include: ['src/**/*.ts'],
     });
-    break;
   }
 }
 
@@ -214,7 +245,7 @@ function publishStyles(tree: Tree, root: string): void {
  */
 function warnIfDesignSystemMayAlreadyExist(tree: Tree): void {
   const libraries = [...getProjects(tree)]
-    .filter(([, project]) => project.projectType === 'library')
+    .filter(([libName]) => projectRole(tree, libName) === 'library')
     .map(([libName, project]) => `${libName} (${project.root})`);
 
   if (libraries.length === 0) return;

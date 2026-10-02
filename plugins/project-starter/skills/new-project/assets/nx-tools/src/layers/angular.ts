@@ -27,7 +27,7 @@ export const angular: LayerDescriptor = {
     executors: stack.executors,
   },
   ensurable: { scaffold: true, sync: false },
-  ensureHint: '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`',
+  ensureHint: '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app --name=<name>`',
   nxPlugin: '@nx/angular',
   brings: 'the Angular editor extensions, the dev-server leaf, the Angular CLI MCP + agent skills',
   generators: {

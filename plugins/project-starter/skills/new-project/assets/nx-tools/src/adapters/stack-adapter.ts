@@ -17,7 +17,7 @@
 //
 // Keep it as small as today's needs: every port below has a caller. A port with no caller is a guess about a
 // framework nobody has asked for yet.
-import type { GeneratorCallback, TargetConfiguration, Tree } from '@nx/devkit';
+import type { GeneratorCallback, ProjectConfiguration, TargetConfiguration, Tree } from '@nx/devkit';
 import type { LayerId } from '../layers/descriptor';
 
 export interface StackAdapter {
@@ -30,6 +30,14 @@ export interface StackAdapter {
    * Angular app?" in the payload asks it (with `projectType` where only applications are wanted).
    */
   ownsProject(tree: Tree, project: string): boolean;
+  /**
+   * Is this project one of this stack's APPLICATIONS — judged from what builds it, not from what it declares?
+   * `projectType` is optional in Nx and absent from every package.json-defined project (a TS-solution
+   * workspace's), so a stack that can recognise its own app by its build says so here; the registry falls back
+   * to `projectType` only when no stack does (`projectRole`). Optional: a stack whose builders do not tell an
+   * app from a library (plain TS — `@nx/js:tsc` builds both) honestly leaves it out.
+   */
+  ownsApp?(project: ProjectConfiguration): boolean;
   /**
    * The executor PREFIXES that make a target this stack's (`@angular/build:`, `@nx/js:`). The ONE list behind
    * both `ownsProject` (applied to a project's build) and the stack layer's evidence (applied to any target) —
@@ -75,7 +83,7 @@ export interface LibOptions {
 }
 
 export interface LibPort {
-  /** Create the library through the framework's own generator (which writes the tsconfig path alias). */
+  /** Create the library through the framework's own generator, linked the way the workspace links (`_utils/linking`). */
   create(tree: Tree, options: LibOptions): Promise<GeneratorCallback>;
   /** Framework post-processing of a PUBLISHABLE library's packaging config (e.g. ng-package.json). */
   normalizePackaging?(tree: Tree, projectRoot: string): void;

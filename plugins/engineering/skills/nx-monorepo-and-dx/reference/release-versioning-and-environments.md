@@ -14,7 +14,7 @@ nx release            # version + changelog + publish (configure in nx.json "rel
 ```jsonc
 // custom pipeline as a composed target
 "build-and-publish": { "executor": "nx:run-commands",
-  "options": { "commands": ["nx build lib", "npm publish dist/libs/lib --access public"], "parallel": false } }
+  "options": { "commands": ["nx build lib", "npm publish dist/<libsDir>/lib --access public"], "parallel": false } }
 ```
 
 **Why.** *Automate every repeated process* — a release nobody can mis-sequence, because the sequence is encoded.

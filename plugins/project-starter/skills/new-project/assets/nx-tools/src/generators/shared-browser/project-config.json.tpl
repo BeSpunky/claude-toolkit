@@ -1,6 +1,5 @@
 {
   "name": "shared-browser",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "tags": ["tooling"],
   "targets": {
     "up": {

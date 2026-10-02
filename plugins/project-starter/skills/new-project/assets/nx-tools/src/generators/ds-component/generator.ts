@@ -5,7 +5,7 @@
 //     -> imports as `@<scope>/design-system/button`
 //
 // THIS IS THE ONLY WAY A COMPONENT ENTERS THE DESIGN SYSTEM. Hand-creating the folder gets you a
-// component that resolves in the editor (through the tsconfig path alias) and then VANISHES on publish,
+// component that resolves in the editor (through the library's in-repo link) and then VANISHES on publish,
 // because nothing declared it as an entry point. Generator-first isn't a style preference here — the
 // entry-point config IS the boundary.
 //
@@ -17,10 +17,10 @@
 // One entry point per component (not one shared `components` barrel) so each is independently
 // tree-shakeable and is its own boundary, and so the barrel never becomes a merge-conflict hotspot.
 //
-// Composes `secondary-entrypoint` (which does the structural work and keeps the path alias — the only
-// in-repo TS resolution channel) and then applies the design-system specifics the generic generator
-// deliberately doesn't know about: the sass channel into the component's own SCSS, and a starting shape
-// that reads tokens instead of inventing values.
+// Composes `secondary-entrypoint` (which does the structural work and links the subpath the workspace's way —
+// a path alias, or a package `exports` entry; see `_utils/linking`) and then applies the design-system
+// specifics the generic generator deliberately doesn't know about: the sass channel into the component's own
+// SCSS, and a starting shape that reads tokens instead of inventing values.
 import {
   type Tree,
   formatFiles,
@@ -89,7 +89,7 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
   const alreadyExists = tree.exists(entryNgPackage);
 
   // 1) The structural work — FIRST CREATION ONLY: the nested ng-package.json, src/index.ts, the standalone
-  //    component, and the `@scope/design-system/<name>` path alias. secondary-entrypoint also resets the
+  //    component, and the `@scope/design-system/<name>` subpath link. secondary-entrypoint also resets the
   //    parent lib's tsconfig.lib.json globs to a bounded shape — without which N entry points explode into
   //    a multi-MB tsconfig that TS then fails to compile. That's its job; we don't duplicate it.
   if (!alreadyExists) {

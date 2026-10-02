@@ -9,7 +9,7 @@ built on this adapter today.
 ## The shape, on ng-packagr
 
 ```
-packages/design-system/
+<libsDir>/design-system/          the workspace's libraries dir (e.g. packages/, libs/)
 ├── ng-package.json              the PRIMARY entry point (@scope/design-system)
 ├── styles/ …                    as in the core
 ├── src/index.ts                 ★ PUBLIC — e.g. provideDesignSystem(), DsTheme

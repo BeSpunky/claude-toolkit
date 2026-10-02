@@ -1,6 +1,6 @@
-// Cloud Functions entry point — `nx build functions` bundles this file (esbuild, CJS)
-// into dist/apps/functions, which is what the functions emulator loads and what
-// `nx run functions:deploy` ships to the cloud.
+// Cloud Functions entry point — `nx build {{functionsProject}}` bundles this file (esbuild, CJS)
+// into {{functionsDist}}, which is what the functions emulator loads and what
+// `nx run {{functionsProject}}:deploy` ships to the cloud.
 //
 // Module boundaries: this is a `platform:server` project — the server-only
 // `firebase-admin` / `firebase-functions` SDKs may ONLY be imported here (never in

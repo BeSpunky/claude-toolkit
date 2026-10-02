@@ -26,7 +26,7 @@ import {
   formatFiles,
 } from '@nx/devkit';
 import { requireLayer } from '../../layers/registry';
-import { adapterOf } from '../../adapters/registry';
+import { adapterOf, projectRole } from '../../adapters/registry';
 
 interface MarkExtractableSchema {
   lib: string;
@@ -66,9 +66,12 @@ export default async function markExtractableGenerator(
 
   const project = readProjectConfiguration(tree, options.lib);
 
-  if (project.projectType && project.projectType !== 'library') {
+  // Only an APPLICATION is refused — asked of `projectRole`, which also knows a package.json-defined project
+  // (no `projectType`) by its build. A project that is neither (tooling, an undeclared source folder) may still
+  // be a library-in-waiting, so it is marked, as before.
+  if (projectRole(tree, options.lib) === 'application') {
     throw new Error(
-      `mark-extractable: "${options.lib}" is a ${project.projectType}, not a library. ` +
+      `mark-extractable: "${options.lib}" is an application, not a library. ` +
         `Extract the generic code into its own Nx library first ` +
         `(nx g @nx/js:lib / @nx/angular:library), then mark that library.`
     );

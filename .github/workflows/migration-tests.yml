@@ -49,3 +49,10 @@ jobs:
       # the detection/plan behaviour scaffold.sh and the SessionStart hook rely on. Same install, same reason.
       - name: Run layer registry tests
         run: node tools/test-layers/run.mjs
+
+      # The GENERATORS against fixture workspaces in every layout × linking cell (tools/test-generators): where a
+      # project lands, how a library is linked, idempotence of every re-run. Same install, same reason. Cases that
+      # delegate to @nx/js / @nx/angular (optional peers, not devDependencies here) are SKIPPED and counted; the
+      # weekly Angular TS-solution workflow runs them with the peers installed (--strict).
+      - name: Run generator fixture tests
+        run: node tools/test-generators/run.mjs

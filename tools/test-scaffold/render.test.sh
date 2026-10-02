@@ -300,18 +300,28 @@ if printf '%s\n' "$_err" | grep -q '`./nx add @nx/angular`' && ! printf '%s\n' "
 else
   fail "wrapper host: the not-sync-ensurable hint does not say ./nx:"; printf '%s\n' "$_err" | sed 's/^/         | /'
 fi
-# A Firebase core with no client app: apps/functions is the ONLY project.json. It is never the app a sync means —
-# the inference excludes it by name, and the no-project.json fallback once re-picked it by directory, so the
-# per-app generators ran on `functions` and the sync died ("has nothing to serve").
+# THE APP A SYNC REFRESHES IS INFERRED BY THE PACKAGE, AT RUN TIME — never by a bash glob over apps/. That glob
+# knew one layout and one project file, and excluded the house's server app (Cloud Functions) by its NAME; a Firebase
+# core with no client app once had its per-app generators run on `functions` ("has nothing to serve"). Which projects
+# are client apps is now `layers/cli.js apps` (project graph + projectRole, `platform:server` excluded); what this
+# render must guarantee is that the program ASKS — passing the given app (or none) and the fallback — and that no
+# app name is baked into the plan call at render time.
 _FIXF="$TMP/fbcore"
 mkdir -p "$_FIXF/apps/functions" && git -C "$_FIXF" init -q
 printf '{"name":"fbcore"}\n' > "$_FIXF/package.json"; printf '{}\n' > "$_FIXF/nx.json"
-printf '{"name":"functions","root":"apps/functions"}\n' > "$_FIXF/apps/functions/project.json"
+printf '{"name":"functions","root":"apps/functions","tags":["platform:server"]}\n' > "$_FIXF/apps/functions/project.json"
 _prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$_FIXF" 2>/dev/null)"
-if printf '%s\n' "$_prog" | grep -q -- '--app=fbcore ' && ! printf '%s\n' "$_prog" | grep -q -- '--app=functions'; then
-  ok "a Firebase core with no client app: the sync's app is not apps/functions"
+if printf '%s\n' "$_prog" | grep -q -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' '' 'fbcore'" \
+   && printf '%s\n' "$_prog" | grep -q -- '--app="$APP"' && ! printf '%s\n' "$_prog" | grep -q -- '--app=functions'; then
+  ok "sync: the app is inferred in the program by the package (layers/cli.js apps), fallback = the project name"
 else
-  fail "the sync inferred apps/functions as its app: $(printf '%s\n' "$_prog" | grep -o -- '--app=[^ ]*' | head -1)"
+  fail "sync: the app is not inferred at run time by the package: $(printf '%s\n' "$_prog" | grep -o -- '_resolve_sync_app [^\n]*\|--app=[^ ]*' | head -2 | tr '\n' ' ')"
+fi
+_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$_FIXF" shop 2>/dev/null)"
+if printf '%s\n' "$_prog" | grep -q -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' 'shop' 'fbcore'"; then
+  ok "sync: an app given on the command line is handed to the program as given"
+else
+  fail "sync: the given app is not handed to the program"
 fi
 
 if [ "$FAILED" -eq 0 ]; then

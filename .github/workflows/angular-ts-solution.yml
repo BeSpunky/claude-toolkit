@@ -1,0 +1,85 @@
+# The Angular TS-solution TRIPWIRE (tools/test-angular-ts-solution/run.sh): a real TS-solution workspace, the house
+# Angular adapter, `nx sync`, typecheck and build — over the network, against the repo's pinned Nx.
+#
+# It exists because the house hosts Angular in a TS-solution workspace through an UNDOCUMENTED Nx opt-out
+# (NX_IGNORE_UNSUPPORTED_TS_SETUP), which a minor Nx release can drop without notice; see the script's header.
+# Slow and network-bound, so it is deliberately NOT on every push and NOT in the pre-push hook: weekly, on demand,
+# and whenever the code that depends on the opt-out — or the Nx version it is pinned to — changes.
+#
+# Its second job runs the generator fixtures with the framework peers they skip in the per-push run (@nx/js,
+# @nx/angular are optional peers of the payload, not devDependencies of this repo), in --strict mode.
+name: angular ts-solution tripwire
+
+on:
+  schedule:
+    - cron: '17 4 * * 1' # Mondays 04:17 UTC
+  workflow_dispatch:
+  push:
+    branches: [main, development, staging]
+    paths:
+      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/adapters/angular/**'
+      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/_utils/linking/**'
+      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/_utils/project-files.ts'
+      - 'plugins/project-starter/skills/new-project/assets/compile-generators.mts'
+      - 'tools/test-angular-ts-solution/**'
+      - 'tools/test-generators/**'
+      - 'package.json' # the pinned Nx the tripwire builds with
+      - '.github/workflows/angular-ts-solution.yml'
+  pull_request:
+    paths:
+      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/adapters/angular/**'
+      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/_utils/linking/**'
+      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/_utils/project-files.ts'
+      - 'plugins/project-starter/skills/new-project/assets/compile-generators.mts'
+      - 'tools/test-angular-ts-solution/**'
+      - 'tools/test-generators/**'
+      - 'package.json'
+      - '.github/workflows/angular-ts-solution.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: angular-ts-solution-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tripwire:
+    # Forks inherit workflows but not this repo's policies; failing there is noise on someone else's minutes.
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # 22.18+: compile-generators.mts runs through Node's built-in type stripping.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build a TS-solution workspace with the house Angular adapter, then sync, typecheck and build it
+        run: bash tools/test-angular-ts-solution/run.sh
+
+  generator-fixtures-with-peers:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      # The optional peers, at the repo's pinned Nx version, WITHOUT touching package.json or the lockfile — they are
+      # what a consumer's workspace provides, not what this repo depends on.
+      - name: Provide the framework peers (@nx/js, @nx/angular)
+        run: |
+          NX_VERSION="$(node -p "require('./package.json').devDependencies.nx")"
+          npm install --no-save --no-package-lock --legacy-peer-deps --no-audit --no-fund "@nx/js@$NX_VERSION" "@nx/angular@$NX_VERSION"
+
+      - name: Run generator fixture tests, every case (a skip is a failure here)
+        run: node tools/test-generators/run.mjs --strict

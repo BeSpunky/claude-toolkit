@@ -25,7 +25,7 @@
 //                                    value; it resolves to the created account's uid.
 //   • Add a whole new seed        → add a key to `WORLDS` (build-seeds.sh picks it up
 //                                    automatically) and, if you want one-command resets
-//                                    to it, a `reset:<name>` target in firebase/project.json.
+//                                    to it, a `reset:<name>` target on the `firebase` project.
 //
 // DIRECTIVE — the seed is part of the schema contract. The doc shapes below must
 // MIRROR the app's real backend (wherever your app defines its Firestore document

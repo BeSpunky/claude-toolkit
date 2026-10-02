@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "{{offsetFromRoot}}{{rootTsconfig}}",
   "compilerOptions": {
     "module": "esnext",
     "moduleResolution": "bundler",
