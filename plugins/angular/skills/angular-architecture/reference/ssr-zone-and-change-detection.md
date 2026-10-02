@@ -1,6 +1,6 @@
 # SSR, Zone & Change Detection (Angular)
 
-Run safely on the server, and control *when* Angular reacts — so the app is correct under SSR and efficient under heavy or imperative workloads (`architect-mentality` → *Compensate for your materials' weaknesses*). Modern Angular: `afterNextRender`, `PendingTasks`, OnPush + signals, zoneless.
+Run safely on the server, and control *when* Angular reacts — so the app is correct under SSR and efficient under heavy or imperative workloads (`bespunky-engineering:architect-mentality` → *Compensate for your materials' weaknesses*). Modern Angular: `afterNextRender`, `PendingTasks`, OnPush + signals, zoneless.
 
 ---
 
@@ -69,4 +69,4 @@ loadThing().finally(done);
 
 ---
 
-**Mentality anchors for this cluster:** *Compensate for your materials' weaknesses*, *Concentrate complexity*, *Place everything on purpose*, *Design for the consumer* — all in the `architect-mentality` skill.
+**Mentality anchors for this cluster:** *Compensate for your materials' weaknesses*, *Concentrate complexity*, *Place everything on purpose*, *Design for the consumer* — all in the `bespunky-engineering:architect-mentality` skill.

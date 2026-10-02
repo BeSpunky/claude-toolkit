@@ -1,6 +1,6 @@
 # Extensibility & Runtime Plugins (Angular)
 
-Let a host be extended by capabilities it **never imports** — tree-shakable, registered at the composition root, attached per host instance (`architect-mentality` → *Define the seam; let others plug in*, *Know when not to do it*). Built entirely from DI; no custom registry framework.
+Let a host be extended by capabilities it **never imports** — tree-shakable, registered at the composition root, attached per host instance (`bespunky-engineering:architect-mentality` → *Define the seam; let others plug in*, *Know when not to do it*). Built entirely from DI; no custom registry framework.
 
 ---
 
@@ -72,4 +72,4 @@ A fixed, known set of features is **not** a plugin system — compose them direc
 
 ---
 
-**Mentality anchors for this cluster:** *Define the seam; let others plug in*, *Know when not to do it*, *Everything is a black box*, *Design for the consumer* — all in the `architect-mentality` skill.
+**Mentality anchors for this cluster:** *Define the seam; let others plug in*, *Know when not to do it*, *Everything is a black box*, *Design for the consumer* — all in the `bespunky-engineering:architect-mentality` skill.

@@ -1,6 +1,6 @@
 # Typed, reactive navigation — the Angular realization
 
-The agnostic architecture lives in the SKILL: route registry → derive everything; typed commands that take entities; selectors as the read side; a typed event bus; a pure event→command binding; cross-domain through an app-shell binding. This file is the **how, in modern Angular** (standalone, signals, `inject()`, `provideRouter`). It pairs with `resumable-state` (the URL as source of truth) and `angular-architecture` (DI scoping, SSR).
+The agnostic architecture lives in the SKILL: route registry → derive everything; typed commands that take entities; selectors as the read side; a typed event bus; a pure event→command binding; cross-domain through an app-shell binding. This file is the **how, in modern Angular** (standalone, signals, `inject()`, `provideRouter`). It pairs with `resumable-state` (the URL as source of truth) and `bespunky-angular:angular-architecture` (DI scoping, SSR).
 
 > **Read this as the anatomy of the kernel, not as per-domain code.** Per the SKILL's *Two layers*, the reusable pieces below — the composer, the navigator, the link directive, the read-side base, the event bus + binding — live **once** in the `navigation-core` kernel (`nx g @bespunky/nx-tools:navigation-core`, which vendors BeSpunky's `navigation-x`). A **domain** supplies only thin config (`nx g @bespunky/nx-tools:domain-navigation <domain>`): the typed route tree (`routeConfigFor<Entity>().route({…} as const)`), its entity/event types, and the pure `event → navigator` mapper — then calls `useNavigationX(routes)` (navigates) and `useNavigationLinks(routes)` (composes the path value for `[bsNavLink]`/`[routerLink]`). The sections here show *what the kernel implements* so you understand the moving parts; you don't hand-write them per domain.
 
@@ -177,7 +177,7 @@ export class OrdersEvents {
 }
 ```
 
-A component dispatches `ordersEvents.emit({ type: 'orderSelected', order })` from a click — it does not know or care that this navigates. Provide the bus at the domain's route (an element-level provider) when you want one bus instance per domain activation rather than a global one (see `angular-architecture` → DI & providers).
+A component dispatches `ordersEvents.emit({ type: 'orderSelected', order })` from a click — it does not know or care that this navigates. Provide the bus at the domain's route (an element-level provider) when you want one bus instance per domain activation rather than a global one (see `bespunky-angular:angular-architecture` → DI & providers).
 
 ---
 
