@@ -16,14 +16,13 @@
 // request headers and common token query params are REDACTED before anything is written.
 // Never share or commit events.jsonl.
 //
-// Usage:  node recorder.mjs [--cdp=http://127.0.0.1:9223] [--bodies]
+// Usage:  node recorder.mjs [--cdp=<url>] [--bodies]     (default: runtime.mjs's CDP_URL — SB_CDP, else 9223)
 // Exits cleanly on SIGTERM/SIGINT.
 
 import fs from 'node:fs';
-import { loadPlaywright } from './runtime.mjs';
+import { CDP_URL as DEFAULT_CDP, loadPlaywright } from './runtime.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────────────────
-const DEFAULT_CDP = 'http://127.0.0.1:9223';
 const RUNTIME = process.env.SB_RUNTIME || `${process.env.XDG_RUNTIME_DIR || '/tmp'}/shared-browser`;
 const LOG_DIR = `${RUNTIME}/logs`;
 const EVENTS = `${LOG_DIR}/events.jsonl`;

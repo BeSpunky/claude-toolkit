@@ -34,6 +34,7 @@ SB_DISPLAY="${SB_DISPLAY:-:99}"
 SB_GEOM="${SB_GEOM:-1440x900x24}"
 SB_VNC="${SB_VNC:-5900}"                                   # x11vnc RFB port (loopback)
 SB_CDP="${SB_CDP:-9223}"                                   # Chromium DevTools port (loopback ONLY)
+export SB_CDP                                              # so the recorder and attach.mjs (runtime.mjs CDP_URL) reach the SAME port
 
 # ── The noVNC port: the ONE host-facing port, and therefore the ONE that is ALLOCATED ────────────────
 # VNC and CDP are loopback-only, so they live in this container's own netns and can never collide with
@@ -491,12 +492,22 @@ teardown_started() {
 }
 
 # ── Verbs ─────────────────────────────────────────────────────────────────────────────────────────────
+# Serialize concurrent `up`s so two callers can't half-start the stack (design: "concurrent up races") — and
+# RELEASE the lock when `up` is done. `exec 9>` opens it on the whole shell, so without the release it stayed
+# held for as long as this process lived: `navigate --wait` (up, then up to SB_WAIT_TIMEOUT of polling) kept
+# every other worktree's `up` waiting on a stack that was long since up, until its 60s flock gave up and its
+# serve died. The lock guards starting the stack, and nothing after it.
 cmd_up() {
   ensure_dirs
-  # Serialize concurrent `up`s so two callers can't half-start the stack (design: "concurrent up races").
   exec 9>"$LOCK" || die "cannot open lock file $LOCK"
   flock -w 60 9 || die "another shared-browser 'up' is in progress (lock held) — try again shortly"
+  local rc=0
+  up_locked || rc=$?
+  exec 9>&-
+  return "$rc"
+}
 
+up_locked() {
   preflight_deps || exit 1
   prepare_env
   resolve_web_port allocate                                # decide the ONE host-facing port before anything binds
@@ -572,7 +583,7 @@ cmd_up() {
   fi
 
   # 6. Recorder — auto-start once CDP is live (so connectOverCDP succeeds). Streams events to JSONL.
-  if ! component_running recorder; then spawn recorder node "$RECORDER"; STARTED+=(recorder); else say "recorder already running"; fi
+  if ! component_running recorder; then spawn recorder node "$RECORDER" --cdp="$CDP_URL"; STARTED+=(recorder); else say "recorder already running"; fi
 
   ok "shared-browser is UP."
   printf '  noVNC (open this in your browser): %s\n' "$NOVNC_URL"
