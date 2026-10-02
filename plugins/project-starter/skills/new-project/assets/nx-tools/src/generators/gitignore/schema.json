@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyGitignore",
+  "title": "Keep the active layers' tooling output out of git",
+  "type": "object",
+  "properties": {
+    "layers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The layers this run applies. Their `.gitignore` blocks (nx → Nx caches + the sync lock, node → node_modules, js/firebase → dist, agent → .claude/data/, …) are appended where not already mentioned. Defaults to DETECTING them from the workspace."
+    }
+  }
+}

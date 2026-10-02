@@ -34,7 +34,12 @@
     "claude-settings": {
       "factory": "./src/generators/claude-settings/generator",
       "schema": "./src/generators/claude-settings/schema.json",
-      "description": "Generate .claude/settings.json wiring the claude-toolkit + nx marketplaces (autoUpdate on); keep .claude/data out of git."
+      "description": "Generate .claude/settings.json wiring the claude-toolkit + nx marketplaces (autoUpdate on) and enabling the active layers' Claude Code plugins."
+    },
+    "gitignore": {
+      "factory": "./src/generators/gitignore/generator",
+      "schema": "./src/generators/gitignore/schema.json",
+      "description": "Keep what the active layers' tooling creates out of git: appends each layer's `.gitignore` block (Nx caches + the sync lock, node_modules, dist, .claude/data/, …) where not already mentioned, and tidies blank-line runs. The Nx floor's step — runs on every sync, with or without the agent layer. Idempotent."
     },
     "angular-ai": {
       "factory": "./src/generators/angular-ai/generator",

@@ -260,9 +260,10 @@ const ctxFor = (tree, overrides = {}) => {
 const render = (lines) =>
   lines.map((l) => (l.kind === 'gen' ? `${l.generator} ${l.args.join(' ')}`.trim() : l.kind === 'warn' ? 'WARN' : 'PARTIAL'));
 
-check('bare repo, --ensure=agent: the agent trio, then the stamp — nothing else', (ok) => {
+check('bare repo, --ensure=agent: the floor\'s gitignore, the agent trio, then the stamp — nothing else', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['bare nx workspace'](), { ensured: ['nx', 'agent'] }), STAMP));
   const want = [
+    'gitignore --layers=nx,agent,node',
     'devcontainer --name=shop --nodeMajor=22 --layers=nx,agent,node',
     'claude-settings --layers=nx,agent,node',
     'window-identity --name=shop',
@@ -270,18 +271,19 @@ check('bare repo, --ensure=agent: the agent trio, then the stamp — nothing els
   ];
   ok(JSON.stringify(got) === JSON.stringify(want), `got\n           ${got.join('\n           ')}`);
 });
-check('a plain sync on a bare repo runs only the stamp (everything above the floor is opt-in)', (ok) => {
+check('a plain sync on a bare repo runs only the floor (gitignore + the stamp; everything above it is opt-in)', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['HOUSE.md only (the floor stamp, no agent tooling)']()), STAMP));
-  ok(got.length === 1 && got[0].startsWith('house-doc ') && got[0].endsWith('--layers=nx'), `got ${got.join(' | ')}`);
+  ok(got.length === 2 && got[0] === 'gitignore --layers=nx' && got[1].startsWith('house-doc ') && got[1].endsWith('--layers=nx'), `got ${got.join(' | ')}`);
 });
 check('voice is carried forward from the devcontainer marker', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['agent project with voice remembered']()), STAMP));
-  ok(got[0].endsWith('--voice=true'), `got ${got[0]}`);
+  const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';
+  ok(devcontainer.endsWith('--voice=true'), `got ${devcontainer}`);
 });
 check('full house sync: per-app steps first, then workspace steps in registry order, stamp last', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { ensured: ['nx', 'firebase'], staging: true }), STAMP));
   const order = got.map((l) => l.split(' ')[0]);
-  const want = ['serve', 'serve-options', 'worktree-tab-label', 'design-system-styles', 'firebase-client', 'devcontainer', 'claude-settings', 'window-identity', 'playwright', 'port-claim', 'shared-browser', 'worktree-domains', 'dev', 'angular-ai', 'design-system', 'firebase-emulators', 'house-doc'];
+  const want = ['serve', 'serve-options', 'worktree-tab-label', 'design-system-styles', 'firebase-client', 'gitignore', 'devcontainer', 'claude-settings', 'window-identity', 'playwright', 'port-claim', 'shared-browser', 'worktree-domains', 'dev', 'angular-ai', 'design-system', 'firebase-emulators', 'house-doc'];
   ok(JSON.stringify(order) === JSON.stringify(want), `order ${order.join(',')}`);
   ok(got.includes('serve --project=shop'), 'serve takes only the project');
   ok(got.includes('worktree-tab-label --project=shop'), 'the tab label gets no --wireProviders on a detect-only angular');
@@ -301,6 +303,37 @@ check('web without agent: web generators skipped, reported, sync marked partial'
   const got = render(plan(ctxFor(FIXTURES['python service with its own serve target, no agent'](), { app: 'api' }), STAMP));
   ok(got[0] === 'WARN' && got[1] === 'PARTIAL', `got ${got.join(' | ')}`);
   ok(!got.some((l) => /^(serve|playwright|shared-browser) /.test(l)), 'no web generator ran');
+});
+// A1 — an UNMET layer is applied by nothing downstream. A wrapper repo (no package.json) ensuring firebase:
+// firebase needs node, which a sync cannot create. Composing its devcontainer fragment shipped the JDK and the
+// emulator ports for a layer that was never wired, and the stamp claimed it was applied.
+check('unmet layer (firebase without node, wrapper repo): not composed, not stamped; the hint is one this mode accepts', (ok) => {
+  const tree = FIXTURES['HOUSE.md only (the floor stamp, no agent tooling)']();
+  const lines = plan(ctxFor(tree, { ensured: ['nx', 'agent', 'firebase'] }), STAMP);
+  const got = render(lines);
+  for (const step of ['gitignore', 'devcontainer', 'claude-settings', 'house-doc']) {
+    const line = got.find((l) => l.startsWith(`${step} `)) ?? '';
+    ok(/--layers=nx,agent( |$)/.test(line), `${step} carries a layer the plan skipped: ${line}`);
+  }
+  ok(!got.some((l) => l.startsWith('firebase-')), `firebase generators ran: ${got.join(' | ')}`);
+  ok(got.includes('PARTIAL'), 'an unmet layer is a partial sync');
+  const warning = lines.find((l) => l.kind === 'warn')?.message ?? '';
+  ok(!warning.includes('--ensure=node'), `the hint advises an --ensure the sync refuses: ${warning}`);
+  ok(warning.includes(registry.layer('node').ensureHint), `the hint is node's own: ${warning}`);
+});
+check('a skipped requirement takes its dependants down with it (navigation over an unmet angular)', (ok) => {
+  const tree = FIXTURES['navigation library found by its tag, under any name']();
+  const got = render(plan(ctxFor(tree, { active: new Set(['nx', 'angular', 'navigation']), app: 'routing-kernel' }), STAMP));
+  const stamp = got.find((l) => l.startsWith('house-doc ')) ?? '';
+  ok(stamp.endsWith('--layers=nx'), `stamped a layer over a skipped requirement: ${stamp}`);
+  ok(got.filter((l) => l === 'PARTIAL').length === 2, `both skips reported: ${got.join(' | ')}`);
+});
+// A2 — the layers' .gitignore blocks are the floor's step, not the agent layer's.
+check('an Nx node app without the agent layer still gets every applied layer\'s gitignore', (ok) => {
+  const tree = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
+  const got = render(plan(ctxFor(tree, { app: 'backend' }), STAMP));
+  ok(got.includes('gitignore --layers=nx,node,design-system,firebase'), `got ${got.join(' | ')}`);
+  ok(!got.some((l) => l.startsWith('claude-settings ')), 'no agent step on a repo without agent');
 });
 check('app missing: per-app steps skipped and reported partial, workspace steps still run', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { app: 'nope' }), STAMP));
@@ -370,6 +403,7 @@ const generator = (name) => require_(join(BUILD, `src/generators/${name}/generat
 const artifacts = async (tree, layers, extra = {}) => {
   await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers, ...extra });
   await generator('claude-settings')(tree, { layers });
+  await generator('gitignore')(tree, { layers });
   await generator('house-doc')(tree, { layers, nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', ...(extra.packageManager ? { packageManager: extra.packageManager } : {}) });
   const read = (path) => tree.read(path, 'utf8') ?? '';
   return {
@@ -474,13 +508,13 @@ checkAsync('a build-bringing layer on an nx-init repo (firebase, no create-nx-wo
   const tree = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
   tree.write('.gitignore', 'node_modules\n');
   await artifacts(tree, [...registry.detectLayers(tree), 'agent']);
-  await generator('claude-settings')(tree, { layers: [...registry.detectLayers(tree), 'agent'] });
+  await generator('gitignore')(tree, { layers: [...registry.detectLayers(tree), 'agent'] });
   const lines = (tree.read('.gitignore', 'utf8') ?? '').split('\n');
   ok(lines.filter((l) => l === 'dist').length === 1, `dist ignored exactly once: ${JSON.stringify(lines)}`);
   // A create-nx-workspace .gitignore already says `dist` — a house workspace must not gain a second entry.
   const cnw = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
   cnw.write('.gitignore', '# compiled output\ndist\ntmp\n');
-  await generator('claude-settings')(cnw, { layers: [...registry.detectLayers(cnw), 'agent'] });
+  await generator('gitignore')(cnw, { layers: [...registry.detectLayers(cnw), 'agent'] });
   ok(!(cnw.read('.gitignore', 'utf8') ?? '').includes('Build output'), 'a create-nx-workspace .gitignore gained a duplicate dist block');
 });
 
