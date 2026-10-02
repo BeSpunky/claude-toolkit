@@ -56,6 +56,10 @@ while read -r local_ref local_sha remote_ref _remote_sha; do
     if [ -f "$workdir/tools/check-script-modes/check.mjs" ]; then
       ( cd "$workdir" && node tools/check-script-modes/check.mjs ) || status=$?
     fi
+    # Third: descriptions within what claude.ai stores (it truncates them silently). Same presence guard.
+    if [ -f "$workdir/tools/check-descriptions/check.mjs" ]; then
+      ( cd "$workdir" && node tools/check-descriptions/check.mjs ) || status=$?
+    fi
     git worktree remove --force "$workdir" >/dev/null 2>&1
   else
     rmdir "$workdir" 2>/dev/null

@@ -1,7 +1,7 @@
 ---
 name: design-system-first
 description: >-
-  Design-system-first discipline - before you build any feature UI you go to the design system, and every visual value in the codebase comes from it. Any stack (Angular, React, Vue, Svelte, web components, plain CSS). Use BEFORE writing or changing any component template, markup or stylesheet - and the moment you reach for a raw hex/rgb/hsl, a magic px/rem/em, an ad-hoc font stack or weight, a box-shadow, a border-radius, a hand-typed `transition: 200ms ease`, a copy-pasted card/button/panel/field, a style reach-in across a component boundary (`::ng-deep`, `:global`, `>>>`/`/deep/`), an `!important`, a one-off variant boolean prop/input, or a "just style it here for now". The core move - the design system is the SINGLE SOURCE OF VISUAL TRUTH, and a feature component is a COMPOSITION of design-system components and tokens, never a place where new visual values are invented: every colour, space, radius, type step, elevation, border, duration and easing is a TOKEN (a CSS custom property at runtime, consumed through the DS's author-time API - the house uses SASS), a component reads SEMANTIC tokens only (never a raw primitive), and every UI pattern that appears a SECOND time is PROMOTED into the design system as a reusable component - its own entry point / package export (in a house project whose design system has the Angular binding, `nx g @bespunky/nx-tools:ds-component <name>`) - rather than copy-pasted, with BOTH sites migrated onto it and the copies deleted. When the design system LACKS the concept you need, you MODEL it (add the token, add the semantic alias, extend the scale, add the component) - you never work around the gap with a local override, an !important, a reach-in, a duplicated token, or a variant boolean; a gap in the DS is a design gap, and patching it locally is the styling flavour of the patch that `bespunky-engineering:architecture-first` forbids, exactly as a magic literal is in logic - and it is worse, because CSS has no compiler to catch the drift, so it compounds silently until "change the brand colour" is a four-hundred-file diff. This is what makes a re-theme, a rebrand, or a redesign a change of TOKENS instead of a change to a thousand component files (the styling twin of `bespunky-product-ux:redesign-means-rethink` - re-token, don't re-hardcode). Triggers - "style this", "add a button/card/modal/table/form", "match the design", "make it look like X", "add dark mode", "change the brand colour", "this component needs its own styles", "make it consistent", any new feature UI, any new or edited component stylesheet. It is NOT the technique layer: for token taxonomy and naming, CSS custom properties, the author-time (SASS) API, theming and modes, encapsulation and its per-framework adapters, and the design system library's structure and entry points, route through `bespunky-design-system:design-tokens-and-theming`. It also does NOT invent the look - the visual system (palette, type, composition, motion language) comes from `bespunky-product-ux:stage-the-vision`; this skill enforces that the look lives in ONE place and is consumed, never re-typed.
+  Design-system-first discipline - before building any feature UI you go to the design system, and every visual value comes from it. Any stack. Use BEFORE writing or changing any component template, markup or stylesheet ("style this", "add a button/card/modal", "match the design", "add dark mode", "change the brand colour") - and the moment you reach for a raw hex/rgb/hsl, a magic px/rem, an ad-hoc font, shadow or radius, a hand-typed `transition: 200ms ease`, a copy-pasted card/button/panel, a style reach-in (`::ng-deep`, `:global`, `/deep/`), an `!important`, a one-off variant boolean, or "just style it here for now". The core move: the DS is the SINGLE SOURCE OF VISUAL TRUTH - every value is a TOKEN, components read SEMANTIC tokens only, a pattern's SECOND occurrence is PROMOTED into the DS, and a missing concept is MODELLED there, never patched locally. The HOW is `bespunky-design-system:design-tokens-and-theming`.
 ---
 
 # Design-system-first — the DS is the single source of visual truth
@@ -19,6 +19,28 @@ it.
 **The rule.** Every colour, space, radius, type step, elevation, border, duration and easing comes from the
 design system, as a **token**. A feature component **composes** design-system components and tokens; it does
 not **invent** appearance. Its own stylesheet should be little more than layout.
+
+## When to use
+
+On any stack — Angular, React, Vue, Svelte, web components, plain CSS. Run it **before** writing or
+changing any component template, markup or stylesheet: any new feature UI, any new or edited component
+stylesheet, and requests like *"style this"*, *"add a button/card/modal/table/form"*, *"match the design"*,
+*"make it look like X"*, *"add dark mode"*, *"change the brand colour"*, *"this component needs its own
+styles"*, *"make it consistent"*. And run it **the moment** you reach for a raw hex/rgb/hsl, a magic
+px/rem/em, an ad-hoc font stack or weight, a box-shadow, a border-radius, a hand-typed
+`transition: 200ms ease`, a copy-pasted card/button/panel/field, a style reach-in (`::ng-deep`, `:global`,
+`>>>`/`/deep/`), an `!important`, a one-off variant boolean prop/input, or a "just style it here for now".
+
+Why it is stricter than its logic twin: a local styling patch is exactly the magic literal
+`bespunky-engineering:architecture-first` forbids — and worse, because **CSS has no compiler to catch the
+drift**. It compounds silently until "change the brand colour" is a four-hundred-file diff.
+
+**What this skill is not.** It is the *discipline*, not the technique layer: token taxonomy and naming, CSS
+custom properties, the author-time (SASS) API, theming and modes, encapsulation and its per-framework
+adapters, and the library's structure and entry points all route through
+`bespunky-design-system:design-tokens-and-theming`. Nor does it invent the look — the visual system
+(palette, type, composition, motion language) comes from `bespunky-product-ux:stage-the-vision`; this skill
+enforces that the look lives in ONE place and is consumed, never re-typed.
 
 ## What a styling patch is (refuse these)
 

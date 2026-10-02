@@ -1,7 +1,7 @@
 {
   "name": "bespunky-angular",
-  "description": "BeSpunky's Angular adapter skills — an optional plugin a project wears when it wears Angular (the scaffolder enables it for projects with the angular layer). angular-architecture: modern-Angular technique clusters (standalone, signals, inject(), provideX) with progressive-disclosure references — DI and providers, lifecycle and reactivity, SSR/zone/change detection, extensibility and plugins, content projection and DOM bridging, component API ergonomics. angular-native-wrappers: wrap an imperative or third-party JS API (maps, editors, charts, players, canvas/WebGL, native browser APIs) in idiomatic, type-safe Angular without a hand-written pass-through per native call. The stack-agnostic mindset and design toolbox they realize live in bespunky-engineering.",
-  "version": "0.1.1",
+  "description": "BeSpunky's Angular adapter skills, for projects that wear Angular. angular-architecture: modern-Angular technique clusters (standalone, signals, inject()) - DI and providers, lifecycle and reactivity, SSR and change detection, extensibility, content projection, component APIs. angular-native-wrappers: wrap an imperative or third-party JS API (maps, editors, charts, players) in idiomatic, type-safe Angular. The stack-agnostic mindset they realize lives in bespunky-engineering.",
+  "version": "0.1.2",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"

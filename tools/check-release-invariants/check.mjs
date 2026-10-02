@@ -262,6 +262,13 @@ function main() {
         `nx release version --projects=${entry.name} --specifier=patch   # regenerates the registry`
       );
     }
+    if (manifest.description !== entry.description) {
+      fail(
+        `${entry.name}: marketplace description differs from the manifest's`,
+        `  The description is DERIVED from ${root}/.claude-plugin/plugin.json too — edit it there, never in ${MARKETPLACE}.`,
+        `nx release version --projects=${entry.name} --specifier=patch   # regenerates the registry`
+      );
+    }
     if (manifest.name !== entry.name) {
       fail(
         `${entry.name}: manifest declares a different name (${manifest.name})`,

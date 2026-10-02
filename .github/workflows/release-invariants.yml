@@ -71,6 +71,11 @@ jobs:
       - name: Check script modes
         run: node tools/check-script-modes/check.mjs
 
+      # Catches descriptions past what claude.ai stores: plugin > 500, skill > 1024 or containing < >. Claude
+      # Code reads the full text, so nothing here notices — Claude Desktop truncates the trigger silently.
+      - name: Check description limits
+        run: node tools/check-descriptions/check.mjs
+
       # Catches the failure class that silently disabled 18 skills: unparseable SKILL.md frontmatter, a
       # plugin.json that does not satisfy the schema, a malformed marketplace manifest.
       - name: Validate plugins and marketplace

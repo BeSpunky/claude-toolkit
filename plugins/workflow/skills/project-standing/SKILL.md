@@ -1,7 +1,7 @@
 ---
 name: project-standing
 description: >-
-  Orient yourself in a project you've been away from — the COLD pick-up. Use when you (or the user) return to a repo after a gap and can't get your bearings — "where did I leave off", "what was I working on here", "what's the state of this project", "what's still open / in flight", "did we finish X", "catch me up on this repo", "what were the plans", "have we tried Y before" — or whenever a session opens onto in-flight work you have no memory of (the SessionStart hook will nudge you here). It DERIVES the project's standing from the repo itself — never a hand-maintained status doc — by reading git (worktrees, branches, merge state, log) and the feature packages under docs/features/: which efforts exist, which are LIVE, STALLED, or CONCLUDED, which single handoff baton to read first, and what was in flight when everyone walked away. Renders live efforts in FULL and concluded ones COLLAPSED to a one-line conclusion, so orientation costs the same at effort #300 as at #3. Three scopes — default (orient on the live tier), history (search the archive tier on demand for "have we done this before"), and archive-sweep (offer to move aged-concluded efforts to the archive tier, an additive git mv, never an erase). This is the COLD front door; for a deliberate, hot, single-effort relay into a fresh session use bespunky-workflow:session-handoff, and for where durable artifacts live use bespunky-workflow:feature-package.
+  Orient in a project you've been away from — the COLD pick-up. Use when you or the user return to a repo after a gap — "where did I leave off", "what was I working on here", "what's the state of this project", "what's still open / in flight", "did we finish X", "catch me up on this repo", "what were the plans", "have we tried Y before" — or a session opens onto in-flight work you have no memory of (the SessionStart hook nudges here). DERIVES the standing from git and the feature packages under docs/features/ — never a hand-maintained status doc: which efforts are LIVE, STALLED or CONCLUDED, and which handoff baton to read first. Scopes: orient (default), history (search the archive), archive-sweep (consented git mv of aged efforts). This DISCOVERS efforts; to CONTINUE one known effort in a fresh session use bespunky-workflow:session-handoff; for where durable artifacts live, bespunky-workflow:feature-package.
 ---
 
 # Project standing — the cold front door
@@ -11,6 +11,14 @@ You put a project down. Weeks or months later you're back and can't get your bea
 > **The standing is DERIVED, never stored.** There is no `STATUS.md`, no kanban, no "current state" file anyone maintains. A maintained status doc is the first thing to rot — and its rot *is* the staleness you came here to cure. Current state is a **query** over git + the feature packages, computed fresh every time.
 
 This is the **cold** entrance — you may not even remember there were three parallel efforts. It is a different job from [[session-handoff]], which is a **hot**, deliberate, single-effort baton into a fresh session where you already know which effort you mean. Standing *discovers* the efforts; a handoff *continues* one. Standing often ends by pointing you at a specific baton, and *then* you hand off.
+
+---
+
+## When to use
+
+- **You or the user return to a repo after a gap** and can't get your bearings — "where did I leave off", "what was I working on here", "what's the state of this project", "what's still open / in flight", "did we finish X", "catch me up on this repo", "what were the plans", "have we tried Y before".
+- **A session opens onto in-flight work you have no memory of** — the `SessionStart` hook nudges you here when live work has gone dormant.
+- **What it answers:** which efforts exist, which are live, stalled or concluded, which single handoff baton to read first, and what was in flight when everyone walked away. Live efforts are rendered in full and concluded ones collapsed to their one-line conclusion, so orientation costs the same at effort #300 as at #3.
 
 ---
 
