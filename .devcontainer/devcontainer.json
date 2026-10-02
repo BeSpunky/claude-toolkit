@@ -37,7 +37,8 @@
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
         "Tobermory.es6-string-html",
-        "formulahendry.auto-rename-tag"
+        "formulahendry.auto-rename-tag",
+        "nrwl.angular-console"
       ],
       "settings": {
         "claude-code.dangerouslySkipPermissions": true,
@@ -91,7 +92,8 @@
     // folder, or an empty dir — so the mount never fails, on WSL or plain Linux alike.
     "source=${localWorkspaceFolder}/.devcontainer/.host/pulse,target=/run/bespunky/host/pulse,type=bind",
     "source=${localWorkspaceFolderBasename}-node_modules,target=${containerWorkspaceFolder}/node_modules,type=volume",
-    "source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume"
+    "source=${localWorkspaceFolderBasename}-nx-cache,target=${containerWorkspaceFolder}/.nx/cache,type=volume",
+    "source=${localWorkspaceFolderBasename}-nx-workspace-data,target=${containerWorkspaceFolder}/.nx/workspace-data,type=volume"
   ],
   "otherPortsAttributes": {
     "onAutoForward": "silent"
