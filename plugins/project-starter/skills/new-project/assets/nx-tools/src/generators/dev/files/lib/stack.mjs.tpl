@@ -126,16 +126,23 @@ export function runStack({ children, cwd, onStop, log }) {
       for (const [signal, handler] of Object.entries(handlers)) process.off(signal, handler);
     };
 
-    const settle = (i, code) => {
+    const settle = (i, code, signal) => {
       if (done[i]) return;
       done[i] = true;
 
-      // A Ctrl+C stop ends a child via signal (code null, or 128+n) — a clean shutdown, not a failure.
-      const stoppedBySignal = code === null || (typeof code === 'number' && code >= 128);
-      if (!stopping && !stoppedBySignal && code !== 0) failed = true;
+      // CLEAN means one of two things: the child exited 0, or it ended on a stop — ours (`stopping`), or the
+      // terminal's Ctrl+C, which reached the child as SIGINT (or its shell's 130) in the same instant it reached us,
+      // so its exit can be processed before our own SIGINT handler has run. Anything else is a failure, whatever
+      // shape it takes: a non-zero exit, a SIGKILL from the OOM killer, a segfault. Reading every signal as a
+      // clean stop made `nx serve` report success for a stack that had crashed.
+      const interrupted = signal === 'SIGINT' || code === 130;
+      if (!stopping && !interrupted && code !== 0) failed = true;
+      // An interrupted child means the terminal stopped the GROUP: every sibling got the same SIGINT. Treat it as
+      // the group stop it is (onGroupStop) — signalling the siblings again here would be the double signal.
+      if (interrupted && !stopping) onGroupStop();
 
       if (!stopping && remaining > 1) {
-        log?.(`${children[i].id} exited (${code ?? 'signal'}) — stopping the rest of the stack.`);
+        log?.(`${children[i].id} exited (${signal ?? code}) — stopping the rest of the stack.`);
         stopping = true;
         runOnStop();
         stopRemaining();
@@ -158,7 +165,7 @@ export function runStack({ children, cwd, onStop, log }) {
         failed = true;
         settle(i, 1);
       });
-      proc.on('exit', (code) => settle(i, code));
+      proc.on('exit', (code, signal) => settle(i, code, signal));
     });
   });
 }
