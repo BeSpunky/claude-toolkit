@@ -35,10 +35,39 @@ export function adapterOf(tree: Tree, project: string): StackAdapter | null {
   );
 }
 
-/** Is this project an application? (`projectType` is what Nx itself means by it.) */
+/** What a project IS to the workspace layout and the capabilities: something that runs, or something consumed. */
+export type ProjectRole = 'application' | 'library';
+
+/**
+ * Is this project an application, a library — or neither (workspace tooling, a script, an unknown name)?
+ *
+ * Asked of the evidence in order of how much it can be trusted:
+ *   1. a STACK recognising its own app by its build (`ownsApp`) — what builds a project cannot be mis-declared;
+ *   2. the declared `projectType` — what Nx itself means by it, when the project states it;
+ *   3. a stack OWNING the project without calling it an app — a built library (`@nx/angular:package`, …);
+ *   4. Nx's own convention for a project that declares nothing (`getProjectType` in @nx/js): a
+ *      `tsconfig.app.json` marks an application, a `tsconfig.lib.json` a library.
+ * Steps 1, 3 and 4 exist for the package.json-defined projects of a TS-solution workspace, which carry no
+ * `projectType` at all: without them every such project was "neither", and the layout and every capability
+ * looking for apps went blind there.
+ */
+export function projectRole(tree: Tree, project: string): ProjectRole | undefined {
+  // An unknown project is an ordinary "neither", not an error — only an unreadable workspace is worth reporting.
+  const config = safely(() => getProjects(tree).get(project), undefined, `reading \`${project}\``);
+  if (!config) return undefined;
+  if (ADAPTERS.some((stack) => safely(() => stack.ownsApp?.(config) ?? false, false, `asking the ${stack.id} stack whether \`${project}\` is its app`))) {
+    return 'application';
+  }
+  if (config.projectType) return config.projectType;
+  if (adapterOf(tree, project)) return 'library';
+  if (tree.exists(`${config.root}/tsconfig.app.json`)) return 'application';
+  if (tree.exists(`${config.root}/tsconfig.lib.json`)) return 'library';
+  return undefined;
+}
+
+/** Is this project an application? (See `projectRole` for how that is decided.) */
 export function isApplication(tree: Tree, project: string): boolean {
-  // An unknown project is an ordinary "no", not an error — only an unreadable workspace is worth reporting.
-  return safely(() => getProjects(tree).get(project)?.projectType === 'application', false, `reading \`${project}\``);
+  return projectRole(tree, project) === 'application';
 }
 
 /**

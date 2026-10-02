@@ -34,6 +34,21 @@ import { angularFirebaseClient } from './firebase-client';
  */
 const ANGULAR_BUILDERS = ['@angular/build:', '@angular-devkit/build-angular:', '@nx/angular:'];
 
+/**
+ * The builders that produce an Angular APPLICATION (as opposed to a library's `package` / `ng-packagr`): today's
+ * esbuild `application`, the legacy devkit browser builders, and Nx's wrappers of them. Exact executor names, not
+ * prefixes — every prefix above builds libraries too.
+ */
+const ANGULAR_APP_BUILDERS = new Set([
+  '@angular/build:application',
+  '@angular-devkit/build-angular:application',
+  '@angular-devkit/build-angular:browser',
+  '@angular-devkit/build-angular:browser-esbuild',
+  '@nx/angular:application',
+  '@nx/angular:browser-esbuild',
+  '@nx/angular:webpack-browser',
+]);
+
 const noop: GeneratorCallback = () => {};
 
 /** Angular's dev-server builder — the leaf this adapter writes (and recognises as its own on a re-run). */
@@ -77,6 +92,10 @@ export const angular: StackAdapter = {
     const executor = config.targets?.build?.executor ?? '';
     // ng-package.json is how an Angular library declares itself even when its build target is inferred.
     return ANGULAR_BUILDERS.some((prefix) => executor.startsWith(prefix)) || tree.exists(`${config.root}/ng-package.json`);
+  },
+
+  ownsApp(project) {
+    return ANGULAR_APP_BUILDERS.has(project.targets?.build?.executor ?? '');
   },
 
   apps: {
