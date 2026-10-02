@@ -22,7 +22,7 @@ import { workspacesLinking } from './workspaces';
 import { workspacePatterns } from './package-workspaces';
 
 export type { Linking, LinkingKind, LinkRequest, LinkedLibrary } from './linking';
-export { rootTsconfig, sourceCondition } from './tsconfig-roots';
+export { rootTsconfig, sourceCondition, referenceFromSolution } from './tsconfig-roots';
 export { ensureWorkspaceMember, isWorkspaceMember, workspaceDependencySpec } from './package-workspaces';
 
 const STRATEGIES: Readonly<Record<LinkingKind, Linking>> = { paths: pathsLinking, workspaces: workspacesLinking };

@@ -13,7 +13,8 @@
 //   2. build the project to verify the package works.
 //   3. nx g @bespunky/nx-tools:adopt-extracted <lib> --finalize
 //        → removes the now-unused local library and unlinks it (its path aliases, or its workspace
-//          membership, solution reference and `workspace:` dependencies — see `_utils/linking`).
+//          membership, solution reference and the workspace-range dependencies linking declared — see
+//          `_utils/linking`). The published dependency step 1 declared is not one of those, so it stays.
 //
 //   --keepShim: one-step staged migration instead — replace the lib's entry with
 //               `export * from '<package>'` and keep it (old import paths keep working).
@@ -72,7 +73,8 @@ export default async function adoptExtractedGenerator(
   // The local import specifier(s) to rewrite away from: what THIS workspace imports the lib by (its linking's
   // answer — a path alias, or its package name), plus its package.json name, which a project may also import
   // it by when the two differ. Cover both.
-  const linkedAs = workspaceLinking(tree).importPathOf(tree, project.root);
+  const linking = workspaceLinking(tree);
+  const linkedAs = linking.importPathOf(tree, project.root);
   const libPkg = readJsonSafe(tree, joinPathFragments(project.root, 'package.json'));
   const libName = typeof libPkg.name === 'string' ? libPkg.name : undefined;
   const rewriteAliases = [...new Set([linkedAs, libName].filter(Boolean))] as string[];
@@ -81,15 +83,19 @@ export default async function adoptExtractedGenerator(
   if (options.finalize) {
     const rootPkg = readJsonSafe(tree, 'package.json');
     const installed = { ...(rootPkg.dependencies ?? {}), ...(rootPkg.devDependencies ?? {}) };
-    if (!(packageName in installed)) {
+    // Declared by a range of its own — not the workspace range that reaches the LOCAL package, which the unlink
+    // below removes (and with it the only declaration there was).
+    const declared = installed[packageName];
+    if (typeof declared !== 'string' || linking.isLinkRange(tree, declared)) {
       throw new Error(
-        `adopt-extracted --finalize: "${packageName}" isn't a dependency yet. ` +
+        `adopt-extracted --finalize: the published "${packageName}" isn't a dependency yet` +
+          `${typeof declared === 'string' ? ` (only the local workspace link "${declared}" is)` : ''}. ` +
           `Run adopt-extracted (without --finalize) first, build to verify, then --finalize.`
       );
     }
     // Unlink BEFORE deleting: the linking reads the library's own files to know what to remove.
     const importPath = linkedAs ?? libName;
-    if (importPath) workspaceLinking(tree).unlink(tree, { importPath, libRoot: project.root });
+    if (importPath) linking.unlink(tree, { importPath, libRoot: project.root });
     removeProjectConfiguration(tree, options.lib);
     tree.delete(project.root);
     await formatFiles(tree);
@@ -97,7 +103,20 @@ export default async function adoptExtractedGenerator(
     return;
   }
 
-  // ---- Step 1: add the dependency ----
+  // ---- Step 1: declare the PUBLISHED dependency ----
+  // Where the local library shares the package's name, the root may already declare it — by the range the
+  // workspace's linking wrote to reach the LOCAL package (`*` / `workspace:*`). That declaration is replaced, not
+  // kept beside: it is what --finalize's unlink removes, so leaving it would end with no dependency at all, and
+  // devkit's version merge cannot be trusted to prefer a dist-tag over a bare `*`.
+  const rootManifest = readJsonSafe(tree, 'package.json');
+  const linkedFields = (['dependencies', 'devDependencies'] as const).filter((field) => {
+    const range = rootManifest[field]?.[packageName];
+    return typeof range === 'string' && linking.isLinkRange(tree, range);
+  });
+  if (linkedFields.length) {
+    for (const field of linkedFields) delete rootManifest[field][packageName];
+    writeJson(tree, 'package.json', rootManifest);
+  }
   const installCallback = addDependenciesToPackageJson(
     tree,
     { [packageName]: options.version ?? 'latest' },

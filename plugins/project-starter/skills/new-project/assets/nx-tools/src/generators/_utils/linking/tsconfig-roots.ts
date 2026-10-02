@@ -1,5 +1,6 @@
-// The two root-tsconfig questions every linking strategy (and every generator) asks — answered once.
-import { type Tree, readJson } from '@nx/devkit';
+// The root-tsconfig questions (and the one root-tsconfig write) every linking strategy and generator needs — answered once.
+import { type Tree, readJson, updateJson } from '@nx/devkit';
+import { workspacePath } from './shared';
 
 /**
  * The root tsconfig that holds the workspace's COMPILER OPTIONS (`paths`, `customConditions`, …):
@@ -30,4 +31,22 @@ export function rootCompilerOptions(tree: Tree): Record<string, any> {
 export function sourceCondition(tree: Tree): string | undefined {
   const declared: string[] = rootCompilerOptions(tree).customConditions ?? [];
   return declared.find((c) => c.startsWith('@nx-source/')) ?? declared.find((c) => c === 'development') ?? declared[0];
+}
+
+/** The TS-solution file: the root tsconfig.json that only `references` the workspace's projects. */
+export const SOLUTION_TSCONFIG = 'tsconfig.json';
+
+/**
+ * Make the solution file reference the project at `root` (deduplicated, in Nx's `./<root>` form) — what
+ * `@nx/js:typescript-sync` would add, written up front so `nx sync --check` in CI agrees with a fresh generator
+ * run. A no-op without a solution file.
+ */
+export function referenceFromSolution(tree: Tree, root: string): void {
+  if (!tree.exists(SOLUTION_TSCONFIG)) return;
+  updateJson(tree, SOLUTION_TSCONFIG, (json) => {
+    json.references ??= [];
+    const present = json.references.some((r: { path?: string }) => typeof r?.path === 'string' && workspacePath(r.path) === workspacePath(root));
+    if (!present) json.references.push({ path: `./${workspacePath(root)}` });
+    return json;
+  });
 }

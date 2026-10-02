@@ -4,6 +4,28 @@ A library is a **black box**: a boundary, a deliberate public contract, hidden i
 
 ---
 
+## 0. The workspace shape — layout and linking are two choices, not one
+
+**What.** Before drawing any boundary, know the two facts every library path and import depends on — and keep them apart, because they vary independently:
+
+| | Options | What it decides |
+| --- | --- | --- |
+| **Layout** — where projects live | `apps/` + `libs/` (Nx's classic integrated convention) · everything under `packages/` (the package-based convention) · a hybrid such as `apps/` + `packages/` | Directories only. Declare it once in `nx.json` → `workspaceLayout` so every generator (Nx's and yours) agrees. |
+| **Linking** — how projects reach each other | **`paths`**: `project.json` projects + `compilerOptions.paths` aliases in `tsconfig.base.json` · **`workspaces`** (Nx's *TypeScript-solution* setup): each project a `package.json` package, package-manager workspaces, TS project references, the consumer declaring the dependency (`workspace:*` / `*`) | How an import resolves, and whether a dependency is *declared* (workspaces) or *ambient* (an alias anyone can import). |
+
+```jsonc
+// nx.json — layout, declared
+"workspaceLayout": { "appsDir": "apps", "libsDir": "libs" }
+```
+
+**Why.** *Place everything on purpose* — the folder a library lands in and the mechanism that links it are separate decisions, and conflating them ("packages/ means npm workspaces") forces one to follow the other for no reason. `workspaces` linking makes every cross-project edge an explicit, declared dependency (*Everything is a black box*, with deliberate connections); `paths` is simpler and is what most of the Angular ecosystem expects.
+
+**When which.** `paths` for a workspace dominated by Angular (the Angular compiler doesn't support TS project references, so `@nx/angular` refuses a TS-solution workspace unless forced; the BeSpunky generators run Angular there as a deliberate, documented hybrid). `workspaces` for a TypeScript/Node workspace that wants package-manager-native linking and `tsc -b`. Pick at scaffold time (`project-starter`: `scaffold.sh --layout=<apps-libs|packages> --linking=<paths|workspaces>`); in an existing workspace, *detect* the shape and follow it — never mix the two models.
+
+**Pitfall.** Hard-coding `libs/…` (or adding a `paths` alias) in a workspace that uses the other shape. Paths in the examples below use `libs/` for brevity — read them as `<libsDir>/`.
+
+---
+
 ## 1. One folder = one entry point
 
 **What.** Split a library into independently-importable entry points by physical folder, so consumers import only what they use and each surface is its own boundary.
@@ -38,9 +60,9 @@ A library is a **black box**: a boundary, a deliberate public contract, hidden i
 
 ---
 
-## 4. Dogfood your own subpaths via tsconfig path mapping
+## 4. Dogfood your own subpaths through the workspace's linking
 
-**What.** Map every published subpath to its source in `tsconfig.base.json`, and have the library's *own* code import through those subpaths — not relative `../../core`.
+**What.** Make every published subpath resolve to its source, and have the library's *own* code import through those subpaths — not relative `../../core`. **How** depends on the linking model (§0). Under `paths`, map each subpath in `tsconfig.base.json`:
 
 ```jsonc
 // tsconfig.base.json
@@ -48,6 +70,16 @@ A library is a **black box**: a boundary, a deliberate public contract, hidden i
   "@scope/lib":         ["libs/lib/src/index.ts"],
   "@scope/lib/core":    ["libs/lib/core/src/index.ts"],
   "@scope/lib/testing": ["libs/lib/testing/src/index.ts"]
+}
+```
+
+Under `workspaces` there are no aliases: the library's own `package.json` `exports` map each subpath to source under the workspace's custom condition (`customConditions` in `tsconfig.base.json`), so TypeScript reads the `.ts` in-repo and the built `dist` once published — one map serves both.
+
+```jsonc
+// libs/lib/package.json
+"exports": {
+  ".":     { "@scope/source": "./src/index.ts",      "default": "./dist/index.js" },
+  "./core": { "@scope/source": "./core/src/index.ts", "default": "./dist/core/index.js" }
 }
 ```
 

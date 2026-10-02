@@ -19,7 +19,7 @@
 // run converge to the same tree — exactly like firebase-emulators re-asserts its always-owned tools/*.sh scripts.
 // formatFiles polishes the result at the end.
 import { type Tree, formatFiles } from '@nx/devkit';
-import { ensureHouseProject, houseProjectHome, type HouseProjectConfig } from '../_utils/house-project';
+import { ensureHouseProject, houseProjectHome, type HouseProjectConfig } from '../_utils/project-files';
 import { readFileSync } from 'node:fs';
 import { NOVNC_BAND_SIZE, NOVNC_BAND_START } from './novnc-band';
 import { join } from 'node:path';
@@ -72,7 +72,7 @@ export default async function sharedBrowserGenerator(
   // this workspace defines projects (a project.json, or a package.json under TS-solution linking), its targets
   // re-asserted on every run into whichever file already defines it.
   const { name, ...config } = JSON.parse(template('project-config.json.tpl')) as { name: string } & HouseProjectConfig;
-  ensureHouseProject(tree, houseProjectHome(tree, name, root, 'shared-browser'), config);
+  ensureHouseProject(tree, 'shared-browser', houseProjectHome(tree, name, root), config);
 
   // Gitignore the runtime dir. By default SB_RUNTIME lives under ${XDG_RUNTIME_DIR:-/tmp} (outside
   // the repo) so nothing lands here — but the capability documents relocating SB_RUNTIME into a

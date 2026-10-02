@@ -1,4 +1,5 @@
 // Small facts both linking strategies need, kept in one place so they cannot disagree.
+import { posix } from 'node:path';
 import type { ProjectConfiguration } from '@nx/devkit';
 import type { LinkRequest } from './linking';
 
@@ -17,3 +18,10 @@ export function rootContaining(projects: Map<string, ProjectConfiguration>, path
     .filter((root) => root === '.' || path === root || path.startsWith(`${root}/`))
     .sort((a, b) => b.length - a.length)[0];
 }
+
+/**
+ * A workspace-relative path in one canonical spelling. tsconfig path targets are written both ways in the wild —
+ * `./packages/ui/src/index.ts` (what @nx/js and @nx/angular write) and `packages/ui/src/index.ts` (what the house
+ * writes) — and both name the same file, so every comparison goes through this.
+ */
+export const workspacePath = (path: string): string => posix.normalize(path.replace(/\\/g, '/')).replace(/^(\.\/)+/, '').replace(/\/+$/, '');

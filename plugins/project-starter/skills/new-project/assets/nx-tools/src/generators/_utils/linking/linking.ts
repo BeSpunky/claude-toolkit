@@ -58,6 +58,11 @@ export interface Linking {
   resolve(tree: Tree, importPath: string): string | undefined;
   /** The specifier this workspace imports the library at `libRoot` by — the reverse of `resolve`. */
   importPathOf(tree: Tree, libRoot: string): string | undefined;
+  /**
+   * Is `range` a dependency declaration THIS strategy writes to reach a local package (so `unlink` will remove it)?
+   * `paths` declares no dependencies, so never; `workspaces` — the package manager's workspace range.
+   */
+  isLinkRange(tree: Tree, range: string): boolean;
   /** Remove every in-repo link to the library (its subpaths included) — for a library about to be deleted. */
   unlink(tree: Tree, library: LinkedLibrary): void;
 }

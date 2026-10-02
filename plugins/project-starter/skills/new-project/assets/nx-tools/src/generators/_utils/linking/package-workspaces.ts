@@ -14,6 +14,7 @@
 import { type Tree, readJson, updateJson, logger } from '@nx/devkit';
 import { dirname } from 'node:path';
 import { detectPackageManager } from '../package-manager';
+import { workspacePath } from './shared';
 
 const PNPM_WORKSPACE = 'pnpm-workspace.yaml';
 
@@ -103,7 +104,7 @@ export function ensureWorkspaceMember(tree: Tree, root: string): string | null {
 
 /** Remove a glob that names exactly `root` (one `ensureWorkspaceMember` may have added). Wider globs stay — they cover others. */
 export function dropExactWorkspacePattern(tree: Tree, root: string): void {
-  const exact = (p: unknown) => typeof p === 'string' && p.replace(/^\.\/+/, '').replace(/\/+$/, '') === root;
+  const exact = (p: unknown) => typeof p === 'string' && workspacePath(p) === workspacePath(root);
   if (detectPackageManager(tree) === 'pnpm') {
     if (!tree.exists(PNPM_WORKSPACE)) return;
     const parsed = (yaml().load(tree.read(PNPM_WORKSPACE, 'utf-8') ?? '') ?? {}) as { packages?: unknown[] };
@@ -127,6 +128,15 @@ export function dropExactWorkspacePattern(tree: Tree, root: string): void {
 export function workspaceDependencySpec(tree: Tree): 'workspace:*' | '*' {
   const pm = detectPackageManager(tree);
   return pm === 'pnpm' || (pm === 'yarn' && isYarnBerry(tree)) ? 'workspace:*' : '*';
+}
+
+/**
+ * Is `range` the one this workspace's package manager LINKS a member by — what `workspaceDependencySpec` writes?
+ * Any `workspace:` protocol range qualifies (it can only ever mean a local package); a plain `*` only where that
+ * is the spec (npm, yarn classic), since under pnpm or yarn berry a `*` asks the registry.
+ */
+export function isWorkspaceLinkRange(tree: Tree, range: string): boolean {
+  return range.startsWith('workspace:') || range === workspaceDependencySpec(tree);
 }
 
 /**

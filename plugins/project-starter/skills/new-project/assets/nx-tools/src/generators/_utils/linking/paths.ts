@@ -3,12 +3,16 @@
 import { type Tree, getProjects, updateJson, logger } from '@nx/devkit';
 import type { Linking, LinkRequest, LinkedLibrary } from './linking';
 import { rootTsconfig, rootCompilerOptions } from './tsconfig-roots';
-import { defaultEntry, specifierOf, rootContaining } from './shared';
+import { defaultEntry, specifierOf, rootContaining, workspacePath } from './shared';
 
 const aliases = (tree: Tree): Record<string, string[]> => rootCompilerOptions(tree).paths ?? {};
 
 /** Does this alias target lie inside the library at `libRoot`? */
-const into = (libRoot: string) => (target: string) => target === libRoot || target.replace(/^\.\/+/, '').startsWith(`${libRoot}/`);
+const into = (libRoot: string) => (target: string) => {
+  const path = workspacePath(target);
+  const root = workspacePath(libRoot);
+  return path === root || path.startsWith(`${root}/`);
+};
 
 export const pathsLinking: Linking = {
   kind: 'paths',
@@ -28,7 +32,7 @@ export const pathsLinking: Linking = {
       // An alias that already exists is the workspace's decision, never silently replaced — but a different one
       // is said out loud, since the library just created will not be what that specifier resolves to.
       if (!existing) json.compilerOptions.paths[specifier] = [entry];
-      else if (!existing.includes(entry)) {
+      else if (!existing.some((target) => workspacePath(target) === workspacePath(entry))) {
         logger.warn(`[linking] Kept the existing path alias "${specifier}" -> ${existing.join(', ')} (not ${entry}). Point it at ${entry} if this library should own it.`);
       }
       return json;
@@ -39,7 +43,7 @@ export const pathsLinking: Linking = {
     const target = aliases(tree)[importPath]?.[0];
     if (!target) return undefined;
     try {
-      return rootContaining(getProjects(tree), target.replace(/^\.\/+/, ''));
+      return rootContaining(getProjects(tree), workspacePath(target));
     } catch {
       return undefined;
     }
@@ -52,6 +56,8 @@ export const pathsLinking: Linking = {
       .map(([alias]) => alias)
       .sort((a, b) => a.length - b.length)[0];
   },
+
+  isLinkRange: () => false,
 
   unlink(tree: Tree, library: LinkedLibrary): void {
     const file = rootTsconfig(tree);

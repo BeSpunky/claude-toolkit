@@ -20,7 +20,7 @@
 // the same tree — exactly like the shared-browser generator re-asserts its always-owned tools/shared-browser/*.
 // formatFiles polishes the result at the end.
 import { type Tree, formatFiles } from '@nx/devkit';
-import { ensureHouseProject, houseProjectHome, type HouseProjectConfig } from '../_utils/house-project';
+import { ensureHouseProject, houseProjectHome, type HouseProjectConfig } from '../_utils/project-files';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -51,7 +51,7 @@ export default async function worktreeDomainsGenerator(
   // this workspace defines projects (a project.json, or a package.json under TS-solution linking), its targets
   // re-asserted on every run into whichever file already defines it.
   const { name, ...config } = JSON.parse(template('project-config.json.tpl')) as { name: string } & HouseProjectConfig;
-  ensureHouseProject(tree, houseProjectHome(tree, name, root, 'worktree-domains'), config);
+  ensureHouseProject(tree, 'worktree-domains', houseProjectHome(tree, name, root), config);
 
   // Gitignore the runtime dir. By default WD_RUNTIME lives under ${XDG_RUNTIME_DIR:-/tmp} (outside the
   // repo) so nothing lands here — but a relocated WD_RUNTIME (e.g. into a workspace volume) would put

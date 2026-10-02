@@ -83,7 +83,7 @@ export interface LibOptions {
 }
 
 export interface LibPort {
-  /** Create the library through the framework's own generator (which writes the tsconfig path alias). */
+  /** Create the library through the framework's own generator, linked the way the workspace links (`_utils/linking`). */
   create(tree: Tree, options: LibOptions): Promise<GeneratorCallback>;
   /** Framework post-processing of a PUBLISHABLE library's packaging config (e.g. ng-package.json). */
   normalizePackaging?(tree: Tree, projectRoot: string): void;

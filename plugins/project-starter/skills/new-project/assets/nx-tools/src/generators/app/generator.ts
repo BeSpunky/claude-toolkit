@@ -26,6 +26,7 @@ import { ADAPTERS, adapter } from '../../adapters/registry';
 import { workspaceStackWith } from '../../adapters/workspace';
 import { attachCapabilities } from './attach';
 import { resolveAppsDir } from '../_utils/workspace-layout';
+import { joinWorkspace } from '../_utils/project-files';
 
 interface AppGeneratorSchema {
   // Workspace-relative directory for the app (positional arg 0). Default: `<appsDir>/<name>`.
@@ -78,6 +79,9 @@ export default async function appGenerator(tree: Tree, options: AppGeneratorSche
     name: options.name,
     style: options.style ?? 'scss',
   });
+
+  // The framework's generator decides the app's files; the WORKSPACE decides whether that makes it a member.
+  joinWorkspace(tree, directory);
 
   // 2) ATTACH every capability the workspace wears.
   const active = new Set([...detectLayers(tree), ...inRegistryOrder(csv(options.layers))]);

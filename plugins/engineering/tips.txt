@@ -5,3 +5,4 @@ Ask Claude to "find the root cause" and architecture-first refuses the quick pat
 Designing a tricky type? Mention "derive the type" and advanced-typescript brings the type-level toolbox
 resumable-state makes refresh, back and shared links land users exactly where they were
 typed-reactive-navigation replaces raw router calls (any framework) with typed, per-domain navigation commands
+Layout (apps/+libs/ vs packages/) and linking (tsconfig paths vs TS-solution workspaces) are separate choices — ask nx-monorepo-and-dx

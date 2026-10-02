@@ -15,11 +15,10 @@
 import { type Tree, getProjects, readJson, updateJson, writeJson, logger } from '@nx/devkit';
 import { dirname, posix } from 'node:path';
 import type { Linking, LinkRequest, LinkedLibrary } from './linking';
-import { sourceCondition } from './tsconfig-roots';
-import { defaultEntry } from './shared';
-import { ensureWorkspaceMember, dropExactWorkspacePattern, workspaceDependencySpec } from './package-workspaces';
+import { sourceCondition, referenceFromSolution, SOLUTION_TSCONFIG } from './tsconfig-roots';
+import { defaultEntry, workspacePath } from './shared';
+import { ensureWorkspaceMember, dropExactWorkspacePattern, workspaceDependencySpec, isWorkspaceLinkRange } from './package-workspaces';
 
-const SOLUTION = 'tsconfig.json';
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const;
 
 export const workspacesLinking: Linking = {
@@ -28,7 +27,7 @@ export const workspacesLinking: Linking = {
   link(tree: Tree, request: LinkRequest): void {
     ensureWorkspaceMember(tree, request.libRoot);
     declareIdentity(tree, request);
-    reference(tree, request.libRoot);
+    referenceFromSolution(tree, request.libRoot);
     if (request.consumerRoot) declareDependency(tree, request.consumerRoot, request);
   },
 
@@ -44,17 +43,20 @@ export const workspacesLinking: Linking = {
     return packageName(tree, libRoot);
   },
 
+  isLinkRange: isWorkspaceLinkRange,
+
   unlink(tree: Tree, library: LinkedLibrary): void {
     dropExactWorkspacePattern(tree, library.libRoot);
-    if (tree.exists(SOLUTION)) {
-      updateJson(tree, SOLUTION, (json) => {
-        if (Array.isArray(json.references)) json.references = json.references.filter((r: { path?: string }) => normalize(r?.path) !== library.libRoot);
+    if (tree.exists(SOLUTION_TSCONFIG)) {
+      updateJson(tree, SOLUTION_TSCONFIG, (json) => {
+        if (Array.isArray(json.references)) json.references = json.references.filter((r: { path?: string }) => !r?.path || workspacePath(r.path) !== workspacePath(library.libRoot));
         return json;
       });
     }
-    // A `workspace:` range can only ever have meant the local package, which is going away: drop it. A plain range
-    // (`*`, `^1.0.0`) is just as valid against the registry — and when the library was adopted as its published
-    // package, that is exactly what it now means — so it stays, and is reported.
+    // Remove EXACTLY the dependency `link` declared — the range this package manager's workspaces link a member
+    // by (`isWorkspaceLinkRange`): it can only have meant the local package, which is going away, and left behind it
+    // would silently re-point at whatever the registry holds under that name. Any other range was declared by
+    // someone else, for the registry (adopt-extracted writes the published one) — it stays, and is reported.
     try {
       // Every project's manifest AND the root's — the root package.json is not a project, but it is where a
       // project.json-only consumer's dependency was declared (see `governingManifest`).
@@ -66,7 +68,7 @@ export const workspacesLinking: Linking = {
           for (const field of DEPENDENCY_FIELDS) {
             const range = json[field]?.[library.importPath];
             if (typeof range !== 'string') continue;
-            if (range.startsWith('workspace:')) delete json[field][library.importPath];
+            if (isWorkspaceLinkRange(tree, range)) delete json[field][library.importPath];
             else logger.info(`[linking] Kept ${manifest} ${field} "${library.importPath}": "${range}" — it now resolves from the registry.`);
           }
           return json;
@@ -116,16 +118,6 @@ function declareIdentity(tree: Tree, request: LinkRequest): void {
   });
 }
 
-/** (3) The solution tsconfig references the library (deduplicated, Nx's `./<root>` form). */
-function reference(tree: Tree, libRoot: string): void {
-  if (!tree.exists(SOLUTION)) return;
-  updateJson(tree, SOLUTION, (json) => {
-    json.references ??= [];
-    if (!json.references.some((r: { path?: string }) => normalize(r?.path) === libRoot)) json.references.push({ path: `./${libRoot}` });
-    return json;
-  });
-}
-
 /** (4) The package.json that governs the consumer's resolution declares the library. */
 function declareDependency(tree: Tree, consumerRoot: string, request: LinkRequest): void {
   const manifest = governingManifest(tree, consumerRoot);
@@ -162,4 +154,3 @@ function packageName(tree: Tree, root: string): string | undefined {
   return typeof name === 'string' ? name : undefined;
 }
 
-const normalize = (path: string | undefined): string | undefined => path?.replace(/^\.\/+/, '').replace(/\/+$/, '');

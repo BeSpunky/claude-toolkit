@@ -171,6 +171,8 @@ export default async function designSystemGenerator(
  * its source. Its consumers are linked app by app, by design-system-styles.
  */
 function createNeutralLibrary(tree: Tree, options: { name: string; directory: string; importPath: string; tags: string[] }): void {
+  // Compiler options first: `createProject` references a package from the solution tsconfig only once it has one.
+  writeProjectTsconfigs(tree, options.directory);
   createProject(
     tree,
     options.name,
@@ -180,7 +182,6 @@ function createNeutralLibrary(tree: Tree, options: { name: string; directory: st
   if (!tree.exists(`${options.directory}/package.json`)) {
     writeJson(tree, `${options.directory}/package.json`, { name: options.importPath, version: '0.0.1' });
   }
-  writeProjectTsconfigs(tree, options.directory);
   workspaceLinking(tree).link(tree, { importPath: options.importPath, libRoot: options.directory });
 }
 

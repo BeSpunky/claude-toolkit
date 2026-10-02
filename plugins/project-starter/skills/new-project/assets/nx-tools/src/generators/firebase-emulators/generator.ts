@@ -40,7 +40,7 @@
 //                        files are written only if absent; its house targets are generator-owned.
 //   - firebase/         — the emulator suite as its own workspace-level Nx project: `emulators`,
 //                        `emulators:<svc>`, `seed:build`, `reset`. User-added targets are preserved.
-//   Both projects are HOUSE PROJECTS (_utils/house-project): found by project, created the way this workspace
+//   Both projects are HOUSE PROJECTS (_utils/project-files): found by project, created the way this workspace
 //   defines projects (a project.json, or a package.json workspace member under TS-solution linking).
 //   - tools/{emulators,emulator-data,reap-emulators,push-secrets,firebase-welcome}.sh, tools/seed/* — the
 //                        launch path, data lifecycle, port reclaim, secrets push, cloud-linkage banner, and
@@ -75,7 +75,7 @@ import { workspaceStacksWith } from '../../adapters/workspace';
 import { hasDependency } from '../../layers/evidence';
 import { FIREBASE_DEFAULT_PORTS, HOUSE_EMULATORS } from './emulator-ports';
 import firebaseClientGenerator from '../firebase-client/generator';
-import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/house-project';
+import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
 import { resolveAppsDir } from '../_utils/workspace-layout';
 import { rootTsconfig } from '../_utils/linking';
 
@@ -185,8 +185,8 @@ export default async function firebaseEmulatorsGenerator(
   // (firebase.json's source, the gitignore entry, the scripts' secrets file) follows the functions project's
   // actual root, and every `nx` command its actual name. A new workspace puts it in its apps directory.
   const appsDir = resolveAppsDir(tree);
-  const functions = houseProjectHome(tree, 'functions', `${appsDir}/functions`, 'firebase-emulators');
-  const suite = houseProjectHome(tree, 'firebase', 'firebase', 'firebase-emulators');
+  const functions = houseProjectHome(tree, 'functions', `${appsDir}/functions`);
+  const suite = houseProjectHome(tree, 'firebase', 'firebase');
   const functionsPaths = (tpl: string) =>
     tpl.split('{{functionsRoot}}').join(functions.root).split('{{functionsDist}}').join(distOf(functions)).split('{{functionsProject}}').join(functions.name);
 
@@ -372,12 +372,32 @@ function ensureFunctionsProject(
   const offset = offsetFromRoot(root);
   const template = (name: string) => render(readFileSync(join(__dirname, name), 'utf8')).split('{{offsetFromRoot}}').join(offset);
 
-  // The PROJECT first. Its package.json is the Cloud Functions deploy manifest — and, in a workspace whose projects
+  // Source files: user-owned once written (the manifest's deps, the functions code, and the compiler options are
+  // all things a project legitimately evolves).
+  const ifAbsent = (path: string, templateName: string) => {
+    if (!tree.exists(path)) tree.write(path, template(templateName));
+  };
+  // The compiler options come BEFORE the project: a project created as a package is referenced by the solution
+  // tsconfig only when it already has a tsconfig.json to reference (`createProject`).
+  // Extends the workspace's root compiler options (`rootTsconfig`: tsconfig.base.json, else a standalone
+  // tsconfig.json) at this project's depth; a repo with neither gets functions that stand alone.
+  if (!tree.exists(`${root}/tsconfig.json`)) {
+    const base = rootTsconfig(tree);
+    const tsconfig = template('functions-tsconfig.json.tpl');
+    tree.write(
+      `${root}/tsconfig.json`,
+      base ? tsconfig.split('{{rootTsconfig}}').join(base) : tsconfig.replace(/^\s*"extends": "[^"]*",\n/m, ''),
+    );
+  }
+  ifAbsent(`${root}/tsconfig.app.json`, 'functions-tsconfig.app.json.tpl');
+
+  // Then the PROJECT. Its package.json is the Cloud Functions deploy manifest — and, in a workspace whose projects
   // are packages (TS-solution linking), also the file that DEFINES the project. So a new project is created from the
   // manifest template through the project seam, which writes it as that workspace needs (a workspace member, its
   // Nx configuration in the `nx` block); a project.json workspace gets the same manifest just below, beside it.
   ensureHouseProject(
     tree,
+    'firebase-emulators',
     functions,
     {
       projectType: 'application',
@@ -426,23 +446,7 @@ function ensureFunctionsProject(
     JSON.parse(template('functions-package.json.tpl')),
   );
 
-  // Source files: user-owned once written (the manifest's deps, the functions code, and the compiler options are
-  // all things a project legitimately evolves).
-  const ifAbsent = (path: string, templateName: string) => {
-    if (!tree.exists(path)) tree.write(path, template(templateName));
-  };
   ifAbsent(`${root}/package.json`, 'functions-package.json.tpl');
-  // Extends the workspace's root compiler options (`rootTsconfig`: tsconfig.base.json, else a standalone
-  // tsconfig.json) at this project's depth; a repo with neither gets functions that stand alone.
-  if (!tree.exists(`${root}/tsconfig.json`)) {
-    const base = rootTsconfig(tree);
-    const tsconfig = template('functions-tsconfig.json.tpl');
-    tree.write(
-      `${root}/tsconfig.json`,
-      base ? tsconfig.split('{{rootTsconfig}}').join(base) : tsconfig.replace(/^\s*"extends": "[^"]*",\n/m, ''),
-    );
-  }
-  ifAbsent(`${root}/tsconfig.app.json`, 'functions-tsconfig.app.json.tpl');
   ifAbsent(`${root}/src/main.ts`, 'functions-main.ts.tpl');
   // The committed shape doc for local Functions secrets (.secret.local itself is gitignored).
   // User-owned once written — it grows with each `defineSecret` the functions add.
@@ -461,7 +465,7 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
   });
   const dependsOnFunctionsBuild = [{ projects: [functions.name], target: 'build' }];
 
-  ensureHouseProject(tree, suite, {
+  ensureHouseProject(tree, 'firebase-emulators', suite, {
     projectType: 'application',
     tags: ['platform:server'],
     targets: {

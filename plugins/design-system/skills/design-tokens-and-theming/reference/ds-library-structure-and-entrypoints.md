@@ -11,7 +11,7 @@ mechanics live in **adapters** — see the end of this file.
 ## The shape
 
 ```
-packages/design-system/
+<libsDir>/design-system/          the workspace's libraries dir (e.g. packages/, libs/)
 ├── styles/                      the SASS surface (the house's author-time choice)
 │   ├── _index.scss              ★ PUBLIC — @forward … show; the only file anyone outside @use's
 │   ├── _core/                   the TOKEN ENGINE (private)
