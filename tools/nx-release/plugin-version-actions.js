@@ -35,8 +35,10 @@
 //
 // `afterAllProjectsVersioned` regenerates `.claude-plugin/marketplace.json` from the plugin manifests. That is
 // what turns "plugin.json and marketplace.json must agree" from an invariant somebody has to remember into
-// one that cannot be expressed. Only `version` is derived — every entry's hand-written `description` and its
-// `source` are preserved verbatim, because trading a version-drift bug for a content-loss bug is a poor deal.
+// one that cannot be expressed. `version` AND `description` are derived from the manifest; `source` (and any
+// other key) is preserved verbatim. The description used to be preserved too — the registry carried a richer,
+// hand-written pitch — until claude.ai's 500-character cap made both copies the same short text: two
+// hand-kept copies of one string is a drift bug waiting, so the manifest is now the one source.
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { VersionActions } = require('nx/release');
@@ -213,11 +215,10 @@ const afterAllProjectsVersioned = async (cwd, { dryRun } = {}) => {
     // Prefer the version decided in THIS run. Falling back to disk covers plugins that were not part of the
     // release, whose versions genuinely did not change — and makes the dry-run preview correct, since disk
     // still holds the old values then.
-    const version =
-      pendingVersions.get(entry.name) ??
-      JSON.parse(readFileSync(join(cwd, pluginRoot, PLUGIN_MANIFEST_DIR, PLUGIN_MANIFEST), 'utf8')).version;
+    const manifest = JSON.parse(readFileSync(join(cwd, pluginRoot, PLUGIN_MANIFEST_DIR, PLUGIN_MANIFEST), 'utf8'));
+    const version = pendingVersions.get(entry.name) ?? manifest.version;
 
-    return { ...entry, version };
+    return { ...entry, description: manifest.description, version };
   });
 
   const next = `${JSON.stringify({ ...marketplace, plugins: entries }, null, 2)}\n`;
