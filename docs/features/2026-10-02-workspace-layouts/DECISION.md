@@ -20,3 +20,11 @@
 ## Open scope question
 
 TS-solution workspaces (package.json-defined projects, project references) — in or out of this effort?
+
+## Scope settled — 2026-10-02
+
+Offered: folder convention now, TS-solution as a follow-up (recommended). The user chose:
+
+> "Support both"
+
+So TS-solution workspaces (package.json-defined projects, npm workspaces, TS project references) are **in scope**. The folder-layout design above stands; TS-solution needs its own design (project-config writes, library linking, Angular's refusal) — researched next, confirmed before implementation.
