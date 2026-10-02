@@ -43,9 +43,14 @@ export interface DevFragment {
   skipped?: string;
 }
 
+/** The declaration, or null when there is none. Throws a sentence (not a parser trace) when it cannot be read. */
 export function readDeclaration(tree: Tree): DevDeclaration | null {
   if (!tree.exists(DECLARATION_PATH)) return null;
-  return JSON.parse(tree.read(DECLARATION_PATH, 'utf8') ?? '{}') as DevDeclaration;
+  try {
+    return JSON.parse(tree.read(DECLARATION_PATH, 'utf8') ?? '{}') as DevDeclaration;
+  } catch (error) {
+    throw new Error(`${DECLARATION_PATH} is not valid JSON (${error instanceof Error ? error.message : String(error)})`);
+  }
 }
 
 export function writeDeclaration(tree: Tree, decl: DevDeclaration): void {

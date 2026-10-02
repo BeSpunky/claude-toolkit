@@ -68,18 +68,27 @@ export default function declareDevProcesses(tree: Tree): void {
 
   const wrapper = !tree.exists('package.json');
   const nx = wrapper ? './nx' : 'node_modules/.bin/nx';
-  const decl: Declaration = tree.exists(DECLARATION)
-    ? (JSON.parse(tree.read(DECLARATION, 'utf8') ?? '{}') as Declaration)
-    : { apps: {} };
-  decl.apps ??= {};
+  const emulators = firebaseEmulators(tree, nx, projects.has('firebase') && Boolean(projects.get('firebase')?.targets?.emulators));
+
+  // An existing declaration this rung cannot read is the PROJECT's file (only a hand edit gets it into that
+  // state) — never a reason to take the whole ladder down, and never one to overwrite it. Report it, declare
+  // nothing, and still do the part that does not touch it (the proxyConfig move below).
+  const decl = readDeclaration(tree);
+  if (!decl) {
+    logger.warn(
+      `${TAG} ${DECLARATION} exists but is not a readable declaration (invalid JSON, or not {"apps": {…}}) — it is ` +
+        `LEFT UNTOUCHED and nothing was declared for ${served.join(', ')}. Fix it, then re-run the sync (the dev ` +
+        `generator seeds whatever an app does not declare yet), or declare the processes by hand.`,
+    );
+    if (emulators) served.forEach((name) => moveProxyConfig(tree, name));
+    return;
+  }
   const added: string[] = [];
 
   if (!decl.install && !wrapper) {
     decl.install = { cmd: [packageManager(tree), 'install'], creates: 'node_modules' };
     added.push(`install: ${decl.install.cmd.join(' ')}`);
   }
-
-  const emulators = firebaseEmulators(tree, nx, projects.has('firebase') && Boolean(projects.get('firebase')?.targets?.emulators));
 
   for (const name of served) {
     const project = projects.get(name)!;
@@ -123,6 +132,23 @@ export default function declareDevProcesses(tree: Tree): void {
     tree.write(DECLARATION, `${JSON.stringify(decl, null, 2)}\n`);
     logger.info(`${TAG} Declared in ${DECLARATION}: ${added.join(', ')}. \`nx serve <app>\` now runs exactly this (via tools/dev/dev serve).`);
   }
+}
+
+/** The declaration on disk (a fresh one when absent), or null when it exists but cannot be read as one. */
+function readDeclaration(tree: Tree): Declaration | null {
+  if (!tree.exists(DECLARATION)) return { apps: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(tree.read(DECLARATION, 'utf8') ?? '');
+  } catch {
+    return null;
+  }
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (!isObject(parsed)) return null;
+  const apps = parsed.apps ?? {};
+  if (!isObject(apps) || !Object.values(apps).every((app) => isObject(app) && Array.isArray(app.processes ?? []))) return null;
+  return { ...(parsed as object), apps } as Declaration;
 }
 
 /** 0.34.x's precedence: the packageManager field, then the lockfile, then yarn. */

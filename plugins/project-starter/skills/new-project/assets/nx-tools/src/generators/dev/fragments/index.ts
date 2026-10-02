@@ -18,6 +18,13 @@ import { LAYERS, isPresent } from '../../../layers/registry';
  * app does not declare yet (see seedApp) — safe on every sync.
  */
 export function seedFromAdapters(tree: Tree, project: string): SeedReport {
+  // The declaration is the PROJECT's file: one it cannot read is reported and left exactly as it is — never
+  // overwritten, and never a reason to fail the sync around it.
+  try {
+    readDeclaration(tree);
+  } catch (error) {
+    return [`NOT seeding ${project}: ${(error as Error).message} — left untouched. Fix it and re-run the sync.`];
+  }
   const report = seedApp(tree, project, nxDevServerFragment(tree, project));
   if (!readDeclaration(tree)?.apps?.[project]) return report;
   const capabilities = LAYERS.filter((entry) => entry.devFragment && isPresent(tree, entry.id));

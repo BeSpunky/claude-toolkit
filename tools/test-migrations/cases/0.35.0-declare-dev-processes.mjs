@@ -47,6 +47,32 @@ export default {
       },
     },
     {
+      // Only a hand edit between an interrupted sync and its re-run gets a declaration into this state — and it
+      // must neither abort the whole ladder (JSON.parse threw) nor be overwritten: it is the project's file.
+      name: 'a malformed existing .bespunky/dev.json: reported, left byte-for-byte, the ladder goes on',
+      setup: (tree) => {
+        app(tree);
+        firebase(tree);
+        tree.write('apps/web/proxy.conf.mjs', 'export default {};\n');
+        tree.write('.bespunky/dev.json', '{ "apps": { "web": { "processes": [ \n');
+      },
+      expect: (tree, t) => {
+        t.ok(tree.read('.bespunky/dev.json', 'utf8') === '{ "apps": { "web": { "processes": [ \n', 'the malformed declaration was rewritten');
+        // The part that does not touch the declaration still happens.
+        t.ok(readProjectConfiguration(tree, 'web').targets['dev-server'].options.proxyConfig, 'the proxy did not move onto the leaf');
+      },
+    },
+    {
+      name: 'a declaration with the wrong shape (processes not a list): reported, left alone',
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, '.bespunky/dev.json', { apps: { web: { processes: 'npm start' } } });
+      },
+      expect: (tree, t) => {
+        t.ok(decl(tree).apps.web.processes === 'npm start', 'the declaration was rewritten');
+      },
+    },
+    {
       name: 'a Firebase workspace: the emulators process, its ports, URL switches and advice; the proxy moves onto the leaf',
       setup: (tree) => {
         app(tree);

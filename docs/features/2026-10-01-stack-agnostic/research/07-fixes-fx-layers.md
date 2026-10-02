@@ -65,3 +65,13 @@ Items from `handoffs/2026-10-02T00-review-fanout.md` → FX-layers. One entry pe
   warning now says its callers are left alone. Fixtures added: "mentions only, nothing to move: no file is
   touched" (the toolkit self-sync shape), "the project's own unstamped file … and so are its callers", and the
   skip set in the main case; all three FAIL on the previous rung (checked on a base worktree).
+- **mig#1 — fixed.** `0.33.0/split-firebase-service-providers` decides "already migrated" from DISK: an app that
+  has any per-service config file (which did not exist before 0.33.0 and which this rung / every 0.33+
+  generator writes) is skipped and named in the log. A ladder replayed from a lagging stamp no longer adds the
+  four services at the root over 0.33.1's commented default. Fixture (0.33.1 case file, ladder run twice):
+  "a replayed ladder (stamp lagging) does not re-add the services 0.33.1 left commented" — FAILS on the old rung.
+- **declare-dev-processes malformed dev.json — fixed.** The 0.35.0 rung reads an existing `.bespunky/dev.json`
+  through a guarded reader: invalid JSON or a wrong shape is REPORTED, the file left byte-for-byte, the
+  declaration skipped, and the proxyConfig move (which does not touch the file) still done; the ladder goes on.
+  Fixtures: malformed JSON, wrong shape. The live `dev` generator now does the same (report, never overwrite,
+  never fail the sync) instead of throwing a parser trace.
