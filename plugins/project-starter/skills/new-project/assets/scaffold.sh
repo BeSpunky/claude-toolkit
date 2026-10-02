@@ -345,6 +345,16 @@ GIT_NAME="$(git config --global user.name 2>/dev/null || whoami)"
 GIT_EMAIL="$(git config --global user.email 2>/dev/null || echo "$(whoami)@localhost")"
 
 # --- resolve TARGET + PROJECT + APP based on mode ---
+# TWO CONCEPTS, KEPT APART: the DIRECTORY the run operates in, and the project's IDENTITY.
+#   PROJECT_DIR_NAME  the target's basename — every PATH use (the cd into it, the container mount, the ownership
+#                     fixup). Reaches the program as environment, never as text (see INNER_ENV).
+#   PROJECT           the project's NAME — what the generators are told (--project=, house-doc, the window
+#                     identity), the fallback app name, the GitHub repository. Validated by _check_name below.
+# A scaffold creates the directory FROM the name, so the two coincide. A sync finds a directory that already
+# exists, and the directory is not always named after the project: the house sync opens its own git worktree
+# (house-sync-<date>) when it starts on a protected branch, and naming the project after that slug stamped a date
+# into every generator that asked who the project is. So on a sync the identity is the name the project has in
+# its MAIN worktree, read from git (_project_identity), and the directory keeps its own name for paths.
 # A missing argument is a usage question, not a bash error. `${1:?…}` printed a raw parameter-expansion
 # message ("scaffold.sh: line 213: 1: Usage: …") whose embedded usage line named only --firebase — the most
 # likely discovery path in the whole script, advertising a fraction of the flags.
@@ -355,8 +365,30 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
+# The identity of an EXISTING project directory: the name the same directory has in the repository's MAIN
+# worktree. `--git-common-dir` is shared by every worktree of a repository and, for an ordinary layout, is the main
+# worktree's `.git` — so its parent is the main worktree, whatever this linked one happens to be called. Only the
+# worktree's TOP maps to the main worktree's name: a workspace in a subdirectory of its repository is named after
+# that subdirectory, which is the same in every worktree, so it keeps its own basename. Anything else — not a git
+# repository, a bare or submodule layout whose common dir is not a `.git` beside a working tree — has no main
+# worktree to ask, and falls back to the directory's own name, which is what a sync has always used.
+_project_identity() {   # <absolute target dir>
+  local _common _top
+  _common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || _common=""
+  _top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || _top=""
+  case "$_common" in
+    */.git)
+      if [ -n "$_top" ] && [ "$(cd "$1" && pwd -P)" = "$(cd "$_top" && pwd -P)" ]; then
+        basename "$(dirname "$_common")"
+        return
+      fi ;;
+  esac
+  basename "$1"
+}
+
 if [ "$MODE" = "scaffold" ]; then
   PROJECT="$1"
+  PROJECT_DIR_NAME="$PROJECT"
   APP="${2:-$PROJECT}"
   PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
   TARGET="$PROJECTS_DIR/$PROJECT"
@@ -382,7 +414,8 @@ else
     }
   fi
   [ -d "$TARGET" ] || { echo "ERROR: '$TARGET' does not exist." >&2; exit 1; }
-  PROJECT="$(basename "$TARGET")"
+  PROJECT_DIR_NAME="$(basename "$TARGET")"
+  PROJECT="$(_project_identity "$TARGET")"
   PROJECTS_DIR="$(dirname "$TARGET")"
   # --- the app to refresh: given, or INFERRED later, by the package -----------------------------------------
   # Not inferred here. It used to be, from a bash glob over apps/*/project.json that skipped `functions` by name —
@@ -400,7 +433,7 @@ fi
 # $PROJECT and $APP are interpolated into the rendered command sequence (--project=, --name=, --scope=,
 # --workspaceName=) which is then run by `bash -c`. They are not always typed by the user: $APP is INFERRED
 # from the project graph (inside the program — a runtime variable there, never rendered into its source, and
-# checked by this same function the moment it is inferred), and $PROJECT from the directory name — so a cloned
+# checked by this same function the moment it is inferred), and $PROJECT from a directory name — so a cloned
 # repository can choose them. A directory literally named `$(...)` or containing a backtick therefore becomes a command
 # substitution evaluated at render time, from nothing more than `git clone` plus a sync the user was invited
 # to run by the SessionStart hook. That is remote code execution through a file name.
@@ -668,25 +701,73 @@ else
   read -r PM PM_SOURCE <<< "$(detect_package_manager "$TARGET")"
 fi
 
-# PM_ADD_DEV pins EXACTLY — every one of these carries an explicit exact-save flag, and that is load-bearing
-# rather than a style choice (see INSTALL_NX_TOOLS for why an accidental caret silently skips the migration
-# ladder). npm in particular defaults to `save-prefix=^` and WILL write `^0.24.3` without `--save-exact`;
-# yarn 1 and pnpm happen to default to exact today, but that is a default, and a project's `.npmrc` /
-# `.yarnrc` can change it under us. Say it out loud in all three.
 case "$PM" in
-  yarn) PM_INSTALL="yarn install";  PM_EXEC="yarn";           PM_ADD_DEV="yarn add -D -E" ;;
+  yarn) PM_INSTALL="yarn install";  PM_EXEC="yarn" ;;
   # `npx --no-install` deliberately: nx is in node_modules by this point, and without the flag a typo or a
   # pruned package would silently fetch something from the registry and run it instead of failing.
-  npm)  PM_INSTALL="npm install";   PM_EXEC="npx --no-install"; PM_ADD_DEV="npm install --save-dev --save-exact" ;;
-  # `-w` is REQUIRED inside a pnpm WORKSPACE — there `pnpm add` at the root refuses outright
-  # (ERR_PNPM_ADDING_TO_ROOT) unless you say you meant the root, and the root is exactly where house tooling
-  # belongs. But it is FATAL outside one: `--workspace-root may only be used inside a workspace`, exit 1
-  # (verified on pnpm 11.9.0). This used to be tolerated because the install was gated and trailed by a
-  # `|| echo NOTE:`; now that installing the toolkit is unconditional and runs under `set -e`, passing it
-  # unconditionally would abort every sync on a plain pnpm repo. So ask the workspace which shape it is.
-  pnpm) PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec";       PM_ADD_DEV="pnpm add -D -E"
-        [ -f "$TARGET/pnpm-workspace.yaml" ] && PM_ADD_DEV="pnpm add -D -w -E" ;;
+  npm)  PM_INSTALL="npm install";   PM_EXEC="npx --no-install" ;;
+  pnpm) PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec" ;;
 esac
+
+# --- ADDING A DEV DEPENDENCY: decided where and when it runs, never composed here --------------------------------
+# The add used to be a command string composed on this side, once, before the program ran — and for a scaffold
+# before the project even existed. That made it a SNAPSHOT of a question whose answer belongs to the moment and
+# the place the install actually runs: "is this directory a workspace root, and which version of the package
+# manager is about to run in it?" The program may run in the fallback container with a different yarn than this
+# host has, and a fresh `--linking=workspaces` scaffold BECOMES a yarn workspaces root halfway through its own
+# program. A snapshot cannot see either. So the add is a FUNCTION, rendered into the program with `declare -f`
+# (like _check_name), that asks the package manager that will run and the workspace it runs in, at call time.
+# The package manager itself IS settled here ($PM: the project's own choice, detected above), and is handed to
+# every call as a literal; what moves to run time is only the flag that depends on the workspace's shape.
+#
+# One concept — ADDING TO A WORKSPACE ROOT — and each package manager's own way of saying "yes, the root":
+#   yarn 1   `-W` at a workspaces root, where a plain `yarn add` refuses outright (exit 1, "Running this command
+#            will add the dependency to the workspace root rather than the workspace itself"); harmless anywhere
+#            else, but it is only passed where it is meant. Berry (2+) has no `-W` and needs none — it adds to the
+#            root of whatever directory it is run in — so the flag is gated on the major, not on the field alone.
+#   pnpm     `-w` is REQUIRED inside a pnpm WORKSPACE — there `pnpm add` at the root refuses
+#            (ERR_PNPM_ADDING_TO_ROOT) unless you say you meant the root, and the root is exactly where house
+#            tooling belongs. But it is FATAL outside one: `--workspace-root may only be used inside a workspace`,
+#            exit 1 (verified on pnpm 11.9.0). This used to be tolerated because the install was gated and
+#            trailed by a `|| echo NOTE:`; now that installing the toolkit is unconditional and runs under
+#            `set -e`, passing it unconditionally would abort every sync on a plain pnpm repo. So ask the
+#            workspace which shape it is (pnpm-workspace.yaml).
+#   npm      adds to the root it runs in, workspaces or not — nothing to say.
+#
+# EVERY ADD PINS EXACTLY — each arm carries an explicit exact-save flag, and that is load-bearing rather than a
+# style choice (see INSTALL_NX_TOOLS for why an accidental caret silently skips the migration ladder). npm in
+# particular defaults to `save-prefix=^` and WILL write `^0.24.3` without `--save-exact`; yarn 1 and pnpm happen
+# to default to exact today, but that is a default, and a project's `.npmrc` / `.yarnrc` can change it under us.
+# Say it out loud in all three.
+#
+# The `workspaces` field is read with node, not grepped: a package.json is JSON, and the program already needs
+# node for everything after the install.
+_pm_add_dev() {   # <package manager> <spec>...
+  local _pm="$1" _root=""
+  shift
+  case "$_pm" in
+    yarn)
+      case "$(yarn --version 2>/dev/null)" in
+        1.*) node -e 'process.exit(require("./package.json").workspaces ? 0 : 1)' 2>/dev/null && _root="-W" ;;
+      esac
+      echo "[tools] yarn add -D -E ${_root:+$_root }$*"
+      yarn add -D -E ${_root:+"$_root"} "$@" ;;
+    pnpm)
+      [ -f pnpm-workspace.yaml ] && _root="-w"
+      echo "[tools] pnpm add -D ${_root:+$_root }-E $*"
+      pnpm add -D ${_root:+"$_root"} -E "$@" ;;
+    npm)
+      echo "[tools] npm install --save-dev --save-exact $*"
+      npm install --save-dev --save-exact "$@" ;;
+    *)
+      echo "ERROR: no way to add a dev dependency with package manager '$_pm'." >&2
+      return 1 ;;
+  esac
+}
+# Rendered only on the NODE host: the wrapper host has no package manager of its own (it pins into nx.json), so a
+# program that carried an add it can never call would only invite one.
+PM_ADD_FN=""
+[ "$HOST" = "node" ] && PM_ADD_FN="$(declare -f _pm_add_dev)"
 if [ "$HOST" = "wrapper" ] && [ "$MODE" = "scaffold" ]; then
   echo "Nx host: the Nx wrapper (./nx) — the new project has no package.json (ensure the node layer, or --preset=node, for one)"
 elif [ "$MODE" = "sync" ]; then
@@ -856,9 +937,12 @@ fi
 # names and cannot be validated into an alphabet — an O'Brien in the parent path closed the rendered quote, and
 # the cd's argument ran on into the next lines of the program; a crafted parent directory could inject a command.
 # Quoting each site would hold only until the next site is added. So the program refers to them as variables, and
-# the runtime hands them over (env for the native run, -e for the container).
+# the runtime hands them over (env for the native run, -e for the container). The project's DIRECTORY name is one
+# of them: on a sync it is no longer the validated project name but whatever the directory happens to be called
+# (a worktree, a clone renamed by hand), so it is a path like the others and travels the same way.
 INNER_ENV=(
   "SCAFFOLD_WORK_ROOT=$WORK_ROOT"
+  "SCAFFOLD_PROJECT_DIR_NAME=$PROJECT_DIR_NAME"
   "SCAFFOLD_ASSETS_ROOT=$ASSETS_ROOT"
   "SCAFFOLD_GIT_NAME=$GIT_NAME"
   "SCAFFOLD_GIT_EMAIL=$GIT_EMAIL"
@@ -930,7 +1014,7 @@ NX_WRAPPER_NXV="\$(node -p \"require('./nx.json').installation.version\")"
 # version, concluded there was nothing to do, and would have reported success having migrated nothing. A real
 # install is what makes the migration story possible at all.
 #
-# PINNED EXACTLY, no caret — see PM_ADD_DEV, where every package manager is given an explicit exact-save
+# PINNED EXACTLY, no caret — see _pm_add_dev, where every package manager is given an explicit exact-save
 # flag. `^0.24.0` lets an ordinary `yarn install` float the project to a newer published minor with no
 # migration having run; the migrator would then read that newer version as where the project already is and
 # skip the whole ladder. `nx migrate` is the only thing that should ever move this. (The migrate step no
@@ -946,7 +1030,7 @@ if [ "$HOST" = "wrapper" ]; then
   echo \"[tools] pinned @bespunky/nx-tools@$NX_TOOLS_VERSION and @nx/devkit@\$_nxv in nx.json installation.plugins\"
   ./nx --version >/dev/null"
 else
-  INSTALL_NX_TOOLS="$PM_ADD_DEV @bespunky/nx-tools@$NX_TOOLS_VERSION"
+  INSTALL_NX_TOOLS="_pm_add_dev $PM @bespunky/nx-tools@$NX_TOOLS_VERSION"
 fi
 FINALIZE_LOCAL=""   # only --local needs a post-run manifest correction; see below.
 if [ "$LOCAL_TOOLS" = "1" ]; then
@@ -1673,7 +1757,7 @@ if [ "$HOST" = "node" ]; then
 if ! node -e \"require.resolve('@nx/devkit')\" >/dev/null 2>&1; then
   _nxv=\"\$(node -p \"require('nx/package.json').version\" 2>/dev/null || echo latest)\"
   echo \"[layers] @nx/devkit missing (an nx init workspace ships only nx) — installing @nx/devkit@\$_nxv\"
-  $PM_ADD_DEV \"@nx/devkit@\$_nxv\"
+  _pm_add_dev $PM \"@nx/devkit@\$_nxv\"
 fi"
 fi
 
@@ -1863,11 +1947,11 @@ if [ "$HOST" = "node" ]; then
 # Scoped to this invocation deliberately. These variables are true — an agent IS running this — and other
 # tools may reasonably key off them. What is not acceptable is one command redefining the workspace shape.
 env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' $CREATE_WORKSPACE_PRESET --packageManager=yarn --nxCloud=skip --no-interactive
-cd '$PROJECT'"
+cd \"\$SCAFFOLD_PROJECT_DIR_NAME\""
 else
   # No package.json: an empty repository, then the SAME wrapper floor a sync lays on a Python or Go repo.
-  SCAFFOLD_FLOOR_BLOCK="mkdir '$PROJECT'
-cd '$PROJECT'
+  SCAFFOLD_FLOOR_BLOCK="mkdir \"\$SCAFFOLD_PROJECT_DIR_NAME\"
+cd \"\$SCAFFOLD_PROJECT_DIR_NAME\"
 git init -q
 $NX_INIT_BLOCK"
 fi
@@ -1908,6 +1992,7 @@ SCAFFOLD_APP_BLOCK=""
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
+$PM_ADD_FN
 mkdir -p \"\$SCAFFOLD_WORK_ROOT\"
 cd \"\$SCAFFOLD_WORK_ROOT\"
 $ENSURED_BLOCK
@@ -1935,7 +2020,8 @@ git add -A
 git commit -m 'chore: scaffold BeSpunky project (layers: $SCAFFOLD_COMMIT_LAYERS)' || true"
 else
   INNER="set -e
-cd \"\$SCAFFOLD_WORK_ROOT/$PROJECT\"
+$PM_ADD_FN
+cd \"\$SCAFFOLD_WORK_ROOT/\$SCAFFOLD_PROJECT_DIR_NAME\"
 $ENSURED_BLOCK
 # PREFLIGHT AND THE PROBE COME FIRST — before nx init, not merely before the install. Both only READ (git
 # state, the installed toolkit, HOUSE.md), so they are safe this early, and the gate's refusals claim to stop
@@ -2114,7 +2200,7 @@ else
   # this is a no-op — chowning there would hand the tree to a subuid. The engine decides; see
   # container-engine.sh. Runs before the gh push so git operations on the tree don't hit permission
   # errors. (The native path never creates foreign-owned files, so it needs none of this.)
-  container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT"
+  container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT_DIR_NAME"
 fi
 
 # --- create + push a private GitHub repo (scaffold mode only; gh auth lives on the host) ---
