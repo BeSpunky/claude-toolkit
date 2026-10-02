@@ -162,6 +162,8 @@ export const web: LayerDescriptor = {
       },
       {
         mount: 'source=bespunky-shared-ports,target=/var/opt/bespunky/ports,type=volume',
+        // Every container on the engine writes its own claim here, under whatever UID its remote user has.
+        ownership: 'shared',
         why:
           'The cross-container host-port registry. A FIXED volume name is the point: every BeSpunky devcontainer on\n' +
           "this engine mounts the SAME volume — the one substrate where containers see each other's noVNC claims.",
@@ -180,10 +182,7 @@ export const web: LayerDescriptor = {
         why: '`sysctl` (procps) for the worktree-domains :80 proxy, `ss` (iproute2) for the port probes.',
       },
     ],
-    postCreate: [
-      { phase: 'prepare', piece: 'web-volumes' },
-      { phase: 'provision', piece: 'shared-browser-runtime' },
-    ],
+    postCreate: [{ phase: 'provision', piece: 'shared-browser-runtime' }],
   },
   // Its skills drive the shared browser and Playwright, which only a web container provisions.
   claudePlugins: ['bespunky-browser-automation@claude-toolkit'],

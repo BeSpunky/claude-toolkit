@@ -700,8 +700,108 @@ checkAsync('post-create: web provisions the shared browser through its own runti
   const tree = createTreeWithEmptyWorkspace();
   const both = await artifacts(tree, ['nx', 'agent', 'node', 'js', 'web']);
   ok(both.post.includes('"@playwright/test"') && both.post.includes('install --with-deps'), 'js+web: both pieces');
-  ok(both.post.indexOf('reclaiming $HOME/.cache/ms-playwright') < both.post.indexOf('@playwright/test detected'), 'the cache volume is reclaimed before any install');
   ok(bashParses(both.post), 'js+web post-create does not parse');
+});
+
+// ── volume ownership: DERIVED from the composed mounts, and RUN against a stand-in for Docker's root-owned dirs ──
+// Docker creates every fresh named volume — and each missing directory on the way to it — owned by root. The
+// reclaim used to be hand-listed per layer, and `node` never listed node_modules: every node-hosted project's
+// first rebuild died in `yarn install` with EACCES. So these RUN the composed script's opening sections (up to
+// the first install step) with `stat` reporting root and `sudo` recording, and assert what it would reclaim.
+const reclaimed = (post, { owner = 'root' } = {}) => {
+  const cut = post.indexOf('\n# --- The OS packages');
+  const opening = post.slice(0, cut === -1 ? undefined : cut);
+  const dir = mkdtempSync(join(tmpdir(), 'reclaim-'));
+  const [ws, home, bin] = ['ws', 'home', 'bin'].map((name) => join(dir, name));
+  for (const path of ['.nx/cache', '.nx/workspace-data', 'node_modules', '.angular']) mkdirSync(join(ws, path), { recursive: true });
+  mkdirSync(join(home, '.cache/ms-playwright'), { recursive: true });
+  mkdirSync(bin);
+  const log = join(dir, 'sudo.log');
+  writeFileSync(join(bin, 'stat'), `#!/bin/sh\ncase "$2" in %U) echo ${owner} ;; %a) echo 755 ;; esac\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'sudo'), `#!/bin/sh\necho "$*" >> '${log}'\n`, { mode: 0o755 });
+  execFileSync('bash', ['-c', opening], { cwd: ws, env: { PATH: `${bin}:${process.env.PATH}`, HOME: home }, encoding: 'utf8' });
+  const me = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
+  const group = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
+  const calls = existsSync(log)
+    ? readFileSync(log, 'utf8').trim().split('\n').map((line) => line.split(ws).join('$WS').split(home).join('$HOME').split(`${me}:${group}`).join('ME'))
+    : [];
+  rmSync(dir, { recursive: true, force: true });
+  return { calls, opening };
+};
+const shParses = (script) => {
+  try {
+    execFileSync('sh', ['-n'], { input: script });
+    return true;
+  } catch {
+    return false;
+  }
+};
+const expectCalls = (ok, label, calls, expected) =>
+  ok(JSON.stringify(calls) === JSON.stringify(expected), `${label}: reclaimed\n           ${calls.join('\n           ')}\n         expected\n           ${expected.join('\n           ')}`);
+
+checkAsync('volume ownership: a node-hosted repo reclaims node_modules (and the Nx volumes) before the install', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  tree.write('package-lock.json', '{}');
+  const a = await artifacts(tree, ['nx', 'agent', 'node']);
+  expectCalls(ok, 'node', reclaimed(a.post).calls, [
+    'chown ME $WS/.nx',
+    'chown -R ME $WS/.nx/cache',
+    'chown -R ME $WS/.nx/workspace-data',
+    'chown -R ME $WS/node_modules',
+  ]);
+  ok(a.post.indexOf('reclaim_volume tree "$WS/node_modules"') < a.post.indexOf('$PM_INSTALL'), 'node_modules is reclaimed AFTER the install');
+  ok(bashParses(a.post) && shParses(a.post), 'node post-create does not parse under bash -n and sh -n');
+});
+
+checkAsync('volume ownership: web reclaims ~/.cache + ~/.cache/ms-playwright and opens the shared port registry (1777)', async (ok) => {
+  const a = await artifacts(wrapperRepo(), ['nx', 'agent', 'web']);
+  const { calls, opening } = reclaimed(a.post);
+  expectCalls(ok, 'web', calls, [
+    'chown ME $WS/.nx',
+    'chown -R ME $WS/.nx/cache',
+    'chown -R ME $WS/.nx/workspace-data',
+    'chown ME $HOME/.cache',
+    'chown -R ME $HOME/.cache/ms-playwright',
+  ]);
+  ok(opening.includes('share_volume "/var/opt/bespunky/ports"') && /share_volume\(\) \{[\s\S]*sudo chmod 1777 "\$1"/.test(opening), 'the port registry is not prepared with chmod 1777');
+  ok(!/reclaim_volume \w+ "\/var\/opt/.test(opening), 'the SHARED registry is chowned to one container\'s user');
+  ok(bashParses(a.post) && shParses(a.post), 'web post-create does not parse under bash -n and sh -n');
+});
+
+checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes; a rebuild reclaims nothing', async (ok) => {
+  const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
+  expectCalls(ok, 'wrapper', reclaimed(a.post).calls, ['chown ME $WS/.nx', 'chown -R ME $WS/.nx/cache', 'chown -R ME $WS/.nx/workspace-data']);
+  const me = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
+  expectCalls(ok, 'already owned (a rebuild)', reclaimed(a.post, { owner: me }).calls, []);
+  ok(bashParses(a.post) && shParses(a.post), 'wrapper post-create does not parse under bash -n and sh -n');
+});
+
+checkAsync('volume ownership: EVERY volume a layer declares is reclaimed — the full house shape, .angular included', async (ok) => {
+  const tree = FIXTURES['angular web app with firebase and a design system']();
+  tree.write('yarn.lock', '');
+  const a = await artifacts(tree, registry.detectLayers(tree));
+  const volumes = a.dc.mounts.filter((m) => m.includes('type=volume')).map((m) => /target=([^,]+)/.exec(m)[1]);
+  const { calls, opening } = reclaimed(a.post);
+  for (const target of volumes) {
+    const path = target.replace('${containerWorkspaceFolder}', '$WS').replace('/home/node', '$HOME');
+    ok(calls.includes(`chown -R ME ${path}`) || opening.includes(`share_volume "${path}"`), `volume ${target} has no reclaim`);
+  }
+  ok(bashParses(a.post) && shParses(a.post), 'full post-create does not parse under bash -n and sh -n');
+});
+
+check('volume ownership: a volume outside the workspace and home must DECLARE its policy', (ok) => {
+  const { compose } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const base = { id: 'agent', fragment: { image: { ref: 'img', remoteUser: 'node' } } };
+  const stray = (ownership) => ({ id: 'x', fragment: { mounts: [{ mount: 'source=v,target=/opt/thing,type=volume', ...(ownership ? { ownership } : {}) }] } });
+  let threw = false;
+  try {
+    compose([base, stray()], { nodeMajor: '22' });
+  } catch (error) {
+    threw = /declare its `ownership`/.test(error.message);
+  }
+  ok(threw, 'an undeclared policy outside the workspace/home was guessed');
+  const declared = compose([base, stray('shared')], { nodeMajor: '22' });
+  ok(JSON.stringify(declared.volumes) === JSON.stringify([{ root: null, path: '/opt/thing', ownership: 'shared' }]), `declared: ${JSON.stringify(declared.volumes)}`);
 });
 
 // ── the dev-loop seams between units: stack adapters, the composer mirror, the TUI, the platform firewall ────

@@ -206,7 +206,8 @@ export interface DevcontainerPort extends Explained {
 /**
  * When a post-create piece runs. The composed script runs the phases in this order, and within a phase the
  * pieces in registry order:
- *   prepare   — fix-ups the rest relies on (volume ownership); before anything installs
+ *   (the volume-ownership reclaim — DERIVED from the composed mounts, see `VolumeOwnership` — runs first)
+ *   prepare   — fix-ups the rest relies on; before anything installs
  *   (the OS packages — every active layer's `osPackages`, as ONE retried apt transaction — run here)
  *   install   — the project's own dependencies (the Nx wrapper's installation, the package-manager install)
  *   plugins   — the Claude Code plugin pre-install
@@ -223,6 +224,23 @@ export interface PostCreatePiece {
    */
   piece: string;
 }
+
+/**
+ * Who a `type=volume` mount point must belong to once the container exists. The composed post-create's FIRST
+ * section is derived from these — one policy per volume, so no layer ever scripts its own reclaim again (the
+ * hand-listed ones each covered some volumes and missed others: `node_modules` had none, and failed every
+ * node-hosted project's first rebuild with EACCES).
+ *
+ *   user    — the DEFAULT, for a volume under the workspace or the remote user's home: the mount point (recursively
+ *             — a fresh volume is empty, an older root-populated one needs it) and every directory Docker created
+ *             on the way to it (non-recursively — their other contents are not the volume's) are chowned to the
+ *             remote user.
+ *   shared  — a volume SEVERAL containers mount, whose remote users may have different UIDs: made world-writable +
+ *             sticky (1777) instead, because a chown would let the second container take it away from the first.
+ *
+ * A volume mounted anywhere else must DECLARE its policy — the composer refuses to guess whose it is.
+ */
+export type VolumeOwnership = 'user' | 'shared';
 
 export interface DevcontainerFragment {
   /**
@@ -242,8 +260,12 @@ export interface DevcontainerFragment {
   extensions?: readonly string[];
   /** VS Code settings at the container (Remote) scope. */
   settings?: readonly ({ key: string; value: DevcontainerJson } & Explained)[];
-  /** Mount specs (`source=…,target=…,type=…`). */
-  mounts?: readonly ({ mount: string } & Explained)[];
+  /**
+   * Mount specs (`source=…,target=…,type=…`). A `type=volume` mount's OWNERSHIP is derived, never hand-scripted:
+   * Docker creates a fresh named volume — and every missing directory on the way to its mount point — owned by
+   * root, so the composed post-create reclaims each one before anything installs (see `VolumeOwnership`).
+   */
+  mounts?: readonly ({ mount: string; ownership?: VolumeOwnership } & Explained)[];
   /** Environment for editor-spawned processes. */
   remoteEnv?: readonly ({ name: string; value: string } & Explained)[];
   /** Environment for EVERY process in the container. */

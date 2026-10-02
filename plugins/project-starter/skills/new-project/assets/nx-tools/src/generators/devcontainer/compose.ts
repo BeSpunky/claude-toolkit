@@ -12,7 +12,8 @@
 //   features …     concatenated, first occurrence of a key wins (de-duplicated)
 //   ports          merged by number: `forward` OR-ed, label/behaviour/why from the first contributor
 //   osPackages     ONE apt transaction, de-duplicated, each group commented with its `why`
-//   postCreate     pieces run by phase (prepare → OS packages → install → plugins → provision), registry order
+//   postCreate     pieces run by phase (prepare → OS packages → install → plugins → provision), registry order,
+//                  after ONE derived section that reclaims every volume's ownership (see `volumeOwnership`)
 //
 // It is pure: no Tree, no filesystem writes. The generator decides ownership and merging; this decides content.
 import { readFileSync } from 'node:fs';
@@ -25,6 +26,7 @@ import type {
   DevcontainerPort,
   PostCreatePhase,
   PostCreatePiece,
+  VolumeOwnership,
 } from '../../layers/descriptor';
 import type { ClaudePlugins } from '../_utils/layer-contributions';
 import { packageManagerShellDetection } from '../_utils/package-manager';
@@ -57,7 +59,9 @@ export interface Composition {
   features: ({ id: string; options: Record<string, DevcontainerJson> } & Why)[];
   extensions: string[];
   settings: ({ key: string; value: DevcontainerJson } & Why)[];
-  mounts: ({ mount: string } & Why)[];
+  mounts: ({ mount: string; ownership?: VolumeOwnership } & Why)[];
+  /** Every `type=volume` mount point and its ownership policy — what the post-create's first section reclaims. */
+  volumes: ComposedVolume[];
   remoteEnv: ({ name: string; value: string } & Why)[];
   containerEnv: ({ name: string; value: string } & Why)[];
   runArgs: ({ args: string[] } & Why)[];
@@ -65,6 +69,18 @@ export interface Composition {
   initializeCommand: ({ name: string; command: string } & Why)[];
   osPackages: ({ packages: string[] } & Why)[];
   postCreate: (PostCreatePiece & { from: string })[];
+}
+
+/**
+ * A volume mount point, as the post-create addresses it: `root` is the shell variable it lies under (`$WS`, the
+ * workspace; `$HOME`, the remote user's home) — so the script follows the container it actually runs in — or
+ * `null` for an absolute path outside both (allowed only with a DECLARED policy).
+ */
+export interface ComposedVolume {
+  root: '$WS' | '$HOME' | null;
+  /** The path below `root` (or the absolute path when `root` is null). */
+  path: string;
+  ownership: VolumeOwnership;
 }
 
 /** The order the composed post-create runs its phases in; the OS packages run between `prepare` and `install`. */
@@ -135,6 +151,14 @@ export function compose(
     have.why = have.why ?? port.why;
   }
 
+  const mounts = unique(
+    all('mounts').map(({ item }) => {
+      const entry = item as { mount: string; ownership?: VolumeOwnership; why?: string };
+      return { mount: sub(entry.mount), ...(entry.ownership ? { ownership: entry.ownership } : {}), why: entry.why };
+    }),
+    (entry) => mountField(entry.mount, 'target') ?? entry.mount,
+  );
+
   return {
     image: { ref: sub(image.ref), remoteUser, why: image.why },
     houseImage: tokens.runsAs === undefined,
@@ -149,13 +173,8 @@ export function compose(
       }),
       (entry) => entry.key,
     ),
-    mounts: unique(
-      all('mounts').map(({ item }) => {
-        const entry = item as { mount: string; why?: string };
-        return { mount: sub(entry.mount), why: entry.why };
-      }),
-      (entry) => /(?:^|,)target=([^,]+)/.exec(entry.mount)?.[1] ?? entry.mount,
-    ),
+    mounts,
+    volumes: mounts.flatMap((entry) => volumeOf(entry, home)),
     remoteEnv: unique(
       all('remoteEnv').map(({ item }) => ({ ...(item as { name: string; value: string; why?: string }) })),
       (entry) => entry.name,
@@ -182,6 +201,38 @@ export function compose(
       (entry) => entry.piece,
     ),
   };
+}
+
+/** One `key=value` field of a mount spec. */
+function mountField(mount: string, key: string): string | undefined {
+  return new RegExp(`(?:^|,)${key}=([^,]+)`).exec(mount)?.[1];
+}
+
+/** A path the post-create may write UNQUOTED-safe inside double quotes: no `$`, quote, backtick or backslash. */
+const PLAIN_PATH = /^[A-Za-z0-9._/@+-]+$/;
+
+/**
+ * The ownership a `type=volume` mount needs (none for any other type). DERIVED, so a layer that adds a volume gets
+ * its reclaim by declaring the mount — the bug this replaces was a hand-listed reclaim per layer that one layer
+ * (`node`, whose `node_modules` volume failed every first install with EACCES) simply never had.
+ */
+function volumeOf(entry: { mount: string; ownership?: VolumeOwnership }, home: string): ComposedVolume[] {
+  if (mountField(entry.mount, 'type') !== 'volume') return [];
+  const target = (mountField(entry.mount, 'target') ?? '').replace(/\/+$/, '');
+  const under = ([prefix, root]: readonly [string, ComposedVolume['root']]) =>
+    target.startsWith(`${prefix}/`) ? { root, path: target.slice(prefix.length + 1) } : undefined;
+  const located = ([['${containerWorkspaceFolder}', '$WS'], [home, '$HOME']] as const).map(under).find(Boolean);
+  const volume = located ?? { root: null, path: target };
+  if (!PLAIN_PATH.test(volume.path) || volume.path.split('/').includes('..')) {
+    throw new Error(`[devcontainer] Volume target \`${target}\` is not a plain path the post-create can reclaim.`);
+  }
+  if (!located && !entry.ownership) {
+    throw new Error(
+      `[devcontainer] Volume target \`${target}\` lies outside the workspace and the remote user's home, so whose it ` +
+        `is cannot be derived — declare its \`ownership\` on the mount fragment.`,
+    );
+  }
+  return [{ ...volume, ownership: entry.ownership ?? 'user' }];
 }
 
 // ── devcontainer.json ──────────────────────────────────────────────────────────────────────────────────────────
@@ -374,6 +425,7 @@ export function renderPostCreate(layers: readonly string[], c: Composition, plug
   const inPhase = (phase: PostCreatePhase) =>
     c.postCreate.filter((entry) => entry.phase === phase).map((entry) => renderPiece(piece(entry.piece), plugins));
 
+  if (c.volumes.length) sections.push(renderVolumeOwnership(piece('volume-ownership'), c.volumes));
   sections.push(...inPhase('prepare'));
   if (c.osPackages.length) sections.push(renderOsPackages(piece('os-packages'), c.osPackages));
   for (const phase of PHASES.slice(1)) sections.push(...inPhase(phase));
@@ -392,6 +444,30 @@ function renderPiece(text: string, plugins: ClaudePlugins): string {
     .join(plugins.marketplaces.map(([name, market]) => `${name} ${market.repo}`).join('\n'))
     .split('{{PLUGINS}}')
     .join(plugins.plugins.join(' '));
+}
+
+/**
+ * One line per directory to reclaim: each `user` volume's mount point (`tree`, recursive) and every directory
+ * between its root and it (`dir` — Docker created those too, and they hold more than the volume), de-duplicated
+ * (`.nx/` sits on the way to two volumes) and shallowest first; then each `shared` volume.
+ */
+function renderVolumeOwnership(template: string, volumes: readonly ComposedVolume[]): string {
+  const at = (volume: ComposedVolume, path: string) => (volume.root ? `${volume.root}/${path}` : path);
+  const reclaim = new Map<string, 'tree' | 'dir'>();
+  for (const volume of volumes.filter((entry) => entry.ownership === 'user')) {
+    // Only under a root are the in-between directories Docker's doing; an absolute target's parents are the image's.
+    const segments = volume.root ? volume.path.split('/') : [volume.path];
+    segments.forEach((_, index) => {
+      const path = at(volume, segments.slice(0, index + 1).join('/'));
+      const scope = index === segments.length - 1 ? 'tree' : 'dir';
+      if (reclaim.get(path) !== 'tree') reclaim.set(path, scope);
+    });
+  }
+  const lines = [
+    ...[...reclaim].map(([path, scope]) => `reclaim_volume ${scope} "${path}"`),
+    ...volumes.filter((entry) => entry.ownership === 'shared').map((volume) => `share_volume "${at(volume, volume.path)}"`),
+  ];
+  return template.split('{{VOLUMES}}').join(lines.join('\n'));
 }
 
 function renderOsPackages(template: string, groups: Composition['osPackages']): string {
