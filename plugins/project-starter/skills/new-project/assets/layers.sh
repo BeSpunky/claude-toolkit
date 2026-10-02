@@ -128,11 +128,15 @@ file .vscode/.window-identity.json' ;;
 project-json "executor"[[:space:]]*:[[:space:]]*"@nx/js:' ;;
     web) printf '%s\n' 'file .bespunky/dev.json
 project-json "dev-server"[[:space:]]*:
-project-json "serve"[[:space:]]*:' ;;
+project-json "executor"[[:space:]]*:[[:space:]]*"@bespunky/nx-tools:serve
+project-json "executor"[[:space:]]*:[[:space:]]*"@angular/build:dev-server
+project-json "executor"[[:space:]]*:[[:space:]]*"@angular-devkit/build-angular:dev-server
+project-json "executor"[[:space:]]*:[[:space:]]*"@nx/angular:dev-server' ;;
     angular) printf '%s\n' 'dependency "@angular/core"
 dependency "@nx/angular"
 project-json "executor"[[:space:]]*:[[:space:]]*"@angular/build:
-project-json "executor"[[:space:]]*:[[:space:]]*"@angular-devkit/build-angular:' ;;
+project-json "executor"[[:space:]]*:[[:space:]]*"@angular-devkit/build-angular:
+project-json "executor"[[:space:]]*:[[:space:]]*"@nx/angular:' ;;
     design-system) printf '%s\n' 'project-json "type:design-system"' ;;
     navigation) printf '%s\n' 'project-json "type:navigation"' ;;
     firebase) printf '%s\n' 'file firebase.json' ;;

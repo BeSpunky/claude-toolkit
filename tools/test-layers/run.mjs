@@ -169,13 +169,41 @@ const FIXTURES = {
     addProjectConfiguration(tree, 'routing-kernel', { root: 'libs/routing-kernel', projectType: 'library', tags: ['type:navigation'] });
     return tree;
   },
-  'python service with its own serve target, no agent': () => {
+  'python site with its own dev-server target, no agent': () => {
     const tree = createTreeWithEmptyWorkspace();
     tree.delete('package.json');
+    addProjectConfiguration(tree, 'site', {
+      root: 'services/site',
+      projectType: 'application',
+      targets: { 'dev-server': { executor: 'nx:run-commands', options: { command: 'python3 -m http.server' } } },
+    });
+    return tree;
+  },
+  // A5 — a BACKEND is not a web app because it has a target called `serve`. @nx/js:node's `--port` is the
+  // inspector's (its schema: "The port to inspect the process on", default 9229).
+  'node API served by @nx/js:node on `serve`, and a python API on `serve`': () => {
+    const tree = createTreeWithEmptyWorkspace();
     addProjectConfiguration(tree, 'api', {
-      root: 'services/api',
-      projectType: 'library',
+      root: 'apps/api',
+      projectType: 'application',
+      targets: {
+        build: { executor: '@nx/esbuild:esbuild' },
+        serve: { executor: '@nx/js:node', options: { buildTarget: 'api:build' } },
+      },
+    });
+    addProjectConfiguration(tree, 'pyapi', {
+      root: 'services/pyapi',
       targets: { serve: { executor: 'nx:run-commands', options: { command: 'uvicorn app:api' } } },
+    });
+    return tree;
+  },
+  'a fresh Angular app whose dev-server still sits on `serve`': () => {
+    const tree = createTreeWithEmptyWorkspace();
+    writeJson(tree, 'package.json', { name: 'shop', devDependencies: { '@nx/angular': '23.1.0' } });
+    addProjectConfiguration(tree, 'shop', {
+      root: 'apps/shop',
+      projectType: 'application',
+      targets: { build: { executor: '@angular/build:application' }, serve: { executor: '@angular/build:dev-server' } },
     });
     return tree;
   },
@@ -188,7 +216,9 @@ const EXPECTED_DETECTION = {
   'agent project with voice remembered': 'nx,agent,node',
   'angular web app with firebase and a design system': 'nx,agent,node,js,web,angular,design-system,firebase',
   'python repo with a hand-written dev declaration': 'nx,agent,web',
-  'python service with its own serve target, no agent': 'nx,web',
+  'python site with its own dev-server target, no agent': 'nx,web',
+  'node API served by @nx/js:node on `serve`, and a python API on `serve`': 'nx,node,js',
+  'a fresh Angular app whose dev-server still sits on `serve`': 'nx,node,web,angular',
   'plain npm repo wearing firebase and a neutral design system': 'nx,node,design-system,firebase',
   'navigation library found by its tag, under any name': 'nx,node,angular,navigation',
 };
@@ -300,7 +330,7 @@ check('scaffold mode runs no per-app steps (the app generator composes them)', (
   ok(!got.some((l) => /^(serve|serve-options|firebase-client|design-system-styles) /.test(l)), `got ${got.join(' | ')}`);
 });
 check('web without agent: web generators skipped, reported, sync marked partial', (ok) => {
-  const got = render(plan(ctxFor(FIXTURES['python service with its own serve target, no agent'](), { app: 'api' }), STAMP));
+  const got = render(plan(ctxFor(FIXTURES['python site with its own dev-server target, no agent'](), { app: 'site' }), STAMP));
   ok(got[0] === 'WARN' && got[1] === 'PARTIAL', `got ${got.join(' | ')}`);
   ok(!got.some((l) => /^(serve|playwright|shared-browser) /.test(l)), 'no web generator ran');
 });
@@ -776,6 +806,80 @@ checkAsync('firebase core on an old-shaped eslint.config.mjs (no trailing comma)
   ok(/sourceTag: 'platform:server'[\s\S]*\n {24}}\n {20}\]/.test(out), `closing bracket not on its own line:\n${out}`);
   await generator('firebase-emulators')(tree, {});
   ok(tree.read('eslint.config.mjs', 'utf8') === out, 'a re-run changed eslint.config.mjs');
+});
+
+// A6 — the emulator ports are firebase.json's, the dev-server forward is the client app's stack's: one source each.
+checkAsync('firebase devcontainer ports come from firebase.json and the client app\'s stack — no dev-server port without a client app', async (ok) => {
+  const backend = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
+  const a = await artifacts(backend, [...registry.detectLayers(backend), 'agent']);
+  ok(!(a.dc.forwardPorts ?? []).includes(4200), `a backend-only Firebase forwards a dev-server port: ${JSON.stringify(a.dc.forwardPorts)}`);
+  ok(JSON.stringify(a.dc.forwardPorts) === '[4000,9099,8080,9150,9199,5001]', `no firebase.json suite yet → the house suite: ${JSON.stringify(a.dc.forwardPorts)}`);
+  const custom = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
+  writeJson(custom, 'firebase.json', { emulators: { auth: { port: 19099 }, firestore: { port: 18080, websocketPort: 19150 }, ui: { enabled: false }, singleProjectMode: true } });
+  const b = await artifacts(custom, [...registry.detectLayers(custom), 'agent']);
+  ok(JSON.stringify(b.dc.forwardPorts) === '[19099,18080,19150]', `firebase.json's own ports: ${JSON.stringify(b.dc.forwardPorts)}`);
+});
+
+// A6 — the package-manager rule is rendered into post-create from the one table, and behaves like the TS rule.
+checkAsync('post-create detects the package manager with the generators\' own rule (rendered, not copied)', async (ok) => {
+  const { detectPackageManager } = require_(join(BUILD, 'src/generators/_utils/package-manager'));
+  const a = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node']);
+  const start = a.post.indexOf('if [ -f "$WS/package.json" ]; then');
+  const block = a.post.slice(start, a.post.indexOf('\nfi\n', start) + 4).replace(/^\s*\$PM_INSTALL\s*$/m, '');
+  ok(start >= 0 && !block.includes('{{'), 'the node-install piece rendered its detection');
+  const cases = [
+    [{ packageManager: 'pnpm@9.0.0' }, ['yarn.lock']],
+    [{ packageManager: 'npm@10.0.0' }, []],
+    [{}, ['pnpm-lock.yaml', 'yarn.lock']],
+    [{}, ['package-lock.json']],
+    [{}, []],
+  ];
+  for (const [pkg, locks] of cases) {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', ...pkg }, null, 2));
+    for (const lock of locks) writeFileSync(join(dir, lock), '');
+    const shell = execFileSync('bash', ['-c', `WS="$1"; ${block} printf %s "$PM"`, '_', dir], { encoding: 'utf8' }).split('\n').pop();
+    const tree = createTreeWithEmptyWorkspace();
+    writeJson(tree, 'package.json', { name: 'x', ...pkg });
+    for (const lock of locks) tree.write(lock, '');
+    const ts = detectPackageManager(tree);
+    ok(shell === ts, `${JSON.stringify(pkg)} + ${locks.join(',') || 'no lockfile'}: post-create says ${shell}, the generators ${ts}`);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A6 — the dev-server base port is the owning stack's; a dev-server nobody can place is reported, not guessed.
+checkAsync('dev seeding: the base port is the stack\'s; an unowned dev-server without a port is reported, not declared on a guess', async (ok) => {
+  const { seedFromAdapters } = require_(join(BUILD, 'src/generators/dev/fragments'));
+  const tree = FIXTURES['angular web app with firebase and a design system']();
+  addProjectConfiguration(tree, 'firebase', { root: 'firebase', targets: { emulators: { executor: 'nx:run-commands', options: { command: 'true' } } } });
+  const report = seedFromAdapters(tree, 'shop');
+  const decl = JSON.parse(tree.read('.bespunky/dev.json', 'utf8'));
+  ok(decl.apps.shop.processes.find((p) => p.id === 'app')?.ports.app === registry.layer('angular').devcontainer.ports[0].port, `angular base port: ${JSON.stringify(decl.apps.shop)}`);
+  ok(report.some((l) => l.includes('"emulators"')), `the Firebase capability's fragment still seeds beside it: ${report.join(' | ')}`);
+  const vite = createTreeWithEmptyWorkspace();
+  addProjectConfiguration(vite, 'site', { root: 'apps/site', targets: { 'dev-server': { executor: '@nx/vite:dev-server' } } });
+  const said = seedFromAdapters(vite, 'site');
+  ok(!vite.exists('.bespunky/dev.json'), 'declared a guessed base port');
+  ok(said.some((l) => l.includes('base port is unknown')), `not reported: ${said.join(' | ')}`);
+});
+
+// A9 — no import cycle in the payload's own modules (the layer registry and the adapter registry once were one).
+check('the payload has no import cycle between the layer and adapter registries', (ok) => {
+  const files = [];
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).forEach((e) => (e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith('.js') && files.push(join(d, e.name))));
+  walk(join(BUILD, 'src/layers'));
+  walk(join(BUILD, 'src/adapters'));
+  const edges = (f) =>
+    [...readFileSync(f, 'utf8').matchAll(/require\(["'](\.[^"']+)["']\)/g)]
+      .map((m) => resolve(dirname(f), m[1]))
+      .map((r) => (existsSync(`${r}.js`) ? `${r}.js` : existsSync(join(r, 'index.js')) ? join(r, 'index.js') : null))
+      .filter(Boolean);
+  const reaches = (from, target, seen = new Set()) =>
+    edges(from).some((n) => n === target || (!seen.has(n) && seen.add(n) && existsSync(n) && reaches(n, target, seen)));
+  const adapters = join(BUILD, 'src/adapters/registry.js');
+  const layers = join(BUILD, 'src/layers/registry.js');
+  ok(!(reaches(adapters, layers) && reaches(layers, adapters)), 'layers/registry and adapters/registry import each other');
 });
 
 for (const run of pending) await run();

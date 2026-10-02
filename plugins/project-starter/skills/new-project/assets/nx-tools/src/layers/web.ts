@@ -6,32 +6,48 @@
 // a framework. Adapters SEED the declaration (an Nx `dev-server` target, the Firebase emulator suite); a
 // Python, Go or plain Vite project writes it by hand.
 //
-// PRESENT when a declaration exists, or when an Nx project has a dev-server / serve target (the Nx adapter
-// then seeds the declaration). REQUIRES only `agent`: the shared browser runs on the display stack and the
+// PRESENT when a declaration exists, or when an Nx project has a DEV-SERVER (see NX_SERVED — never merely a
+// target called `serve`, which a backend has too); the Nx adapter then seeds the declaration. REQUIRES only `agent`: the shared browser runs on the display stack and the
 // forwarded ports the agent layer's devcontainer provides. Nx is the floor underneath both.
 //
 // A scaffold ensures it only `via` angular — the Angular app it creates is what has the dev-server. A sync
 // cannot invent what a project serves; it detects a declaration (or a dev-server) and wires the rest.
-import type { LayerDescriptor, PlanContext } from './descriptor';
+import type { LayerDescriptor, LayerEvidence, PlanContext } from './descriptor';
 import { matchesEvidence, projectExists } from './evidence';
 import { type Tree, getProjects } from '@nx/devkit';
 import { NOVNC_BAND_LABEL, novncBandPorts } from '../generators/shared-browser/novnc-band';
-import { findExistingDevServer } from '../generators/_utils/dev-server';
-import { adapterOf } from '../adapters/registry';
-
-/** The Nx adapter's dev-loop targets — what makes a project "served through Nx". */
-const NX_SERVE_TARGETS = ['dev-server', 'serve'];
+import { SERVE_EXECUTOR } from '../generators/_utils/dev-server';
+import { ADAPTERS, adapterOf } from '../adapters/registry';
 
 /**
- * Does the `serve` generator have something to compose for this project — exactly its own precondition: a
- * dev-server of the project's own (any executor), or a stack that supplies one. A project merely EXISTING is not
- * enough: `nx init` on a package.json makes the repo root a project, and the serve generator refuses one that
- * serves nothing — which killed the whole sync of a declaration-only repo with a package.json.
+ * What makes an Nx project SERVED — a dev-server, recognised by what it IS, never by a target merely called
+ * `serve` (that is a backend's name too: `@nx/js:node` on `serve` runs an API, and its `--port` is the
+ * inspector's). One of:
+ *   - a `dev-server` target — the house leaf, or one a project named so itself (any executor);
+ *   - the house composer (`@bespunky/nx-tools:serve`);
+ *   - a dev-server executor a registered stack recognises (`DevServerPort.recognises`) on ANY target — a fresh
+ *     framework app parks its dev-server on `serve` before the serve generator reclaims that slot.
+ * A dev-server no registered stack knows (Vite on `serve`, say) is declared in `.bespunky/dev.json`, or named
+ * `dev-server`.
+ */
+const NX_SERVED: LayerEvidence = {
+  targets: ['dev-server'],
+  executors: [SERVE_EXECUTOR, ...ADAPTERS.flatMap((stack) => stack.devServer?.recognises ?? [])],
+};
+
+/**
+ * Does the `serve` generator have something to compose for this project: it is served (above), or its stack
+ * supplies a dev-server (an Angular app with only a build). A project merely EXISTING is not enough: `nx init`
+ * on a package.json makes the repo root a project, and the serve generator refuses one that serves nothing —
+ * which killed the whole sync of a declaration-only repo with a package.json.
  */
 function nxServable(tree: Tree, app: string): boolean {
   if (!projectExists(tree, app)) return false;
   const targets = getProjects(tree).get(app)?.targets ?? {};
-  return Boolean(findExistingDevServer(targets) ?? adapterOf(tree, app)?.devServer);
+  const served =
+    Boolean(targets['dev-server']) ||
+    Object.values(targets).some((target) => NX_SERVED.executors!.some((prefix) => (target?.executor ?? '').startsWith(prefix)));
+  return served || Boolean(adapterOf(tree, app)?.devServer);
 }
 
 /**
@@ -44,13 +60,7 @@ function nxServable(tree: Tree, app: string): boolean {
  */
 const nxAppMustExist = (ctx: PlanContext) => {
   if (nxServable(ctx.tree, ctx.app)) return null;
-  let nxServed = false;
-  try {
-    nxServed = matchesEvidence(ctx.tree, { targets: NX_SERVE_TARGETS });
-  } catch {
-    /* an unreadable graph is "could not tell" — treat as declaration-only, never crash the plan */
-  }
-  return nxServed
+  return matchesEvidence(ctx.tree, NX_SERVED)
     ? {
         reason:
           `web layer present, but '${ctx.app}' is no Nx-served project (no such project, or nothing to serve) — SKIPPING the per-app serve generators. ` +
@@ -65,7 +75,7 @@ export const web: LayerDescriptor = {
   id: 'web',
   title: 'Web dev loop (dev engine, worktree domains, shared browser)',
   requires: ['agent'],
-  evidence: { files: ['.bespunky/dev.json'], targets: NX_SERVE_TARGETS },
+  evidence: { files: ['.bespunky/dev.json'], ...NX_SERVED },
   ensurable: { scaffold: { via: 'angular' }, sync: false },
   ensureHint:
     'declare what the project serves in `.bespunky/dev.json` (e.g. `{"apps":{"site":{"processes":[{"id":"app","cmd":"python3 -m http.server ${PORT:app}","ports":{"app":8000}}]}}}`), ' +

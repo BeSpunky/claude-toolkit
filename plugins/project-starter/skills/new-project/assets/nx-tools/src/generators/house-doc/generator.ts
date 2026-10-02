@@ -31,8 +31,7 @@
 // leave the hook nagging forever with no way to fix it. HOUSE.md is the opposite: root-level, unambiguously
 // committed, generator-owned, rewritten on every sync — and already the file the hook stats to decide
 // whether this is even a house project. One file, one truth, no new gitignore surface.
-import { detectPackageManager } from '../_utils/package-manager';
-import { isWrapperHosted } from '../_utils/nx-host';
+import { nxInvocation } from '../_utils/nx-host';
 import { type Tree, formatFiles } from '@nx/devkit';
 import { retireInlineHouseSections } from '../_utils/inline-house-sections';
 import { findDesignSystem } from '../_utils/design-system';
@@ -87,12 +86,13 @@ export default async function houseDocGenerator(
   // The package manager means something only where there is a package.json (the `node` layer); the sections
   // that name it are gated on that layer. It never falls back to a guess for a repo without one — that is how a
   // Python repo used to be told to run `yarn nx …`.
-  const packageManager = options.packageManager ?? detectPackageManager(tree) ?? 'npm';
+  const invocation = nxInvocation(tree, options.packageManager);
+  const packageManager = invocation.packageManager ?? '';
   // HOW THIS REPO INVOKES NX — the one command every Nx line in the docs starts with. `./nx` on the wrapper
   // host (no package.json, or a repo already running the wrapper); the package manager's runner on a
   // package.json host. Rendering `{{PM}} nx` instead produced `npm nx` — not a command — on every npm project
   // and every wrapper-hosted repo.
-  const nx = nxInvocation(tree, packageManager);
+  const nx = invocation.command;
   const nxTools = options.nxToolsVersion ?? UNKNOWN;
   const plugin = options.pluginVersion ?? UNKNOWN;
   const tpl = (name: string) => readFileSync(join(__dirname, name), 'utf8');
@@ -279,22 +279,6 @@ function upsertPointer(source: string, pointer: string): string {
     return `${source.slice(0, headingIdx)}${pointer}\n\n${source.slice(headingIdx)}`;
   }
   return `${source.trimEnd()}\n\n${pointer}\n`;
-}
-
-/**
- * The project's package manager, from its own lockfile.
- *
- * Same evidence and same precedence scaffold.sh uses, so the doc can't disagree with the tool that wrote
- * it. Defaults to the house standard only when the project genuinely declares nothing.
- */
-/**
- * The Nx invocation for this repo's HOST — the same decision scaffold.sh makes (`HOST`): a repo running the Nx
- * wrapper (its `.nx/nxw.js` plus an `installation` block in nx.json), or one with no package.json at all, is a
- * WRAPPER host → `./nx`; otherwise Nx lives in node_modules and runs through the package manager.
- */
-function nxInvocation(tree: Tree, packageManager: string): string {
-  if (isWrapperHosted(tree)) return './nx';
-  return { yarn: 'yarn nx', pnpm: 'pnpm nx', npm: 'npx nx' }[packageManager] ?? 'npx nx';
 }
 
 /** Squeeze runs of 3+ newlines (i.e. two or more consecutive blank lines) down to a single blank line. */

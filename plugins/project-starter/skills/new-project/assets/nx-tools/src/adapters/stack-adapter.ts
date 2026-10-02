@@ -30,6 +30,12 @@ export interface StackAdapter {
    * Angular app?" in the payload asks it (with `projectType` where only applications are wanted).
    */
   ownsProject(tree: Tree, project: string): boolean;
+  /**
+   * The executor PREFIXES that make a target this stack's (`@angular/build:`, `@nx/js:`). The ONE list behind
+   * both `ownsProject` (applied to a project's build) and the stack layer's evidence (applied to any target) —
+   * two copies of it once disagreed on whether `@nx/angular:` counted.
+   */
+  readonly executors: readonly string[];
 
   readonly apps?: AppPort;
   readonly libs?: LibPort;
@@ -126,6 +132,14 @@ export interface StylesPort {
 export interface DevServerPort {
   /** The executor this stack's leaf runs — how a re-run recognises a leaf it owns (and may re-assert). */
   readonly executor: string;
+  /**
+   * Every executor that runs one of this stack's dev-servers — its own leaf's and the legacy ones. How a
+   * dev-server is RECOGNISED under any target name (a fresh app parks it on `serve`), and so what the web
+   * layer's evidence counts — never "any target called serve", which is a backend's name too.
+   */
+  readonly recognises: readonly string[];
+  /** The port the stack's dev-server listens on when its target names none (Angular: 4200). THE one copy. */
+  readonly basePort: number;
   /** The leaf for `project`, carrying `preserved` (the options a user tuned on the previous leaf). */
   leaf(tree: Tree, project: string, preserved: Record<string, unknown>): TargetConfiguration;
   /**

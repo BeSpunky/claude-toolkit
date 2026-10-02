@@ -19,7 +19,7 @@
 // registered by ONE line in `REGISTERED` below. Nothing else in the toolkit enumerates layers: scaffold.sh and
 // the SessionStart hook read the generated shell projection (`assets/layers.sh`, from `cli.ts shell`) and the
 // installed planner (`cli.ts plan`). The full contract: docs/features/2026-10-01-stack-agnostic/contracts/layers.md.
-import type { Tree } from '@nx/devkit';
+import { type Tree, logger } from '@nx/devkit';
 import type { LayerDescriptor, LayerId } from './descriptor';
 import { matchesEvidence } from './evidence';
 import { nx } from './nx';
@@ -33,8 +33,6 @@ import { navigation } from './navigation';
 import { firebase } from './firebase';
 
 export type { LayerDescriptor, LayerId } from './descriptor';
-/** @deprecated The pre-registry name for a descriptor; kept so existing imports keep compiling. */
-export type Layer = LayerDescriptor;
 
 /**
  * THE REGISTRATION LIST, in dependency order: every layer appears after everything it requires (asserted
@@ -106,10 +104,21 @@ export function requireLayer(tree: Tree, id: LayerId, generatorName: string): vo
 function safeDetect(entry: LayerDescriptor, tree: Tree): boolean {
   try {
     return matchesEvidence(tree, entry.evidence) || Boolean(entry.detect?.(tree));
-  } catch {
+  } catch (error) {
+    // Degrade, but SAY so (once per cause): a layer silently reported absent is a skipped generator with no
+    // reason anywhere in the output, and the cause — a malformed project.json — is exactly what the reader can fix.
+    const message =
+      `[layers] Could not tell whether the ${entry.id} layer is present (${error instanceof Error ? error.message : String(error)}) ` +
+      '— treating it as absent.';
+    if (!reported.has(message)) {
+      reported.add(message);
+      logger.warn(message);
+    }
     return false;
   }
 }
+
+const reported = new Set<string>();
 
 /**
  * The registration list's invariants, checked once at load — a broken registry must fail loudly at the first

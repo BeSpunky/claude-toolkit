@@ -27,6 +27,7 @@ import type {
   PostCreatePiece,
 } from '../../layers/descriptor';
 import type { ClaudePlugins } from '../_utils/layer-contributions';
+import { packageManagerShellDetection } from '../_utils/package-manager';
 
 export interface Contributor {
   /** A layer id, or an intent's name (`voice`). */
@@ -385,6 +386,8 @@ export function renderPostCreate(layers: readonly string[], c: Composition, plug
 
 function renderPiece(text: string, plugins: ClaudePlugins): string {
   return text
+    .split('{{PM_DETECT}}')
+    .join(packageManagerShellDetection().replace(/^/gm, '  '))
     .split('{{MARKETPLACES}}')
     .join(plugins.marketplaces.map(([name, market]) => `${name} ${market.repo}`).join('\n'))
     .split('{{PLUGINS}}')

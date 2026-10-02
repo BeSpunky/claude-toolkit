@@ -29,7 +29,8 @@ import { angularFirebaseClient } from './firebase-client';
 /**
  * The executors that make a project an Angular one. Applications build with `@angular/build:` (or the legacy
  * `@angular-devkit/build-angular:`); libraries with `@nx/angular:package` / `ng-packagr-lite`. This list is
- * THE rule — it replaced three hand-copied `isAngularApp`s that disagreed on whether a library counted.
+ * THE rule — it replaced three hand-copied `isAngularApp`s that disagreed on whether a library counted — and
+ * the `angular` layer's evidence reads it from here (`angular.executors`).
  */
 const ANGULAR_BUILDERS = ['@angular/build:', '@angular-devkit/build-angular:', '@nx/angular:'];
 
@@ -37,8 +38,13 @@ const noop: GeneratorCallback = () => {};
 
 /** Angular's dev-server builder — the leaf this adapter writes (and recognises as its own on a re-run). */
 const DEV_SERVER_EXECUTOR = '@angular/build:dev-server';
-/** Dev-server builders that take Angular's options (`proxyConfig`, …): today's and the legacy devkit one. */
-const DEV_SERVER_EXECUTORS = [DEV_SERVER_EXECUTOR, '@angular-devkit/build-angular:dev-server'];
+/**
+ * Dev-server builders that take Angular's options (`proxyConfig`, …): today's, the legacy devkit one, and Nx's
+ * (module-federation) wrapper of it.
+ */
+const DEV_SERVER_EXECUTORS = [DEV_SERVER_EXECUTOR, '@angular-devkit/build-angular:dev-server', '@nx/angular:dev-server'];
+/** Angular's dev-server default port — what an app is served on when its target names none. */
+const DEV_SERVER_PORT = 4200;
 
 /** An Angular app's bootstrap: its ApplicationConfig. */
 const bootstrapFile = (tree: Tree, project: string): string =>
@@ -63,6 +69,7 @@ function buildOptions(config: ProjectConfiguration): Record<string, unknown> | n
 export const angular: StackAdapter = {
   id: 'angular',
   layer: 'angular',
+  executors: ANGULAR_BUILDERS,
 
   ownsProject(tree, project) {
     const config = projectOf(tree, project);
@@ -190,6 +197,8 @@ export const angular: StackAdapter = {
 
   devServer: {
     executor: DEV_SERVER_EXECUTOR,
+    recognises: DEV_SERVER_EXECUTORS,
+    basePort: DEV_SERVER_PORT,
 
     // Env pinned via configurations (development default / production); host 0.0.0.0 so it is reachable from
     // outside the devcontainer. buildTarget + configurations are owned here; every other option a user tuned

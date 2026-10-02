@@ -56,9 +56,9 @@ import publishableLibGenerator from '../publishable-lib/generator';
 import designSystemStylesGenerator from '../design-system-styles/generator';
 import { findDesignSystem, DESIGN_SYSTEM_TAG } from '../_utils/design-system';
 import { resolveLibsDir, resolveWorkspaceScope, normalizeNpmScope } from '../_utils/workspace-layout';
-import { ADAPTERS, adapterOf, applicationsWith } from '../../adapters/registry';
+import { adapterOf, applicationsWith } from '../../adapters/registry';
+import { workspaceStackWith } from '../../adapters/workspace';
 import type { StackAdapter } from '../../adapters/stack-adapter';
-import { isPresent } from '../../layers/registry';
 
 interface DesignSystemSchema {
   /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
@@ -97,7 +97,7 @@ export default async function designSystemGenerator(
   const existing = findDesignSystem(tree);
   const stack: StackAdapter | null = existing
     ? adapterOf(tree, existing.name)
-    : ADAPTERS.find((candidate) => candidate.designSystem && isPresent(tree, candidate.layer)) ?? null;
+    : workspaceStackWith(tree, 'designSystem');
   const binding = stack?.designSystem ?? null;
 
   // 1) Create the library — ONLY if it isn't there. On a --sync it exists, and re-creating it would re-delegate

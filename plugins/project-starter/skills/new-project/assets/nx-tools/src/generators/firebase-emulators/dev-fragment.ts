@@ -1,4 +1,6 @@
-// The Firebase capability's fragment: the workspace emulator suite, served beside the app.
+// The Firebase capability's dev fragment: the workspace emulator suite, served beside the app. It lives with the
+// Firebase CORE (this generator), which owns the suite, and reaches the dev engine through the layer descriptor
+// (`firebase.devFragment`) — the dev generator lists no capability by name.
 //
 // It contributes:
 //   - the `emulators` process — the workspace `firebase:emulators` target, which launches through
@@ -9,50 +11,14 @@
 //     emulators, and `?emulate=none` when the suite is skipped, so every service resolves to the real backend;
 //   - the OAuth-origin advice: real Google sign-in is registered for the base origin only, so when another
 //     devcontainer owns that port, its owner is the one signing in there.
-//
-// Phase 4 (capability/adapter split) is the natural owner of this file: it belongs beside the Firebase core,
-// which can then seed it when the capability is ensured. It lives here until that split lands.
 import { type Tree, readProjectConfiguration } from '@nx/devkit';
-import type { DevFragment } from '../declaration';
-import { NX_TREE_ENV, nxInvocation } from './nx';
-
-/** firebase-tools' own defaults, for an emulator firebase.json enables without naming a port. */
-const FIREBASE_DEFAULT_PORTS: Record<string, number> = {
-  ui: 4000,
-  hub: 4400,
-  logging: 4500,
-  hosting: 5000,
-  functions: 5001,
-  apphosting: 5002,
-  firestore: 8080,
-  pubsub: 8085,
-  database: 9000,
-  auth: 9099,
-  storage: 9199,
-  eventarc: 9299,
-  dataconnect: 9399,
-  tasks: 9499,
-};
-/** Always occupied by a running suite — tools/emulators.sh pins them (shifted) even when firebase.json is silent. */
-const ALWAYS_ON = ['hub', 'logging'];
+import type { DevFragment } from '../dev/declaration';
+import { NX_TREE_ENV } from '../dev/fragments/nx';
+import { nxInvocation } from '../_utils/nx-host';
+import { emulatorPorts } from './emulator-ports';
 
 export const FIREBASE_PROJECT = 'firebase';
 export const EMULATORS_TARGET = 'emulators';
-
-/** Every port a running suite occupies, by emulator name — read from firebase.json. */
-export function emulatorPorts(tree: Tree): Record<string, number> {
-  const json = JSON.parse(tree.read('firebase.json', 'utf8') ?? '{}') as { emulators?: Record<string, unknown> };
-  const ports: Record<string, number> = {};
-  for (const [name, value] of Object.entries(json.emulators ?? {})) {
-    if (!value || typeof value !== 'object') continue; // singleProjectMode and other settings
-    const entry = value as { port?: unknown; enabled?: unknown };
-    if (entry.enabled === false) continue;
-    const port = Number(entry.port ?? FIREBASE_DEFAULT_PORTS[name]);
-    if (Number.isInteger(port) && port > 0 && /^[a-z][a-z0-9_-]*$/.test(name)) ports[name] = port;
-  }
-  for (const name of ALWAYS_ON) ports[name] ??= FIREBASE_DEFAULT_PORTS[name];
-  return ports;
-}
 
 export function firebaseFragment(tree: Tree): DevFragment {
   if (!tree.exists('firebase.json')) return { processes: [] };

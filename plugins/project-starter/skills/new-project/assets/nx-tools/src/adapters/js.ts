@@ -9,13 +9,18 @@ import type { StackAdapter } from './stack-adapter';
 
 const noop: GeneratorCallback = () => {};
 
+/** The executors that make a project a plain-TS one (and the `js` layer's executor evidence). */
+const JS_EXECUTORS = ['@nx/js:'];
+
 export const js: StackAdapter = {
   id: 'js',
   layer: 'js',
+  executors: JS_EXECUTORS,
 
   ownsProject(tree, project) {
     try {
-      return (readProjectConfiguration(tree, project).targets?.build?.executor ?? '').startsWith('@nx/js:');
+      const executor = readProjectConfiguration(tree, project).targets?.build?.executor ?? '';
+      return JS_EXECUTORS.some((prefix) => executor.startsWith(prefix));
     } catch {
       return false;
     }

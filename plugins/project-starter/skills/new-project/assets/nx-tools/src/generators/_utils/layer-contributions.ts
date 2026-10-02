@@ -23,9 +23,14 @@ function normalise(given: readonly LayerId[] | string | undefined): LayerId[] | 
   return list.map((entry) => entry.trim()).filter(Boolean);
 }
 
-/** The devcontainer fragments of these layers, each tagged with its layer id. */
-export function devcontainerFragments(layers: readonly LayerDescriptor[]): { id: LayerId; fragment: DevcontainerFragment }[] {
-  return layers.filter((entry) => entry.devcontainer).map((entry) => ({ id: entry.id, fragment: entry.devcontainer! }));
+/** The devcontainer fragments of these layers, resolved against the workspace, each tagged with its layer id. */
+export function devcontainerFragments(
+  tree: Tree,
+  layers: readonly LayerDescriptor[],
+): { id: LayerId; fragment: DevcontainerFragment }[] {
+  return layers.flatMap(({ id, devcontainer }) =>
+    devcontainer ? [{ id, fragment: typeof devcontainer === 'function' ? devcontainer(tree) : devcontainer }] : [],
+  );
 }
 
 /** The `.gitignore` blocks these layers' tooling needs, in registry order. */

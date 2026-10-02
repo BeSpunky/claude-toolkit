@@ -69,9 +69,10 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadTypeScript, type TsArrayLiteralExpression, type TsNode } from '../_utils/typescript-api';
-import { ADAPTERS, adapterOf, applicationsWith } from '../../adapters/registry';
+import { adapterOf, applicationsWith } from '../../adapters/registry';
+import { workspaceStacksWith } from '../../adapters/workspace';
 import { hasDependency } from '../../layers/evidence';
-import { isPresent } from '../../layers/registry';
+import { FIREBASE_DEFAULT_PORTS, HOUSE_EMULATORS } from './emulator-ports';
 import firebaseClientGenerator from '../firebase-client/generator';
 
 interface FirebaseEmulatorsSchema {
@@ -92,12 +93,14 @@ interface FirebaseEmulatorsSchema {
 // localhost (127.0.0.1)" because the emulator bound to ::1 (IPv6) or a container-internal
 // interface only.
 function canonicalEmulatorsBlock() {
+  // The ui is `enabled: true` explicitly; every emulator binds 0.0.0.0. Ports: emulator-ports.ts (one table).
   return {
-    auth:      { host: '0.0.0.0', port: 9099 },
-    firestore: { host: '0.0.0.0', port: 8080 },
-    storage:   { host: '0.0.0.0', port: 9199 },
-    functions: { host: '0.0.0.0', port: 5001 },
-    ui:        { enabled: true, host: '0.0.0.0', port: 4000 },
+    ...Object.fromEntries(
+      HOUSE_EMULATORS.map((name) => [
+        name,
+        { ...(name === 'ui' ? { enabled: true } : {}), host: '0.0.0.0', port: FIREBASE_DEFAULT_PORTS[name] },
+      ]),
+    ),
     singleProjectMode: true,
   };
 }
@@ -222,9 +225,7 @@ export default async function firebaseEmulatorsGenerator(
   const serverBanned = [
     'firebase',
     'firebase/*',
-    ...ADAPTERS.filter((stack) => stack.firebase && isPresent(tree, stack.layer)).flatMap(
-      (stack) => stack.firebase!.serverBannedImports,
-    ),
+    ...workspaceStacksWith(tree, 'firebase').flatMap((stack) => stack.firebase.serverBannedImports),
   ];
   const eslintConfigPath = 'eslint.config.mjs';
   if (tree.exists(eslintConfigPath)) {

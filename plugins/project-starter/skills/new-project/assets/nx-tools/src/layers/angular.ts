@@ -13,6 +13,10 @@
 // the app. The executor evidence catches an Angular app built in a workspace that declares neither.
 import type { LayerDescriptor } from './descriptor';
 import { projectExists } from './evidence';
+import { adapter } from '../adapters/registry';
+
+/** The Angular stack adapter — THE source of what makes a target Angular, and of its dev-server's port. */
+const stack = adapter('angular');
 
 export const angular: LayerDescriptor = {
   id: 'angular',
@@ -20,7 +24,7 @@ export const angular: LayerDescriptor = {
   requires: ['nx', 'node'],
   evidence: {
     dependencies: ['@angular/core', '@nx/angular'],
-    executors: ['@angular/build:', '@angular-devkit/build-angular:'],
+    executors: stack.executors,
   },
   ensurable: { scaffold: true, sync: false },
   ensureHint: '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`',
@@ -43,7 +47,7 @@ export const angular: LayerDescriptor = {
   docSections: ['angular', 'ui', 'monorepo'],
   devcontainer: {
     extensions: ['Angular.ng-template'],
-    ports: [{ port: 4200, label: 'Angular Dev Server', onAutoForward: 'openPreview' }],
+    ports: [{ port: stack.devServer!.basePort, label: 'Angular Dev Server', onAutoForward: 'openPreview' }],
     mounts: [
       {
         mount: 'source=${localWorkspaceFolderBasename}-angular,target=${containerWorkspaceFolder}/.angular,type=volume',

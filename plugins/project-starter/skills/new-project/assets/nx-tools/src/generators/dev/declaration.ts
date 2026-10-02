@@ -39,6 +39,8 @@ export interface DevDeclaration {
 export interface DevFragment {
   processes: DevProcess[];
   install?: DevInstall;
+  /** Why this fragment contributes nothing, when the reader should hear it — logged with the seed report. */
+  skipped?: string;
 }
 
 export function readDeclaration(tree: Tree): DevDeclaration | null {
@@ -61,7 +63,7 @@ export type SeedReport = string[];
  * names are the app's substitution namespace) — it is reported instead, so the conflict is visible.
  */
 export function seedApp(tree: Tree, app: string, fragment: DevFragment): SeedReport {
-  const report: SeedReport = [];
+  const report: SeedReport = fragment.skipped ? [fragment.skipped] : [];
   if (fragment.processes.length === 0 && !fragment.install) return report;
 
   const decl: DevDeclaration = readDeclaration(tree) ?? { apps: {} };
