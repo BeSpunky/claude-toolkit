@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-02
+summary: Toolkit supports apps/+libs/ and packages/ layouts and Nx TS-solution (workspaces) linking — both detected on sync, chosen at scaffold via --layout/--linking; Angular rides an undocumented upstream opt-out guarded by a weekly tripwire.
+tags: [nx-tools, scaffolder, workspace-layout, ts-solution, angular, linking]
+---
+
 # Workspace layouts — decision (draft, awaiting confirmation)
 
 ## Proposed design
@@ -55,3 +62,7 @@ Asked "Shall I go ahead and implement it?" — the user: "Yes".
 ## Angular projects declare their own compiler contract (2026-10-02)
 
 The real-workspace tripwire (U7) failed where U4's hand-built workspace passed: a genuine `--preset=ts` base tsconfig carries `emitDeclarationOnly: true` and `lib: ["es2022"]` — right for tsc-built packages, wrong for Angular (ng-packagr NG4006, TS5069, no DOM). Decision: in a `workspaces`-linked workspace, every Angular project's own `tsconfig.json` states the compiler options Angular needs (`emitDeclarationOnly: false`, the base `lib` plus `dom`), applied inside the Angular adapter's TS-solution seam — the one place that already knows "Angular in a TS-solution workspace". Not in the base (that would break the packages it is correct for), not per call site.
+
+## Conclusion — 2026-10-02
+
+Shipped as nx-tools 0.37.0 / project-starter 0.37.0. Merged into development on the user's go (typed "טקד" — "yes" on a Hebrew layout). Not covered: Module Federation host/remote in TS-solution workspaces.
