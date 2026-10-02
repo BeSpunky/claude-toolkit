@@ -28,3 +28,22 @@ Offered: folder convention now, TS-solution as a follow-up (recommended). The us
 > "Support both"
 
 So TS-solution workspaces (package.json-defined projects, npm workspaces, TS project references) are **in scope**. The folder-layout design above stands; TS-solution needs its own design (project-config writes, library linking, Angular's refusal) — researched next, confirmed before implementation.
+
+## Combined design (proposed 2026-10-02, after research R1–R3 — see handoffs/*-fanout.md)
+
+Two **orthogonal** workspace facts, each modelled once, each **detected** on sync and **chosen** only at scaffold:
+
+| Concept | Values | Detected from |
+| --- | --- | --- |
+| **Layout** — where projects live | `apps-libs` (`apps/`,`libs/`) · `packages` (`packages/`) · today's hybrid by inference | nx.json `workspaceLayout` → existing projects → default |
+| **Linking** — how projects reach each other | `paths` (project.json + tsconfig `paths`) · `workspaces` (TS-solution: package.json projects, PM workspaces, project references) | our own copy of Nx's `isUsingTsSolutionSetup` predicate (it's only exported from `@nx/js/internal`) |
+
+**Linking is a strategy behind one port** (`_utils/linking/`): `link(lib → consumer)`, `resolve(importPath)`, `retarget`, `unlink`. `paths` = today's behaviour; `workspaces` = workspaces glob + root `references` + consumer `package.json` dependency (`workspace:*` / `*` by package manager) + `exports` with the custom condition. Replaces the 4 duplicated root-tsconfig picks and the "paths only" policy comments.
+
+**Project config through one seam**: devkit's `updateProjectConfiguration` already writes the `nx` block of a package.json-only project. What's left: one `projectConfigFile()` helper replacing 4 duplicated copies and the hard-coded `project.json` writes (shared-browser, worktree-domains, firebase-emulators, design-system's `addProjectConfiguration`); `projectType` reads replaced by asking the stack adapter "is this your app?"; layer evidence (`layers/cli.ts`) scans package.json projects too.
+
+**Angular in a TS-solution workspace = honest hybrid.** The Angular adapter calls `@nx/angular` init/application/library with `NX_IGNORE_UNSUPPORTED_TS_SETUP` set for that one call only (upstream's own opt-out). Angular projects are `project.json` islands that consume workspace packages through their `exports`; documented as such in HOUSE.md. `host`/`remote` stay refused. Risk: the env var is undocumented and could change in a minor — a fixture test (TS-solution + Angular app + typecheck/build) is the tripwire.
+
+**Scaffold**: `--layout=apps-libs|packages`, `--linking=paths|workspaces`; defaults = today's output. App discovery leaves bash (`apps/*` glob) for the package (`layers/cli.js`), layout- and linking-agnostic.
+
+**Migrations**: nothing to migrate — no existing project's shape changes; both facts are detected, and existing projects detect as exactly what they are. (Stated deliberately per the release rule.)
