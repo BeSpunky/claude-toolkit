@@ -48,11 +48,11 @@
 #   [app-name]     scaffold: the first app's name (default: the project name) — only when an ensured layer's
 #                  stack creates apps (the angular preset); refused otherwise. sync: the app to refresh.
 #
-# Sync auto-backup: --sync snapshots the project to a git tag (sync-backup-<ts>) BEFORE running
-# any generator, so a regenerated file (e.g. firebase.config.ts) is always recoverable — review with
-# `git diff <tag>`, restore with `git checkout <tag> -- <path>`. A clean tree needs no tag (HEAD is the
-# restore point). If a backup is wanted but impossible (not a git repo) or fails, sync ABORTS rather
-# than change files unprotected. Opt out with --no-backup.
+# Sync restore point: preflight refuses a dirty tree, so a sync only ever starts from a CLEAN one — and then
+# HEAD already is the pre-sync state, so a regenerated file (e.g. firebase.config.ts) is always recoverable:
+# review with `git diff <sha>`, restore with `git checkout <sha> -- <path>`. A directory that is not a git
+# repository has no restore point, so sync ABORTS there rather than change files unprotected — unless
+# --no-backup says that is understood.
 #
 # Sync CONSENT GATE (--yes): a sync rewrites generated files and takes minutes — it must never
 # happen because something *inferred* that it should. The SessionStart hook that
@@ -134,7 +134,9 @@ USAGE
                     For developing the toolkit itself; leaves the project holding an unpublished build.
   --yes, -y         Assert that a human explicitly agreed to this sync, in this conversation. The sync
                     refuses to run unattended without it. Never pass it to satisfy the gate.
-  --no-backup       Skip the pre-sync git restore point. Migrations are ONE-WAY; there is no undo without it.
+  --no-backup       Sync a directory that is NOT a git repository, with no restore point at all.
+                    Migrations are ONE-WAY; there is no undo without one. (In a git repository the
+                    restore point is the clean HEAD preflight requires — nothing to skip.)
   --no-github       Scaffold only: do not create a private GitHub repo.
   --docker          Force the container even when the local Node would do.
   --print-inner     Render the command sequence this run would execute, print it, and exit without
@@ -151,7 +153,7 @@ FIREBASE=0
 VOICE=0    # --voice: bridge the host's audio (WSLg or PulseAudio/PipeWire) into the devcontainer + provision bespunky-voice (opt-in).
 STAGING=0  # --staging: also scaffold a first-class staging environment (requires --firebase).
 GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
-BACKUP=1   # sync snapshots the project to a git tag BEFORE mutating; --no-backup opts out.
+BACKUP=1   # sync refuses a non-git directory (no restore point); --no-backup accepts that.
 CONSENT=0  # --yes: asserts a human explicitly agreed to this sync (see the consent gate above).
 FORCE_DOCKER=0  # --docker: use the base image even when the local Node would do (escape hatch).
 ENSURE_ARG=""   # --ensure=<csv>: layers to BRING INTO BEING (see the layer model below). Empty = detect only.
@@ -501,26 +503,47 @@ esac
 #                 re-detects, does not see it, so the tooling would rot with the stamp claiming otherwise.
 #   via:<id>    — creatable only together with <id>, whose creation produces it (a scaffold's `web` is the
 #                 dev-server of the Angular app the `angular` layer creates).
-#   requires    — a SCAFFOLD starts from an empty directory, so nothing can be detected: everything a requested
-#                 layer requires is CREATED WITH IT (the closure below, announced — asking for `angular` and
-#                 being told to also type `node` would be the script refusing to do arithmetic it can do). A
-#                 sync may satisfy a requirement by detection instead; the planner reports one that is unmet.
+#   requires    — every layer a requested one requires must be THERE when it is created: either already in the
+#                 workspace (detected — a sync only; a scaffold's directory is empty) or created by this run.
+#                 Whatever is missing is ADDED to the ensure set (the closure below, announced — asking for
+#                 `angular` and being told to also type `node` would be the script refusing to do arithmetic it
+#                 can do), and then has to pass the same ensurability check as a requested layer. So a sync that
+#                 asks for a layer whose requirement it can neither detect nor create is refused HERE, before
+#                 anything is written — not planned, half-applied and stamped as if it had worked.
 for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
   _layer_listed "$_l" "$HOUSE_LAYERS" || {
     echo "ERROR: unknown layer '$_l' in --ensure. Known layers: $HOUSE_LAYERS" >&2; exit 1; }
 done
-if [ "$MODE" = "scaffold" ]; then
-  _closed=""; _added=""
-  while [ "$_closed" != "$ENSURE_LAYERS" ]; do
-    _closed="$ENSURE_LAYERS"
-    for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
-      for _r in $(house_layer_requires "$_l" | tr ',' ' '); do
-        _layer_listed "$_r" "$ENSURE_LAYERS" || { ENSURE_LAYERS="$ENSURE_LAYERS,$_r"; _added="$_added $_r (for $_l)"; }
-      done
+# What the workspace already HAS, from the registry's own evidence (layers.sh) — read, never declared. Empty for a
+# scaffold, whose directory does not exist yet.
+EVIDENT=""
+[ "$MODE" = "sync" ] && EVIDENT="$(house_layers_evident "$TARGET")"
+# A layer a sync cannot create but the workspace already has needs nothing created: the sync REFRESHES it, as it
+# does every detected layer. Refusing it with "add it with its own tooling" would be false about a layer that is
+# right there (a hand-written .bespunky/dev.json already makes `web` present).
+if [ -n "$EVIDENT" ]; then
+  _kept=""
+  for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+    if [ "$(house_layer_ensurable_sync "$_l")" = "no" ] && _layer_listed "$_l" "$EVIDENT"; then
+      echo "NOTE: the '$_l' layer is already present here (detected) — the sync refreshes it; nothing to create."
+    else
+      _kept="${_kept:+$_kept,}$_l"
+    fi
+  done
+  ENSURE_LAYERS="$_kept"
+fi
+_closed=""; _added=""; _added_for=""
+while [ "$_closed" != "$ENSURE_LAYERS" ]; do
+  _closed="$ENSURE_LAYERS"
+  for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+    for _r in $(house_layer_requires "$_l" | tr ',' ' '); do
+      _layer_listed "$_r" "$ENSURE_LAYERS" || _layer_listed "$_r" "$EVIDENT" || {
+        ENSURE_LAYERS="$ENSURE_LAYERS,$_r"; _added="$_added $_r (for $_l)"; _added_for="$_added_for $_r:$_l"; }
     done
   done
-  [ -n "$_added" ] && echo "Also ensuring what those layers require:$_added"
-fi
+done
+# Which requested layer pulled <id> in (empty when it was asked for directly).
+_needed_by() { local _e; for _e in $_added_for; do [ "${_e%%:*}" = "$1" ] && { printf '%s' "${_e#*:}"; return 0; }; done; return 0; }
 # --- how does this project HOST Nx? ----------------------------------------------------------------------------
 # Nx is the floor under every house run, but "has Nx" must not mean "is a Node project". Two hosting models:
 #
@@ -546,58 +569,6 @@ if [ "$MODE" = "sync" ]; then
   fi
 elif ! _layer_listed node "$ENSURE_LAYERS"; then
   HOST="wrapper"
-fi
-
-# One spelling of the set from here on: registry order, each layer once.
-_ordered=""
-for _l in $(printf '%s' "$HOUSE_LAYERS" | tr ',' ' '); do
-  _layer_listed "$_l" "$ENSURE_LAYERS" && _ordered="${_ordered:+$_ordered,}$_l"
-done
-ENSURE_LAYERS="$_ordered"
-for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
-  if [ "$MODE" = "scaffold" ]; then _ens="$(house_layer_ensurable_scaffold "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SCAFFOLD"
-  else _ens="$(house_layer_ensurable_sync "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SYNC"; fi
-  case "$_ens" in
-    yes) ;;
-    via:*)
-      _via="${_ens#via:}"
-      _layer_listed "$_via" "$ENSURE_LAYERS" || {
-        echo "ERROR: a $MODE can ensure the '$_l' layer only together with '$_via', whose creation produces it." >&2
-        echo "       Add it: --ensure=$ENSURE_LAYERS,$_via" >&2
-        exit 1; } ;;
-    *)
-      if [ "$MODE" = "scaffold" ]; then
-        echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
-        echo "       Scaffold the project, then add it with its own tooling:" >&2
-      else
-        echo "ERROR: --sync cannot ENSURE the '$_l' layer — it can only refresh a layer that is already there." >&2
-        echo "       A sync brings house tooling up to date; it does not add a framework to your project." >&2
-        echo "       Add the layer with its own tooling, then re-run --sync and it will be DETECTED:" >&2
-      fi
-      # The hint is written host-neutrally (`nx …`); spell it the way THIS repo runs Nx — `./nx` on a wrapper host.
-      _hint="$(house_layer_hint "$_l")"
-      [ "$HOST" = "wrapper" ] && _hint="$(printf '%s' "$_hint" | sed 's/`nx /`.\/nx /g')"
-      echo "         $_hint" >&2
-      echo "       Ensurable by a $MODE: $_ensurable" >&2
-      exit 1 ;;
-  esac
-done
-[ -n "$PRESET" ] && echo "Preset: $PRESET — $(house_preset_title "$PRESET")"
-[ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
-
-# --- the FIRST APP: only a layer whose stack creates apps makes one ------------------------------------------
-# Derived from the registry projection (house_layer_app_stack: the stack adapter with an `apps` port for that
-# layer), never from a layer name here. A scaffold that ensures no such layer creates no app — and an app name on
-# the command line is then refused rather than silently ignored: it would read as if something used it.
-APP_STACK=""
-for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
-  _s="$(house_layer_app_stack "$_l")"
-  [ -n "$_s" ] && { APP_STACK="$_s"; break; }
-done
-if [ "$MODE" = "scaffold" ] && [ -n "$APP_ARG" ] && [ -z "$APP_STACK" ]; then
-  echo "ERROR: an app name ('$APP_ARG') was given, but nothing this scaffold ensures creates an app" >&2
-  echo "       (layers: $ENSURE_LAYERS). Ask for a stack that does, e.g.:  scaffold.sh --preset=angular $PROJECT $APP_ARG" >&2
-  exit 1
 fi
 
 # --- resolve the package manager + the three commands the rendered sequences use -------------------------------
@@ -645,6 +616,86 @@ elif [ "$MODE" = "sync" ]; then
   fi
 fi
 
+# --- the HOST: how this run invokes Nx and where the toolkit lives ----------------------------------------------
+# Every rendered block goes through these three — and so does every hint this script prints (a refusal that tells
+# a yarn user to type a bare `nx g` names a command their shell does not have), so the node and wrapper hosting models differ in exactly one place.
+#   NX_RUN     the nx command (the package manager's, or the wrapper script)
+#   NXT_DIR    where @bespunky/nx-tools is installed, relative to the workspace root — the layer CLI, the probe
+#              and the --local collector all read the INSTALLED package from here
+#   VENDOR_DIR the installed-packages directory a per-migration commit must never sweep in
+if [ "$HOST" = "wrapper" ]; then
+  NX_RUN="./nx"
+  NXT_DIR=".nx/installation/node_modules/@bespunky/nx-tools"
+  VENDOR_DIR=".nx/installation"
+else
+  NX_RUN="$PM_EXEC nx"
+  NXT_DIR="node_modules/@bespunky/nx-tools"
+  VENDOR_DIR="node_modules"
+fi
+
+# One spelling of the set from here on: registry order, each layer once.
+_ordered=""
+for _l in $(printf '%s' "$HOUSE_LAYERS" | tr ',' ' '); do
+  _layer_listed "$_l" "$ENSURE_LAYERS" && _ordered="${_ordered:+$_ordered,}$_l"
+done
+ENSURE_LAYERS="$_ordered"
+# Every layer is checked, THEN one verdict — a request wrong in two ways says so once (asking for `angular` on a repo
+# with no package.json lacks `node` AND `angular`, and both hints are what the user needs).
+_refused=0
+for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+  if [ "$MODE" = "scaffold" ]; then _ens="$(house_layer_ensurable_scaffold "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SCAFFOLD"
+  else _ens="$(house_layer_ensurable_sync "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SYNC"; fi
+  case "$_ens" in
+    yes) ;;
+    via:*)
+      _via="${_ens#via:}"
+      _layer_listed "$_via" "$ENSURE_LAYERS" || {
+        echo "ERROR: a $MODE can ensure the '$_l' layer only together with '$_via', whose creation produces it." >&2
+        echo "       Add it: --ensure=$ENSURE_LAYERS,$_via" >&2
+        _refused=1; } ;;
+    *)
+      _for="$(_needed_by "$_l")"
+      if [ -n "$_for" ]; then
+        echo "ERROR: the '$_for' layer requires '$_l', which this repo does not have — and a $MODE cannot create it." >&2
+        echo "       Add '$_l' with its own tooling, then re-run and it will be DETECTED:" >&2
+      elif [ "$MODE" = "scaffold" ]; then
+        echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
+        echo "       Scaffold the project, then add it with its own tooling:" >&2
+      else
+        echo "ERROR: --sync cannot ENSURE the '$_l' layer — this repo does not have it, and a sync only refreshes" >&2
+        echo "       a layer that is already there. It brings house tooling up to date; it does not add a framework." >&2
+        echo "       Add the layer with its own tooling, then re-run --sync and it will be DETECTED:" >&2
+      fi
+      # The hint is written host-neutrally (`nx …`); spell it the way THIS repo runs Nx — `./nx` on a wrapper
+      # host, `yarn nx` / `npx --no-install nx` / `pnpm exec nx` on a package.json host.
+      _hint="$(house_layer_hint "$_l")"
+      _hint="$(printf '%s' "$_hint" | sed "s|\`nx |\`$NX_RUN |g")"
+      echo "         $_hint" >&2
+      _refused=1 ;;
+  esac
+done
+if [ "$_refused" = "1" ]; then
+  echo "       Ensurable by a $MODE: $_ensurable. Nothing has been written." >&2
+  exit 1
+fi
+[ -n "$PRESET" ] && echo "Preset: $PRESET — $(house_preset_title "$PRESET")"
+[ -n "$_added" ] && echo "Also ensuring what those layers require:$_added"
+[ -n "$ENSURE_LAYERS" ] && echo "Layers to ensure: $ENSURE_LAYERS"
+
+# --- the FIRST APP: only a layer whose stack creates apps makes one ------------------------------------------
+# Derived from the registry projection (house_layer_app_stack: the stack adapter with an `apps` port for that
+# layer), never from a layer name here. A scaffold that ensures no such layer creates no app — and an app name on
+# the command line is then refused rather than silently ignored: it would read as if something used it.
+APP_STACK=""
+for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
+  _s="$(house_layer_app_stack "$_l")"
+  [ -n "$_s" ] && { APP_STACK="$_s"; break; }
+done
+if [ "$MODE" = "scaffold" ] && [ -n "$APP_ARG" ] && [ -z "$APP_STACK" ]; then
+  echo "ERROR: an app name ('$APP_ARG') was given, but nothing this scaffold ensures creates an app" >&2
+  echo "       (layers: $ENSURE_LAYERS). Ask for a stack that does, e.g.:  scaffold.sh --preset=angular $PROJECT $APP_ARG" >&2
+  exit 1
+fi
 
 # --- sync consent gate (see the header) ---
 # The point of this gate is that it cannot be satisfied by inference. A sync is a real, minutes-long,
@@ -655,14 +706,14 @@ fi
 # written. An unconsented sync must fail for want of CONSENT, not trip over a missing daemon on its way to
 # the same place: "docker not found" would send an agent off to fix Docker and come back (which is precisely
 # the inference this gate exists to stop) — and, worse, is now a lie, since the local Node usually suffices.
-# --print-inner is exempt: it RENDERS the program and exits (line ~1772) without running a single command
+# --print-inner is exempt: it RENDERS the program and exits (see --print-inner below) without running a single command
 # of it, so there is nothing here to consent to. The gate guards the *act* of syncing, not describing it —
 # and the render test (tools/test-scaffold/render.test.sh) drives exactly `--sync --yes --print-inner` under
 # CI=true, which the unconditional CI refusal below would otherwise kill before it could render anything.
 if [ "$MODE" = "sync" ] && [ "$PRINT_INNER" != "1" ]; then
   if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
     echo "ERROR: refusing to sync in CI — a sync rewrites generated files and no human is here to agree." >&2
-    echo "       Run it locally, review the diff against the backup tag, and commit the result." >&2
+    echo "       Run it locally, review the diff against the pre-sync HEAD, and commit the result." >&2
     exit 1
   fi
 
@@ -670,7 +721,7 @@ if [ "$MODE" = "sync" ] && [ "$PRINT_INNER" != "1" ]; then
     if [ -t 0 ] && [ -t 1 ]; then
       echo "About to sync '$TARGET': re-runs the house generators, REWRITING generated files"
       echo "(HOUSE.md, .claude/settings.json, .devcontainer/*, serve/worktree/design-system targets)."
-      echo "A pre-sync snapshot is taken first (git tag), unless --no-backup."
+      echo "It starts only from a clean git tree, so HEAD is the restore point."
       printf "Proceed? [y/N] "
       read -r reply
       case "$reply" in
@@ -717,6 +768,18 @@ else
   ASSETS_ROOT="/assets"              # ASSETS_DIR is mounted here (ro)
   RUNTIME_DESC="image=$IMAGE"
 fi
+# THE ROOTS REACH THE PROGRAM AS ENVIRONMENT, NEVER AS TEXT. The project and app names are validated before they
+# are rendered (_check_name), but the directory ABOVE the project, the assets path and the git identity are not
+# names and cannot be validated into an alphabet — an O'Brien in the parent path closed the rendered quote, and
+# the cd's argument ran on into the next lines of the program; a crafted parent directory could inject a command.
+# Quoting each site would hold only until the next site is added. So the program refers to them as variables, and
+# the runtime hands them over (env for the native run, -e for the container).
+INNER_ENV=(
+  "SCAFFOLD_WORK_ROOT=$WORK_ROOT"
+  "SCAFFOLD_ASSETS_ROOT=$ASSETS_ROOT"
+  "SCAFFOLD_GIT_NAME=$GIT_NAME"
+  "SCAFFOLD_GIT_EMAIL=$GIT_EMAIL"
+)
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
 [ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (host audio bridge — WSLg or PulseAudio/PipeWire — + espeak-ng + bespunky-voice plugin)"
@@ -764,21 +827,6 @@ APP_STAGING_FLAG=""
 # executing it, and ANY stderr during rendering means something in a string was evaluated that should not
 # have been. Pipe it into `bash -n /dev/stdin` to syntax-check the result.
 # ============================================================================================================
-# --- the HOST, rendered: how this run invokes Nx and where the toolkit lives --------------------------------------
-# Every block below goes through these three, so the node and wrapper hosting models differ in exactly one place.
-#   NX_RUN     the nx command (the package manager's, or the wrapper script)
-#   NXT_DIR    where @bespunky/nx-tools is installed, relative to the workspace root — the layer CLI, the probe
-#              and the --local collector all read the INSTALLED package from here
-#   VENDOR_DIR the installed-packages directory a per-migration commit must never sweep in
-if [ "$HOST" = "wrapper" ]; then
-  NX_RUN="./nx"
-  NXT_DIR=".nx/installation/node_modules/@bespunky/nx-tools"
-  VENDOR_DIR=".nx/installation"
-else
-  NX_RUN="$PM_EXEC nx"
-  NXT_DIR="node_modules/@bespunky/nx-tools"
-  VENDOR_DIR="node_modules"
-fi
 # Exact-pin entries into nx.json's installation.plugins — the wrapper's equivalent of a devDependency. Pairs of
 # <package> <spec> as arguments; the wrapper reinstalls .nx/installation on its next invocation to match.
 NX_WRAPPER_PIN="node -e \"const fs=require('fs'),f='nx.json',j=JSON.parse(fs.readFileSync(f,'utf8'));j.installation=j.installation||{};j.installation.plugins=j.installation.plugins||{};const a=process.argv.slice(1);for(let i=0;i<a.length;i+=2)j.installation.plugins[a[i]]=a[i+1];fs.writeFileSync(f,JSON.stringify(j,null,2)+'\\\\n')\""
@@ -857,9 +905,9 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   # that can see this path (the outer shell never learns it).
   INSTALL_NX_TOOLS="_local_stage=\"\$(mktemp -d)\"
   trap 'rm -rf \"\$_local_stage\"' EXIT INT TERM
-  cp -r '$ASSETS_ROOT/nx-tools' \"\$_local_stage/nx-tools\"
+  cp -r \"\$SCAFFOLD_ASSETS_ROOT/nx-tools\" \"\$_local_stage/nx-tools\"
   mkdir -p \"\$_local_stage/ts\"
-  (cd \"\$_local_stage/ts\" && npm init -y >/dev/null 2>&1 && npm install --no-save --no-audit --no-fund --silent 'typescript@^5' && node '$ASSETS_ROOT/compile-generators.mts' \"\$_local_stage/nx-tools\")
+  (cd \"\$_local_stage/ts\" && npm init -y >/dev/null 2>&1 && npm install --no-save --no-audit --no-fund --silent 'typescript@^5' && node \"\$SCAFFOLD_ASSETS_ROOT/compile-generators.mts\" \"\$_local_stage/nx-tools\")
   _local_tgz=\"\$(cd \"\$_local_stage/nx-tools\" && npm pack --silent --pack-destination \"\$_local_stage\")\"
   echo \"[tools] --local: installing the working tree (\$_local_tgz) instead of the published package\"
 $LOCAL_ADD
@@ -1082,6 +1130,7 @@ if [ -n \"\$_REFUSE_CODES\" ] || [ -n \"\$_ASK_CODES\" ]; then
   fi
   [ -n \"\$_REFUSE_TEXT\" ] && echo \"\$_REFUSE_TEXT\" >&2
   [ -n \"\$_ASK_TEXT\" ] && echo \"\$_ASK_TEXT\" >&2
+  _stage refused
   exit 1
 fi"
 
@@ -1296,14 +1345,6 @@ else
   MIGRATE_COLLECT="  NX_MIGRATE_USE_LOCAL=true $NX_RUN migrate '@bespunky/nx-tools@$NX_TOOLS_VERSION' --from=\"@bespunky/nx-tools@\$MIGRATE_FROM\""
 fi
 
-# Where a user's swept-up uncommitted work can be recovered from — which depends entirely on whether this run
-# took a restore point. Resolved at render time, because --no-backup is known then.
-if [ "$BACKUP" = "1" ]; then
-  UNCOMMITTED_RECOVERY="They are in the backup tag above if you need them back out."
-else
-  UNCOMMITTED_RECOVERY="This run was given --no-backup, so there is NO restore point: git is the only copy."
-fi
-
 MIGRATE_RUN="
 if [ -z \"\$MIGRATE_FROM\" ]; then
   echo '[migrate] @bespunky/nx-tools was not installed here before this run — baseline, nothing to migrate from'
@@ -1315,17 +1356,17 @@ else
   # --create-commits gives ONE COMMIT PER MIGRATION, which is the difference between a reviewable ladder and
   # a single unreadable blob. A sync can apply many one-way deltas across every project in the workspace at
   # once; landing them as one diff makes \`git log -p\` useless exactly where it matters most, and reverting a
-  # single bad migration impossible without unpicking it by hand. The backup tag is the blunt undo for the
+  # single bad migration impossible without unpicking it by hand. The pre-sync HEAD is the blunt undo for the
   # whole run; these commits are the fine-grained one.
   #
   # Two things Nx's implementation forces us to handle rather than pass the flag blindly:
   #   1. It is a HARD ERROR outside a git repo ('--create-commits requires a git repository'). A sync
-  #      normally cannot reach here without git, because the backup aborts first — but --no-backup skips
+  #      normally cannot reach here without git, because the restore-point check aborts first — but --no-backup skips
   #      that, and then this would kill an otherwise fine run over a bookkeeping nicety. Detect and drop it.
-  #   2. Every commit is built with \`git add -A\`, so anything uncommitted when the sync started is committed
-  #      too — into a dedicated 'checkpoint before running migrations' commit that Nx makes before the first
-  #      migration. That is Nx's design, not something we can scope down, so the only honest thing is to say
-  #      so before it happens; the backup tag already captured that work.
+  #   2. Every commit is built with \`git add -A\`, so whatever is uncommitted when the ladder starts is
+  #      committed too — into a dedicated 'checkpoint before running migrations' commit that Nx makes before
+  #      the first migration. Preflight has already refused a dirty tree, so that is only ever THIS RUN's own
+  #      work so far (the floor, the toolkit install), and the note below says exactly that.
   #   3. That same \`git add -A\` will happily commit node_modules on a repo that does not ignore it — which
   #      is a live case, because --ensure=agent exists to retrofit repos of any shape. Thousands of vendored
   #      files landing in someone's history as a side effect of a version bump is far worse than losing the
@@ -1369,13 +1410,12 @@ else
           echo '/migrations.json' >> \"\$_ex\" 2>/dev/null || true
         fi
       fi
+      # The tree was clean when preflight passed, so any change here is THIS run's own: the floor and the
+      # toolkit install. Saying the tree has uncommitted changes, with a pointer to a backup, described the
+      # user's work on every migrating sync of a clean tree when the dirt was the sync's own.
       if [ -n \"\$(git status --porcelain 2>/dev/null)\" ]; then
-        echo '[migrate] NOTE: this tree has uncommitted changes. Nx commits each migration with \"git add -A\",'
-        echo '[migrate]   so those changes are committed too, in the checkpoint commit it makes before the'
-        echo '[migrate]   first migration.'
-        # Rendered against THIS run: naming a backup tag that --no-backup never created sends someone
-        # looking for a recovery point that does not exist, at the one moment they actually need it.
-        echo '[migrate]   $UNCOMMITTED_RECOVERY'
+        echo '[migrate] the toolkit install this run just made is committed first, in the checkpoint commit Nx'
+        echo '[migrate]   makes before the first migration.'
       fi
     fi
   else
@@ -1531,6 +1571,93 @@ if ! node -e \"require.resolve('@nx/devkit')\" >/dev/null 2>&1; then
 fi"
 fi
 
+# --- the RESTORE POINT, decided before anything runs — and READ, never made -----------------------------------
+# A sync REWRITES files on two counts: the generators regenerate what they own outright (firebase.config.ts, for
+# one), and the MIGRATIONS apply one-way deltas with no reverse. So it must start from a point it can be undone to.
+#
+# PREFLIGHT MAKES THAT POINT FREE. It refuses a dirty tree, so every sync that runs at all starts from a clean one,
+# and then HEAD already is the pre-sync state. The tag this used to build through a throwaway index existed for the
+# dirty case — which preflight now refuses — and it was built BEFORE preflight ran, so a refused sync had already
+# written a tag (and the advice printed on failure, reset --hard to that tag, put a synthetic WIP commit onto the
+# user's branch). Reading HEAD writes nothing, so a refusal stays the "nothing has been written" it claims to be.
+#
+#   SYNC_BASE    a diffable commit for SYNC_NEXT; the EMPTY TREE for a repository with no commits yet, which is
+#                exactly what was there.
+#   RESTORE_SHA  the commit a failed run is restored to; empty when there is none.
+#   BACKUP_REF   the same, as display text for the summary lines.
+BACKUP_REF="(--no-backup)"
+RESTORE_SHA=""
+SYNC_BASE=""
+RESTORE_BLOCK=""
+if [ "$MODE" = "sync" ]; then
+  if git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if RESTORE_SHA="$(git -C "$TARGET" rev-parse --verify -q HEAD 2>/dev/null)"; then
+      BACKUP_REF="HEAD(${RESTORE_SHA:0:7})"
+      SYNC_BASE="$RESTORE_SHA"
+      # Printed by the PROGRAM, after the preflight verdict: a refused run has no restore point to announce.
+      RESTORE_BLOCK="
+echo 'BACKUP_OK: working tree clean — the pre-sync restore point is $BACKUP_REF ($RESTORE_SHA).'
+echo '  Review this sync: git diff $RESTORE_SHA ; restore a file: git checkout $RESTORE_SHA -- <path>'"
+    else
+      RESTORE_SHA=""
+      BACKUP_REF="(no commits yet)"
+      SYNC_BASE="$(git -C "$TARGET" hash-object -t tree /dev/null)"
+    fi
+  elif [ "$BACKUP" = "1" ]; then
+    echo "BACKUP_ABORT: '$TARGET' is not a git repository, so a sync would change files with no way back." >&2
+    echo "  Create a restore point first:  (cd \"$TARGET\" && git init && git add -A && git commit -m 'pre-sync')" >&2
+    echo "  …or re-run with --no-backup to sync without one." >&2
+    exit 1
+  else
+    echo "WARNING: --no-backup on a directory that is not a git repository — there is NO restore point, and the"
+    echo "         house migrations are ONE-WAY. If one does the wrong thing to this project there is no undo."
+  fi
+fi
+
+# --- two lockfiles: damage this toolkit caused, and will otherwise keep believing ----------------------------
+# Before nx-tools 0.18.0 the generated post-create.sh hardcoded `yarn install`, while scaffold.sh already
+# detected npm and pnpm correctly. So a devcontainer build on an npm project ran yarn and left a yarn.lock
+# beside package-lock.json. After that `npm ci` fails for the whole team, and the cause — a container rebuild
+# weeks earlier — is nowhere near the symptom.
+#
+# The 0.18.0 fix made it PERMANENT rather than repairing it: every detector here checks yarn.lock BEFORE
+# package-lock.json, so the stray file the old script planted became the evidence every later run trusts, and
+# the sync itself keeps choosing yarn in an npm project.
+#
+# The `packageManager` field is an EXPLICIT declaration, not an artifact — the one piece of evidence that settles
+# which lockfile is legitimate. Where it names npm or pnpm, a yarn.lock contradicts something the project stated
+# about itself, and this toolkit is what put it there: removed. Anywhere else nothing is deleted, only reported.
+#
+# RENDERED INTO THE PROGRAM, after the preflight verdict — it is a write, and it once ran in this outer shell
+# before preflight: a refused sync had already deleted the file, and then listed that deletion as the user's own
+# dirty change.
+STRAY_LOCKFILE_BLOCK=""
+if [ "$MODE" = "sync" ]; then
+  if [ "$PM_SOURCE" = "packageManager-field" ] && [ "$PM" != "yarn" ]; then
+    _stray_act="rm -f yarn.lock
+    echo \"NOTE: removed a stray yarn.lock — this project declares packageManager: $PM and also has \$_other.\"
+    echo '      A pre-0.18 devcontainer build created it by running yarn install regardless of the project'
+    echo '      package manager, which breaks $PM ci for everyone and made every later sync pick yarn.'
+    echo '      If it was tracked, git restore yarn.lock brings it back.'"
+  else
+    _stray_act="echo \"WARNING: this workspace has TWO lockfiles — yarn.lock and \$_other.\" >&2
+    echo '         A pre-0.18 devcontainer build may have created the yarn.lock by running yarn install' >&2
+    echo '         regardless of the project package manager. While both exist, this sync and post-create.sh' >&2
+    echo '         resolve to yarn, and installs from the other lockfile fail.' >&2
+    echo '         Nothing was deleted: which one is legitimate cannot be determined from here. Delete the one' >&2
+    echo '         that is not yours, or declare it with npm pkg set packageManager=<pm>@<version>, and re-run.' >&2"
+  fi
+  STRAY_LOCKFILE_BLOCK="
+if [ -f yarn.lock ]; then
+  _other=''
+  [ -f package-lock.json ] && _other=package-lock.json
+  [ -f pnpm-lock.yaml ] && _other=pnpm-lock.yaml
+  if [ -n \"\$_other\" ]; then
+    $_stray_act
+  fi
+fi"
+fi
+
 # --- the ENSURE set, available to the rendered program from its first line ---
 # ENSURED, not ACTIVE — the distinction the house keeps strictly apart. ACTIVE is detected-OR-ensured; ENSURED is
 # only what this run was explicitly asked to create. The scaffold's first app attaches it before anything can be
@@ -1645,14 +1772,14 @@ SCAFFOLD_APP_BLOCK=""
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
-mkdir -p '$WORK_ROOT'
-cd '$WORK_ROOT'
+mkdir -p \"\$SCAFFOLD_WORK_ROOT\"
+cd \"\$SCAFFOLD_WORK_ROOT\"
 $ENSURED_BLOCK
 # Set the git identity only if unset. In the throwaway Docker image there is none, so this establishes it;
-# on the native path the invoking user already HAS a global identity (it's where \$GIT_NAME came from), so
+# on the native path the invoking user already HAS a global identity (it's where the name came from), so
 # this must not clobber it — hence the conditional. Same result on both paths, no drift.
-git config --global user.name >/dev/null 2>&1 || git config --global user.name '$GIT_NAME'
-git config --global user.email >/dev/null 2>&1 || git config --global user.email '$GIT_EMAIL'
+git config --global user.name >/dev/null 2>&1 || git config --global user.name \"\$SCAFFOLD_GIT_NAME\"
+git config --global user.email >/dev/null 2>&1 || git config --global user.email \"\$SCAFFOLD_GIT_EMAIL\"
 git config --global init.defaultBranch >/dev/null 2>&1 || git config --global init.defaultBranch main
 $SCAFFOLD_FLOOR_BLOCK
 $SCAFFOLD_PLUGINS_BLOCK
@@ -1670,7 +1797,7 @@ git add -A
 git commit -m 'chore: scaffold BeSpunky project (layers: $SCAFFOLD_COMMIT_LAYERS)' || true"
 else
   INNER="set -e
-cd '$WORK_ROOT/$PROJECT'
+cd \"\$SCAFFOLD_WORK_ROOT/$PROJECT\"
 $ENSURED_BLOCK
 # PREFLIGHT AND THE PROBE COME FIRST — before nx init, not merely before the install. Both only READ (git
 # state, the installed toolkit, HOUSE.md), so they are safe this early, and the gate's refusals claim to stop
@@ -1687,6 +1814,8 @@ $PREFLIGHT_CHECKS
 _stage probe
 $MIGRATE_PROBE
 $PREFLIGHT_VERDICT
+$RESTORE_BLOCK
+$STRAY_LOCKFILE_BLOCK
 # THE FLOOR — always ensured, so there is no not-an-Nx-workspace refusal any more: a repo without Nx gets it.
 $NX_INIT_BLOCK
 $NX_RUNTIME_BLOCK
@@ -1706,6 +1835,24 @@ if [ \"\$_SYNC_PARTIAL\" = '1' ]; then
   echo 'SYNC_PARTIAL: some generators were skipped — see the [layers] WARNING lines above. The project'
   echo '  was still stamped, so a later sync will NOT retry them on its own; re-run addressing the warning.'
 fi"
+fi
+
+# --- --print-inner: show the rendered program and stop --------------------------------------------------------
+# This script's real product is the ~300-line shell program assembled above, and until now the only way to
+# read it was to edit this file and insert a printf — which is what every review of it has had to do, and
+# what a maintainer debugging a quoting bug would have to do under pressure. The blocks are nested
+# double-quoted strings where a stray backtick or an unescaped quote is live command substitution, so being
+# able to LOOK at the output is the difference between checking a change and hoping.
+#
+# Placed here, after every block is rendered and BEFORE ANYTHING WRITES — before the sync lock, and the program
+# itself is where every write lives. It once sat after the lock, the backup tag and the stray-lockfile cleanup,
+# so "running nothing" deleted a yarn.lock and tagged a dirty tree. It shows exactly what would have run —
+# including the mode, layer and package-manager decisions already baked in. Writes to stdout and exits 0, so
+# `scaffold.sh --sync --print-inner <proj> | bash -n /dev/stdin` is a syntax check. The roots are environment
+# (INNER_ENV), so the printed program names them as variables.
+if [ "$PRINT_INNER" = "1" ]; then
+  printf '%s\n' "$INNER" >&3
+  exit 0
 fi
 
 # --- single writer per project ------------------------------------------------------------------------------
@@ -1768,8 +1915,8 @@ if [ "$MODE" = "sync" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/de
   # 1. AN OPERATION IS ALREADY IN PROGRESS. `git add -A` during an unresolved merge stages the CONFLICT
   #    MARKERS and the checkpoint commit concludes the merge with them in it — a real two-parent commit, so
   #    `git merge` afterwards says "Already up to date" and `git branch --merged` lists a branch whose content
-  #    was never actually merged. The backup tag does not save you either: it has one parent, so it does not
-  #    record the merge at all. This is the only failure here that corrupts history rather than just failing,
+  #    was never actually merged. A restore point does not save you either: one commit does not record the merge
+  #    in progress at all. This is the only failure here that corrupts history rather than just failing,
   #    and once pushed it is everyone's problem.
   _busy=""
   [ -n "$_gd" ] && [ -e "$_gd/MERGE_HEAD" ]        && _busy="a merge"
@@ -1788,7 +1935,7 @@ if [ "$MODE" = "sync" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/de
 
   # 2. DETACHED HEAD. The migrations would be committed to no branch at all: nothing names them afterwards,
   #    `git checkout <branch>` refuses because the tree is dirty, and forcing it discards the entire run.
-  #    The backup path makes it worse by reporting HEAD as the restore point, which is not a durable ref here.
+  #    And HEAD, the restore point, is not a durable ref here.
   if ! git -C "$TARGET" symbolic-ref -q HEAD >/dev/null 2>&1; then
     echo "ERROR: this repository has a detached HEAD, so the sync will not run." >&2
     echo "       The migrations commit as they go; on a detached HEAD those commits belong to no branch and" >&2
@@ -1796,125 +1943,6 @@ if [ "$MODE" = "sync" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/de
     echo "       Check out a branch first (git switch -c <name> keeps what is here), then re-run." >&2
     exit 1
   fi
-fi
-
-# --- auto-backup before sync. Sync REWRITES files on two counts now: the generators regenerate what they
-#     own outright (firebase.config.ts, for one, unconditionally), and the MIGRATIONS apply one-way deltas
-#     across every project in the workspace. Migrations in particular have no reverse — `nx migrate` walks
-#     forwards only — so this snapshot is the sole undo, and it matters more than it did under convergence.
-#     Take it FIRST, making any clobbered customization recoverable. The snapshot is a
-#     TAG built through a throwaway index: HEAD, the branch, the real index and the working tree are
-#     left untouched, while committed + uncommitted + untracked content (minus .gitignore) is
-#     captured, so sync still runs on the exact current tree. Scaffold mode has nothing to back up
-#     (brand-new project). Opt out with --no-backup — but if a backup is wanted and CAN'T be made,
-#     ABORT rather than mutate unprotected ("backup before executing any changes"). ---
-BACKUP_REF="(--no-backup)"
-# The same snapshot, as a DIFFABLE ref rather than a human-readable one. BACKUP_REF is display text
-# ("HEAD(1a2b3c4)", "(--no-backup)") and cannot be handed to `git diff`; SYNC_NEXT below needs an actual
-# commit to answer "what did this run change?". Prefer the backup COMMIT where one was made, because it
-# captured untracked files too — diffing against plain HEAD would report a pre-existing untracked file as
-# something this sync created. Empty means the question is unanswerable (no git, or no HEAD yet), which the
-# reporter states rather than guesses at.
-SYNC_BASE=""
-# Say it out loud. Under convergence a sync re-asserted state and re-running was the informal undo; under
-# migrations it applies ONE-WAY deltas that have no reverse, so the restore point is the only way back and
-# turning it off is a materially bigger decision than it was. The only other trace of that choice was
-# `backup=(--no-backup)` in the final SYNC_OK line, printed after everything had already happened.
-if [ "$MODE" = "sync" ] && [ "$BACKUP" != "1" ]; then
-  echo "WARNING: --no-backup — no restore point will be taken, and the house migrations are ONE-WAY."
-  echo "         If a migration does the wrong thing to this project there is no undo. Ctrl+C now if that"
-  echo "         was not deliberate."
-fi
-if [ "$MODE" = "sync" ] && [ "$BACKUP" = "1" ]; then
-  if ! git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "BACKUP_ABORT: '$TARGET' is not a git repository, so sync can't snapshot it before changing files." >&2
-    echo "  Create a restore point first:  (cd \"$TARGET\" && git init && git add -A && git commit -m 'pre-sync')" >&2
-    echo "  …or re-run with --no-backup to sync without one." >&2
-    exit 1
-  fi
-  if [ -z "$(git -C "$TARGET" status --porcelain 2>/dev/null)" ] && git -C "$TARGET" rev-parse --verify -q HEAD >/dev/null 2>&1; then
-    # Clean tree: HEAD already IS the pre-sync state — no redundant tag.
-    BACKUP_REF="HEAD($(git -C "$TARGET" rev-parse --short HEAD))"
-    SYNC_BASE="$(git -C "$TARGET" rev-parse HEAD)"
-    echo "BACKUP_OK: working tree clean — pre-sync restore point is $BACKUP_REF. Undo a change with: git -C \"$TARGET\" checkout HEAD -- <path>"
-  else
-    BACKUP_TAG="sync-backup-$(date +%Y%m%d-%H%M%S)"
-    BACKUP_INDEX="$(mktemp -u)"
-    HEAD_PARENT=""
-    git -C "$TARGET" rev-parse --verify -q HEAD >/dev/null 2>&1 && HEAD_PARENT="-p HEAD"
-    if GIT_INDEX_FILE="$BACKUP_INDEX" git -C "$TARGET" add -A >/dev/null 2>&1 \
-      && _backup_tree="$(GIT_INDEX_FILE="$BACKUP_INDEX" git -C "$TARGET" write-tree 2>/dev/null)" \
-      && _backup_commit="$(GIT_AUTHOR_NAME="$GIT_NAME" GIT_AUTHOR_EMAIL="$GIT_EMAIL" GIT_COMMITTER_NAME="$GIT_NAME" GIT_COMMITTER_EMAIL="$GIT_EMAIL" git -C "$TARGET" commit-tree "$_backup_tree" $HEAD_PARENT -m "chore: pre-sync backup ($BACKUP_TAG)" 2>/dev/null)" \
-      && git -C "$TARGET" tag "$BACKUP_TAG" "$_backup_commit" >/dev/null 2>&1; then
-      rm -f "$BACKUP_INDEX"
-      BACKUP_REF="$BACKUP_TAG"
-      SYNC_BASE="$_backup_commit"
-      echo "BACKUP_OK: snapshotted the project (incl. uncommitted + untracked) to tag '$BACKUP_TAG'. Review sync's changes: git -C \"$TARGET\" diff $BACKUP_TAG ; restore a file: git -C \"$TARGET\" checkout $BACKUP_TAG -- <path>"
-    else
-      rm -f "$BACKUP_INDEX"
-      echo "BACKUP_ABORT: could not create the git snapshot — aborting so nothing changes without a backup. (Check 'git -C \"$TARGET\" status', or re-run with --no-backup.)" >&2
-      exit 1
-    fi
-  fi
-fi
-
-# A --no-backup run took no snapshot, so fall back to plain HEAD as the diff base. Weaker (it cannot tell a
-# file this sync created from one that was already sitting there untracked) and it therefore over-reports
-# rather than under-reports — an unnecessary "restart" costs seconds, a missed one costs a confusing session
-# where the new settings silently are not in effect.
-if [ "$MODE" = "sync" ] && [ -z "$SYNC_BASE" ]; then
-  SYNC_BASE="$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || true)"
-fi
-
-# --- two lockfiles: damage this toolkit caused, and will otherwise keep believing ----------------------------
-# Before nx-tools 0.18.0 the generated post-create.sh hardcoded `yarn install`, while scaffold.sh already
-# detected npm and pnpm correctly. So a devcontainer build on an npm project ran yarn and left a yarn.lock
-# beside package-lock.json. After that `npm ci` fails for the whole team, and the cause — a container rebuild
-# weeks earlier — is nowhere near the symptom.
-#
-# The 0.18.0 fix made it PERMANENT rather than repairing it: every detector here checks yarn.lock BEFORE
-# package-lock.json, so the stray file the old script planted became the evidence every later run trusts, and
-# the sync itself keeps choosing yarn in an npm project.
-#
-# Placed after the backup deliberately: a deletion below is inside the restore point, so it can be undone.
-if [ "$MODE" = "sync" ] && [ -f "$TARGET/yarn.lock" ]; then
-  _other=""
-  [ -f "$TARGET/package-lock.json" ] && _other="package-lock.json"
-  [ -f "$TARGET/pnpm-lock.yaml" ]    && _other="pnpm-lock.yaml"
-  if [ -n "$_other" ]; then
-    # The `packageManager` field is an EXPLICIT declaration, not an artifact — the one piece of evidence that
-    # settles which lockfile is legitimate. Where it names npm or pnpm, a yarn.lock contradicts something the
-    # project stated about itself, and this toolkit is what put it there.
-    if [ "$PM_SOURCE" = "packageManager-field" ] && [ "$PM" != "yarn" ]; then
-      rm -f "$TARGET/yarn.lock"
-      echo "NOTE: removed a stray yarn.lock — this project declares packageManager: $PM and also has $_other."
-      echo "      A pre-0.18 devcontainer build created it by running 'yarn install' regardless of the project's"
-      echo "      package manager, which breaks '$PM ci' for everyone and made every later sync pick yarn."
-      echo "      It is in the restore point above if you actually wanted it."
-    else
-      echo "WARNING: this workspace has TWO lockfiles — yarn.lock and $_other." >&2
-      echo "         A pre-0.18 devcontainer build may have created the yarn.lock by running 'yarn install'" >&2
-      echo "         regardless of the project's package manager. While both exist, this sync and post-create.sh" >&2
-      echo "         resolve to yarn, and '$_other'-based installs (npm ci / pnpm i --frozen-lockfile) fail." >&2
-      echo "         Nothing was deleted: which one is legitimate cannot be determined from here. Delete the one" >&2
-      echo "         that is not yours, or declare it — npm pkg set packageManager=<pm>@<version> — and re-run." >&2
-    fi
-  fi
-fi
-
-# --- --print-inner: show the rendered program and stop --------------------------------------------------------
-# This script's real product is the ~300-line shell program assembled above, and until now the only way to
-# read it was to edit this file and insert a printf — which is what every review of it has had to do, and
-# what a maintainer debugging a quoting bug would have to do under pressure. The blocks are nested
-# double-quoted strings where a stray backtick or an unescaped quote is live command substitution, so being
-# able to LOOK at the output is the difference between checking a change and hoping.
-#
-# Placed here, after every block is rendered but before anything executes, so it shows exactly what would
-# have run — including the mode, layer and package-manager decisions already baked in. Writes to stdout and
-# exits 0, so `scaffold.sh --sync --print-inner <proj> | bash -n /dev/stdin` is a syntax check.
-if [ "$PRINT_INNER" = "1" ]; then
-  printf '%s\n' "$INNER" >&3
-  exit 0
 fi
 
 # --- run the rendered command sequence, on whichever runtime we chose ---
@@ -1928,10 +1956,12 @@ if [ "$RUNTIME" = "native" ]; then
   # Native: the generators run in THIS environment, as the invoking user, writing straight to the host
   # tree — so no mounts, no uid mapping, and no root-owned-files fixup are needed. $INNER's roots are
   # already bound to the real host paths.
-  bash -c "$INNER" || INNER_RC=$?
+  env "${INNER_ENV[@]}" bash -c "$INNER" || INNER_RC=$?
 else
+  _inner_env_args=()
+  for _kv in "${INNER_ENV[@]}"; do _inner_env_args+=(-e "$_kv"); done
   container_run_as_host_user \
-    -e HOME=/home/node \
+    -e HOME=/home/node "${_inner_env_args[@]}" \
     -v "$PROJECTS_DIR":/work -v "$ASSETS_DIR":/assets:ro -w /work \
     "$IMAGE" \
     bash -lc "$INNER" || INNER_RC=$?
@@ -1983,10 +2013,18 @@ if [ "$INNER_RC" -ne 0 ]; then
     _st="$(sed -n 's/^stage=//p' "$SYNC_LOCK/state" 2>/dev/null | tail -1)"
     _mig="$(sed -n 's/^migrations=//p' "$SYNC_LOCK/state" 2>/dev/null | tail -1)"
   fi
+  # A PREFLIGHT REFUSAL is not a failure: it decided not to start, said why on its own first line (SYNC_REFUSED /
+  # SYNC_ASK), and wrote nothing — so there is nothing to diagnose and nothing to restore. Adding SYNC_FAILED and
+  # restore advice on top of it told the reader a run had died and needed undoing.
+  [ "$_st" = "refused" ] && exit "$INNER_RC"
   echo "" >&2
   echo "SYNC_FAILED $TARGET (exit $INNER_RC)${_st:+ — died during: $_st}" >&2
+  _wrote=1
   case "$_st" in
-    probe|install|"")
+    preflight|probe)
+      _wrote=0
+      echo "  migrations : NOT started — and nothing had been written yet." >&2 ;;
+    install|"")
       echo "  migrations : NOT started — nothing was migrated." >&2 ;;
     migrate)
       echo "  migrations : STARTED and may be partly applied. This is the one case not to re-run blindly:" >&2
@@ -2001,11 +2039,19 @@ if [ "$INNER_RC" -ne 0 ]; then
       echo "               and a re-run will pick up from the same place." >&2
       echo "  re-running : SAFE — the migrations are idempotent and will report no changes the second time." >&2 ;;
   esac
-  echo "  restore    : $BACKUP_REF" >&2
-  case "$BACKUP_REF" in
-    "(--no-backup)") echo "               (no restore point was taken — this run was given --no-backup)" >&2 ;;
-    *)               echo "               git -C '$TARGET' reset --hard $BACKUP_REF" >&2 ;;
-  esac
+  # RESTORE, NEVER RESET. The way back is to put the FILES back as they were, leaving the branch, its history and
+  # anything else the user has done since exactly where they are — a reset --hard moves the branch and discards
+  # the working tree wholesale, which is the one undo that can destroy something the sync did not make. Restoring
+  # leaves the migration commits in history (revert them like any commit, if wanted) and a reviewable diff.
+  if [ "$_wrote" = "1" ]; then
+    echo "  restore    : $BACKUP_REF" >&2
+    if [ -n "$RESTORE_SHA" ]; then
+      echo "               put every tracked file back:  git -C '$TARGET' restore --source=$RESTORE_SHA --staged --worktree -- ." >&2
+      echo "               then list what the run ADDED: git -C '$TARGET' clean -n   (review before removing with -f)" >&2
+    else
+      echo "               (no restore point — not a git repository, or no commits yet)" >&2
+    fi
+  fi
   exit "$INNER_RC"
 fi
 
@@ -2048,7 +2094,12 @@ _sync_next() {   # <target> <base-sha|''> — sets SYNC_NEXT and SYNC_RELOAD
   [ -n "$base" ] || return 0
   # Committed deltas (the migration ladder commits as it goes) + working-tree edits + brand-new untracked
   # files, which `git diff` alone would miss entirely — and a first retrofit creates most of these files.
-  changed="$( { git -C "$target" diff --name-only "$base" 2>/dev/null
+  # BOTH RELATIVE TO THE PROJECT. `ls-files` answers relative to its -C directory, but `diff --name-only` answers
+  # relative to the REPOSITORY ROOT — so in a project that is a subdirectory of its repo, a changed
+  # `.devcontainer/devcontainer.json` came back as `web/.devcontainer/…`, missed every anchor below, and a sync
+  # that needed a rebuild reported `none`. `--relative` makes the diff speak the same coordinates (and limits it
+  # to the project, which is the question asked).
+  changed="$( { git -C "$target" diff --relative --name-only "$base" 2>/dev/null
                 git -C "$target" ls-files --others --exclude-standard 2>/dev/null; } | sort -u )"
   SYNC_NEXT="none"
   # THE ANCHORS ARE LOAD-BEARING — do not relax `^\.claude/settings\.json$` to `^\.claude/`.
@@ -2118,5 +2169,10 @@ else
       [ -f "$_pj" ] && grep -qE "\"name\"[[:space:]]*:[[:space:]]*\"$APP\"" "$_pj" && { _app_dir="${_pj#"$TARGET"/}"; _app_dir="${_app_dir%/project.json}"; break; }
     done
   fi
-  echo "SYNC_OK $TARGET ($RUNTIME_DESC layers=${_final_layers:-unknown}${_app_dir:+ app=$_app_dir} voice=$VOICE backup=$BACKUP_REF)"
+  # voice: whether the project's devcontainer now bridges audio — read from its ownership marker, which records the
+  # answer the devcontainer generator was actually given (an explicit --voice, or the project's earlier choice
+  # carried forward). The flag alone said voice=0 for a project that had just been synced WITH voice.
+  _voice=0
+  grep -qE '"voice"[[:space:]]*:[[:space:]]*true' "$TARGET/.devcontainer/.bespunky-devcontainer.json" 2>/dev/null && _voice=1
+  echo "SYNC_OK $TARGET ($RUNTIME_DESC layers=${_final_layers:-unknown}${_app_dir:+ app=$_app_dir} voice=$_voice backup=$BACKUP_REF)"
 fi

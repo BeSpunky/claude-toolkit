@@ -68,7 +68,7 @@ commit()  { echo x > "$1/f.txt"; git -C "$1" add -A; git -C "$1" commit -qm init
 # Run the gate in <dir> and reduce it to its verdict line(s), or PASS when it lets the run through.
 gate() {
   local out
-  out="$( cd "$1" && ( set -e; MIGRATE_FROM=''; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT"; echo '__PASS__' ) 2>&1 )"
+  out="$( cd "$1" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT"; echo '__PASS__' ) 2>&1 )"
   if printf '%s' "$out" | grep -q '__PASS__'; then echo 'PASS'
   else printf '%s\n' "$out" | grep -E '^SYNC_(REFUSED|ASK):' | tr '\n' ' ' | sed 's/ *$//'; fi
 }
@@ -119,7 +119,7 @@ check 'dirty tree, feature branch' 'SYNC_REFUSED: dirty-tree' "$d"
 # Git COLLAPSES an untracked directory to one porcelain entry, so without `-uall` three files across two new
 # libraries report as `untracked=1` — the figure a reader skims past, for the work least likely to be
 # reconstructable. This asserts the count is per FILE.
-counts="$( cd "$d" && ( set -e; MIGRATE_FROM=''; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT" ) 2>&1 \
+counts="$( cd "$d" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT" ) 2>&1 \
   | grep -oE 'staged=[0-9]+  modified=[0-9]+  untracked=[0-9]+' )"
 if [ "$counts" = 'staged=1  modified=1  untracked=3' ]; then
   printf '  ok   %-32s %s\n' 'untracked counted per file' "$counts"
