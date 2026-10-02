@@ -1,7 +1,7 @@
 // `firebase` — the emulator suite, Cloud Functions, App Hosting config, env bundles, devcontainer wiring.
 //
 // A CAPABILITY on the Nx floor, not an Angular feature. firebase.json, the emulator/seed/secrets
-// scripts, apps/functions and the workspace `firebase` project are framework-neutral — the `firebase-emulators`
+// scripts, the `functions` app and the workspace `firebase` project are framework-neutral — the `firebase-emulators`
 // core, a WORKSPACE step. Only the client wiring is framework-specific, and it attaches PER APP through the app's
 // stack adapter (`firebase-client`, src/adapters/<stack>/firebase-client.ts). A repo with no frontend at all gets
 // the core and nothing to attach to — a legitimate shape, reported, not partial.
@@ -74,7 +74,7 @@ export const firebase: LayerDescriptor = {
   docSections: ['firebase'],
   // The emulator suite, served beside every app the dev engine runs.
   devFragment: (tree) => firebaseFragment(tree),
-  // The Cloud Functions bundle lands in `dist/apps/functions`. create-nx-workspace ignores `dist`; `nx init` on an
+  // The Cloud Functions bundle lands in `dist/<functions root>`. create-nx-workspace ignores `dist`; `nx init` on an
   // existing repo does not — and this layer brings that build, so it owns ignoring its output, or the first
   // `nx build functions` leaves an untracked tree behind.
   gitignore: [{ heading: 'Build output (Nx writes builds to dist/)', entries: ['dist'] }],

@@ -171,7 +171,7 @@ export function provideAppFirebase(): EnvironmentProviders {
         '    1) firebase login\n' +
         '    2) firebase use --add                                  (picks from your account; writes .firebaserc)\n' +
         '    3) firebase apps:sdkconfig WEB <appId> --project <id>  (prints the real web config)\n' +
-        '  Paste the returned firebaseConfig fields into apps/<app>/src/environments/environment.prod.ts and rebuild.'
+        '  Paste the returned firebaseConfig fields into this app's src/environments/environment.prod.ts and rebuild.'
     );
   }
 

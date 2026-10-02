@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Push the local Functions secrets file into Google Secret Manager — the PRODUCTION counterpart
 # of the emulator's `.secret.local` (tools/emulators.sh injects the same file locally). One
-# command, one source of truth: every `KEY=VALUE` in apps/functions/.secret.local becomes a
+# command, one source of truth: every `KEY=VALUE` in {{functionsRoot}}/.secret.local becomes a
 # `firebase functions:secrets:set KEY` on the target project, so local and prod can never drift
 # on WHICH secrets exist.
 #
@@ -11,15 +11,15 @@
 #   bash tools/push-secrets.sh                        # project from .firebaserc / environment.prod.ts
 #   FIREBASE_PROJECT=<id> bash tools/push-secrets.sh    # explicit override
 #
-# Nx target: `yarn nx run functions:push-secrets`.
+# Nx target: `yarn nx run {{functionsProject}}:push-secrets`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SECRETS_FILE="$ROOT/apps/functions/.secret.local"
+SECRETS_FILE="$ROOT/{{functionsRoot}}/.secret.local"
 ENV_PROD="$ROOT/{{appEnvProdPath}}"
 
 if [ ! -f "$SECRETS_FILE" ]; then
-  echo "[push-secrets] no $SECRETS_FILE — copy apps/functions/.secret.local.example and fill it first." >&2
+  echo "[push-secrets] no $SECRETS_FILE — copy {{functionsRoot}}/.secret.local.example and fill it first." >&2
   exit 1
 fi
 

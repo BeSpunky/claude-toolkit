@@ -14,11 +14,12 @@
 // drives this same browser. So it is generated ONCE per workspace, from scaffold.sh's
 // WORKSPACE_GEN_BLOCK (unconditional in both the scaffold and the --sync path — it's always-on).
 //
-// Idempotent + --sync-safe: every generator-owned file is rewritten on each run (the CLI, the three
-// helpers, and project.json carry no user values), so a fresh run and a --sync run converge to the
-// same tree — exactly like firebase-emulators re-asserts its always-owned tools/*.sh scripts.
+// Idempotent + --sync-safe: every generator-owned file is rewritten on each run (the CLI and the three
+// helpers carry no user values) and the project's house targets are re-asserted, so a fresh run and a --sync
+// run converge to the same tree — exactly like firebase-emulators re-asserts its always-owned tools/*.sh scripts.
 // formatFiles polishes the result at the end.
 import { type Tree, formatFiles } from '@nx/devkit';
+import { ensureHouseProject, houseProjectHome, type HouseProjectConfig } from '../_utils/house-project';
 import { readFileSync } from 'node:fs';
 import { NOVNC_BAND_SIZE, NOVNC_BAND_START } from './novnc-band';
 import { join } from 'node:path';
@@ -67,8 +68,11 @@ export default async function sharedBrowserGenerator(
   // Host-port arbitration (the noVNC band) lives in tools/port-claim/ — its own generator, because the
   // worktree-domains proxy and the dev engine consult the same registry.
 
-  // The workspace Nx project that surfaces the lifecycle verbs as targets (each runs the CLI verb).
-  tree.write(`${root}/project.json`, template('project.json.tpl'));
+  // The workspace Nx project that surfaces the lifecycle verbs as targets (each runs the CLI verb) — created the way
+  // this workspace defines projects (a project.json, or a package.json under TS-solution linking), its targets
+  // re-asserted on every run into whichever file already defines it.
+  const { name, ...config } = JSON.parse(template('project-config.json.tpl')) as { name: string } & HouseProjectConfig;
+  ensureHouseProject(tree, houseProjectHome(tree, name, root, 'shared-browser'), config);
 
   // Gitignore the runtime dir. By default SB_RUNTIME lives under ${XDG_RUNTIME_DIR:-/tmp} (outside
   // the repo) so nothing lands here — but the capability documents relocating SB_RUNTIME into a

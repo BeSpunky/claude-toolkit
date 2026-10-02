@@ -20,9 +20,10 @@ export interface PublishableLibGeneratorSchema {
   /** Comma-separated Nx tags applied to the library. */
   tags?: string;
   /**
-   * Sibling package names (short names take the workspace's scope) to declare as cross-lib deps on this lib's own package.json,
-   * as real caret ranges (`"<scope>/<dep>": "^<sibling version>"`). The published-consumer
-   * contract only — in-repo resolution is the tsconfig.base.json path alias; never `workspace:*`.
+   * Sibling package names (short names take the workspace's scope) to declare as cross-lib deps on this lib's own package.json.
+   * Linked the workspace's way: under `paths` linking a real caret range (`"<scope>/<dep>": "^<sibling version>"`, the
+   * published-consumer contract — in-repo resolution is the path alias); under `workspaces` linking a sibling in the
+   * workspace is declared the way the package manager links it (`workspace:*` / `*`), others by caret range.
    */
   workspaceDeps?: string[];
   /** Skip running formatFiles at the end. Default false. */

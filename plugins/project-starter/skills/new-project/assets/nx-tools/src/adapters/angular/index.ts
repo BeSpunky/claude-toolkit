@@ -25,6 +25,7 @@ import { setLeafOption } from '../../generators/_utils/dev-server';
 import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
+import { angularGeneratorCall } from './ts-solution';
 
 /**
  * The executors that make a project an Angular one. Applications build with `@angular/build:` (or the legacy
@@ -103,8 +104,9 @@ export const angular: StackAdapter = {
       // These option names are the exact, proven-good flags scaffold.sh always passed
       // (`--minimal --style=scss --routing --e2eTestRunner=none`), expressed programmatically.
       const { applicationGenerator } = await import('@nx/angular/generators');
+      // Through the TS-solution seam: in a workspaces-linked repo the app is created as a project.json island.
       const callback =
-        (await applicationGenerator(tree, {
+        (await angularGeneratorCall(tree, () => applicationGenerator(tree, {
           directory: options.directory,
           ...(options.name ? { name: options.name } : {}),
           style: options.style ?? 'scss',
@@ -112,7 +114,7 @@ export const angular: StackAdapter = {
           minimal: true,
           e2eTestRunner: 'none',
           skipFormat: true,
-        } as Parameters<typeof applicationGenerator>[1])) ?? noop;
+        } as Parameters<typeof applicationGenerator>[1]))) ?? noop;
       return { project: emittedProjectName(tree, options.directory, options.name), callback };
     },
   },

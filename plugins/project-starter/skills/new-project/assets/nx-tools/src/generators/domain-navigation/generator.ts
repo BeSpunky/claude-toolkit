@@ -14,14 +14,17 @@
 // The directive, event bus, selectors base and composer are INHERITED from
 // navigation-core — never regenerated. Reads its own bundled templates and substitutes
 // the standard name tokens via @nx/devkit `names()`, and points the kernel import at the
-// workspace's navigation library (found by its `type:navigation` tag). The developer fills in
-// the real routes, entity and events.
+// workspace's navigation library (found by its `type:navigation` tag) — and, when the domain lives in a
+// project, links the kernel TO that project the workspace's way (`_utils/linking`: under `workspaces` that is
+// the project's declared dependency on the kernel package; under `paths` the global alias already covers it).
+// The developer fills in the real routes, entity and events.
 // Generator-first / concentrate complexity.
-import { type Tree, names, formatFiles, readJson } from '@nx/devkit';
+import { type Tree, names, formatFiles, getProjects } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
 import { resolveLibsDir } from '../_utils/workspace-layout';
+import { workspaceLinking } from '../_utils/linking';
 import { findNavigationLibrary } from '../navigation-core/generator';
 
 interface DomainNavigationSchema {
@@ -52,7 +55,7 @@ export default async function domainNavigationGenerator(
   const baseDir = (options.directory ?? `${resolveLibsDir(tree)}/${n.fileName}/src/lib`).replace(/\/+$/, '');
   // The kernel's import path, when the workspace has the kernel: the templates import `@navigation-core`, a
   // placeholder the developer had to repoint by hand on every domain.
-  const kernel = navigationImportPath(tree);
+  const kernel = linkKernel(tree, baseDir);
   const target = `${baseDir}/navigation`;
 
   for (const [tpl, outName] of TEMPLATES) {
@@ -74,18 +77,26 @@ export default async function domainNavigationGenerator(
   await formatFiles(tree);
 }
 
-/** The navigation kernel's import specifier — its package name, else the path alias pointing into it. */
-function navigationImportPath(tree: Tree): string | null {
-  const root = findNavigationLibrary(tree);
-  if (!root) return null;
-  if (tree.exists(`${root}/package.json`)) {
-    const name = readJson<{ name?: string }>(tree, `${root}/package.json`).name;
-    if (name) return name;
-  }
-  for (const tsconfig of ['tsconfig.base.json', 'tsconfig.json']) {
-    if (!tree.exists(tsconfig)) continue;
-    const paths = readJson<{ compilerOptions?: { paths?: Record<string, string[]> } }>(tree, tsconfig).compilerOptions?.paths ?? {};
-    for (const [alias, targets] of Object.entries(paths)) if (targets.some((t) => t.startsWith(`${root}/`))) return alias;
-  }
-  return null;
+/**
+ * The navigation kernel's import specifier — what this workspace imports it by (its linking's answer) — or null
+ * when the workspace has no kernel. When the domain's files land inside a project, the kernel is linked to that
+ * project as its consumer, so a package-based workspace declares the dependency the new imports need.
+ */
+function linkKernel(tree: Tree, domainDir: string): string | null {
+  const kernelRoot = findNavigationLibrary(tree);
+  if (!kernelRoot) return null;
+  const linking = workspaceLinking(tree);
+  const importPath = linking.importPathOf(tree, kernelRoot);
+  if (!importPath) return null;
+  const consumerRoot = projectContaining(tree, domainDir);
+  if (consumerRoot && consumerRoot !== kernelRoot) linking.link(tree, { importPath, libRoot: kernelRoot, consumerRoot });
+  return importPath;
+}
+
+/** The deepest project whose root contains `dir` (project roots nest), or undefined. The root project never counts. */
+function projectContaining(tree: Tree, dir: string): string | undefined {
+  return [...getProjects(tree).values()]
+    .map((project) => project.root)
+    .filter((root) => root !== '.' && root !== '' && (dir === root || dir.startsWith(`${root}/`)))
+    .sort((a, b) => b.length - a.length)[0];
 }

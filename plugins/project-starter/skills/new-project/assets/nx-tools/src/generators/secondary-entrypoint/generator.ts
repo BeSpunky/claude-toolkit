@@ -9,15 +9,18 @@
 // ng-packagr auto-discovers nested `ng-package.json` files by filesystem scan, so the new
 // entry becomes the `<package>/<name>` deep-import subpath with no extra registration.
 //
-// LINKING MODEL (DECIDED 2026-06-22 — the suite's one decision that shapes this generator):
-//   The BeSpunky suite links in-repo via `tsconfig.base.json` PATH ALIASES, NOT package-manager
-//   workspaces + project references. The deep import `@bespunky/<lib>/<subpath>` resolves through
-//   the `compilerOptions.paths` entry that the delegated @nx/angular generator (via addPathMapping)
-//   writes for the new subpath. That alias is therefore the ONLY in-repo resolution channel for the
-//   entry — so we KEEP it. (An earlier revision stripped it under a stale workspaces+references
-//   assumption; that strip step is now gone.) Deleting it would break editor/type resolution of the
-//   deep import by construction (ts(2307)). We deliberately do NOT add an alias of our own — the
-//   base generator's addPathMapping already wrote the correct one.
+// LINKING — the subpath is linked the way the WORKSPACE links (`_utils/linking`), exactly as its parent library
+// was (the Angular adapter's `libs` port):
+//   - `paths`: the delegated @nx/angular generator writes the `<package>/<subpath>` alias into the root tsconfig
+//     itself (its own addPathMapping), and that alias IS the in-repo channel for the deep import — so it is kept,
+//     never stripped (an earlier revision stripped it under a stale workspaces assumption and broke type
+//     resolution, ts(2307)), and no second one is added.
+//   - `workspaces`: @nx/angular knows no other model and writes that SAME alias unconditionally (the secondary
+//     generator has no `skipTsConfig`) — into tsconfig.base.json, which every package extends. There it is a
+//     second, global channel inside a references-based build, so it is removed again and the subpath is linked
+//     through the port instead: an `exports["./<subpath>"]` entry on the library's package.json, under the
+//     workspace's source condition. ng-packagr rewrites `exports` in the dist package.json it emits, so that
+//     source entry never reaches a published artifact.
 //
 // This generator is a content-agnostic entry creator. It delegates the structural work to
 // @nx/angular's `librarySecondaryEntryPointGenerator`, then normalizes the result and (only on
@@ -49,6 +52,8 @@ import {
 import type * as AngularGenerators from '@nx/angular/generators';
 import type { SecondaryEntrypointGeneratorSchema } from './schema';
 import { requireLayer } from '../../layers/registry';
+import { workspaceLinking, rootTsconfig } from '../_utils/linking';
+import { angularGeneratorCall } from '../../adapters/angular/ts-solution';
 
 export async function secondaryEntrypointGenerator(
   tree: Tree,
@@ -85,11 +90,15 @@ export async function secondaryEntrypointGenerator(
   //    (+ `skipModule`). Older lines accepted the same; if 23.1 renamed `library`→`project`
   //    or moved `skipModule`, adjust here. We pass ONLY these three (not `...options`) so our
   //    own `component`/`skipFormat` keys can't leak into the delegated schema.
-  await librarySecondaryEntryPointGenerator(tree, {
-    library: options.library,
-    name: options.name,
-    skipModule: true,
-  });
+  // Through the TS-solution seam: @nx/angular 23 does not guard this generator today, but a workspaces-linked
+  // repo is one it does not support, and a guard added in a minor would otherwise fail here with no opt-out.
+  await angularGeneratorCall(tree, () =>
+    librarySecondaryEntryPointGenerator(tree, {
+      library: options.library,
+      name: options.name,
+      skipModule: true,
+    })
+  );
 
   // 1b) RESET the parent lib's tsconfig.lib.json include/exclude to the bounded house shape.
   //     The delegated @nx/angular generator APPENDS the new entry's deep glob to these arrays on
@@ -98,16 +107,14 @@ export async function secondaryEntrypointGenerator(
   //     past V8's nesting limit ("error TS500: Invalid regular expression", the ng-packagr build
   //     dies — worst on 4-segment-deep entries like `router-x/navigation/zod`). We replace that
   //     growing list with a FIXED-SIZE pair of globs that still covers the primary src AND every
-  //     secondary-entry src (so the editor can resolve `@bespunky/*` on the PATHS model — see
+  //     secondary-entry src (so the editor can resolve the library's own subpath imports — see
   //     resetLibTsConfig). Resetting here makes the generator idempotent and bloat-proof.
   resetLibTsConfig(tree, libraryRoot);
 
   const entryRoot = joinPathFragments(libraryRoot, options.name);
 
-  // 2) KEEP the tsconfig.base.json path alias the base generator added for the new subpath.
-  //    See the LINKING MODEL note at the top of this file: on the PATHS model that
-  //    `@bespunky/<lib>/<subpath>` alias is the ONLY in-repo resolution channel for the deep
-  //    import, so deleting it would break type resolution (ts(2307)). We deliberately leave it.
+  // 2) Link the subpath the workspace's way (see LINKING at the top of this file).
+  linkSubpath(tree, { importPath: packageName, libRoot: libraryRoot, subpath: options.name });
 
   // 3) Normalize the nested ng-package.json to the house shape. ng-packagr accepts `{}` for a
   //    secondary entry, but we keep the explicit entryFile so the contract is visible and stable
@@ -170,6 +177,32 @@ export async function secondaryEntrypointGenerator(
 export default secondaryEntrypointGenerator;
 
 /**
+ * Make `<importPath>/<subpath>` resolve the workspace's way. Under `paths` the delegated generator's alias is the
+ * link and is left exactly as written; under any other linking that alias is a stray second channel, so it is
+ * removed (only when it points into this library — an alias someone else owns is never touched) and the port
+ * links the subpath.
+ */
+function linkSubpath(tree: Tree, request: { importPath: string; libRoot: string; subpath: string }): void {
+  const linking = workspaceLinking(tree);
+  if (linking.kind === 'paths') return;
+
+  const file = rootTsconfig(tree);
+  const alias = `${request.importPath}/${request.subpath}`;
+  if (file) {
+    updateJson(tree, file, (json) => {
+      const targets: string[] | undefined = json.compilerOptions?.paths?.[alias];
+      const intoLibrary = (target: string) => target.replace(/^\.\/+/, '').startsWith(`${request.libRoot}/`);
+      if (targets?.every(intoLibrary)) {
+        delete json.compilerOptions.paths[alias];
+        if (Object.keys(json.compilerOptions.paths).length === 0) delete json.compilerOptions.paths;
+      }
+      return json;
+    });
+  }
+  linking.link(tree, request);
+}
+
+/**
  * Reset the parent library's tsconfig.lib.json include/exclude to the canonical BOUNDED shape.
  * See the call site (step 1b): the delegated secondary-entry generator bloats these arrays
  * cartesian-style across runs, eventually producing a multi-MB tsconfig whose globs compile to a
@@ -182,8 +215,8 @@ export default secondaryEntrypointGenerator;
  *   - `**\/src/**\/*.ts` → EVERY secondary-entry's sources, which sit in their OWN `src/` beside the
  *                          primary one (e.g. `reactive-input/shared/src/`, `router-x/navigation/src/`).
  * Without the second glob those nested sources fall outside the lib's TS project, so the editor
- * can't resolve `@bespunky/*` imports inside them → ts(2307). On the PATHS linking model that is a
- * broken link, so the bounded include is what makes a multi-entry lib editor-correct. No-op when
+ * can't resolve `@bespunky/*` imports inside them → ts(2307), whichever way the workspace links. The bounded
+ * include is what makes a multi-entry lib editor-correct. No-op when
  * the file is absent.
  */
 function resetLibTsConfig(tree: Tree, libraryRoot: string): void {

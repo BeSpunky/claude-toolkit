@@ -7,16 +7,15 @@
   "properties": {
     "directory": {
       "type": "string",
-      "description": "Workspace-relative directory for the app, e.g. `apps/<name>`. The project name defaults to the directory's last segment.",
+      "description": "Workspace-relative directory for the app. Optional when --name is given: the app then goes to <appsDir>/<name>, the workspace's apps directory (nx.json workspaceLayout.appsDir, else where its apps already live, else apps/). The project name defaults to the directory's last segment.",
       "$default": {
         "$source": "argv",
         "index": 0
-      },
-      "x-prompt": "Where should the app live (e.g. apps/<name>)?"
+      }
     },
     "name": {
       "type": "string",
-      "description": "Explicit project name. Defaults to the directory's last segment (matching @nx/angular)."
+      "description": "Explicit project name. Defaults to the directory's last segment (matching @nx/angular). Given alone, it also places the app at <appsDir>/<name>."
     },
     "stack": {
       "type": "string",
@@ -57,8 +56,5 @@
       "default": false,
       "x-priority": "internal"
     }
-  },
-  "required": [
-    "directory"
-  ]
+  }
 }

@@ -12,8 +12,13 @@
 // left alone (see adapters/registry `portOf`) — never handed config it cannot read.
 //
 // WHAT IT WRITES, and why each piece is necessary:
-//   1. the DS's parent dir as a sass LOAD PATH (styles port) — the workspace links via tsconfig path aliases,
-//      which SASS does not read, so a load path is the only way `@use 'design-system/styles'` resolves.
+//   0. the design system LINKED to this app, the workspace's way (`_utils/linking`): under `paths` the global
+//      alias already reaches every app (nothing to add); under `workspaces` the app's governing package.json
+//      DECLARES the design-system package — without it pnpm never links it and the provider's import below
+//      resolves only by the accident of hoisting.
+//   1. the DS's parent dir as a sass LOAD PATH (styles port) — SASS reads neither path aliases nor package
+//      `exports`, so a load path is the one channel that resolves `@use 'design-system/styles'` under both
+//      linkings (see the design-system generator's SASS CHANNEL note).
 //   2. project.implicitDependencies += <design-system>                       <-- CACHE CORRECTNESS
 //      A load path is not a graph edge; without one a token edit can leave `nx build <app>` replaying a cached
 //      bundle with the OLD tokens. Deliberately NOT a hand-rolled `inputs` array — a project-level `inputs`
@@ -37,6 +42,7 @@ import {
 import { dirname, basename } from 'node:path';
 import { findDesignSystem } from '../_utils/design-system';
 import { adapterOf, isApplication, portOf } from '../../adapters/registry';
+import { workspaceLinking } from '../_utils/linking';
 
 interface DesignSystemStylesSchema {
   /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
@@ -82,6 +88,11 @@ export default async function designSystemStylesGenerator(
     return;
   }
 
+  // 0) The app consumes the design system: link it, the workspace's way.
+  const importPath = readImportPath(tree, designSystem.root);
+  const appRoot = readProjectConfiguration(tree, options.project).root;
+  workspaceLinking(tree).link(tree, { importPath, libRoot: designSystem.root, consumerRoot: appRoot });
+
   const loadPath = dirname(designSystem.root); // e.g. `packages` — the app's sass load path
   const specifier = `${basename(designSystem.root)}/styles`; // e.g. `design-system/styles`
 
@@ -103,16 +114,20 @@ export default async function designSystemStylesGenerator(
 
   // 4) The runtime binding's provider, on the per-app path so the first app and every later one get it from ONE
   //    code path — an app with the sass but not the provider renders the tokens but never follows a mode change.
-  wireDesignSystemProvider(tree, options.project, designSystem, options.wireProviders === true);
+  wireDesignSystemProvider(tree, options.project, designSystem, importPath, options.wireProviders === true);
 
   if (!options.skipFormat) await formatFiles(tree);
 }
 
-/** The design system's published package name — the specifier an app imports its runtime from. */
+/**
+ * The specifier an app imports the design system's runtime by: what this workspace links it as (its alias, or
+ * its package name), else its package name, else its directory's name.
+ */
 function readImportPath(tree: Tree, designSystemRoot: string): string {
+  const linked = workspaceLinking(tree).importPathOf(tree, designSystemRoot);
+  if (linked) return linked;
   const pkgPath = `${designSystemRoot}/package.json`;
   const name = tree.exists(pkgPath) ? readJson<{ name?: string }>(tree, pkgPath).name : undefined;
-  // The tsconfig path alias is keyed on the package name, so this is also the in-repo import specifier.
   return name ?? basename(designSystemRoot);
 }
 
@@ -128,13 +143,13 @@ function wireDesignSystemProvider(
   tree: Tree,
   app: string,
   designSystem: { name: string; root: string },
+  importPath: string,
   ensuring: boolean,
 ): void {
   const binding = adapterOf(tree, designSystem.name);
   const appStack = adapterOf(tree, app);
   if (!binding?.designSystem || !appStack?.providers || binding.id !== appStack.id) return;
 
-  const importPath = readImportPath(tree, designSystem.root);
   const providerFn = binding.designSystem.provider;
   const result = appStack.providers.wire(tree, app, { providerFn, importFrom: importPath, ensuring });
   if (result === 'unrecognized') {

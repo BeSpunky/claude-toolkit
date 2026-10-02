@@ -7,8 +7,8 @@
 // real-href link directive, the URL read-side, a typed event bus + binding, and middleware.
 //
 // A REAL LIBRARY, created through the Angular adapter's `libs` port (a workspace-internal library — buildable,
-// linted, tested, with its path alias) and tagged `type:navigation`, which is how the `navigation` layer finds
-// it. It used to be loose files dropped at `libs/navigation-core/src` with no project, no tag and a hard-coded
+// linted, tested, and linked the way the workspace links: a path alias, or a workspace package) and tagged
+// `type:navigation`, which is how the `navigation` layer finds it. It used to be loose files dropped at `libs/navigation-core/src` with no project, no tag and a hard-coded
 // `libs/`: invisible to Nx, and found by the layer only if someone hand-made a project with exactly that name.
 // The library lands where THIS workspace keeps libraries (resolveLibsDir).
 //

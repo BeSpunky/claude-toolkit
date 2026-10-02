@@ -23,7 +23,7 @@ _fb_root="${BESPUNKY_FIREBASE_WS:-$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." 2>/d
 
 # The client env files the house wires (the Angular client adapter's). None → no client config to fill.
 _fb_has_client() {
-  for f in "$_fb_root"/apps/*/src/environments/environment.prod.ts; do
+  for f in "$_fb_root"/{{appsDir}}/*/src/environments/environment.prod.ts; do
     [ -f "$f" ] && return 0
   done
   return 1
@@ -34,7 +34,7 @@ _fb_setup_pending() {
   # environment.firebase.projectId.
   [ -f "$_fb_root/.firebaserc" ] || return 0
   _fb_has_client || return 1  # no house-wired client: .firebaserc is the whole setup
-  for f in "$_fb_root"/apps/*/src/environments/environment.prod.ts; do
+  for f in "$_fb_root"/{{appsDir}}/*/src/environments/environment.prod.ts; do
     [ -f "$f" ] || continue
     # Look for environment.firebase.projectId with a non-empty string literal.
     # Scoped to the `firebase: { ... }` block to avoid false positives elsewhere.
@@ -59,7 +59,7 @@ if _fb_setup_pending; then
   printf '    3) \033[1mfirebase apphosting:backends:create --project <projectId>\033[0m       (one-time: creates the App Hosting backend; interactive — LINK THIS REPO so deploys auto-run on push)\n'
   printf '    4) \033[1mfirebase apps:sdkconfig WEB <appId> --project <projectId>\033[0m       (prints the real web config for client-side SDK init)\n'
   if _fb_has_client; then
-    printf '    5) Paste the returned firebaseConfig fields into `firebase` in apps/<app>/src/environments/environment.prod.ts\n'
+    printf '    5) Paste the returned firebaseConfig fields into `firebase` in {{appsDir}}/<app>/src/environments/environment.prod.ts\n'
   fi
   printf '  Linking the repo at step 3 is the deploy CI: Firebase wires its own Cloud Build pipeline (no workflow file in this repo).\n'
   printf '  After that, App Hosting deploys are GitHub-driven — push to the configured branch and it builds + deploys.\n'

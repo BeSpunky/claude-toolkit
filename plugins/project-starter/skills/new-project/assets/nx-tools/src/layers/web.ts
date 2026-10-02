@@ -79,7 +79,7 @@ export const web: LayerDescriptor = {
   ensurable: { scaffold: { via: 'angular' }, sync: false },
   ensureHint:
     'declare what the project serves in `.bespunky/dev.json` (e.g. `{"apps":{"site":{"processes":[{"id":"app","cmd":"python3 -m http.server ${PORT:app}","ports":{"app":8000}}]}}}`), ' +
-    'or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app apps/<name>`), then sync',
+    'or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app --name=<name>`), then sync',
   brings: 'the stack-free dev engine (tools/dev/dev serve), worktree domains, the shared co-driven browser, :80',
   generators: {
     app: [

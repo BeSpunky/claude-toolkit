@@ -1,16 +1,44 @@
 // The Angular adapter's LIBRARY port: @nx/angular:library, plus the ng-packagr config a publishable lib needs.
 import { type Tree, type GeneratorCallback, readJson, writeJson, updateJson, logger } from '@nx/devkit';
 import type { LibPort } from '../stack-adapter';
+import { workspaceLinking } from '../../generators/_utils/linking';
+import { angularGeneratorCall } from './ts-solution';
 
 const noop: GeneratorCallback = () => {};
 
 export const angularLibs: LibPort = {
+  // LINKED THE WAY THE WORKSPACE LINKS — the port's promise, kept the same in both models:
+  //   - `paths`: @nx/angular:library writes the root-tsconfig alias itself (addTsConfigPath), as it always has.
+  //   - `workspaces`: it would write that SAME alias — into tsconfig.base.json, the file every TS-solution package
+  //     extends — because @nx/angular knows no other model (it refuses these workspaces; see ./ts-solution). A
+  //     `paths` entry there is a second, global linking channel inside a references-based build: any composite
+  //     package could import the library through it with no reference behind it, and the workspace would link two
+  //     ways at once. So the alias is skipped (`skipTsConfig`) and the library is linked through the workspace's
+  //     own port instead: a workspace member whose package.json `exports` its source under the custom condition,
+  //     referenced by the solution — what @nx/js:library produces. An Angular LIBRARY is therefore not an island:
+  //     it is a package like any other, consumed by Angular apps (the islands — they resolve `exports` like any
+  //     import) and by plain-TS packages alike. Verified for real (@nx/angular 23.1, ng-packagr 22; U4 in
+  //     docs/features/2026-10-02-workspace-layouts): ng-packagr builds with the source `exports` present, and an
+  //     Angular app importing the library and a TS-solution package passes `nx sync`, typecheck and build.
+  //     One honest leftover: ng-packagr MERGES the source package.json's `exports` into the dist one, replacing
+  //     `types`/`default` but KEEPING the source-condition key — so the published package.json carries
+  //     `"<condition>": "./src/index.ts"`. That is the same trade Nx makes for its own TS-solution packages, and it
+  //     is inert exactly when the condition is workspace-unique (Nx's `@<scope>/source`), never a common one
+  //     (`development`) that a consumer's bundler would actually match.
+  // Secondary entry points must follow the same rule: link each subpath through the port (`subpath`), never a
+  // `paths` alias of their own.
   async create(tree, options) {
+    const linking = workspaceLinking(tree);
+    const ownAlias = linking.kind === 'paths';
     // Option NAMES verified against @nx/angular 23 (`nx g @nx/angular:library --help`): standalone-only suite,
-    // no NgModule entry, the Angular-native Vitest runner, eslint as a string (the enum is deprecated).
+    // no NgModule entry, Vitest, eslint as a string (the enum is deprecated). WHICH Vitest follows from the build:
+    // `vitest-angular` (the Angular-native `@nx/angular:unit-test` executor) runs through the library's own
+    // build, so @nx/angular REFUSES it for a library that has none (validate-options: "requires the library to
+    // be buildable or publishable") — a workspace-internal library (navigation-core) gets `vitest-analog`,
+    // @nx/angular's own Vitest choice for exactly that case.
     const { libraryGenerator } = await import('@nx/angular/generators');
-    return (
-      (await libraryGenerator(tree, {
+    const callback =
+      (await angularGeneratorCall(tree, () => libraryGenerator(tree, {
         name: options.name,
         directory: options.directory,
         importPath: options.importPath,
@@ -22,11 +50,17 @@ export const angularLibs: LibPort = {
         style: options.style ?? 'scss',
         linter: 'eslint',
         strict: true,
-        unitTestRunner: 'vitest-angular',
+        unitTestRunner: options.publishable ? 'vitest-angular' : 'vitest-analog',
         skipFormat: true,
         tags: options.tags,
-      } as Parameters<typeof libraryGenerator>[1])) ?? noop
-    );
+        skipTsConfig: !ownAlias,
+      } as Parameters<typeof libraryGenerator>[1]))) ?? noop;
+    if (!ownAlias) {
+      const libRoot = options.directory.replace(/\/+$/, '');
+      linking.link(tree, { importPath: options.importPath, libRoot });
+      stateTheBuildsSourceMaps(tree, libRoot);
+    }
+    return callback;
   },
 
   /**
@@ -76,3 +110,21 @@ export const angularLibs: LibPort = {
     });
   },
 };
+
+/**
+ * A TS-solution workspace typechecks EVERY project with plain `tsc --build` (the `@nx/js/typescript` plugin infers
+ * a `typecheck` target from each tsconfig.json) — the Angular library included. @nx/angular gives a buildable
+ * library's tsconfig.lib.json `inlineSources` without `sourceMap`, which tsc rejects outright (TS5051); it never
+ * mattered before because only ng-packagr read that file, and ng-packagr FORCES `sourceMap: true` +
+ * `inlineSources: true` itself (ng-packagr src/lib/ts/tsconfig.js). So the fix is to state the pair the build
+ * actually uses — not to drop `inlineSources`: the file then tells the truth to both of its readers.
+ */
+function stateTheBuildsSourceMaps(tree: Tree, libRoot: string): void {
+  const tsconfig = `${libRoot}/tsconfig.lib.json`;
+  if (!tree.exists(tsconfig)) return;
+  updateJson(tree, tsconfig, (json: { compilerOptions?: Record<string, unknown> }) => {
+    const options = json.compilerOptions;
+    if (options?.inlineSources && options.sourceMap === undefined && !options.inlineSourceMap) options.sourceMap = true;
+    return json;
+  });
+}

@@ -1,6 +1,5 @@
 {
   "name": "worktree-domains",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "tags": ["tooling"],
   "targets": {
     "list": {

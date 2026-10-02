@@ -25,10 +25,11 @@ import { detectLayers, inRegistryOrder, isPresent, layer } from '../../layers/re
 import { ADAPTERS, adapter } from '../../adapters/registry';
 import { workspaceStackWith } from '../../adapters/workspace';
 import { attachCapabilities } from './attach';
+import { resolveAppsDir } from '../_utils/workspace-layout';
 
 interface AppGeneratorSchema {
-  // Workspace-relative directory for the app, e.g. `apps/<name>` (positional arg 0).
-  directory: string;
+  // Workspace-relative directory for the app (positional arg 0). Default: `<appsDir>/<name>`.
+  directory?: string;
   // Explicit project name. Defaults to the directory's last segment.
   name?: string;
   // The stack to create the app with (an adapter id). Default: the workspace's stack that can create apps.
@@ -47,8 +48,15 @@ interface AppGeneratorSchema {
 }
 
 export default async function appGenerator(tree: Tree, options: AppGeneratorSchema): Promise<GeneratorCallback> {
-  if (!options.directory) {
-    throw new Error('app generator requires a directory (positional arg 0 / --directory), e.g. `apps/<name>`.');
+  // WHERE: the directory given, else the app's name in the workspace's apps directory — the same answer every
+  // other house generator lands an app on (`resolveAppsDir`: nx.json `workspaceLayout`, else where the
+  // workspace's apps already live, else `apps/`). A bare name is never guessed to be a directory or vice versa.
+  const directory = options.directory ?? (options.name ? `${resolveAppsDir(tree)}/${options.name}` : undefined);
+  if (!directory) {
+    throw new Error(
+      'app generator needs a directory (positional arg 0 / --directory) or a --name — with only a name, the app ' +
+        `goes to ${resolveAppsDir(tree)}/<name>, this workspace's apps directory.`,
+    );
   }
 
   // 1) CREATE, through the stack. Its precondition is stated here, as a sentence, rather than surfacing as a
@@ -66,7 +74,7 @@ export default async function appGenerator(tree: Tree, options: AppGeneratorSche
     throw new Error(`[app] The ${stack.id} stack needs the \`${stack.layer}\` layer, which this workspace does not have.`);
   }
   const { project, callback } = await stack.apps.create(tree, {
-    directory: options.directory,
+    directory,
     name: options.name,
     style: options.style ?? 'scss',
   });
