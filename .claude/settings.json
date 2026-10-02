@@ -15,7 +15,6 @@
     "bespunky-vscode-identity@claude-toolkit": true,
     "bespunky-communication@claude-toolkit": true
   },
-  "outputStyle": "bespunky-communication:Pitch to the listener",
   "extraKnownMarketplaces": {
     "nx-claude-plugins": {
       "source": {
@@ -31,6 +30,7 @@
       "autoUpdate": true
     }
   },
+  "outputStyle": "bespunky-communication:Pitch to the listener",
   "sandbox": {
     "network": {
       "allowedDomains": [
