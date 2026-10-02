@@ -17,7 +17,7 @@ HOOK="$PLUGIN/hooks/check-house-version.sh"
 INSTALLED="$(node -p "require('$PLUGIN/skills/new-project/assets/nx-tools/package.json').version")"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP" 2>/dev/null || sudo -n rm -rf "$TMP"' EXIT
 
 FAILED=0
 ok() { if [ "$2" = 1 ]; then printf '  ok   %-60s\n' "$1"; else printf '  FAIL %-60s (%s)\n' "$1" "${3:-}"; FAILED=1; fi }
@@ -45,5 +45,25 @@ ok 'same version: a grown layer (web) is still reported' "$( [[ "$out" == *'grow
 P="$TMP/current"; stamp "$P" "$INSTALLED" 'nx,agent'
 out="$(run_hook "$P")"
 ok 'current stamp, no new layer: silent' "$( [ -z "$out" ] && echo 1 || echo 0)" "$out"
+
+# A root-owned volume mount point: the container's post-create most likely failed on it. ONE fact, naming the
+# path and owner and the exact fix, from the same derivation the sync preflight uses (the project's
+# devcontainer.json). Needs a non-root user with passwordless sudo to build the fixture; skipped out loud otherwise.
+if [ "$(id -u)" = 0 ] || ! sudo -n true 2>/dev/null; then
+  echo "  skip root-owned mount point cases — need a non-root user with passwordless sudo"
+else
+  P="$TMP/vol"; stamp "$P" "$INSTALLED" 'nx,agent'
+  mkdir -p "$P/.devcontainer"
+  printf '{ "mounts": [ "source=x,target=${containerWorkspaceFolder}/.angular,type=volume" ] }\n' > "$P/.devcontainer/devcontainer.json"
+  echo 'echo hi' > "$P/.devcontainer/post-create.sh"
+  mkdir "$P/node_modules"
+  out="$(run_hook "$P")"
+  ok 'writable mount points: silent' "$( [ -z "$out" ] && echo 1 || echo 0)" "$out"
+  sudo -n mkdir "$P/.angular"
+  out="$(run_hook "$P")"
+  ok 'root-owned volume mount point: one fact, path + owner' "$( [[ "$out" == *'post-create most likely FAILED'* && "$out" == *'.angular (root)'* && "$out" != *node_modules* ]] && echo 1 || echo 0)" "$out"
+  ok 'root-owned volume mount point: the exact remedy' "$( [[ "$out" == *'sudo chown -R "$(id -un):$(id -gn)" .angular'* && "$out" == *'bash .devcontainer/post-create.sh'* ]] && echo 1 || echo 0)" "$out"
+  ok 'root-owned volume mount point: a single line' "$( [ "$(printf '%s\n' "$out" | wc -l)" = 1 ] && echo 1 || echo 0)" "$out"
+fi
 
 exit "$FAILED"

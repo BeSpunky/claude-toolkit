@@ -62,6 +62,32 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 HOUSE_DOC="$PROJECT_DIR/HOUSE.md"
 [ -f "$HOUSE_DOC" ] || exit 0
 
+# --- an unwritable mount point: the container came up without its dependencies --------------------------------
+# A MACHINE fact, and the most urgent one this hook can see. A devcontainer that mounts a named volume inside the
+# workspace (node_modules, .nx/cache, .angular…) gets a mount point Docker creates ROOT-OWNED; if post-create did
+# not reclaim it, its install died on EACCES and this session is running with no dependencies — every later
+# notice here is moot until that is fixed, and a sync would refuse on it (`unwritable-mounts`).
+#
+# Asked BEFORE the containment exit below, deliberately: that exit is about comparing versions, and a root-owned
+# node_modules is just as broken in the toolkit's own repo. Detection is assets/house-mounts.sh — the SAME
+# derivation the sync preflight uses, so the two cannot disagree — and costs a few greps of devcontainer.json and
+# `test -w` per candidate: no Node, nothing installed. One fact, silent otherwise, and it does not end the hook:
+# the version notices below stay true and are still told.
+MOUNTS_SH="$PLUGIN_ROOT/skills/new-project/assets/house-mounts.sh"
+if [ -f "$MOUNTS_SH" ]; then
+  # shellcheck source=../skills/new-project/assets/house-mounts.sh
+  . "$MOUNTS_SH"
+  _um="$(house_unwritable_mounts "$PROJECT_DIR")"
+  if [ -n "$_um" ]; then
+    _um_paths="$(printf '%s\n' "$_um" | cut -d' ' -f1 | paste -sd' ' -)"
+    _um_owners="$(printf '%s\n' "$_um" | awk '{printf "%s%s (%s)", (NR>1?", ":""), $1, $2}')"
+    _um_pc="$(house_post_create "$PROJECT_DIR")"
+    cat <<EOF
+[bespunky-project-starter] This container's post-create most likely FAILED: $_um_owners — not writable by $(id -un), so the install into it died with EACCES and the project has no dependencies. Fix, in the project root: \`sudo chown -R "\$(id -un):\$(id -gn)" $_um_paths\`${_um_pc:+, then \`bash $_um_pc\`}. Relay this to the user.
+EOF
+  fi
+fi
+
 # IS THE PLUGIN THIS PROJECT'S OWN SOURCE? Then there is nothing to compare and never anything to say.
 #
 # This used to be free: HOUSE.md was absent from the toolkit repo, so the check above exited first. Layering

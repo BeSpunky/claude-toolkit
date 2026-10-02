@@ -89,6 +89,12 @@ ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Nothing in this script lists layers by hand: ids, ensurability, hints and the --help text all come from it.
 # shellcheck source=layers.sh
 . "$ASSETS_DIR/layers.sh"
+# The house MOUNT POINTS (node_modules, .nx, every workspace volume the project's devcontainer declares) and which
+# of them the current user cannot write. Shared with the SessionStart hook so the two derive them identically;
+# rendered into the program below with `declare -f`, because the program may run inside the fallback container.
+# shellcheck source=house-mounts.sh
+. "$ASSETS_DIR/house-mounts.sh"
+HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_post_create)"
 
 # The command line is the first place anyone looks, and until now it was the one place that said nothing:
 # `--help` was answered with "unknown flag", and a bare invocation printed a raw bash parameter-expansion
@@ -1026,6 +1032,29 @@ _ask() {
   _ASK_TEXT=\"\$_ASK_TEXT
 \$2\"
 }
+# UNWRITABLE MOUNT POINTS — a directory this run must write into exists but is not this user's to write. The
+# classic cause: a devcontainer mounts a named volume at <ws>/node_modules, Docker creates the mount point
+# root-owned, and nothing reclaimed it — so the container came up with no dependencies, and this sync's own
+# install would die on the same EACCES minutes in, leaving a half-run sync behind. Unlike
+# every other refusal here the fix is not a judgment about the user's work: it is a deterministic ownership fix
+# of the project's own mount points, so the verdict carries the exact command.
+$HOUSE_MOUNTS_FNS
+_um=\"\$(house_unwritable_mounts .)\"
+if [ -n \"\$_um\" ]; then
+  _um_paths=\"\$(printf '%s\n' \"\$_um\" | cut -d' ' -f1 | paste -sd' ' -)\"
+  _um_list=\"\$(printf '%s\n' \"\$_um\" | awk '{printf \"           %-28s owner: %s\\n\", \$1, \$2}')\"
+  _um_fix='sudo chown -R \"\$(id -un):\$(id -gn)\" '\"\$_um_paths\"
+  _um_pc=\"\$(house_post_create .)\"
+  _um_then='then re-run the sync.'
+  [ -n \"\$_um_pc\" ] && _um_then=\"then re-run the container's post-create (bash \$_um_pc), and re-run the sync.\"
+  _refuse unwritable-mounts \"[preflight] unwritable-mounts: directories this sync must write into are not writable by \$(id -un).
+\$_um_list
+           A named-volume mount point is created ROOT-OWNED by Docker; unless the container's post-create
+           reclaims it, every install into it fails with EACCES — this sync's included.
+           Fix (the project's own mount points, nothing else):
+             \$_um_fix
+           \$_um_then\"
+fi
 # Not a git repository at all: there is no history to damage and no branch to land on, so none of the git
 # preconditions have anything to say. Silence here is correct, not a skipped check.
 if git rev-parse --git-dir >/dev/null 2>&1; then
