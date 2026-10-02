@@ -2,6 +2,7 @@
 # One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
 
 /bespunky-project-starter:sync brings a project up to the current house standard in one step
+A /sync on a protected branch opens its own worktree off development — it never commits onto development or main
 "Scaffold a new project" now means the house DX on Nx — no Angular, no package.json; add only the layers you pick
 Want the house web app? Ask for the angular preset (scaffold.sh --preset=angular) — Angular, dev loop, design system
 Add only the house DX to any repo: /bespunky-project-starter:sync --ensure=agent
