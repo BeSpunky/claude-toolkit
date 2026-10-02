@@ -25,6 +25,11 @@ export const nx: LayerDescriptor = {
     '`scaffold.sh --sync <project>` — the floor is always ensured: `nx init` in place (into node_modules when ' +
     'the repo has a package.json, else through the Nx wrapper, ./nx)',
   brings: 'the Nx floor every house generator and migration runs on',
+  // The floor's own step: every applied layer's `.gitignore` block (see `gitignore` below and on each layer). The
+  // floor runs on every sync, so a layer's ignores arrive with the layer — never contingent on the agent layer.
+  generators: {
+    workspace: [{ generator: 'gitignore', args: (ctx) => [`--layers=${[...ctx.active].join(',')}`] }],
+  },
   docSections: ['nx'],
   // The Nx floor's share of the agent artifacts. Nx Console (`nrwl.angular-console` is its historical id — it is
   // the Nx extension, not an Angular one) and Nx's own Claude plugin, because Nx is in EVERY house project.

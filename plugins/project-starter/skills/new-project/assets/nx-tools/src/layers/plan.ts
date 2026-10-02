@@ -10,10 +10,12 @@
 //   3. the STAMP — `house-doc`, layer-independent and LAST, because it records the layer set this run applied
 //      and must see every layer above have its turn.
 //
-// A layer whose `requires` are not all active contributes no steps; the plan says so (a WARNING + SYNC_PARTIAL),
-// because something the project's layers call for was not applied.
+// A layer whose `requires` are not all APPLIED contributes no steps — and is applied by nothing downstream: not
+// composed into the devcontainer, not enabled in the Claude settings, not stamped. The plan says so (a WARNING +
+// SYNC_PARTIAL), because something the project's layers call for was not applied, and says how to fix it in a
+// sentence the reader can act on — never a command this mode would refuse.
 import type { GeneratorStep, LayerId, PlanContext } from './descriptor';
-import { LAYERS, inRegistryOrder } from './registry';
+import { inRegistryOrder, layer } from './registry';
 
 export type PlanLine =
   | { kind: 'gen'; generator: string; args: string[] }
@@ -31,39 +33,41 @@ const SAFE_WORD = /^[A-Za-z0-9@._/,=:+-]+$/;
 
 export function plan(ctx: PlanContext, stamp: StampOptions): PlanLine[] {
   const lines: PlanLine[] = [];
-  const active = inRegistryOrder(ctx.active);
 
-  const runnable = (id: LayerId): boolean => {
-    const entry = LAYERS.find((candidate) => candidate.id === id)!;
-    const missing = entry.requires.filter((required) => !ctx.active.has(required));
-    if (missing.length === 0) return true;
-    lines.push({
-      kind: 'warn',
-      message:
-        `the ${id} layer is present but needs ${missing.join(', ')}, which this project does not have — ` +
-        `SKIPPING its generators. Add it (scaffold.sh --sync --ensure=${missing.join(',')} <project>, where a sync ` +
-        `can ensure it) and re-run.`,
-    });
+  // THE APPLIED SET — the layers whose steps this run actually executes. A layer whose `requires` are not all
+  // APPLIED (not merely active: a requirement that is itself skipped takes its dependants down with it) runs no
+  // steps — and then nothing downstream may claim it either. The devcontainer composes, claude-settings enables
+  // and the stamp records THIS set, never `ctx.active`: composing an unmet layer's fragment ships its tooling
+  // (a JDK, emulator ports) for a layer that was never wired, and stamping it tells every later reader — the
+  // hook, the next sync — that it was. Registry order is a topological order, so one pass decides it.
+  const applied = new Set<LayerId>();
+  for (const id of inRegistryOrder(ctx.active)) {
+    const missing = layer(id).requires.filter((required) => !applied.has(required));
+    if (missing.length === 0) {
+      applied.add(id);
+      continue;
+    }
+    lines.push({ kind: 'warn', message: unmet(ctx, id, missing) });
     lines.push({ kind: 'partial' });
-    return false;
-  };
-  const eligible = active.filter(runnable);
+  }
+  // Every step reads the run through THIS context, so no step can see a layer the plan did not apply.
+  const run: PlanContext = { ...ctx, active: applied, ensured: new Set([...ctx.ensured].filter((id) => applied.has(id))) };
+  const eligible = [...applied];
 
   const emit = (step: GeneratorStep) => {
-    const skipped = step.skip?.(ctx);
+    const skipped = step.skip?.(run);
     if (skipped) {
       lines.push({ kind: 'warn', message: skipped.reason });
       if (skipped.partial) lines.push({ kind: 'partial' });
       return;
     }
-    lines.push({ kind: 'gen', generator: step.generator, args: checked(step.generator, step.args?.(ctx) ?? []) });
+    lines.push({ kind: 'gen', generator: step.generator, args: checked(step.generator, step.args?.(run) ?? []) });
   };
 
-  const byId = new Map(LAYERS.map((entry) => [entry.id, entry]));
   if (ctx.mode === 'sync') {
-    for (const id of eligible) for (const step of byId.get(id)!.generators?.app ?? []) emit(step);
+    for (const id of eligible) for (const step of layer(id).generators?.app ?? []) emit(step);
   }
-  for (const id of eligible) for (const step of byId.get(id)!.generators?.workspace ?? []) emit(step);
+  for (const id of eligible) for (const step of layer(id).generators?.workspace ?? []) emit(step);
 
   // THE STAMP. Ungated: HOUSE.rules.md is how the house directives reach a session at all (CLAUDE.md
   // `@`-imports it), and that must not be contingent on wanting the agent tooling. Section-level gating inside
@@ -75,7 +79,7 @@ export function plan(ctx: PlanContext, stamp: StampOptions): PlanLine[] {
       `--nxToolsVersion=${stamp.nxToolsVersion}`,
       `--pluginVersion=${stamp.pluginVersion}`,
       `--packageManager=${stamp.packageManager}`,
-      `--layers=${active.join(',')}`,
+      `--layers=${eligible.join(',')}`,
     ]),
   });
   return lines;
@@ -97,4 +101,23 @@ function checked(generator: string, args: string[]): string[] {
     }
   }
   return args;
+}
+
+/**
+ * Why `id` was skipped, and how to bring what it lacks — per missing layer, the remedy THIS mode actually
+ * accepts: `--ensure=<it>` only where the mode can ensure it (a sync refuses `--ensure=node`), else the layer's
+ * own hint. A requirement that is active but itself skipped is named as such; its own warning carries the fix.
+ */
+function unmet(ctx: PlanContext, id: LayerId, missing: readonly LayerId[]): string {
+  const remedies = missing.map((required) => {
+    if (ctx.active.has(required)) return `${required} (itself skipped above)`;
+    const spec = layer(required).ensurable[ctx.mode];
+    if (spec === true) {
+      return ctx.mode === 'sync'
+        ? `${required} — re-run with \`scaffold.sh --sync --ensure=${required} <project>\``
+        : `${required} — add it to --ensure`;
+    }
+    return `${required} — ${layer(required).ensureHint}`;
+  });
+  return `the ${id} layer is present but needs ${missing.join(', ')}, which this run does not apply — SKIPPING its generators (and leaving it out of the devcontainer, the Claude settings and the stamp). To bring it: ${remedies.join('; ')}.`;
 }

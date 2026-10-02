@@ -19,6 +19,7 @@
 //
 // See docs/features/2026-10-01-stack-agnostic/contracts/layers.md for the contract later phases build on.
 import type { Tree } from '@nx/devkit';
+import type { DevFragment } from '../generators/dev/declaration';
 
 /**
  * A layer id. OPEN, not a closed union: a layer exists because it is registered, and a registry lookup of an
@@ -129,8 +130,12 @@ export interface LayerDescriptor {
   //    Each is OPTIONAL: a layer that contributes nothing omits the field. The generators COMPOSE the
   //    contributions of the ACTIVE layers (registry order), so a layer's tooling arrives with the layer and
   //    leaves with it — no generator carries a flag per layer.
-  /** This layer's devcontainer fragment — composed by the `devcontainer` generator. See `DevcontainerFragment`. */
-  devcontainer?: DevcontainerFragment;
+  /**
+   * This layer's devcontainer fragment — composed by the `devcontainer` generator. See `DevcontainerFragment`.
+   * DATA, or a pure function of the workspace when part of it is a fact about the project (the emulator ports in
+   * firebase.json) rather than about the layer.
+   */
+  devcontainer?: DevcontainerFragment | ((tree: Tree) => DevcontainerFragment);
   /**
    * The HOUSE.md / HOUSE.rules.md / CLAUDE.md section flags this layer switches on (`{{#flag}}…{{/flag}}` in the
    * house-doc templates). Usually the layer's own id; a layer may also switch on a shared section (`ui`).
@@ -144,8 +149,11 @@ export interface LayerDescriptor {
   claudePlugins?: readonly string[];
   /** `.gitignore` entries this layer's tooling makes necessary, under one heading per block. */
   gitignore?: readonly GitignoreBlock[];
-  /** Phase 1/4 — the migration `layer` scope this layer answers to (defaults to its id). */
-  migrationScope?: LayerId;
+  /**
+   * The processes this CAPABILITY runs beside a served app (Firebase: the emulator suite) — seeded into the app's
+   * `.bespunky/dev.json` entry by the `dev` generator, only where the layer is present and the app is served.
+   */
+  devFragment?(tree: Tree, project: string): DevFragment;
 }
 
 /** A `.gitignore` block: a `#` heading (without the `#`) and the entries under it. */

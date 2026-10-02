@@ -1,6 +1,6 @@
 # Lifecycle & Reactivity (Angular)
 
-How units come to life, react to change, and tear down cleanly — with the boilerplate **concentrated, not copy-pasted** (`architect-mentality` → *Concentrate complexity*, *Work smart, not hard*). Modern Angular: signal inputs, `effect()`, `DestroyRef`, `takeUntilDestroyed`.
+How units come to life, react to change, and tear down cleanly — with the boilerplate **concentrated, not copy-pasted** (`bespunky-engineering:architect-mentality` → *Concentrate complexity*, *Work smart, not hard*). Modern Angular: signal inputs, `effect()`, `DestroyRef`, `takeUntilDestroyed`.
 
 ---
 
@@ -116,4 +116,4 @@ Then `@for (m of markers(); track m.id) { <app-marker [data]="m"/> }` keeps the 
 
 ---
 
-**Mentality anchors for this cluster:** *Concentrate complexity*, *Work smart, not hard*, *Refuse false tradeoffs*, *Design for the consumer*, *Lead with one mental model* — all in the `architect-mentality` skill.
+**Mentality anchors for this cluster:** *Concentrate complexity*, *Work smart, not hard*, *Refuse false tradeoffs*, *Design for the consumer*, *Lead with one mental model* — all in the `bespunky-engineering:architect-mentality` skill.

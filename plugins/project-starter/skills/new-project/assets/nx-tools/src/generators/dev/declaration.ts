@@ -39,11 +39,18 @@ export interface DevDeclaration {
 export interface DevFragment {
   processes: DevProcess[];
   install?: DevInstall;
+  /** Why this fragment contributes nothing, when the reader should hear it — logged with the seed report. */
+  skipped?: string;
 }
 
+/** The declaration, or null when there is none. Throws a sentence (not a parser trace) when it cannot be read. */
 export function readDeclaration(tree: Tree): DevDeclaration | null {
   if (!tree.exists(DECLARATION_PATH)) return null;
-  return JSON.parse(tree.read(DECLARATION_PATH, 'utf8') ?? '{}') as DevDeclaration;
+  try {
+    return JSON.parse(tree.read(DECLARATION_PATH, 'utf8') ?? '{}') as DevDeclaration;
+  } catch (error) {
+    throw new Error(`${DECLARATION_PATH} is not valid JSON (${error instanceof Error ? error.message : String(error)})`);
+  }
 }
 
 export function writeDeclaration(tree: Tree, decl: DevDeclaration): void {
@@ -61,7 +68,7 @@ export type SeedReport = string[];
  * names are the app's substitution namespace) — it is reported instead, so the conflict is visible.
  */
 export function seedApp(tree: Tree, app: string, fragment: DevFragment): SeedReport {
-  const report: SeedReport = [];
+  const report: SeedReport = fragment.skipped ? [fragment.skipped] : [];
   if (fragment.processes.length === 0 && !fragment.install) return report;
 
   const decl: DevDeclaration = readDeclaration(tree) ?? { apps: {} };

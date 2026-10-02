@@ -91,8 +91,9 @@ exactly what invoking `/sync` is. **This is the only situation in which you may 
 reasoning to a sync you decided to run yourself, one suggested by the SessionStart hook, or one in a
 scripted or headless run.
 
-**Do not add `--no-backup`.** The sync tags a restore point first; that is the safety net for a command
-that rewrites files.
+**Do not add `--no-backup`.** In a git repository it changes nothing — the restore point is the clean `HEAD`
+preflight requires — and its only remaining meaning is "sync a directory that is NOT a git repository, with no
+restore point at all". That is the user's call to make, never yours.
 
 **Pass `$ARGUMENTS` through, and add nothing of your own.** In particular do not invent `--ensure` or
 `--preset` (a preset is only a named ensure set): ensuring a layer CREATES capability the project did not ask
@@ -112,8 +113,8 @@ meaning, not by its exact wording** (it is prose, and it gets tuned):
 
 - **the ladder ran**, naming the two versions it walked between. **Relay this loudly.** These are one-way
   deltas, not idempotent re-assertions: they rewrite **every project in the workspace**, not just the one app
-  the per-app generators target, and there is no reverse. Name the two versions and point at the backup ref
-  from `BACKUP_OK`, because that tag is the only way back.
+  the per-app generators target, and there is no reverse. Name the two versions and point at the restore point
+  from `BACKUP_OK` (the clean pre-sync `HEAD` sha), because that commit is the only way back.
 - **the baseline line**, saying the toolkit was not installed here before this run — normal on a first
   retrofit. There is no applied version to migrate *from*; the project is simply being brought to baseline.
 - **the steady-state line**, saying the project is already at the version being installed, so there is
@@ -150,8 +151,11 @@ Do not offer to squash, amend or reword these commits unless the user asks. They
 **If a migration fails mid-ladder, STOP.** Do not re-run the sync to "get past it": the version bump (in
 `package.json`, or `nx.json` → `installation` on the wrapper host) and the install have already happened, the project is half-migrated, and Nx leaves its `migrations.json` sitting
 in the workspace root. Re-running restarts the ladder against a tree that is partly through it. Surface the
-failing migration's name, the backup ref, and the leftover `migrations.json`, and let the user decide between
-fixing forward and restoring from the tag.
+failing migration's name, the restore point, and the leftover `migrations.json`, and let the user decide between
+fixing forward and restoring — with the commands the failure printed: `git restore --source=<sha> --staged
+--worktree -- .` puts every tracked file back, then `git clean -n` lists what the run ADDED (review before any
+`-f`). **Never `git reset --hard`**: it moves the branch and discards the working tree wholesale, the one undo
+that can destroy something the sync did not make.
 
 One failure there is worth recognising on sight, because Nx's message gives no clue what it is about:
 
@@ -236,10 +240,8 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 - **`BACKUP_ABORT: … is not a git repository`** — very common on a first retrofit. The sync **refused to
   change anything** rather than rewrite files with no restore point. Relay the two ways out it printed:
   `git init && git add -A && git commit` in the project, or `--no-backup`. Prefer the first, and only pass
-  `--no-backup` if the user asks for it — see the rule above.
-
-- **`BACKUP_ABORT: could not create the git snapshot`** — same refusal, different cause (a broken or
-  unwritable repo state). Relay it; don't retry with `--no-backup` on your own initiative.
+  `--no-backup` if the user asks for it — see the rule above. (In a git repository there is no backup step to
+  fail: preflight requires a clean tree, so the restore point is simply `HEAD`.)
 
 - **`[layers] ensure nx: …`** — the repo had no `nx.json`, so the sync laid the **Nx floor** in place
   (`nx init`). Not an error: the floor is always ensured, because every house generator and migration runs
@@ -248,9 +250,10 @@ mid-way. Step 1 may matter again, and the gate is cheap.
   **none** (a Python, Go or docs repo), Nx came through its **wrapper**: the repo gains `nx.json`, `./nx`,
   `nx.bat` and `.nx/nxw.js`, with the toolkit pinned exactly in `nx.json` → `installation.plugins` — and no
   `package.json`, lockfile or `node_modules`, so it does not become a Node project. Nx commands there are
-  `./nx …`. If the user ran a plain `/sync` on such a repo, the floor is all they got; **offer**
-  `/sync --ensure=agent` for the house DX (devcontainer, Claude settings, window identity, `HOUSE.rules.md` +
-  `HOUSE.md`) and wait for a yes.
+  `./nx …`. If the user ran a plain `/sync` on such a repo, they got the floor — Nx, the house docs
+  (`HOUSE.rules.md` + `HOUSE.md`, imported from `CLAUDE.md`, seeded if absent) and each layer's `.gitignore`
+  entries — and nothing above it; **offer** `/sync --ensure=agent` for the house DX (devcontainer, Claude
+  settings, window identity) and wait for a yes.
 
 - **`--sync cannot ENSURE the '<layer>' layer`** — relay the message verbatim (a `--preset` naming such a
   layer is refused the same way). It already names the native command to add that layer, after which a plain
@@ -289,7 +292,9 @@ silently and mention it in one clause.
 - the layers it reported active, and the package manager it detected;
 - if it printed an `[devcontainer] Adopted the existing …` line, read `.devcontainer/.bespunky-devcontainer.json`
   and tell them which keys were left as theirs — that is the divergence the sync will never fix on its own;
-- the backup ref from the `BACKUP_OK` line, so they know how to undo it.
+- the restore point from the `BACKUP_OK` line (also `backup=` in `SYNC_OK`) — the clean pre-sync `HEAD` — and how
+  to use it: `git diff <sha>` reviews the sync; `git checkout <sha> -- <path>` restores one file;
+  `git restore --source=<sha> --staged --worktree -- .` (then `git clean -n`) undoes it all. Never `reset --hard`.
 
 ### Last, the one boundary — `SYNC_NEXT`
 

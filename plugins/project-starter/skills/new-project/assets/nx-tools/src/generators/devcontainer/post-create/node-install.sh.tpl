@@ -7,26 +7,10 @@
 # lockfile beside the first — after which `npm ci` fails for the whole team, caused by a container rebuild.
 # THE DECLARATION FIRST, then the artifacts. `packageManager` is the only signal a human deliberately wrote;
 # a lockfile is a by-product, and a STRAY one is exactly what an unconditional `yarn install` used to leave
-# behind. Same order as scaffold.sh and the house-doc generator.
+# behind. The detection below is RENDERED from the one rule (generators/_utils/package-manager.ts), so it cannot
+# disagree with the generators; scaffold.sh keeps the same order.
 if [ -f "$WS/package.json" ]; then
-  case "$(grep -m1 '"packageManager"' "$WS/package.json" 2>/dev/null)" in
-    *pnpm*) PM=pnpm; PM_INSTALL="pnpm install"; PM_EXEC="pnpm exec" ;;
-    *yarn*) PM=yarn; PM_INSTALL="yarn install"; PM_EXEC="yarn" ;;
-    *npm*)  PM=npm;  PM_INSTALL="npm install";  PM_EXEC="npx --no-install" ;;
-    *)
-      if [ -f "$WS/pnpm-lock.yaml" ]; then
-        PM=pnpm;  PM_INSTALL="pnpm install";  PM_EXEC="pnpm exec"
-      elif [ -f "$WS/yarn.lock" ]; then
-        PM=yarn;  PM_INSTALL="yarn install";  PM_EXEC="yarn"
-      elif [ -f "$WS/package-lock.json" ]; then
-        PM=npm;   PM_INSTALL="npm install";   PM_EXEC="npx --no-install"
-      else
-        # A package.json that declares nothing and has no lockfile: the house default — the same one scaffold.sh
-        # falls back to, so the container and the sync never disagree about it.
-        PM=yarn;  PM_INSTALL="yarn install";  PM_EXEC="yarn"
-      fi
-      ;;
-  esac
+{{PM_DETECT}}
   echo "[post-create] package manager: $PM"
   echo "[post-create] $PM_INSTALL"
   $PM_INSTALL

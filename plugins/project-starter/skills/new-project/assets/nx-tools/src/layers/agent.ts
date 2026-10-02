@@ -54,7 +54,16 @@ export const agent: LayerDescriptor = {
       features: [{ id: 'ghcr.io/devcontainers/features/node:1', options: { version: '{{nodeMajor}}' } }],
       why: 'A neutral base: this repo brings no stack image. Node comes as a feature — the Nx floor and the house tooling run on it.',
     },
-    features: [{ id: 'ghcr.io/devcontainers-extra/features/claude-code' }, { id: 'ghcr.io/devcontainers/features/github-cli' }],
+    features: [
+      {
+        id: 'ghcr.io/devcontainers-extra/features/claude-code',
+        why:
+          "Claude's permission posture is set once in .claude/settings.json (permissions.defaultMode: \"auto\")\n" +
+          '— deliberately NOT a blanket skip here. "auto" gives frictionless auto-approval WITH the background\n' +
+          'safety classifier, the right default even in an isolated container.',
+      },
+      { id: 'ghcr.io/devcontainers/features/github-cli' },
+    ],
     extensions: [
       'Anthropic.claude-code',
       'EditorConfig.EditorConfig',
@@ -64,14 +73,7 @@ export const agent: LayerDescriptor = {
       'usernamehw.errorlens',
     ],
     settings: [
-      {
-        key: 'editor.formatOnSave',
-        value: false,
-        why:
-          "Claude's permission posture is set once in .claude/settings.json (permissions.defaultMode: \"auto\")\n" +
-          '— deliberately NOT a blanket skip here. "auto" gives frictionless auto-approval WITH the background\n' +
-          'safety classifier, the right default even in an isolated container.',
-      },
+      { key: 'editor.formatOnSave', value: false },
       { key: 'files.associations', value: { '*.mdc': 'markdown' } },
     ],
     mounts: [

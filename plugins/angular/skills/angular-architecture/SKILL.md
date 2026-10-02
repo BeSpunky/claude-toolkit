@@ -6,7 +6,7 @@ description: >-
 
 # Angular Architecture
 
-Concrete, modern-Angular techniques that put the architect mindset into practice. The *why* lives in the **`architect-mentality`** skill (agnostic principles); the *discipline* lives in **`architecture-first`** (root-cause, no patches, design-and-confirm refactors). **This skill is the *how*, in Angular.**
+Concrete, modern-Angular techniques that put the architect mindset into practice. The *why* lives in the **`bespunky-engineering:architect-mentality`** skill (agnostic principles); the *discipline* lives in **`bespunky-engineering:architecture-first`** (root-cause, no patches, design-and-confirm refactors). **This skill is the *how*, in Angular.**
 
 Everything here is the timeless design idea expressed in **today's** Angular — standalone components, `inject()`, `provideX()` functions, signals, `takeUntilDestroyed`, `afterNextRender`. Where a pattern originated in an older idiom (NgModules, Zone, `EventEmitter`), it is restated in the current one. The idea is what matters, not the dated API.
 
@@ -14,7 +14,7 @@ Everything here is the timeless design idea expressed in **today's** Angular —
 
 1. Identify which **cluster** (below) your decision belongs to.
 2. **Read the matching `reference/<file>.md`** for the full pattern: what it is, the mentality it serves, modern code, when to use it, when *not* to, and pitfalls.
-3. Apply it — and keep every connection between units deliberate and one-directional (`architect-mentality` → *Everything is a black box*).
+3. Apply it — and keep every connection between units deliberate and one-directional (`bespunky-engineering:architect-mentality` → *Everything is a black box*).
 
 Read only the cluster(s) you need; don't load them all.
 
@@ -38,4 +38,4 @@ All six clusters have full reference files — read only the one(s) you need.
 - **`bespunky-engineering:architecture-first`** — the operational discipline that governs how changes are made.
 - **`bespunky-engineering:advanced-typescript`** · **`bespunky-engineering:software-design`** — the type-level and cross-stack toolboxes these Angular techniques specialize.
 
-This plugin (`bespunky-angular`) is the **Angular adapter** of the toolkit: the mindset, the discipline and the stack-neutral techniques live in `bespunky-engineering`; bare skill names in these files (`architect-mentality`, `architecture-first`, `advanced-typescript`) refer to that plugin.
+This plugin (`bespunky-angular`) is the **Angular adapter** of the toolkit: the mindset, the discipline and the stack-neutral techniques live in `bespunky-engineering`; bare skill names in these files (`bespunky-engineering:architect-mentality`, `bespunky-engineering:architecture-first`, `bespunky-engineering:advanced-typescript`) refer to that plugin.

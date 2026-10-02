@@ -101,7 +101,7 @@ export default async function devcontainerGenerator(
   const layers = activeLayers(tree, options.layers);
   const layerIds = layers.map((entry) => entry.id);
 
-  const declared: Contributor[] = [...devcontainerFragments(layers), ...(voice ? [{ id: 'voice', fragment: VOICE }] : [])];
+  const declared: Contributor[] = [...devcontainerFragments(tree, layers), ...(voice ? [{ id: 'voice', fragment: VOICE }] : [])];
   // The probe follows from the mounts: every workspace bind source it guarantees is one a contributor declared.
   const bindSources = workspaceBindSources(declared);
   const contributors: Contributor[] = bindSources.length ? [...declared, { id: 'host-probe', fragment: HOST_PROBE }] : declared;

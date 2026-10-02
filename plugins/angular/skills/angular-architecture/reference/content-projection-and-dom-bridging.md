@@ -1,6 +1,6 @@
 # Content Projection & DOM Bridging (Angular)
 
-Let consumers supply Angular-managed content that ends up somewhere Angular doesn't normally control — a third-party overlay, a portal, a canvas-driven panel — **without losing live bindings** (`architect-mentality` → *Abstractions must never trap*, *Design for the consumer*). Modern Angular: `model()`, CDK Portals, signals.
+Let consumers supply Angular-managed content that ends up somewhere Angular doesn't normally control — a third-party overlay, a portal, a canvas-driven panel — **without losing live bindings** (`bespunky-engineering:architect-mentality` → *Abstractions must never trap*, *Design for the consumer*). Modern Angular: `model()`, CDK Portals, signals.
 
 ---
 
@@ -18,7 +18,7 @@ outlet.attach(portal);                                  // real DOM — bindings
 inject(DestroyRef).onDestroy(() => outlet.dispose());
 ```
 
-**Pitfalls.** Serializing `outerHTML` is the tempting shortcut and it is the *easy-but-complex* one (`architect-mentality` → *Go the extra mile*): it freezes the content and drops reactivity. Move nodes, don't stringify them.
+**Pitfalls.** Serializing `outerHTML` is the tempting shortcut and it is the *easy-but-complex* one (`bespunky-engineering:architect-mentality` → *Go the extra mile*): it freezes the content and drops reactivity. Move nodes, don't stringify them.
 
 ---
 
@@ -47,8 +47,8 @@ export class OverlayDirective {
 - Prefer **signals / `computed`** for derived view state — they recompute coherently and largely eliminate the error.
 - If a value genuinely must settle after render, that's `afterNextRender` territory — but first ask whether the data flow is modeled correctly.
 
-**Pitfalls.** `setTimeout` or a stray `ChangeDetectorRef.detectChanges()` to "make it go away" is symptom-masking — exactly what the `architecture-first` skill forbids. Find *why* the value changes late.
+**Pitfalls.** `setTimeout` or a stray `ChangeDetectorRef.detectChanges()` to "make it go away" is symptom-masking — exactly what the `bespunky-engineering:architecture-first` skill forbids. Find *why* the value changes late.
 
 ---
 
-**Mentality anchors for this cluster:** *Abstractions must never trap*, *Refuse false tradeoffs*, *Design for the consumer*, *Go the extra mile* — all in the `architect-mentality` skill; and *fix the root cause* in `architecture-first`.
+**Mentality anchors for this cluster:** *Abstractions must never trap*, *Refuse false tradeoffs*, *Design for the consumer*, *Go the extra mile* — all in the `bespunky-engineering:architect-mentality` skill; and *fix the root cause* in `bespunky-engineering:architecture-first`.

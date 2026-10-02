@@ -9,9 +9,12 @@
 // ENSURABLE BY A SYNC: the core genuinely creates the layer from nothing — the "retrofit Firebase" case, reached
 // through --firebase (which scaffold.sh folds into the ensure set: the flag and --ensure=firebase are two
 // spellings of one intent).
-import type { LayerDescriptor, PlanContext } from './descriptor';
+import type { DevcontainerPort, LayerDescriptor, PlanContext } from './descriptor';
+import { type Tree, readProjectConfiguration } from '@nx/devkit';
+import { hostDialledPorts } from '../generators/firebase-emulators/emulator-ports';
 import { projectExists } from './evidence';
 import { adapterOf, applicationsWith } from '../adapters/registry';
+import { firebaseFragment } from '../generators/firebase-emulators/dev-fragment';
 
 /** The sync's app, when its stack can take the Firebase client. */
 const attachable = (ctx: PlanContext): boolean =>
@@ -69,36 +72,18 @@ export const firebase: LayerDescriptor = {
     ],
   },
   docSections: ['firebase'],
+  // The emulator suite, served beside every app the dev engine runs.
+  devFragment: (tree) => firebaseFragment(tree),
   // The Cloud Functions bundle lands in `dist/apps/functions`. create-nx-workspace ignores `dist`; `nx init` on an
   // existing repo does not — and this layer brings that build, so it owns ignoring its output, or the first
   // `nx build functions` leaves an untracked tree behind.
   gitignore: [{ heading: 'Build output (Nx writes builds to dist/)', entries: ['dist'] }],
-  devcontainer: {
+  // A function of the workspace: the forwarded ports are the suite's as firebase.json configures it, and the
+  // dev-server port of each app the Firebase client can attach to — never a hand-copied list.
+  devcontainer: (tree) => ({
     features: [{ id: 'ghcr.io/devcontainers-extra/features/firebase-cli' }, { id: 'ghcr.io/jajera/features/gcloud-cli' }],
     extensions: ['toba.vsfire'],
-    ports: [
-      {
-        // The dev server, pinned to the SAME host port: the page loads over forwarded :4200, then the Firebase
-        // SDK INSIDE it calls the emulators at hardcoded localhost:<port> addresses (environment.ts), which only
-        // resolve from a host browser if those ports are forwarded to the identical host port.
-        port: 4200,
-        label: 'Dev Server',
-        onAutoForward: 'openPreview',
-        forward: true,
-        why:
-          'Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a\n' +
-          'host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.\n' +
-          'KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;\n' +
-          'real Google OAuth is pinned to whichever holds :4200). The shared browser runs INSIDE the container and\n' +
-          'reaches them on loopback, so it works for every container.',
-      },
-      { port: 4000, label: 'Firebase Emulator UI', onAutoForward: 'notify', forward: true },
-      { port: 9099, label: 'Auth Emulator', onAutoForward: 'silent', forward: true },
-      { port: 8080, label: 'Firestore Emulator', onAutoForward: 'silent', forward: true },
-      { port: 9150, label: 'Firestore WebSocket', onAutoForward: 'silent', forward: true },
-      { port: 9199, label: 'Storage Emulator', onAutoForward: 'silent', forward: true },
-      { port: 5001, label: 'Functions Emulator', onAutoForward: 'silent', forward: true },
-    ],
+    ports: [...clientDevServerPorts(tree), ...emulatorForwards(tree)],
     osPackages: [
       {
         packages: ['default-jdk-headless'],
@@ -108,5 +93,47 @@ export const firebase: LayerDescriptor = {
       },
     ],
     postCreate: [{ phase: 'provision', piece: 'firebase-banner' }],
-  },
+  }),
 };
+
+/**
+ * The dev-server of every app the Firebase client can attach to, forwarded to the SAME host port: the page loads
+ * over it, then the Firebase SDK INSIDE it calls the emulators at hardcoded localhost:<port> addresses
+ * (environment.ts), which only resolve from a host browser if those ports are forwarded to the identical number.
+ * The port is the app's own (its dev-server leaf's `port`), else its stack's default — so a backend-only Firebase
+ * forwards no dev-server at all.
+ */
+function clientDevServerPorts(tree: Tree): DevcontainerPort[] {
+  const ports = new Set<number>();
+  for (const { project, adapter } of applicationsWith(tree, 'firebase')) {
+    if (!adapter.devServer) continue;
+    const declared = Number(readProjectConfiguration(tree, project).targets?.['dev-server']?.options?.port);
+    ports.add(Number.isInteger(declared) && declared > 0 ? declared : adapter.devServer.basePort);
+  }
+  return [...ports].map((port, index) => ({
+    port,
+    label: 'Dev Server',
+    onAutoForward: 'openPreview' as const,
+    forward: true,
+    ...(index === 0
+      ? {
+          why:
+            'Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a\n' +
+            'host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.\n' +
+            'KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;\n' +
+            'real Google OAuth is pinned to whichever holds the dev-server port). The shared browser runs INSIDE the\n' +
+            'container and reaches them on loopback, so it works for every container.',
+        }
+      : {}),
+  }));
+}
+
+/** The emulator suite's host-dialled ports (firebase.json, else the house suite), forwarded at the same number. */
+function emulatorForwards(tree: Tree): DevcontainerPort[] {
+  return hostDialledPorts(tree).map(({ name, port, label }) => ({
+    port,
+    label,
+    onAutoForward: name === 'ui' ? ('notify' as const) : ('silent' as const),
+    forward: true,
+  }));
+}

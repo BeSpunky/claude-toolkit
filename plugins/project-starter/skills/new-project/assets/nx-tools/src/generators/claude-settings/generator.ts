@@ -1,12 +1,9 @@
-// House generator: write .claude/settings.json (marketplaces + autoUpdate + enabled plugins),
-// and keep the active layers' machine-local state out of git.
+// House generator: write .claude/settings.json (marketplaces + autoUpdate + enabled plugins).
 //
 // COMPOSED FROM THE ACTIVE LAYERS. Which plugins a project enables is a fact about its layers — the Nx plugin
 // with the Nx floor, `bespunky-angular` with Angular, the design-system plugin with a design system — so each
 // layer declares them (`descriptor.claudePlugins`) and this generator enables the union. The devcontainer's
 // plugin pre-install reads the SAME list (`_utils/layer-contributions.ts`), so the two can no longer drift.
-// The same goes for `.gitignore`: each layer names the machine-local paths its tooling creates
-// (`descriptor.gitignore`), and they are ignored only where that layer is.
 //
 // MERGE, never clobber. This file is co-owned: the house owns the marketplace/plugin/permission keys,
 // but the PROJECT owns everything it adds afterwards (its own `hooks`, extra `permissions.allow`
@@ -33,7 +30,7 @@
 import { type Tree } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { activeLayers, claudePlugins, gitignoreBlocks } from '../_utils/layer-contributions';
+import { activeLayers, claudePlugins } from '../_utils/layer-contributions';
 
 type Json = Record<string, unknown>;
 
@@ -55,10 +52,8 @@ export default async function claudeSettingsGenerator(tree: Tree, options: Claud
   // exists on this machine only and a fresh clone would still lack it. The devcontainer's host probe creates it
   // on the host before every container open — the one place that holds on every machine.
 
-  // Keep each active layer's machine-local state out of git — Claude Code's own (`agent`), Nx's caches and the
-  // sync's lock (`nx`), whatever a later layer adds. Additive and idempotent: an entry already mentioned is left
-  // alone, so a project that ignores these its own way is untouched.
-  for (const block of gitignoreBlocks(layers)) ensureIgnored(tree, `# ${block.heading}`, [...block.entries]);
+  // The layers' `.gitignore` blocks are NOT written here: they are a floor concern (the `gitignore` generator,
+  // the nx layer's step), so a repo without the agent layer still ignores what its layers' tooling creates.
 }
 
 /**
@@ -77,33 +72,6 @@ function pluginSettings(layers: Parameters<typeof claudePlugins>[0]): Json {
     ),
     enabledPlugins: Object.fromEntries(plugins.map((plugin) => [plugin, true])),
   };
-}
-
-/**
- * Append any of `entries` that aren't already mentioned in `.gitignore`, under a single heading.
- *
- * Substring matching is deliberate and sufficient here: these are distinctive paths, and the question being
- * asked is "does this repo already deal with this?", not "is there an exactly-equal line". A repo that
- * ignores `.nx/` wholesale already covers `.nx/cache`, and re-adding it would be noise.
- */
-function ensureIgnored(tree: Tree, heading: string, entries: string[]): void {
-  const current = tree.exists('.gitignore') ? (tree.read('.gitignore', 'utf8') ?? '') : '';
-  const missing = entries.filter((entry) => !current.includes(entry));
-
-  const appended =
-    missing.length === 0
-      ? current
-      : `${current}${current === '' || current.endsWith('\n') ? '' : '\n'}\n${heading}\n${missing.join('\n')}\n`;
-
-  // Tidy the whole file, even on a run that appends NOTHING.
-  //
-  // `.gitignore` is written by several hands — `nx init` appends its own block with leading newlines, and
-  // so does every generator that owns a rule here — and the result accumulates runs of blank lines that no
-  // single author is responsible for. This layer owns .gitignore hygiene, so it normalises the file it
-  // touches rather than only the lines it contributed; anything else leaves the mess for a human to notice.
-  // Idempotent by construction: collapsing is a fixed point, so a second run rewrites nothing.
-  const tidied = appended.replace(/\n{3,}/g, '\n\n');
-  if (tidied !== current) tree.write('.gitignore', tidied);
 }
 
 /**

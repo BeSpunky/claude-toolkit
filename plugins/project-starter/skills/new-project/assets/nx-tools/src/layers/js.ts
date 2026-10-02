@@ -5,12 +5,13 @@
 // (switching this layer on in every web workspace), and a Python or Go library in an Nx workspace declares it
 // just as legitimately.
 import type { LayerDescriptor } from './descriptor';
+import { adapter } from '../adapters/registry';
 
 export const js: LayerDescriptor = {
   id: 'js',
   title: 'TypeScript/JavaScript libraries',
   requires: ['nx'],
-  evidence: { dependencies: ['@nx/js'], executors: ['@nx/js:'] },
+  evidence: { dependencies: ['@nx/js'], executors: adapter('js').executors },
   ensurable: { scaffold: false, sync: false },
   ensureHint: '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --stack=js`)',
   brings: 'the publishable-library and tool-extraction conventions in HOUSE.md, @playwright/test (pinned)',

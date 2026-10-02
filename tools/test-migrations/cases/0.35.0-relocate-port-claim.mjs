@@ -22,6 +22,11 @@ export default {
         tree.write('tools/worktree-domains/worktree-domains', WD_CLI);
         tree.write('docs/ports.md', 'Run `node tools/shared-browser/port-claim.mjs list`.\n');
         tree.write('.claude/worktrees/other/tools/worktree-domains/worktree-domains', WD_CLI);
+        // Never edited: a dated feature record, a virtualenv, a nested work tree outside .claude/worktrees.
+        tree.write('docs/features/2026-09-01-ports/DECISION.md', 'We kept tools/shared-browser/port-claim.mjs.\n');
+        tree.write('.venv/lib/site.py', '# tools/shared-browser/port-claim.mjs\n');
+        tree.write('elsewhere/checkout/.git', 'gitdir: /x\n');
+        tree.write('elsewhere/checkout/notes.md', 'tools/shared-browser/port-claim.mjs\n');
       },
       expect: (tree, t) => {
         t.missing('tools/shared-browser/port-claim.mjs');
@@ -34,13 +39,37 @@ export default {
         t.has('tools/worktree-domains/worktree-domains', '$WORKSPACE_ROOT/tools/port-claim/port-claim.mjs');
         t.has('docs/ports.md', 'tools/port-claim/port-claim.mjs');
         t.has('.claude/worktrees/other/tools/worktree-domains/worktree-domains', 'tools/shared-browser/port-claim.mjs');
+        t.has('docs/features/2026-09-01-ports/DECISION.md', 'tools/shared-browser/port-claim.mjs');
+        t.has('.venv/lib/site.py', 'tools/shared-browser/port-claim.mjs');
+        t.has('elsewhere/checkout/notes.md', 'tools/shared-browser/port-claim.mjs');
       },
     },
     {
-      name: 'a port-claim.mjs without the house stamp is the project’s own — left in place',
-      setup: (tree) => tree.write('tools/shared-browser/port-claim.mjs', '// mine\n'),
+      name: 'a port-claim.mjs without the house stamp is the project’s own — left in place, and so are its callers',
+      setup: (tree) => {
+        tree.write('tools/shared-browser/port-claim.mjs', '// mine\n');
+        tree.write('tools/shared-browser/shared-browser', SB_CLI);
+        tree.write('scripts/x.sh', 'node tools/shared-browser/port-claim.mjs list\n');
+      },
       expect: (tree, t) => {
         t.has('tools/shared-browser/port-claim.mjs', '// mine');
+        t.missing('tools/port-claim/port-claim.mjs');
+        // Nothing moved, so nothing may be pointed at a tools/port-claim/ copy that does not exist.
+        t.has('scripts/x.sh', 'node tools/shared-browser/port-claim.mjs list');
+        t.has('tools/shared-browser/shared-browser', 'PORT_CLAIM="$SCRIPT_DIR/port-claim.mjs"');
+        t.hasNot('tools/shared-browser/shared-browser', 'tools/port-claim/');
+      },
+    },
+    {
+      // This toolkit's own repo, synced: its sources, fixtures and research MENTION the old path; nothing lives there.
+      name: 'mentions only, nothing to move: no file is touched',
+      setup: (tree) => {
+        tree.write('src/migrations/relocate-port-claim.ts', "const OLD = 'tools/shared-browser/port-claim.mjs';\n");
+        tree.write('research/notes.md', 'PORT_CLAIM="$SCRIPT_DIR/port-claim.mjs" lived in tools/shared-browser/port-claim.mjs\n');
+      },
+      expect: (tree, t) => {
+        t.has('src/migrations/relocate-port-claim.ts', "'tools/shared-browser/port-claim.mjs'");
+        t.has('research/notes.md', 'PORT_CLAIM="$SCRIPT_DIR/port-claim.mjs" lived in tools/shared-browser/port-claim.mjs');
         t.missing('tools/port-claim/port-claim.mjs');
       },
     },

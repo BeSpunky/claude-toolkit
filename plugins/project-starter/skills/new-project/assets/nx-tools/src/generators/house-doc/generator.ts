@@ -31,8 +31,7 @@
 // leave the hook nagging forever with no way to fix it. HOUSE.md is the opposite: root-level, unambiguously
 // committed, generator-owned, rewritten on every sync — and already the file the hook stats to decide
 // whether this is even a house project. One file, one truth, no new gitignore surface.
-import { detectPackageManager } from '../_utils/package-manager';
-import { isWrapperHosted } from '../_utils/nx-host';
+import { nxInvocation } from '../_utils/nx-host';
 import { type Tree, formatFiles } from '@nx/devkit';
 import { retireInlineHouseSections } from '../_utils/inline-house-sections';
 import { findDesignSystem } from '../_utils/design-system';
@@ -87,12 +86,13 @@ export default async function houseDocGenerator(
   // The package manager means something only where there is a package.json (the `node` layer); the sections
   // that name it are gated on that layer. It never falls back to a guess for a repo without one — that is how a
   // Python repo used to be told to run `yarn nx …`.
-  const packageManager = options.packageManager ?? detectPackageManager(tree) ?? 'npm';
+  const invocation = nxInvocation(tree, options.packageManager);
+  const packageManager = invocation.packageManager ?? '';
   // HOW THIS REPO INVOKES NX — the one command every Nx line in the docs starts with. `./nx` on the wrapper
   // host (no package.json, or a repo already running the wrapper); the package manager's runner on a
   // package.json host. Rendering `{{PM}} nx` instead produced `npm nx` — not a command — on every npm project
   // and every wrapper-hosted repo.
-  const nx = nxInvocation(tree, packageManager);
+  const nx = invocation.command;
   const nxTools = options.nxToolsVersion ?? UNKNOWN;
   const plugin = options.pluginVersion ?? UNKNOWN;
   const tpl = (name: string) => readFileSync(join(__dirname, name), 'utf8');
@@ -261,10 +261,17 @@ function ignoreSnoozeFile(tree: Tree): void {
 
 /**
  * Insert or replace the whole marker-delimited pointer block (markers included) in CLAUDE.md.
- *   - both markers present → replace the entire old block (START…END) with the new one (restore/regenerate).
- *   - markers absent       → insert the block right before the first `## ` heading (prominent, deterministic),
- *     falling back to appending at the end.
+ *   - both markers present, OUTSIDE any foreign region → replace the entire old block (START…END) in place.
+ *   - otherwise (absent, or sitting inside a foreign region from an earlier sync) → insert it right before the
+ *     first `## ` heading that is outside every foreign region (prominent, deterministic), falling back to
+ *     appending at the end.
  * `pointer` is the full rendered block, including both markers.
+ *
+ * A FOREIGN REGION is a block another tool owns and rewrites wholesale, delimited the same way this one is:
+ * `<!-- <name> start -->` … `<!-- <name> end -->` — Nx's `<!-- nx configuration start-->` block in a
+ * create-nx-workspace CLAUDE.md is the one met in practice. Its first `## ` heading sits INSIDE it, so "before
+ * the first heading" put the pointer inside Nx's block, and `nx configure-ai-agents` (which the house tells
+ * people to run) then deleted it — and with it the `@HOUSE.rules.md` import — until the next sync.
  */
 function upsertPointer(source: string, pointer: string): string {
   const startIdx = source.indexOf(START);
@@ -272,29 +279,28 @@ function upsertPointer(source: string, pointer: string): string {
   if (startIdx !== -1 && endMarkerIdx !== -1 && endMarkerIdx > startIdx) {
     const before = source.slice(0, startIdx);
     const after = source.slice(endMarkerIdx + END.length);
-    return `${before}${pointer}${after}`;
+    if (!insideForeignRegion(source, startIdx)) return `${before}${pointer}${after}`;
+    // Inside someone else's block: take it out, then place it as if it were new.
+    source = `${before.replace(/\n+$/, '\n')}${after.replace(/^\n+/, '\n')}`;
   }
-  const headingIdx = source.search(/^## /m);
-  if (headingIdx !== -1) {
-    return `${source.slice(0, headingIdx)}${pointer}\n\n${source.slice(headingIdx)}`;
+  const heading = [...source.matchAll(/^## /gm)].find((match) => !insideForeignRegion(source, match.index!));
+  if (heading) {
+    return `${source.slice(0, heading.index)}${pointer}\n\n${source.slice(heading.index)}`;
   }
   return `${source.trimEnd()}\n\n${pointer}\n`;
 }
 
-/**
- * The project's package manager, from its own lockfile.
- *
- * Same evidence and same precedence scaffold.sh uses, so the doc can't disagree with the tool that wrote
- * it. Defaults to the house standard only when the project genuinely declares nothing.
- */
-/**
- * The Nx invocation for this repo's HOST — the same decision scaffold.sh makes (`HOST`): a repo running the Nx
- * wrapper (its `.nx/nxw.js` plus an `installation` block in nx.json), or one with no package.json at all, is a
- * WRAPPER host → `./nx`; otherwise Nx lives in node_modules and runs through the package manager.
- */
-function nxInvocation(tree: Tree, packageManager: string): string {
-  if (isWrapperHosted(tree)) return './nx';
-  return { yarn: 'yarn nx', pnpm: 'pnpm nx', npm: 'npx nx' }[packageManager] ?? 'npx nx';
+/** Is `index` inside a region another tool owns (`<!-- X start -->` … `<!-- X end -->`)? */
+function insideForeignRegion(source: string, index: number): boolean {
+  for (const open of source.matchAll(/<!--\s*([^>]*?)\s*start\s*-->/gi)) {
+    const name = open[1];
+    if (name.startsWith('@bespunky/')) continue;
+    const from = open.index! + open[0].length;
+    const close = new RegExp(`<!--\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*end\\s*-->`, 'i').exec(source.slice(from));
+    const to = close ? from + close.index + close[0].length : source.length;
+    if (index >= open.index! && index < to) return true;
+  }
+  return false;
 }
 
 /** Squeeze runs of 3+ newlines (i.e. two or more consecutive blank lines) down to a single blank line. */

@@ -1,6 +1,6 @@
 # Resumable state — the Angular realization
 
-The agnostic principle lives in the SKILL: every piece of state has a deliberate home; navigational/view state → the URL as source of truth; working/data state → an explicitly chosen store; only ephemeral state stays in the component. This file is the **how, in modern Angular** (standalone, signals, `inject()`, `input()`, `provideRouter`). Read it alongside the `angular-architecture` skill (its SSR cluster governs safe storage access; its lifecycle/reactivity cluster governs the signals/effects used here).
+The agnostic principle lives in the SKILL: every piece of state has a deliberate home; navigational/view state → the URL as source of truth; working/data state → an explicitly chosen store; only ephemeral state stays in the component. This file is the **how, in modern Angular** (standalone, signals, `inject()`, `input()`, `provideRouter`). Read it alongside the `bespunky-angular:angular-architecture` skill (its SSR cluster governs safe storage access; its lifecycle/reactivity cluster governs the signals/effects used here).
 
 ---
 
@@ -139,7 +139,7 @@ Now `/team?dialog=invite` opens the invite dialog on load; closing it removes th
 
 ## 5. Working state → storage, with a `storedSignal` seam (SSR-safe)
 
-For drafts/selections that belong in `sessionStorage`/`localStorage`, model "this value lives in storage" once. **Guard storage access for SSR** — there is no `localStorage` on the server (see the `angular-architecture` SSR cluster):
+For drafts/selections that belong in `sessionStorage`/`localStorage`, model "this value lives in storage" once. **Guard storage access for SSR** — there is no `localStorage` on the server (see the `bespunky-angular:angular-architecture` SSR cluster):
 
 ```ts
 export function storedSignal<T>(key: string, initial: T, store: 'local' | 'session' = 'local') {

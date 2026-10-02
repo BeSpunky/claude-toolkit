@@ -5,13 +5,13 @@
 // that claims it — an Angular library built by @nx/angular is Angular, not "plain TS".
 //
 // To add a stack (React/Vite, say): write `adapters/<id>.ts` implementing the ports it can honour, register it
-// here, and register its layer. Every capability then attaches to its apps through those ports — no capability
+// here, and register its layer. (Which of these stacks a WORKSPACE wears is `./workspace` — kept out of this
+// module so it never imports the layer registry, which imports it.) Every capability then attaches to its apps through those ports — no capability
 // generator changes, because none of them names a framework.
-import { type Tree, getProjects, readProjectConfiguration, logger } from '@nx/devkit';
+import { type Tree, getProjects, logger } from '@nx/devkit';
 import type { StackAdapter } from './stack-adapter';
 import { angular } from './angular';
 import { js } from './js';
-import { isPresent } from '../layers/registry';
 
 export type { StackAdapter } from './stack-adapter';
 
@@ -29,20 +29,16 @@ export function adapter(id: string): StackAdapter {
 
 /** The stack that owns this project, or null (a project no registered stack builds — Python, Go, a script). */
 export function adapterOf(tree: Tree, project: string): StackAdapter | null {
-  return ADAPTERS.find((candidate) => safely(() => candidate.ownsProject(tree, project))) ?? null;
+  return (
+    ADAPTERS.find((candidate) => safely(() => candidate.ownsProject(tree, project), false, `asking the ${candidate.id} stack whether it owns \`${project}\``)) ??
+    null
+  );
 }
 
 /** Is this project an application? (`projectType` is what Nx itself means by it.) */
 export function isApplication(tree: Tree, project: string): boolean {
-  return safely(() => readProjectConfiguration(tree, project).projectType === 'application');
-}
-
-/**
- * The stack a NEW library should be created with when the caller names none: the most specific stack whose
- * layer this workspace wears and which can create libraries. Null when none can (no @nx/js, no framework).
- */
-export function defaultLibStack(tree: Tree): StackAdapter | null {
-  return ADAPTERS.find((candidate) => candidate.libs && isPresent(tree, candidate.layer)) ?? null;
+  // An unknown project is an ordinary "no", not an error — only an unreadable workspace is worth reporting.
+  return safely(() => getProjects(tree).get(project)?.projectType === 'application', false, `reading \`${project}\``);
 }
 
 /**
@@ -82,7 +78,7 @@ export function applicationsWith<P extends Port>(
   port: P,
 ): Array<{ project: string; adapter: StackAdapter; port: NonNullable<StackAdapter[P]> }> {
   const found: Array<{ project: string; adapter: StackAdapter; port: NonNullable<StackAdapter[P]> }> = [];
-  for (const project of safely(() => [...getProjects(tree).keys()], [] as string[])) {
+  for (const project of safely(() => [...getProjects(tree).keys()], [] as string[], 'listing the projects')) {
     if (!isApplication(tree, project)) continue;
     const owner = adapterOf(tree, project);
     const value = owner?.[port];
@@ -91,10 +87,23 @@ export function applicationsWith<P extends Port>(
   return found;
 }
 
-function safely<T>(read: () => T, fallback?: T): T {
+/**
+ * A read that must never take a generator down — an unreadable project config degrades to `fallback` — but is
+ * never SILENT about it either: "could not tell" is reported (once per distinct cause), so a malformed
+ * project.json shows up as the reason a capability skipped an app instead of as an unexplained skip.
+ */
+function safely<T>(read: () => T, fallback: T, what: string): T {
   try {
     return read();
-  } catch {
-    return (fallback ?? (false as unknown)) as T;
+  } catch (error) {
+    reportOnce(`[adapters] Could not finish ${what}: ${error instanceof Error ? error.message : String(error)} — treating it as absent.`);
+    return fallback;
   }
+}
+
+const reported = new Set<string>();
+function reportOnce(message: string): void {
+  if (reported.has(message)) return;
+  reported.add(message);
+  logger.warn(message);
 }

@@ -91,7 +91,20 @@ export default async function splitFirebaseServiceProviders(tree: Tree): Promise
   const alreadyDone: string[] = [];
   const unresolved: string[] = [];
 
+  const alreadyShaped: string[] = [];
+
   for (const appRoot of appRoots) {
+    // ALREADY MIGRATED IS A FACT ON DISK, NOT IN THE STAMP. The per-service files did not exist before 0.33.0;
+    // this rung (or any 0.33+ generator run) writes them. So an app that has any of them is past this rung —
+    // and re-applying it there is not a no-op: a ladder REPLAYED from a lagging stamp (a sync that committed its
+    // rungs, then died before house-doc re-stamped) finds the `provideAppFirebase()` that 0.33.1 wired on the
+    // first pass, and would add all four services at the root — +241 kB initial bundle, onto an app whose new
+    // default deliberately leaves them commented. The stamp cannot tell that run from a first one; the files can.
+    if (FIREBASE_SERVICE_CONFIGS.some((config) => tree.exists(`${appRoot}/src/app/${config.fileName}`))) {
+      alreadyShaped.push(appRoot);
+      continue;
+    }
+
     // FIND THE CALL SITES BEFORE WRITING ANYTHING. The per-service templates mention `provideAppFirebase()`
     // in their own header prose; `findProviderCallSites` is parser-based and ignores prose, but searching
     // first is still the honest order — the question is what THIS project wired, and files this migration
@@ -146,6 +159,12 @@ export default async function splitFirebaseServiceProviders(tree: Tree): Promise
     logger.info(
       `[split-firebase-service-providers] Left ${alreadyDone.join(', ')} alone — the per-service providers are ` +
         `already wired there.`
+    );
+  }
+  if (alreadyShaped.length > 0) {
+    logger.info(
+      `[split-firebase-service-providers] Left ${alreadyShaped.join(', ')} alone — its per-service config files ` +
+        `are already on disk, so it is past this change (wherever its services are provided now is its choice).`
     );
   }
   if (unresolved.length > 0) {

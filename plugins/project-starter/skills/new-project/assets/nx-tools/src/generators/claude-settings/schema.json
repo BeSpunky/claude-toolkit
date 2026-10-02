@@ -7,7 +7,7 @@
     "layers": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "The layers this project has. The enabled plugins and their marketplaces are the union of the layers' `claudePlugins` (nx → the Nx plugin, agent → the core house plugins, web → browser automation, angular → bespunky-angular, design-system → the design-system plugin), and the .gitignore entries the union of their `gitignore` blocks. Defaults to DETECTING them from the workspace."
+      "description": "The layers this project has. The enabled plugins and their marketplaces are the union of the layers' `claudePlugins` (nx → the Nx plugin, agent → the core house plugins, web → browser automation, angular → bespunky-angular, design-system → the design-system plugin). Defaults to DETECTING them from the workspace."
     }
   }
 }

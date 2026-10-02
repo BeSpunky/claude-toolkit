@@ -1,6 +1,6 @@
 # DI & Providers (Angular)
 
-Dependency injection is Angular's primary **seam** (`architect-mentality` → *Define the seam; let others plug in*). These techniques make DI do the heavy lifting: a unit declares what it needs, receives it from outside, and stays substitutable and testable.
+Dependency injection is Angular's primary **seam** (`bespunky-engineering:architect-mentality` → *Define the seam; let others plug in*). These techniques make DI do the heavy lifting: a unit declares what it needs, receives it from outside, and stays substitutable and testable.
 
 All examples are modern Angular: `inject()`, `provideX()` functions, `InjectionToken` with a `factory`, and standalone APIs. Each technique names the mentality principle it serves so the *why* is never lost.
 
@@ -171,8 +171,8 @@ function provideLocalizer(strategy?: LocalizeStrategy): Provider {
 }
 ```
 
-(The "map object instead of `switch`" is itself a house convention — keep it consistent everywhere: `architect-mentality` → *Lead with one mental model*.)
+(The "map object instead of `switch`" is itself a house convention — keep it consistent everywhere: `bespunky-engineering:architect-mentality` → *Lead with one mental model*.)
 
 ---
 
-**Mentality anchors for this cluster:** *Define the seam*, *Work smart, not hard*, *Concentrate complexity*, *Compensate for your materials' weaknesses*, *Design for the consumer* — all in the `architect-mentality` skill.
+**Mentality anchors for this cluster:** *Define the seam*, *Work smart, not hard*, *Concentrate complexity*, *Compensate for your materials' weaknesses*, *Design for the consumer* — all in the `bespunky-engineering:architect-mentality` skill.

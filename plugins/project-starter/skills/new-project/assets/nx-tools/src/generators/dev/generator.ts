@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
 import { seedFromAdapters } from './fragments';
+import { SERVE_EXECUTOR } from '../_utils/dev-server';
 
 /** The engine's files, relative to tools/dev/ — each written from files/<name>.tpl. */
 export const ENGINE_FILES = [
@@ -28,7 +29,6 @@ export const ENGINE_FILES = [
 ] as const;
 
 export const ENGINE_ROOT = 'tools/dev';
-const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
 
 type DevSchema = Record<string, never>;
 

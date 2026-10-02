@@ -39,7 +39,8 @@ import {
 } from '@nx/devkit';
 import type { PublishableLibGeneratorSchema } from './schema';
 import { requireLayer } from '../../layers/registry';
-import { adapter, defaultLibStack, ADAPTERS } from '../../adapters/registry';
+import { adapter, ADAPTERS } from '../../adapters/registry';
+import { workspaceStackWith } from '../../adapters/workspace';
 import { resolveLibsDir, resolveWorkspaceScope } from '../_utils/workspace-layout';
 
 // Test-only peers the base @nx generators declare as HARD peerDependencies (the chosen unitTestRunner pulls these
@@ -57,7 +58,7 @@ export default async function publishableLibGenerator(
   // The stack: named, or the deprecated boolean's meaning, or the workspace's own.
   const stackId = options.stack ?? (options.nonAngular ? 'js' : undefined);
   if (options.nonAngular) logger.warn('[publishable-lib] --nonAngular is deprecated: pass --stack=js.');
-  const stack = stackId ? adapter(stackId) : defaultLibStack(tree);
+  const stack = stackId ? adapter(stackId) : workspaceStackWith(tree, 'libs');
   if (!stack?.libs) {
     throw new Error(
       `[publishable-lib] ${stackId ? `The ${stackId} stack cannot create libraries` : 'No stack in this workspace can create libraries'} ` +

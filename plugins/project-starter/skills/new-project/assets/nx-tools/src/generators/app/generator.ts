@@ -21,8 +21,9 @@
 // app's name (which corrupted the workspace-level scripts the moment a second app was added).
 import { type Tree, type GeneratorCallback, formatFiles } from '@nx/devkit';
 import { basename } from 'node:path';
-import { detectLayers, inRegistryOrder, isPresent } from '../../layers/registry';
+import { detectLayers, inRegistryOrder, isPresent, layer } from '../../layers/registry';
 import { ADAPTERS, adapter } from '../../adapters/registry';
+import { workspaceStackWith } from '../../adapters/workspace';
 import { attachCapabilities } from './attach';
 
 interface AppGeneratorSchema {
@@ -52,12 +53,13 @@ export default async function appGenerator(tree: Tree, options: AppGeneratorSche
 
   // 1) CREATE, through the stack. Its precondition is stated here, as a sentence, rather than surfacing as a
   //    module-resolution trace from inside the framework's own generator.
-  const stack = options.stack ? adapter(options.stack) : ADAPTERS.find((a) => a.apps && isPresent(tree, a.layer));
+  const stack = options.stack ? adapter(options.stack) : workspaceStackWith(tree, 'apps');
   if (!stack?.apps) {
-    const creators = ADAPTERS.filter((a) => a.apps).map((a) => a.id);
+    const creators = ADAPTERS.filter((a) => a.apps);
     throw new Error(
       `[app] ${options.stack ? `The ${options.stack} stack cannot create apps` : 'No stack in this workspace can create apps'} ` +
-        `(stacks that can: ${creators.join(', ')}). Add one — e.g. \`nx add @nx/angular\` — and re-run.`,
+        `(stacks that can: ${creators.map((a) => a.id).join(', ')}). Add one — ` +
+        `${creators.map((a) => `${a.id}: ${layer(a.layer).ensureHint}`).join('; ')} — and re-run.`,
     );
   }
   if (!isPresent(tree, stack.layer)) {
