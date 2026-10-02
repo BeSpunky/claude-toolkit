@@ -11,7 +11,7 @@
 #                 recognise every shape the toolkit ever produced. Each one-way change ships instead as a
 #                 migration keyed to the version that introduced it, collected and ordered by `nx migrate`.
 # Firebase opt-in: --firebase is --ensure=firebase (two spellings of one intent). The layer brings the emulator
-#                  suite, Cloud Functions as an Nx app (apps/functions), the workspace-level `firebase`
+#                  suite, Cloud Functions as an Nx app (<appsDir>/functions), the workspace-level `firebase`
 #                  project and the seed/cache/reset tooling; its devcontainer FRAGMENT (layers/firebase.ts)
 #                  brings the Firebase/Google Cloud CLIs, the JDK and the forwarded emulator ports. It requires
 #                  the `node` layer (Cloud Functions are a Node app). NEVER enabled by default.
@@ -34,7 +34,7 @@
 #                  deploy methodology). Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
-#   scaffold.sh [--preset=<id>] [--ensure=<layers>] [--firebase] [--staging] [--voice] [--no-github] [--docker] [--local] <project-name> [app-name]
+#   scaffold.sh [--preset=<id>] [--ensure=<layers>] [--layout=<id>] [--linking=<id>] [--firebase] [--staging] [--voice] [--no-github] [--docker] [--local] <project-name> [app-name]
 #   scaffold.sh --sync [--preset=<id>] [--ensure=<layers>] [--firebase] [--voice] [--no-backup] [--yes] [--docker] [--local] <project-path|project-name> [app-name]
 #
 #   --local installs @bespunky/nx-tools from the WORKING TREE (npm pack) instead of the registry — for
@@ -45,6 +45,11 @@
 #                  (assets/layers.sh). Everything else is DETECTED, never ensured. The Nx floor is always
 #                  ensured; a scaffold also ensures whatever the requested layers require.
 #   --preset=<id>  a named ensure set (unions with --ensure). A scaffold with neither gets the default preset.
+#   --layout=<id>  scaffold only: WHERE projects live — a named layout (layers.sh HOUSE_LAYOUTS, from LAYOUTS in
+#                  workspace-layout.ts), declared into nx.json `workspaceLayout`. Omitted: today's apps/ + packages/.
+#   --linking=<id> scaffold only: HOW projects reach each other — `paths` (the default: project.json + tsconfig
+#                  paths) or `workspaces` (a TS-solution workspace; needs the node layer). A sync refuses both:
+#                  an existing workspace's layout and linking are DETECTED, never chosen.
 #   [app-name]     scaffold: the first app's name (default: the project name) — only when an ensured layer's
 #                  stack creates apps (the angular preset); refused otherwise. sync: the app to refresh.
 #
@@ -68,7 +73,7 @@
 # Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
 # clobber anything that already exists.
 #
-# Leading flags (--sync, --preset, --ensure, --firebase, --staging, --voice, --local, --no-github, --no-backup, --yes, --docker)
+# Leading flags (--sync, --preset, --ensure, --layout, --linking, --firebase, --staging, --voice, --local, --no-github, --no-backup, --yes, --docker)
 # may be given in any order.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 #
@@ -131,6 +136,19 @@ USAGE
                     (through the Nx wrapper, ./nx, when the repo has no package.json — it does not
                     become a Node project). `--ensure=agent` on a bare repo is the usual retrofit: the
                     stack-agnostic DX layer (devcontainer, Claude settings, window identity).
+USAGE
+  printf '  --layout=<id>     Scaffold only: where projects live, declared in nx.json workspaceLayout:\n'
+  for _p in $(printf '%s' "$HOUSE_LAYOUTS" | tr ',' ' '); do
+    printf '                      %-10s %s\n' "$_p" "$(house_layout_title "$_p")"
+  done
+  printf '                    Omitted: apps under %s/, libraries under packages/ (the house default).\n' "$HOUSE_LAYOUT_DEFAULT_APPS_DIR"
+  printf '  --linking=<id>    Scaffold only: how projects reach each other:\n'
+  for _p in $(printf '%s' "$HOUSE_LINKINGS" | tr ',' ' '); do
+    _d=""; [ "$_p" = "$HOUSE_LINKING_DEFAULT" ] && _d=" (default)"
+    printf '                      %-10s %s%s\n' "$_p" "$(house_linking_title "$_p")" "$_d"
+  done
+  cat <<'USAGE'
+                    A sync refuses both: an existing workspace's layout and linking are DETECTED.
   --firebase        Include the Firebase layer (emulator suite, Cloud Functions app, devcontainer wiring);
                     the same as --ensure=firebase.
   --staging         Also scaffold the staging environment bundle. Requires --firebase.
@@ -164,6 +182,8 @@ CONSENT=0  # --yes: asserts a human explicitly agreed to this sync (see the cons
 FORCE_DOCKER=0  # --docker: use the base image even when the local Node would do (escape hatch).
 ENSURE_ARG=""   # --ensure=<csv>: layers to BRING INTO BEING (see the layer model below). Empty = detect only.
 PRESET_ARG=""   # --preset=<id>: a named ensure set (src/layers/presets.ts); unions with --ensure.
+LAYOUT_ARG=""   # --layout=<id>: scaffold only — where projects live (LAYOUTS, projected into layers.sh).
+LINKING_ARG=""  # --linking=<id>: scaffold only — how projects reach each other (paths | workspaces).
 LOCAL_TOOLS=0   # --local: install @bespunky/nx-tools from the WORKING TREE instead of npm (toolkit dev).
 PRINT_INNER=0   # --print-inner: render the command sequence to stdout and exit, running nothing.
 while [ "${1:-}" != "" ]; do
@@ -180,6 +200,15 @@ while [ "${1:-}" != "" ]; do
     --print-inner) PRINT_INNER=1; shift;;
     --ensure=*)   ENSURE_ARG="${1#--ensure=}"; shift;;
     --preset=*)   PRESET_ARG="${1#--preset=}"; shift;;
+    --layout=*)   LAYOUT_ARG="${1#--layout=}"; shift;;
+    --linking=*)  LINKING_ARG="${1#--linking=}"; shift;;
+    # Same guard as --preset/--ensure below: a flag-shaped value is a mistyped command line, not a value.
+    --layout|--linking)
+                  case "${2:-}" in
+                    ''|-*) echo "ERROR: $1 needs a value, got '${2:-}'. Did you mean $1=<id>?" >&2; exit 1;;
+                  esac
+                  if [ "$1" = "--layout" ]; then LAYOUT_ARG="$2"; else LINKING_ARG="$2"; fi
+                  shift 2;;
     --preset)     case "${2:-}" in
                     ''|-*) echo "ERROR: --preset needs a preset name, got '${2:-}'. Known presets: $HOUSE_PRESETS" >&2
                            exit 1;;
@@ -355,55 +384,24 @@ else
   [ -d "$TARGET" ] || { echo "ERROR: '$TARGET' does not exist." >&2; exit 1; }
   PROJECT="$(basename "$TARGET")"
   PROJECTS_DIR="$(dirname "$TARGET")"
-  # --- infer the app when one wasn't given ---
-  # Read the PROJECT NAMES out of apps/*/project.json rather than counting directories. Two reasons the old
-  # "sole directory under apps/" rule failed exactly where it mattered:
-  #
-  #   1. Every Firebase workspace has apps/functions beside the app, so there were always two directories
-  #      and inference never ran at all. It then fell back to the PROJECT FOLDER name, which is right only
-  #      by coincidence — rename the folder, or clone it under a different name, and the sync targets a
-  #      project that does not exist, skips both per-app generators, and still stamps the project current.
-  #   2. A project's Nx name and its directory name are independent. The name is what --project= needs.
-  #
-  # apps/functions is the house Cloud Functions app, created by the firebase-emulators generator; it is
-  # never the app a sync means. Excluding it by name is narrow and honest — if a workspace really does have
-  # two candidate apps, inference declines and says so, which is the correct answer rather than a guess.
+  # --- the app to refresh: given, or INFERRED later, by the package -----------------------------------------
+  # Not inferred here. It used to be, from a bash glob over apps/*/project.json that skipped `functions` by name —
+  # which knew one layout (apps/), one way of defining a project (project.json) and the house server app by its
+  # name. A workspace keeping its apps under packages/, or defining them in package.json (TS-solution), had no
+  # app as far as that glob could see, so the sync fell back to the folder name, skipped every per-app step and
+  # still stamped the project current. Which projects are this workspace's apps is a question for the project
+  # GRAPH, so it is asked of the installed package (`layers/cli.js apps`) inside the program, after the install —
+  # the first point where the answer can be read honestly, and well before the one step that needs it (the plan).
+  # Empty here means "infer"; the program falls back to the project name only when inference finds no single app.
   APP="${2:-}"
-  if [ -z "$APP" ] && [ -d "$TARGET/apps" ]; then
-    _cands=(); _any_pj=0
-    for _pj in "$TARGET"/apps/*/project.json; do
-      [ -f "$_pj" ] || continue
-      _any_pj=1
-      _nm="$(grep -m1 '"name"' "$_pj" 2>/dev/null | sed -E 's/.*"name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
-      [ -n "$_nm" ] || _nm="$(basename "$(dirname "$_pj")")"
-      [ "$_nm" = "functions" ] && continue
-      _cands+=("$_nm")
-    done
-    if [ "${#_cands[@]}" -eq 1 ]; then
-      APP="${_cands[0]}"
-    elif [ "${#_cands[@]}" -gt 1 ]; then
-      echo "NOTE: this workspace has more than one app (${_cands[*]}), so the app to refresh can't be inferred."
-      echo "      Defaulting to '$PROJECT'. Pass one explicitly to target a different app:"
-      echo "        scaffold.sh --sync <project> <app-name>"
-    elif [ "$_any_pj" -eq 0 ]; then
-      # No project.json anywhere under apps/ — fall back to the old rule, which is right for a
-      # single-app workspace that predates project.json-per-app. ONLY then: when the sole project.json is
-      # apps/functions (a Firebase core with no client app), the fallback used to pick apps/functions by its
-      # directory — the very app the loop above had just excluded — and the per-app generators then failed on it.
-      apps_list=("$TARGET"/apps/*/)
-      if [ "${#apps_list[@]}" -eq 1 ] && [ -d "${apps_list[0]}" ]; then
-        APP="$(basename "${apps_list[0]}")"
-      fi
-    fi
-  fi
-  APP="${APP:-$PROJECT}"
 fi
 
 # --- names are EXECUTED, so validate them before anything else touches them ------------------------------------
 # $PROJECT and $APP are interpolated into the rendered command sequence (--project=, --name=, --scope=,
 # --workspaceName=) which is then run by `bash -c`. They are not always typed by the user: $APP is INFERRED
-# from the sole directory under apps/, and $PROJECT from the directory name — so a cloned repository can
-# choose them. A directory literally named `$(...)` or containing a backtick therefore becomes a command
+# from the project graph (inside the program — a runtime variable there, never rendered into its source, and
+# checked by this same function the moment it is inferred), and $PROJECT from the directory name — so a cloned
+# repository can choose them. A directory literally named `$(...)` or containing a backtick therefore becomes a command
 # substitution evaluated at render time, from nothing more than `git clone` plus a sync the user was invited
 # to run by the SessionStart hook. That is remote code execution through a file name.
 #
@@ -428,7 +426,41 @@ _check_name() {
   esac
 }
 _check_name project "$PROJECT"
-_check_name app "$APP"
+# An app given (or a scaffold's default) is checked now; an INFERRED one is checked by the same function inside
+# the program, the moment it is inferred (CHECK_NAME_FN below) — before any generator receives it.
+[ -z "$APP" ] || _check_name app "$APP"
+
+# The app a SYNC refreshes when none was given — resolved INSIDE the program (rendered there with `declare -f`),
+# after the install, by asking the installed package for the workspace's client apps (`layers/cli.js apps`: the
+# project graph, project.json and package.json projects alike, classified by projectRole; the server-side app —
+# Cloud Functions — excluded by its `platform:server` tag, not by its name). Exactly one → that app. More than one
+# → inference declines and says so (the correct answer rather than a guess). None → the project name, as before.
+# Sets APP and APP_ROOT (empty when the app is not one of the workspace's client apps), and hands APP_ROOT to the
+# outer summary through the sync lock's state file — the summary runs on the host, which may have no Node.
+_resolve_sync_app() {   # <nx-tools dir> <app as given, or ''> <fallback name>
+  local _apps _n _tab
+  _tab="$(printf '\t')"
+  _apps="$(node "$1/src/layers/cli.js" apps)" || {
+    echo "ERROR: could not list this workspace's apps (the layer CLI failed) — refusing to guess which app to refresh." >&2
+    return 1; }
+  APP="$2"
+  if [ -z "$APP" ]; then
+    _n="$(printf '%s' "$_apps" | grep -c .)" || true
+    if [ "$_n" -eq 1 ]; then
+      APP="${_apps%%"$_tab"*}"
+    elif [ "$_n" -gt 1 ]; then
+      echo "NOTE: this workspace has more than one app ($(printf '%s\n' "$_apps" | cut -f1 | paste -sd' ' -)), so the app to refresh can't be inferred."
+      echo "      Defaulting to '$3'. Pass one explicitly to target a different app:"
+      echo "        scaffold.sh --sync <project> <app-name>"
+    fi
+  fi
+  APP="${APP:-$3}"
+  _check_name app "$APP"
+  APP_ROOT="$(printf '%s\n' "$_apps" | awk -F "$_tab" -v a="$APP" '$1 == a { print $2; exit }')"
+  echo "[app] the app to refresh: $APP${APP_ROOT:+ ($APP_ROOT)}"
+  if [ -n "$APP_ROOT" ] && [ -d .bespunky-sync.lock ]; then printf 'app=%s\n' "$APP_ROOT" >> .bespunky-sync.lock/state 2>/dev/null || true; fi
+}
+CHECK_NAME_FN="$(declare -f _check_name _resolve_sync_app)"
 
 # Resolved and VALIDATED before the consent gate below. Argument validation is pure string work — it
 # reads nothing, writes nothing, and reaches no network — so doing it first costs nothing and stops the
@@ -470,6 +502,40 @@ else
   PRESET=""
 fi
 ENSURE_LAYERS="${PRESET:+$(house_preset_layers "$PRESET")}"
+
+# --- THE WORKSPACE SHAPE: layout (where projects live) and linking (how they reach each other) -----------------
+# Two orthogonal facts about a workspace, kept to the same detect/ensure split as the layers: a SCAFFOLD may CHOOSE
+# them, because it is creating the workspace; a SYNC only DETECTS them (resolveWorkspaceLayout, detectLinking —
+# inside the package), because the shape of a workspace that exists is the shape its projects already have, and
+# "choosing" one there would be a relocation no flag should perform. So a sync REFUSES both flags rather than
+# silently ignoring them — an ignored flag reads as if it had been applied.
+# Validated against the projection (HOUSE_LAYOUTS / HOUSE_LINKINGS, from LAYOUTS and the linking kinds), here,
+# before anything is installed. Omitted, each reproduces today's output exactly: no workspaceLayout declared (the
+# resolver's default — apps/ + packages/), and `paths` linking.
+if [ "$MODE" = "sync" ] && { [ -n "$LAYOUT_ARG" ] || [ -n "$LINKING_ARG" ]; }; then
+  _chosen="${LAYOUT_ARG:+--layout=$LAYOUT_ARG }${LINKING_ARG:+--linking=$LINKING_ARG}"
+  echo "ERROR: --sync does not take ${_chosen% }: an existing workspace's layout and linking are" >&2
+  echo "       DETECTED from it (nx.json workspaceLayout and where its projects live; its tsconfig and package-" >&2
+  echo "       manager workspaces), never chosen by a sync — choosing would mean relocating projects." >&2
+  echo "       Drop the flag; it is for a NEW project (scaffold.sh --layout=<id> --linking=<id> <project>)." >&2
+  echo "       Nothing has been written." >&2
+  exit 1
+fi
+if [ -n "$LAYOUT_ARG" ] && ! _layer_listed "$LAYOUT_ARG" "$HOUSE_LAYOUTS"; then
+  echo "ERROR: unknown layout '$LAYOUT_ARG'. Known layouts:" >&2
+  for _p in $(printf '%s' "$HOUSE_LAYOUTS" | tr ',' ' '); do echo "         $_p — $(house_layout_title "$_p")" >&2; done
+  exit 1
+fi
+if [ -n "$LINKING_ARG" ] && ! _layer_listed "$LINKING_ARG" "$HOUSE_LINKINGS"; then
+  echo "ERROR: unknown linking '$LINKING_ARG'. Known linkings:" >&2
+  for _p in $(printf '%s' "$HOUSE_LINKINGS" | tr ',' ' '); do echo "         $_p — $(house_linking_title "$_p")" >&2; done
+  exit 1
+fi
+LAYOUT="$LAYOUT_ARG"
+LINKING="${LINKING_ARG:-$HOUSE_LINKING_DEFAULT}"
+# Where a scaffold's first app lands: the chosen layout's appsDir, else the resolver's default.
+APPS_DIR="$HOUSE_LAYOUT_DEFAULT_APPS_DIR"
+[ -n "$LAYOUT" ] && APPS_DIR="$(house_layout_apps_dir "$LAYOUT")"
 [ -n "$ENSURE_ARG" ] && ENSURE_LAYERS="${ENSURE_LAYERS:+$ENSURE_LAYERS,}$ENSURE_ARG"
 ENSURE_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | tr -d '[:space:]')"
 
@@ -575,6 +641,17 @@ if [ "$MODE" = "sync" ]; then
   fi
 elif ! _layer_listed node "$ENSURE_LAYERS"; then
   HOST="wrapper"
+fi
+# `workspaces` linking IS package-manager workspaces: the root package.json's `workspaces` (pnpm: its
+# pnpm-workspace.yaml) and a package.json per project. A wrapper-hosted scaffold has no package.json and no package
+# manager of its own — so the combination is not a degraded variant of anything; it does not exist. Refused, with
+# the one thing that makes it exist, rather than quietly scaffolding `paths`.
+if [ "$MODE" = "scaffold" ] && [ "$LINKING" = "workspaces" ] && [ "$HOST" = "wrapper" ]; then
+  echo "ERROR: --linking=workspaces links projects through package-manager workspaces, which need a package.json —" >&2
+  echo "       and this scaffold ensures no 'node' layer (layers: $ENSURE_LAYERS), so it would have none." >&2
+  echo "       Ensure it:  scaffold.sh --ensure=node --linking=workspaces $PROJECT   (or --preset=node / --preset=angular)" >&2
+  echo "       Nothing has been written." >&2
+  exit 1
 fi
 
 # --- resolve the package manager + the three commands the rendered sequences use -------------------------------
@@ -1727,7 +1804,7 @@ echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 # fd 9, not stdin: nx g may read stdin, and would swallow the rest of the plan.
 PLAN_RUN_BLOCK="
 _SYNC_PARTIAL=\${_SYNC_PARTIAL:-0}
-_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=$APP --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM)\" || {
+_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM)\" || {
   echo 'ERROR: the layer planner failed — no house generators were run, and nothing has been stamped.' >&2
   exit 1
 }
@@ -1754,25 +1831,38 @@ SCAFFOLD_COMMIT_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | sed 's/,/, /g')"
 # THE FLOOR, by host. Every scaffold block below is RENDERED only when the ensure set calls for it — the program
 # a scaffold runs is exactly the bootstrap of the layers it ensures, nothing gated at run time on a flag.
 if [ "$HOST" = "node" ]; then
+  # WHICH WORKSPACE create-nx-workspace BUILDS is the LINKING choice, and nothing else (layout is declared after,
+  # by a generator — the presets below fix no app/lib directories of their own that we keep):
+  #   paths       --preset=apps --workspaces=false — project.json projects, tsconfig.base.json `paths`. The house
+  #               default, and today's output exactly.
+  #   workspaces  --preset=ts — Nx's TS-solution workspace: package-manager `workspaces`, tsconfig.base.json with
+  #               `composite` + a custom condition, a references-only tsconfig.json. Chosen over
+  #               `--preset=apps --workspaces=true` because that combination was VERIFIED to produce no
+  #               TS-solution at all (Nx 23.2: no `workspaces`, no tsconfig — `apps` ignores the flag), so it
+  #               would scaffold `paths` while the summary said `workspaces`. `--workspaces=true` is passed
+  #               anyway, so the request is explicit rather than a preset default that could move.
+  if [ "$LINKING" = "workspaces" ]; then
+    CREATE_WORKSPACE_PRESET="--preset=ts --workspaces=true"
+  else
+    CREATE_WORKSPACE_PRESET="--preset=apps --workspaces=false"
+  fi
   SCAFFOLD_FLOOR_BLOCK="# THE AGENT-MODE ENV VARS ARE STRIPPED FOR THIS ONE COMMAND, and that is the difference between a working
-# scaffold and a dead one.
+# scaffold and the wrong one.
 #
 # create-nx-workspace reads CLAUDECODE / OPENCODE and switches into an \"AI Agent Mode\" that IGNORES
-# --preset entirely: it builds from \`nrwl/empty-template\` instead, which is the TS-solution layout
-# (packages/ + a root tsconfig.json with project references + package.json-based Nx config) and additionally
-# litters the repo with AGENTS.md, opencode.json, .codex/, .cursor/, .gemini/. \`nx add @nx/angular\` then
-# REFUSES that workspace outright — \"The Angular framework doesn't support a TypeScript setup with project
-# references\" — so the scaffold died at its first real step.
+# --preset entirely: it builds from \`nrwl/empty-template\` instead (a TS-solution workspace) and additionally
+# litters the repo with AGENTS.md, opencode.json, .codex/, .cursor/, .gemini/. Whether this workspace links by
+# \`paths\` or by \`workspaces\` is a choice the user made (--linking), so no environment variable may make it
+# for them — in either direction.
 #
 # The sting is that this only happens when the scaffolder is run FROM Claude Code, which is its primary way
-# of being used: run it by hand in a terminal and it works, run it the way this toolkit intends and it does
-# not. Nothing in the script had changed; the environment silently reinterpreted its arguments.
+# of being used: run it by hand in a terminal and it does what was asked, run it the way this toolkit intends
+# and it silently does something else. Nothing in the script had changed; the environment reinterpreted its
+# arguments.
 #
 # Scoped to this invocation deliberately. These variables are true — an agent IS running this — and other
-# tools may reasonably key off them. What is not acceptable is one command redefining the workspace shape
-# the entire house standard is built on. Every house generator reads project.json (\`readProjectConfiguration\`),
-# which the TS-solution layout does not use, so this is not a cosmetic preference.
-env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' --preset=apps --packageManager=yarn --nxCloud=skip --no-interactive --workspaces=false
+# tools may reasonably key off them. What is not acceptable is one command redefining the workspace shape.
+env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' $CREATE_WORKSPACE_PRESET --packageManager=yarn --nxCloud=skip --no-interactive
 cd '$PROJECT'"
 else
   # No package.json: an empty repository, then the SAME wrapper floor a sync lays on a Python or Go repo.
@@ -1784,12 +1874,29 @@ fi
 
 # The Nx plugins of the ensured layers (descriptor nxPlugin, e.g. angular -> @nx/angular), in registry order —
 # each one is how its layer comes into being, before any house generator needs it.
+#
+# In a `workspaces` (TS-solution) scaffold each `nx add` runs with NX_IGNORE_UNSUPPORTED_TS_SETUP=true, for that
+# command only. Some stack plugins refuse a TS-solution workspace outright in their init (@nx/angular:
+# "doesn't support a TypeScript setup with project references"), and upstream's own opt-out — undocumented, printed
+# only in that refusal — is this variable: an INLINE prefix on the one command, never an export. The
+# house hosts such a stack as an honest hybrid — its projects are project.json islands that consume the
+# workspace's packages through their `exports` (docs/features/2026-10-02-workspace-layouts/DECISION.md) — and the
+# stack adapter sets the same variable around its own generator calls. A plugin with no such guard ignores it.
+SCAFFOLD_PLUGIN_ENV=""
+[ "$LINKING" = "workspaces" ] && SCAFFOLD_PLUGIN_ENV="NX_IGNORE_UNSUPPORTED_TS_SETUP=true "
 SCAFFOLD_PLUGINS_BLOCK=""
 for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
   _plugin="$(house_layer_nx_plugin "$_l")"
   [ -n "$_plugin" ] && SCAFFOLD_PLUGINS_BLOCK="$SCAFFOLD_PLUGINS_BLOCK
-$NX_RUN add $_plugin$NX_TAG"
+$SCAFFOLD_PLUGIN_ENV$NX_RUN add $_plugin$NX_TAG"
 done
+
+# The LAYOUT the scaffold was asked for, DECLARED in nx.json \`workspaceLayout\` before the first project exists —
+# an empty workspace has nothing to infer a layout from, so every generator after this one (the first app, the
+# design system, Nx's own) resolves the choice from Nx's own field. Through the house generator, never a hand
+# edit of nx.json here. Not rendered without --layout: today's output declares nothing.
+SCAFFOLD_LAYOUT_BLOCK=""
+[ -n "$LAYOUT" ] && SCAFFOLD_LAYOUT_BLOCK="$NX_RUN g @bespunky/nx-tools:workspace-layout --layout=$LAYOUT"
 
 # The first app, through the HOUSE app generator (never the raw framework generator): the stack adapter creates
 # it with the house defaults, then it ATTACHES every capability the workspace wears — each layer's per-app steps,
@@ -1797,7 +1904,7 @@ done
 # and the Nth share one code path. --layers hands it the ensure set: at first-app time nothing this run ensures
 # exists yet to be detected (firebase.json, for one).
 SCAFFOLD_APP_BLOCK=""
-[ -n "$APP_STACK" ] && SCAFFOLD_APP_BLOCK="$NX_RUN g @bespunky/nx-tools:app 'apps/$APP' --stack=$APP_STACK$APP_STAGING_FLAG --layers=\$ENSURED"
+[ -n "$APP_STACK" ] && SCAFFOLD_APP_BLOCK="$NX_RUN g @bespunky/nx-tools:app '$APPS_DIR/$APP' --stack=$APP_STACK$APP_STAGING_FLAG --layers=\$ENSURED"
 
 if [ "$MODE" = "scaffold" ]; then
   INNER="set -e
@@ -1813,8 +1920,10 @@ git config --global init.defaultBranch >/dev/null 2>&1 || git config --global in
 $SCAFFOLD_FLOOR_BLOCK
 $SCAFFOLD_PLUGINS_BLOCK
 $INSTALL_NX_TOOLS
+$SCAFFOLD_LAYOUT_BLOCK
 $SCAFFOLD_APP_BLOCK
 $LAYER_RESOLVE_BLOCK
+APP='$APP'
 $PLAN_RUN_BLOCK
 # --local only: correct the manifest's temp-dir tarball spec back to the plain version BEFORE the commit, or
 # the scaffold's one commit records a file: path that exists on no machine (and is deleted moments later).
@@ -1855,6 +1964,8 @@ $MIGRATE_RUN
 [ -d .bespunky-sync.lock ] && printf 'migrations=%s\n' \"\${_expected:-0}\" >> .bespunky-sync.lock/state 2>/dev/null || true
 _stage generators
 $LAYER_RESOLVE_BLOCK
+$CHECK_NAME_FN
+_resolve_sync_app '$NXT_DIR' '$APP' '$PROJECT'
 $PLAN_RUN_BLOCK
 $FINALIZE_LOCAL
 # A run that skipped generators is not a clean run, and the outer summary prints SYNC_OK either way.
@@ -2181,23 +2292,19 @@ if [ "$MODE" = "sync" ]; then
 fi
 
 if [ "$MODE" = "scaffold" ]; then
-  echo "SCAFFOLD_OK $TARGET ($RUNTIME_DESC layers=$ENSURE_LAYERS host=$HOST${APP_STACK:+ app=apps/$APP} voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
+  echo "SCAFFOLD_OK $TARGET ($RUNTIME_DESC layers=$ENSURE_LAYERS host=$HOST${APP_STACK:+ app=$APPS_DIR/$APP}${LAYOUT:+ layout=$LAYOUT}${LINKING_ARG:+ linking=$LINKING} voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
 else
   # THE SUMMARY STATES WHAT THE PROJECT IS NOW, read back from the project — never the run's own inputs. It used
   # to echo them: `app=apps/<repo>` was the DEFAULT app name, printed for a repo that has no app at all, and
   # `firebase=0` was "--firebase was not passed", printed for a project whose Firebase layer the sync had just
   # detected and synced. So: the layer set house-doc STAMPED (the final, detected one — firebase included when
-  # present), and the app only when it exists (by directory, or by an apps/*/project.json naming it).
+  # present), and the app only when it exists (as the project graph resolved it).
   _final_layers="$(grep -o '@bespunky/house-tooling:stamp[^>]*' "$TARGET/HOUSE.md" 2>/dev/null | head -1 \
     | grep -o 'layers=[a-z0-9,-]*' | head -1 | cut -d= -f2)"
+  # The app's root, as the program resolved it from the project graph (`_resolve_sync_app`), handed over through
+  # the lock's state file — empty when the app is not one of the workspace's apps, and then not printed.
   _app_dir=""
-  if [ -d "$TARGET/apps/$APP" ]; then
-    _app_dir="apps/$APP"
-  else
-    for _pj in "$TARGET"/apps/*/project.json; do
-      [ -f "$_pj" ] && grep -qE "\"name\"[[:space:]]*:[[:space:]]*\"$APP\"" "$_pj" && { _app_dir="${_pj#"$TARGET"/}"; _app_dir="${_app_dir%/project.json}"; break; }
-    done
-  fi
+  [ -n "${SYNC_LOCK:-}" ] && [ -f "$SYNC_LOCK/state" ] && _app_dir="$(sed -n 's/^app=//p' "$SYNC_LOCK/state" 2>/dev/null | tail -1)"
   # voice: whether the project's devcontainer now bridges audio — read from its ownership marker, which records the
   # answer the devcontainer generator was actually given (an explicit --voice, or the project's earlier choice
   # carried forward). The flag alone said voice=0 for a project that had just been synced WITH voice.

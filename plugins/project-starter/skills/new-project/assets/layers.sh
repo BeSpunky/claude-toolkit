@@ -12,6 +12,10 @@ HOUSE_LAYERS_ENSURABLE_SCAFFOLD='nx,agent,node,web,angular,design-system,firebas
 HOUSE_LAYERS_ENSURABLE_SYNC='nx,agent,firebase'
 HOUSE_PRESETS='agent,node,angular'
 HOUSE_PRESET_DEFAULT='agent'
+HOUSE_LAYOUTS='apps-libs,packages'
+HOUSE_LAYOUT_DEFAULT_APPS_DIR='apps'
+HOUSE_LINKINGS='paths,workspaces'
+HOUSE_LINKING_DEFAULT='paths'
 
 # house_layer_title <id> — one line naming the layer.
 house_layer_title() {
@@ -50,8 +54,8 @@ house_layer_hint() {
     agent) printf '%s\n' '`scaffold.sh --sync --ensure=agent <project>`' ;;
     node) printf '%s\n' 'a root package.json (`npm init`) — the next sync then treats the repo as a Node project' ;;
     js) printf '%s\n' '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --stack=js`)' ;;
-    web) printf '%s\n' 'declare what the project serves in `.bespunky/dev.json` (e.g. `{"apps":{"site":{"processes":[{"id":"app","cmd":"python3 -m http.server ${PORT:app}","ports":{"app":8000}}]}}}`), or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app apps/<name>`), then sync' ;;
-    angular) printf '%s\n' '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app apps/<name>`' ;;
+    web) printf '%s\n' 'declare what the project serves in `.bespunky/dev.json` (e.g. `{"apps":{"site":{"processes":[{"id":"app","cmd":"python3 -m http.server ${PORT:app}","ports":{"app":8000}}]}}}`), or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app --name=<name>`), then sync' ;;
+    angular) printf '%s\n' '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app --name=<name>`' ;;
     design-system) printf '%s\n' '`nx g @bespunky/nx-tools:design-system --scope=<scope>`' ;;
     navigation) printf '%s\n' '`nx g @bespunky/nx-tools:navigation-core`' ;;
     firebase) printf '%s\n' '`scaffold.sh --sync --firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)' ;;
@@ -161,10 +165,57 @@ house_preset_layers() {
   esac
 }
 
-# house_project_jsons <dir> — the contents of every project.json Nx would read under <dir>, concatenated.
+# house_layout_title <layout> — one line naming the layout.
+house_layout_title() {
+  case "$1" in
+    apps-libs) printf '%s\n' 'apps under apps/, libraries under libs/ — the classic integrated Nx convention' ;;
+    packages) printf '%s\n' 'every project under packages/ — the package-based convention' ;;
+  esac
+}
+
+# house_layout_apps_dir <layout> — where it keeps applications (a scaffold's first app lands there).
+house_layout_apps_dir() {
+  case "$1" in
+    apps-libs) printf '%s\n' 'apps' ;;
+    packages) printf '%s\n' 'packages' ;;
+  esac
+}
+
+# house_linking_title <linking> — one line naming the linking strategy.
+house_linking_title() {
+  case "$1" in
+    paths) printf '%s\n' 'project.json projects reached through tsconfig `paths` aliases' ;;
+    workspaces) printf '%s\n' 'a TS-solution workspace — package.json projects, package-manager workspaces, TS project references' ;;
+  esac
+}
+
+# house_workspace_globs <dir> — the package-manager workspace globs <dir> declares, one per line (`!` kept).
+house_workspace_globs() {
+  local dir="$1"
+  [ -f "$dir/package.json" ] && tr -d '\n\r' < "$dir/package.json" \
+    | grep -o '"workspaces"[[:space:]]*:[[:space:]]*[[{][^]}]*' | head -1 \
+    | sed 's/^"workspaces"[[:space:]]*:[[:space:]]*//; s/^{[[:space:]]*"packages"[[:space:]]*:[[:space:]]*//' \
+    | grep -o '"[^"]*"' | tr -d '"'
+  [ -f "$dir/pnpm-workspace.yaml" ] && sed -n '/^packages:/,/^[^[:space:]-]/s/^[[:space:]]*-[[:space:]]*//p' "$dir/pnpm-workspace.yaml" \
+    | sed 's/[[:space:]]*#.*$//' | tr -d "\"'"
+  return 0
+}
+
+# house_project_jsons <dir> — every project configuration Nx would read under <dir> (project.json files and the
+# package.json of each workspace member), concatenated.
 house_project_jsons() {
-  local dir="$1" scratch=''
+  local dir="$1" scratch='' glob
   set -- -z --cached --others --exclude-standard -- project.json '*/project.json'
+  while IFS= read -r glob; do
+    glob="${glob#./}"; glob="${glob%/}"
+    case "$glob" in
+      ''|'.') ;;
+      '!'*) set -- "$@" ":(exclude,glob)${glob#!}/package.json" ;;
+      *)    set -- "$@" ":(glob)$glob/package.json" ;;
+    esac
+  done <<HOUSE_WORKSPACES
+$(house_workspace_globs "$dir")
+HOUSE_WORKSPACES
   if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     ( cd "$dir" && git ls-files "$@" 2>/dev/null | xargs -0 cat 2>/dev/null )
   elif scratch="$(mktemp -d 2>/dev/null)" && git init -q --bare "$scratch" >/dev/null 2>&1; then
