@@ -58,3 +58,10 @@ Items from `handoffs/2026-10-02T00-review-fanout.md` → FX-layers. One entry pe
   `find` (now also pruning `.claude/worktrees` and nested work trees). layers.sh regenerated. Test: "evidence walk:
   gitignored and nested-worktree project.json files are invisible, exactly as to Nx" (git + non-git); the no-git
   fallback was checked by hand with a git-less PATH.
+- **R1 + mig#2 — fixed.** `0.35.0/relocate-port-claim` retargets references ONLY when this run moved a house
+  file (move + retarget are one rung commit, so a "moved earlier, refs stale" state cannot arise). The walk also
+  skips dependency/build/virtualenv dirs (`.venv`, `vendor`, `target`, `coverage`, `build`, `out`, …), any nested
+  work tree (a `.git` file or dir), and `docs/features` (past records are never rewritten). The unstamped-file
+  warning now says its callers are left alone. Fixtures added: "mentions only, nothing to move: no file is
+  touched" (the toolkit self-sync shape), "the project's own unstamped file … and so are its callers", and the
+  skip set in the main case; all three FAIL on the previous rung (checked on a base worktree).
