@@ -47,3 +47,7 @@ Two **orthogonal** workspace facts, each modelled once, each **detected** on syn
 **Scaffold**: `--layout=apps-libs|packages`, `--linking=paths|workspaces`; defaults = today's output. App discovery leaves bash (`apps/*` glob) for the package (`layers/cli.js`), layout- and linking-agnostic.
 
 **Migrations**: nothing to migrate — no existing project's shape changes; both facts are detected, and existing projects detect as exactly what they are. (Stated deliberately per the release rule.)
+
+## Confirmed — 2026-10-02
+
+Asked "Shall I go ahead and implement it?" — the user: "Yes".
