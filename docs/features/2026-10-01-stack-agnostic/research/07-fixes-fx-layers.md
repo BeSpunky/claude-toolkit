@@ -75,3 +75,9 @@ Items from `handoffs/2026-10-02T00-review-fanout.md` → FX-layers. One entry pe
   declaration skipped, and the proxyConfig move (which does not touch the file) still done; the ladder goes on.
   Fixtures: malformed JSON, wrong shape. The live `dev` generator now does the same (report, never overwrite,
   never fail the sync) instead of throwing a parser trace.
+- **R4 — fixed.** house-doc's `upsertPointer` never places the pointer inside a FOREIGN managed region
+  (`<!-- <name> start -->` … `<!-- <name> end -->`, e.g. Nx's `nx configuration` block): it goes before the first
+  `## ` heading outside every such region, else at the end; a pointer an earlier sync put inside one is moved
+  out (once; the foreign block is left exactly as its owner wrote it). Owned block in an owned-on-every-sync
+  file, so no migration is owed — the next sync relocates it. Test: "house-doc: the CLAUDE.md pointer goes
+  outside Nx's managed block…".

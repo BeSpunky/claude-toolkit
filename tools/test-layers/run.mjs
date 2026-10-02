@@ -917,6 +917,32 @@ check('the payload has no import cycle between the layer and adapter registries'
   ok(!(reaches(adapters, layers) && reaches(layers, adapters)), 'layers/registry and adapters/registry import each other');
 });
 
+// R4 — the house pointer never lands inside another tool's managed block (Nx's `nx configure-ai-agents` rewrites
+// its block wholesale, and took the `@HOUSE.rules.md` import with it).
+checkAsync('house-doc: the CLAUDE.md pointer goes outside Nx\'s managed block — and moves out of it if an older sync put it there', async (ok) => {
+  const NX_BLOCK = '<!-- nx configuration start-->\n<!-- Leave the start & end comments to automatically receive updates. -->\n\n# General Guidelines for working with Nx\n\n## Running tasks\n\nUse nx.\n\n<!-- nx configuration end-->\n';
+  const outside = (claude) => {
+    const at = claude.indexOf('<!-- @bespunky/house-tooling:start');
+    return at !== -1 && (at < claude.indexOf('<!-- nx configuration start-->') || at > claude.indexOf('<!-- nx configuration end-->'));
+  };
+  const cnw = createTreeWithEmptyWorkspace();
+  cnw.write('CLAUDE.md', NX_BLOCK);
+  await generator('house-doc')(cnw, { layers: ['nx', 'node'] });
+  const first = cnw.read('CLAUDE.md', 'utf8');
+  ok(outside(first), `the pointer was placed inside Nx's block:\n${first}`);
+  ok(first.includes('@HOUSE.rules.md') && first.includes(NX_BLOCK.trim()), 'Nx block intact, import present');
+  await generator('house-doc')(cnw, { layers: ['nx', 'node'] });
+  ok(cnw.read('CLAUDE.md', 'utf8') === first, 'a second run moved the pointer again');
+  // A project whose earlier sync put it inside the block: it moves out, once, and Nx's block is left as Nx wrote it.
+  const old = createTreeWithEmptyWorkspace();
+  const pointer = first.slice(first.indexOf('<!-- @bespunky/house-tooling:start'), first.indexOf('<!-- @bespunky/house-tooling:end -->') + '<!-- @bespunky/house-tooling:end -->'.length);
+  old.write('CLAUDE.md', `# Mine\n\n${NX_BLOCK.replace('## Running tasks', `${pointer}\n\n## Running tasks`)}\n## My rules\n`);
+  await generator('house-doc')(old, { layers: ['nx', 'node'] });
+  const moved = old.read('CLAUDE.md', 'utf8');
+  ok(outside(moved) && moved.split('<!-- @bespunky/house-tooling:start').length === 2, `not moved out exactly once:\n${moved}`);
+  ok(moved.includes(NX_BLOCK.trim()), `Nx's block was not restored to what Nx wrote:\n${moved}`);
+});
+
 for (const run of pending) await run();
 
 // ── migrations.json: every rung names a registered layer scope ─────────────────────────────────────────────
