@@ -37,7 +37,8 @@
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
         "Tobermory.es6-string-html",
-        "formulahendry.auto-rename-tag"
+        "formulahendry.auto-rename-tag",
+        "nrwl.angular-console"
       ],
       "settings": {
         "claude-code.dangerouslySkipPermissions": true,
