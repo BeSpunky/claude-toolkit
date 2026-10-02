@@ -26,7 +26,7 @@ Where every visual value lives. Read `{{DS_ROOT}}/STRUCTURE.md` for the full con
 ```scss
 @use 'design-system/styles' as ds;   // the PUBLIC API (styles/_index.scss). Never reach into styles/_core/ or styles/_utils/.
 
-:host {
+{{#angular}}:host{{/angular}}{{^angular}}.card{{/angular}} {
   display: grid;
   gap: ds.space(3);
   color: ds.color('on-surface');
@@ -44,11 +44,15 @@ An unknown token name is a **compile error**, not a silently-empty `var()` — s
 
 **Switching mode at runtime** — a re-binding, not a reload:
 
-```ts
+{{#angular}}```ts
 private readonly theme = inject(DsTheme);      // from the design system's primary entry point
 toggle() { this.theme.mode.set(this.theme.resolved() === 'dark' ? 'light' : 'dark'); }
 ```
-
+{{/angular}}{{^angular}}```ts
+import { setMode, resolvedMode } from '<the design system package>';   // its plain-DOM runtime (no framework binding)
+setMode(resolvedMode() === 'dark' ? 'light' : 'dark');
+```
+{{/angular}}
 **Themes** (a brand, a tenant palette, a user-selectable skin) — **a theme is a CSS file, not JavaScript.** Generate it:
 
 ```bash
@@ -65,24 +69,25 @@ Fill in the token overrides (authored in SASS, so a typo'd token name is a **bui
 );
 ```
 
-It builds to a standalone `theme-acme.css`. Link it in `index.html` so it applies **before first paint**:
+{{#angular}}It builds to a standalone `theme-acme.css`{{/angular}}{{^angular}}Compile it to a standalone CSS file with your app's own sass step (no stack here registers it for you){{/angular}}. Link it in `index.html` so it applies **before first paint**:
 
 ```html
 <link id="ds-theme" rel="stylesheet" href="theme-acme.css">
 ```
 
-…and swap it at runtime with one line: `inject(DsRuntimeTheme).use('theme-globex.css')`.
+{{#angular}}…and swap it at runtime with one line: `inject(DsRuntimeTheme).use('theme-globex.css')`.{{/angular}}{{^angular}}…and swap it at runtime by pointing that `<link>`'s `href` at another theme file.{{/angular}}
 
-**Why a file and not JS:** a `<link>` in `<head>` is applied before the browser paints, so the brand never flashes in after boot — a JS-applied theme *always* does, because it lands after the bundle executes. You also get browser caching and CDN delivery for free, and the compile-time token guard survives. The only case that genuinely needs JS is a value that doesn't exist until runtime (a colour dragged out of a picker) — that's `DsRuntimeTheme.setTokens()`, and it's the exception, not the default.
+**Why a file and not JS:** a `<link>` in `<head>` is applied before the browser paints, so the brand never flashes in after boot — a JS-applied theme *always* does, because it lands after the bundle executes. You also get browser caching and CDN delivery for free, and the compile-time token guard survives. The only case that genuinely needs JS is a value that doesn't exist until runtime (a colour dragged out of a picker) — that's {{#angular}}`DsRuntimeTheme.setTokens()`{{/angular}}{{^angular}}setting the token's custom property on the root element{{/angular}}, and it's the exception, not the default.
 
 A theme can only **re-bind** tokens the design system already declares; it cannot invent new ones (nothing would be reading them).
 
-**Adding a component** — always the generator, never a hand-made folder (the entry-point config *is* the boundary; a hand-made folder resolves in the editor and vanishes on publish):
+{{#angular}}**Adding a component** — always the generator (the Angular adapter's), never a hand-made folder (the entry-point config *is* the boundary; a hand-made folder resolves in the editor and vanishes on publish):
 
 ```bash
 {{NX}} g @bespunky/nx-tools:ds-component <name>    # -> {{DS_ROOT}}/<name>, imports as <package>/<name>
 ```
-
+{{/angular}}{{^angular}}**Adding a component** — this design system has no framework binding, so it ships tokens, the SASS API and the mode runtime, and no component generator (`ds-component` is the Angular adapter's). A component is whatever your stack calls one, built ONLY from these tokens and the SASS API — and promoted into the design system the second time it appears.
+{{/angular}}
 **Adding a token** → `{{DS_ROOT}}/styles/_core/_tokens.scss`. Colours must be declared in **every** mode — the build fails if one is missing, because a token that exists in light and not in dark is a broken theme.
 
 > **The tokens currently in that file are PLACEHOLDERS with no design authority.** They exist so the library compiles and the app runs on day zero. The design phase (`bespunky-product-ux:stage-the-vision` → `realize-the-vision`) replaces that file wholesale with the real visual system. Do not build a look on top of them, and do not tweak them into one.
@@ -113,19 +118,20 @@ For the full architecture (registry shape, what belongs on the bus vs in the com
 `{{SERVE}} <app>` is the one command for local dev — the house's **stack-free dev engine** (`tools/dev/dev`{{#nx-serve}}, which `{{NX}} serve` wraps through the **`@bespunky/nx-tools:serve`** executor{{/nx-serve}}). What it serves is DATA — **`.bespunky/dev.json`**, each app's processes and the ports they occupy — and it runs them in parallel under one Ctrl+C:
 
 {{#angular}}- the **app dev-server** (the `dev-server` target → `@angular/build:dev-server`, host `0.0.0.0`), and{{/angular}}{{^angular}}- the app's **declared processes** (`.bespunky/dev.json` → `apps.<app>.processes` — edit it to change what runs; every declared port shifts by the same offset), and{{/angular}}
-- the **shared co-driven browser** — a real Chromium *inside the container* that it brings up and navigates to your app, so you and Claude watch and drive the same instance together{{#firebase}}, and
-- the **Firebase emulator suite** (this is a Firebase workspace — see below){{/firebase}}.
+- the **shared co-driven browser** — a real Chromium *inside the container* that it brings up and navigates to your app, so you and Claude watch and drive the same instance together{{#firebase}}{{#nx-serve}}, and
+- the **Firebase emulator suite** (this is a Firebase workspace — see below){{/nx-serve}}{{/firebase}}.
 
 It auto-derives a **port offset** from the tree you're in — the **main tree is always offset 0** (app on {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}its declared base port{{/angular}}); each git worktree gets its own stable, verified-free port block — and registers a pretty **`<slug>.localhost`** domain for the app.
 
 | Flag | Effect |
 | --- | --- |
-{{#angular}}| `--configuration=production\|development` | dev-server variant (Angular's canonical env-file replacements; default `development`). |
-{{/angular}}| `--no-shared-browser` | serve without bringing up / navigating the shared browser. |
-| `--worktree=<branch\|slug\|path>` | serve a worktree you're **not** cwd'd into (see *Serving an in-flight worktree* below). Omit → current tree; pass it empty in a TTY → interactive picker. |
+{{#nx-serve}}{{#angular}}| `--configuration=production\|development` | dev-server variant (Angular's canonical env-file replacements; default `development`). `nx serve` only — the configuration is an Nx target's. |
+{{/angular}}{{/nx-serve}}| `--no-shared-browser` | serve without bringing up / navigating the shared browser. |
+| `--worktree=<branch\|slug\|path>` | serve a worktree you're **not** cwd'd into (see *Serving an in-flight worktree* below). Omit → current tree; pass it empty in a TTY → a numbered picker. |
 | `--port-offset=auto\|<n>` | `auto` (default) derives the block from the tree; `0` pins the base ports; an int pins a specific block. |
-{{#firebase}}| `--no-emulators` | serve the app **alone**, every Firebase service resolved **real** (`?emulate=none`) — no suite booted. |
-{{/firebase}}| `--dry-run` | print the resolved tree, offset, port, slug, layers, and URLs — run nothing. |
+| `--skip=<id,…>` | don't start these declared processes (the primary cannot be skipped). |
+{{#firebase}}{{#nx-serve}}| `--no-emulators` | the same as `--skip=emulators`: the app **alone**, every Firebase service resolved **real** (`?emulate=none`) — no suite booted. |
+{{/nx-serve}}{{/firebase}}| `--dry-run` | print the resolved tree, offset block, every process with its command, ports and env, and the URLs — run nothing. |
 
 ### Two ways to view the running app
 
@@ -142,15 +148,15 @@ The shared browser is one instance you and Claude share. Before Claude asks *you
 {{#firebase}}
 ## Firebase
 
-{{#web}}This project wears Firebase, so **`{{SERVE}} <app>` boots the emulator suite alongside the app** (and the shared browser) — offline, no `firebase login` / cloud project / `.firebaserc` needed{{#angular}} (project id derived from `environment.ts` — `demo-<workspaceName>` by default){{/angular}}. **Local dev is not forced through the emulators** — tune what's emulated with one flag{{#angular}}, or with the per-service knobs below{{/angular}}:
+{{#web}}{{#nx-serve}}This project wears Firebase, so **`{{SERVE}} <app>` boots the emulator suite alongside the app** (and the shared browser) — offline, no `firebase login` / cloud project / `.firebaserc` needed{{#angular}} (project id derived from `environment.ts` — `demo-<workspaceName>` by default){{/angular}}. **Local dev is not forced through the emulators** — tune what's emulated with one flag{{#angular}}, or with the per-service knobs below{{/angular}}:
 
 | Command | What it does |
 | --- | --- |
 | `{{SERVE}} <app>` | App **+ emulator suite + shared browser**, in parallel, offline. The full local Firebase stack. |
-| `{{SERVE}} <app> {{#nx-serve}}--no-emulators{{/nx-serve}}{{^nx-serve}}--skip=emulators{{/nx-serve}}` | App **alone, no emulators** — every service resolved real (`?emulate=none`); e.g. pure UI work, or a real/staging backend. |
-| `nx run firebase:emulators` | The emulator suite **alone** (restart/run it independently of the app). |
+| `{{SERVE}} <app> --no-emulators` | App **alone, no emulators** — every service resolved real (`?emulate=none`); e.g. pure UI work, or a real/staging backend. |
+| `{{NX}} run firebase:emulators` | The emulator suite **alone** (restart/run it independently of the app). |
 
-{{#nx-serve}}The `@bespunky/nx-tools:serve` executor runs the emulator suite alongside the app `dev-server` (pinned to the emulator env by default) as one parallel run. The Nx TUI is disabled in `nx.json` so both stream plain prefixed logs and one Ctrl+C stops everything.{{/nx-serve}}{{/web}}{{^web}}This project wears the Firebase **core** — the emulator suite, Cloud Functions as an Nx app, seeded emulator data — and serves no app through the house dev loop yet, so the suite runs on its own: **`{{NX}} run firebase:emulators`** (offline; no `firebase login` / cloud project / `.firebaserc` needed). Declare what an app serves in `.bespunky/dev.json` and sync, and the dev loop runs the suite beside it.{{/web}}
+The `@bespunky/nx-tools:serve` executor runs the emulator suite alongside the app `dev-server` (pinned to the emulator env by default) as one parallel run. The Nx TUI is disabled in `nx.json` so both stream plain prefixed logs and one Ctrl+C stops everything.{{/nx-serve}}{{^nx-serve}}This project wears Firebase, and its dev loop is DECLARED (`.bespunky/dev.json`) rather than served through an Nx app — and the house seeds the emulator suite into a declaration only for apps served through Nx. So **`{{SERVE}} <app>` runs the suite beside an app only if that app's declaration lists it**: add an `emulators` process to it (`"cmd": "{{NX}} run firebase:emulators"`, its `ports` the ones `firebase.json` configures) and the engine shifts the whole suite with the app; `--skip=emulators` then serves the app alone. Otherwise run the suite on its own — offline, no `firebase login` / cloud project / `.firebaserc` needed: **`{{NX}} run firebase:emulators`**.{{/nx-serve}}{{/web}}{{^web}}This project wears the Firebase **core** — the emulator suite, Cloud Functions as an Nx app, seeded emulator data — and serves no app through the house dev loop yet, so the suite runs on its own: **`{{NX}} run firebase:emulators`** (offline; no `firebase login` / cloud project / `.firebaserc` needed). Declare what an app serves in `.bespunky/dev.json` and sync, and the dev loop runs the suite beside it.{{/web}}
 
 {{#angular}}
 ### Where each Firebase service is provided — and what it costs
@@ -218,9 +224,9 @@ The shared co-driven browser is **real Chromium with a real window manager**, ru
 {{#angular}}- **`environment.ts` still ships an `authDomain`** — required for any OAuth provider sign-in (popup *and* redirect refuse without it, even against the Auth emulator). Don't remove it.{{/angular}}
 - **VS Code Simple Browser / a host browser are now only *viewers*** of the shared browser over noVNC — they no longer have to *complete* the OAuth flow themselves; the containerized Chromium does. They stay fine for viewing.
 - **Emulator auth works from anywhere** — any origin, any tree, including the pretty `<slug>.localhost` domains and offset ports.
-- **Real Google OAuth is pinned to the main-tree serve on {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}the app's base origin{{/angular}}.** That exact origin/redirect URI is the one registered in the Google OAuth client; worktree offset ports and the `<slug>.localhost` domains are **not** registered, so real Google sign-in only works on the main tree at `:4200`. To enable it, add `http://localhost:4200` to both **Authorized JavaScript origins** and **Authorized redirect URIs** on the OAuth 2.0 client in Google Cloud. For worktrees, use the Auth **emulator** (it authenticates anywhere).
+- **Real Google OAuth is pinned to the main-tree serve on {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}the app's base origin{{/angular}}.** That exact origin/redirect URI is the one registered in the Google OAuth client; worktree offset ports and the `<slug>.localhost` domains are **not** registered, so real Google sign-in only works on the main tree at {{#angular}}`:4200`{{/angular}}{{^angular}}the app's base port{{/angular}}. To enable it, add {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}`http://localhost:<the app's base port>` (its `ports` in `.bespunky/dev.json`){{/angular}} to both **Authorized JavaScript origins** and **Authorized redirect URIs** on the OAuth 2.0 client in Google Cloud. For worktrees, use the Auth **emulator** (it authenticates anywhere).
 
-The devcontainer forwards the base dev-server + emulator ports to the **same host ports** (`forwardPorts`) — if you re-port an emulator, update `firebase.json`, {{#angular}}`environment.ts`, {{/angular}}AND `.devcontainer/devcontainer.json` together. When Claude needs *you* to complete a real OAuth sign-in in the shared browser, it enters **observe-only** (`shared-browser observe`) first so it won't move the view under you, and **resumes** after.
+The devcontainer forwards the base dev-server + emulator ports to the **same host ports** (`forwardPorts`) — if you re-port an emulator, update `firebase.json`{{#angular}} and `environment.ts` together{{/angular}}; the devcontainer's forwarded ports are read from `firebase.json` on the next sync (never hand-edit them in `.devcontainer/devcontainer.json`). When Claude needs *you* to complete a real OAuth sign-in in the shared browser, it enters **observe-only** (`shared-browser observe`) first so it won't move the view under you, and **resumes** after.
 {{/web}}
 
 **When the user asks to deploy this app — or otherwise connect it to a real Firebase project — walk them through these steps** (from the workspace root inside the devcontainer, where the Firebase CLI is installed). The BeSpunky default is Firebase **App Hosting** (framework-aware; config in `apphosting.yaml`), not classic static Hosting:
@@ -282,7 +288,7 @@ The **rules** — the mandatory `bespunky-workflow:branch-and-release` skill inv
 
 ```bash
 {{SERVE}} <app>                              # serve the tree you're in (main → base ports; a worktree → its own offset block)
-{{SERVE}} <app> --worktree=<branch|slug>     # serve another worktree (pass --worktree empty in a TTY for an arrow-key picker)
+{{SERVE}} <app> --worktree=<branch|slug>     # serve another worktree (pass --worktree empty in a TTY for a numbered picker)
 {{SERVE}} <app> --port-offset=auto           # ISOLATED: own verified-free port block, coexists with a running serve
 {{SERVE}} <app> --dry-run                    # print what it would serve, without serving
 ```

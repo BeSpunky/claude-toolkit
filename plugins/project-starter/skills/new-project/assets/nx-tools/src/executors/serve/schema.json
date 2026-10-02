@@ -61,7 +61,7 @@
     },
     "worktree": {
       "type": "string",
-      "description": "Which git worktree to serve. Omit to serve the current cwd's tree; pass a value to match by branch name, DNS slug, or path; pass an empty value in an interactive terminal to pick one from an arrow-key prompt."
+      "description": "Which git worktree to serve. Omit to serve the current cwd's tree; pass a value to match by branch name, DNS slug, or path; pass an empty value in an interactive terminal to pick one from a numbered prompt."
     },
     "portOffset": {
       "type": [

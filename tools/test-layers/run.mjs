@@ -943,6 +943,28 @@ checkAsync('house-doc: the CLAUDE.md pointer goes outside Nx\'s managed block �
   ok(moved.includes(NX_BLOCK.trim()), `Nx's block was not restored to what Nx wrote:\n${moved}`);
 });
 
+// D1/D2/D6/D11 — the house docs only promise what this shape has.
+checkAsync('house docs: Firebase serve advice follows the real serve command; Angular-only DS and 4200 text only with Angular', async (ok) => {
+  const lines = (text, re) => text.split('\n').filter((l) => re.test(l)).map((l) => l.slice(0, 140));
+  // node + firebase, no web: nothing tells the agent to serve an app.
+  const core = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
+  const a = await artifacts(core, [...registry.detectLayers(core), 'agent']);
+  ok(lines(a.rules, /serve <app>|--no-emulators|--skip=emulators/).length === 0, `rules advise serving with no web layer: ${lines(a.rules, /serve <app>/)}`);
+  ok(a.rules.includes('run firebase:emulators'), 'rules: the suite runs on its own');
+  // design system without Angular: the neutral runtime, no Angular API or Angular-adapter generator.
+  ok(lines(a.house, /DsTheme|DsRuntimeTheme|nx-tools:ds-component|:host/).length === 0, `Angular DS docs without angular: ${lines(a.house, /DsTheme|DsRuntimeTheme|nx-tools:ds-component|:host/)}`);
+  ok(a.house.includes('setMode('), 'the neutral mode runtime is documented');
+  // node + web (declaration only) + firebase: the engine's flags, no emulator promise, no 4200.
+  const decl = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
+  writeJson(decl, '.bespunky/dev.json', { apps: { site: { processes: [{ id: 'app', cmd: 'node server.js', ports: { app: 3000 } }] } } });
+  const b = await artifacts(decl, [...registry.detectLayers(decl), 'agent']);
+  const both = `${b.house}\n${b.rules}`;
+  ok(lines(both, /--no-emulators|nx serve|4200|--configuration/).length === 0, `Nx-face flags / 4200 in a declaration-only repo: ${lines(both, /--no-emulators|nx serve|4200|--configuration/)}`);
+  ok(lines(b.house, /boots the emulator suite/).length === 0, `promises a suite the dev generator never seeds: ${lines(b.house, /boots the emulator suite/)}`);
+  ok(b.rules.includes('tools/dev/dev serve <app>') && b.rules.includes('`--skip=emulators`'), 'rules use the engine command and flag');
+  ok(!/arrow-key/.test(b.house) && !/slug, layers, and URLs/.test(b.house), 'picker / dry-run claims match the engine');
+});
+
 for (const run of pending) await run();
 
 // ── migrations.json: every rung names a registered layer scope ─────────────────────────────────────────────

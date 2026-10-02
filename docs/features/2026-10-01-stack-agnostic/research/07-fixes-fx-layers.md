@@ -81,3 +81,22 @@ Items from `handoffs/2026-10-02T00-review-fanout.md` → FX-layers. One entry pe
   out (once; the foreign block is left exactly as its owner wrote it). Owned block in an owned-on-every-sync
   file, so no migration is owed — the next sync relocates it. Test: "house-doc: the CLAUDE.md pointer goes
   outside Nx's managed block…".
+- **D1 — fixed.** HOUSE.rules.md's Firebase block: serve advice only under `web`, with the evidence-derived
+  `{{SERVE}}` and the face's own skip flag (`--no-emulators` on the Nx face, `--skip=emulators` on the engine);
+  without `web` it says the suite runs alone.
+- **D2 (templates) — fixed.** HOUSE.md's design-system section gates every Angular part on `angular`
+  (`:host`, `DsTheme`, `DsRuntimeTheme`, the built theme bundle, `ds-component`); without it, the neutral
+  `setMode()` runtime, a sass-built theme file, and an honest "no component generator — `ds-component` is the
+  Angular adapter's".
+- **D6 — fixed.** The OAuth origin advice names `:4200`/`http://localhost:4200` only with `angular`; otherwise the
+  app's base port from `.bespunky/dev.json`.
+- **D7 (HOUSE.md half) / D9 — fixed.** The serve flag table: `--configuration` and `--no-emulators` only on the
+  Nx face, a general `--skip=<id,…>` row, "numbered picker" (HOUSE.md and the serve executor's schema), and the
+  `--dry-run` row lists what the engine really prints (no "layers").
+- **D8 — fixed.** HOUSE.rules.md and `local-server-isolation/reference/firebase-emulators.md` no longer say
+  `--no-emulators` reuses a running suite: skipping the suite means `?emulate=none`, every service real.
+- **D11 — fixed.** "`<serve> <app>` boots the emulator suite" (the serve list and the Firebase section) only
+  where an Nx-served app exists (the dev generator seeds `emulators` only there); a declaration-only web +
+  Firebase repo is told to declare an `emulators` process or run the suite alone. Also: `nx run
+  firebase:emulators` now renders with `{{NX}}`, and the re-port advice says the devcontainer reads
+  firebase.json (A6). Test: "house docs: Firebase serve advice follows the real serve command; …".
