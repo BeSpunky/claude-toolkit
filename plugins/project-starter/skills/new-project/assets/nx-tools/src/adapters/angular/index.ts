@@ -25,7 +25,7 @@ import { setLeafOption } from '../../generators/_utils/dev-server';
 import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
-import { angularGeneratorCall } from './ts-solution';
+import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
 
 /**
  * The executors that make a project an Angular one. Applications build with `@angular/build:` (or the legacy
@@ -115,7 +115,9 @@ export const angular: StackAdapter = {
           e2eTestRunner: 'none',
           skipFormat: true,
         } as Parameters<typeof applicationGenerator>[1]))) ?? noop;
-      return { project: emittedProjectName(tree, options.directory, options.name), callback };
+      const project = emittedProjectName(tree, options.directory, options.name);
+      stateAngularCompilerContract(tree, readProjectConfiguration(tree, project).root);
+      return { project, callback };
     },
   },
 

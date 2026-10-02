@@ -74,7 +74,12 @@ export function workspace({ layout = 'hybrid', link = 'paths', pm } = {}) {
   if (linking === 'workspaces') {
     tree.delete('tsconfig.base.json');
     writeJson(tree, 'tsconfig.base.json', {
-      compilerOptions: { composite: true, declaration: true, module: 'nodenext', moduleResolution: 'nodenext', customConditions: [`@${SCOPE}/source`] },
+      // `emitDeclarationOnly` + an ES-only `lib`: what a real --preset=ts base states, and what an Angular project
+      // must override for itself (the Angular compiler contract — cases/angular-compiler-contract.mjs).
+      compilerOptions: {
+        composite: true, declaration: true, emitDeclarationOnly: true, lib: ['es2022'],
+        module: 'nodenext', moduleResolution: 'nodenext', customConditions: [`@${SCOPE}/source`],
+      },
     });
     writeJson(tree, 'tsconfig.json', { extends: './tsconfig.base.json', files: [], references: [] });
     if (manager === 'pnpm') tree.write('pnpm-workspace.yaml', 'packages:\n  - "packages/*"\n');

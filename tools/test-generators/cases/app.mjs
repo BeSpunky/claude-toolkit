@@ -23,7 +23,13 @@ export default {
           await app(ctx)(tree, { name: 'shop', skipFormat: true });
         },
         expect: (tree, t, ctx) => {
-          t.equal(getProjects(tree).get('shop')?.root, `${RESOLVED[layout].appsDir}/shop`, 'the app root');
+          const root = `${RESOLVED[layout].appsDir}/shop`;
+          t.equal(getProjects(tree).get('shop')?.root, root, 'the app root');
+          // In a TS-solution workspace the app states its own compiler contract over the tsc-oriented base.
+          if (link !== 'paths') {
+            const options = JSON.parse(tree.read(`${root}/tsconfig.json`, 'utf8')).compilerOptions;
+            t.equal({ emitDeclarationOnly: options.emitDeclarationOnly, lib: options.lib }, { emitDeclarationOnly: false, lib: ['es2022', 'dom'] }, 'the Angular compiler contract');
+          }
           // The TS-solution opt-out is scoped to the one @nx/angular call — never left set for the rest of the process.
           t.equal(process.env.NX_IGNORE_UNSUPPORTED_TS_SETUP, ctx.envBefore, 'NX_IGNORE_UNSUPPORTED_TS_SETUP restored');
         },

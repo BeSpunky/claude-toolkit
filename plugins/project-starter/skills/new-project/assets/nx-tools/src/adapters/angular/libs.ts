@@ -2,7 +2,7 @@
 import { type Tree, type GeneratorCallback, readJson, writeJson, updateJson, logger } from '@nx/devkit';
 import type { LibPort } from '../stack-adapter';
 import { workspaceLinking } from '../../generators/_utils/linking';
-import { angularGeneratorCall } from './ts-solution';
+import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
 
 const noop: GeneratorCallback = () => {};
 
@@ -25,6 +25,12 @@ export const angularLibs: LibPort = {
   //     `"<condition>": "./src/index.ts"`. That is the same trade Nx makes for its own TS-solution packages, and it
   //     is inert exactly when the condition is workspace-unique (Nx's `@<scope>/source`), never a common one
   //     (`development`) that a consumer's bundler would actually match.
+  //     And one honest warning: ng-packagr reports the source manifest's `types`/`default` (written by `link`,
+  //     pointing at source) as "conflicting … would be overridden". Harmless, and NOT to be dropped: overriding them
+  //     in the dist manifest is exactly right, while in the workspace they are LOAD-BEARING — the Angular
+  //     application builder resolves an Angular app's import of the library through them (it does not apply the
+  //     workspace's custom condition), and without them the app fails with "Could not resolve" / TS2307 (verified
+  //     against the tripwire's workspace). So the link stays uniform; no Angular special case in the linker.
   // Secondary entry points must follow the same rule: link each subpath through the port (`subpath`), never a
   // `paths` alias of their own.
   async create(tree, options) {
@@ -59,6 +65,7 @@ export const angularLibs: LibPort = {
       const libRoot = options.directory.replace(/\/+$/, '');
       linking.link(tree, { importPath: options.importPath, libRoot });
       stateTheBuildsSourceMaps(tree, libRoot);
+      stateAngularCompilerContract(tree, libRoot);
     }
     return callback;
   },
