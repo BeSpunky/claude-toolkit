@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-02
+summary: Every plugin description ≤500 and skill description ≤1024 with no < > (what claude.ai stores); tools/check-descriptions guards it in CI + pre-push; marketplace descriptions now derived from plugin.json.
+tags: [plugins, skills, descriptions, triggers, claude-desktop, release-tooling]
+---
+
 # Description limits — decision
 
 **What:** every plugin description cut to ≤ 500 characters and every skill description to ≤ 1024 with no `<` `>` — the limits Claude Desktop (claude.ai) enforces when it stores them; Claude Code reads the full text, which is why nothing here noticed (48 violations).
