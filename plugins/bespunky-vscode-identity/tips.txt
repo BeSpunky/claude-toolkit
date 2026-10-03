@@ -2,3 +2,4 @@
 # One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
 
 Too many identical VS Code windows? Ask for a window identity (an emoji title plus a quiet colour band)
+Grew a design system? A one-time toast says when the window colour can move from its name-hash placeholder to the brand

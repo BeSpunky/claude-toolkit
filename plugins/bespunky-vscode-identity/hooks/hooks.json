@@ -1,4 +1,7 @@
 {
+  "modules": [
+    "./name-hash-toast.ts"
+  ],
   "hooks": {
     "SessionStart": [
       {

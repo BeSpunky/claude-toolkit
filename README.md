@@ -197,7 +197,8 @@ claude-toolkit/
 │   ├── .claude-plugin/plugin.json
 │   ├── hooks/                                # SessionStart: is the window colour still the name-hash placeholder while a design system now exists?
 │   │   ├── hooks.json
-│   │   └── check-window-identity.sh          # DETECTS + offers the name-hash → design-system re-derive; never runs it
+│   │   ├── check-window-identity.sh          # DETECTS + offers the name-hash → design-system re-derive; never runs it; `--json` names the deciding gate for non-model readers
+│   │   └── name-hash-toast.ts                # mod — toasts the same fact to the person, once per project (remembered in `$.store`); reads `--json`, re-implements no gate
 │   └── skills/window-identity/
 │       └── SKILL.md                          # the INTELLIGENCE: finds the DS primary + a project emoji, then calls the window-identity generator (the writer lives in nx-tools)
 └── plugins/project-starter/
