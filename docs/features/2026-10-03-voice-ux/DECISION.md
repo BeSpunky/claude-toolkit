@@ -1,4 +1,4 @@
-# voice-ux — decision (DRAFT, awaiting the user's confirmation)
+# voice-ux — decision
 
 Brief and root causes: [`BRIEF.md`](BRIEF.md).
 
@@ -13,7 +13,9 @@ Brief and root causes: [`BRIEF.md`](BRIEF.md).
 - whisper.cpp on this machine, 4.2 s clip: `base.en` 0.57 s, `small.en` 1.8 s.
   → live partials with the fast model, the final with the accurate one.
 
-## Proposed design
+## The design
+
+Confirmed by the user as proposed: "yes" (2026-10-03).
 
 **1 + 2. One author per utterance.** The robotic template and the doubled options are
 the same defect: two parties compose one sentence. Claude becomes the only author.
@@ -49,3 +51,24 @@ group, the pidfile and the **last utterance**. Everything that speaks goes throu
 ## Release
 `bespunky-voice` minor bump (new command verbs, new hook, changed tool contract).
 No `nx-tools` payload change → nothing to migrate.
+
+## As built — what differed from the proposal
+
+- **Yes/no questions are asked as one** ("Should I commit now?", not "…: yes or no?"),
+  and a `(Recommended)` label becomes a spoken suggestion ("I'd go with …").
+- **End-of-speech applies to `/voice answer` too**, not only the streaming mode; the
+  hard cap rose from 10 s to 20 s, since it now only bounds a long answer.
+- **Noise annotations are stripped at the STT boundary**: whisper names sounds it
+  hears instead of words — `(static)`, `*coughs*` — which would otherwise have
+  surfaced as partials or even as an answer.
+- **A new ask supersedes one still running** (one microphone, one speaker).
+- `speak-detached.sh` is retired; the SessionStart publish now prunes runtime
+  scripts the plugin no longer ships.
+
+## Not verified live
+
+The conversation logic is covered by `tools/test-voice/run.mjs` (real server, fake
+audio). End-of-speech was tuned on synthetic speech + noise; the container's mic,
+probed with nobody speaking, produced near-full-scale noise and once ended a take
+early on a burst. **The first real hands-free session is the remaining check** —
+especially that partials appear under the tool call and that Esc reaches the tool.
