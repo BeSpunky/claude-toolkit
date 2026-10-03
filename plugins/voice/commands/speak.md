@@ -44,12 +44,12 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
   ```
   bash ~/.claude/bespunky-voice/listen.sh
   ```
-  It sets the mic gain for the resolved audio endpoint, records a short window,
+  It sets the mic gain for the resolved audio endpoint, records until you stop talking,
   and prints the transcript on stdout. Take that transcript as the user's answer
   to the question you last asked them, echo it back in one line so they can catch a misrecognition ("You said:
   …"), and then continue acting on it. If it exits non-zero (nothing recognized, STT
   not installed, or no reachable audio endpoint), relay the stderr message and offer to retry — do NOT guess an
-  answer. If speech-to-text isn't installed yet, tell them to run
+  answer. If speech-to-text or the speech detector isn't installed yet, tell them to run
   `bash ~/.claude/bespunky-voice/install-whisper.sh` once.
 
 - **auto on** / **auto off** — Run `bash ~/.claude/bespunky-voice/voice-auto.sh on`
