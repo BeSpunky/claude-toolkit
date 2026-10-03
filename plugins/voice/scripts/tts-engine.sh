@@ -23,6 +23,16 @@
 #                           one line saying why (missing piece, or piper's own error).
 #   voice_piper_probe     → voice_piper_synth on a fixed word into a temp file: the
 #                           health check. Same return/VOICE_PIPER_PROBLEM contract.
+#   voice_tts_verdict     → which engine will ACTUALLY speak, as one word in
+#                           VOICE_TTS_HEALTH, the same order speak.sh tries them:
+#                             natural  piper works
+#                             broken   piper is installed but fails (speech falls
+#                                      back to the robotic voice, or to none)
+#                             robotic  no piper; espeak-ng speaks
+#                             system   no piper or espeak-ng; macOS say speaks
+#                             none     nothing can speak
+#                           VOICE_PIPER_PROBLEM says why when it isn't natural.
+#                           Runs the probe (~0.3 s): callers that poll must cache it.
 #
 # Env overrides (all optional): BESPUNKY_VOICE_PIPER_BIN, BESPUNKY_VOICE_PIPER_MODEL.
 #
@@ -83,6 +93,17 @@ voice_piper_probe() {
   voice_piper_synth "ok" "$tmp"; rc=$?
   rm -f "$tmp"
   return "$rc"
+}
+
+voice_tts_verdict() {
+  voice_resolve_piper
+  if voice_piper_probe; then VOICE_TTS_HEALTH=natural
+  elif [ -n "$VOICE_PIPER_BIN" ]; then VOICE_TTS_HEALTH=broken
+  elif command -v espeak-ng >/dev/null 2>&1; then VOICE_TTS_HEALTH=robotic
+  elif command -v say >/dev/null 2>&1; then VOICE_TTS_HEALTH=system
+  else VOICE_TTS_HEALTH=none
+  fi
+  return 0
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

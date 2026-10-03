@@ -5,7 +5,7 @@ import type { On, RenderPropsOf } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { guardAbort } from '../hooks/band.tsx'
+import { guardAbort, healthWarning, parseHealth } from '../hooks/band.tsx'
 
 const PLUGIN = 'bespunky-voice'
 const HOME = '/home/tester'
@@ -29,8 +29,14 @@ const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, 
 
 type Files = Record<string, { text: string; mtimeMs: number }>
 
-/** The runtime's directory as the band sees it, and every command it runs. */
-function world(on: On, outcome = RAN_OK) {
+const HEALTHY = 'tts\tnatural\t\nstt\tok\t\n'
+const PIPER_BROKEN = 'tts\tbroken\tpiper failed: libpiper_phonemize.so.1: cannot open\nstt\tok\t\n'
+
+/**
+ * The runtime's directory as the band sees it, and every command it runs;
+ * `voice-health.sh` answers `health()` — what the runtime's verdict is now.
+ */
+function world(on: On, outcome = RAN_OK, health = () => HEALTHY) {
   const files: Files = {}
   const ran: string[][] = []
   mock.env(on, { HOME })
@@ -60,7 +66,7 @@ function world(on: On, outcome = RAN_OK) {
   on('process.run', ($, e) => {
     ran.push([...e.argv])
 
-    return { value: outcome }
+    return { value: e.argv[1] === `${DIR}/voice-health.sh` ? { ...RAN_OK, stdout: health() } : outcome }
   })
 
   const write = (name: string, text: string, ageMs = 0) => {
@@ -68,7 +74,9 @@ function world(on: On, outcome = RAN_OK) {
   }
   const remove = (...names: string[]) => names.forEach(name => delete files[name])
 
-  return { clock, ran, write, remove }
+  const probes = () => ran.filter(argv => argv[1] === `${DIR}/voice-health.sh`).length
+
+  return { clock, ran, write, remove, probes }
 }
 
 async function started($: Engine, w: ReturnType<typeof world>) {
@@ -223,5 +231,101 @@ describe('voice band', () => {
     expect(await guardAbort(calm.signal, async () => 'answered', () => stops.push('stop'))).toBe('answered')
     calm.abort()
     expect(stops).toEqual(['stop'])
+  })
+
+  describe('engine health', () => {
+    test('healthy engines stay quiet, and are probed once, not per tick', async ($, on) => {
+      const w = world(on)
+      w.write('voice-health.sh', '#!/bin/bash')
+      await started($, w)
+      await w.clock.advance(3_000)
+      for (const surface of SURFACES) {
+        const ui = await mount($, surface)
+        expect(await ui.find(LINE)).toBeUndefined()
+        await ui.unmount()
+      }
+      expect(w.probes()).toBe(1)
+    })
+
+    test('a broken Piper warns until dismissed, and stays dismissed', async ($, on) => {
+      const w = world(on, RAN_OK, () => PIPER_BROKEN)
+      w.write('voice-health.sh', '#!/bin/bash')
+      await started($, w)
+      await w.clock.advance(400)
+      for (const surface of SURFACES) {
+        const ui = await mount($, surface)
+        expect((await ui.find(LINE))?.text).toBe('⚠ voice: Piper broken — robotic fallback · /speak status')
+        expect(await ui.find({ key: 'voice-dismiss' })).toMatchObject({ props: { label: 'Dismiss', hotkey: 'd' } })
+        await ui.unmount()
+      }
+      const ui = await mount($, 'terminal')
+      await ui.press({ key: 'voice-dismiss' })
+      expect(await ui.find(LINE)).toBeUndefined()
+      await w.clock.advance(2_000)
+      expect(await ui.find(LINE)).toBeUndefined()
+    })
+
+    test('speech takes the band over a warning', async ($, on) => {
+      const w = world(on, RAN_OK, () => PIPER_BROKEN)
+      w.write('voice-health.sh', '#!/bin/bash')
+      w.write('last-utterance.txt', 'Ship it?')
+      w.write('.speaking.pid', '4242')
+      await started($, w)
+      await w.clock.advance(400)
+      const ui = await mount($, 'terminal')
+      expect((await ui.find(LINE))?.text).toBe('🔊 Ship it?')
+    })
+
+    test('a repair is noticed: an engine install moving re-takes the verdict', async ($, on) => {
+      let verdict = PIPER_BROKEN
+      const w = world(on, RAN_OK, () => verdict)
+      w.write('voice-health.sh', '#!/bin/bash')
+      w.write('piper', '')
+      await started($, w)
+      await w.clock.advance(400)
+      const ui = await mount($, 'terminal')
+      expect((await ui.find(LINE))?.text).toStartWith('⚠ voice: Piper broken')
+
+      verdict = HEALTHY
+      w.write('piper', '')
+      await w.clock.advance(1_000)
+      expect(await ui.find(LINE)).toBeUndefined()
+      expect(w.probes()).toBe(2)
+    })
+
+    test('an aged verdict is re-taken even when nothing moved', async ($, on) => {
+      const w = world(on)
+      w.write('voice-health.sh', '#!/bin/bash')
+      await started($, w)
+      await w.clock.advance(599_000)
+      expect(w.probes()).toBe(1)
+      await w.clock.advance(2_000)
+      expect(w.probes()).toBe(2)
+    })
+
+    test('without the voice runtime nothing is probed or shown', async ($, on) => {
+      const w = world(on, RAN_OK, () => PIPER_BROKEN)
+      await started($, w)
+      await w.clock.advance(1_000)
+      const ui = await mount($, 'terminal')
+      expect(await ui.find(LINE)).toBeUndefined()
+      expect(w.probes()).toBe(0)
+    })
+
+    test('the warning names every engine at fault, and only those', () => {
+      expect(healthWarning({ tts: 'natural', stt: 'ok' })).toBeUndefined()
+      expect(healthWarning({ tts: 'system', stt: 'ok' })).toBeUndefined()
+      expect(healthWarning({ tts: 'robotic', stt: 'missing' })).toBe(
+        'voice: robotic voice (no Piper); no speech recognition · /speak status',
+      )
+      expect(healthWarning({ tts: 'natural', stt: 'broken' })).toBe('voice: speech recognition broken · /speak status')
+    })
+
+    test('only the runtime script\'s own output is a verdict', () => {
+      expect(parseHealth(PIPER_BROKEN)).toEqual({ tts: 'broken', stt: 'ok' })
+      expect(parseHealth('')).toBeUndefined()
+      expect(parseHealth('tts\tfine\t\nstt\tok\t\n')).toBeUndefined()
+      expect(parseHealth('bash: voice-health.sh: No such file')).toBeUndefined()
+    })
   })
 })

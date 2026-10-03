@@ -16,12 +16,30 @@
  *               any words).
  * - `lingering` speech just ended; `text` stays up (dimmed, Replay only) until
  *               `until` (ms since the epoch), so the person can still catch it.
+ * - `warning`   nothing is said or heard, and an engine will let the person
+ *               down (VoiceHealth); `text` says which, until it is dismissed.
  */
 export type VoiceBand =
   | { phase: 'idle' }
   | { phase: 'speaking'; text: string }
   | { phase: 'listening'; heard: string }
   | { phase: 'lingering'; text: string; until: number }
+  | { phase: 'warning'; text: string }
+
+/**
+ * The voice engines' health, as the runtime's `voice-health.sh` reports it —
+ * the band never judges an engine itself.
+ *
+ * - `tts`: which engine will actually speak — `natural` (Piper works), `broken`
+ *   (Piper is installed but fails, so speech falls back to the robotic voice),
+ *   `robotic` (no Piper; espeak-ng), `system` (macOS say), `none`.
+ * - `stt`: whether ask_by_voice can hear — `ok`, `broken` (whisper-cli is there
+ *   but cannot run), `missing`.
+ */
+export type VoiceHealth = {
+  tts: 'natural' | 'broken' | 'robotic' | 'system' | 'none'
+  stt: 'ok' | 'broken' | 'missing'
+}
 
 declare module 'claude-code' {
   interface PluginState {
