@@ -1,7 +1,7 @@
 {
   "name": "bespunky-voice",
   "description": "Hear Claude's questions and answer by voice, for when you're away from the screen. `/voice say` (or `/voice auto on`) speaks a listenable summary of the question; `/voice answer` records, transcribes locally, and replies for you; the `voice-conversation` skill + `ask_by_voice` MCP tool run a hands-free spoken back-and-forth. Swappable TTS (espeak-ng / say, upgradable to local Piper), local whisper.cpp STT; audio bridged by the BeSpunky devcontainer.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"
