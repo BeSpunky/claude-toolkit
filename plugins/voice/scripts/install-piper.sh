@@ -42,12 +42,20 @@ if [ "${1:-}" = "--set-default" ]; then
 fi
 
 # --- 1. the piper binary ------------------------------------------------------
+# "Present" is not "installed": a binary whose bundled libs lost their soname
+# symlinks is executable and still dies in the dynamic linker on every call. So
+# ask it to RUN (--version loads every library it links); a binary that can't is
+# replaced, never reported as "already present".
+if [ -x "$BIN" ] && ! LD_LIBRARY_PATH="$PIPER_DIR" "$BIN" --version >/dev/null 2>&1; then
+  echo "[install-piper] piper binary is present but cannot run — reinstalling it"
+  rm -rf "$PIPER_DIR" && mkdir -p "$PIPER_DIR"
+fi
 if [ ! -x "$BIN" ]; then
   url="https://github.com/rhasspy/piper/releases/download/$REL/piper_linux_$(uname -m).tar.gz"
   echo "[install-piper] downloading piper binary from $url ..."
   tmp="$(mktemp -d)"
   if curl -fsSL "$url" -o "$tmp/piper.tgz" && tar -xzf "$tmp/piper.tgz" -C "$tmp"; then
-    cp -rf "$tmp/piper/." "$PIPER_DIR/"     # binary + libs + espeak-ng-data
+    cp -a "$tmp/piper/." "$PIPER_DIR/"     # binary + libs (and their symlinks) + espeak-ng-data
     chmod +x "$BIN" 2>/dev/null || true
     echo "[install-piper] piper installed → $BIN"
   else
@@ -56,7 +64,7 @@ if [ ! -x "$BIN" ]; then
   fi
   rm -rf "$tmp"
 else
-  echo "[install-piper] piper binary already present"
+  echo "[install-piper] piper binary already present and runs"
 fi
 
 # --- 2. voices ----------------------------------------------------------------
@@ -89,6 +97,18 @@ if [ ! -e "$VOICES_DIR/default.onnx" ]; then
   fi
 fi
 
-echo "[install-piper] done. Installed voices:"
+echo "[install-piper] installed voices:"
 ls -1 "$VOICES_DIR"/*.onnx 2>/dev/null | sed 's#.*/##;s/\.onnx$//' | grep -v '^default$' || true
-exit 0
+
+# --- 3. prove it: synthesize a word with the default voice --------------------
+# The same health check speak.sh's fallback and `/voice status` rely on — so
+# "done" here means the natural voice will actually be the one that speaks.
+# shellcheck source=tts-engine.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tts-engine.sh"
+voice_resolve_piper
+if voice_piper_probe; then
+  echo "[install-piper] done. piper works (default voice $VOICE_PIPER_VOICE)"
+  exit 0
+fi
+echo "[install-piper] installed, but piper still does not work — $VOICE_PIPER_PROBLEM" >&2
+exit 1
