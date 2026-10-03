@@ -325,7 +325,7 @@ Libraries here are **publishable by default** — one generator owns the package
 {{NX}} g @bespunky/nx-tools:adopt-extracted <lib> --package=<npm-package>
 ```
 
-`mark-extractable` declares this library reusable; `adopt-extracted` swaps a local copy for the published package (with `--keepShim` while call sites migrate, then `--finalize`). The cross-workspace half runs from the toolkit repo — see its `docs/reusable-tool-extraction.md`.
+`mark-extractable` declares this library reusable; `adopt-extracted` swaps a local copy for the published package (`--keepShim` leaves a re-export at the old import path — a compat layer, so use it only when the user, asked explicitly, wants existing call sites to keep resolving for a while; then `--finalize`). The cross-workspace half runs from the toolkit repo — see its `docs/reusable-tool-extraction.md`.
 
 {{/js}}## Common Commands
 

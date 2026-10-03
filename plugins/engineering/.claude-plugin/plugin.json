@@ -1,7 +1,7 @@
 {
   "name": "bespunky-engineering",
   "description": "BeSpunky engineering skills, stack-agnostic. Foundation: architect-mentality (the mindset) and architecture-first (solve through design, not patches; fix the root cause). Technique routers: software-design, advanced-typescript, nx-monorepo-and-dx. Plus resumable-state (a deliberate home for view and working state) and typed-reactive-navigation (typed per-domain navigation, never a raw router call), each with an Angular adapter. Angular-only skills live in bespunky-angular.",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"
