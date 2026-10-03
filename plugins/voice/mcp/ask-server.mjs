@@ -29,6 +29,10 @@ import { classifyIntent, matchOption } from './answer.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SPEAKER = join(HERE, '..', 'scripts', 'speaker.sh');
 const LISTEN = join(HERE, '..', 'scripts', 'listen.sh');
+const VOICE = join(HERE, '..', 'scripts', 'voice.sh');
+// The one exit code speaker.sh and listen.sh use for "cut short by a stop" — the
+// user pressed Stop in the band, hit Esc, or typed; not a failure to report.
+const STOPPED = 143;
 // Reported to the client as serverInfo.version — the plugin's own release, read
 // rather than restated so the two can never drift.
 const VERSION = (() => { try { return JSON.parse(readFileSync(join(HERE, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version; } catch { return '0.0.0'; } })();
@@ -76,14 +80,14 @@ const TOOL = {
 // One microphone, one speaker: a new ask supersedes any still running.
 const inflight = new Map(); // JSON-RPC request id → Ask
 
-// A cancel silences the speaker through `speaker.sh stop`. That stop must LAND
+// A cancel silences the voice through `voice.sh stop`. That stop must LAND
 // before the next question is spoken — run concurrently, it can read the pidfile
 // after the new question wrote it and silence a question nobody then hears.
 // Every `say` waits for the stop in flight, if any.
 let silencing = Promise.resolve();
 function silenceSpeaker() {
   silencing = new Promise((resolve) => {
-    const c = spawn('bash', [SPEAKER, 'stop'], { stdio: 'ignore' });
+    const c = spawn('bash', [VOICE, 'stop'], { stdio: 'ignore' });
     c.on('error', resolve);
     c.on('close', resolve);
   });
@@ -139,6 +143,10 @@ class Ask {
   }
 }
 
+// Stopped from outside this call (the band's Stop, Esc, a typed prompt): the user
+// dropped the question as surely as saying "never mind".
+const stoppedResult = { cancelled: true, note: 'The user stopped the voice. Drop this question; do not re-ask unless they bring it up.' };
+
 const cancelledResult = (why) => ({
   cancelled: true,
   note: why === 'superseded' ? 'Superseded by a newer ask_by_voice call.' : 'Cancelled.',
@@ -155,6 +163,7 @@ export async function askByVoice({ question, options }, ask) {
     if (ask.cancelled) return cancelledResult(ask.cancelled);
     const spoke = await ask.run([SPEAKER, 'say', '--wait', question]);
     if (ask.cancelled) return cancelledResult(ask.cancelled);
+    if (spoke.code === STOPPED) return stoppedResult;
     if (spoke.code !== 0) {
       // Nobody heard the question, so listening for an answer would be a lie.
       return { transcript: '', matched: null, error: spoke.stderr || 'could not speak the question', note: 'The question was not spoken. Relay `error` to the user and fall back to a typed question.' };
@@ -171,6 +180,7 @@ export async function askByVoice({ question, options }, ask) {
     });
     if (ask.cancelled) return cancelledResult(ask.cancelled);
 
+    if (!transcript && heard.code === STOPPED) return stoppedResult;
     if (!transcript) {
       // listen.sh explains its own failures on stderr (no reachable audio endpoint,
       // STT not installed, nothing recognized) — pass that through verbatim.

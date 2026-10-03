@@ -36,8 +36,8 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
   `bash ~/.claude/bespunky-voice/speaker.sh replay --wait`. If it reports nothing
   has been said yet, tell the user so.
 
-- **stop** — Silence whatever is being said right now:
-  `bash ~/.claude/bespunky-voice/speaker.sh stop`. (Speech also stops on its own
+- **stop** — Silence whatever is being said, and end any recording in progress:
+  `bash ~/.claude/bespunky-voice/voice.sh stop`. (Speech also stops on its own
   the moment the user submits a prompt or answers a question picker.)
 
 - **answer** — Capture the user's spoken reply and act on it. Run:

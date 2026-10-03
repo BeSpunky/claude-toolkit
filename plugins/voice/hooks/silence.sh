@@ -11,9 +11,10 @@
 #
 # Writes NOTHING to stdout — a UserPromptSubmit hook's stdout is added to the
 # model's context. Unconditional (not gated on auto-speak): speech started by any
-# path — /voice say, the ask tool, auto-speak — is stopped the same way.
+# path — /voice say, the ask tool, auto-speak — is stopped the same way, and
+# so is any open recording (voice.sh stop is "the voice", both halves).
 set -uo pipefail
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 [ -n "$PLUGIN_ROOT" ] || exit 0
-bash "$PLUGIN_ROOT/scripts/speaker.sh" stop >/dev/null 2>&1
+bash "$PLUGIN_ROOT/scripts/voice.sh" stop >/dev/null 2>&1
 exit 0

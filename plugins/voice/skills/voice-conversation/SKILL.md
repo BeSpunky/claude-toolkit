@@ -25,7 +25,8 @@ The user wants to answer your questions by **voice**, hands-free. While in this 
   - `cancelled: true` → the user said "stop" / "never mind" (or interrupted).
     Drop the question; don't re-ask unless they bring it up.
 - The user can say **"repeat that"** at any point — the tool re-asks by itself.
-  `/voice replay` and `/voice stop` work for anything spoken.
+  `/voice replay` and `/voice stop` work for anything spoken, and the voice band
+  above the prompt shows what's said and heard, with Replay and Stop.
 - Keep spoken questions **short and one at a time** — the user is listening, not
   reading. Prefer 2–4 clear options with distinct labels (the matcher keys off
   the label words, ordinals like "the second one", and yes/no).

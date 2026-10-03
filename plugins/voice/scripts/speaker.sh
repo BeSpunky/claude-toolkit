@@ -9,13 +9,20 @@
 #   speaker.sh say [--wait] <text…>   stop whatever is speaking, remember <text>,
 #                                     speak it. Detached by default (a hook must
 #                                     not block the UI); --wait blocks until done
-#                                     and passes speak.sh's stderr + exit through.
+#                                     and passes speak.sh's stderr + exit through —
+#                                     143 when the utterance was STOPPED (by
+#                                     stop, a newer say, or the user), so a caller
+#                                     can tell "nobody heard it" from "it played".
 #   speaker.sh replay [--wait]        say the last utterance again.
 #   speaker.sh stop                   silence the current utterance, if any.
 #
-# State (machine-local, beside the published runtime):
-#   .speaking.pid       pgid of the utterance in flight (setsid → pgid == pid)
-#   last-utterance.txt  the text most recently said
+# State (machine-local, beside the published runtime) — also read by the voice
+# band, so it must stay TRUE, not merely written:
+#   .speaking.pid       pgid of the utterance in flight (setsid → pgid == pid);
+#                       exists exactly while something is being said — the
+#                       utterance removes it itself when it ends, stop() when it
+#                       is cut short.
+#   last-utterance.txt  the text most recently said (mtime = when it started)
 set -uo pipefail
 
 VOICE_HOME="${HOME}/.claude/bespunky-voice"
@@ -77,7 +84,9 @@ say() {
   stop
   printf '%s' "$text" > "$LAST" 2>/dev/null || true
 
-  local launch=("${OWN_GROUP[@]}" bash "$SPEAK" "$text")
+  # The utterance runs as `speaker.sh _utter`, not speak.sh directly, so it can
+  # clear its own pidfile when it finishes on its own (see _utter below).
+  local launch=("${OWN_GROUP[@]}" bash "$HERE/speaker.sh" _utter "$text")
   if [ "$wait" = 1 ]; then
     "${launch[@]}" 9>&- &
   else
@@ -89,12 +98,19 @@ say() {
   [ "$wait" = 1 ] || return 0
 
   wait "$pid"; local rc=$?
-  # Clear the pidfile only if it is still ours (a newer say may have replaced it).
+  # Cut short by a signal → the one "stopped" code, whatever the signal was.
+  [ "$rc" -ge 128 ] && return 143
+  return "$rc"
+}
+
+# The utterance itself: speak, then — if the pidfile still names THIS utterance
+# (a newer say or a stop may have replaced or removed it) — clear it, so
+# ".speaking.pid exists" stays true to "something is being said".
+utter() {
+  bash "$SPEAK" "$@"; local rc=$?
   lock
-  [ "$(cat "$PIDFILE" 2>/dev/null)" = "$pid" ] && rm -f "$PIDFILE"
+  [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] && rm -f "$PIDFILE"
   unlock
-  # Killed by stop() is not a failure of speech.
-  [ "$rc" -ge 128 ] && return 0
   return "$rc"
 }
 
@@ -104,5 +120,6 @@ case "${1:-}" in
           [ -s "$LAST" ] || { echo "bespunky-voice: nothing has been said yet" >&2; exit 1; }
           say "$@" "$(cat "$LAST")" ;;
   stop)   lock; stop; unlock ;;
+  _utter) shift; utter "$@" ;;   # internal: how say() launches an utterance
   *)      echo "usage: speaker.sh say [--wait] <text> | replay [--wait] | stop" >&2; exit 2 ;;
 esac
