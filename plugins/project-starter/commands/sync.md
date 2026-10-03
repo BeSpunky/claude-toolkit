@@ -66,7 +66,7 @@ If they differ, the steps you are reading are the *old* release's. **Read `$PLUG
 follow that instead**, from step 3 onward — the scaffolder you are about to run is its scaffolder, not this
 one's. Say in one line that you did so.
 
-## 3. Decide WHERE it runs — before it runs, without asking
+## 3. Decide WHERE it runs — before it runs, from the project's DECLARED branch model
 
 A sync is a change like any other: the ladder commits as it goes, and the generators rewrite files. So the
 always-on branch rule applies to it exactly as to any other request (`bespunky-workflow:branch-and-release`,
@@ -74,27 +74,61 @@ always-on branch rule applies to it exactly as to any other request (`bespunky-w
 and don't run the sync here to see whether it refuses.** The `protected-branch` refusal below is the
 scaffolder's backstop for when this step was skipped, not a question for the user.
 
-- **On `development`, `staging`, `main` or `master`, and a `development` branch exists** — the sync is its own
-  unit of work. Open a worktree off `development` and sync THERE:
+**Which branches are protected, and what the worktree is based on, are facts of the project's branch model** —
+declared in `.bespunky/branches.json`, never assumed to be `development` → `staging` → `main`. **Invoke the
+`bespunky-workflow:branch-and-release` skill and resolve the model through it** (its engine's `status`: the
+copy on the integration line's tip is the one in force; exit `3` means undeclared). Don't reach for the engine
+by a path written here — the skill knows where it lives. Then:
+
+- **Declared, and HEAD is on one of its protected lines** (a name in `projection.protected`, or a release line
+  matching `projection.protectedPatterns`) — the sync is its own unit of work. Open a worktree off the
+  **integration line** (`projection.integration`) and sync THERE:
 
   ```
   SLUG="house-sync-$(date -u +%F)"
-  git worktree add ".claude/worktrees/$SLUG" -b "chore/$SLUG" development
+  git worktree add ".claude/worktrees/$SLUG" -b "chore/$SLUG" <integration>
   ```
 
-  If that worktree already exists (an earlier sync today, not yet merged), it is the same effort — use it.
+  If that worktree already exists (an earlier sync today, not yet landed), it is the same effort — use it.
   Run step 4 from inside the worktree, with the Nx workspace-root override the branch rule requires for any
   Nx command in a worktree (`NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$PWD"`). A fresh worktree is clean, so
   uncommitted work in the tree you started from is untouched and irrelevant to this run. A sync needs no
   feature package — its migration commits and `SYNC_OK` are the record.
-- **On a feature branch** — sync there only if the sync belongs to that branch's in-flight work (it is
-  testing a toolkit change, say, or the branch exists to adopt the house tooling). Otherwise it is unrelated:
-  open the worktree off `development` exactly as above.
-- **On `main`/`master` with no `development` branch** — there is no branch model to follow, so this stays a
-  genuine question (`no-branch-model`, below). Run in place and let the gate ask it.
+- **On a work branch** — sync there only if the sync belongs to that branch's in-flight work (it is testing a
+  toolkit change, say, or the branch exists to adopt the house tooling). Otherwise it is unrelated: open the
+  worktree off the integration line exactly as above.
+- **UNDECLARED** — see *3b*. Until a model is declared, every branch named `main`, `master`, `development`,
+  `develop` or `staging` is protected: on one of them, open the worktree **off the branch you are on** (same
+  commands, `<integration>` replaced by the current branch); on any other branch, apply the work-branch rule
+  above.
 
 Say in one line where the sync is running and why. Promotion afterwards waits for the user's signal like any
-other change — the worktree is where the sync happens, not a licence to merge it.
+other change — the worktree is where the sync happens, not a licence to land it.
+
+### 3b. No declared model — investigate and ASK, but don't hold the sync hostage to it
+
+The user's rule for this state: *"Projects without a json file should trigger Claude to investigate the current
+layout and suggest one to the user. That should happen on `/sync`."* — and *"no json means asking the user."*
+So when the model is undeclared (the skill's `status` exits `3`, or the run prints
+`[preflight] branch-model: undeclared`), **follow the branch-and-release skill's *choosing a branch model*
+procedure** (`reference/choosing-a-branch-model.md`): gather the evidence — not the branch list alone, since
+projects the toolkit once forced into three lines all *have* `development`/`staging`/`main` whether they need
+them or not — judge whether each line justifies itself, propose a model, and **ask**. Never write the
+declaration without the user's answer, and never let the sync write it: it lands through the skill's own
+change procedure, on the integration line the user chooses.
+
+**Where this sits, and why: the sync runs first, the question is asked in the report — unless the user wants
+the model settled first.** The sync's commits land on its own worktree branch, and *landing* that branch is a
+human-gated move that needs the model anyway (it names the line to land on). So nothing the sync writes
+depends on the answer, and the answer gates the one step that does. Running the investigation's evidence
+first is cheap and read-only — do it before step 4 if you like — but put the proposal and the question at the
+end, in step 6, alongside the sync's own report; don't make the user wait on a branch-model conversation to
+get the house tooling they asked for. **Settle it first instead when** the user says so, or when the evidence
+shows the current branch is a production line with live deploy bindings and nothing else to base on — then
+ask before step 4, and base the sync's worktree on the integration line the user chose.
+
+The house docs this sync renders will carry the *undeclared* wording until a model is declared; the next sync
+after the declaration lands renders them with the real line names.
 
 ## 4. Run the sync
 
@@ -202,18 +236,28 @@ same Nx API and will fail first on a project that is far enough behind. The fix 
 inside `targets` named in the message, move it onto the target it documents (or up to the project root, where
 it is harmless), and re-run. Do not delete it on the user's behalf — it is their documentation.
 
-### The sync refused before writing anything — `SYNC_REFUSED` / `SYNC_ASK`
+### The branch-model signal — `[preflight] branch-model: …`
+
+Every sync in a repository with history prints one line about the branch model, whether it then runs or is
+refused. It **blocks nothing by itself**:
+
+- **`branch-model: declared — <summary>`** — the model in force and where it was read from (the integration
+  line's tip, normally). Notes beneath it say when this tree's copy differs from that one; relay them.
+- **`branch-model: undeclared`** — no model is declared. Run *3b* if you haven't already: investigate, propose,
+  and ask (in the report, unless the user wants it settled first). Also printed when this tree carries a
+  declaration that has **not landed** on its integration line yet — it is not in force until it does.
+
+### The sync refused before writing anything — `SYNC_REFUSED`
 
 The sync checks a handful of **preconditions before its first write** and stops if any fails. The first line
 of the output is the contract, in the same vocabulary as `SYNC_OK` and `SYNC_PARTIAL`:
 
 ```text
 SYNC_REFUSED: dirty-tree protected-branch
-SYNC_ASK: no-branch-model
 ```
 
-**Both may appear, and either may carry several codes** — every check runs before anything is reported, so a
-run that is wrong in three ways says so once. Read them all; fixing one and re-running to discover the next
+**It may carry several codes** — every check runs before anything is reported, so a run that is wrong in three
+ways says so once. Read them all; fixing one and re-running to discover the next
 is the round-tripping the aggregation exists to prevent.
 
 **Lead your reply with the fact that nothing was written.** The project is byte-for-byte as it was — no
@@ -235,12 +279,24 @@ someone's git state.
   separate worktree, or something the situation suggests that this list doesn't. If the work is unrelated to
   the current branch, say so — that is usually the most useful observation you can make here.
 
-- **`protected-branch`** — HEAD is on `development`, `staging`, `main` or `master`, **and** this project has
-  adopted the house branch model (the gate only fires when a `development` branch exists). The ladder commits
-  as it goes, so syncing here would commit straight onto a branch that is supposed to advance only by merging
-  the branch below it. **This is the one code you resolve yourself, without asking:** it means step 3 was
-  skipped. Open the worktree off `development` exactly as step 3 says and re-run there — the answer is fixed by
-  the house branch rule, so there is nothing for the user to choose.
+- **`protected-branch`** — HEAD is on a protected line: one the declared model protects (by name, or a release
+  line matching its glob), or — with no model declared — a branch named `main`, `master`, `development`,
+  `develop` or `staging`. The ladder commits as it goes, so syncing here would commit straight onto a line
+  that is supposed to advance only by landings and promotions. **This is a code you resolve yourself, without
+  asking:** it means step 3 was skipped. Open the worktree exactly as step 3 says — off the integration line the
+  message names, or, undeclared, off the current branch — and re-run there. The branch-model question (3b) is
+  separate and does not have to be answered first.
+
+- **`branch-model-unreadable`** — `.bespunky/branches.json` exists but cannot be read with certainty: invalid
+  JSON, no `projection`, or a `projection.schema` major this toolkit does not know (a newer engine wrote it).
+  The run stops rather than guess which lines are protected. An unknown schema means this machine's toolkit is
+  behind — check step 1 updated it. Anything else is a damaged declaration: repair it through the
+  branch-and-release skill's change procedure, never by hand (the projection is derived). Tell the user which.
+
+- **`staging-without-stage`** — `--staging` was passed, and the declared model has no pre-production stage for
+  the staging bundle to deploy from (trunk, two-line, maintained releases). Put the choice to the user: drop
+  `--staging`, or add a pre-production stage to the model first — a model change, which goes through the
+  branch-and-release skill's change procedure (verify, risks, confirm) — then re-run.
 
 - **`unwritable-mounts`** — a directory the sync must write into (`node_modules`, `.nx`, or any workspace
   volume the project's `devcontainer.json` mounts) exists but is not writable by the current user. The usual
@@ -263,12 +319,6 @@ someone's git state.
   backwards, so there is no repair path. Check that step 1 actually updated the plugin; if it reported nothing
   new, this machine is genuinely the older one, and say so plainly. **There is no flag to override this, by
   design; don't look for one.**
-
-- **`no-branch-model`** (an **ask**, not a refusal) — HEAD is on `main`/`master` and no `development` branch
-  exists, so there is no house branch structure to check against. This is genuinely ambiguous and the gate
-  says so rather than guessing: `main` may simply be where this project works, or it may be the production
-  line about to receive a stack of migration commits. Put exactly that choice to the user — sync here, or
-  establish the branch structure first and sync off `development` — and wait for an answer.
 
 **There is no override flag for any of these, deliberately.** Every resolution — commit, stash, backup branch,
 new branch, worktree — ends with a clean tree on a working branch, so a bypass could only ever reproduce the
@@ -337,6 +387,13 @@ silently and mention it in one clause.
 - the restore point from the `BACKUP_OK` line (also `backup=` in `SYNC_OK`) — the clean pre-sync `HEAD` — and how
   to use it: `git diff <sha>` reviews the sync; `git checkout <sha> -- <path>` restores one file;
   `git restore --source=<sha> --staged --worktree -- .` (then `git clean -n`) undoes it all. Never `reset --hard`.
+
+### If the model is undeclared — the proposal and the question (3b)
+
+Unless it was settled before step 4, close the report with the branch-model proposal: the evidence that
+decided it (each line justified, ceremonial or unused — and anything *unobservable*, as a question), the model
+you propose, and the question itself. Say plainly that the sync's worktree branch waits on the answer to land.
+It is a question, not a boundary — it does not count against the one `SYNC_NEXT` below.
 
 ### Last, the one boundary — `SYNC_NEXT`
 

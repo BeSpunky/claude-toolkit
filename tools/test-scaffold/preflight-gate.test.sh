@@ -45,14 +45,21 @@ extract() {   # extract <assignment marker> — the block from its opening line 
 # shellcheck source=../../plugins/project-starter/skills/new-project/assets/house-mounts.sh
 . "$ROOT/plugins/project-starter/skills/new-project/assets/house-mounts.sh"
 HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_post_create)"
+# The branch-model reader, rendered in by value the same way.
+# shellcheck source=../../plugins/project-starter/skills/new-project/assets/house-branches.sh
+. "$ROOT/plugins/project-starter/skills/new-project/assets/house-branches.sh"
+HOUSE_BRANCHES_FNS="$(declare -f house_branches_undeclared_protected _house_bm_parse _house_bm_ref house_branch_model)"
 checks_src="$(extract 'PREFLIGHT_CHECKS="')"   || exit 2
 verdict_src="$(extract 'PREFLIGHT_VERDICT="')" || exit 2
-eval "$checks_src"
+# `--staging` is substituted at RENDER time, so a case that passes it re-renders the checks (render_checks 1).
+render_checks() { STAGING="$1"; eval "$checks_src"; }
+render_checks 0
 eval "$verdict_src"
 
 # Belt and braces: prove the extracted text is actually the gate, not some other block that happens to end
 # in `fi"`. Without this, a marker collision degrades to a vacuous pass exactly like an empty extraction.
-for needle in dirty-tree protected-branch detached-head no-branch-model unwritable-mounts; do
+for needle in dirty-tree protected-branch detached-head branch-model-unreadable staging-without-stage \
+    'branch-model: undeclared' unwritable-mounts; do
   case "${PREFLIGHT_CHECKS:-}" in
     *"$needle"*) ;;
     *) echo "FATAL: extracted PREFLIGHT_CHECKS does not mention '$needle' — wrong block?" >&2; exit 2 ;;
@@ -76,12 +83,19 @@ gate() {
   local out
   out="$( cd "$1" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT"; echo '__PASS__' ) 2>&1 )"
   if printf '%s' "$out" | grep -q '__PASS__'; then echo 'PASS'
-  else printf '%s\n' "$out" | grep -E '^SYNC_(REFUSED|ASK):' | tr '\n' ' ' | sed 's/ *$//'; fi
+  else printf '%s\n' "$out" | grep -E '^SYNC_REFUSED:' | tr '\n' ' ' | sed 's/ *$//'; fi
+}
+# The branch-model SIGNAL the gate prints (blocking nothing by itself), reduced to its state word, or NONE.
+signal() {
+  local out
+  out="$( cd "$1" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT" ) 2>&1 )"
+  printf '%s\n' "$out" | sed -n 's/^\[preflight\] branch-model: \([a-z]*\).*/\1/p' | head -1 | grep . || echo NONE
 }
 
 FAILED=0
-check() {   # check <label> <expected> <dir>
+check() {   # check <label> <expected> <dir> [<expected branch-model signal>]
   local got; got="$(gate "$3")"
+  [ $# -ge 4 ] && got="$got | $(signal "$3")" && set -- "$1" "$2 | $4" "$3"
   if [ "$got" = "$2" ]; then printf '  ok   %-32s %s\n' "$1" "$got"
   else printf '  FAIL %-32s got:[%s] want:[%s]\n' "$1" "$got" "$2"; FAILED=1; fi
 }
@@ -95,17 +109,93 @@ check 'not a git repo' 'PASS' "$d"
 d="$(mkrepo empty)"
 check 'git repo, no commits' 'PASS' "$d"
 
-# ── The branch model ────────────────────────────────────────────────────────────────────────────────────────
-# Real history on a lone `main`: genuinely ambiguous, and the one case the gate ASKS rather than deciding.
+# ── The branch model: UNDECLARED ────────────────────────────────────────────────────────────────────────────
+# No .bespunky/branches.json: the gate SIGNALS it (the /sync session investigates and asks) and, meanwhile,
+# protects every name the toolkit ever forced plus gitflow's. A lone `main` used to be an ASK about this one run;
+# its ambiguity is now resolved by declaring the model, and the run is kept off `main` until then.
 d="$(mkrepo lone)"; commit "$d"
-check 'lone main with history' 'SYNC_ASK: no-branch-model' "$d"
+check 'undeclared, lone main' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+git -C "$d" checkout -q -b develop
+check 'undeclared, on develop' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+git -C "$d" checkout -q -b fix/x
+check 'undeclared, feature branch' 'PASS' "$d" undeclared
 
-# ONLY PROTECT WHAT EXISTS: the refusal is derived from the repo's own state — a `development` branch is the
-# evidence the model was adopted. Same `main`, opposite verdict, purely because of that branch.
+# `development` existing is no longer evidence of anything: same verdicts, still undeclared.
 d="$(mkrepo prot)"; commit "$d"; git -C "$d" branch development
-check 'on main, development exists' 'SYNC_REFUSED: protected-branch' "$d"
-git -C "$d" checkout -q development
-check 'on development' 'SYNC_REFUSED: protected-branch' "$d"
+check 'undeclared, development exists' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+git -C "$d" checkout -q -b feat/y
+check 'undeclared, development, feat' 'PASS' "$d" undeclared
+
+# ── The branch model: DECLARED ──────────────────────────────────────────────────────────────────────────────
+# Only the PROJECTION is read (CONTRACT §2). Fixtures carry just enough of the rest to be honest JSON.
+declare_model() {   # declare_model <dir> <schema> <integration> <chain csv> <production csv> <patterns csv>
+  local d="$1" q
+  q() { [ -z "$1" ] && { printf '[]'; return; }; printf '["%s"]' "$(printf '%s' "$1" | sed 's/,/","/g')"; }
+  mkdir -p "$d/.bespunky"
+  cat > "$d/.bespunky/branches.json" <<JSON
+{
+  "schema": 1,
+  "integration": { "branch": "$3", "baseline": null },
+  "projection": {
+    "schema": $2,
+    "integration": "$3",
+    "production": $(q "$5"),
+    "productionPatterns": [],
+    "chain": $(q "$4"),
+    "protected": $(q "$4"),
+    "protectedPatterns": $(q "$6"),
+    "workBase": "$3",
+    "summary": "$(printf '%s' "$4" | sed 's/,/ → /g')"
+  }
+}
+JSON
+}
+
+# gitflow-ish: develop → main, release/* protected by glob. The model lands on the integration line's tip.
+d="$(mkrepo gf)"; commit "$d"; git -C "$d" checkout -q -b develop
+declare_model "$d" 1 develop develop,main main 'release/*'
+git -C "$d" add -A && git -C "$d" commit -qm 'declare model'
+check 'declared, on develop' 'SYNC_REFUSED: protected-branch' "$d" declared
+git -C "$d" checkout -q main
+check 'declared, on main (no copy here)' 'SYNC_REFUSED: protected-branch' "$d" declared
+git -C "$d" checkout -q -b release/1.2 develop
+check 'declared, glob release/1.2' 'SYNC_REFUSED: protected-branch' "$d" declared
+# `staging` is protected only while undeclared — a declared model that has no `staging` line does not own it.
+git -C "$d" checkout -q -b staging develop
+check 'declared, unlisted staging' 'PASS' "$d" declared
+git -C "$d" checkout -q -b feat/z develop
+check 'declared, work branch' 'PASS' "$d" declared
+# A file `release/x` on disk must not turn the glob into a filesystem expansion.
+mkdir -p "$d/release" && touch "$d/release/x" && git -C "$d" add -A && git -C "$d" commit -qm r
+git -C "$d" checkout -q -b release/2.0
+check 'declared, glob vs on-disk path' 'SYNC_REFUSED: protected-branch' "$d" declared
+
+# A declaration that has not LANDED on its integration line is not in force (CONTRACT §1): the branch proposing
+# it is still undeclared, and protection falls back to the undeclared names.
+d="$(mkrepo prop)"; commit "$d"; git -C "$d" checkout -q -b chore/model
+declare_model "$d" 1 main main main ''
+git -C "$d" add -A && git -C "$d" commit -qm 'propose model'
+check 'declared on a branch, not landed' 'PASS' "$d" undeclared
+
+# An unknown projection schema MAJOR is refused, never guessed past — it is what decides where commits land.
+d="$(mkrepo schema)"; commit "$d"
+declare_model "$d" 2 main main main ''
+git -C "$d" add -A && git -C "$d" commit -qm 'future model'; git -C "$d" checkout -q -b fix/s
+check 'unknown projection schema' 'SYNC_REFUSED: branch-model-unreadable' "$d"
+
+# --staging needs a PRE-PRODUCTION stage to bind to. trunk/two-line have none; three-line has `staging`.
+render_checks 1
+d="$(mkrepo stg2)"; commit "$d"; git -C "$d" checkout -q -b development
+declare_model "$d" 1 development development,main main ''
+git -C "$d" add -A && git -C "$d" commit -qm 'two-line'; git -C "$d" checkout -q -b feat/s
+check '--staging, two-line' 'SYNC_REFUSED: staging-without-stage' "$d" declared
+d="$(mkrepo stg3)"; commit "$d"; git -C "$d" checkout -q -b development
+declare_model "$d" 1 development development,staging,main main ''
+git -C "$d" add -A && git -C "$d" commit -qm 'three-line'; git -C "$d" checkout -q -b feat/s
+check '--staging, three-line' 'PASS' "$d" declared
+d="$(mkrepo stgu)"; commit "$d"; git -C "$d" checkout -q -b feat/s
+check '--staging, undeclared' 'PASS' "$d" undeclared
+render_checks 0
 
 d="$(mkrepo feat)"; commit "$d"; git -C "$d" branch development; git -C "$d" checkout -q -b fix/x
 check 'feature branch, clean' 'PASS' "$d"
