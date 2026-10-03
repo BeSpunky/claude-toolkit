@@ -8,8 +8,8 @@
 
 HOUSE_LAYERS='nx,agent,node,js,web,angular,design-system,navigation,firebase'
 HOUSE_LAYER_FLOOR='nx'
-HOUSE_LAYERS_ENSURABLE_SCAFFOLD='nx,agent,node,web,angular,design-system,firebase'
-HOUSE_LAYERS_ENSURABLE_SYNC='nx,agent,firebase'
+HOUSE_LAYERS_ENSURABLE_NEW='nx,agent,node,web,angular,design-system,firebase'
+HOUSE_LAYERS_ENSURABLE_UPGRADE='nx,agent,firebase'
 HOUSE_PRESETS='agent,node,angular'
 HOUSE_PRESET_DEFAULT='agent'
 HOUSE_LAYOUTS='apps-libs,packages'
@@ -77,8 +77,8 @@ house_layer_brings() {
   esac
 }
 
-# house_layer_ensurable_scaffold <id> — yes | no | via:<id>.
-house_layer_ensurable_scaffold() {
+# house_layer_ensurable_new <id> — yes | no | via:<id>.
+house_layer_ensurable_new() {
   case "$1" in
     nx) printf '%s\n' 'yes' ;;
     agent) printf '%s\n' 'yes' ;;
@@ -92,8 +92,8 @@ house_layer_ensurable_scaffold() {
   esac
 }
 
-# house_layer_ensurable_sync <id> — yes | no | via:<id>.
-house_layer_ensurable_sync() {
+# house_layer_ensurable_upgrade <id> — yes | no | via:<id>.
+house_layer_ensurable_upgrade() {
   case "$1" in
     nx) printf '%s\n' 'yes' ;;
     agent) printf '%s\n' 'yes' ;;

@@ -13,8 +13,8 @@
 #               migration keyed to the version that introduced it, collected and ordered by `nx migrate`.
 #               It adds NO layer: --add-layer, --preset and --firebase are refused there.
 #   add-layer : an upgrade that also brings the named layers into being (the internal "ensure set").
-# Internally the two run shapes stay MODE=scaffold (new) and MODE=sync (upgrade, add-layer) — the planner's and
-# layers.sh's vocabulary; only the command line speaks the user's words.
+# Internally there are two run shapes, named after the commands: MODE=new and MODE=upgrade (upgrade and add-layer
+# alike) — the same words the planner (`cli.js plan --mode=`) and layers.sh use.
 # Firebase opt-in: --firebase is the `firebase` layer in the ensure set (two spellings of one intent). The layer brings the emulator
 #                  suite, Cloud Functions as an Nx app (<appsDir>/functions), the workspace-level `firebase`
 #                  project and the seed/cache/reset tooling; its devcontainer FRAGMENT (layers/firebase.ts)
@@ -137,8 +137,8 @@ own their output; it brings no layer into being. `add-layer` is an upgrade that 
                     creates whatever they require. Addable:
 USAGE
   # Rendered from the registry projection, so the list a user reads is the list the script accepts.
-  printf '                      add-layer: %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SYNC" | sed 's/,/, /g')"
-  printf '                      new      : %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SCAFFOLD" | sed 's/,/, /g')"
+  printf '                      add-layer: %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_UPGRADE" | sed 's/,/, /g')"
+  printf '                      new      : %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_NEW" | sed 's/,/, /g')"
   printf '                    The %s floor is ALWAYS ensured: a repo without Nx gets it initialised in place\n' "$HOUSE_LAYER_FLOOR"
   cat <<'USAGE'
                     (through the Nx wrapper, ./nx, when the repo has no package.json — it does not
@@ -195,14 +195,14 @@ USAGE
 
 # --- THE COMMAND: the first token, always ---------------------------------------------------------------------
 # Each command's name says what it does — the reason it replaced `--sync` / `--ensure`, which made one script do
-# three jobs behind flags (DECISION.md). The internal run shape stays MODE: `new` is a scaffold, `upgrade` and
+# three jobs behind flags (DECISION.md). The internal run shape is MODE: `new`, or `upgrade` — `upgrade` and
 # `add-layer` are the same upgrade run, the latter with a non-empty ensure set. An old invocation (`--sync`, a bare
 # path) is simply not a command, and the error says which ones are; scaffold.sh beside this script is the shim
 # that translates old command lines for the HOUSE.md files that still print them.
 CMD="${1:-}"
 case "$CMD" in
-  new)            MODE="scaffold"; shift;;
-  upgrade|add-layer) MODE="sync"; shift;;
+  new)            MODE="new"; shift;;
+  upgrade|add-layer) MODE="upgrade"; shift;;
   help|--help|-h) usage; exit 0;;
   '')             usage >&2
                   echo >&2
@@ -213,8 +213,8 @@ case "$CMD" in
                   echo "       Run 'house.sh help' for the full usage." >&2
                   exit 1;;
 esac
-# The run, as a noun the messages can use — the internal MODE is not a word a user typed.
-A_RUN="an upgrade"; [ "$MODE" = "scaffold" ] && A_RUN="a scaffold"
+# The run, as a noun the messages can use.
+A_RUN="an upgrade"; [ "$MODE" = "new" ] && A_RUN="a scaffold"
 
 FIREBASE=0
 VOICE=0    # --voice: bridge the host's audio (WSLg or PulseAudio/PipeWire) into the devcontainer + provision bespunky-voice (opt-in).
@@ -466,7 +466,7 @@ _project_identity() {   # <absolute target dir>
   basename "$1"
 }
 
-if [ "$MODE" = "scaffold" ]; then
+if [ "$MODE" = "new" ]; then
   PROJECT="$1"
   PROJECT_DIR_NAME="$PROJECT"
   APP="${2:-$PROJECT}"
@@ -571,7 +571,7 @@ _resolve_upgrade_app() {   # <nx-tools dir> <app as given, or ''> <fallback name
   _check_name app "$APP"
   APP_ROOT="$(printf '%s\n' "$_apps" | awk -F "$_tab" -v a="$APP" '$1 == a { print $2; exit }')"
   echo "[app] the app to refresh: $APP${APP_ROOT:+ ($APP_ROOT)}"
-  if [ -n "$APP_ROOT" ] && [ -d .bespunky-sync.lock ]; then printf 'app=%s\n' "$APP_ROOT" >> .bespunky-sync.lock/state 2>/dev/null || true; fi
+  if [ -n "$APP_ROOT" ] && [ -d .bespunky-upgrade.lock ]; then printf 'app=%s\n' "$APP_ROOT" >> .bespunky-upgrade.lock/state 2>/dev/null || true; fi
 }
 CHECK_NAME_FN="$(declare -f _check_name _resolve_upgrade_app)"
 
@@ -609,7 +609,7 @@ if [ -n "$PRESET_ARG" ]; then
     for _p in $(printf '%s' "$HOUSE_PRESETS" | tr ',' ' '); do echo "         $_p — $(house_preset_title "$_p")" >&2; done
     exit 1; }
   PRESET="$PRESET_ARG"
-elif [ "$MODE" = "scaffold" ] && [ -z "$ENSURE_ARG" ]; then
+elif [ "$MODE" = "new" ] && [ -z "$ENSURE_ARG" ]; then
   PRESET="$HOUSE_PRESET_DEFAULT"
 else
   PRESET=""
@@ -625,7 +625,7 @@ ENSURE_LAYERS="${PRESET:+$(house_preset_layers "$PRESET")}"
 # Validated against the projection (HOUSE_LAYOUTS / HOUSE_LINKINGS, from LAYOUTS and the linking kinds), here,
 # before anything is installed. Omitted, each reproduces today's output exactly: no workspaceLayout declared (the
 # resolver's default — apps/ + packages/), and `paths` linking.
-if [ "$MODE" = "sync" ] && { [ -n "$LAYOUT_ARG" ] || [ -n "$LINKING_ARG" ]; }; then
+if [ "$MODE" = "upgrade" ] && { [ -n "$LAYOUT_ARG" ] || [ -n "$LINKING_ARG" ]; }; then
   _chosen="${LAYOUT_ARG:+--layout=$LAYOUT_ARG }${LINKING_ARG:+--linking=$LINKING_ARG}"
   echo "ERROR: house.sh $CMD does not take ${_chosen% }: an existing workspace's layout and linking are" >&2
   echo "       DETECTED from it (nx.json workspaceLayout and where its projects live; its tsconfig and package-" >&2
@@ -686,7 +686,7 @@ esac
 #                 their own native tooling and then DETECTED. Accepting more would be a promise the script
 #                 cannot keep — and worse, it would STAMP the layer as applied while the next run, which
 #                 re-detects, does not see it, so the tooling would rot with the stamp claiming otherwise.
-#   via:<id>    — creatable only together with <id>, whose creation produces it (a scaffold's `web` is the
+#   via:<id>    — creatable only together with <id>, whose creation produces it (a `new` run's `web` is the
 #                 dev-server of the Angular app the `angular` layer creates).
 #   requires    — every layer a requested one requires must be THERE when it is created: either already in the
 #                 workspace (detected — an upgrade only; a scaffold's directory is empty) or created by this run.
@@ -702,14 +702,14 @@ done
 # What the workspace already HAS, from the registry's own evidence (layers.sh) — read, never declared. Empty for a
 # scaffold, whose directory does not exist yet.
 EVIDENT=""
-[ "$MODE" = "sync" ] && EVIDENT="$(house_layers_evident "$TARGET")"
+[ "$MODE" = "upgrade" ] && EVIDENT="$(house_layers_evident "$TARGET")"
 # A layer an upgrade cannot create but the workspace already has needs nothing created: the upgrade REFRESHES it, as it
 # does every detected layer. Refusing it with "add it with its own tooling" would be false about a layer that is
 # right there (a hand-written .bespunky/dev.json already makes `web` present).
 if [ -n "$EVIDENT" ]; then
   _kept=""
   for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
-    if [ "$(house_layer_ensurable_sync "$_l")" = "no" ] && _layer_listed "$_l" "$EVIDENT"; then
+    if [ "$(house_layer_ensurable_upgrade "$_l")" = "no" ] && _layer_listed "$_l" "$EVIDENT"; then
       echo "NOTE: the '$_l' layer is already present here (detected) — the upgrade refreshes it; nothing to create."
     else
       _kept="${_kept:+$_kept,}$_l"
@@ -748,7 +748,7 @@ _needed_by() { local _e; for _e in $_added_for; do [ "${_e%%:*}" = "$1" ] && { p
 # that ensures it lays the floor with create-nx-workspace (a package.json host, the house package manager),
 # and one that does not lays it through the wrapper — the default project is not a Node project.
 HOST="node"
-if [ "$MODE" = "sync" ]; then
+if [ "$MODE" = "upgrade" ]; then
   if { [ -f "$TARGET/.nx/nxw.js" ] && grep -q '"installation"' "$TARGET/nx.json" 2>/dev/null; } || [ ! -f "$TARGET/package.json" ]; then
     HOST="wrapper"
   fi
@@ -759,7 +759,7 @@ fi
 # pnpm-workspace.yaml) and a package.json per project. A wrapper-hosted scaffold has no package.json and no package
 # manager of its own — so the combination is not a degraded variant of anything; it does not exist. Refused, with
 # the one thing that makes it exist, rather than quietly scaffolding `paths`.
-if [ "$MODE" = "scaffold" ] && [ "$LINKING" = "workspaces" ] && [ "$HOST" = "wrapper" ]; then
+if [ "$MODE" = "new" ] && [ "$LINKING" = "workspaces" ] && [ "$HOST" = "wrapper" ]; then
   echo "ERROR: --linking=workspaces links projects through package-manager workspaces, which need a package.json —" >&2
   echo "       and this scaffold ensures no 'node' layer (layers: $ENSURE_LAYERS), so it would have none." >&2
   echo "       Add it:  house.sh new --add-layer=node --linking=workspaces $PROJECT   (or --preset=node / --preset=angular)" >&2
@@ -772,7 +772,7 @@ fi
 # uses. Everything downstream goes through these three variables, so a new package manager is one case here
 # rather than twenty call sites.
 
-if [ "$HOST" = "node" ] && [ "$MODE" = "scaffold" ]; then
+if [ "$HOST" = "node" ] && [ "$MODE" = "new" ]; then
   PM="yarn"; PM_SOURCE="house-default"
 elif [ "$HOST" = "wrapper" ]; then
   # The wrapper installs with npm into .nx/installation; the project itself has no package manager to honour.
@@ -848,9 +848,9 @@ _pm_add_dev() {   # <package manager> <spec>...
 # program that carried an add it can never call would only invite one.
 PM_ADD_FN=""
 [ "$HOST" = "node" ] && PM_ADD_FN="$(declare -f _pm_add_dev)"
-if [ "$HOST" = "wrapper" ] && [ "$MODE" = "scaffold" ]; then
+if [ "$HOST" = "wrapper" ] && [ "$MODE" = "new" ]; then
   echo "Nx host: the Nx wrapper (./nx) — the new project has no package.json (ensure the node layer, or --preset=node, for one)"
-elif [ "$MODE" = "sync" ]; then
+elif [ "$MODE" = "upgrade" ]; then
   if [ "$HOST" = "wrapper" ]; then
     echo "Nx host: the Nx wrapper (./nx) — this repo has no package.json and does not become a Node project"
   elif [ "$PM_SOURCE" = "house-default" ]; then
@@ -887,8 +887,8 @@ ENSURE_LAYERS="$_ordered"
 # with no package.json lacks `node` AND `angular`, and both hints are what the user needs).
 _refused=0
 for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
-  if [ "$MODE" = "scaffold" ]; then _ens="$(house_layer_ensurable_scaffold "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SCAFFOLD"
-  else _ens="$(house_layer_ensurable_sync "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_SYNC"; fi
+  if [ "$MODE" = "new" ]; then _ens="$(house_layer_ensurable_new "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_NEW"
+  else _ens="$(house_layer_ensurable_upgrade "$_l")"; _ensurable="$HOUSE_LAYERS_ENSURABLE_UPGRADE"; fi
   case "$_ens" in
     yes) ;;
     via:*)
@@ -902,7 +902,7 @@ for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
       if [ -n "$_for" ]; then
         echo "ERROR: the '$_for' layer requires '$_l', which this repo does not have — and $A_RUN cannot create it." >&2
         echo "       Add '$_l' with its own tooling, then re-run and it will be DETECTED:" >&2
-      elif [ "$MODE" = "scaffold" ]; then
+      elif [ "$MODE" = "new" ]; then
         echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
         echo "       Scaffold the project, then add it with its own tooling:" >&2
       else
@@ -935,7 +935,7 @@ for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
   _s="$(house_layer_app_stack "$_l")"
   [ -n "$_s" ] && { APP_STACK="$_s"; break; }
 done
-if [ "$MODE" = "scaffold" ] && [ -n "$APP_ARG" ] && [ -z "$APP_STACK" ]; then
+if [ "$MODE" = "new" ] && [ -n "$APP_ARG" ] && [ -z "$APP_STACK" ]; then
   echo "ERROR: an app name ('$APP_ARG') was given, but nothing this scaffold ensures creates an app" >&2
   echo "       (layers: $ENSURE_LAYERS). Ask for a stack that does, e.g.:  house.sh --preset=angular $PROJECT $APP_ARG" >&2
   exit 1
@@ -954,7 +954,7 @@ fi
 # of it, so there is nothing here to consent to. The gate guards the *act* of upgrading, not describing it —
 # and the render test (tools/test-scaffold/render.test.sh) drives exactly `upgrade --yes --print-inner` under
 # CI=true, which the unconditional CI refusal below would otherwise kill before it could render anything.
-if [ "$MODE" = "sync" ] && [ "$PRINT_INNER" != "1" ]; then
+if [ "$MODE" = "upgrade" ] && [ "$PRINT_INNER" != "1" ]; then
   if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
     echo "ERROR: refusing to upgrade in CI — an upgrade rewrites generated files and no human is here to agree." >&2
     echo "       Run it locally, review the diff against the pre-upgrade HEAD, and commit the result." >&2
@@ -1021,11 +1021,11 @@ fi
 # of them: on an upgrade it is no longer the validated project name but whatever the directory happens to be called
 # (a worktree, a clone renamed by hand), so it is a path like the others and travels the same way.
 INNER_ENV=(
-  "SCAFFOLD_WORK_ROOT=$WORK_ROOT"
-  "SCAFFOLD_PROJECT_DIR_NAME=$PROJECT_DIR_NAME"
-  "SCAFFOLD_ENGINE_ROOT=$ENGINE_ROOT"
-  "SCAFFOLD_GIT_NAME=$GIT_NAME"
-  "SCAFFOLD_GIT_EMAIL=$GIT_EMAIL"
+  "HOUSE_WORK_ROOT=$WORK_ROOT"
+  "HOUSE_PROJECT_DIR_NAME=$PROJECT_DIR_NAME"
+  "HOUSE_ENGINE_ROOT=$ENGINE_ROOT"
+  "HOUSE_GIT_NAME=$GIT_NAME"
+  "HOUSE_GIT_EMAIL=$GIT_EMAIL"
 )
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
@@ -1152,9 +1152,9 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   # that can see this path (the outer shell never learns it).
   INSTALL_NX_TOOLS="_local_stage=\"\$(mktemp -d)\"
   trap 'rm -rf \"\$_local_stage\"' EXIT INT TERM
-  cp -r \"\$SCAFFOLD_ENGINE_ROOT/nx-tools\" \"\$_local_stage/nx-tools\"
+  cp -r \"\$HOUSE_ENGINE_ROOT/nx-tools\" \"\$_local_stage/nx-tools\"
   mkdir -p \"\$_local_stage/ts\"
-  (cd \"\$_local_stage/ts\" && npm init -y >/dev/null 2>&1 && npm install --no-save --no-audit --no-fund --silent 'typescript@^5' && node \"\$SCAFFOLD_ENGINE_ROOT/compile-generators.mts\" \"\$_local_stage/nx-tools\")
+  (cd \"\$_local_stage/ts\" && npm init -y >/dev/null 2>&1 && npm install --no-save --no-audit --no-fund --silent 'typescript@^5' && node \"\$HOUSE_ENGINE_ROOT/compile-generators.mts\" \"\$_local_stage/nx-tools\")
   _local_tgz=\"\$(cd \"\$_local_stage/nx-tools\" && npm pack --silent --pack-destination \"\$_local_stage\")\"
   echo \"[tools] --local: installing the working tree (\$_local_tgz) instead of the published package\"
 $LOCAL_ADD
@@ -1940,7 +1940,7 @@ BACKUP_REF="(--no-backup)"
 RESTORE_SHA=""
 UPGRADE_BASE=""
 RESTORE_BLOCK=""
-if [ "$MODE" = "sync" ]; then
+if [ "$MODE" = "upgrade" ]; then
   if git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     if RESTORE_SHA="$(git -C "$TARGET" rev-parse --verify -q HEAD 2>/dev/null)"; then
       BACKUP_REF="HEAD(${RESTORE_SHA:0:7})"
@@ -1983,7 +1983,7 @@ fi
 # before preflight: a refused upgrade had already deleted the file, and then listed that deletion as the user's own
 # dirty change.
 STRAY_LOCKFILE_BLOCK=""
-if [ "$MODE" = "sync" ]; then
+if [ "$MODE" = "upgrade" ]; then
   if [ "$PM_SOURCE" = "packageManager-field" ] && [ "$PM" != "yarn" ]; then
     _stray_act="rm -f yarn.lock
     echo \"NOTE: removed a stray yarn.lock — this project declares packageManager: $PM and also has \$_other.\"
@@ -2075,7 +2075,7 @@ done 9<<< \"\$_plan\""
 # The default (`agent`) scaffolds a wrapper-hosted Nx repo with the agent DX and bootstraps no stack at all; the
 # `angular` preset lays a package.json host, adds @nx/angular and creates the first app — because its layers say
 # so (node, angular's nxPlugin, angular's app-creating adapter), not because this script names them.
-SCAFFOLD_COMMIT_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | sed 's/,/, /g')"
+NEW_COMMIT_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | sed 's/,/, /g')"
 
 # THE FLOOR, by host. Every scaffold block below is RENDERED only when the ensure set calls for it — the program
 # a scaffold runs is exactly the bootstrap of the layers it ensures, nothing gated at run time on a flag.
@@ -2095,7 +2095,7 @@ if [ "$HOST" = "node" ]; then
   else
     CREATE_WORKSPACE_PRESET="--preset=apps --workspaces=false"
   fi
-  SCAFFOLD_FLOOR_BLOCK="# THE AGENT-MODE ENV VARS ARE STRIPPED FOR THIS ONE COMMAND, and that is the difference between a working
+  NEW_FLOOR_BLOCK="# THE AGENT-MODE ENV VARS ARE STRIPPED FOR THIS ONE COMMAND, and that is the difference between a working
 # scaffold and the wrong one.
 #
 # create-nx-workspace reads CLAUDECODE / OPENCODE and switches into an \"AI Agent Mode\" that IGNORES
@@ -2112,11 +2112,11 @@ if [ "$HOST" = "node" ]; then
 # Scoped to this invocation deliberately. These variables are true — an agent IS running this — and other
 # tools may reasonably key off them. What is not acceptable is one command redefining the workspace shape.
 env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' $CREATE_WORKSPACE_PRESET --packageManager=yarn --nxCloud=skip --no-interactive
-cd \"\$SCAFFOLD_PROJECT_DIR_NAME\""
+cd \"\$HOUSE_PROJECT_DIR_NAME\""
 else
   # No package.json: an empty repository, then the SAME wrapper floor an upgrade lays on a Python or Go repo.
-  SCAFFOLD_FLOOR_BLOCK="mkdir \"\$SCAFFOLD_PROJECT_DIR_NAME\"
-cd \"\$SCAFFOLD_PROJECT_DIR_NAME\"
+  NEW_FLOOR_BLOCK="mkdir \"\$HOUSE_PROJECT_DIR_NAME\"
+cd \"\$HOUSE_PROJECT_DIR_NAME\"
 git init -q
 $NX_INIT_BLOCK"
 fi
@@ -2131,47 +2131,47 @@ fi
 # house hosts such a stack as an honest hybrid — its projects are project.json islands that consume the
 # workspace's packages through their `exports` (docs/features/2026-10-02-workspace-layouts/DECISION.md) — and the
 # stack adapter sets the same variable around its own generator calls. A plugin with no such guard ignores it.
-SCAFFOLD_PLUGIN_ENV=""
-[ "$LINKING" = "workspaces" ] && SCAFFOLD_PLUGIN_ENV="NX_IGNORE_UNSUPPORTED_TS_SETUP=true "
-SCAFFOLD_PLUGINS_BLOCK=""
+NEW_PLUGIN_ENV=""
+[ "$LINKING" = "workspaces" ] && NEW_PLUGIN_ENV="NX_IGNORE_UNSUPPORTED_TS_SETUP=true "
+NEW_PLUGINS_BLOCK=""
 for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
   _plugin="$(house_layer_nx_plugin "$_l")"
-  [ -n "$_plugin" ] && SCAFFOLD_PLUGINS_BLOCK="$SCAFFOLD_PLUGINS_BLOCK
-$SCAFFOLD_PLUGIN_ENV$NX_RUN add $_plugin$NX_TAG"
+  [ -n "$_plugin" ] && NEW_PLUGINS_BLOCK="$NEW_PLUGINS_BLOCK
+$NEW_PLUGIN_ENV$NX_RUN add $_plugin$NX_TAG"
 done
 
 # The LAYOUT the scaffold was asked for, DECLARED in nx.json \`workspaceLayout\` before the first project exists —
 # an empty workspace has nothing to infer a layout from, so every generator after this one (the first app, the
 # design system, Nx's own) resolves the choice from Nx's own field. Through the house generator, never a hand
 # edit of nx.json here. Not rendered without --layout: today's output declares nothing.
-SCAFFOLD_LAYOUT_BLOCK=""
-[ -n "$LAYOUT" ] && SCAFFOLD_LAYOUT_BLOCK="$NX_RUN g @bespunky/nx-tools:workspace-layout --layout=$LAYOUT"
+NEW_LAYOUT_BLOCK=""
+[ -n "$LAYOUT" ] && NEW_LAYOUT_BLOCK="$NX_RUN g @bespunky/nx-tools:workspace-layout --layout=$LAYOUT"
 
 # The first app, through the HOUSE app generator (never the raw framework generator): the stack adapter creates
 # it with the house defaults, then it ATTACHES every capability the workspace wears — each layer's per-app steps,
 # the same ones an upgrade runs. This is the SAME one command a developer runs to add any LATER app, so the first app
 # and the Nth share one code path. --layers hands it the ensure set: at first-app time nothing this run ensures
 # exists yet to be detected (firebase.json, for one).
-SCAFFOLD_APP_BLOCK=""
-[ -n "$APP_STACK" ] && SCAFFOLD_APP_BLOCK="$NX_RUN g @bespunky/nx-tools:app '$APPS_DIR/$APP' --stack=$APP_STACK$APP_STAGING_FLAG --layers=\$ENSURED"
+NEW_APP_BLOCK=""
+[ -n "$APP_STACK" ] && NEW_APP_BLOCK="$NX_RUN g @bespunky/nx-tools:app '$APPS_DIR/$APP' --stack=$APP_STACK$APP_STAGING_FLAG --layers=\$ENSURED"
 
-if [ "$MODE" = "scaffold" ]; then
+if [ "$MODE" = "new" ]; then
   INNER="set -e
 $PM_ADD_FN
-mkdir -p \"\$SCAFFOLD_WORK_ROOT\"
-cd \"\$SCAFFOLD_WORK_ROOT\"
+mkdir -p \"\$HOUSE_WORK_ROOT\"
+cd \"\$HOUSE_WORK_ROOT\"
 $ENSURED_BLOCK
 # Set the git identity only if unset. In the throwaway Docker image there is none, so this establishes it;
 # on the native path the invoking user already HAS a global identity (it's where the name came from), so
 # this must not clobber it — hence the conditional. Same result on both paths, no drift.
-git config --global user.name >/dev/null 2>&1 || git config --global user.name \"\$SCAFFOLD_GIT_NAME\"
-git config --global user.email >/dev/null 2>&1 || git config --global user.email \"\$SCAFFOLD_GIT_EMAIL\"
+git config --global user.name >/dev/null 2>&1 || git config --global user.name \"\$HOUSE_GIT_NAME\"
+git config --global user.email >/dev/null 2>&1 || git config --global user.email \"\$HOUSE_GIT_EMAIL\"
 git config --global init.defaultBranch >/dev/null 2>&1 || git config --global init.defaultBranch main
-$SCAFFOLD_FLOOR_BLOCK
-$SCAFFOLD_PLUGINS_BLOCK
+$NEW_FLOOR_BLOCK
+$NEW_PLUGINS_BLOCK
 $INSTALL_NX_TOOLS
-$SCAFFOLD_LAYOUT_BLOCK
-$SCAFFOLD_APP_BLOCK
+$NEW_LAYOUT_BLOCK
+$NEW_APP_BLOCK
 $LAYER_RESOLVE_BLOCK
 APP='$APP'
 # An upgrade resolved the branch model in its preflight; a scaffold has no preflight, so it resolves here (a new
@@ -2185,11 +2185,11 @@ $FINALIZE_LOCAL
 # house generators + dep installs ran after it — capture them so the host-side push (gh repo
 # create --source --push) ships a clean, complete tree on main.
 git add -A
-git commit -m 'chore: scaffold BeSpunky project (layers: $SCAFFOLD_COMMIT_LAYERS)' || true"
+git commit -m 'chore: scaffold BeSpunky project (layers: $NEW_COMMIT_LAYERS)' || true"
 else
   INNER="set -e
 $PM_ADD_FN
-cd \"\$SCAFFOLD_WORK_ROOT/\$SCAFFOLD_PROJECT_DIR_NAME\"
+cd \"\$HOUSE_WORK_ROOT/\$HOUSE_PROJECT_DIR_NAME\"
 $ENSURED_BLOCK
 # PREFLIGHT AND THE PROBE COME FIRST — before nx init, not merely before the install. Both only READ (git
 # state, the installed toolkit, HOUSE.md), so they are safe this early, and the gate's refusals claim to stop
@@ -2200,7 +2200,7 @@ $ENSURED_BLOCK
 # that reports and exits. The probe sits between them on purpose — it writes nothing, and running it first is
 # what lets a refusal name the ladder the user is being stopped from running.
 _UPGRADE_PARTIAL=0
-_stage() { [ -d .bespunky-sync.lock ] && printf 'stage=%s\n' \"\$1\" > .bespunky-sync.lock/state 2>/dev/null || true; }
+_stage() { [ -d .bespunky-upgrade.lock ] && printf 'stage=%s\n' \"\$1\" > .bespunky-upgrade.lock/state 2>/dev/null || true; }
 _stage preflight
 $PREFLIGHT_CHECKS
 _stage probe
@@ -2215,7 +2215,7 @@ _stage install
 $INSTALL_NX_TOOLS
 _stage migrate
 $MIGRATE_RUN
-[ -d .bespunky-sync.lock ] && printf 'migrations=%s\n' \"\${_expected:-0}\" >> .bespunky-sync.lock/state 2>/dev/null || true
+[ -d .bespunky-upgrade.lock ] && printf 'migrations=%s\n' \"\${_expected:-0}\" >> .bespunky-upgrade.lock/state 2>/dev/null || true
 _stage generators
 $LAYER_RESOLVE_BLOCK
 $CHECK_NAME_FN
@@ -2261,8 +2261,25 @@ fi
 # PID inside lets a genuinely dead run be taken over rather than wedging the project forever, which is the
 # failure mode that makes people delete lock files by hand and lose the protection entirely.
 UPGRADE_LOCK=""
-if [ "$MODE" = "sync" ]; then
-  UPGRADE_LOCK="$TARGET/.bespunky-sync.lock"
+if [ "$MODE" = "upgrade" ]; then
+  UPGRADE_LOCK="$TARGET/.bespunky-upgrade.lock"
+  # THE SAME LOCK UNDER ITS OLD NAME. Before 0.39.0 the lock was `.bespunky-sync.lock/`, so an older engine's
+  # upgrade still running on this project holds that one, and the rename must not quietly end the exclusion: a
+  # live holder refuses this run exactly as a live holder of the current lock does; a dead one's directory is
+  # taken over (removed) exactly as a stale current lock is — before the ladder, whose `0.39.0/rename-upgrade-lock`
+  # rung would otherwise find it and leave its .gitignore line in place.
+  _legacy_lock="$TARGET/.bespunky-sync.lock"
+  if [ -d "$_legacy_lock" ]; then
+    _holder="$(cat "$_legacy_lock/pid" 2>/dev/null || echo '')"
+    if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then
+      echo "ERROR: an older toolkit's upgrade is already running for this project (pid $_holder, $_legacy_lock)." >&2
+      echo "       Two upgrades at once can leave the project stamped as migrated when it is not." >&2
+      echo "       Wait for it to finish, or stop it, then re-run." >&2
+      exit 1
+    fi
+    echo "NOTE: found a stale lock from an older toolkit (.bespunky-sync.lock, pid ${_holder:-unknown}, no longer running) — removing it."
+    rm -rf "$_legacy_lock"
+  fi
   if ! mkdir "$UPGRADE_LOCK" 2>/dev/null; then
     _holder="$(cat "$UPGRADE_LOCK/pid" 2>/dev/null || echo '')"
     if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then
@@ -2301,7 +2318,7 @@ fi
 # --- the repository has to be in a state where committing means what it says ----------------------------------
 # The migration ladder commits, and Nx builds every one of those commits with `git add -A`. That is fine in a
 # normal working tree and actively destructive in two states git can legitimately be in.
-if [ "$MODE" = "sync" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ "$MODE" = "upgrade" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   # --absolute-git-dir, not --git-dir: the plain form answers RELATIVE to the repository ("`.git`"), and this
   # script's own working directory is not the project, so every `-e "$_gd/MERGE_HEAD"` below silently missed.
   _gd="$(git -C "$TARGET" rev-parse --absolute-git-dir 2>/dev/null || echo '')"
@@ -2378,7 +2395,7 @@ fi
 # (so we generate no workflow files). Non-Firebase projects just get a remote to push to.
 # Never fail the scaffold over a missing/unauthenticated gh — the local repo already exists.
 GITHUB_RESULT=""
-if [ "$MODE" = "scaffold" ] && [ "$GITHUB" = "1" ]; then
+if [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ]; then
   if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
     GITHUB_RESULT="GITHUB_SKIP: gh not found or not authenticated — local repo only (run 'gh auth login', then 'gh repo create $PROJECT --private --source \"$TARGET\" --remote=origin --push')"
     echo "$GITHUB_RESULT" >&2
@@ -2396,7 +2413,7 @@ if [ "$MODE" = "scaffold" ] && [ "$GITHUB" = "1" ]; then
       echo "$GITHUB_RESULT" >&2
     fi
   fi
-elif [ "$MODE" = "scaffold" ]; then
+elif [ "$MODE" = "new" ]; then
   GITHUB_RESULT="GITHUB_SKIP: --no-github"
 fi
 
@@ -2521,7 +2538,7 @@ _upgrade_next() {   # <target> <base-sha|''> — sets UPGRADE_NEXT and UPGRADE_R
 }
 # ---8<--- UPGRADE_NEXT
 
-if [ "$MODE" = "sync" ]; then
+if [ "$MODE" = "upgrade" ]; then
   _upgrade_next "$TARGET" "$UPGRADE_BASE"
   echo "UPGRADE_NEXT: $UPGRADE_NEXT"
   case "$UPGRADE_NEXT" in
@@ -2545,8 +2562,8 @@ if [ "$MODE" = "sync" ]; then
   fi
 fi
 
-if [ "$MODE" = "scaffold" ]; then
-  echo "SCAFFOLD_OK $TARGET ($RUNTIME_DESC layers=$ENSURE_LAYERS host=$HOST${APP_STACK:+ app=$APPS_DIR/$APP}${LAYOUT:+ layout=$LAYOUT}${LINKING_ARG:+ linking=$LINKING} voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
+if [ "$MODE" = "new" ]; then
+  echo "NEW_OK $TARGET ($RUNTIME_DESC layers=$ENSURE_LAYERS host=$HOST${APP_STACK:+ app=$APPS_DIR/$APP}${LAYOUT:+ layout=$LAYOUT}${LINKING_ARG:+ linking=$LINKING} voice=$VOICE github=$GITHUB) ${GITHUB_RESULT:-}"
 else
   # THE SUMMARY STATES WHAT THE PROJECT IS NOW, read back from the project — never the run's own inputs. It used
   # to echo them: `app=apps/<repo>` was the DEFAULT app name, printed for a repo that has no app at all, and

@@ -53,9 +53,9 @@ if grep -q 'house-sync-2026-10-02' <<< "$_prog"; then
 else
   ok "the worktree's directory name appears nowhere in the program"
 fi
-grep -qF 'cd "$SCAFFOLD_WORK_ROOT/$SCAFFOLD_PROJECT_DIR_NAME"' <<< "$_prog" \
+grep -qF 'cd "$HOUSE_WORK_ROOT/$HOUSE_PROJECT_DIR_NAME"' <<< "$_prog" \
   && ok "the program reaches its directory through the environment" \
-  || fail "the program does not cd through \$SCAFFOLD_PROJECT_DIR_NAME"
+  || fail "the program does not cd through \$HOUSE_PROJECT_DIR_NAME"
 
 # ── the identity rule ───────────────────────────────────────────────────────────────────────────────────────────
 echo "── the identity is the directory's name in the main worktree"

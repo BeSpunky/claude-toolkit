@@ -139,7 +139,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/engine/house.sh" new --preset=node --layout=packages
 
 Pass the preset / `--add-layer` from step 0 input 3 — omit both for the default `agent` preset. Include `<APP_NAME>` **only** when a chosen layer creates an app. Include `--firebase` **only** if step 0 input 5 was yes (the user opted in); `--staging` (the staging environment bundle) only with `--firebase` and only when asked. Include `--voice` **only** if the user explicitly asked for hands-free/spoken voice (see the voice opt-in bullet). Include `--no-github` **only** if the user explicitly opted out of a remote (otherwise a private GitHub repo is created).
 
-Wait for the final `SCAFFOLD_OK <path>` line. It also reports the GitHub outcome — `GITHUB_OK <url>` when the private repo was created and pushed, or `GITHUB_SKIP: <reason>` when it was skipped (so you can relay the reason and the manual follow-up). On the Docker fallback path, the first run pulls the base image (a few hundred MB); the native path skips that. If a generator/CLI flag is rejected, check `house.sh help`, `nx g @bespunky/nx-tools:<generator> --help`, or `gh repo create --help` - **never guess**.
+Wait for the final `NEW_OK <path>` line. It also reports the GitHub outcome — `GITHUB_OK <url>` when the private repo was created and pushed, or `GITHUB_SKIP: <reason>` when it was skipped (so you can relay the reason and the manual follow-up). On the Docker fallback path, the first run pulls the base image (a few hundred MB); the native path skips that. If a generator/CLI flag is rejected, check `house.sh help`, `nx g @bespunky/nx-tools:<generator> --help`, or `gh repo create --help` - **never guess**.
 
 ### 1z. The layer model — what makes this work on a repo that isn't the house shape
 
