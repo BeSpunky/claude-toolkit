@@ -190,6 +190,52 @@ const cases = {
     assert.equal(by.done.closedAt === undefined, false);
   },
 
+  'every package says what it is about, in one plain line'() {
+    const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+    const dir = fixture({
+      commitAge: 30,
+      docAge: 30,
+      files: {
+        'docs/features/2026-01-01-folded/DECISION.md':
+          '---\nstatus: concluded\nsummary: >-\n  Folded **summary**\n  over `two` lines.\ntags: [a]\n---\n',
+        'docs/features/2026-01-01-folded/BRIEF.md': '# Folded\n\nNot this.\n',
+        'docs/features/2026-01-02-plain/DECISION.md': '---\nstatus: concluded\nsummary: A plain scalar\n  that wraps.\n---\n',
+        'docs/features/2026-01-03-in-flight-decision/DECISION.md': '---\nsummary: Decided before closing.\n---\n',
+        'docs/features/2026-01-04-brief-front/BRIEF.md': '---\nabout: From the brief\'s frontmatter.\n---\n# Title\n\nNot this.\n',
+        'docs/features/2026-01-05-brief-prose/BRIEF.md': [
+          '# Brief — prose',
+          '',
+          '**Slug:** `brief-prose` · **Opened:** 2026-01-05',
+          '*Opened 2026-01-05.*',
+          '',
+          '> "a quote is not the summary"',
+          '',
+          '| a | table |',
+          '- a list item',
+          '## A subheading',
+          '',
+          'Make the *pane* say what a [package](x.md) is',
+          'about, in `one` line. Then more detail.',
+        ].join('\n'),
+        'docs/features/2026-01-06-long/BRIEF.md': `# Long\n\n${long}\n`,
+        'docs/features/2026-01-07-silent/BRIEF.md': '# Only a heading\n\n- and a list\n',
+        'docs/features/2026-01-08-bare/x.md': 'no brief, no decision\n',
+      },
+    });
+    const by = Object.fromEntries(JSON.parse(engine(dir)).packages.map(p => [p.slug, p]));
+    assert.equal(by.folded.about, 'Folded summary over two lines.', 'DECISION.md summary, a folded block scalar, plain text');
+    assert.equal(by.folded.summary, 'Folded **summary** over `two` lines.');
+    assert.equal(by.plain.about, 'A plain scalar that wraps.');
+    assert.equal(by['in-flight-decision'].about, 'Decided before closing.');
+    assert.equal(by['brief-front'].about, "From the brief's frontmatter.");
+    assert.equal(by['brief-prose'].about, 'Make the pane say what a package is about, in one line.');
+    assert.ok(by.long.about.length <= 141, 'capped');
+    assert.match(by.long.about, /^word0 .* word\d+…$/, 'capped at a word boundary');
+    assert.equal(by.silent.about, null);
+    assert.equal(by.bare.about, null);
+    assert.doesNotMatch(engine(dir, '--tsv'), /Folded|plain scalar|pane say/);
+  },
+
   '--tsv carries no free text'() {
     const dir = fixture({ commitAge: 30, docAge: 30, files: FILES });
     const tsv = engine(dir, '--tsv');

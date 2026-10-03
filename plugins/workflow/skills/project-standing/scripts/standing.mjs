@@ -2,7 +2,7 @@
 // standing.mjs — the project-standing DERIVATION (bespunky-workflow:project-standing).
 //
 // The ONE place that reads docs/features/ and git and says what each feature package is: its validated name,
-// its closing status (from DECISION.md) and when it closed, whether it is live, dormant or concluded, its newest
+// what it is about (one line), its closing status (from DECISION.md) and when it closed, whether it is live, dormant or concluded, its newest
 // handoff baton, which worktree holds its newest copy, and the repo-wide activity facts. Every worktree's
 // docs/features/ is read, not only the session's: in-flight work lives on its own branch, in its own checkout. Everything that needs those facts consumes THIS script, never its own
 // copy of the rules:
@@ -16,7 +16,7 @@
 //
 // UNTRUSTED INPUT. Folder and file names come from the repo, which may be hostile. A package whose folder
 // name fails the feature-package shape is SKIPPED, not echoed; a baton whose name fails a strict charset is
-// not named. Free text (summary, tags) is passed through only in `--json`, for DISPLAY; consumers must never
+// not named. Free text (about, summary, tags) is passed through only in `--json`, for DISPLAY; consumers must never
 // put it into a model prompt.
 //
 // Usage: standing.mjs [--json | --tsv]     (project dir: $CLAUDE_PROJECT_DIR, else the cwd)
@@ -98,11 +98,76 @@ function frontmatter(text) {
         fields.tags = items.filter(Boolean);
       }
     } else {
-      fields[key] = unquote(value);
+      // A value may continue on more-indented lines: a block scalar (`summary: >-`, folded; `|`, kept) or a
+      // multi-line plain scalar (folded).
+      const isBlock = /^[>|][+-]?$/.test(value);
+      const more = [];
+      while (i + 1 < lines.length && (/^\s+\S/.test(lines[i + 1]) || (lines[i + 1].trim() === '' && /^\s+\S/.test(lines[i + 2] ?? '')))) {
+        more.push(lines[++i].trim());
+      }
+      if (isBlock) fields[key] = more.join(value.startsWith('|') ? '\n' : ' ').trim();
+      else fields[key] = unquote([value, ...more].join(' ').trim());
     }
   }
 
   return fields;
+}
+
+/** The length an `about` line is capped at, at a word boundary. */
+const ABOUT_MAX = 140;
+
+/** Markdown inline syntax as plain text, whitespace collapsed, capped at a word boundary. */
+function plain(text) {
+  const flat = text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // [text](url), ![alt](src)
+    .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_, target, label) => label ?? target) // [[wiki|label]]
+    .replace(/`+([^`]*)`+/g, '$1')
+    .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+    .replace(/(^|[^\w*])([*_])(?=\S)(.+?)(?<=\S)\2(?![\w*])/g, '$1$3')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (flat.length <= ABOUT_MAX) return flat;
+  const cut = flat.slice(0, ABOUT_MAX);
+  const space = cut.lastIndexOf(' ');
+
+  return `${(space > ABOUT_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.\u2014-]+$/, '')}…`;
+}
+
+/** A line that only states metadata (`**Slug:** x · **Opened:** y`, `*Opened 2026-08-10.*`), not what the effort is about. */
+const META_RE = /^(?:\*\*[^*]+:\*\*|\*[^*]+\*$|_[^_]+_$)/;
+
+/** The first prose sentence after a markdown file's first heading: headings, quotes, tables, lists and metadata skipped. */
+function firstSentence(text) {
+  const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---[^\n]*\n/, '').split(/\r?\n/);
+  const heading = body.findIndex(line => /^#{1,6}\s/.test(line));
+  const paragraph = [];
+  let inFence = false;
+  for (const raw of body.slice(heading + 1)) {
+    const line = raw.trim();
+    if (/^(```|~~~)/.test(line)) inFence = !inFence;
+    const isProse =
+      !inFence && line !== '' && !/^(#|>|\||[-*+]\s|\d+[.)]\s|```|~~~|<!--|---$|\*\*\*$)/.test(line) && !META_RE.test(line);
+    if (isProse) paragraph.push(line);
+    else if (paragraph.length > 0) break;
+  }
+  if (paragraph.length === 0) return undefined;
+  const joined = paragraph.join(' ');
+  const end = /[.!?](?=\s|$)/.exec(joined);
+
+  return end ? joined.slice(0, end.index + 1) : joined;
+}
+
+/**
+ * What a package is about, in one line: DECISION.md's `summary:`, else BRIEF.md's `summary:`/`about:`, else
+ * BRIEF.md's first prose sentence; null when none says. Free text: for display only, never a prompt.
+ */
+function aboutOf(decisionFront, brief) {
+  const briefFront = brief ? frontmatter(brief) : {};
+  const said = [decisionFront.summary, briefFront.summary, briefFront.about].find(v => typeof v === 'string' && v.trim());
+  const text = said ?? (brief ? firstSentence(brief) : undefined);
+  const line = text ? plain(text) : '';
+
+  return line || null;
 }
 
 function unquote(s) {
@@ -210,9 +275,16 @@ function scanTree(features, { prefix, committed, dirty }) {
     } catch {
       /* no DECISION.md: in flight */
     }
+    let brief = '';
+    try {
+      brief = fs.readFileSync(path.join(full, 'BRIEF.md'), 'utf8');
+    } catch {
+      /* no BRIEF.md */
+    }
     const closing = STATUS_RE.exec(decision);
     const status = closing ? closing[1].toLowerCase() : 'in-flight';
-    const front = closing ? frontmatter(decision) : {};
+    const decisionFront = frontmatter(decision);
+    const front = closing ? decisionFront : {};
 
     let lastActivity = 0;
     let decisionAt = 0;
@@ -229,7 +301,7 @@ function scanTree(features, { prefix, committed, dirty }) {
       }
     }
 
-    const pkg = { dir, date: dir.slice(0, 10), slug, status, lastActivity };
+    const pkg = { dir, date: dir.slice(0, 10), slug, status, lastActivity, about: aboutOf(decisionFront, brief) };
     if (baton) pkg.baton = `handoffs/${baton.name}`;
     if (closing) {
       if (typeof front.summary === 'string' && front.summary) pkg.summary = front.summary;
@@ -314,9 +386,9 @@ export function derive(projectDir, env = process.env, now = Math.floor(Date.now(
       const hasWorktree = branches.some(branch => branch === pkg.slug || branch.endsWith(`/${pkg.slug}`));
       const state =
         pkg.status !== 'in-flight' ? 'concluded' : hasWorktree || ageDays(now, pkg.lastActivity) < stale ? 'live' : 'dormant';
-      const { dir, date, slug, status, lastActivity, ...rest } = pkg;
+      const { dir, date, slug, status, lastActivity, about, ...rest } = pkg;
 
-      return { dir, date, slug, status, state, lastActivity, hasWorktree, ...rest };
+      return { dir, date, slug, status, state, lastActivity, hasWorktree, about, ...rest };
     });
 
   // Work committed in another worktree is activity here too: the session's HEAD never sees it.
