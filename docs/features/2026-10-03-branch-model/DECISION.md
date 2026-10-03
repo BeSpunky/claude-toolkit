@@ -55,6 +55,23 @@ confirm with the user"*. One procedure for add / remove / rename a rung:
 4. **Apply** — update the file, regenerate house docs, create/delete branches; **report** (never silently
    change) external bindings it can't or shouldn't touch.
 
-## Not decided yet
+## Scope: everything (decided 2026-10-03)
 
-- Scope: linear pipeline only, or release/hotfix lines too.
+The user, on linear-only vs. release/hotfix lines too: *"Support everything."*
+
+That breaks the invariant the current method rests on — *each branch is a strict ancestor of the next* — so
+the concept above must widen before anything is built. The declaration has to describe more than one ordered
+list:
+
+- **Rungs** — the long-lived promotion chain (today's whole model; trunk is a one-rung chain).
+- **Release lines** — short- or long-lived branches cut from a rung (`release/<version>`), stabilised and
+  shipped independently while the chain keeps moving; possibly several maintained at once.
+- **Hotfix lines** — branched off a production line, shipped, and then **back-merged** into every line that
+  must also carry the fix (the one place work flows *against* the chain).
+
+Each line kind carries its own rules (where it forks, how it advances, what fast-forward guarantees hold,
+where a fix must flow back to). The investigation must also recognise these shapes in an existing repo
+(`release/*` / `hotfix/*` branches, tag-per-version history, CI triggers on patterns).
+
+**Next design step (on hold at the user's request):** model line kinds and their flow rules, then re-check
+the declaration, the skill's method, and the change procedure against them.

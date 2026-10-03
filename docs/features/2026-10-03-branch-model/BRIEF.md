@@ -17,6 +17,12 @@
 - `--staging` Firebase environment bundle assumes a `staging` branch to deploy from.
 - `workflow/hooks/checkpoint-on-compact.sh` mentions the branches.
 
-## Open
+## Scope (decided 2026-10-03)
 
-- Linear pipeline of 1–N branches only, or also gitflow-style release/hotfix lines? (Asked; user deferred: "I'll tell you later.")
+Asked: a single linear pipeline of 1–N branches only, or also gitflow-style release/hotfix lines? First
+deferred ("I'll tell you later."), then, after the difference was explained:
+
+> "Support everything."
+
+So release branches, hotfix branches and multiple maintained release lines are **in scope**, alongside the
+linear pipeline.
