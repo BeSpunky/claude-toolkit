@@ -5,6 +5,7 @@
 // the model does not have is refused, not approximated.
 import { chainOf, feederOf, productionLine, releaseLines, resolveLine, UsageError } from './model.mjs';
 import { fill, match, placeholders } from './patterns.mjs';
+import { landed } from './landed.mjs';
 
 export const GATES = {
   land: '<work-branch> [--onto <line>]',
@@ -12,7 +13,7 @@ export const GATES = {
   'cut-release': '<version>',
   'ship-release': '<version>',
   hotfix: '<line> <slug>',
-  carry: '<commit|branch>',
+  carry: '<branch | commit…>',
   start: '<type> <slug> [--on <line>]',
 };
 
@@ -35,7 +36,6 @@ export function plan(git, model, gate, args, opts = {}) {
     return ref ? git.sha(ref) : null;
   };
   const prStyle = model.landing.prStyle;
-  const squashy = (style) => style === 'squash' || style === 'rebase';
 
   /** Bring `source` into `target` the way the model says lines are joined. */
   const join = (target, source, { via = model.landing.via, ff = false, title } = {}) => {
@@ -70,21 +70,42 @@ export function plan(git, model, gate, args, opts = {}) {
     need(!(upstreamFirst && isReleaseLine(line)), `under upstream-first, work never ${verb} a release line ("${line}"): it lands on ${integration} first and is carried back with cherry-pick -x (plan carry <commit|branch>)`);
   const hasLocal = (name) => git.ok(['show-ref', '--verify', '--quiet', `refs/heads/${name}`]);
   const hasRemote = (name) => git.ok(['show-ref', '--verify', '--quiet', `refs/remotes/${R}/${name}`]);
-  /** Merge-forward: merge the branch `what` (named as `source`) into every line that still lacks it, except `skip`. */
-  const mergeForward = (what, source, skip) => {
-    const sha = tip(what);
-    const targets = [integration, ...releases].filter((l) => !skip.includes(l) && tip(l) && !(sha && git.isAncestor(sha, tip(l))));
-    for (const t of targets) {
-      if (isReleaseLine(t)) note(`only if ${t} is NEWER than the line ${what} landed on:`);
+  /** How `line` already holds everything `what` carries — 'ancestry' · 'patch' (every commit it lacks by
+   *  ancestry has a patch-equivalent there, git cherry) · 'content' (merging it would change nothing: every path
+   *  `what` changed since they forked is already identical on `line`) — or null when it lacks something. Ancestry
+   *  alone is not enough: a squash or rebase PR carries content without it, and re-carrying then plans a no-op. */
+  const holds = (line, what) => {
+    const [s, t] = [tip(what), tip(line)];
+    if (!s || git.isAncestor(s, t)) return 'ancestry';
+    const lacking = git.lines(['cherry', t, s]);
+    if (lacking.length && lacking.every((l) => l.startsWith('- '))) return 'patch';
+    const base = git.try(['merge-base', s, t]);
+    if (!base) return null;
+    const paths = git.lines(['diff', '--name-only', '--no-renames', base, s]);
+    return git.ok(['diff', '--quiet', s, t, '--', ...paths.map((p) => `:(literal)${p}`)]) ? 'content' : null;
+  };
+  /** Merge-forward: merge the branch `what` (named as `source`) into every line that still lacks it, except
+   *  `skip`; a line that already holds it is skipped with a note saying how, never handed a no-op merge or PR. */
+  const mergeForward = (what, source, skip, { newerThan = `the line ${what} landed on` } = {}) => {
+    const targets = [];
+    for (const t of [integration, ...releases].filter((l) => !skip.includes(l) && tip(l))) {
+      const how = holds(t, what);
+      if (how === 'ancestry') continue;
+      if (how) {
+        note(`${t} already has everything ${what} carries (${how === 'patch' ? 'every commit, by patch-id' : 'every file it changed, by content'}) — nothing to carry there`);
+        continue;
+      }
+      if (isReleaseLine(t)) note(`only if ${t} is NEWER than ${newerThan}:`);
       join(t, source, { title: `Carry ${what} → ${t}` });
+      targets.push(t);
     }
     return targets;
   };
   /** Remove a finished branch: its worktree (if any), the local branch, then its remote copy — in that order, so
    *  `git branch -d` still sees the upstream it was merged into. */
-  const cleanup = (branch, { worktree, local = true, remote = model.landing.via === 'pr' } = {}) => {
+  const cleanup = (branch, { worktree, local = true, remote = model.landing.via === 'pr', force = false } = {}) => {
     if (worktree) run(`git worktree remove ${WORKTREES}/${worktree}`);
-    if (local) run(`git branch -d ${branch}`);
+    if (local) run(`git branch ${force ? '-D' : '-d'} ${branch}`);
     if (remote) run(`git push ${R} --delete ${branch}`);
   };
 
@@ -138,13 +159,12 @@ export function plan(git, model, gate, args, opts = {}) {
         cleanup(branch, { worktree: slug });
       } else if (hot) {
         // Upstream-first: carried back by cherry-pick -x from integration. Which commits those are is a fact of
-        // the landing just made, so the branch stays until `plan carry` has read it — and that plan removes it.
+        // the landing just made — under a squash or rebase PR, commits that did not exist until the PR merged —
+        // so the branch stays until `plan carry` has read them off it, and that plan removes it.
         const back = resolveLine(model, hot.line) ?? hot.line;
         run(`git worktree remove ${WORKTREES}/${slug}`);
-        if (model.landing.via === 'pr' && squashy(prStyle)) {
-          cleanup(branch);
-          note(`not done until carried — the ${prStyle} merge rewrote the fix, so name what landed: next: plan carry <the commit(s) the ${prStyle} merge created on ${integration}> (cherry-picked back to ${back})`);
-        } else carryNote(`${branch} (it cherry-picks the fix back to ${back}, then deletes the branch)`);
+        const found = model.landing.via === 'pr' && prStyle !== 'merge' ? `finds the commit(s) the ${prStyle} merge created on ${integration}, ` : '';
+        carryNote(`${branch} (it ${found}cherry-picks the fix back to ${back}, then deletes the branch)`);
       } else {
         cleanup(branch, { worktree: slug });
         if (carry) carryNote(target);
@@ -172,7 +192,7 @@ export function plan(git, model, gate, args, opts = {}) {
       run(`git fetch ${R}`);
       run(`git branch ${name} ${R}/${model.releases.cutFrom}`);
       run(`git push -u ${R} ${name}`);
-      if (upstreamFirst) note(`stabilisation fixes land on ${integration} and are carried back: plan carry <commit>`);
+      if (upstreamFirst) note(`stabilisation fixes land on ${integration} and are carried back: plan carry <fix-branch> once it has landed`);
       else note(`stabilisation work: plan start <type> <slug> --on ${name}`);
       break;
     }
@@ -199,13 +219,8 @@ export function plan(git, model, gate, args, opts = {}) {
           run(`git push ${R} ${tag}`);
         }
       }
-      if (model.fixFlow === 'merge-forward') {
-        join(integration, model.landing.via === 'pr' ? name : `${R}/${name}`, { title: `Carry ${name} → ${integration}` });
-        for (const other of releases.filter((r) => r !== name)) {
-          note(`only if ${other} is NEWER than ${name}:`);
-          join(other, model.landing.via === 'pr' ? name : `${R}/${name}`, { title: `Carry ${name} → ${other}` });
-        }
-      } else note(`upstream-first: every fix on ${name} should already be on ${integration} — branches.mjs verify confirms`);
+      if (model.fixFlow === 'merge-forward') mergeForward(name, model.landing.via === 'pr' ? name : `${R}/${name}`, [name], { newerThan: name });
+      else note(`upstream-first: every fix on ${name} should already be on ${integration} — branches.mjs verify confirms`);
       if (!model.releases.maintained) cleanup(name, { local: hasLocal(name), remote: true });
       break;
     }
@@ -223,7 +238,7 @@ export function plan(git, model, gate, args, opts = {}) {
       const base = model.fixFlow === 'upstream-first' ? integration : line;
       run(`git fetch ${R}`);
       run(`git worktree add ${WORKTREES}/${slug} -b ${branch} ${R}/${base}`);
-      if (model.fixFlow === 'upstream-first') note(`upstream-first: the fix lands on ${integration} (plan land ${branch}), then is cherry-picked back to ${line} (plan carry <commit>)`);
+      if (model.fixFlow === 'upstream-first') note(`upstream-first: the fix lands on ${integration} (plan land ${branch}), then is cherry-picked back to ${line} (plan carry ${branch})`);
       else note(`merge-forward: the fix lands on ${line} (plan land ${branch}), then is carried (plan carry ${branch})`);
       break;
     }
@@ -233,8 +248,10 @@ export function plan(git, model, gate, args, opts = {}) {
       const [what] = args;
       need(what, `usage: plan carry ${GATES.carry}`);
       const ref = git.ref(what, R);
-      const sha = ref ? git.sha(ref) : git.sha(what);
-      need(sha, `"${what}" is neither a branch nor a commit`);
+      need(!ref || args.length === 1, `name ONE branch to carry, or the commit(s) themselves — not both`);
+      const shas = ref ? [git.sha(ref)] : args.map((a) => git.sha(a));
+      args.forEach((a, i) => need(shas[i], `"${a}" is neither a branch nor a commit`));
+      const [sha] = shas;
       const intTip = tip(integration);
       if (model.fixFlow === 'merge-forward') {
         need(ref, `under merge-forward a fix is carried by merging the line that holds it — name the branch (hotfix or release line), not a commit`);
@@ -244,24 +261,27 @@ export function plan(git, model, gate, args, opts = {}) {
       } else {
         let commits;
         let targets;
+        let rewritten = false;
         const hot = model.hotfixes && ref && match(model.hotfixes.pattern, what);
         if (ref) {
-          need(intTip && git.isAncestor(sha, intTip), `upstream-first: land ${what} on ${integration} first (plan land ${what}), then carry it`);
-          // The fix's own commits: from where the landing merge forked to the branch tip.
-          const landing = git.lines(['rev-list', '--first-parent', '--ancestry-path', `${sha}..${intTip}`]).at(-1);
-          const parents = landing ? git.parents(landing) : [];
-          commits = parents.length > 1 && !git.isAncestor(sha, parents[0]) ? `${parents[0].slice(0, 12)}..${sha.slice(0, 12)}` : sha.slice(0, 12);
+          need(intTip, `upstream-first: ${integration} does not exist`);
+          // What landed it — the branch's own commits after a merge, the NEW commits a squash or rebase PR made.
+          const l = landed(git, what, sha, intTip, integration);
+          need(!l.refused, `cannot tell which commit(s) on ${integration} landed ${what}: ${l.refused}.\nIf it has not landed yet: plan land ${what}. If it has, name what landed it: plan carry <commit> [<commit>…]`);
+          commits = l.pick;
+          rewritten = l.how !== 'ancestry';
+          if (l.how === 'squash' || l.how === 'rebase') note(`${what} landed on ${integration} by a ${l.how} merge: ${l.shas.map((c) => `${c.slice(0, 12)} ${git.subject(c)}`).join(' · ')} (matched by patch-id)`);
+          if (l.how === 'pr') note(`${what} landed on ${integration} as ${l.shas[0].slice(0, 12)} ${git.subject(l.shas[0])} — matched by its PR reference, NOT by content (the merge changed the patch): check it before picking`);
           targets = hot ? [resolveLine(model, hot.line)] : releases;
         } else {
-          need(intTip && git.isAncestor(sha, intTip), `upstream-first: ${what.slice(0, 9)} is not on ${integration} — land it there first`);
-          commits = sha.slice(0, 12);
-          targets = releases.filter((l) => {
-            const equiv = git.lines(['cherry', tip(l), sha, `${sha}^`]);
-            return !equiv.some((x) => x.startsWith('- '));
-          });
+          shas.forEach((c, i) => need(intTip && git.isAncestor(c, intTip), `upstream-first: ${args[i].slice(0, 9)} is not on ${integration} — land it there first`));
+          commits = shas.map((c) => c.slice(0, 12)).join(' ');
+          // A line needs the carry while it lacks any of the commits — by ancestry, and by patch (git cherry '-').
+          const lacks = (l, c) => !git.isAncestor(c, tip(l)) && !git.lines(['cherry', tip(l), c, `${c}^`]).some((x) => x.startsWith('- '));
+          targets = releases.filter((l) => shas.some((c) => lacks(l, c)));
         }
         targets = targets.filter((t) => t && tip(t));
-        need(targets.length, `no maintained line still needs ${what}`);
+        need(targets.length, `no maintained line still needs ${args.join(' ')}`);
         run(`git fetch ${R}`);
         for (const t of targets) {
           note(`only if ${t} carries the code the fix touches; if it cannot apply, record why with a "Not-applicable-upstream:" trailer instead`);
@@ -274,7 +294,10 @@ export function plan(git, model, gate, args, opts = {}) {
         if (hot) {
           run(`git switch ${integration}`, `the checkout that holds ${integration}`);
           run(`git merge --ff-only ${R}/${integration}`);
-          cleanup(what, { local: hasLocal(what), remote: hasRemote(what) });
+          // A squash or rebase landing leaves the branch unmerged as far as git can see; its content was matched
+          // above, which is what makes forcing the delete safe.
+          if (rewritten && hasLocal(what)) note(`git cannot see a ${model.landing.prStyle}-landed branch as merged — its content was matched above, so it is deleted with -D`);
+          cleanup(what, { local: hasLocal(what), remote: hasRemote(what), force: rewritten });
         }
       }
       break;

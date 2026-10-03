@@ -7,10 +7,13 @@ import { execFileSync } from 'node:child_process';
 
 const READ_ONLY = new Set([
   'rev-parse', 'show', 'log', 'merge-base', 'cherry', 'for-each-ref', 'rev-list', 'diff-tree', 'diff',
-  'show-ref', 'cat-file', 'ls-files', 'config', 'worktree',
+  'show-ref', 'cat-file', 'ls-files', 'config', 'worktree', 'patch-id',
 ]);
 // Subcommands that are read-only only with these first arguments.
 const READ_ONLY_ARGS = { config: ['--get', '--get-all', '--list'], worktree: ['list'] };
+
+// One rendering for every patch whose id is compared: no colour, no external diff, renames as plain add/delete.
+const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--no-renames'];
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
 
@@ -19,19 +22,19 @@ export class Git {
     this.cwd = cwd;
   }
 
-  /** Run a read-only git command; returns trimmed stdout. Throws on a non-zero exit. */
-  run(args) {
+  /** Run a read-only git command (`input` → its stdin); returns trimmed stdout. Throws on a non-zero exit. */
+  run(args, input) {
     const [sub, first] = args;
     if (!READ_ONLY.has(sub) || (READ_ONLY_ARGS[sub] && !READ_ONLY_ARGS[sub].includes(first))) {
       throw new Error(`branches.mjs refuses to run a state-changing git command: git ${args.join(' ')}`);
     }
-    return execFileSync('git', args, { cwd: this.cwd, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 }).replace(/\s+$/, '');
+    return execFileSync('git', args, { cwd: this.cwd, env: ENV, encoding: 'utf8', ...(input === undefined ? { stdio: ['ignore', 'pipe', 'pipe'] } : { input, stdio: ['pipe', 'pipe', 'pipe'] }), maxBuffer: 256 * 1024 * 1024 }).replace(/\s+$/, '');
   }
 
   /** Like run(), but null instead of throwing. */
-  try(args) {
+  try(args, input) {
     try {
-      return this.run(args);
+      return this.run(args, input);
     } catch {
       return null;
     }
@@ -87,6 +90,18 @@ export class Git {
 
   message(sha) {
     return this.try(['log', '-1', '--format=%B', sha]) || '';
+  }
+
+  /** Stable patch-ids of a patch stream (`log -p` / `diff` args): [{ patch, commit }] — `commit` is all zeros
+   *  for a bare diff. Both sides of a comparison must come through here, so they are rendered alike. */
+  patchIds(args) {
+    const patch = this.try([...args.slice(0, 1), ...DIFF_FLAGS, ...args.slice(1)]);
+    if (!patch) return [];
+    const out = this.try(['patch-id', '--stable'], `${patch}\n`);
+    return (out ? out.split('\n').filter(Boolean) : []).map((l) => {
+      const [p, c] = l.split(' ');
+      return { patch: p, commit: c };
+    });
   }
 
   subject(sha) {
