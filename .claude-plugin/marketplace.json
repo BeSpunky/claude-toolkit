@@ -58,7 +58,7 @@
       "name": "bespunky-voice",
       "source": "./plugins/voice",
       "description": "Hear Claude's questions and answer by voice, away from the screen. Questions are asked the way a person asks them (`/voice say`, or automatically with `/voice auto on`). A band above the prompt shows what's said and heard, live, with Replay and Stop. The `voice-conversation` skill + `ask_by_voice` MCP tool run a hands-free back-and-forth. Swappable TTS (espeak-ng / say, upgradable to local Piper), local whisper.cpp STT; audio bridged by the BeSpunky devcontainer.",
-      "version": "0.4.1"
+      "version": "0.5.0"
     },
     {
       "name": "bespunky-vscode-identity",
