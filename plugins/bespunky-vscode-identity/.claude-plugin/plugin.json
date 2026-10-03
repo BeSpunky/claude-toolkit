@@ -1,7 +1,7 @@
 {
   "name": "bespunky-vscode-identity",
   "description": "Make every project's VSCode window recognizable at a glance, without Peacock's whole-window glow. `window-identity` picks a project-fitting emoji for the window title and a quiet bar colour derived from the design-system primary (else a stable name hash), written by the @bespunky/nx-tools:window-identity generator with a no-clobber ratchet. A SessionStart hook offers the upgrade to the brand colour once a design system appears.",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"
