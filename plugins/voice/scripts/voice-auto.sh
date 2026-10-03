@@ -42,6 +42,23 @@ case "${1:-status}" in
     else
       echo "$VOICE_ENDPOINT_DIAGNOSIS"
     fi
+    # Which voice will ACTUALLY speak — decided by running piper, not by finding
+    # its files, because a present-but-broken piper is exactly the case that
+    # otherwise only shows up as "why does it sound robotic?".
+    # shellcheck source=tts-engine.sh
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tts-engine.sh"
+    voice_resolve_piper
+    if voice_piper_probe; then
+      echo "speech engine: piper, natural (voice $VOICE_PIPER_VOICE)"
+    elif [ -n "$VOICE_PIPER_BIN" ]; then
+      echo "speech engine: robotic fallback — piper is installed but $VOICE_PIPER_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install-piper.sh"
+    elif command -v espeak-ng >/dev/null 2>&1; then
+      echo "speech engine: espeak-ng, robotic ($VOICE_PIPER_PROBLEM). Natural voice: bash ~/.claude/bespunky-voice/install-piper.sh"
+    elif command -v say >/dev/null 2>&1; then
+      echo "speech engine: macOS say"
+    else
+      echo "speech engine: none — install espeak-ng, or run bash ~/.claude/bespunky-voice/install-piper.sh"
+    fi
     ;;
   *)
     echo "usage: voice-auto.sh [on|off|status]" >&2

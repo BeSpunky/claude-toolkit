@@ -49,7 +49,9 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
 
 - **test** — Run
   `bash ~/.claude/bespunky-voice/speak.sh "Voice check. If you can hear this clearly, the voice plugin is working."`
-  and confirm to the user whether it should have played. If it fails with "no
+  and confirm to the user whether it should have played. If it prints
+  "falling back to the robotic voice", relay the reason and the repair command
+  it names — the natural voice is installed but broken. If it fails with "no
   reachable audio endpoint", relay that diagnosis: voice needs a reachable
   PulseAudio-protocol sink (WSLg, or the host's native PulseAudio/PipeWire),
   bridged by the BeSpunky devcontainer.
@@ -57,4 +59,7 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
 - **status** — Run `bash ~/.claude/bespunky-voice/voice-auto.sh status` and tell
   the user whether auto-speak is currently on or off, which audio endpoint was
   resolved (and the mic gain it implies) — or, if none was reachable, relay the
-  diagnosis it printed (every endpoint tried, why each failed, and the fix).
+  diagnosis it printed (every endpoint tried, why each failed, and the fix) —
+  and which speech engine will actually speak (natural Piper voice or the
+  robotic fallback, with the reason and the repair command when it's the
+  fallback).

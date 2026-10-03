@@ -8,7 +8,8 @@
 # without touching a single caller.
 #
 # Text arrives as arguments ("$*") or, if none, on stdin. On SUCCESS it prints
-# NOTHING; all errors go to stderr only.
+# NOTHING to stdout; errors — and a fallback from an installed-but-broken Piper
+# to espeak-ng — go to stderr only.
 #
 # Engine selection (first that applies):
 #   1. Piper (natural, local, offline) — auto-detected from the conventional
@@ -66,18 +67,11 @@ VOICE_HOME="${HOME}/.claude/bespunky-voice"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/audio-endpoint.sh"
 voice_resolve_endpoint || true
 
-PIPER_BIN="${BESPUNKY_VOICE_PIPER_BIN:-}"
-[ -z "$PIPER_BIN" ] && command -v piper >/dev/null 2>&1 && PIPER_BIN="$(command -v piper)"
-[ -z "$PIPER_BIN" ] && [ -x "$VOICE_HOME/piper/piper" ] && PIPER_BIN="$VOICE_HOME/piper/piper"
-
-PIPER_MODEL="${BESPUNKY_VOICE_PIPER_MODEL:-}"
-if [ -z "$PIPER_MODEL" ]; then
-  if [ -e "$VOICE_HOME/voices/default.onnx" ]; then
-    PIPER_MODEL="$VOICE_HOME/voices/default.onnx"
-  else
-    PIPER_MODEL="$(ls "$VOICE_HOME"/voices/*.onnx 2>/dev/null | head -n1)"
-  fi
-fi
+# Where Piper lives, and which voice — resolved by the helper that also knows
+# how to tell a working install from a merely present one.
+# shellcheck source=tts-engine.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tts-engine.sh"
+voice_resolve_piper
 
 play() {  # play a WAV file (arg 1) to the default sink
   if   command -v paplay >/dev/null 2>&1; then paplay "$1" 2>/dev/null
@@ -89,7 +83,7 @@ play() {  # play a WAV file (arg 1) to the default sink
 
 # macOS `say` synthesizes AND plays in one step, with no temp file or player —
 # handle it before allocating a WAV. Text via stdin (no argv → no option-injection).
-if [ -z "$PIPER_MODEL" ] && ! command -v espeak-ng >/dev/null 2>&1 && command -v say >/dev/null 2>&1; then
+if [ -z "$VOICE_PIPER_MODEL" ] && ! command -v espeak-ng >/dev/null 2>&1 && command -v say >/dev/null 2>&1; then
   printf '%s' "$CLEAN" | say 2>/dev/null && exit 0
   echo "bespunky-voice: macOS 'say' failed" >&2; exit 1
 fi
@@ -101,12 +95,14 @@ TMP="$(mktemp "${TMPDIR:-/tmp}/bespunky-voice-XXXXXX")" || { echo "bespunky-voic
 trap 'rm -f "$TMP"' EXIT
 
 synth_ok=0
-if [ -n "$PIPER_BIN" ] && [ -n "$PIPER_MODEL" ] && [ -f "$PIPER_MODEL" ]; then
-  PIPER_LIBS="$(dirname "$PIPER_BIN")"   # piper finds its bundled libs alongside itself
-  if printf '%s' "$CLEAN" \
-     | LD_LIBRARY_PATH="$PIPER_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-       "$PIPER_BIN" --model "$PIPER_MODEL" --output_file "$TMP" 2>/dev/null; then
+if [ -n "$VOICE_PIPER_BIN" ]; then
+  if voice_piper_synth "$CLEAN" "$TMP"; then
     synth_ok=1
+  else
+    # Piper is INSTALLED but broken — the fallback below still speaks, but in the
+    # robotic voice, so say why. Never degrade silently: an install that "works"
+    # in the wrong voice is invisible from anywhere but the speaker.
+    echo "bespunky-voice: falling back to the robotic voice — $VOICE_PIPER_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install-piper.sh" >&2
   fi
 fi
 if [ "$synth_ok" = 0 ] && command -v espeak-ng >/dev/null 2>&1; then
