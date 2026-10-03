@@ -5,7 +5,7 @@ import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { brandLine } from '../hooks/_brand.tsx'
+import { brandStatus } from '../hooks/_brand.tsx'
 import { entryFor, parseStatus } from '../hooks/status.tsx'
 
 const WORKSPACE = '/work/project'
@@ -86,7 +86,7 @@ describe('shared-browser status entry', () => {
     w.answers({ up: true, url: URL, hostVerified: 'true' })
     await started($, w)
     expect(w.ran[0]).toEqual(['bash', SCRIPT, 'status', '--json'])
-    expect(w.lines).toEqual([brandLine(`shared browser: ${URL}`)])
+    expect(w.lines).toEqual([brandStatus(`shared browser: ${URL}`)])
   })
 
   test('shows the entry when it comes up, warns, then clears when it stops', async ($, on) => {
@@ -96,7 +96,7 @@ describe('shared-browser status entry', () => {
 
     w.answers({ up: true, url: URL, hostVerified: 'true' })
     await w.clock.advance(10_000)
-    expect(w.lines).toEqual([brandLine(`shared browser: ${URL}`)])
+    expect(w.lines).toEqual([brandStatus(`shared browser: ${URL}`)])
 
     // Unchanged: no rewrite.
     await w.clock.advance(10_000)
@@ -104,7 +104,7 @@ describe('shared-browser status entry', () => {
 
     w.answers({ up: true, url: URL, hostVerified: 'false' })
     await w.clock.advance(10_000)
-    expect(w.lines.at(-1)).toBe(brandLine(`⚠ shared browser: ${URL} (host forward not confirmed)`))
+    expect(w.lines.at(-1)).toBe(brandStatus(`⚠ shared browser: ${URL} (host forward not confirmed)`))
 
     w.answers({ up: false, url: URL, hostVerified: 'false' })
     await w.clock.advance(10_000)
@@ -118,7 +118,7 @@ describe('shared-browser status entry', () => {
     await started($, w)
     w.answers('boom', 1)
     await w.clock.advance(10_000)
-    expect(w.lines).toEqual([brandLine(`shared browser: ${URL}`), undefined])
+    expect(w.lines).toEqual([brandStatus(`shared browser: ${URL}`), undefined])
   })
 
   test('a project without the shared browser stays silent', async ($, on) => {

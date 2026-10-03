@@ -11,8 +11,9 @@
 // projection, and never re-type the glyph or the colour in a mod.
 //
 // THE RULES IT ENCODES.
-//   - Plain-text surfaces (status line, toast) carry the GLYPH alone: they are one line, and a toast already
-//     sits under the plugin's name. `brandLine(text)`.
+//   - A TOAST carries the GLYPH alone: it already sits under the plugin's name. `brandLine(text)`.
+//   - A STATUS-LINE entry carries the glyph AND the name: Claude Code draws that line in its own colour (a mod
+//     hands it a plain string), so the accent cannot mark it and the word must. `brandStatus(text)`.
 //   - Drawn surfaces carry the WORDMARK in the accent: a band leads with `✦ bespunky` in a gutter of its own,
 //     a pane opens with `✦ bespunky · <mod>` over a dim rule (the engine draws no pane title while only one
 //     pane is open, so this header IS the title). `<BrandFrame>`.
@@ -39,9 +40,17 @@ export const BRAND = {
 /** The wordmark: `✦ bespunky`. */
 export const WORDMARK = `${BRAND.glyph} ${BRAND.name}`
 
-/** A plain-text status entry or toast, marked as the toolkit's: `✦ <text>`. */
+/** A toast, marked as the toolkit's: `✦ <text>` (the engine already titles it with the plugin's name). */
 export function brandLine(text: string) {
   return `${BRAND.glyph} ${text}`
+}
+
+/**
+ * A status-line entry, marked as the toolkit's in words: `✦ bespunky · <text>`. Claude Code colours the status
+ * line itself, so the wordmark, not the accent, is what tells the entry apart from Claude's and other plugins'.
+ */
+export function brandStatus(text: string) {
+  return `${WORDMARK} · ${text}`
 }
 
 /** A drawn site's title: `✦ bespunky · <mod>`, or the wordmark alone. */

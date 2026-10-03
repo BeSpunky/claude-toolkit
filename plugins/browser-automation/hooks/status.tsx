@@ -16,7 +16,7 @@
 
 import type { EngineInterface, Register } from 'claude-code'
 
-import { brandLine } from './_brand.tsx'
+import { brandStatus } from './_brand.tsx'
 
 /** Modest: the browser comes and goes on `up`/`down`, not every second. */
 const POLL_MS = 10_000
@@ -84,7 +84,7 @@ function startPolling($: EngineInterface) {
       if (next !== shown) {
         shown = next
         // The toolkit's mark goes on at the boundary: the policy says what, the brand says whose.
-        $.ui.status(next === undefined ? undefined : brandLine(next))
+        $.ui.status(next === undefined ? undefined : brandStatus(next))
       }
     } finally {
       isPolling = false
