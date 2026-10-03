@@ -17,6 +17,7 @@
 # The extraction is the fragile part, so it FAILS LOUDLY when it finds nothing. An empty extraction would eval
 # cleanly, every fixture would report PASS, and the suite would go green while testing literally nothing —
 # the same shape of silent success the gate itself exists to prevent.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -85,7 +86,7 @@ commit()  { echo x > "$1/f.txt"; git -C "$1" add -A; git -C "$1" commit -qm init
 gate() {
   local out
   out="$( cd "$1" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT"; echo '__PASS__' ) 2>&1 )"
-  if printf '%s' "$out" | grep -q '__PASS__'; then echo 'PASS'
+  if in_text "$out" -q '__PASS__'; then echo 'PASS'
   else printf '%s\n' "$out" | grep -E '^SYNC_REFUSED:' | tr '\n' ' ' | sed 's/ *$//'; fi
 }
 # The branch-model SIGNAL the gate prints (blocking nothing by itself), reduced to its state word, or NONE.
@@ -219,7 +220,7 @@ resolves() {   # resolves <label> <dir> <want state> <want source|-> [<want note
   out="$(cd "$2" && house_branch_model)"
   st="$(printf '%s\n' "$out" | sed -n 's/^state=//p')"
   src="$(printf '%s\n' "$out" | sed -n 's/^source=//p')"; src="${src:--}"
-  if [ "$st|$src" = "$3|$4" ] && { [ -z "${5:-}" ] || printf '%s\n' "$out" | grep -q "^note=.*$5"; }; then
+  if [ "$st|$src" = "$3|$4" ] && { [ -z "${5:-}" ] || in_text "$out" -q "^note=.*$5"; }; then
     printf '  ok   %-32s %s\n' "$1" "$st via $src"
   else
     printf '  FAIL %-32s got:[%s via %s] want:[%s via %s%s]\n' "$1" "$st" "$src" "$3" "$4" "${5:+, note ~ $5}"

@@ -5,6 +5,7 @@
 # parse breaks every login shell — not just the banner. The hook used `source` (dash has none) and an unquoted
 # workspace path (a space, or a quote, split it in both shells). Here the shipped post-create piece writes the
 # hook for a workspace whose path holds a space AND a quote, and both shells source it.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -31,7 +32,7 @@ HOOK="$TMP/zz-firebase-welcome.sh"
 for sh in dash bash; do
   command -v "$sh" >/dev/null 2>&1 || { echo "  skip  $sh unavailable"; continue; }
   out="$(cd / && "$sh" -c ". '$HOOK'" 2>&1)"; rc=$?
-  if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'Firebase setup is pending'; then
+  if [ "$rc" -eq 0 ] && in_text "$out" -q 'Firebase setup is pending'; then
     ok "$sh sources the hook from a path with a space and a quote, and the banner shows"
   else
     fail "$sh: rc=$rc: $out"

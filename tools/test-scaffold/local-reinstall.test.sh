@@ -14,6 +14,7 @@
 # `--sync --local` program for a fixture whose manifest pins an unresolvable version, extracts that fence, and runs
 # it against a dummy tarball — npm always, yarn too when it is installed. No network is needed: the only
 # dependency is a file: tarball. The fence is asserted present, so the test cannot pass by matching nothing.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -51,7 +52,7 @@ check_pm() {
   program="$(bash "$SCAFFOLD" --print-inner --sync --yes --local "$dir" 2>/dev/null)"
   snippet="$(printf '%s\n' "$program" | sed -n '/# local-install:begin/,/# local-install:end/p')"
   if [ -z "$snippet" ]; then fail "$pm: the rendered --local program has no local-install fence"; return; fi
-  if printf '%s\n' "$snippet" | grep -qE '(yarn add|npm install --save-dev|pnpm add)'; then
+  if in_text "$snippet" -qE '(yarn add|npm install --save-dev|pnpm add)'; then
     fail "$pm: the local install still goes through the package manager's add"
   fi
   if (cd "$dir" && _local_stage="$TMP" _local_tgz="$TGZ" bash -c "set -e; $snippet") >"$TMP/$pm.log" 2>&1; then

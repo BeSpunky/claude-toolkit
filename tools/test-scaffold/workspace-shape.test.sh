@@ -11,6 +11,7 @@
 #   - `--linking=workspaces` must bootstrap a real TS-solution (`--preset=ts`: `--preset=apps --workspaces=true` was
 #     verified to produce none), and `--layout` must land the first app in that layout's appsDir.
 # Render-level only (bash + git): the refusals happen before the program, and the bootstrap is the program's text.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -30,8 +31,8 @@ printf '{}\n' > "$P/nx.json"
 before="$(ls -A "$P")"
 for flag in --layout=packages --linking=workspaces; do
   err="$(bash "$SCAFFOLD" --sync --yes "$flag" "$P" 2>&1 >/dev/null)"; rc=$?
-  if [ "$rc" -ne 0 ] && printf '%s\n' "$err" | grep -q -- "--sync does not take $flag" \
-     && printf '%s\n' "$err" | grep -q 'DETECTED' && printf '%s\n' "$err" | grep -q 'Nothing has been written'; then
+  if [ "$rc" -ne 0 ] && in_text "$err" -q -- "--sync does not take $flag" \
+     && in_text "$err" -q 'DETECTED' && in_text "$err" -q 'Nothing has been written'; then
     ok "sync refuses $flag (detected, never chosen)"
   else
     fail "sync did not refuse $flag (rc=$rc): $(printf '%s' "$err" | head -2)"
@@ -45,18 +46,18 @@ bash "$SCAFFOLD" --sync --yes --print-inner --layout=apps-libs "$P" >/dev/null 2
 # ── unknown ids are refused with the known ones ───────────────────────────────────────────────────────────────
 err="$(bash "$SCAFFOLD" --print-inner --layout=monorepo newp 2>&1 >/dev/null)" \
   && fail "an unknown layout was accepted" \
-  || { printf '%s\n' "$err" | grep -q 'apps-libs' && ok "an unknown layout is refused, listing the known ones" \
+  || { in_text "$err" -q 'apps-libs' && ok "an unknown layout is refused, listing the known ones" \
        || fail "unknown-layout refusal does not list the layouts: $err"; }
 err="$(bash "$SCAFFOLD" --print-inner --linking=symlinks newp 2>&1 >/dev/null)" \
   && fail "an unknown linking was accepted" \
-  || { printf '%s\n' "$err" | grep -q 'workspaces' && ok "an unknown linking is refused, listing the known ones" \
+  || { in_text "$err" -q 'workspaces' && ok "an unknown linking is refused, listing the known ones" \
        || fail "unknown-linking refusal does not list the linkings: $err"; }
 bash "$SCAFFOLD" --print-inner --layout --yes newp >/dev/null 2>&1 \
   && fail "--layout swallowed a flag as its value" || ok "--layout refuses a flag-shaped value"
 
 # ── workspaces linking needs a package.json ───────────────────────────────────────────────────────────────────
 err="$(bash "$SCAFFOLD" --print-inner --linking=workspaces newp 2>&1 >/dev/null)"; rc=$?
-if [ "$rc" -ne 0 ] && printf '%s\n' "$err" | grep -q 'need a package.json' && printf '%s\n' "$err" | grep -q -- '--ensure=node'; then
+if [ "$rc" -ne 0 ] && in_text "$err" -q 'need a package.json' && in_text "$err" -q -- '--ensure=node'; then
   ok "--linking=workspaces on the wrapper host (no node layer) is refused, naming the fix"
 else
   fail "--linking=workspaces without the node layer was not refused (rc=$rc)"
@@ -65,19 +66,19 @@ fi
 # ── the bootstrap each choice renders ─────────────────────────────────────────────────────────────────────────
 render() { bash "$SCAFFOLD" --print-inner "$@" 2>/dev/null; }
 prog="$(render --preset=angular newp shop)"
-if printf '%s\n' "$prog" | grep -q -- "--preset=apps --workspaces=false" \
-   && ! printf '%s\n' "$prog" | grep -q 'workspace-layout' \
-   && ! printf '%s\n' "$prog" | grep -q 'NX_IGNORE_UNSUPPORTED_TS_SETUP=true' \
-   && printf '%s\n' "$prog" | grep -q -- "nx-tools:app 'apps/shop'"; then
+if in_text "$prog" -q -- "--preset=apps --workspaces=false" \
+   && ! in_text "$prog" -q 'workspace-layout' \
+   && ! in_text "$prog" -q 'NX_IGNORE_UNSUPPORTED_TS_SETUP=true' \
+   && in_text "$prog" -q -- "nx-tools:app 'apps/shop'"; then
   ok "defaults: today's bootstrap (apps preset, no workspaces, no layout declared, app under apps/)"
 else
   fail "the default bootstrap changed"
 fi
 prog="$(render --preset=angular --linking=workspaces --layout=packages newp shop)"
-if printf '%s\n' "$prog" | grep -q -- "--preset=ts --workspaces=true" \
-   && printf '%s\n' "$prog" | grep -q 'nx-tools:workspace-layout --layout=packages' \
-   && printf '%s\n' "$prog" | grep -q -- "nx-tools:app 'packages/shop'" \
-   && printf '%s\n' "$prog" | grep -q '^NX_IGNORE_UNSUPPORTED_TS_SETUP=true .*nx add @nx/angular'; then
+if in_text "$prog" -q -- "--preset=ts --workspaces=true" \
+   && in_text "$prog" -q 'nx-tools:workspace-layout --layout=packages' \
+   && in_text "$prog" -q -- "nx-tools:app 'packages/shop'" \
+   && in_text "$prog" -q '^NX_IGNORE_UNSUPPORTED_TS_SETUP=true .*nx add @nx/angular'; then
   ok "--linking=workspaces --layout=packages: TS-solution preset, layout declared, app in packages/, scoped opt-out on nx add"
 else
   fail "--linking=workspaces --layout=packages does not render its bootstrap"
@@ -92,10 +93,10 @@ else
   fail "the layout is not declared between the install and the first app (install=$_install layout=$_layout app=$_app)"
 fi
 prog="$(render --preset=angular --layout=apps-libs newp shop)"
-printf '%s\n' "$prog" | grep -q -- "nx-tools:app 'apps/shop'" && printf '%s\n' "$prog" | grep -q -- "--preset=apps --workspaces=false" \
+in_text "$prog" -q -- "nx-tools:app 'apps/shop'" && in_text "$prog" -q -- "--preset=apps --workspaces=false" \
   && ok "--layout=apps-libs alone: paths linking, app in apps/" || fail "--layout=apps-libs does not render as expected"
 prog="$(render --layout=packages newp)"
-printf '%s\n' "$prog" | grep -q 'nx-tools:workspace-layout --layout=packages' && ! printf '%s\n' "$prog" | grep -q 'nx-tools:app ' \
+in_text "$prog" -q 'nx-tools:workspace-layout --layout=packages' && ! in_text "$prog" -q 'nx-tools:app ' \
   && ok "--layout on the agent preset (wrapper host): declared, no app" || fail "--layout on the agent preset does not render as expected"
 printf '%s\n' "$prog" | bash -n /dev/stdin 2>/dev/null && ok "the rendered program parses" || fail "the rendered program does not parse"
 

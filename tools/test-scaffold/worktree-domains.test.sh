@@ -13,6 +13,7 @@
 #
 # Runs the shipped templates as a project would have them, against a throwaway repo, a private WD_RUNTIME and a
 # random high proxy port — nothing touches :80 or this workspace, and everything started is torn down.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -79,9 +80,9 @@ bash "$WD" register gone-tree "$p" >/dev/null 2>&1
 out="$(cd "$REPO" && bash "$WD" reconcile 2>&1)"
 kept="$(bash "$WD" list)"
 all_kept=1
-for s in $slugs; do printf '%s' "$kept" | grep -q " $s.localhost " || { all_kept=0; fail "reconcile dropped the live route $s ($out)"; }; done
+for s in $slugs; do in_text "$kept" -q " $s.localhost " || { all_kept=0; fail "reconcile dropped the live route $s ($out)"; }; done
 [ "$all_kept" = 1 ] && ok "reconcile keeps every live tree's route ($(printf '%s' "$slugs" | tr ' ' ','))"
-printf '%s' "$out" | grep -q 'dropped gone-tree.localhost.*worktree gone' \
+in_text "$out" -q 'dropped gone-tree.localhost.*worktree gone' \
   && ok "reconcile drops a route no tree answers to" || fail "reconcile kept a dead slug: $out"
 
 # ── stop really stops ───────────────────────────────────────────────────────────────────────────────────────
