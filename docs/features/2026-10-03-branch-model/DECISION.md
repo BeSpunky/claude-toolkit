@@ -1,4 +1,11 @@
-# branch-model — decision (draft, awaiting sign-off)
+---
+status: concluded
+concluded: 2026-10-03
+summary: The branch model is a declared project fact (.bespunky/branches.json) — five line kinds, one engine interprets it, readers parse only its projection; no file means Claude investigates and asks.
+tags: [branch-model, branch-and-release, gitflow, trunk, sync, preflight, house-doc]
+---
+
+# branch-model — decision
 
 ## The concept
 
@@ -270,3 +277,25 @@ design found ten issues. Each was checked against the design and the code; all t
 The reviewer's "keep as is" list matches the design's core and stands: a closed vocabulary of kinds; nothing
 writes the file without a human decision, and the engine plans and verifies but never executes; the
 no-regression history check runs during the investigation, whatever model is picked.
+
+## Conclusion (2026-10-03)
+
+Shipped as workflow 0.9.0, project-starter 0.38.0, `@bespunky/nx-tools` 0.38.0. The contract as built is
+`CONTRACT.md` (Amendment 2 governs resolution); the build, two review rounds and four sanity checks are in
+`handoffs/*-fanout.md`.
+
+What changed after this decision was first written, and why:
+- **Two resolvers, not three.** An implementation review reproduced a sync committing onto production when a
+  stale local integration branch lacked the file. The hook now asks the engine; house-doc is handed the
+  projection by the sync.
+- **Promotions by PR, and squash, are first-class.** Containment checks compare trees, not only ancestry.
+- **Long-lived lines are detected by use, not just name** (`origin/HEAD`, CI push targets, promotion
+  patterns), so repos that don't use our names are still seen.
+
+Known gaps, deliberately left: upstream-first with squash-PR landing ends its plan on a `plan carry <squash
+commit>` placeholder (the commit can't be known in advance); gitflow with squash PRs isn't in the executed
+end-to-end tests; "how long a stage sat ahead" needs the local reflog.
+
+Not done here, on purpose: declaring a model for **this** repo. The dogfood run proposes `development → main`
+(`staging` is ceremonial: median 3s promotion, nothing fires on it alone) — that is the user's decision, made
+through the skill's investigation, not part of this effort.
