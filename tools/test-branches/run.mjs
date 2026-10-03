@@ -204,7 +204,10 @@ function gh(r, cmd) {
     r.hub = path.join(SCRATCH, `hub-${seq}`);
     execFileSync('git', ['clone', '-q', r.bare, r.hub], { env: ENV });
   }
-  const g = (...a) => execFileSync('git', a, { cwd: r.hub, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // GitHub commits as itself: a rebase merge ALWAYS makes new commits (new committer), even when no rebase was
+  // needed — without this, a rebased commit would reproduce the branch's SHA and pass for a fast-forward.
+  const hubEnv = { ...ENV, GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' };
+  const g = (...a) => execFileSync('git', a, { cwd: r.hub, env: hubEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   g('fetch', '-q', 'origin');
   g('checkout', '-q', '-B', base, `origin/${base}`);
   const n = ++r.prn;
@@ -1025,6 +1028,59 @@ const cases = {
     assert.equal(gitflow().run(['plan', 'start', 'fix', 'x', '--on', 'release/1.0']).code, 0);
   },
 
+  'plan carry <branch> after a squash landing: found by patch, else by a PR reference that names it, else refused'() {
+    const r = repo();
+    r.declare('maintained-releases', ['--landing', 'pr', '--pr-style', 'squash']);
+    r.branch('release/1.0');
+    r.git('switch', '-q', '-c', 'hotfix/1.0/x', 'main');
+    r.commit('fix: x one', 'x.txt', 'one\n');
+    r.commit('fix: x two', 'x.txt', 'one\ntwo\n');
+    const carry = () => r.run(['plan', 'carry', 'hotfix/1.0/x']);
+    /** Land the branch on main as ONE commit — its exact change, or with `extra` folded in (a conflict fix). */
+    const squash = (subject, extra) => {
+      r.sw('main');
+      r.git('merge', '-q', '--squash', 'hotfix/1.0/x');
+      if (extra) r.write('x.txt', `one\ntwo\n${extra}\n`);
+      r.git('commit', '-qam', subject);
+      return r.git('rev-parse', 'HEAD');
+    };
+
+    // not landed yet: refused, saying both ways forward
+    let c = carry();
+    assert.equal(c.code, 2);
+    assert.match(c.err, /has not landed[\s\S]*plan land hotfix\/1\.0\/x[\s\S]*plan carry <commit>/);
+
+    // landed by an exact squash: found by patch-id, whatever its subject says
+    const exact = squash('Fix the x crash (#5)');
+    c = carry();
+    assert.equal(c.code, 0, c.err);
+    assert.match(c.out, new RegExp(`squash merge: ${exact.slice(0, 12)}[\\s\\S]*git cherry-pick -x ${exact.slice(0, 12)}\\n[\\s\\S]*git branch -D hotfix/1\\.0/x`));
+
+    // the patch changed in the merge, and the PR commit does not name the branch: refused, not guessed
+    r.git('reset', '-q', '--hard', 'HEAD^');
+    squash('Fix the x crash (#6)', 'conflict fix');
+    c = carry();
+    assert.equal(c.code, 2);
+    assert.match(c.err, /plan carry <commit>/);
+
+    // …but a PR commit that names the branch ties it: taken, and said to be matched by reference, not content
+    r.git('reset', '-q', '--hard', 'HEAD^');
+    const named = squash('hotfix/1.0/x → main (#7)', 'conflict fix');
+    c = carry();
+    assert.equal(c.code, 0, c.err);
+    assert.match(c.out, /matched by its PR reference, NOT by content/);
+    assert.match(c.out, new RegExp(`git cherry-pick -x ${named.slice(0, 12)}\\n`));
+
+    // naming the commits explicitly always works — several at once — and a branch plus commits does not
+    const y = r.commit('fix: y');
+    c = r.run(['plan', 'carry', named, y]);
+    assert.equal(c.code, 0, c.err);
+    assert.match(c.out, new RegExp(`git cherry-pick -x ${named.slice(0, 12)} ${y.slice(0, 12)}\\n`));
+    // a commit the line already has (by ancestry) does not make it need a carry
+    assert.equal(r.run(['plan', 'carry', r.git('rev-parse', 'release/1.0')]).code, 2);
+    assert.equal(r.run(['plan', 'carry', 'hotfix/1.0/x', named]).code, 2);
+  },
+
   'plan ship-release via PR: the tag goes on the fetched remote line, and following it tags the release'() {
     const r = withOrigin(gitflow());
     // rebuild under PR landing: re-declare with landing pr/merge
@@ -1118,39 +1174,49 @@ const cases = {
         follow(r, ['promote', 'main']);
       }],
       gitflow: () => [withOrigin(gitflow()), gitflowRun],
-      'gitflow, PR merge landing': () => {
-        const r = gitflow();
-        const m = r.model();
-        m.landing = { via: 'pr', prStyle: 'merge' };
-        delete m.projection;
-        const file = path.join(SCRATCH, `prm-${seq}.json`);
-        fs.writeFileSync(file, JSON.stringify(m));
-        r.git('switch', '-q', '-c', 'chore/pr', 'develop');
-        assert.equal(r.run(['write', file]).code, 0);
-        r.git('commit', '-qam', 'landing via pr');
-        r.sw('develop');
-        r.merge('chore/pr');
-        r.git('branch', '-q', '-d', 'chore/pr');
-        return [withOrigin(r), gitflowRun];
-      },
-      'maintained-releases': () => {
-        const r = repo();
-        r.declare('maintained-releases');
-        return [withOrigin(r), (r) => {
-          follow(r, ['start', 'feat', 'a']);
-          r.work('feat/a', 'feat: a');
-          follow(r, ['land', 'feat/a']);
-          follow(r, ['cut-release', '1.0']);
-          follow(r, ['hotfix', '1.0', 'cve']);
-          r.work('hotfix/1.0/cve', 'fix: cve');
-          follow(r, ['land', 'hotfix/1.0/cve']); // hands off to plan carry, which cherry-picks back and cleans up
-          assert.ok(!has(r, 'refs/heads/hotfix/1.0/cve'), 'hotfix branch removed once carried');
-          assert.match(r.git('log', '-1', '--format=%B', 'origin/release/1.0'), /cherry picked from commit/);
-          follow(r, ['ship-release', '1.0']);
-          assert.equal(r.git('rev-parse', 'v1.0^{commit}'), r.git('rev-parse', 'origin/release/1.0'));
-        }];
-      },
+      'gitflow, PR merge landing': () => [withOrigin(relanded(gitflow(), 'merge')), gitflowRun],
+      'gitflow, PR squash landing': () => [withOrigin(relanded(gitflow(), 'squash')), gitflowRun],
+      'maintained-releases': () => maintained(),
+      'maintained-releases, PR squash landing': () => maintained(['--landing', 'pr', '--pr-style', 'squash'], 2),
+      'maintained-releases, PR rebase landing': () => maintained(['--landing', 'pr', '--pr-style', 'rebase'], 2),
     };
+    /** Upstream-first: a hotfix lands on main first and is carried back by the hand-off `plan carry`. Under a
+     *  squash or rebase PR landing the commits that reach main are NEW ones, so carry has to find them. */
+    function maintained(opts = [], fixCommits = 1) {
+      const r = repo();
+      r.declare('maintained-releases', opts);
+      return [withOrigin(r), (r) => {
+        follow(r, ['start', 'feat', 'a']);
+        r.work('feat/a', 'feat: a');
+        follow(r, ['land', 'feat/a']);
+        follow(r, ['cut-release', '1.0']);
+        follow(r, ['hotfix', '1.0', 'cve']);
+        for (let i = 1; i <= fixCommits; i++) r.work('hotfix/1.0/cve', `fix: cve part ${i}`);
+        follow(r, ['land', 'hotfix/1.0/cve']); // hands off to plan carry, which cherry-picks back and cleans up
+        assert.ok(!has(r, 'refs/heads/hotfix/1.0/cve'), 'hotfix branch removed once carried');
+        assert.ok(!has(r, 'refs/remotes/origin/hotfix/1.0/cve') && !r.git('ls-remote', '--heads', 'origin', 'hotfix/1.0/cve'), 'remote hotfix branch removed once carried');
+        assert.match(r.git('log', '-1', '--format=%B', 'origin/release/1.0'), /cherry picked from commit/);
+        for (let i = 1; i <= fixCommits; i++) assert.ok(r.git('show', 'origin/release/1.0:fix-cve-part-' + i + '.txt'), `fix part ${i} carried back`);
+        follow(r, ['ship-release', '1.0']);
+        assert.equal(r.git('rev-parse', 'v1.0^{commit}'), r.git('rev-parse', 'origin/release/1.0'));
+      }];
+    }
+    /** Re-declare a model's landing as PR + `style`, landed the way any model change is. */
+    function relanded(r, style) {
+      const m = r.model();
+      m.landing = { via: 'pr', prStyle: style };
+      delete m.projection;
+      const integ = m.integration.branch;
+      const file = path.join(SCRATCH, `pr-${style}-${seq}.json`);
+      fs.writeFileSync(file, JSON.stringify(m));
+      r.git('switch', '-q', '-c', 'chore/pr', integ);
+      assert.equal(r.run(['write', file]).code, 0);
+      r.git('commit', '-qam', `landing via pr (${style})`);
+      r.sw(integ);
+      r.merge('chore/pr');
+      r.git('branch', '-q', '-d', 'chore/pr');
+      return r;
+    }
     function gitflowRun(r) {
       follow(r, ['start', 'feat', 'a']);
       r.work('feat/a', 'feat: a');
@@ -1164,7 +1230,7 @@ const cases = {
       follow(r, ['hotfix', 'main', 'crash']);
       r.work('hotfix/main/crash', 'fix: crash');
       follow(r, ['land', 'hotfix/main/crash']);
-      assert.ok(r.git('log', '--format=%s', 'origin/develop').includes('fix: crash'), 'hotfix carried to develop');
+      assert.ok(r.git('show', 'origin/develop:fix-crash.txt'), 'hotfix carried to develop'); // by content: a squash rewrites the subject
     }
     for (const [name, make] of Object.entries(scenarios)) {
       const [r, run] = make();
@@ -1173,6 +1239,7 @@ const cases = {
         green(r);
       } catch (e) {
         e.message = `[${name}] ${e.message}`;
+        e.stack = `[${name}] ${e.stack}${process.env.TRAIL ? `\n--- trail ---\n${r.trail?.join('\n')}` : ''}`;
         throw e;
       }
     }
@@ -1195,7 +1262,7 @@ for (const [name, test] of selected) {
     console.log(`  ok   ${name}`);
   } catch (error) {
     failed++;
-    console.log(`  FAIL ${name}\n       ${String(error.stack || error.message).split("\n").slice(0, 40).join('\n       ')}`);
+    console.log(`  FAIL ${name}\n       ${String(error.stack || error.message).split("\n").slice(0, process.env.TRAIL ? 1000 : 40).join('\n       ')}`);
   }
 }
 fs.rmSync(SCRATCH, { recursive: true, force: true });
