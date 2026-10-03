@@ -102,9 +102,9 @@ export function healthWarning(health: VoiceHealth): string | undefined {
   const tts = {
     natural: undefined,
     system: undefined,
-    broken: 'Piper broken — falling back to the robotic voice',
-    robotic: 'robotic voice — Piper not installed',
-    none: 'no speech engine — nothing will be spoken',
+    broken: 'Piper broken — robotic fallback',
+    robotic: 'robotic voice (no Piper)',
+    none: 'no speech engine',
   }[health.tts]
   const stt = {
     ok: undefined,
@@ -113,7 +113,7 @@ export function healthWarning(health: VoiceHealth): string | undefined {
   }[health.stt]
   const problems = [tts, stt].filter(Boolean)
 
-  return problems.length === 0 ? undefined : `voice: ${problems.join('; ')} — /speak status`
+  return problems.length === 0 ? undefined : `voice: ${problems.join('; ')} · /speak status`
 }
 
 /** `voice-health.sh`'s two lines, or undefined when they aren't its output. */

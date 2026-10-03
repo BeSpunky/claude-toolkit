@@ -45,8 +45,10 @@ case "${1:-status}" in
     # Which voice will ACTUALLY speak — decided by running piper, not by finding
     # its files, because a present-but-broken piper is exactly the case that
     # otherwise only shows up as "why does it sound robotic?".
-    # shellcheck source=tts-engine.sh
-    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tts-engine.sh"
+    # voice-health.sh brings tts-engine.sh and the listening verdict with it —
+    # the same verdicts the voice band shows.
+    # shellcheck source=voice-health.sh
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/voice-health.sh"
     voice_tts_verdict
     case "$VOICE_TTS_HEALTH" in
       natural) echo "speech engine: piper, natural (voice $VOICE_PIPER_VOICE)" ;;
@@ -54,6 +56,12 @@ case "${1:-status}" in
       robotic) echo "speech engine: espeak-ng, robotic ($VOICE_PIPER_PROBLEM). Natural voice: bash ~/.claude/bespunky-voice/install-piper.sh" ;;
       system)  echo "speech engine: macOS say" ;;
       none)    echo "speech engine: none — install espeak-ng, or run bash ~/.claude/bespunky-voice/install-piper.sh" ;;
+    esac
+    voice_stt_verdict
+    case "$VOICE_STT_HEALTH" in
+      ok)      echo "listening engine: whisper.cpp" ;;
+      broken)  echo "listening engine: broken — $VOICE_STT_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install-whisper.sh" ;;
+      missing) echo "listening engine: none — $VOICE_STT_PROBLEM. Install: bash ~/.claude/bespunky-voice/install-whisper.sh" ;;
     esac
     ;;
   *)

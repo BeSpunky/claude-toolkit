@@ -19,29 +19,42 @@
 #   stt<TAB>ok|broken|missing<TAB>why (empty when ok)
 #
 # Cost: one short piper synthesis (~0.3 s). Callers that poll cache it.
+#
+# Sourced, it defines voice_stt_verdict (→ VOICE_STT_HEALTH ok|broken|missing,
+# VOICE_STT_PROBLEM) — what /speak status reports for listening — and prints nothing.
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_VOICE_HEALTH_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=tts-engine.sh
+. "$_VOICE_HEALTH_HERE/tts-engine.sh"
+
+voice_stt_verdict() {
+  # Sourced, listen.sh resolves CLI and MODEL and returns before touching a device.
+  # shellcheck source=listen.sh
+  . "$_VOICE_HEALTH_HERE/listen.sh"
+  local err
+  VOICE_STT_HEALTH=ok VOICE_STT_PROBLEM=""
+  if [ ! -x "$CLI" ]; then
+    VOICE_STT_HEALTH=missing VOICE_STT_PROBLEM="whisper-cli is not installed"
+  elif [ ! -f "$MODEL" ]; then
+    VOICE_STT_HEALTH=missing VOICE_STT_PROBLEM="no whisper model in $WHDIR/models"
+  elif ! err="$("$CLI" --help 2>&1 >/dev/null)"; then
+    VOICE_STT_HEALTH=broken
+    VOICE_STT_PROBLEM="whisper-cli failed: $(printf '%s\n' "$err" | grep -v '^[[:space:]]*$' | tail -n1)"
+  fi
+  return 0
+}
+
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 one_line() { printf '%s' "$1" | tr '\t\n' '  '; }
 
-# shellcheck source=tts-engine.sh
-. "$HERE/tts-engine.sh"
 voice_tts_verdict
 tts_why=""
 [ "$VOICE_TTS_HEALTH" = natural ] || tts_why="$VOICE_PIPER_PROBLEM"
 printf 'tts\t%s\t%s\n' "$VOICE_TTS_HEALTH" "$(one_line "$tts_why")"
 
-# Sourced, listen.sh resolves CLI and MODEL and returns before touching a device.
-# shellcheck source=listen.sh
-. "$HERE/listen.sh"
-stt=ok stt_why=""
-if [ ! -x "$CLI" ]; then
-  stt=missing stt_why="whisper-cli is not installed"
-elif [ ! -f "$MODEL" ]; then
-  stt=missing stt_why="no whisper model in $WHDIR/models"
-elif ! err="$("$CLI" --help 2>&1 >/dev/null)"; then
-  stt=broken stt_why="whisper-cli failed: $(printf '%s\n' "$err" | grep -v '^[[:space:]]*$' | tail -n1)"
-fi
-printf 'stt\t%s\t%s\n' "$stt" "$(one_line "$stt_why")"
+voice_stt_verdict
+printf 'stt\t%s\t%s\n' "$VOICE_STT_HEALTH" "$(one_line "$VOICE_STT_PROBLEM")"
 exit 0
