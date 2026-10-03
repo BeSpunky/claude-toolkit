@@ -214,7 +214,9 @@ function gh(r, cmd) {
   if (style === 'merge') g('merge', '-q', '--no-ff', '-m', `Merge pull request #${n} from ${head}`, `origin/${head}`);
   else if (style === 'squash') {
     g('merge', '-q', '--squash', `origin/${head}`);
-    if (g('status', '--porcelain').trim()) g('commit', '-q', '-m', `${head} (#${n})`);
+    // A squash PR that changes nothing is a step the plan should never have printed (a no-op carry).
+    assert.ok(g('status', '--porcelain').trim(), `gh pr merge ${head} --squash into ${base}: an empty PR — ${base} already had all of it\n--- trail ---\n${r.trail.join('\n')}`);
+    g('commit', '-q', '-m', `${head} (#${n})`);
   } else {
     g('checkout', '-q', '-B', 'gh-rebase', `origin/${head}`);
     g('rebase', '-q', '--no-ff', base);
@@ -629,6 +631,11 @@ const cases = {
     const r = gitflow();
     assert.match(r.run(['plan', 'cut-release', '1.1']).out, /git branch release\/1\.1 origin\/develop[\s\S]*git push -u origin release\/1\.1/);
     r.git('branch', 'release/1.0', 'develop');
+    // a release holding nothing develop lacks has nothing to carry back — no no-op merge is planned
+    assert.doesNotMatch(r.run(['plan', 'ship-release', '1.0']).out, /git switch develop/);
+    r.sw('release/1.0');
+    r.commit('fix: rc');
+    r.sw('develop');
     const ship = r.run(['plan', 'ship-release', '1.0']);
     assert.equal(ship.code, 0, ship.err);
     assert.match(ship.out, /git switch main[\s\S]*git merge --no-ff origin\/release\/1\.0[\s\S]*git tag -a v1\.0 origin\/main[\s\S]*git switch develop[\s\S]*git merge --no-ff origin\/release\/1\.0[\s\S]*git push origin --delete release\/1\.0/);
@@ -1226,6 +1233,10 @@ const cases = {
       r.work('fix/rc', 'fix: rc');
       follow(r, ['land', 'fix/rc', '--onto', 'release/1.0']); // hands off to plan carry release/1.0
       follow(r, ['ship-release', '1.0']);
+      // release/1.0 was already carried into develop (plan carry above): shipping must not plan that carry again
+      assert.doesNotMatch(r.trail.at(-1), /--base develop --head release\/1\.0|git switch develop/, 'ship-release re-plans a carry develop already has');
+      // …and where only content says so (a squash carry leaves no ancestry), the plan says why it skipped
+      if (r.model().landing.prStyle === 'squash') assert.match(r.trail.at(-1), /develop already has everything release\/1\.0 carries \(every/);
       assert.equal(r.git('rev-parse', 'v1.0^{commit}'), r.git('rev-parse', 'origin/main'), 'tagged what shipped');
       follow(r, ['hotfix', 'main', 'crash']);
       r.work('hotfix/main/crash', 'fix: crash');

@@ -70,13 +70,34 @@ export function plan(git, model, gate, args, opts = {}) {
     need(!(upstreamFirst && isReleaseLine(line)), `under upstream-first, work never ${verb} a release line ("${line}"): it lands on ${integration} first and is carried back with cherry-pick -x (plan carry <commit|branch>)`);
   const hasLocal = (name) => git.ok(['show-ref', '--verify', '--quiet', `refs/heads/${name}`]);
   const hasRemote = (name) => git.ok(['show-ref', '--verify', '--quiet', `refs/remotes/${R}/${name}`]);
-  /** Merge-forward: merge the branch `what` (named as `source`) into every line that still lacks it, except `skip`. */
-  const mergeForward = (what, source, skip) => {
-    const sha = tip(what);
-    const targets = [integration, ...releases].filter((l) => !skip.includes(l) && tip(l) && !(sha && git.isAncestor(sha, tip(l))));
-    for (const t of targets) {
-      if (isReleaseLine(t)) note(`only if ${t} is NEWER than the line ${what} landed on:`);
+  /** How `line` already holds everything `what` carries — 'ancestry' · 'patch' (every commit it lacks by
+   *  ancestry has a patch-equivalent there, git cherry) · 'content' (merging it would change nothing: every path
+   *  `what` changed since they forked is already identical on `line`) — or null when it lacks something. Ancestry
+   *  alone is not enough: a squash or rebase PR carries content without it, and re-carrying then plans a no-op. */
+  const holds = (line, what) => {
+    const [s, t] = [tip(what), tip(line)];
+    if (!s || git.isAncestor(s, t)) return 'ancestry';
+    const lacking = git.lines(['cherry', t, s]);
+    if (lacking.length && lacking.every((l) => l.startsWith('- '))) return 'patch';
+    const base = git.try(['merge-base', s, t]);
+    if (!base) return null;
+    const paths = git.lines(['diff', '--name-only', '--no-renames', base, s]);
+    return git.ok(['diff', '--quiet', s, t, '--', ...paths.map((p) => `:(literal)${p}`)]) ? 'content' : null;
+  };
+  /** Merge-forward: merge the branch `what` (named as `source`) into every line that still lacks it, except
+   *  `skip`; a line that already holds it is skipped with a note saying how, never handed a no-op merge or PR. */
+  const mergeForward = (what, source, skip, { newerThan = `the line ${what} landed on` } = {}) => {
+    const targets = [];
+    for (const t of [integration, ...releases].filter((l) => !skip.includes(l) && tip(l))) {
+      const how = holds(t, what);
+      if (how === 'ancestry') continue;
+      if (how) {
+        note(`${t} already has everything ${what} carries (${how === 'patch' ? 'every commit, by patch-id' : 'every file it changed, by content'}) — nothing to carry there`);
+        continue;
+      }
+      if (isReleaseLine(t)) note(`only if ${t} is NEWER than ${newerThan}:`);
       join(t, source, { title: `Carry ${what} → ${t}` });
+      targets.push(t);
     }
     return targets;
   };
@@ -198,13 +219,8 @@ export function plan(git, model, gate, args, opts = {}) {
           run(`git push ${R} ${tag}`);
         }
       }
-      if (model.fixFlow === 'merge-forward') {
-        join(integration, model.landing.via === 'pr' ? name : `${R}/${name}`, { title: `Carry ${name} → ${integration}` });
-        for (const other of releases.filter((r) => r !== name)) {
-          note(`only if ${other} is NEWER than ${name}:`);
-          join(other, model.landing.via === 'pr' ? name : `${R}/${name}`, { title: `Carry ${name} → ${other}` });
-        }
-      } else note(`upstream-first: every fix on ${name} should already be on ${integration} — branches.mjs verify confirms`);
+      if (model.fixFlow === 'merge-forward') mergeForward(name, model.landing.via === 'pr' ? name : `${R}/${name}`, [name], { newerThan: name });
+      else note(`upstream-first: every fix on ${name} should already be on ${integration} — branches.mjs verify confirms`);
       if (!model.releases.maintained) cleanup(name, { local: hasLocal(name), remote: true });
       break;
     }
