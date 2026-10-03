@@ -33,12 +33,12 @@
 //   (2) the DS's own SCSS    -> the binding's `openLibraryStyles` (Angular: ng-package.json lib.styleIncludePaths)
 //   (3) a published consumer -> the raw .scss + a `./styles` entry in the package's `exports` map
 //
-// IDEMPOTENCE / --sync CONTRACT (read before changing anything here):
+// IDEMPOTENCE / UPGRADE CONTRACT (read before changing anything here):
 //   - `styles/` and `src/` are SEEDED, not owned: each file is written only if ABSENT. `styles/_core/_tokens.scss`
-//     is precisely the file the design phase REPLACES, and a --sync that rewrote it would silently destroy the
+//     is precisely the file the design phase REPLACES, and an upgrade that rewrote it would silently destroy the
 //     project's real design and restore the placeholders.
 //   - Everything else (STRUCTURE.md, the src/index.ts barrel, the packaging patches, the tags, the app wiring)
-//     is GENERATOR-OWNED and re-asserted on every run, so a --sync heals drift.
+//     is GENERATOR-OWNED and re-asserted on every run, so an upgrade heals drift.
 import {
   type Tree,
   type GeneratorCallback,
@@ -104,7 +104,7 @@ export default async function designSystemGenerator(
     : workspaceStackWith(tree, 'designSystem');
   const binding = stack?.designSystem ?? null;
 
-  // 1) Create the library — ONLY if it isn't there. On a --sync it exists, and re-creating it would re-delegate
+  // 1) Create the library — ONLY if it isn't there. On an upgrade it exists, and re-creating it would re-delegate
   //    to the framework generator over a library the project has since filled with real components.
   let installTask: GeneratorCallback = noop;
   if (!existing) {
@@ -126,7 +126,7 @@ export default async function designSystemGenerator(
   const root = project.root; // never assume `packages/<name>` — `directory` is overridable
   const specifier = `${basename(root)}/styles`; // e.g. `design-system/styles`
 
-  // 2) Re-assert the tag (a --sync heals a lib whose tags were edited away; it is what makes the DS findable).
+  // 2) Re-assert the tag (an upgrade heals a lib whose tags were edited away; it is what makes the DS findable).
   project.tags = [...new Set([...(project.tags ?? []), DESIGN_SYSTEM_TAG])];
   updateProjectConfiguration(tree, project.name ?? name, project);
 
@@ -147,7 +147,7 @@ export default async function designSystemGenerator(
   publishStyles(tree, root);
 
   // 7) Wire every app that can consume it (its stack has a `styles` port) — the scaffold's first app, created
-  //    BEFORE this lib, and every app on a --sync. A LATER app wires itself: the `app` generator attaches the
+  //    BEFORE this lib, and every app on an upgrade. A LATER app wires itself: the `app` generator attaches the
   //    design-system layer's per-app step, this same design-system-styles.
   for (const { project: app } of applicationsWith(tree, 'styles')) {
     await designSystemStylesGenerator(tree, {
@@ -237,7 +237,7 @@ function publishStyles(tree: Tree, root: string): void {
  * We're about to CREATE a design system because none was found by tag or by the name `design-system`.
  * If the workspace already contains libraries, one of them might be the project's real design system
  * under a different name — in which case creating a fresh one is a DUPLICATE, not a sync (exactly the
- * failure a `--sync` against a `libs/`-style repo produced). We DETECT and RELAY; we never adopt on a
+ * failure an upgrade against a `libs/`-style repo produced). We DETECT and RELAY; we never adopt on a
  * guess, because the `type:design-system` tag is the single source of truth and the correct fix is a
  * human tagging the real DS and re-running (which makes DS creation a no-op).
  *
@@ -264,7 +264,7 @@ function warnIfDesignSystemMayAlreadyExist(tree: Tree): void {
  * — a plain .scss under src/ would never reach a consumer's node_modules).
  *
  * SEED semantics: a file is written only if it does NOT exist, EXCEPT for the paths in `alwaysRewrite`.
- * See the file header for why this matters — a --sync must never restore placeholder tokens over the
+ * See the file header for why this matters — an upgrade must never restore placeholder tokens over the
  * project's real design.
  */
 function seedTemplates(

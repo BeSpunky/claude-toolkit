@@ -10,7 +10,7 @@ that *reads one workspace and writes another* can't be a generator (see
 `docs/reusable-tool-extraction.md` §2.1).
 
 It runs **in Docker**, not on the bare host: the host's Node is too old for modern Nx, so — exactly like
-`scaffold.sh` — the launcher runs the tool inside the `typescript-node` base image with `~/projects`
+`house.sh` — the launcher runs the tool inside the `typescript-node` base image with `~/projects`
 mounted (both the source project and the shared workspace are visible, and the shared workspace's own
 Nx is available via its mounted `node_modules`).
 

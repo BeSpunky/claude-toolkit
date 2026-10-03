@@ -118,7 +118,7 @@ export const serverConfig: ApplicationConfig = { providers: [provideAppFirebase(
     {
       // THE WORST ONE. The house's own convention puts a second checkout at .claude/worktrees/<slug>, at
       // exactly the depth the walk reached — so the migration edited source on an unrelated feature branch,
-      // which --sync's git backup does not cover.
+      // which an upgrade's git backup does not cover.
       name: 'never touches another git worktree, build output, or a nested checkout',
       setup: (tree) => {
         plainApp(tree, 'apps/web');

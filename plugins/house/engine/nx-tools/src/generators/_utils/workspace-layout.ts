@@ -7,7 +7,7 @@
 //
 // A house generator run against a CONSUMER'S existing repo must land a project where that repo already keeps
 // them: an Nx workspace that uses `libs/` should not sprout a lone `packages/` folder the moment someone runs
-// `--sync`. So the layout is DETECTED, never assumed, and each half independently, from the most authoritative
+// an upgrade. So the layout is DETECTED, never assumed, and each half independently, from the most authoritative
 // signal to the safe fallback:
 //
 //   1. an explicit `--directory` (the caller's escape hatch — handled by the caller, not here);
@@ -31,7 +31,7 @@ export interface WorkspaceLayout {
 }
 
 /**
- * The named layouts a NEW workspace can be scaffolded with (`scaffold.sh --layout=<id>`). Data, beside the
+ * The named layouts a NEW workspace can be scaffolded with (`house.sh --layout=<id>`). Data, beside the
  * presets — adding one is one entry. Neither is the default: the default is `DEFAULT_LAYOUT`, which reproduces
  * what the house always produced, so nobody who doesn't ask sees a change.
  */

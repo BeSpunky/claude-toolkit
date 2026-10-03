@@ -1,12 +1,12 @@
-<!-- Seeded by @bespunky/nx-tools@{{NX_TOOLS_VERSION}} (project-starter {{PLUGIN_VERSION}}) for the layers {{LAYERS}} -->
+<!-- Seeded by @bespunky/nx-tools@{{NX_TOOLS_VERSION}} (bespunky-house {{PLUGIN_VERSION}}) for the layers {{LAYERS}} -->
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 <!-- This file was SEEDED by `@bespunky/nx-tools:house-doc` because the repo had no CLAUDE.md to host the
      generated house pointer — with sections chosen by this project's layers. Everything OUTSIDE the
-     `@bespunky/house-tooling` markers is yours: it is never rewritten by a sync. Fill in the prompts below
-     (the new-project skill does this on a scaffold), delete the ones that don't apply, and add your own. -->
+     `@bespunky/house-tooling` markers is yours: it is never rewritten by an upgrade. Fill in the prompts below
+     (the `bespunky-house:new` skill does this on a scaffold), delete the ones that don't apply, and add your own. -->
 
 ## Project Overview / Intentions
 

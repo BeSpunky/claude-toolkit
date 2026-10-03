@@ -5,7 +5,7 @@
 #  would break every existing status check reference, so the name stays and this comment carries the truth.)
 #
 # 1. A missed PLUGIN BUMP. A missed `@bespunky/nx-tools` bump announces itself — publish-nx-tools skips and
-#    the next `--sync` installs the old payload. A missed plugin bump does not: the repo has the change, the
+#    the next upgrade installs the old payload. A missed plugin bump does not: the repo has the change, the
 #    marketplace advertises the old version, `/plugin marketplace update` is a no-op, and consumers stay
 #    behind forever with nothing to see. This repo has shipped that bug three times, every time from a sweep
 #    that crossed plugin boundaries while the commit was named after a different plugin.

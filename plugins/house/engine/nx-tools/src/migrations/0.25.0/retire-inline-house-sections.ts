@@ -202,7 +202,7 @@ export default function retireInlineHouseSections(tree: Tree): void {
     logger.warn(
       `[migrate 0.25.0] \`${CLAUDE_MD}\` still carries ${removed.length} inline house section(s) from before ` +
         `0.5.0, but this workspace has no \`${HOUSE_MD}\` — so they are the ONLY copy of that guidance and were ` +
-        `LEFT IN PLACE. Run \`scaffold.sh --sync --ensure=agent .\` to generate \`${HOUSE_RULES_MD}\` + ` +
+        `LEFT IN PLACE. Run \`house.sh add-layer agent .\` to generate \`${HOUSE_RULES_MD}\` + ` +
         `\`${HOUSE_MD}\`; re-running this migration afterwards will retire the inline copy.`
     );
     return;
@@ -220,7 +220,7 @@ export default function retireInlineHouseSections(tree: Tree): void {
     logger.warn(
       `[migrate 0.25.0] The generated house pointer block sat inside an inline house section in ` +
         `\`${CLAUDE_MD}\`; the section was retired and the block re-appended at the end of the file. ` +
-        `The next \`scaffold.sh --sync\` will move it back to its usual place above the first heading.`
+        `The next \`house.sh upgrade\` will move it back to its usual place above the first heading.`
     );
   }
 

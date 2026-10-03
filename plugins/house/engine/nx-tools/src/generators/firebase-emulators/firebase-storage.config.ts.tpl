@@ -6,7 +6,7 @@
 // surfaces (an upload screen, an avatar picker), which makes it a natural fit for the lazy routes file
 // that owns those surfaces rather than app.config.ts.
 //
-// GENERATOR-OWNED — rewritten in full on every `--sync`. See firebase.config.ts for the full contract.
+// GENERATOR-OWNED — rewritten in full on every upgrade. See firebase.config.ts for the full contract.
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { connectStorageEmulator, getStorage, provideStorage } from '@angular/fire/storage';
 

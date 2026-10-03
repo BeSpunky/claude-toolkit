@@ -32,9 +32,9 @@ export interface DesignSystemProject {
  * caller must no-op cleanly on `null`.
  *
  * Falls back to a LIBRARY literally named `design-system` so a hand-made (or pre-tag) library is still
- * found and can be healed by a --sync. The LIBRARY gate is load-bearing: without it, an `apps/design-system` (a docs/demo/storybook app — a very natural name) would be silently
+ * found and can be healed by an upgrade. The LIBRARY gate is load-bearing: without it, an `apps/design-system` (a docs/demo/storybook app — a very natural name) would be silently
  * hijacked — tagged, seeded with styles, and have its package.json rewritten — the moment anyone ran the
- * generator or a `--sync`. It asks `projectRole`, not the declared `projectType`: a package.json-defined
+ * generator or an upgrade. It asks `projectRole`, not the declared `projectType`: a package.json-defined
  * project in a TS-solution workspace declares none, and would otherwise never be found by name at all.
  */
 export function findDesignSystem(tree: Tree): DesignSystemProject | null {

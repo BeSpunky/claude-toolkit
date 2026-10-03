@@ -125,6 +125,18 @@
       "layer": "navigation",
       "description": "Tag the navigation kernel's library `type:navigation`: the navigation layer is now detected by that tag instead of the hard-coded project name `navigation-core`. Tags a project named `navigation-core` and the project owning a directory that carries the vendored kernel (lib/navigation-x.providers.ts), merging into project.json or package.json's `nx` block; reports a kernel left as loose files with no project (earlier generators wrote it that way) instead of inventing one.",
       "implementation": "./src/migrations/0.35.0/tag-navigation-library"
+    },
+    "rename-house-plugin": {
+      "version": "0.39.0",
+      "layer": "agent",
+      "description": "The plugin that ships these generators was renamed from `bespunky-project-starter` to `bespunky-house`. Renames the `bespunky-project-starter@claude-toolkit` key in `enabledPlugins` of .claude/settings.json (and .claude/settings.local.json, machine-local) to `bespunky-house@claude-toolkit` in place, keeping its value, position and the rest of the file — because the claude-settings generator preserves keys it does not declare, so the old plugin would otherwise stay enabled forever. Where the new key already exists the old one is removed and the new value wins (a disagreement is reported); an unparseable file is left and named.",
+      "implementation": "./src/migrations/0.39.0/rename-house-plugin"
+    },
+    "rename-upgrade-lock": {
+      "version": "0.39.0",
+      "layer": "nx",
+      "description": "The upgrade's transient lock directory was renamed from `.bespunky-sync.lock/` to `.bespunky-upgrade.lock/` with the `sync` → `upgrade` command. Retargets the project's .gitignore line (any spelling of it) and the house heading above it in place, because the gitignore generator only appends and would otherwise leave the dead line forever; where the new name is already ignored the old line is removed. A `.bespunky-sync.lock/` directory still in the project may belong to an older upgrade that is running, so it and its line are left and reported, never deleted.",
+      "implementation": "./src/migrations/0.39.0/rename-upgrade-lock"
     }
   }
 }

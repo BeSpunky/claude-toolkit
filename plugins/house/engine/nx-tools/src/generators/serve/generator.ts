@@ -22,7 +22,7 @@
 // `nx g @bespunky/nx-tools:app` — needs its own dev-server leaf + serve target, so it is applied here,
 // on the same code path serve-options runs on, and can't drift as apps are added.
 //
-// Idempotent + --sync-safe: re-running re-asserts the same targets (reclaiming the raw @nx/angular `serve`
+// Idempotent + upgrade-safe: re-running re-asserts the same targets (reclaiming the raw @nx/angular `serve`
 // slot into the `dev-server` leaf).
 //
 // It also turns Nx's interactive TUI off (nx.json `tui.enabled: false`, set-if-absent): the composer streams

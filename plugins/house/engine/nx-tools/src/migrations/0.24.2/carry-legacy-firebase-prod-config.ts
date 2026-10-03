@@ -75,7 +75,7 @@ export default function carryLegacyFirebaseProdConfig(tree: Tree): void {
         `${candidates.map((c) => c.configPath).join(', ')}: this workspace has no usable TypeScript compiler ` +
         `API (the classic \`createSourceFile\` entry point is missing), and these values are too important to ` +
         `parse with a regex. Copy projectId/apiKey/appId/authDomain into the matching ` +
-        `src/environments/environment.prod.ts BY HAND before running \`--sync --firebase\`, which rewrites ` +
+        `src/environments/environment.prod.ts BY HAND before running \`house.sh upgrade\`, which rewrites ` +
         `firebase.config.ts and would drop them.`,
     );
     return;
@@ -107,7 +107,7 @@ export default function carryLegacyFirebaseProdConfig(tree: Tree): void {
       //
       // The generator usually rewrites this file wholesale moments later, which would drop the const anyway
       // — but "usually" is doing real work there. The per-app generators are skipped whenever a sync cannot
-      // resolve the app (the run then reports SYNC_PARTIAL), and that is exactly the case where a stale
+      // resolve the app (the run then reports UPGRADE_PARTIAL), and that is exactly the case where a stale
       // second copy of production credentials survives indefinitely.
       removeLegacyProdConfigDeclaration(ts, tree, configPath, name);
   }
@@ -187,7 +187,7 @@ function writeProdEnvFromTemplate(tree: Tree, envProdPath: string, config: ProdC
     // of a file whose shape this migration is not the author of.
     logger.warn(
       `[migrate 0.24.2] Could not read ${tplPath}, so ${envProdPath} was not created. The legacy values are ` +
-        `still in firebase.config.ts — copy them out BEFORE running \`--sync --firebase\`.`,
+        `still in firebase.config.ts — copy them out BEFORE running \`house.sh upgrade\`.`,
     );
     return [];
   }
@@ -230,7 +230,7 @@ function fillEmptyFirebaseFields(
     logger.warn(
       `[migrate 0.24.2] ${envProdPath} has no recognisable \`environment.firebase\` object, so the legacy ` +
         `production config was NOT carried into it. Move projectId/apiKey/appId/authDomain across by hand ` +
-        `before the next \`--sync --firebase\`.`,
+        `before the next \`house.sh upgrade\`.`,
     );
     return [];
   }
@@ -287,7 +287,7 @@ function fillEmptyFirebaseFields(
         `[migrate 0.24.2] ${envProdPath}: could not add ${missing.join(', ')} to its \`firebase\` block (its ` +
           `source does not end where the parser says it does), so ${missing.length === 1 ? 'that value is' : 'those values are'} ` +
           `still only in the legacy firebase.config.ts. Copy ${missing.length === 1 ? 'it' : 'them'} across BY ` +
-          `HAND before running \`--sync --firebase\`, which rewrites that file.`,
+          `HAND before running \`house.sh upgrade\`, which rewrites that file.`,
       );
     }
   }

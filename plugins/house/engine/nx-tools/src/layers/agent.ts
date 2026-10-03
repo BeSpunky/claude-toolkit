@@ -19,8 +19,8 @@ export const agent: LayerDescriptor = {
   title: 'Agent DX (Claude settings, devcontainer, window identity)',
   requires: [],
   evidence: { files: [DEVCONTAINER_MARKER, '.vscode/.window-identity.json'] },
-  ensurable: { scaffold: true, sync: true },
-  ensureHint: '`scaffold.sh --sync --ensure=agent <project>`',
+  ensurable: { new: true, upgrade: true },
+  ensureHint: '`house.sh add-layer agent <project>`',
   brings: 'the devcontainer, the Claude settings and the window identity',
   generators: {
     workspace: [
@@ -98,7 +98,7 @@ export const agent: LayerDescriptor = {
   // (`nx`, `web`, `angular`, `design-system`).
   claudePlugins: [
     'bespunky@claude-toolkit',
-    'bespunky-project-starter@claude-toolkit',
+    'bespunky-house@claude-toolkit',
     'bespunky-engineering@claude-toolkit',
     'bespunky-workflow@claude-toolkit',
     'bespunky-product-ux@claude-toolkit',

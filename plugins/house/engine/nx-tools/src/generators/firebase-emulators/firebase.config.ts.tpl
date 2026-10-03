@@ -77,7 +77,7 @@
 // the Angular optimizer guarantees to fold.
 //
 // GENERATOR-OWNED — this file (and every firebase-*.config.ts sibling) is rewritten IN FULL on every
-// `--sync`, so never edit them by hand: a future sync silently reverts it. They carry no per-project
+// an upgrade, so never edit them by hand: a future sync silently reverts it. They carry no per-project
 // values by design, so everything you'd want to change lives elsewhere:
 //   • per-environment CONFIG (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`,
 //     functions `proxied`) → environment.ts / environment.<env>.ts;

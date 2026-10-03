@@ -17,7 +17,7 @@
 // (Route providers ARE visible to that route's own `canActivate` — measured against Angular 22. Only a
 // CHILD route's providers are invisible to a parent's guard. Do not reach for root on the DI argument.)
 //
-// GENERATOR-OWNED — rewritten in full on every `--sync`. See firebase.config.ts for the full contract.
+// GENERATOR-OWNED — rewritten in full on every upgrade. See firebase.config.ts for the full contract.
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { connectAuthEmulator, getAuth, provideAuth } from '@angular/fire/auth';
 

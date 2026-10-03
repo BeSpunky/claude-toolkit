@@ -1,6 +1,6 @@
 // House generator: the FIREBASE CORE — the emulator suite, Cloud Functions, App Hosting config and their tooling.
 // Framework-neutral: it needs only the Nx floor, and runs the same for an Angular app, a plain npm repo, or a
-// repo with no frontend at all. Idempotent and safe in --sync mode.
+// repo with no frontend at all. Idempotent and safe in upgrade mode.
 //
 // THE CLIENT IS NOT HERE. What an APP needs to talk to Firebase (environment files, SDK initialisation, the
 // provider in its bootstrap, the browser SDK) depends on its framework, so it is the `firebase-client`
@@ -153,7 +153,7 @@ const secretsOf = (functions: HouseProjectHome) => `${functions.root}/.secret.lo
 
 // Local Functions secrets ignore — kept separate from GITIGNORE_BLOCK (its own idempotency
 // marker: the secrets path itself) so a project already past the emulator block self-heals to ignore
-// .secret.local on --sync.
+// .secret.local on upgrade.
 const secretGitignoreBlock = (functions: HouseProjectHome) => `# Local Cloud Functions secrets — the gitignored source for \`nx run ${functions.name}:push-secrets\`
 # (which sets them in Google Secret Manager for production) and the emulator's local injection.
 # The committed ${secretsOf(functions)}.example documents the shape.
@@ -211,7 +211,7 @@ export default async function firebaseEmulatorsGenerator(
   }
 
   // 1c) .gitignore — the emulator block, then the secrets block under its own marker (so a project already past
-  //     the first still gains the second on --sync).
+  //     the first still gains the second on upgrade).
   const gitignore = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
   if (!gitignore.includes('/.emulator-data')) tree.write('.gitignore', `${gitignore.trimEnd()}\n\n${GITIGNORE_BLOCK}`);
   const gitignoreNow = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
@@ -482,7 +482,7 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
         options: { command: 'bash tools/seed/build-seeds.sh', cwd: '{workspaceRoot}' },
       },
       // On-call reset to the default pristine world (takes effect on the next serve).
-      // Add `reset:<seed>` siblings here for extra worlds — they survive --sync.
+      // Add `reset:<seed>` siblings here for extra worlds — they survive an upgrade.
       reset: {
         executor: 'nx:run-commands',
         options: { command: 'bash tools/emulator-data.sh reset', cwd: '{workspaceRoot}' },

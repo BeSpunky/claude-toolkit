@@ -9,19 +9,19 @@
 // Getting a rule into the wrong one is not cosmetic: a directive in HOUSE.md is a directive nothing loads.
 //
 // The toolkit-owned conventions used to live inline in each project's CLAUDE.md — where they went STALE,
-// because `scaffold.sh --sync` deliberately never rewrites the hand-owned CLAUDE.md. This generator owns
+// because `house.sh upgrade` deliberately never rewrites the hand-owned CLAUDE.md. This generator owns
 // them instead, in the two files above, and leaves only a small, marker-delimited POINTER in CLAUDE.md —
 // the single part of an EXISTING CLAUDE.md it touches, so the rest stays the project's own. When there is
 // no CLAUDE.md at all it seeds one, because a pointer with nowhere to live is how both generated files end
 // up referenced by nothing.
 //
-// Idempotent + --sync-safe: both docs are fully rewritten every run; the pointer is upserted between its
+// Idempotent + upgrade-safe: both docs are fully rewritten every run; the pointer is upserted between its
 // markers (inserted if absent, replaced/restored if present), so a hand-deleted or edited pointer heals.
 //
 // It also renders the STAMP into HOUSE.md's header — a marker line recording the @bespunky/nx-tools (and,
 // for provenance, the plugin) version this project was last generated with. The stamp exists so that "is
 // this project behind the installed toolkit?" is a FILE READ rather than a five-minute Docker run: it is
-// what lets project-starter's SessionStart hook detect a toolkit upgrade and ask for a sync, instead of
+// what lets bespunky-house's SessionStart hook detect a toolkit upgrade and offer `/bespunky-house:upgrade`, instead of
 // speculatively running one.
 //
 // WHY THE STAMP LIVES IN HOUSE.md, and not in a file of its own. The hook's whole premise is that the stamp
@@ -53,15 +53,15 @@ interface HouseDocSchema {
   // The layers this project has. Default: DETECTED from the workspace. Drives which sections render (a
   // non-Angular project has no business reading the Angular MCP section) and is recorded in the stamp.
   layers?: LayerId[];
-  // The package manager this project uses (yarn | npm | pnpm). Passed by scaffold.sh, which DETECTS it
+  // The package manager this project uses (yarn | npm | pnpm). Passed by house.sh, which DETECTS it
   // from the project's own lockfile. HOUSE.md is the doc the agent reads and copies commands out of, so
   // `yarn nx build` in an npm project is not a cosmetic mismatch — it is a command that fails.
   packageManager?: string;
-  // The @bespunky/nx-tools version whose generators are producing this project. Passed by scaffold.sh
+  // The @bespunky/nx-tools version whose generators are producing this project. Passed by house.sh
   // (derived from the staged package.json — never hand-maintained). THIS is the version the hook compares:
   // it is what actually determines the generated output, so it is what a sync can actually change.
   nxToolsVersion?: string;
-  // The bespunky-project-starter plugin version that shipped those generators. Recorded for provenance but
+  // The bespunky-house plugin version that shipped those generators. Recorded for provenance but
   // deliberately NOT what the hook compares — the house convention bumps a plugin's version on ANY change
   // (a SKILL.md typo, a README line), and demanding a multi-minute sync for a change that
   // regenerates nothing would train everyone to ignore the notice.
@@ -80,7 +80,7 @@ const START = '<!-- @bespunky/house-tooling:start';
 const END = '<!-- @bespunky/house-tooling:end -->';
 
 // What an unknown version records as. A version is only unknown when a generator is invoked directly
-// (`nx g …:house-doc`) rather than through scaffold.sh; the hook treats it as "can't compare" and — like a
+// (`nx g …:house-doc`) rather than through house.sh; the hook treats it as "can't compare" and — like a
 // missing stamp on a house project — asks for a sync, which is exactly the action that fixes it.
 const UNKNOWN = 'unknown';
 
@@ -89,7 +89,7 @@ export default async function houseDocGenerator(
   options: HouseDocSchema = {},
 ): Promise<void> {
   // DETECTED by default, never declared — the same rule the layer registry states for itself. A caller may
-  // pass layers explicitly (scaffold.sh knows what it just ensured, before the tree reflects it), but a
+  // pass layers explicitly (house.sh knows what it just ensured, before the tree reflects it), but a
   // direct `nx g …:house-doc` reads the workspace, so HOUSE.md can't describe a project that isn't there.
   const active = activeLayers(tree, options.layers);
   const layers = active.map((entry) => entry.id);
@@ -115,7 +115,7 @@ export default async function houseDocGenerator(
   // directive.
   //
   // `firebase` stays an explicit override as well, because it is the one section set a caller forces directly
-  // (scaffold.sh --firebase renders the Firebase docs for a project that is about to become a Firebase project,
+  // (house.sh --firebase renders the Firebase docs for a project that is about to become a Firebase project,
   // before firebase.json exists to detect).
   const flags: Record<string, boolean> = Object.fromEntries([...docSections(active)].map((flag) => [flag, true]));
   flags.firebase = firebase;
@@ -197,11 +197,11 @@ export default async function houseDocGenerator(
   //
   //    CLAUDE.md is SEEDED when absent rather than skipped. It used to be skipped, on the reasoning that a
   //    fresh scaffold writes CLAUDE.md from the skill's template and a sync therefore always finds one. That
-  //    holds for the greenfield path and fails for the one this mode exists to serve: `--sync --ensure=agent`
+  //    holds for the greenfield path and fails for the one this mode exists to serve: `add-layer agent`
   //    retrofits onto a repo of ANY shape, and an arbitrary repo need not have a CLAUDE.md at all. The result
   //    was the worst of the two failures above — HOUSE.md and HOUSE.rules.md written, and nothing anywhere
   //    referencing either. The seed is deliberately minimal (headings and prompts, no house prose): authoring
-  //    the real, project-specific CLAUDE.md is still the new-project skill's job, and a seed that pretended
+  //    the real, project-specific CLAUDE.md is still the `bespunky-house:new` skill's job, and a seed that pretended
   //    otherwise would be a second source of truth for content this generator does not own.
   const seeded = tree.exists('CLAUDE.md') ? (tree.read('CLAUDE.md', 'utf8') ?? '') : render(tpl('CLAUDE.seed.md.tpl'));
   const pointer = render(tpl('pointer.md.tpl')).trim();
@@ -289,7 +289,7 @@ function ignoreSnoozeFile(tree: Tree): void {
   const sep = gitignore === '' || gitignore.endsWith('\n') ? '' : '\n';
   tree.write(
     '.gitignore',
-    `${gitignore}${sep}\n# Claude Code — this developer's "not now" on a house-tooling sync (local, never shared)\n${entry}\n`,
+    `${gitignore}${sep}\n# Claude Code — this developer's "not now" on a house-tooling upgrade (local, never shared)\n${entry}\n`,
   );
 }
 

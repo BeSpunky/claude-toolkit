@@ -22,5 +22,5 @@ if [ -f "$WS/tools/shared-browser/shared-browser" ]; then
     echo "[post-create]            bash tools/shared-browser/shared-browser install --with-deps"
   fi
 else
-  echo "[post-create] shared-browser: tools/shared-browser is not here yet (it arrives with the next sync) — skipping"
+  echo "[post-create] shared-browser: tools/shared-browser is not here yet (it arrives with the next upgrade) — skipping"
 fi

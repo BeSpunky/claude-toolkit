@@ -11,12 +11,12 @@
 // The proxy uses ONLY Node built-ins (http + net) and proxies WebSocket upgrades too, so HMR survives.
 //
 // Why workspace-level (not per-app): the proxy is a single workspace-wide resource shared by every app's
-// serve. So it is generated ONCE per workspace, from scaffold.sh's WORKSPACE_GEN_BLOCK (always-on). The
+// serve. So it is generated ONCE per workspace, from house.sh's WORKSPACE_GEN_BLOCK (always-on). The
 // dev engine (tools/dev/dev serve, and `nx serve` through it) drives it per-serve via
 // `bash tools/worktree-domains/worktree-domains register|unregister`.
 //
-// Idempotent + --sync-safe: every generator-owned file is rewritten on each run (the CLI and the proxy carry
-// no user values) and the project's house targets are re-asserted, so a fresh run and a --sync run converge to
+// Idempotent + upgrade-safe: every generator-owned file is rewritten on each run (the CLI and the proxy carry
+// no user values) and the project's house targets are re-asserted, so a fresh run and an upgrade run converge to
 // the same tree — exactly like the shared-browser generator re-asserts its always-owned tools/shared-browser/*.
 // formatFiles polishes the result at the end.
 import { type Tree, formatFiles } from '@nx/devkit';

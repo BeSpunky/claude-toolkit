@@ -61,7 +61,7 @@ export default async function serveOptionsGenerator(
   if (devServer) {
     // House shape: the real dev-server leaf lives alongside the composing serve.
     // 1) The nx-tools:serve composer DELEGATES `host` to the dev-server (forwards `--host`), so `host`
-    //    belongs on it too — assert it (the `serve` generator sets it; this keeps --sync honest).
+    //    belongs on it too — assert it (the `serve` generator sets it; this keeps an upgrade honest).
     if (serveIsNxToolsComposer && serve) {
       serve.options = { ...serve.options, host };
     }

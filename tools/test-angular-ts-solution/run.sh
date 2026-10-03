@@ -11,7 +11,7 @@
 # TypeScript project references. The house hosts Angular there anyway, as an honest hybrid — apps are project.json
 # islands, libraries are real workspace packages, both reached through `exports` — and gets past that refusal with
 # upstream's own opt-out, the environment variable NX_IGNORE_UNSUPPORTED_TS_SETUP, set around one generator call
-# (`adapters/angular/ts-solution.ts`) and inline on `nx add` (scaffold.sh).
+# (`adapters/angular/ts-solution.ts`) and inline on `nx add` (house.sh).
 #
 # That opt-out is UNDOCUMENTED. It appears nowhere in Nx's docs — only in the text of the refusal itself — so it
 # carries no compatibility promise, and a MINOR Nx release can rename it, remove it, or keep it while the generated
@@ -29,7 +29,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-ASSETS="$REPO/plugins/project-starter/skills/new-project/assets"
+ASSETS="$REPO/plugins/house/engine"
 PAYLOAD="$ASSETS/nx-tools"
 NX_VERSION="${NX_VERSION:-$(node -p "require('$REPO/package.json').devDependencies.nx")}"
 WS_NAME=tssol
@@ -43,15 +43,15 @@ trap cleanup EXIT
 step() { printf '\n── %s\n' "$*"; }
 fail() { printf '\nTRIPWIRE FAILED: %s\n' "$*" >&2; exit 1; }
 
-step "create-nx-workspace@$NX_VERSION --preset=ts --workspaces (the TS-solution workspace scaffold.sh --linking=workspaces builds)"
+step "create-nx-workspace@$NX_VERSION --preset=ts --workspaces (the TS-solution workspace house.sh --linking=workspaces builds)"
 cd "$WORK"
-# Agent-mode env vars stripped, exactly as scaffold.sh does: create-nx-workspace ignores --preset under them.
+# Agent-mode env vars stripped, exactly as house.sh does: create-nx-workspace ignores --preset under them.
 env -u CLAUDECODE -u OPENCODE npx --yes "create-nx-workspace@$NX_VERSION" "$WS_NAME" \
   --preset=ts --workspaces=true --packageManager=npm --nxCloud=skip --no-interactive \
   || fail "create-nx-workspace could not build a TS-solution workspace"
 cd "$WS_NAME"
 
-step "nx add @nx/angular@$NX_VERSION under the opt-out (scaffold.sh's exact form: an inline prefix, never an export)"
+step "nx add @nx/angular@$NX_VERSION under the opt-out (house.sh's exact form: an inline prefix, never an export)"
 NX_IGNORE_UNSUPPORTED_TS_SETUP=true npx nx add "@nx/angular@$NX_VERSION" \
   || fail "nx add @nx/angular refused the TS-solution workspace even with NX_IGNORE_UNSUPPORTED_TS_SETUP — the opt-out may be gone"
 

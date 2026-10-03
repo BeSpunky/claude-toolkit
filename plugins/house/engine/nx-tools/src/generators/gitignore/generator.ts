@@ -1,7 +1,7 @@
 // House generator: keep what the active layers' tooling creates out of git.
 //
 // A FLOOR CONCERN, run on every sync as the `nx` layer's workspace step. Each layer names the machine-local or
-// generated paths its tooling makes necessary (`descriptor.gitignore`): Nx's caches and the sync's lock (`nx`),
+// generated paths its tooling makes necessary (`descriptor.gitignore`): Nx's caches and the upgrade's lock (`nx`),
 // `node_modules` (`node`), `dist` (`js`, `firebase`), Claude Code's state (`agent`). Those blocks used to be
 // written by `claude-settings` — the agent layer's generator — so an Nx app synced WITHOUT the agent layer never
 // ignored `dist` or `.nx/workspace-data`, and its first build left an untracked tree behind. A layer's ignores

@@ -13,7 +13,7 @@ if (!pluginDir) {
   process.exit(1);
 }
 
-// Resolve the workspace's TypeScript (cwd is the workspace root when invoked from scaffold.sh).
+// Resolve the workspace's TypeScript (cwd is the workspace root when invoked from house.sh).
 const require = createRequire(join(process.cwd(), 'noop.js'));
 const ts = require('typescript');
 

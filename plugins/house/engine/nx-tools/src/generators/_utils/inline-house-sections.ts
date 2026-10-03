@@ -30,7 +30,7 @@
 // FROZEN copy of the house guidance inline, sitting beside a HOUSE.md that supersedes it and is regenerated on
 // every sync. Two sources of truth, one of which no longer moves.
 //
-// The plugin knew: `new-project/SKILL.md` has carried a "One-time migration only … remove the now-duplicated
+// The plugin knew: `new/SKILL.md` (then `new-project/SKILL.md`) has carried a "One-time migration only … remove the now-duplicated
 // house sections by hand" note ever since. That note is the admission that this was a migration all along —
 // it just predated the migration ladder (which only arrived at 0.24.0), so the work was handed to a human who
 // had to read a line in a SKILL.md to know it was owed. This is that migration.
@@ -44,7 +44,7 @@
 // IT REFUSES TO RUN WITHOUT THE REPLACEMENT PRESENT. The whole justification for deleting inline guidance is
 // that a generated copy supersedes it — so the migration first checks that HOUSE.md is actually there. It is
 // not a formality. `house-doc` only runs when the `agent` layer is active, and that layer is detected SOLELY
-// by the presence of HOUSE.md (`src/layers/registry.ts`); a plain `--sync` ensures no layers. So a project
+// by the presence of HOUSE.md (`src/layers/registry.ts`); a plain upgrade ensures no layers. So a project
 // scaffolded before 0.5.0 and never synced since — inline sections, no HOUSE.md, but an old `@bespunky/nx-tools`
 // still resolvable in node_modules, which is exactly how that era shipped it — would have had the ladder
 // collect this migration, delete all thirteen sections, and then skip `house-doc` entirely. That is the one
@@ -242,7 +242,7 @@ export function retireInlineHouseSections(tree: Tree): void {
     logger.warn(
       `[house-doc] The generated house pointer block sat inside an inline house section in ` +
         `\`${CLAUDE_MD}\`; the section was retired and the block re-appended at the end of the file. ` +
-        `The next \`scaffold.sh --sync\` will move it back to its usual place above the first heading.`
+        `The next \`house.sh upgrade\` will move it back to its usual place above the first heading.`
     );
   }
 

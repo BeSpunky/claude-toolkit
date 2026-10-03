@@ -1,7 +1,7 @@
 // House generator: create a BeSpunky-standard application.
 //
 // The application sibling of `publishable-lib`, and the SINGLE SOURCE OF TRUTH for "what a BeSpunky app is", so
-// the FIRST app (created by scaffold.sh) and every LATER app a developer adds go through ONE code path — a second
+// the FIRST app (created by house.sh) and every LATER app a developer adds go through ONE code path — a second
 // app is configured identically to the first, with no manual steps and no knowledge of the house conventions.
 //
 // Two halves, and neither names a capability:
@@ -13,7 +13,7 @@
 //      capability attaches to new apps by being registered.
 //
 // What the workspace "wears" is DETECTED, plus whatever this run is bringing into being alongside the app:
-// `--layers` (scaffold.sh passes its ensure set — at first-app time nothing it ensures exists yet, so nothing
+// `--layers` (house.sh passes its ensure set — at first-app time nothing it ensures exists yet, so nothing
 // could be detected) and the legacy `--firebase` (an explicit true/false still overrides firebase.json detection).
 //
 // workspaceName is a WORKSPACE identity, not an app one. It seeds the emulators' offline `demo-<workspaceName>`

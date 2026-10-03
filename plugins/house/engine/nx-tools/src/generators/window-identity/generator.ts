@@ -13,7 +13,7 @@
 //
 // 2. A no-clobber PROVENANCE RATCHET (the stamp lesson). A colour has a source — name-hash < design-system <
 //    manual — recorded in .vscode/.window-identity.json. A run only writes when its source RANKS >= the
-//    recorded one, so a --sync's name-hash pass can never downgrade a design-system or hand-picked colour,
+//    recorded one, so an upgrade's name-hash pass can never downgrade a design-system or hand-picked colour,
 //    and an automated design-system re-derive can never stomp a human's manual choice.
 //
 // 3. DETERMINISM. Colours are pure functions of (primary | name) — see color.ts — so a sync regenerates

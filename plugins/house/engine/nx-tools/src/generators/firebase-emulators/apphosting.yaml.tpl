@@ -13,8 +13,8 @@
 # pipeline and auto-deploys on every push to the configured branch. We deliberately ship no
 # GitHub Actions deploy workflow — Firebase owns and maintains that config, so this scaffold
 # never goes stale against Firebase's deploy methodology.
-# See the SKILL.md "Connect a real Firebase project" recipe in the project-starter
-# new-project skill for the full flow.
+# See the SKILL.md "Connect a real Firebase project" recipe in the bespunky-house
+# `new` skill for the full flow.
 
 # runConfig:
 #   cpu: 1

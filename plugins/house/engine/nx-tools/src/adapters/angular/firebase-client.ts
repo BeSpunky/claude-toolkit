@@ -95,7 +95,7 @@ export const angularFirebaseClient: FirebaseClientPort = {
       );
     }
 
-    // 5) The browser SDK. Existing entries are never overwritten (preserves user pins on --sync).
+    // 5) The browser SDK. Existing entries are never overwritten (preserves user pins on upgrade).
     const rootPkg = readJson<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(
       tree,
       'package.json',

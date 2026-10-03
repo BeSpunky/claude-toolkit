@@ -1,5 +1,5 @@
 {
-  // TYPECHECKING ONLY. The shipped JS is produced by assets/compile-generators.mts via
+  // TYPECHECKING ONLY. The shipped JS is produced by engine/compile-generators.mts via
   // `ts.transpileModule` with its own explicit options (ModuleKind.CommonJS), which never reads this file —
   // so this config exists for editors and for anyone typechecking the sources, not for the build.
   //

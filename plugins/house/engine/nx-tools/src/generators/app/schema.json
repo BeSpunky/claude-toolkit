@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "BeSpunkyApp",
   "title": "Create a house-standard application",
-  "description": "Scaffold a BeSpunky-standard app — the application sibling of publishable-lib. CREATES the app through the stack adapter (--stack; default: the workspace's own — Angular today, with the house defaults minimal/scss/routing/no-e2e), then ATTACHES every capability the workspace wears by running each active layer's per-app steps — the same steps a sync runs (the web dev loop's serve targets, the design system's sass channel + provider, the Firebase client, …). What the workspace wears is detected, plus --layers (what this run is bringing into being; scaffold.sh passes its ensure set) and the legacy --firebase override. This is the single command for adding any further app to a BeSpunky workspace; never reach for the raw framework generator, which leaves the per-app config out.",
+  "description": "Scaffold a BeSpunky-standard app — the application sibling of publishable-lib. CREATES the app through the stack adapter (--stack; default: the workspace's own — Angular today, with the house defaults minimal/scss/routing/no-e2e), then ATTACHES every capability the workspace wears by running each active layer's per-app steps — the same steps a sync runs (the web dev loop's serve targets, the design system's sass channel + provider, the Firebase client, …). What the workspace wears is detected, plus --layers (what this run is bringing into being; house.sh passes its ensure set) and the legacy --firebase override. This is the single command for adding any further app to a BeSpunky workspace; never reach for the raw framework generator, which leaves the per-app config out.",
   "type": "object",
   "properties": {
     "directory": {
@@ -23,7 +23,7 @@
     },
     "layers": {
       "type": "string",
-      "description": "Comma-separated layers this run is bringing into being alongside the app, attached as if already detected (scaffold.sh passes its ensure set: at first-app time nothing it ensures exists yet).",
+      "description": "Comma-separated layers this run is bringing into being alongside the app, attached as if already detected (house.sh passes its ensure set: at first-app time nothing it ensures exists yet).",
       "x-priority": "internal"
     },
     "firebase": {

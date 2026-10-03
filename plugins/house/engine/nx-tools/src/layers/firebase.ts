@@ -7,7 +7,7 @@
 // the core and nothing to attach to — a legitimate shape, reported, not partial.
 //
 // ENSURABLE BY A SYNC: the core genuinely creates the layer from nothing — the "retrofit Firebase" case, reached
-// through --firebase (which scaffold.sh folds into the ensure set: the flag and --ensure=firebase are two
+// through --firebase (which house.sh folds into the ensure set: the flag and `add-layer firebase` are two
 // spellings of one intent).
 import type { DevcontainerPort, LayerDescriptor, PlanContext } from './descriptor';
 import { type Tree, readProjectConfiguration } from '@nx/devkit';
@@ -28,9 +28,9 @@ export const firebase: LayerDescriptor = {
   // package.json host for it; a sync on a repo without one reports the layer as unmet instead of half-wiring it.
   requires: ['nx', 'node'],
   evidence: { files: ['firebase.json'] },
-  ensurable: { scaffold: true, sync: true },
+  ensurable: { new: true, upgrade: true },
   ensureHint:
-    '`scaffold.sh --sync --firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)',
+    '`house.sh add-layer firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)',
   brings: 'the emulator wiring, the JDK step, and the forwarded emulator ports',
   generators: {
     app: [

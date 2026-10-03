@@ -8,7 +8,7 @@
 # THE DECLARATION FIRST, then the artifacts. `packageManager` is the only signal a human deliberately wrote;
 # a lockfile is a by-product, and a STRAY one is exactly what an unconditional `yarn install` used to leave
 # behind. The detection below is RENDERED from the one rule (generators/_utils/package-manager.ts), so it cannot
-# disagree with the generators; scaffold.sh keeps the same order.
+# disagree with the generators; house.sh keeps the same order.
 if [ -f "$WS/package.json" ]; then
 {{PM_DETECT}}
   echo "[post-create] package manager: $PM"

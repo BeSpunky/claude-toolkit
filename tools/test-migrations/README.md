@@ -22,7 +22,7 @@ The evidence is not hypothetical. A throwaway version of these fixtures, written
 `0.33.0` rung, caught **five** defects that four reading passes had missed:
 
 - a tree walk that entered `.claude/worktrees/` — the house's own convention for feature worktrees — and
-  would have silently edited source on an unrelated branch, which `--sync`'s git backup does not cover;
+  would have silently edited source on an unrelated branch, which an upgrade's git backup does not cover;
 - sibling files written beside a config that did not export what they imported, so the project stopped
   compiling on a bare `nx migrate`, on a partial sync, and in every multi-app workspace;
 - an "already migrated" check that matched on identifier *name*, so a project with its own same-named

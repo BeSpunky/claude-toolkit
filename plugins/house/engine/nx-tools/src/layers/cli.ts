@@ -2,7 +2,7 @@
 //
 //   node <nx-tools>/src/layers/cli.js detect
 //       The layers present in the workspace at cwd, comma-separated, in registry order.
-//   node <nx-tools>/src/layers/cli.js plan --mode=sync|scaffold --active=<csv> --ensured=<csv> --project=<p>
+//   node <nx-tools>/src/layers/cli.js plan --mode=new|upgrade --active=<csv> --ensured=<csv> --project=<p>
 //       --app=<a> --node-major=<n> --voice=0|1 --staging=0|1 --nx-tools-version=<v> --plugin-version=<v>
 //       --package-manager=<pm> [--branch-projection=<projection JSON>|undeclared]
 //       The generator sequence for this run, one TAB-separated line per step (see PlanLine):
@@ -10,12 +10,12 @@
 //         warn<TAB><sentence>
 //         partial
 //   node <nx-tools>/src/layers/cli.js apps
-//       The workspace's CLIENT applications — the apps a sync's per-app steps are for — one per line as
+//       The workspace's CLIENT applications — the apps an upgrade's per-app steps are for — one per line as
 //       `<project name><TAB><project root>`. Layout- and linking-agnostic: read from the project graph (project.json
 //       and package.json projects alike) and classified by `projectRole`, never by where a directory sits.
 //   node <nx-tools>/src/layers/cli.js shell
-//       The SHELL PROJECTION of the registry (assets/layers.sh): data + pure-bash functions for the two
-//       consumers that cannot load this package — scaffold.sh's outer shell (it validates --ensure BEFORE
+//       The SHELL PROJECTION of the registry (engine/layers.sh): data + pure-bash functions for the two
+//       consumers that cannot load this package — house.sh's outer shell (it validates the layers to add BEFORE
 //       anything is installed, and on the Docker path the host may have no usable Node) and the SessionStart
 //       hook (a few greps at the start of every session, in projects that may have no node_modules at all).
 //
@@ -23,7 +23,7 @@
 // resolve from this file's own location, which is the workspace's node_modules on the package.json path and
 // `.nx/installation/node_modules` on the Nx-wrapper path. One CLI, both hosting models, no path arguments.
 import { FsTree } from 'nx/src/generators/tree';
-import type { LayerDescriptor, LayerEvidence } from './descriptor';
+import { RUN_MODES, type LayerDescriptor, type LayerEvidence, type RunMode } from './descriptor';
 import { FLOOR, LAYERS, detectLayers, inRegistryOrder } from './registry';
 import { plan } from './plan';
 import { DEFAULT_PRESET, PRESETS } from './presets';
@@ -44,7 +44,7 @@ function main(argv: string[]): void {
       const lines = plan(
         {
           tree: workspace(),
-          mode: flags.mode === 'scaffold' ? 'scaffold' : 'sync',
+          mode: runMode(flags.mode),
           active: new Set(inRegistryOrder(csv('active'))),
           ensured: new Set(inRegistryOrder(csv('ensured'))),
           project: required(flags, 'project'),
@@ -91,6 +91,13 @@ function parseFlags(args: string[]): Record<string, string> {
     out[match[1]] = match[2];
   }
   return out;
+}
+
+/** The run mode, named after the house command — refused when it is anything else (never guessed). */
+function runMode(value: string | undefined): RunMode {
+  const mode = RUN_MODES.find((known) => known === value);
+  if (!mode) throw new Error(`[layers] plan needs --mode=${RUN_MODES.join('|')} (got ${JSON.stringify(value ?? '')}).`);
+  return mode;
 }
 
 function required(flags: Record<string, string>, key: string): string {
@@ -190,14 +197,14 @@ function evidenceLines(evidence: LayerEvidence): string {
   return lines.join('\n');
 }
 
-function ensurability(entry: LayerDescriptor, mode: 'scaffold' | 'sync'): string {
+function ensurability(entry: LayerDescriptor, mode: RunMode): string {
   const spec = entry.ensurable[mode];
   return typeof spec === 'object' ? `via:${spec.via}` : spec ? 'yes' : 'no';
 }
 
 export function shellProjection(): string {
   const ids = LAYERS.map((entry) => entry.id);
-  const ensurableIn = (mode: 'scaffold' | 'sync') =>
+  const ensurableIn = (mode: RunMode) =>
     LAYERS.filter((entry) => ensurability(entry, mode) !== 'no')
       .map((entry) => entry.id)
       .join(',');
@@ -206,14 +213,14 @@ export function shellProjection(): string {
     '# GENERATED from the @bespunky/nx-tools layer registry (src/layers/*.ts, via `cli.js shell`). DO NOT EDIT.',
     '# Regenerate with:  node tools/test-layers/run.mjs --write   (CI fails when this file drifts from the registry.)',
     '#',
-    '# The pure-bash view of the registry for the two readers that cannot load the package: scaffold.sh, which',
-    '# validates --ensure before anything is installed, and the SessionStart hook, which must stay a few greps.',
+    '# The pure-bash view of the registry for the two readers that cannot load the package: house.sh, which',
+    '# validates the layers to add before anything is installed, and the SessionStart hook, which must stay a few greps.',
     '# Sourcing it defines variables and functions only; it runs nothing.',
     '',
     `HOUSE_LAYERS=${q(ids.join(','))}`,
     `HOUSE_LAYER_FLOOR=${q(FLOOR)}`,
-    `HOUSE_LAYERS_ENSURABLE_SCAFFOLD=${q(ensurableIn('scaffold'))}`,
-    `HOUSE_LAYERS_ENSURABLE_SYNC=${q(ensurableIn('sync'))}`,
+    `HOUSE_LAYERS_ENSURABLE_NEW=${q(ensurableIn('new'))}`,
+    `HOUSE_LAYERS_ENSURABLE_UPGRADE=${q(ensurableIn('upgrade'))}`,
     `HOUSE_PRESETS=${q(PRESETS.map((p) => p.id).join(','))}`,
     `HOUSE_PRESET_DEFAULT=${q(DEFAULT_PRESET)}`,
     `HOUSE_LAYOUTS=${q(Object.keys(LAYOUTS).join(','))}`,
@@ -229,11 +236,11 @@ export function shellProjection(): string {
     byIdFunction('house_layer_brings', 'house_layer_brings <id> — what its house tooling brings (hook drift notice).', (e) =>
       e.brings,
     ),
-    byIdFunction('house_layer_ensurable_scaffold', 'house_layer_ensurable_scaffold <id> — yes | no | via:<id>.', (e) =>
-      ensurability(e, 'scaffold'),
+    byIdFunction('house_layer_ensurable_new', 'house_layer_ensurable_new <id> — yes | no | via:<id>.', (e) =>
+      ensurability(e, 'new'),
     ),
-    byIdFunction('house_layer_ensurable_sync', 'house_layer_ensurable_sync <id> — yes | no | via:<id>.', (e) =>
-      ensurability(e, 'sync'),
+    byIdFunction('house_layer_ensurable_upgrade', 'house_layer_ensurable_upgrade <id> — yes | no | via:<id>.', (e) =>
+      ensurability(e, 'upgrade'),
     ),
     byIdFunction('house_layer_nx_plugin', 'house_layer_nx_plugin <id> — the Nx plugin a scaffold `nx add`s to create it (or nothing).', (e) =>
       e.nxPlugin ?? null,

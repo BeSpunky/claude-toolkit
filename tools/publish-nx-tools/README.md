@@ -6,11 +6,11 @@ devDependency and run the generators — including the reusable-tool extraction 
 
 ## Why this exists (Phase 4 distribution)
 
-The generators live as **TypeScript** in the toolkit (`plugins/project-starter/.../assets/nx-tools`).
+The generators live as **TypeScript** in the toolkit (`plugins/house/engine/nx-tools`).
 The scaffold compiles them on the fly and bundles them at scaffold time — but that copy is **pruned on
 every `yarn install`**, so the generators aren't runnable in a project afterward.
 
-Fix: publish `@bespunky/nx-tools` and have projects depend on it (the scaffold/sync add it as a
+Fix: publish `@bespunky/nx-tools` and have projects depend on it (the scaffold/upgrade add it as a
 devDep). Nx can't run raw TS from `node_modules`, so the published package ships **compiled JS** — this
 script compiles (reusing `compile-generators.mts`) and publishes.
 
@@ -18,7 +18,7 @@ script compiles (reusing `compile-generators.mts`) and publishes.
 
 **A release ships the migrations it owes.** The version bump this script needs is not a bookkeeping step —
 it is the moment existing projects find out what changed, and the *only* moment. So before editing
-`assets/nx-tools/package.json`, put every change going out to one question:
+`engine/nx-tools/package.json`, put every change going out to one question:
 
 > **Does this alter a shape that projects already on disk have?**
 
@@ -26,7 +26,7 @@ A renamed target, a relocated project or library, a retired config or environmen
 dropped option, a file shape a generator used to heal and no longer does — each is a **one-way delta**, and
 the release is unfinished until a migration at `src/migrations/<version>/` carries it (registered in
 `migrations.json`; see the toolkit `CLAUDE.md` §*Release & versioning* for the full rule, and the
-`new-project` skill §1d for how the ladder runs).
+`bespunky-house:new` skill §1d for how the ladder runs).
 
 **"Nothing to migrate" is a legitimate answer** — a brand-new generator, a new layer, a fix to an owned
 template artifact that every sync regenerates anyway. It is also the answer you'll reach by accident if you
@@ -43,7 +43,7 @@ wrote), carried data cleared from where it used to live, and anything deliberate
 by name with its reason**. Details and the ladder's own scar tissue are in `CLAUDE.md`.
 
 **The invariant this script cannot check for you:** `max(version in migrations.json) <= version in
-assets/nx-tools/package.json`. A migration registered above the package version is never collected, never
+engine/nx-tools/package.json`. A migration registered above the package version is never collected, never
 run, and silent about it — so the migration's `version` field and the package bump are one decision.
 
 ## Usage
@@ -52,7 +52,7 @@ run, and silent about it — so the migration's `version` field and the package 
 # validate the package without publishing:
 tools/publish-nx-tools/publish.sh --dry-run
 
-# real publish (bump the version in assets/nx-tools/package.json first):
+# real publish (bump the version in engine/nx-tools/package.json first):
 tools/publish-nx-tools/publish.sh
 
 # npm 2FA on the account? pass a one-time code:
@@ -76,5 +76,5 @@ silently and writes the token to `~/.npmrc` for you (the human types it; it's ne
 ## Bootstrapping order
 
 1. `publish.sh` → `@bespunky/nx-tools@0.1.0` on npm.
-2. New projects get it as a devDep automatically (scaffold); existing projects via `scaffold.sh --sync`.
+2. New projects get it as a devDep automatically (scaffold); existing projects via `house.sh upgrade`.
 3. Then `nx g @bespunky/nx-tools:mark-extractable` / `adopt-extracted` work in any project's devcontainer.

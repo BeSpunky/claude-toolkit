@@ -3,7 +3,7 @@
 // Every house generator has a PRECONDITION: `design-system` needs Angular, `serve` needs a project with a
 // dev-server, `firebase-emulators` needs an app to wire. A layer makes the precondition a first-class,
 // inspectable value:
-//   - DETECT  — is this capability present? Pure; never mutates. This is what lets `--sync` re-apply only what
+//   - DETECT  — is this capability present? Pure; never mutates. This is what lets an upgrade re-apply only what
 //               a project actually has, instead of assuming every project is the scaffolder's own shape.
 //   - REQUIRE — a generator states what it needs, and gets a sentence a human can act on when it's absent.
 //   - ORDER   — a partial order (`requires`), so a caller can resolve "apply these layers" into a sequence.
@@ -13,14 +13,14 @@
 // declaration is a second source of truth that goes stale the moment someone runs `nx add @nx/angular` by hand.
 //
 // WHAT IS NOT A LAYER. Host facts — a host audio bridge (`--voice`), a GitHub remote, Docker — describe the
-// MACHINE, not the project, and are not detectable from a Tree. They stay opt-in flags on scaffold.sh.
+// MACHINE, not the project, and are not detectable from a Tree. They stay opt-in flags on house.sh.
 //
 // OPEN, NOT CLOSED. A layer is one file in this directory exporting a `LayerDescriptor` (see descriptor.ts),
-// registered by ONE line in `REGISTERED` below. Nothing else in the toolkit enumerates layers: scaffold.sh and
-// the SessionStart hook read the generated shell projection (`assets/layers.sh`, from `cli.ts shell`) and the
+// registered by ONE line in `REGISTERED` below. Nothing else in the toolkit enumerates layers: house.sh and
+// the SessionStart hook read the generated shell projection (`engine/layers.sh`, from `cli.ts shell`) and the
 // installed planner (`cli.ts plan`). The full contract: docs/features/2026-10-01-stack-agnostic/contracts/layers.md.
 import { type Tree, logger } from '@nx/devkit';
-import type { LayerDescriptor, LayerId } from './descriptor';
+import { RUN_MODES, type LayerDescriptor, type LayerId } from './descriptor';
 import { matchesEvidence } from './evidence';
 import { nx } from './nx';
 import { agent } from './agent';
@@ -123,7 +123,7 @@ const reported = new Set<string>();
 /**
  * The registration list's invariants, checked once at load — a broken registry must fail loudly at the first
  * import, not as a mis-ordered generator sequence in somebody's project:
- *   - ids are unique and shell-safe (they are interpolated into scaffold.sh's rendered program and the hook);
+ *   - ids are unique and shell-safe (they are interpolated into house.sh's rendered program and the hook);
  *   - every `requires` names a layer registered EARLIER (so registry order is a topological order);
  *   - an ensurability `via` names a registered layer.
  */
@@ -140,7 +140,7 @@ function validated(list: readonly LayerDescriptor[]): readonly LayerDescriptor[]
     seen.add(entry.id);
   }
   for (const entry of list) {
-    for (const mode of ['scaffold', 'sync'] as const) {
+    for (const mode of RUN_MODES) {
       const spec = entry.ensurable[mode];
       if (typeof spec === 'object' && !seen.has(spec.via)) {
         throw new Error(`[layers] "${entry.id}" is ensurable via "${spec.via}", which is not registered.`);

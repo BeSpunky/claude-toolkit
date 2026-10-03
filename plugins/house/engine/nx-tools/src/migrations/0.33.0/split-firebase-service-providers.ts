@@ -41,7 +41,7 @@
 // IT ALSO WRITES THE FILES IT IMPORTS — ALL FIVE OF THEM. The house sync runs
 // `probe → install → migrate → detect → generate`, so when this runs the per-service files do not exist
 // yet; the firebase-emulators generator writes them afterwards. That is fine for a `scaffold.sh --sync`
-// naming the app, and broken everywhere else: a bare `nx migrate`, a SYNC_PARTIAL run (the per-app
+// naming the app, and broken everywhere else: a bare `nx migrate`, an UPGRADE_PARTIAL run (the per-app
 // generators are skipped when the sync cannot resolve the app), and every app in a multi-app workspace
 // except the one the sync names. So the whole set is written here from the SAME templates the generator
 // uses (shared via generators/firebase-emulators/service-configs), and the generator's later rewrite is

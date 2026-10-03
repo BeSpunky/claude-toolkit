@@ -101,7 +101,7 @@ export const angular: StackAdapter = {
 
   apps: {
     async create(tree, options): Promise<CreatedApp> {
-      // These option names are the exact, proven-good flags scaffold.sh always passed
+      // These option names are the exact, proven-good flags house.sh always passed
       // (`--minimal --style=scss --routing --e2eTestRunner=none`), expressed programmatically.
       const { applicationGenerator } = await import('@nx/angular/generators');
       // Through the TS-solution seam: in a workspaces-linked repo the app is created as a project.json island.

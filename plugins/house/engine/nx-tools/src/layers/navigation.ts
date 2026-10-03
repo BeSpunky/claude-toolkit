@@ -16,7 +16,7 @@ export const navigation: LayerDescriptor = {
   title: 'Typed reactive navigation',
   requires: ['angular'],
   evidence: { tags: [NAVIGATION_TAG] },
-  ensurable: { scaffold: false, sync: false },
+  ensurable: { new: false, upgrade: false },
   ensureHint: '`nx g @bespunky/nx-tools:navigation-core`',
   brings: 'nothing per-sync (its generators are on-demand), but HOUSE.md gains the typed-navigation conventions',
   docSections: ['navigation'],

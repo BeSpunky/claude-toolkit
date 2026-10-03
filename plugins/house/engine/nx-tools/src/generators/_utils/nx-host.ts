@@ -1,4 +1,4 @@
-// HOW THIS REPO HOSTS AND INVOKES NX — the same decision scaffold.sh makes (`HOST`), in one place for the
+// HOW THIS REPO HOSTS AND INVOKES NX — the same decision house.sh makes (`HOST`), in one place for the
 // generators.
 //
 //   wrapper  no root package.json, or a repo already running the Nx wrapper (`.nx/nxw.js` + an `installation`
@@ -24,7 +24,7 @@ export interface NxInvocation {
 }
 
 /**
- * The one answer to "how is nx run in this repo". `packageManager` overrides detection (scaffold.sh passes the one
+ * The one answer to "how is nx run in this repo". `packageManager` overrides detection (house.sh passes the one
  * it detected), and is meaningless on the wrapper host.
  */
 export function nxInvocation(tree: Tree, packageManager?: string): NxInvocation {

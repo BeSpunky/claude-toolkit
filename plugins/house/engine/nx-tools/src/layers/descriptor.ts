@@ -1,17 +1,17 @@
 // THE LAYER DESCRIPTOR — what a layer IS, as data the whole toolkit reads.
 //
 // A project is a stack of layers (`nx`, `agent`, `web`, `angular`, …). Each one used to be described in eight
-// places at once: a closed `LayerId` union here, and in scaffold.sh a `KNOWN_LAYERS` list, two `*_ENSURABLE`
+// places at once: a closed `LayerId` union here, and in house.sh a `KNOWN_LAYERS` list, two `*_ENSURABLE`
 // lists, two hint `case`s, the `--help` text, hard-coded `if layer_active X; then nx g …` blocks, and the
 // SessionStart hook's drift greps. Adding a stack was an edit in all of them, and they drifted.
 //
 // Now a layer is ONE file (`layers/<id>.ts`) exporting one `LayerDescriptor`, registered by one line in
 // `registry.ts`. Everything else is DERIVED from the registered set:
 //   - generators guard on it (`requireLayer`) and house-doc renders from it (`detectLayers`);
-//   - scaffold.sh's outer shell (validation, --help, ensure hints) and the SessionStart hook read
-//     `assets/layers.sh`, a GENERATED shell projection of these descriptors (`cli.ts shell`), because both run
+//   - house.sh's outer shell (validation, --help, ensure hints) and the SessionStart hook read
+//     `engine/layers.sh`, a GENERATED shell projection of these descriptors (`cli.ts shell`), because both run
 //     before — or entirely without — any node_modules;
-//   - scaffold.sh's rendered sequence asks the installed CLI (`cli.ts plan`) which generators to run, with
+//   - house.sh's rendered sequence asks the installed CLI (`cli.ts plan`) which generators to run, with
 //     which arguments, instead of hard-coding them.
 //
 // This file has NO runtime imports, deliberately: a descriptor is a statement about a layer, and the
@@ -54,16 +54,23 @@ export interface LayerEvidence {
 /**
  * Can this run BRING the layer into being?
  *   true            — yes, this mode has a step that creates it.
- *   false           — no; the layer can only be detected (add it natively, then sync).
- *   { via: <id> }   — only together with that layer, whose creation produces this one (a scaffold's `web`
+ *   false           — no; the layer can only be detected (add it natively, then upgrade).
+ *   { via: <id> }   — only together with that layer, whose creation produces this one (a `new` run's `web`
  *                     exists because the Angular app it creates has a dev-server).
  */
 export type Ensurability = boolean | { via: LayerId };
 
+/**
+ * The two run shapes, named after the house commands: `new` creates a workspace; `upgrade` moves an existing one
+ * (`house.sh upgrade` and `house.sh add-layer`, which is an upgrade with an ensure set).
+ */
+export const RUN_MODES = ['new', 'upgrade'] as const;
+export type RunMode = (typeof RUN_MODES)[number];
+
 /** Everything a plan step may read: the workspace, the resolved layer sets, and the run's own parameters. */
 export interface PlanContext {
   tree: Tree;
-  mode: 'scaffold' | 'sync';
+  mode: RunMode;
   /** Detected ∪ ensured. */
   active: ReadonlySet<LayerId>;
   /** Only what this run was explicitly asked to create — the baseline acts (provider wiring) key off it. */
@@ -86,7 +93,7 @@ export interface PlanContext {
  * control character, which would split or corrupt the line.
  *
  * `skip` is the per-step precondition: return a sentence to SKIP the step and say why; with `partial: true`
- * the sync is reported as SYNC_PARTIAL (a step that should have run did not).
+ * the sync is reported as UPGRADE_PARTIAL (a step that should have run did not).
  */
 export interface GeneratorStep {
   /** Generator name inside @bespunky/nx-tools. */
@@ -108,8 +115,8 @@ export interface LayerDescriptor {
    * PURE — reads, never writes. Present ⇔ evidence matches OR detect returns true.
    */
   detect?(tree: Tree): boolean;
-  /** Can a scaffold / a sync create this layer? */
-  ensurable: { scaffold: Ensurability; sync: Ensurability };
+  /** Can a `new` / an `upgrade` (`add-layer`) run create this layer? */
+  ensurable: Record<RunMode, Ensurability>;
   /** How a human brings this layer into being. Quoted verbatim when a precondition fails. */
   ensureHint: string;
   /**

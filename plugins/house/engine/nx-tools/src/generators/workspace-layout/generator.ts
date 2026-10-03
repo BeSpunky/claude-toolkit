@@ -2,7 +2,7 @@
 //
 // A workspace's layout (`WorkspaceLayout { appsDir, libsDir }`) is otherwise DETECTED (`resolveWorkspaceLayout`:
 // nx.json → existing projects → the house default). An empty workspace has no projects to infer from, so a
-// scaffold that was ASKED for a layout (`scaffold.sh --layout=<id>`) must record the choice before the first
+// scaffold that was ASKED for a layout (`house.sh --layout=<id>`) must record the choice before the first
 // project exists, or the first generator to ask would infer the default instead. It records it in Nx's own field,
 // nx.json `workspaceLayout`, so Nx's generators land projects in the same place ours do.
 //

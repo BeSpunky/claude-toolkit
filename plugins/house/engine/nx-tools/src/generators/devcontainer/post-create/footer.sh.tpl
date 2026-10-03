@@ -1,8 +1,8 @@
 # --- Project-specific setup (YOURS — this script's one extension point) ---
-# Everything above is GENERATED and is overwritten on every `scaffold.sh --sync`. That is fine for
+# Everything above is GENERATED and is overwritten on every `house.sh upgrade`. That is fine for
 # house steps and fatal for yours: a project that needs its own provisioning (a database client, an
 # internal CA, a language runtime the house image doesn't carry) had nowhere to put it but this file,
-# where the next sync would silently delete it. Hence a seam.
+# where the next upgrade would silently delete it. Hence a seam.
 #
 # `.devcontainer/post-create.local.sh` is YOURS. It is created once, never regenerated, never read by
 # any generator, and it runs last — after the workspace has deps, plugins and every house prerequisite,

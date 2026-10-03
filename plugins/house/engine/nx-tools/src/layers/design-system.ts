@@ -20,7 +20,7 @@ export const designSystem: LayerDescriptor = {
   requires: ['nx'],
   evidence: { tags: ['type:design-system'] },
   detect: (tree) => findDesignSystem(tree) !== null,
-  ensurable: { scaffold: true, sync: false },
+  ensurable: { new: true, upgrade: false },
   ensureHint: '`nx g @bespunky/nx-tools:design-system --scope=<scope>`',
   brings: "the design-system config, STRUCTURE.md, and every app's sass/provider wiring",
   generators: {

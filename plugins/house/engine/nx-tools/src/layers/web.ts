@@ -65,7 +65,7 @@ const nxAppMustExist = (ctx: PlanContext) => {
         reason:
           `web layer present, but '${ctx.app}' is no Nx-served project (no such project, or nothing to serve) — SKIPPING the per-app serve generators. ` +
           `Migrations and workspace generators ran, but this app's own serve wiring was not refreshed. ` +
-          `Re-run naming the app: scaffold.sh --sync <project> <app-name>`,
+          `Re-run naming the app: house.sh upgrade <project> <app-name>`,
         partial: true,
       }
     : { reason: `web layer is declaration-only (.bespunky/dev.json, no Nx-served app) — no per-app Nx serve wiring to refresh.`, partial: false };
@@ -76,10 +76,10 @@ export const web: LayerDescriptor = {
   title: 'Web dev loop (dev engine, worktree domains, shared browser)',
   requires: ['agent'],
   evidence: { files: ['.bespunky/dev.json'], ...NX_SERVED },
-  ensurable: { scaffold: { via: 'angular' }, sync: false },
+  ensurable: { new: { via: 'angular' }, upgrade: false },
   ensureHint:
     'declare what the project serves in `.bespunky/dev.json` (e.g. `{"apps":{"site":{"processes":[{"id":"app","cmd":"python3 -m http.server ${PORT:app}","ports":{"app":8000}}]}}}`), ' +
-    'or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app --name=<name>`), then sync',
+    'or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app --name=<name>`), then upgrade',
   brings: 'the stack-free dev engine (tools/dev/dev serve), worktree domains, the shared co-driven browser, :80',
   generators: {
     app: [

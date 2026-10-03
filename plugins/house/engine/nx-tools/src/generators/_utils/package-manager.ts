@@ -7,7 +7,7 @@
 // THE RULE IS DATA, rendered for every reader that cannot call this function: the generated post-create.sh
 // detects at RUN time (a project can change package manager between rebuilds), so it is handed the bash
 // rendering of this same table (`packageManagerShellDetection`) rather than keeping a hand-copy that drifts.
-// (scaffold.sh's outer shell keeps its own copy — it runs before this package is installed.)
+// (house.sh's outer shell keeps its own copy — it runs before this package is installed.)
 import type { Tree } from '@nx/devkit';
 
 export type PackageManager = 'yarn' | 'npm' | 'pnpm';

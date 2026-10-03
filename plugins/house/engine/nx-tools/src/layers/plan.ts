@@ -1,6 +1,6 @@
 // THE PLAN — which house generators a run executes, in what order, with which arguments.
 //
-// This is what scaffold.sh used to hard-code as `if layer_active X; then nx g … fi` blocks. It is now derived
+// This is what house.sh used to hard-code as `if layer_active X; then nx g … fi` blocks. It is now derived
 // from the registered descriptors, so a new layer's generators run because the layer is registered — not
 // because someone remembered to add a block to a shell string.
 //
@@ -12,7 +12,7 @@
 //
 // A layer whose `requires` are not all APPLIED contributes no steps — and is applied by nothing downstream: not
 // composed into the devcontainer, not enabled in the Claude settings, not stamped. The plan says so (a WARNING +
-// SYNC_PARTIAL), because something the project's layers call for was not applied, and says how to fix it in a
+// UPGRADE_PARTIAL), because something the project's layers call for was not applied, and says how to fix it in a
 // sentence the reader can act on — never a command this mode would refuse.
 import type { GeneratorStep, LayerId, PlanContext } from './descriptor';
 import { inRegistryOrder, layer } from './registry';
@@ -75,7 +75,7 @@ export function plan(ctx: PlanContext, stamp: StampOptions): PlanLine[] {
     lines.push({ kind: 'gen', generator: step.generator, args: checked(step.generator, step.args?.(run) ?? []) });
   };
 
-  if (ctx.mode === 'sync') {
+  if (ctx.mode === 'upgrade') {
     for (const id of eligible) for (const step of layer(id).generators?.app ?? []) emit(step);
   }
   for (const id of eligible) for (const step of layer(id).generators?.workspace ?? []) emit(step);
@@ -117,7 +117,7 @@ function checked(generator: string, args: string[]): string[] {
 
 /**
  * Why `id` was skipped, and how to bring what it lacks — per missing layer, the remedy THIS mode actually
- * accepts: `--ensure=<it>` only where the mode can ensure it (a sync refuses `--ensure=node`), else the layer's
+ * accepts: `add-layer <it>` (a `new` run: `--add-layer=<it>`) only where the mode can ensure it (an upgrade refuses `add-layer node`), else the layer's
  * own hint. A requirement that is active but itself skipped is named as such; its own warning carries the fix.
  */
 function unmet(ctx: PlanContext, id: LayerId, missing: readonly LayerId[]): string {
@@ -125,9 +125,9 @@ function unmet(ctx: PlanContext, id: LayerId, missing: readonly LayerId[]): stri
     if (ctx.active.has(required)) return `${required} (itself skipped above)`;
     const spec = layer(required).ensurable[ctx.mode];
     if (spec === true) {
-      return ctx.mode === 'sync'
-        ? `${required} — re-run with \`scaffold.sh --sync --ensure=${required} <project>\``
-        : `${required} — add it to --ensure`;
+      return ctx.mode === 'upgrade'
+        ? `${required} — re-run with \`house.sh add-layer ${required} <project>\``
+        : `${required} — add it to --add-layer`;
     }
     return `${required} — ${layer(required).ensureHint}`;
   });

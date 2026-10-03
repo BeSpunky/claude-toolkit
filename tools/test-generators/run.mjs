@@ -26,7 +26,7 @@
  *
  * ── IDEMPOTENCE IS CHECKED FOR EVERY CASE, BY THE HARNESS ──────────────────────────────────────────────
  *
- * A house generator re-runs on every `--sync`. A second run that changes something is a sync that never settles —
+ * A house generator re-runs on every upgrade. A second run that changes something is a sync that never settles —
  * a diff in every consumer's repo, every time. So the runner calls each case's `run` TWICE and fails the case if
  * the second call altered the tree; no fixture has to remember to ask. A case whose operation is one-way by
  * definition (deleting a library) opts out with `once: '<why>'` — the reason is printed with the result, so an

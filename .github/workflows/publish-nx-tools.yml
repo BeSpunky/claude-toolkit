@@ -22,8 +22,8 @@ on:
     # Only wake for changes that could produce a new package. A version bump lives in nx-tools/package.json
     # (covered by the payload glob); the compiler and the publish script are inputs to what gets shipped.
     paths:
-      - 'plugins/project-starter/skills/new-project/assets/nx-tools/**'
-      - 'plugins/project-starter/skills/new-project/assets/compile-generators.mts'
+      - 'plugins/house/engine/nx-tools/**'
+      - 'plugins/house/engine/compile-generators.mts'
       - 'tools/publish-nx-tools/**'
       - '.github/workflows/publish-nx-tools.yml'
   workflow_dispatch:
@@ -62,7 +62,7 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          PKG='plugins/project-starter/skills/new-project/assets/nx-tools/package.json'
+          PKG='plugins/house/engine/nx-tools/package.json'
           VERSION="$(node -p "require('./$PKG').version")"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if npm view "@bespunky/nx-tools@$VERSION" version >/dev/null 2>&1; then
@@ -89,7 +89,7 @@ jobs:
           node -e "
             const fs=require('fs');
             const {findUnreachableMigrations}=require('./tools/check-release-invariants/rules.cjs');
-            const dir='plugins/project-starter/skills/new-project/assets/nx-tools';
+            const dir='plugins/house/engine/nx-tools';
             if(!fs.existsSync(dir+'/migrations.json')) process.exit(0);
             const pkg=JSON.parse(fs.readFileSync(dir+'/package.json','utf8'));
             const mig=JSON.parse(fs.readFileSync(dir+'/migrations.json','utf8'));

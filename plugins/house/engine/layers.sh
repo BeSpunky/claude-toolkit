@@ -2,8 +2,8 @@
 # GENERATED from the @bespunky/nx-tools layer registry (src/layers/*.ts, via `cli.js shell`). DO NOT EDIT.
 # Regenerate with:  node tools/test-layers/run.mjs --write   (CI fails when this file drifts from the registry.)
 #
-# The pure-bash view of the registry for the two readers that cannot load the package: scaffold.sh, which
-# validates --ensure before anything is installed, and the SessionStart hook, which must stay a few greps.
+# The pure-bash view of the registry for the two readers that cannot load the package: house.sh, which
+# validates the layers to add before anything is installed, and the SessionStart hook, which must stay a few greps.
 # Sourcing it defines variables and functions only; it runs nothing.
 
 HOUSE_LAYERS='nx,agent,node,js,web,angular,design-system,navigation,firebase'
@@ -50,15 +50,15 @@ house_layer_requires() {
 # house_layer_hint <id> — how a human brings the layer into being.
 house_layer_hint() {
   case "$1" in
-    nx) printf '%s\n' '`scaffold.sh --sync <project>` — the floor is always ensured: `nx init` in place (into node_modules when the repo has a package.json, else through the Nx wrapper, ./nx)' ;;
-    agent) printf '%s\n' '`scaffold.sh --sync --ensure=agent <project>`' ;;
-    node) printf '%s\n' 'a root package.json (`npm init`) — the next sync then treats the repo as a Node project' ;;
+    nx) printf '%s\n' '`house.sh upgrade <project>` — the floor is always ensured: `nx init` in place (into node_modules when the repo has a package.json, else through the Nx wrapper, ./nx)' ;;
+    agent) printf '%s\n' '`house.sh add-layer agent <project>`' ;;
+    node) printf '%s\n' 'a root package.json (`npm init`) — the next upgrade then treats the repo as a Node project' ;;
     js) printf '%s\n' '`nx add @nx/js` (or `nx g @bespunky/nx-tools:publishable-lib <name> --stack=js`)' ;;
-    web) printf '%s\n' 'declare what the project serves in `.bespunky/dev.json` (e.g. `{"apps":{"site":{"processes":[{"id":"app","cmd":"python3 -m http.server ${PORT:app}","ports":{"app":8000}}]}}}`), or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app --name=<name>`), then sync' ;;
+    web) printf '%s\n' 'declare what the project serves in `.bespunky/dev.json` (e.g. `{"apps":{"site":{"processes":[{"id":"app","cmd":"python3 -m http.server ${PORT:app}","ports":{"app":8000}}]}}}`), or give an Nx app a dev-server target (the `angular` layer: `nx g @bespunky/nx-tools:app --name=<name>`), then upgrade' ;;
     angular) printf '%s\n' '`nx add @nx/angular`, then `nx g @bespunky/nx-tools:app --name=<name>`' ;;
     design-system) printf '%s\n' '`nx g @bespunky/nx-tools:design-system --scope=<scope>`' ;;
     navigation) printf '%s\n' '`nx g @bespunky/nx-tools:navigation-core`' ;;
-    firebase) printf '%s\n' '`scaffold.sh --sync --firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)' ;;
+    firebase) printf '%s\n' '`house.sh add-layer firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)' ;;
   esac
 }
 

@@ -3,7 +3,7 @@
 // The per-app half of the design system, and the reason a LATER app is correct by construction. It runs from
 // BOTH:
 //   - `design-system`  — for every app that already exists when the DS lands (the scaffold's first app, and
-//                        every app in the workspace on a --sync), and
+//                        every app in the workspace on an upgrade), and
 //   - `app`            — for every app created afterwards (the design-system layer's per-app step).
 // Self-detecting: no design system in the workspace -> clean no-op.
 //
@@ -29,7 +29,7 @@
 //   4. the design system's runtime provider (its binding's, e.g. provideDesignSystem()) — only into an app of
 //      the SAME stack as the binding: a framework's provider is that framework's code.
 //
-// Idempotent + --sync-safe: arrays are MERGED and de-duplicated, and the marker blocks are upserted between
+// Idempotent + upgrade-safe: arrays are MERGED and de-duplicated, and the marker blocks are upserted between
 // their markers, so everything OUTSIDE them stays the developer's.
 import {
   type Tree,

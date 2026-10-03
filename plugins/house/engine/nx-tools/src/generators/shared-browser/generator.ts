@@ -11,11 +11,11 @@
 //
 // Why workspace-level (not per-app): the shared browser is a single workspace-wide resource, not an
 // app concern — every app's `serve` target shared-browser layer (wired per-app by the `app` generator)
-// drives this same browser. So it is generated ONCE per workspace, from scaffold.sh's
-// WORKSPACE_GEN_BLOCK (unconditional in both the scaffold and the --sync path — it's always-on).
+// drives this same browser. So it is generated ONCE per workspace, from house.sh's
+// WORKSPACE_GEN_BLOCK (unconditional in both the scaffold and the upgrade path — it's always-on).
 //
-// Idempotent + --sync-safe: every generator-owned file is rewritten on each run (the CLI and the three
-// helpers carry no user values) and the project's house targets are re-asserted, so a fresh run and a --sync
+// Idempotent + upgrade-safe: every generator-owned file is rewritten on each run (the CLI and the three
+// helpers carry no user values) and the project's house targets are re-asserted, so a fresh run and an upgrade
 // run converge to the same tree — exactly like firebase-emulators re-asserts its always-owned tools/*.sh scripts.
 // formatFiles polishes the result at the end.
 import { type Tree, formatFiles } from '@nx/devkit';

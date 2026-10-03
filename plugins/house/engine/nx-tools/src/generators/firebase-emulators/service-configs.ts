@@ -113,12 +113,12 @@ export const FIREBASE_ROOT_CONFIG = {
  * EXPORTED from 0.33.0 onwards — before that they were module-private. So writing the siblings beside an
  * older root file produces four files importing symbols that do not exist: the project stops compiling,
  * at `tsc`, nowhere near whatever wrote them. The migration hits exactly that if it writes only the
- * siblings — on a bare `nx migrate`, on a `SYNC_PARTIAL` run where the per-app generators are skipped,
+ * siblings — on a bare `nx migrate`, on an `UPGRADE_PARTIAL` run where the per-app generators are skipped,
  * and in any multi-app workspace, since the sync runs the generator against ONE app while the migration
  * necessarily visits them all. Keeping the set indivisible removes the failure instead of documenting it.
  *
  * Generator-owned and unconditional: these files carry no per-project values, so there is no "is it
- * customized?" guess to get wrong and no reason to preserve an older copy. `--sync`'s git backup covers a
+ * customized?" guess to get wrong and no reason to preserve an older copy. an upgrade's git backup covers a
  * project that edited one anyway.
  *
  * @returns the paths written, root file first.

@@ -1,9 +1,9 @@
 // PRESETS — named ensure sets, as DATA beside the layer registry.
 //
-// A preset is nothing but a name for a set of layers a new project starts with: `scaffold.sh --preset=angular`
-// is `--ensure=<its layers>` with a memorable spelling. It adds no behaviour — the bootstrap and the generators
-// that run are the ensure set's, exactly as for an explicit --ensure — so a preset cannot drift from the layers
-// it names, and adding one is one entry here (then `node tools/test-layers/run.mjs --write`: scaffold.sh and
+// A preset is nothing but a name for a set of layers a new project starts with: `house.sh new --preset=angular`
+// is `--add-layer=<its layers>` with a memorable spelling. It adds no behaviour — the bootstrap and the generators
+// that run are the ensure set's, exactly as for an explicit --add-layer — so a preset cannot drift from the layers
+// it names, and adding one is one entry here (then `node tools/test-layers/run.mjs --write`: house.sh and
 // --help read them through the generated shell projection like everything else).
 //
 // The DEFAULT is the stack-agnostic one: a new project is the house DX on the Nx floor — no package.json, no
@@ -64,8 +64,8 @@ function validated(list: readonly Preset[]): readonly Preset[] {
     const set = new Set(entry.layers);
     for (const id of entry.layers) {
       const descriptor = layer(id);
-      const spec = descriptor.ensurable.scaffold;
-      if (spec === false) throw new Error(`[presets] "${entry.id}": a scaffold cannot ensure "${id}".`);
+      const spec = descriptor.ensurable.new;
+      if (spec === false) throw new Error(`[presets] "${entry.id}": `new` cannot ensure "${id}".`);
       if (typeof spec === 'object' && !set.has(spec.via)) {
         throw new Error(`[presets] "${entry.id}": "${id}" is created only via "${spec.via}", which the preset lacks.`);
       }

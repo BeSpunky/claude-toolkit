@@ -3,7 +3,7 @@
 //
 // ALWAYS ENSURED. A sync on a repo without nx.json initialises Nx in place rather than refusing — "Let's keep
 // Nx as a base assumption. If it's not there, we require/install/init it" (the user, 2026-10-01). Everything
-// ABOVE this layer stays opt-in. scaffold.sh reads `floor: true` from the shell projection and adds it to
+// ABOVE this layer stays opt-in. house.sh reads `floor: true` from the shell projection and adds it to
 // every ensure set; how it lays the floor depends on the repo:
 //   - a repo with a root package.json → `nx init` into node_modules (today's path);
 //   - a repo WITHOUT one (Python, Go, docs) → `nx init --useDotNxInstallation` — the Nx wrapper
@@ -20,9 +20,9 @@ export const nx: LayerDescriptor = {
   title: 'Nx workspace (the floor)',
   requires: [],
   evidence: { files: ['nx.json'] },
-  ensurable: { scaffold: true, sync: true },
+  ensurable: { new: true, upgrade: true },
   ensureHint:
-    '`scaffold.sh --sync <project>` — the floor is always ensured: `nx init` in place (into node_modules when ' +
+    '`house.sh upgrade <project>` — the floor is always ensured: `nx init` in place (into node_modules when ' +
     'the repo has a package.json, else through the Nx wrapper, ./nx)',
   brings: 'the Nx floor every house generator and migration runs on',
   // The floor's own step: every applied layer's `.gitignore` block (see `gitignore` below and on each layer). The
@@ -53,9 +53,10 @@ export const nx: LayerDescriptor = {
     // churn on every `nx` invocation — for an agent a permanently dirty tree makes "is this change mine?"
     // unanswerable. Substring-matched, so a repo ignoring `.nx/` wholesale is left alone.
     { heading: 'Nx caches (machine-local; never committed)', entries: ['.nx/cache', '.nx/workspace-data'] },
-    // The sync's own transient lock. Nx builds its pre-migration checkpoint with `git add -A`, so a lock the
-    // sync still holds gets swept into that commit (it landed in history twice: `abd143e`, and again on the run
-    // that added this line). The sync runs on the Nx floor, so the floor owns its lock.
-    { heading: "The house sync's transient lock (machine-local; never committed)", entries: ['.bespunky-sync.lock/'] },
+    // The upgrade's own transient lock. Nx builds its pre-migration checkpoint with `git add -A`, so a lock the
+    // upgrade still holds gets swept into that commit (it landed in history twice: `abd143e`, and again on the run
+    // that added this line). The upgrade runs on the Nx floor, so the floor owns its lock. (Named
+    // `.bespunky-sync.lock/` before 0.39.0; `0.39.0/rename-upgrade-lock` retargets the old line in place.)
+    { heading: "The house upgrade's transient lock (machine-local; never committed)", entries: ['.bespunky-upgrade.lock/'] },
   ],
 };

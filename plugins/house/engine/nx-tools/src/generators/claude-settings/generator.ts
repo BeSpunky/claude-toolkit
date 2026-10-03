@@ -8,7 +8,7 @@
 // MERGE, never clobber. This file is co-owned: the house owns the marketplace/plugin/permission keys,
 // but the PROJECT owns everything it adds afterwards (its own `hooks`, extra `permissions.allow`
 // entries, extra `enabledPlugins`, env, statusLine…). A wholesale `tree.write` of the template — what
-// this generator used to do — silently deleted all of that on every `scaffold.sh --sync`.
+// this generator used to do — silently deleted all of that on every `house.sh upgrade`.
 //
 // The merge rule is deliberate and one-directional: house keys are RE-ASSERTED (the template wins at
 // every leaf it declares, so a drifted or hand-broken house setting heals), and any key the template
@@ -24,7 +24,7 @@
 // `outputStyle` is the seeded case and shows why the distinction has to exist. It is a BEHAVIOURAL
 // preference, only ONE can be active at a time, and a consumer choosing a different one — or writing
 // their own — is a legitimate decision. Re-asserting it would silently revert that choice on every
-// `--sync`, which is not "keeping the house standard", it is overruling a human who already answered
+// an upgrade, which is not "keeping the house standard", it is overruling a human who already answered
 // the question. Seeding gets the house default working out of the box (nobody has to know the setting
 // exists) while leaving the answer theirs the moment they give one.
 import { type Tree } from '@nx/devkit';

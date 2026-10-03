@@ -65,7 +65,7 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
   if (!existsSync(engine)) {
     logger.error(
       `[serve] The dev engine is missing (${engine}).\n` +
-        '  It is written by the house sync — run `scaffold.sh --sync <project>` (or `nx g @bespunky/nx-tools:dev`).',
+        '  It is written by the house sync — run `house.sh upgrade <project>` (or `nx g @bespunky/nx-tools:dev`).',
     );
     return { success: false };
   }

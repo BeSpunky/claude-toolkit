@@ -6,7 +6,7 @@
 // is still a pinned import. Provide it in the lazy routes file of the surface that calls one — or not at
 // all until you do.
 //
-// GENERATOR-OWNED — rewritten in full on every `--sync`. See firebase.config.ts for the full contract.
+// GENERATOR-OWNED — rewritten in full on every upgrade. See firebase.config.ts for the full contract.
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { getApp } from '@angular/fire/app';
 import { connectFunctionsEmulator, getFunctions, provideFunctions } from '@angular/fire/functions';

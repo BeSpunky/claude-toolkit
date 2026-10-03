@@ -9,7 +9,7 @@
 // package.json it does not have. Those now arrive with this layer and nowhere else.
 //
 // It is a HOSTING fact as much as a stack fact, and that is fine: it is detected (a package.json at the root),
-// never declared, and the sync already decides the Nx host from the very same file (scaffold.sh `HOST`). `js`
+// never declared, and the sync already decides the Nx host from the very same file (house.sh `HOST`). `js`
 // stays the narrower claim "TypeScript/JavaScript LIBRARIES here" — a Node app with no library is `node`
 // without `js`.
 //
@@ -23,8 +23,8 @@ export const node: LayerDescriptor = {
   title: 'Node project (a root package.json)',
   requires: [],
   evidence: { files: ['package.json'] },
-  ensurable: { scaffold: true, sync: false },
-  ensureHint: 'a root package.json (`npm init`) — the next sync then treats the repo as a Node project',
+  ensurable: { new: true, upgrade: false },
+  ensureHint: 'a root package.json (`npm init`) — the next upgrade then treats the repo as a Node project',
   brings: 'the typescript-node devcontainer image, the node_modules volume and the package-manager install',
   devcontainer: {
     // The stack image. It replaces the neutral base the `agent` layer declares (and that base's Node feature):

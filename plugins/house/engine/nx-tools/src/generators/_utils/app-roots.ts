@@ -7,7 +7,7 @@
 //     the repo there (see the branch-and-release skill). `Tree.children` reads the filesystem and knows
 //     nothing about `.gitignore`, so a migration walking blindly edits source on an unrelated feature
 //     branch — a branch that is NOT being migrated, so it gets the new files and keeps the old ones, and
-//     `--sync`'s git backup covers the main tree only. That is silent corruption of work in progress.
+//     an upgrade's git backup covers the main tree only. That is silent corruption of work in progress.
 //   • `dist/`, `coverage/`, `.angular/` — build output containing copies of `src`, which produce both
 //     pointless writes and spurious "could not wire" warnings about directories nobody edits.
 //
@@ -16,7 +16,7 @@
 // rather than a directory check).
 //
 // It also does two things the first version got wrong by omission: it tests the workspace ROOT itself
-// (an `nx init`-retrofitted single-project repo has its app at `src/app`, and `--sync --ensure=agent`
+// (an `nx init`-retrofitted single-project repo has its app at `src/app`, and `add-layer agent`
 // explicitly supports that shape), and it keeps recursing INTO a matched root, so an app nested under
 // another app is found rather than silently skipped.
 import type { Tree } from '@nx/devkit';

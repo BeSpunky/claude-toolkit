@@ -32,7 +32,7 @@ export interface AttachContext {
 export async function attachCapabilities(tree: Tree, context: AttachContext): Promise<GeneratorCallback[]> {
   const ctx: PlanContext = {
     tree,
-    mode: 'sync',
+    mode: 'upgrade',
     active: context.active,
     ensured: context.active,
     project: context.workspaceName,

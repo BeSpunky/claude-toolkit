@@ -12,7 +12,7 @@
 // `loadChildren` — a providers array written in the EAGER app.routes.ts is imported by the initial chunk
 // and pins Firestore there regardless.
 //
-// GENERATOR-OWNED — rewritten in full on every `--sync`. See firebase.config.ts for the full contract.
+// GENERATOR-OWNED — rewritten in full on every upgrade. See firebase.config.ts for the full contract.
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { getApp } from '@angular/fire/app';
 import { connectFirestoreEmulator, getFirestore, provideFirestore } from '@angular/fire/firestore';
