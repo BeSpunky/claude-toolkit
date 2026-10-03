@@ -1,6 +1,9 @@
 ---
 effort: house-plugin-rename
-summary: Rename the project-starter plugin to bespunky-house, its sync command to upgrade, and --ensure to add-layer, so the names say what they do
+status: concluded
+concluded: 2026-10-03
+summary: project-starter is now bespunky-house — /bespunky-house:new|upgrade|add-layer over engine/house.sh, internals renamed to match; a project-starter stub hands existing users over, payload 0.39.0 migrates their settings and .gitignore
+tags: [house, rename, cli, migration, plugin-transition]
 ---
 
 # Decision — the house plugin says what it does
