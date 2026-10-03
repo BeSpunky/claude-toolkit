@@ -13,6 +13,9 @@
 //   - Drawn surfaces carry the WORDMARK in the accent: a band leads with `✦ bespunky` in a gutter of its own,
 //     a pane opens with `✦ bespunky · <mod>` over a dim rule (the engine draws no pane title while only one
 //     pane is open, so this header IS the title). `<BrandFrame>`.
+//   - A mod's slash command answers in the transcript under the PLUGIN's name (`bespunky-workflow: …`), which
+//     reads as any plugin's. Its output row is redrawn as the toolkit's: `✦ bespunky · <command>` then the
+//     text. `<BrandCommandRow>`, from a `ui.render` hook on `{ component: 'CommandOutput', props: { command } }`.
 //   - Anything drawn BELOW the transcript (every band; a pane seated inline) starts one blank row down, so it
 //     never reads as the tail of Claude's reply.
 //   - The accent is a raw colour, not a theme key: theme keys are Claude's palette, and the point is to look
@@ -117,5 +120,27 @@ export function BrandDivider({ ui, site, columns }: { ui: BrandUi; site: BrandSi
     </Text>
   ) : (
     <Box height={1} />
+  )
+}
+
+/**
+ * A toolkit command's output row in the transcript: `✦ bespunky · <command>` in the accent, then the text the
+ * command answered. `text` is the row's own (`e.props.text`); `plugin` is the answering plugin's manifest name
+ * (`$.plugin.name`), whose `name: ` lead — the engine's attribution of a hook-answered row — the brand replaces.
+ */
+export function BrandCommandRow({ ui, command, text, plugin }: { ui: BrandUi; command: string; text: string; plugin: string }) {
+  const { Box, Text } = ui
+  const lead = `${plugin}: `
+  const body = text.startsWith(lead) ? text.slice(lead.length) : text
+
+  return (
+    <Box flexDirection="row" gap={1}>
+      <Text color={BRAND.accent} bold>
+        {brandTitle(command)}
+      </Text>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text dimColor>{body}</Text>
+      </Box>
+    </Box>
   )
 }

@@ -341,6 +341,20 @@ describe('standing pane, as the toolkit draws it', () => {
     expect((await docked.find({ type: 'Box' }))?.props).toMatchObject({ marginTop: 0 })
   })
 
+  test("the command's answer row is the toolkit's, not the plugin's bare name", async ($, on) => {
+    world(on)
+    await started($)
+    const row = await $.ui.mount({
+      plugin: PLUGIN,
+      surface: 'terminal',
+      component: 'CommandOutput',
+      props: { command: 'standing', args: '', text: `${PLUGIN}: Standing: 1 live, 0 dormant, 2 concluded.`, isErrored: false },
+    })
+    const texts = (await row.findAll({ type: 'Text' })).map(t => t.text)
+    expect(texts).toEqual([brandTitle('standing'), 'Standing: 1 live, 0 dormant, 2 concluded.'])
+    expect((await row.find({ type: 'Text', text: brandTitle('standing') }))?.props).toMatchObject({ color: BRAND.accent })
+  })
+
   test('the control row says how a closed pane comes back, and closing toasts it', async ($, on) => {
     const w = world(on)
     await started($)

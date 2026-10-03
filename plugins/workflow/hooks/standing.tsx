@@ -29,7 +29,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Standing, StandingPackage, StandingView } from '../types/index.d.ts'
 
-import { BrandDivider, BrandFrame, brandLine } from './_brand.tsx'
+import { BrandCommandRow, BrandDivider, BrandFrame, brandLine } from './_brand.tsx'
 
 const VIEW = { plugin: 'bespunky-workflow', key: 'standing' } as const
 const SHOW_CONCLUDED = { plugin: 'bespunky-workflow', key: 'showConcluded' } as const
@@ -154,6 +154,13 @@ export const register: Register = on => {
     const { live, dormant, concluded } = groups(view.standing)
 
     return { text: `Standing: ${live.length} live, ${dormant.length} dormant, ${concluded.length} concluded.` }
+  })
+
+  // The command's answer row reads as the toolkit's, not as the plugin's bare name.
+  on('ui.render', { component: 'CommandOutput', props: { command: COMMAND } }, async ($, e, next) => {
+    if (e.props.isErrored) return next(e)
+
+    return <BrandCommandRow ui={$.ui.resolve(e)} command={COMMAND} text={e.props.text} plugin={$.plugin.name} />
   })
 
   // Closed by the person's own hand (the engine's close mark, ctrl+x x), say how it comes back. The
