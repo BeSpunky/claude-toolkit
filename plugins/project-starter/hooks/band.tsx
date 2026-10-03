@@ -21,10 +21,14 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { HouseAction, HouseBand, HouseNotice } from '../types/index.d.ts'
 
+import { BrandFrame, brandLine } from './_brand.tsx'
+
 /** The one value the band draws from. */
 const BAND = { plugin: 'bespunky-project-starter', key: 'band' } as const
 
 const CHECK_TIMEOUT_MS = 10_000
+/** A dismissed band cannot say how it comes back, so the dismissal does. */
+export const DISMISSED_TOAST = 'House notice hidden for this session; the next session checks again'
 const ACTIONS: readonly HouseAction[] = ['sync', 'update-toolkit', 'fix-mounts']
 
 /** Each action's button and the prompt it submits. */
@@ -113,17 +117,18 @@ export const register: Register = on => {
       return next(e)
     }
 
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Button, Text } = ui
 
     return (
-      <Box flexDirection="column">
+      <BrandFrame ui={ui} site={e}>
         {band.notices.map((notice, index) => {
           const button = BUTTONS[notice.action]
 
           return (
             <Box key={`house-row-${notice.kind}`} flexDirection="row" gap={1}>
               <Box flexGrow={1} flexShrink={1}>
-                <Text wrap="truncate-end">{`⚙ ${notice.summary}`}</Text>
+                <Text wrap="truncate-end">{notice.summary}</Text>
               </Box>
               <Button
                 key={`house-${notice.kind}`}
@@ -138,7 +143,7 @@ export const register: Register = on => {
             </Box>
           )
         })}
-      </Box>
+      </BrandFrame>
     )
   })
 }
@@ -168,5 +173,6 @@ async function dismiss($: EngineInterface) {
   const { value: band, version } = await $.state.get(BAND)
   if (band !== undefined) {
     await $.state.set(BAND, { ...band, dismissed: true } satisfies HouseBand, { ifVersion: version })
+    $.ui.toast(brandLine(DISMISSED_TOAST))
   }
 }

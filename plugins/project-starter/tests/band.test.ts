@@ -7,12 +7,12 @@ import type { On, RenderPropsOf } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { parseNotices, promptFor } from '../hooks/band.tsx'
+import { BRAND, WORDMARK, brandLine } from '../hooks/_brand.tsx'
+import { DISMISSED_TOAST, parseNotices, promptFor } from '../hooks/band.tsx'
 
 const PLUGIN = 'bespunky-project-starter'
 const CWD = '/work/project'
 const SURFACES = ['terminal', 'desktop'] as const
-const LINE = { type: 'Text' }
 
 const PROPS: RenderPropsOf['AbovePrompt'] = {
   hasSurvey: false,
@@ -27,6 +27,10 @@ const MOVED = { kind: 'toolkit-moved', action: 'sync', summary: 'The toolkit mov
 const BEHIND = { kind: 'machine-behind', action: 'update-toolkit', summary: "This machine's toolkit is older." }
 const MOUNTS = { kind: 'post-create-failed', action: 'fix-mounts', summary: 'Post-create most likely failed.' }
 
+/** The band's notice lines: every Text but the toolkit's wordmark. */
+const lines = async (ui: { findAll: (q: { type: string }) => Promise<{ text?: string }[]> }) =>
+  (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(t => t !== WORDMARK)
+
 const ok = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
 const said = (...notices: object[]) => JSON.stringify({ notices })
 
@@ -34,6 +38,12 @@ const said = (...notices: object[]) => JSON.stringify({ notices })
 function world(on: On, first: string) {
   const runs: { argv: string[]; env?: Record<string, string>; cwd?: string }[] = []
   const submitted: { text: string; asUser?: boolean }[] = []
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
   const script = { out: ok(first) }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => $.ui.resolve(e).Box({ key: 'engine-band' }))
@@ -49,7 +59,7 @@ function world(on: On, first: string) {
     return { text: e.text }
   })
 
-  return { runs, submitted, script }
+  return { runs, submitted, script, toasts }
 }
 
 const start = ($: Engine) => $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
@@ -99,7 +109,7 @@ describe('house band', () => {
     await start($)
     for (const surface of SURFACES) {
       const ui = await mount($, surface)
-      expect((await ui.find(LINE))?.text).toBe(`⚙ ${MOVED.summary}`)
+      expect(await lines(ui)).toEqual([MOVED.summary])
       expect(await ui.find({ key: 'house-toolkit-moved' })).toMatchObject({ props: { label: 'Sync', hotkey: 's' } })
       expect(await ui.find({ key: 'house-dismiss' })).toMatchObject({ props: { label: 'Dismiss', hotkey: 'd' } })
       await ui.unmount()
@@ -133,7 +143,8 @@ describe('house band', () => {
     world(on, said(MOUNTS, MOVED))
     await start($)
     const ui = await mount($, 'terminal')
-    expect((await ui.findAll(LINE)).map(t => t.text)).toEqual([`⚙ ${MOUNTS.summary}`, `⚙ ${MOVED.summary}`])
+    expect(await lines(ui)).toEqual([MOUNTS.summary, MOVED.summary])
+    expect(await ui.findAll({ type: 'Text', text: WORDMARK })).toHaveLength(1)
     expect(await ui.find({ key: 'house-post-create-failed' })).toMatchObject({ props: { label: 'Fix' } })
     expect(await ui.findAll({ key: 'house-dismiss' })).toHaveLength(1)
   })
@@ -143,7 +154,8 @@ describe('house band', () => {
     await start($)
     const ui = await mount($, 'terminal')
     await ui.press({ key: 'house-dismiss' })
-    expect(await ui.find(LINE)).toBeUndefined()
+    expect(await lines(ui)).toEqual([])
+    expect(w.toasts).toEqual([brandLine(DISMISSED_TOAST)])
     const before = w.runs.length
     await endTurn($)
     expect(w.runs).toHaveLength(before)
@@ -153,10 +165,10 @@ describe('house band', () => {
     const w = world(on, said(MOVED))
     await start($)
     const ui = await mount($, 'terminal')
-    expect(await ui.find(LINE)).toBeDefined()
+    expect(await lines(ui)).toEqual([MOVED.summary])
     w.script.out = ok(said())
     await endTurn($)
-    expect(await ui.find(LINE)).toBeUndefined()
+    expect(await lines(ui)).toEqual([])
   })
 
   test('nothing shown, nothing re-run after a turn', async ($, on) => {
@@ -164,6 +176,17 @@ describe('house band', () => {
     await start($)
     await endTurn($)
     expect(w.runs).toHaveLength(1)
+  })
+
+  test('the band is the toolkit\'s: a row below the transcript, led by the wordmark in the accent', async ($, on) => {
+    world(on, said(MOVED))
+    await start($)
+    for (const surface of SURFACES) {
+      const ui = await mount($, surface)
+      expect((await ui.find({ type: 'Box' }))?.props).toMatchObject({ marginTop: 1 })
+      expect(await ui.find({ type: 'Text', text: WORDMARK })).toMatchObject({ props: { color: BRAND.accent, bold: true } })
+      await ui.unmount()
+    }
   })
 
   test('parseNotices keeps only well-formed notices with a known action', () => {
