@@ -29,6 +29,8 @@ import type { EngineInterface, FsEntry, Register } from 'claude-code'
 
 import type { VoiceBand, VoiceHealth } from '../types/index.d.ts'
 
+import { BAND_GUTTER_CELLS, BrandFrame, brandLine } from './_brand.tsx'
+
 /** The one value the band draws from; written by the poller alone. */
 const BAND = { plugin: 'bespunky-voice', key: 'band' } as const
 const IDLE: VoiceBand = { phase: 'idle' }
@@ -169,12 +171,16 @@ export const register: Register = on => {
       return next(e)
     }
 
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Button, Text } = ui
+    // The toolkit's frame (./_brand.tsx) leads the band with its wordmark: that gutter is not the line's.
+    const columns = (e.props.bodyColumns || e.viewport?.columns || 80) - BAND_GUTTER_CELLS
 
     if (shown.phase === 'warning') {
-      const room = (e.props.bodyColumns || e.viewport?.columns || 80) - DISMISS_CELLS
+      const room = columns - DISMISS_CELLS
 
       return (
+        <BrandFrame ui={ui} site={e}>
         <Box flexDirection="row" gap={1}>
           <Box flexGrow={1} flexShrink={1}>
             <Text color="warning" wrap="truncate-end">
@@ -192,11 +198,12 @@ export const register: Register = on => {
             }}
           />
         </Box>
+        </BrandFrame>
       )
     }
 
     const isLingering = shown.phase === 'lingering'
-    const room = (e.props.bodyColumns || e.viewport?.columns || 80) - (isLingering ? REPLAY_CELLS : BOTH_CELLS)
+    const room = columns - (isLingering ? REPLAY_CELLS : BOTH_CELLS)
     const line =
       shown.phase === 'listening'
         ? shown.heard === ''
@@ -205,6 +212,7 @@ export const register: Register = on => {
         : `🔊 ${fit(shown.text, room - 3)}`
 
     return (
+      <BrandFrame ui={ui} site={e}>
       <Box flexDirection="row" gap={1}>
         <Box flexGrow={1} flexShrink={1}>
           <Text dimColor={isLingering} wrap="truncate-end">
@@ -216,6 +224,7 @@ export const register: Register = on => {
           <Button key="voice-stop" label="Stop" hotkey="s" variant="primary" onPress={() => void runVoice($, 'stop')} />
         )}
       </Box>
+      </BrandFrame>
     )
   })
 }
@@ -339,7 +348,7 @@ function cachedText($: EngineInterface, path: string): TextFile {
 /** Runs `voice.sh <verb>` fire-and-forget; a failure is a toast naming it. */
 async function runVoice($: EngineInterface, verb: Verb) {
   const dir = await voiceDir($)
-  const failed = (why: string) => $.ui.toast(`Voice ${verb} failed: ${why}`)
+  const failed = (why: string) => $.ui.toast(brandLine(`Voice ${verb} failed: ${why}`))
 
   if (dir === undefined) {
     return failed('HOME is unset')

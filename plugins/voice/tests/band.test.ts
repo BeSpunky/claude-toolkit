@@ -5,6 +5,7 @@ import type { On, RenderPropsOf } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { WORDMARK, brandLine } from '../hooks/_brand.tsx'
 import { guardAbort, healthWarning, parseHealth } from '../hooks/band.tsx'
 
 const PLUGIN = 'bespunky-voice'
@@ -14,7 +15,8 @@ const ASK = 'mcp__plugin_bespunky-voice_bespunky-voice__ask_by_voice'
 const T0 = 1_800_000_000_000
 const SURFACES = ['terminal', 'desktop'] as const
 /** The band's one line of text; the engine's own band (beneath) draws none. */
-const LINE = { type: 'Text' }
+/** The band's own line: any Text but the toolkit's wordmark, which leads every toolkit band. */
+const LINE = { type: 'Text', text: new RegExp(`^(?!${WORDMARK}$)`) }
 
 const PROPS: RenderPropsOf['AbovePrompt'] = {
   hasSurvey: false,
@@ -205,7 +207,7 @@ describe('voice band', () => {
     await started($, w)
     const ui = await mount($, 'terminal')
     await ui.press({ key: 'voice-stop' })
-    expect(toasts).toEqual(['Voice stop failed: no runtime'])
+    expect(toasts).toEqual([brandLine('Voice stop failed: no runtime')])
   })
 
   test('a normal ask_by_voice passes its result through and stops nothing', async ($, on) => {
