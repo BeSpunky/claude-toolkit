@@ -6,7 +6,7 @@ User: "Send agents to sanity check" (2026-10-03). Read-only reviewers, branch fe
 | --- | --- | --- | --- |
 | R1 | mcp/ask-server.mjs + mcp/answer.mjs (protocol, async, cancel, supersede, intents) | dispatched | yes |
 | R2 | scripts/listen.sh (stream contract, VAD, lifecycle) | dispatched | yes |
-| R3 | scripts/speaker.sh, hooks/*, hooks.json, install-runtime, command + skill docs | dispatched | yes |
+| R3 | scripts/speaker.sh, hooks/*, hooks.json, install-runtime, command + skill docs | returned | yes |
 | R4 | end-to-end behaviour: phrasing on realistic payloads, docs vs. behaviour, tests' blind spots | returned | yes |
 
 Findings land below as they return.
@@ -19,3 +19,9 @@ prompt, so speech keeps going). Worst: "…retry the request. or Log the user ou
 multi-select read as either/or. Ranked fixes: PostToolUse stop on AskUserQuestion|ExitPlanMode; Stop hook speaks
 list heads + question (shared phrasing); label punctuation, multi-select, yes/no suggestion; tests for
 extract-turn-question, multi-select, cancel-while-speaking.
+
+## R3 (speaker/hooks/docs) — returned
+MED speaker.sh: without setsid (macOS) stop kills only speak.sh's bash, the player keeps playing. MED speaker.sh:
+concurrent `say` not atomic — all speak at once, only one stoppable. LOW-MED install-runtime: unreadable/missing
+PLUGIN_ROOT/scripts → prune deletes every published script. Sound: --wait pgid, rc/stderr passthrough, stop during
+--wait returns 0, hooks print nothing, hooks.json, docs ↔ scripts, all repo checks.
