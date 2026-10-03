@@ -1,4 +1,4 @@
-# voice-band — decision (DRAFT, awaiting the user's confirmation)
+# voice-band — decision 
 
 Brief: [`BRIEF.md`](BRIEF.md).
 
@@ -15,7 +15,9 @@ name the `user` tier "everything a person installs". Gates: an organization's ma
 whether the interactive workspace-trust dialog applies.
 → **The band ships inside `bespunky-voice`.**
 
-## Proposed design
+## The design
+
+Confirmed by the user: "yes, build it" (2026-10-03).
 
 **The band is a view, not a second voice.** The runtime keeps owning the audio; the
 band only shows its state and sends it two commands.
