@@ -54,8 +54,8 @@ const section = (doc, title) => {
 const RULES = (t) => section(t.read('HOUSE.rules.md'), 'Branch & release workflow');
 const PARAMS = (t) => section(t.read('HOUSE.md'), 'Branch & release parameters');
 
-const generate = (layers) => async (tree, ctx) => {
-  await ctx.load('generators/house-doc/generator').default(tree, { layers, nxToolsVersion: '9.9.9', pluginVersion: '1.0.0' });
+const generate = (layers, extra = {}) => async (tree, ctx) => {
+  await ctx.load('generators/house-doc/generator').default(tree, { layers, nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', ...extra });
 };
 
 /** What every rendering — declared or not — must still say. */
@@ -136,6 +136,73 @@ export default {
         t.ok(!params.includes('| Line | Role |'), 'no table for a model that does not exist');
         t.ok(!tree.exists(MODEL), 'the generator never writes the model to escape the undeclared state');
       },
+    },
+    // THE RESOLVED MODEL WINS OVER THE TREE. A sync resolves which copy is in force (the integration tip, local or
+    // remote) and hands it in as `branchProjection`; the Tree is only the working copy, which may be stale, absent
+    // (a branch cut before the declaration) or in another directory (an Nx workspace nested below the git root).
+    {
+      name: 'branchProjection is rendered, and a conflicting working-tree file is not read',
+      setup: () => {
+        const tree = workspace();
+        declare(THREE_LINE)(tree);
+        return tree;
+      },
+      run: generate(['nx', 'agent'], { branchProjection: JSON.stringify({ schema: 1, remote: 'origin', ...TRUNK }) }),
+      expect: (tree, t) => {
+        const rules = RULES(t);
+        common(t, rules);
+        t.ok(rules.includes(`**This project's branch model: ${TRUNK.summary}.**`), 'the passed projection is the one rendered');
+        t.ok(!rules.includes('`development`') && !rules.includes('`staging`'), 'nothing from the Tree\'s three-line copy');
+      },
+    },
+    {
+      name: 'branchProjection "undeclared" renders the protective rules even over a declared working-tree file',
+      setup: () => {
+        const tree = workspace();
+        declare(GITFLOW)(tree);
+        return tree;
+      },
+      run: generate(['nx', 'agent'], { branchProjection: 'undeclared' }),
+      expect: (tree, t) => {
+        const rules = RULES(t);
+        common(t, rules);
+        t.ok(rules.includes('branch model is not declared yet'), 'undeclared wording');
+        t.ok(!rules.includes('release/*'), 'nothing from the Tree\'s gitflow copy');
+      },
+    },
+    {
+      name: 'branchProjection with an unknown schema major is refused, not guessed at',
+      once: 'the generator throws; there is no second state to compare',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        ctx.error = undefined;
+        try {
+          await generate(['nx', 'agent'], { branchProjection: JSON.stringify({ ...THREE_LINE, schema: 2 }) })(tree, ctx);
+        } catch (error) {
+          ctx.error = error;
+        }
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(/branchProjection/.test(ctx.error?.message ?? '') && /projection\.schema` is 2/.test(ctx.error?.message ?? ''), `a clear refusal: ${ctx.error?.message}`);
+        t.ok(!tree.exists('HOUSE.rules.md'), 'nothing written before the refusal');
+      },
+    },
+    // A schema MINOR is additive (readers check the major): "1.1" reads, from the Tree and from the option alike.
+    {
+      name: 'projection schema "1.1" is read as major 1 (Tree)',
+      setup: () => {
+        const tree = workspace();
+        tree.write(MODEL, JSON.stringify({ schema: 1, projection: { ...THREE_LINE, schema: '1.1' } }));
+        return tree;
+      },
+      run: generate(['nx', 'agent']),
+      expect: (tree, t) => t.ok(RULES(t).includes(`**This project's branch model: ${THREE_LINE.summary}.**`), 'rendered'),
+    },
+    {
+      name: 'projection schema "1.1" is read as major 1 (branchProjection)',
+      setup: () => workspace(),
+      run: generate(['nx', 'agent'], { branchProjection: JSON.stringify({ ...GITFLOW, schema: '1.1' }) }),
+      expect: (tree, t) => t.ok(RULES(t).includes(`**This project's branch model: ${GITFLOW.summary}.**`), 'rendered'),
     },
     {
       name: 'an unknown projection schema major is refused, not guessed at',

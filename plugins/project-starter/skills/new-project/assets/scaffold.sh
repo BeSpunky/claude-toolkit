@@ -105,7 +105,7 @@ HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_
 # whether a model is declared at all. Rendered by value for the same reason.
 # shellcheck source=house-branches.sh
 . "$ASSETS_DIR/house-branches.sh"
-HOUSE_BRANCHES_FNS="$(declare -f house_branches_undeclared_protected _house_bm_parse _house_bm_ref house_branch_model)"
+HOUSE_BRANCHES_FNS="$(house_branches_fns)"
 
 # The command line is the first place anyone looks, and until now it was the one place that said nothing:
 # `--help` was answered with "unknown flag", and a bare invocation printed a raw bash parameter-expansion
@@ -1196,7 +1196,26 @@ fi
 # fire AFTER this gate — an Nx workspace and an nx binary — stay where they are on purpose: '--ensure' may
 # create what they check, so they are post-ensure conditions, not pre-write ones, and aggregating them here
 # would report a missing nx.json that the run was about to create.
+# THE BRANCH MODEL, RESOLVED ONCE PER RUN (house-branches.sh). Two consumers read this one result: the preflight
+# (which lines this run may not commit onto) and house-doc (which model the house docs render) — house-doc is
+# handed the projection rather than reading the Tree, because the Tree is the working copy, and the working copy
+# is not the model in force: its schema may differ from the integration tip's, a branch cut before the declaration
+# carries none, and an Nx workspace nested below the git root would look for .bespunky/ in the wrong directory.
+# '_bm_projection' is what the planner passes on: the projection JSON (declared), the literal 'undeclared', or
+# empty (unreadable — a sync has already refused; a standalone house-doc then refuses on the Tree itself).
+BRANCH_MODEL_BLOCK="
+$HOUSE_BRANCHES_FNS
+_bm=\"\$(house_branch_model)\"
+_bm_get() { printf '%s\n' \"\$_bm\" | sed -n \"s/^\$1=//p\"; }
+_bm_state=\"\$(_bm_get state)\"
+case \"\$_bm_state\" in
+  declared)   _bm_projection=\"\$(_bm_get projection)\" ;;
+  undeclared) _bm_projection='undeclared' ;;
+  *)          _bm_projection='' ;;
+esac"
+
 PREFLIGHT_CHECKS="
+$BRANCH_MODEL_BLOCK
 _REFUSE_CODES=''
 _REFUSE_TEXT=''
 _SIGNAL_TEXT=''
@@ -1272,21 +1291,19 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   # and no history to strand. Every branch question below presupposes a HEAD.
   if git rev-parse --verify HEAD >/dev/null 2>&1; then
     _branch=\"\$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')\"
-    # THE BRANCH MODEL — what is protected here, and whether anyone has said. See house-branches.sh for which copy
-    # of the declaration is authoritative; this block only acts on its verdict.
-    $HOUSE_BRANCHES_FNS
-    _bm=\"\$(house_branch_model)\"
-    _bm_get() { printf '%s\n' \"\$_bm\" | sed -n \"s/^\$1=//p\"; }
-    _bm_state=\"\$(_bm_get state)\"
+    # THE BRANCH MODEL — what is protected here, and whether anyone has said. Resolved once, above the gate
+    # (BRANCH_MODEL_BLOCK; see house-branches.sh for which copy is authoritative); this block only acts on it.
     _bm_notes=\"\$(_bm_get note | sed 's/^/           note: /')\"
     [ -n \"\$_bm_notes\" ] && _bm_notes=\"
 \$_bm_notes\"
-    _bm_protected=\"\$(house_branches_undeclared_protected)\"
-    _bm_patterns=''
+    # THE EFFECTIVE PROTECTED SET, in every state — the resolver's, never rebuilt here from the state word. Rebuilding
+    # it ('undeclared' → the fallback names) is how a not-yet-landed declaration's own protected lines were dropped,
+    # and a sync committed onto a production line the working copy named.
+    _bm_protected=\"\$(_bm_get protected)\"
+    _bm_patterns=\"\$(_bm_get protectedPatterns)\"
+    _bm_shown=\"\$(printf '%s' \"\$_bm_protected \$_bm_patterns\" | sed 's/^ *//; s/ *\$//; s/  */, /g')\"
     case \"\$_bm_state\" in
       declared)
-        _bm_protected=\"\$(_bm_get protected)\"
-        _bm_patterns=\"\$(_bm_get protectedPatterns)\"
         _bm_integration=\"\$(_bm_get integration)\"
         _bm_summary=\"\$(_bm_get summary)\"
         _signal \"[preflight] branch-model: declared — \$_bm_summary   (read from \$(_bm_get source))\$_bm_notes\"
@@ -1304,7 +1321,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
         _signal \"[preflight] branch-model: undeclared
            This project declares no branch model (.bespunky/branches.json), so nothing here says which lines
            exist or where work lands. Until one is declared, every existing branch named
-           \$(house_branches_undeclared_protected | sed 's/ /, /g') is protected.
+           \$_bm_shown is protected.
            The model is not this script's to decide: investigate the repository and ASK the user — the
            bespunky-workflow:branch-and-release skill carries the procedure (choosing a branch model).\$_bm_notes\"
         ;;
@@ -1334,7 +1351,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            any other change.\"
         else
           _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', and this project declares no branch model —
-           so every branch named \$(house_branches_undeclared_protected | sed 's/ /, /g') is protected until it does.
+           so every branch named \$_bm_shown is protected until it does.
            The migration ladder commits onto the current branch; with no model, nothing says whether
            '\$_branch' is where work happens or the production line, and landing a stack of commits on the
            latter cannot be taken back. Open a worktree off '\$_branch' and sync there; where it lands waits
@@ -1933,13 +1950,15 @@ echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 # @bespunky/nx-tools src/layers/cli.js plan) derives the sequence from the registered layer descriptors:
 #   per-app steps (sync only — a scaffold's app generator composes them), then workspace steps in registry order,
 #   then house-doc LAST, ungated, because it STAMPS the layer set this run applied.
-# Each line it prints is: gen TAB generator TAB argv-words | warn TAB sentence | partial. The argv words are
-# refused at plan time unless shell-safe and free of duplicated flags, so word-splitting them here is deliberate.
+# Each line it prints is: gen TAB generator TAB arg TAB arg … | warn TAB sentence | partial. Arguments are
+# TAB-separated FIELDS, read into an array and passed quoted — never word-split — so a value may carry spaces and
+# JSON (house-doc's --branchProjection is the resolved branch-model projection). The planner refuses an argument
+# holding a TAB, newline or other control character, and a duplicated flag.
 #
 # fd 9, not stdin: nx g may read stdin, and would swallow the rest of the plan.
 PLAN_RUN_BLOCK="
 _SYNC_PARTIAL=\${_SYNC_PARTIAL:-0}
-_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM)\" || {
+_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM --branch-projection=\"\${_bm_projection:-}\")\" || {
   echo 'ERROR: the layer planner failed — no house generators were run, and nothing has been stamped.' >&2
   exit 1
 }
@@ -1947,8 +1966,10 @@ _tab=\"\$(printf '\\t')\"
 while IFS=\"\$_tab\" read -r -u 9 _kind _gen _args; do
   case \"\$_kind\" in
     gen)
-      echo \"[layers] nx g @bespunky/nx-tools:\$_gen \$_args\"
-      $NX_RUN g \"@bespunky/nx-tools:\$_gen\" \$_args ;;
+      _argv=()
+      [ -n \"\$_args\" ] && IFS=\"\$_tab\" read -r -a _argv <<< \"\$_args\"
+      echo \"[layers] nx g @bespunky/nx-tools:\$_gen \${_argv[*]+\${_argv[*]}}\"
+      $NX_RUN g \"@bespunky/nx-tools:\$_gen\" \${_argv[@]+\"\${_argv[@]}\"} ;;
     warn)
       echo \"[layers] WARNING: \$_gen\" ;;
     partial)
@@ -2060,6 +2081,9 @@ $SCAFFOLD_LAYOUT_BLOCK
 $SCAFFOLD_APP_BLOCK
 $LAYER_RESOLVE_BLOCK
 APP='$APP'
+# A sync resolved the branch model in its preflight; a scaffold has no preflight, so it resolves here (a new
+# repository: undeclared, unless a declaration was already carried in).
+$BRANCH_MODEL_BLOCK
 $PLAN_RUN_BLOCK
 # --local only: correct the manifest's temp-dir tarball spec back to the plain version BEFORE the commit, or
 # the scaffold's one commit records a file: path that exists on no machine (and is deleted moments later).

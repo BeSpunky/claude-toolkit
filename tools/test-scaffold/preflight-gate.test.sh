@@ -25,9 +25,9 @@ NX_TOOLS_VERSION=9.9.9   # render-time substitution; the gate only echoes it
 
 [ -f "$SCAFFOLD" ] || { echo "FATAL: scaffold.sh not found at $SCAFFOLD" >&2; exit 2; }
 
-extract() {   # extract <assignment marker> — the block from its opening line to its closing `fi"`
-  local marker="$1" out
-  out="$(awk -v s="$marker" 'index($0,s)==1{f=1} f{print} f&&/^fi"$/{exit}' "$SCAFFOLD")"
+extract() {   # extract <assignment marker> [<closing line>] — the block from its opening line to its closing line (`fi"`)
+  local marker="$1" end="${2:-fi\"}" out
+  out="$(awk -v s="$marker" -v e="$end" 'index($0,s)==1{f=1} f{print} f&&$0==e{exit}' "$SCAFFOLD")"
   if [ -z "$out" ]; then
     echo "FATAL: could not extract '$marker' from scaffold.sh." >&2
     echo "       The block moved or its closing marker changed. Refusing to run: an empty extraction" >&2
@@ -48,7 +48,10 @@ HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_
 # The branch-model reader, rendered in by value the same way.
 # shellcheck source=../../plugins/project-starter/skills/new-project/assets/house-branches.sh
 . "$ROOT/plugins/project-starter/skills/new-project/assets/house-branches.sh"
-HOUSE_BRANCHES_FNS="$(declare -f house_branches_undeclared_protected _house_bm_parse _house_bm_ref house_branch_model)"
+HOUSE_BRANCHES_FNS="$(house_branches_fns)"
+# The branch model is resolved once, above the gate, and the gate embeds that block — so it is extracted first.
+model_src="$(extract 'BRANCH_MODEL_BLOCK="' 'esac"')" || exit 2
+eval "$model_src"
 checks_src="$(extract 'PREFLIGHT_CHECKS="')"   || exit 2
 verdict_src="$(extract 'PREFLIGHT_VERDICT="')" || exit 2
 # `--staging` is substituted at RENDER time, so a case that passes it re-renders the checks (render_checks 1).
@@ -176,6 +179,107 @@ d="$(mkrepo prop)"; commit "$d"; git -C "$d" checkout -q -b chore/model
 declare_model "$d" 1 main main main ''
 git -C "$d" add -A && git -C "$d" commit -qm 'propose model'
 check 'declared on a branch, not landed' 'PASS' "$d" undeclared
+
+# ── Resolution (CONTRACT Amendment 2) — the same scenario list the engine's suite runs ─────────────────────────
+# Asserts the resolver's own verdict (state + the ref it read) beside the gate's, because the gate's PASS/REFUSE
+# alone cannot tell "declared from origin/dev" from "undeclared, but the name happens to be protected anyway".
+resolves() {   # resolves <label> <dir> <want state> <want source|-> [<want note substring>]
+  local out st src
+  out="$(cd "$2" && house_branch_model)"
+  st="$(printf '%s\n' "$out" | sed -n 's/^state=//p')"
+  src="$(printf '%s\n' "$out" | sed -n 's/^source=//p')"; src="${src:--}"
+  if [ "$st|$src" = "$3|$4" ] && { [ -z "${5:-}" ] || printf '%s\n' "$out" | grep -q "^note=.*$5"; }; then
+    printf '  ok   %-32s %s\n' "$1" "$st via $src"
+  else
+    printf '  FAIL %-32s got:[%s via %s] want:[%s via %s%s]\n' "$1" "$st" "$src" "$3" "$4" "${5:+, note ~ $5}"
+    printf '%s\n' "$out" | sed 's/^/         /'; FAILED=1
+  fi
+}
+# A shared upstream: a bare `origin` and a clone of it. <name> names both.
+upstream() {   # upstream <name> <first branch> — prints the CLONE's path; the seed repo is <name>-seed
+  local seed="$TMP/$1-seed" bare="$TMP/$1.git" clone="$TMP/$1"
+  mkdir -p "$seed"; git -C "$seed" init -q -b "$2"; commit "$seed"
+  git clone -q --bare "$seed" "$bare"; git -C "$seed" remote add origin "$bare"; git -C "$seed" fetch -q origin
+  git clone -q "$bare" "$clone" 2>/dev/null
+  echo "$clone"
+}
+seed() { echo "$TMP/$1-seed"; }
+
+# THE REPRODUCED BUG. Two-line `dev → prod`; this clone's LOCAL `dev` is stale (predates the declaration), the
+# remote's carries it, HEAD is on `prod`. Stopping at the first ref found said "undeclared" and protected only the
+# fallback names — so `prod`, the production line, let a sync commit onto it.
+c="$(upstream up-stale dev)"; s_="$(seed up-stale)"
+git -C "$s_" branch prod; git -C "$s_" push -q origin dev prod
+git -C "$c" fetch -q; git -C "$c" checkout -q dev 2>/dev/null; git -C "$c" checkout -q -b prod origin/prod
+declare_model "$s_" 1 dev dev,prod prod ''
+git -C "$s_" add -A && git -C "$s_" commit -qm 'declare dev → prod'; git -C "$s_" branch -f prod dev
+git -C "$s_" push -q origin dev prod
+git -C "$c" fetch -q; git -C "$c" merge -q --ff-only origin/prod
+resolves 'stale local dev, fresh origin' "$c" declared refs/remotes/origin/dev
+check 'stale local dev, HEAD on prod' 'SYNC_REFUSED: protected-branch' "$c" declared
+
+# NOT LANDED: the working copy declares lines the integration tip does not carry yet. Undeclared — but never with
+# fewer protections than the copy itself declares: its `prod` and its `rel/*` stay protected beside the §3 names.
+d="$(mkrepo notlanded)"; commit "$d"; git -C "$d" branch dev; git -C "$d" checkout -q -b prod
+declare_model "$d" 1 dev dev,prod prod 'rel/*'
+git -C "$d" add -A && git -C "$d" commit -qm 'propose dev → prod'
+resolves 'not landed' "$d" undeclared - 'not in force until it lands'
+check 'not landed, HEAD on its prod' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+git -C "$d" checkout -q -b rel/1
+check 'not landed, its glob rel/1' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+git -C "$d" checkout -q -b chore/m
+check 'not landed, work branch' 'PASS' "$d" undeclared
+
+# BOTH HOLD IT. Identical → either; one descends from the other → the descendant (here origin/dev, which added `qa`);
+# diverged → the local one, said out loud.
+c="$(upstream up-both dev)"; s_="$(seed up-both)"
+declare_model "$s_" 1 dev dev,prod prod ''
+git -C "$s_" add -A && git -C "$s_" commit -qm 'declare'; git -C "$s_" push -q origin dev
+git -C "$c" pull -q --ff-only
+resolves 'both hold, identical' "$c" declared refs/heads/dev
+declare_model "$s_" 1 dev dev,qa,prod prod ''
+git -C "$s_" add -A && git -C "$s_" commit -qm 'add qa'; git -C "$s_" push -q origin dev
+git -C "$c" fetch -q; git -C "$c" checkout -q -b qa
+resolves 'both hold, origin descends' "$c" declared refs/remotes/origin/dev
+check 'both hold, origin adds qa' 'SYNC_REFUSED: protected-branch' "$c" declared
+git -C "$c" checkout -q dev; git -C "$c" merge -q --ff-only origin/dev
+declare_model "$c" 1 dev dev,qa,stg,prod prod ''
+git -C "$c" add -A && git -C "$c" commit -qm 'local adds stg'; git -C "$c" checkout -q -b feat/z
+resolves 'both hold, local descends' "$c" declared refs/heads/dev
+declare_model "$s_" 1 dev dev,uat,prod prod ''
+git -C "$s_" add -A && git -C "$s_" commit -qm 'remote adds uat'; git -C "$s_" push -q origin dev; git -C "$c" fetch -q
+resolves 'both hold, diverged' "$c" declared refs/heads/dev 'diverged'
+
+# SELF-CONFIRMING SEARCH through the remote only: no working copy (the branch was cut before the declaration), the
+# local `development` stale, origin/development carrying a copy that names itself — found, and its `prod` protected.
+c="$(upstream up-selfc development)"; s_="$(seed up-selfc)"
+git -C "$s_" branch prod; git -C "$s_" push -q origin prod
+git -C "$c" fetch -q; git -C "$c" checkout -q -b prod origin/prod
+declare_model "$s_" 1 development development,prod prod ''
+git -C "$s_" add -A && git -C "$s_" commit -qm 'declare'; git -C "$s_" push -q origin development; git -C "$c" fetch -q
+resolves 'self-confirm via origin only' "$c" declared refs/remotes/origin/development
+check 'self-confirm, HEAD on prod' 'SYNC_REFUSED: protected-branch' "$c" declared
+
+# UNREADABLE: a working copy that is not JSON is refused — never skipped into the self-confirming search, which
+# would read some other branch's copy and act on it.
+d="$(mkrepo badjson)"; commit "$d"; git -C "$d" checkout -q -b fix/j
+mkdir -p "$d/.bespunky"; echo '{ not json' > "$d/.bespunky/branches.json"
+git -C "$d" add -A && git -C "$d" commit -qm 'broken'
+resolves 'unparseable working copy' "$d" unreadable working-tree
+check 'unparseable working copy' 'SYNC_REFUSED: branch-model-unreadable' "$d"
+# …and a readable working copy whose integration TIP carries a schema this toolkit does not know: unreadable,
+# read from the tip.
+d="$(mkrepo tipschema)"; commit "$d"; git -C "$d" checkout -q -b dev
+declare_model "$d" 2 dev dev,prod prod ''
+git -C "$d" add -A && git -C "$d" commit -qm 'future'; git -C "$d" checkout -q -b fix/t
+declare_model "$d" 1 dev dev,prod prod ''
+git -C "$d" add -A && git -C "$d" commit -qm 'older copy'
+resolves 'tip schema unknown' "$d" unreadable refs/heads/dev
+# A schema MINOR is additive: 1.1 reads as 1.
+d="$(mkrepo minor)"; commit "$d"; git -C "$d" checkout -q -b dev
+declare_model "$d" '"1.1"' dev dev,prod prod ''
+git -C "$d" add -A && git -C "$d" commit -qm 'minor'; git -C "$d" checkout -q -b feat/m
+resolves 'schema 1.1 accepted' "$d" declared refs/heads/dev
 
 # An unknown projection schema MAJOR is refused, never guessed past — it is what decides where commits land.
 d="$(mkrepo schema)"; commit "$d"

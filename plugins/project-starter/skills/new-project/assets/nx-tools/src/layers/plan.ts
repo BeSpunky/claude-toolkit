@@ -26,10 +26,21 @@ export interface StampOptions {
   nxToolsVersion: string;
   pluginVersion: string;
   packageManager: string;
+  /**
+   * The branch model the run RESOLVED (house-branches.sh): the projection as JSON, or the literal `undeclared`.
+   * Passed to house-doc as `--branchProjection` so it renders the model in force rather than re-resolving it from
+   * the working tree. Absent/empty (an unreadable model, or a caller with nothing resolved) → house-doc reads the
+   * Tree itself, as it does standalone.
+   */
+  branchProjection?: string;
 }
 
-/** One argv word, safe to word-split into `nx g` in the rendered sequence: no whitespace, no shell syntax. */
-const SAFE_WORD = /^[A-Za-z0-9@._/,=:+-]+$/;
+/**
+ * One argument, safe to carry as one TAB-separated FIELD of a plan line: the rendered sequence reads the fields into
+ * an array and passes them quoted, so spaces and shell syntax are inert — only a TAB, a newline or another control
+ * character could split or corrupt the line. Non-empty, because an empty field collapses under TAB splitting.
+ */
+const SAFE_FIELD = /^[^\u0000-\u001f\u007f]+$/;
 
 export function plan(ctx: PlanContext, stamp: StampOptions): PlanLine[] {
   const lines: PlanLine[] = [];
@@ -80,20 +91,21 @@ export function plan(ctx: PlanContext, stamp: StampOptions): PlanLine[] {
       `--pluginVersion=${stamp.pluginVersion}`,
       `--packageManager=${stamp.packageManager}`,
       `--layers=${eligible.join(',')}`,
+      ...(stamp.branchProjection ? [`--branchProjection=${stamp.branchProjection}`] : []),
     ]),
   });
   return lines;
 }
 
 /**
- * Refuse an argv word the rendered sequence would mis-split — and a flag passed twice, which `nx g` coerces to
+ * Refuse an argument the rendered sequence would mis-split — and a flag passed twice, which `nx g` coerces to
  * an array and rejects against a boolean schema, taking every later generator down under `set -e` (it shipped
  * once, in 0.29.0, as a devcontainer `--firebase=true` with two authors).
  */
 function checked(generator: string, args: string[]): string[] {
   const flags = new Set<string>();
   for (const arg of args) {
-    if (!SAFE_WORD.test(arg)) throw new Error(`[layers] ${generator}: unsafe argument ${JSON.stringify(arg)}.`);
+    if (!SAFE_FIELD.test(arg)) throw new Error(`[layers] ${generator}: unsafe argument ${JSON.stringify(arg)}.`);
     const flag = /^--([^=]+)/.exec(arg)?.[1];
     if (flag) {
       if (flags.has(flag)) throw new Error(`[layers] ${generator}: --${flag} is passed twice.`);

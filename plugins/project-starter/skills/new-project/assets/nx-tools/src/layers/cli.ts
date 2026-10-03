@@ -4,9 +4,9 @@
 //       The layers present in the workspace at cwd, comma-separated, in registry order.
 //   node <nx-tools>/src/layers/cli.js plan --mode=sync|scaffold --active=<csv> --ensured=<csv> --project=<p>
 //       --app=<a> --node-major=<n> --voice=0|1 --staging=0|1 --nx-tools-version=<v> --plugin-version=<v>
-//       --package-manager=<pm>
+//       --package-manager=<pm> [--branch-projection=<projection JSON>|undeclared]
 //       The generator sequence for this run, one TAB-separated line per step (see PlanLine):
-//         gen<TAB><generator><TAB><space-separated argv words>
+//         gen<TAB><generator>[<TAB><arg>]…        (each argument one field — it may hold spaces, never a TAB)
 //         warn<TAB><sentence>
 //         partial
 //   node <nx-tools>/src/layers/cli.js apps
@@ -57,10 +57,11 @@ function main(argv: string[]): void {
           nxToolsVersion: flags['nx-tools-version'] ?? 'unknown',
           pluginVersion: flags['plugin-version'] ?? 'unknown',
           packageManager: flags['package-manager'] ?? 'npm',
+          branchProjection: flags['branch-projection'] || undefined,
         },
       );
       for (const line of lines) {
-        if (line.kind === 'gen') process.stdout.write(`gen\t${line.generator}\t${line.args.join(' ')}\n`);
+        if (line.kind === 'gen') process.stdout.write(`${['gen', line.generator, ...line.args].join('\t')}\n`);
         else if (line.kind === 'warn') process.stdout.write(`warn\t${line.message.replace(/[\t\n]/g, ' ')}\n`);
         else process.stdout.write('partial\n');
       }

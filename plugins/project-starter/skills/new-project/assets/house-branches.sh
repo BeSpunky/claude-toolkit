@@ -21,19 +21,26 @@
 # and the container path (the typescript-node image). And this is JSON: a grep/sed reading of it would be the
 # one parser in the toolkit that could be fooled by formatting, in the one check that decides where commits land.
 #
-# WHICH COPY IS AUTHORITATIVE (CONTRACT §1, §3, §4 status). The file is committed, so every branch has its own,
-# possibly stale or missing. The copy on the INTEGRATION LINE'S TIP is the model; the integration name comes
-# from the working tree's copy. Resolution, in order:
-#   1. the working tree's copy names the integration line → read that line's tip (local branch, else
-#      origin/<it>). Present → DECLARED from the tip (a note when the working copy differs). Absent → the
-#      declaration has not landed yet → UNDECLARED (not in force until it does).
-#   2. no readable working copy → each name the toolkit has ever protected is tried, and a copy is accepted only
-#      when it is SELF-CONFIRMING (it names the very branch it was read from as its integration line) — a branch
-#      cut before the model was declared still finds it, and nothing is inferred from a name alone.
-#   3. the integration tip cannot be resolved at all → the working tree's copy, with a note saying so.
-#   4. nothing found → UNDECLARED.
-# Remote tips resolve through `projection.remote` (absent → `origin`); the self-confirming search, which has no
-# projection yet to name one, uses `origin`.
+# WHICH COPY IS AUTHORITATIVE (CONTRACT Amendment 2 — the rule the engine's lib/resolve.mjs implements too, and both
+# test suites run the same scenario list). The file is committed, so every branch has its own, possibly stale or
+# missing, copy. The copy on the INTEGRATION LINE'S TIP is the model; the integration name comes from the working
+# tree's copy. Resolution, in order:
+#   1. the working tree's copy exists but cannot be read with certainty (bad JSON, no projection, an unknown
+#      projection.schema major) → UNREADABLE: the reader refuses to act, and protection is the §3 list.
+#   2. a readable working copy names integration I and remote R → BOTH refs/heads/I and refs/remotes/R/I are
+#      considered (a stale local integration branch must not hide a fresh remote one — that is the bug that let
+#      a sync commit onto production), keeping those that exist AND hold the file:
+#        - neither ref exists      → the working copy is in force (bootstrap), with a note;
+#        - none holds the file     → NOT LANDED: undeclared, but protected = the §3 list UNION the working copy's
+#                                    protected / protectedPatterns (never fewer protections than the copy says);
+#        - one holds it            → that copy;
+#        - both hold it            → identical → that copy; else the one whose commit descends from the other's;
+#                                    diverged → the local one, with a note.
+#   3. no working copy → SELF-CONFIRMING search: each §3 name, local branch AND origin/<name>; a copy is accepted
+#      only when its own projection.integration names the very branch it was read from.
+#   4. nothing → UNDECLARED.
+# Every state reports the EFFECTIVE protected set (`protected=` / `protectedPatterns=`), so a caller never has to
+# reconstruct one from the state word — that reconstruction is exactly where the working copy's list was lost.
 
 # The names the toolkit ever forced, plus gitflow's (CONTRACT §3): protected while a project declares no model,
 # and the candidates for the self-confirming search. A function, not a variable, so `declare -f` carries it.
@@ -65,65 +72,109 @@ say("protectedPatterns=" + p.protectedPatterns.join(" "));
 say("chain=" + p.chain.join(" "));
 say("production=" + p.production.join(" "));
 say("preproduction=" + p.chain.filter(b => b !== p.integration && !prod.has(b)).join(" "));
+say("projection=" + JSON.stringify(p));
 '
 }
 
-# _house_bm_ref <branch> [remote] — the ref holding that line's tip: the local branch, else the remote's (default
-# origin). Exit 1 when neither.
-_house_bm_ref() {
-  local remote="${2:-origin}"
-  if git rev-parse --verify -q "refs/heads/$1" >/dev/null 2>&1; then echo "refs/heads/$1"
-  elif git rev-parse --verify -q "refs/remotes/$remote/$1" >/dev/null 2>&1; then echo "refs/remotes/$remote/$1"
-  else return 1; fi
+# _house_bm_has <ref> — exit 0 when that ref exists.
+_house_bm_has() { git rev-parse --verify -q "$1^{commit}" >/dev/null 2>&1; }
+
+# _house_bm_union <list> <list> — space-joined, order kept, duplicates dropped.
+_house_bm_union() {
+  local out='' n
+  for n in $1 $2; do
+    case " $out " in *" $n "*) ;; *) out="${out:+$out }$n" ;; esac
+  done
+  printf '%s' "$out"
 }
 
 # house_branch_model — resolve the model of the repository at $PWD. stdout, KEY=VALUE lines:
 #   state=declared|undeclared|unreadable    always first
 #   source=<ref>|working-tree               declared/unreadable: where the copy was read
-#   integration= summary= protected= protectedPatterns= chain= production= preproduction=   declared only
+#   protected= protectedPatterns=           ALWAYS — the effective set for this state (see above)
+#   integration= remote= summary= chain= production= preproduction= projection=<compact JSON>   declared only
 #   reason=…                                unreadable only
 #   note=…                                  zero or more, human-facing
+# Never fails: every git or parse failure is a state, so `x="$(house_branch_model)"` is safe under `set -e`.
 house_branch_model() {
-  local f='.bespunky/branches.json' top wt='' integ='' remote='' ref='' json='' src='' out cand r t i
-  local notes=()
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo 'state=undeclared'; return 0; }
+  local f='.bespunky/branches.json' top wt='' integ='' remote='' json='' src='' out='' cand r t i
+  local wt_prot='' wt_pat='' local_ref remote_ref local_json='' remote_json='' any=0
+  local notes=() refs=()
+  local undeclared; undeclared="$(house_branches_undeclared_protected)"
+  _bm_emit_notes() { local n; for n in "${notes[@]+"${notes[@]}"}"; do echo "note=$n"; done; }
+  # Outside git there are no refs: a copy here is in force as written (rule 2, "neither ref exists").
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || top="$PWD"
+
   if [ -f "$top/$f" ]; then
-    wt="$(cat "$top/$f")"
-    out="$(printf '%s' "$wt" | _house_bm_parse 2>/dev/null || true)"
-    integ="$(printf '%s\n' "$out" | sed -n 's/^integration=//p')"
-    remote="$(printf '%s\n' "$out" | sed -n 's/^remote=//p')"
-  fi
-  if [ -n "$integ" ]; then
-    ref="$(_house_bm_ref "$integ" "$remote")" || ref=''
-  else
-    for cand in $(house_branches_undeclared_protected); do
-      r="$(_house_bm_ref "$cand")" || continue
-      t="$(git show "$r:$f" 2>/dev/null)" || continue
-      i="$(printf '%s' "$t" | _house_bm_parse 2>/dev/null | sed -n 's/^integration=//p' || true)"
-      if [ "$i" = "$cand" ]; then ref="$r"; integ="$cand"; break; fi
-    done
-  fi
-  if [ -n "$ref" ]; then
-    if json="$(git show "$ref:$f" 2>/dev/null)"; then
-      src="$ref"
-      if [ -n "$wt" ] && [ "$wt" != "$json" ]; then
-        notes+=("this tree's copy of $f differs from the one on '$integ' — the integration line's copy is the model in force")
-      fi
-    else
-      echo 'state=undeclared'
-      echo "note=this tree carries $f naming '$integ' as its integration line, but '$integ' does not — a declaration is not in force until it lands there"
+    wt="$(cat "$top/$f" 2>/dev/null)" || wt=''
+    if ! out="$(printf '%s' "$wt" | _house_bm_parse 2>/dev/null)"; then
+      echo 'state=unreadable'; echo 'source=working-tree'
+      echo "protected=$undeclared"; echo 'protectedPatterns='
+      printf '%s\n' "$out" | sed -n '/^reason=/p'
       return 0
     fi
-  elif [ -n "$wt" ]; then
-    src='working-tree'; json="$wt"
-    [ -n "$integ" ] && notes+=("the integration line '$integ' could not be resolved (no local or ${remote:-origin} branch), so this tree's copy of $f was read")
+    integ="$(printf '%s\n' "$out" | sed -n 's/^integration=//p')"
+    remote="$(printf '%s\n' "$out" | sed -n 's/^remote=//p')"
+    wt_prot="$(printf '%s\n' "$out" | sed -n 's/^protected=//p')"
+    wt_pat="$(printf '%s\n' "$out" | sed -n 's/^protectedPatterns=//p')"
+    local_ref="refs/heads/$integ"; remote_ref="refs/remotes/$remote/$integ"
+    if _house_bm_has "$local_ref"; then
+      any=1; local_json="$(git show "$local_ref:$f" 2>/dev/null)" && refs+=("$local_ref") || local_json=''
+    fi
+    if _house_bm_has "$remote_ref"; then
+      any=1; remote_json="$(git show "$remote_ref:$f" 2>/dev/null)" && refs+=("$remote_ref") || remote_json=''
+    fi
+    if [ "$any" = 0 ]; then
+      src='working-tree'; json="$wt"
+      notes+=("the integration line '$integ' does not exist yet (no local or $remote branch), so this tree's copy of $f is in force")
+    elif [ "${#refs[@]}" = 0 ]; then
+      echo 'state=undeclared'
+      echo "protected=$(_house_bm_union "$undeclared" "$wt_prot")"
+      echo "protectedPatterns=$wt_pat"
+      notes+=("this tree carries $f naming '$integ' as its integration line, but '$integ' does not — a declaration is not in force until it lands there; meanwhile the lines it declares are protected too")
+      _bm_emit_notes
+      return 0
+    elif [ "${#refs[@]}" = 1 ]; then
+      src="${refs[0]}"
+      [ "$src" = "$local_ref" ] && json="$local_json" || json="$remote_json"
+    elif [ "$local_json" = "$remote_json" ]; then
+      src="$local_ref"; json="$local_json"
+    elif git merge-base --is-ancestor "$local_ref" "$remote_ref" 2>/dev/null; then
+      src="$remote_ref"; json="$remote_json"
+    elif git merge-base --is-ancestor "$remote_ref" "$local_ref" 2>/dev/null; then
+      src="$local_ref"; json="$local_json"
+    else
+      src="$local_ref"; json="$local_json"
+      notes+=("'$integ' and '$remote/$integ' have diverged and carry different copies of $f — the local one was read; reconcile them")
+    fi
+    if [ "$src" != 'working-tree' ] && [ "$wt" != "$json" ]; then
+      notes+=("this tree's copy of $f differs from the one on '$integ' ($src) — the integration line's copy is the model in force")
+    fi
   else
-    echo 'state=undeclared'; return 0
+    for cand in $undeclared; do
+      for r in "refs/heads/$cand" "refs/remotes/origin/$cand"; do
+        _house_bm_has "$r" || continue
+        t="$(git show "$r:$f" 2>/dev/null)" || continue
+        i="$(printf '%s' "$t" | _house_bm_parse 2>/dev/null | sed -n 's/^integration=//p')" || i=''
+        if [ "$i" = "$cand" ]; then src="$r"; json="$t"; break 2; fi
+      done
+    done
+    if [ -z "$src" ]; then
+      echo 'state=undeclared'; echo "protected=$undeclared"; echo 'protectedPatterns='; return 0
+    fi
   fi
-  if out="$(printf '%s' "$json" | _house_bm_parse)"; then
+
+  if out="$(printf '%s' "$json" | _house_bm_parse 2>/dev/null)"; then
     echo 'state=declared'; echo "source=$src"; printf '%s\n' "$out"
   else
-    echo 'state=unreadable'; echo "source=$src"; printf '%s\n' "$out"
+    echo 'state=unreadable'; echo "source=$src"
+    echo "protected=$undeclared"; echo 'protectedPatterns='
+    printf '%s\n' "$out" | sed -n '/^reason=/p'
   fi
-  for t in "${notes[@]}"; do echo "note=$t"; done
+  _bm_emit_notes
+  return 0
 }
+
+# house_branches_fns — every function above, by value, for rendering into a program (`declare -f`). One list, so
+# the renderers (scaffold.sh, and the gate's test) cannot carry a stale subset of it.
+house_branches_fns() { declare -f house_branches_undeclared_protected _house_bm_parse _house_bm_has _house_bm_union house_branch_model; }

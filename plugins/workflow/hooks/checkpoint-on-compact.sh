@@ -36,73 +36,41 @@ branch="$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || true)"
 slug="${branch##*/}"
 
 # --- which lines are protected? the DECLARED branch model, never a hard-coded list -----------------------------
-# The model lives in .bespunky/branches.json; readers like this one parse ONLY its derived `projection` block
-# (names + globs), and refuse a schema major they don't know rather than guess. Which copy is in force follows
-# the toolkit's one resolution rule (reference: project-starter's assets/house-branches.sh):
-#   1. the working-tree copy names the integration line → that line's copy (local branch, else
-#      <projection.remote|origin>/<line>) is the model; the line exists but holds no copy → UNDECLARED (not landed);
-#      the line exists nowhere → the working-tree copy stands in.
-#   2. no working-tree copy → a SELF-CONFIRMING search: a copy on one of the undeclared names below counts only
-#      when it names that same branch as its integration line (a work branch cut before the model landed).
-#   3. nothing → UNDECLARED.
-# Undeclared (or no node to read JSON with — the toolkit's other hooks already rely on node) → the protective
-# fallback: every name the toolkit ever forced, plus gitflow's.
+# NOT RESOLVED HERE. Which copy of .bespunky/branches.json is in force (integration tip, local or remote, vs the
+# working tree's) is the engine's question, and this hook ships in the engine's own plugin — so it asks the engine
+# (`branches.mjs status --json`, CONTRACT Amendment 2) instead of carrying a third resolver that would drift from
+# it. A copy of the rule here is exactly how a stale local integration branch once made a reader drop the
+# declared protections.
+#
+# The engine reports the EFFECTIVE protected set for every state (`protected` / `protectedPatterns`), so nothing
+# is rebuilt from the state word. Two outcomes are handled differently:
+#   unreadable              → the model exists but cannot be read with certainty: skip the checkpoint, say why.
+#   the engine did not run  → no node, a missing script, a crash, output that is not the contract's shape: the
+#                             protective fallback — every name the toolkit ever forced, plus gitflow's.
 UNDECLARED_PROTECTED="main master development develop staging"
 names="$UNDECLARED_PROTECTED"
 globs=""
-if command -v node >/dev/null 2>&1; then
-  model="$(node - "$PROJECT_DIR" "$UNDECLARED_PROTECTED" <<'NODE' 2>/dev/null
-const fs = require('fs'), path = require('path'), cp = require('child_process');
-const [dir, undeclared] = process.argv.slice(2);
-const F = '.bespunky/branches.json';
-const fail = (msg) => { console.log('ERROR\t' + msg); process.exit(0); };
-const parse = (text) => { try { const p = JSON.parse(text).projection; return p && typeof p === 'object' ? p : null; } catch { return null; } };
-const read = (text, where) => {
-  let doc; try { doc = JSON.parse(text); } catch { fail(where + ' is not valid JSON'); }
-  const p = doc && doc.projection;
-  if (!p || typeof p !== 'object') fail(where + ' has no projection block');
-  if (String(p.schema).split('.')[0] !== '1') fail(where + ' has projection.schema ' + JSON.stringify(p.schema) + '; this plugin reads only schema 1 (update bespunky-workflow)');
-  return p;
-};
-const git = (args) => cp.execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-const ref = (branch, remote) => {
-  for (const r of ['refs/heads/' + branch, 'refs/remotes/' + remote + '/' + branch]) {
-    try { git(['rev-parse', '--verify', '--quiet', r + '^{commit}']); return r; } catch {}
-  }
-  return null;
-};
-const show = (r) => { try { return git(['show', r + ':' + F]); } catch { return null; } };
-const out = (p) => {
-  for (const n of p.protected || []) console.log('NAME\t' + n);
-  for (const g of p.protectedPatterns || []) console.log('GLOB\t' + g);
-  process.exit(0);
-};
-let wt = null; try { wt = fs.readFileSync(path.join(dir, F), 'utf8'); } catch {}
-const wp = wt === null ? null : parse(wt);
-if (wp && typeof wp.integration === 'string') {
-  const r = ref(wp.integration, typeof wp.remote === 'string' ? wp.remote : 'origin');
-  if (!r) out(read(wt, 'the working-tree ' + F));
-  const tip = show(r);
-  if (tip === null) { console.log('UNDECLARED'); process.exit(0); }
-  out(read(tip, r + ':' + F));
-}
-if (wt !== null) read(wt, 'the working-tree ' + F); // present but unreadable → fail loudly via read()
-for (const cand of undeclared.split(' ')) {
-  const r = ref(cand, 'origin'); if (!r) continue;
-  const t = show(r); if (t === null) continue;
-  const p = parse(t);
-  if (p && p.integration === cand) out(read(t, r + ':' + F));
-}
-console.log('UNDECLARED');
-NODE
-)"
-  case "$model" in
-    ERROR*)
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}"
+ENGINE="$PLUGIN_ROOT/skills/branch-and-release/scripts/branches.mjs"
+if command -v node >/dev/null 2>&1 && [ -f "$ENGINE" ]; then
+  # The exit code (0 declared · 3 undeclared · 1 unreadable) is deliberately not trusted on its own: a crash also
+  # exits non-zero. The SHAPE decides — anything not matching the contract counts as "did not run".
+  status_json="$(cd "$PROJECT_DIR" && node "$ENGINE" status --json 2>/dev/null)" || true
+  model="$(printf '%s' "$status_json" | node -e '
+let j; try { j = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { process.exit(1); }
+const list = (v) => Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "" && !/[\s]/.test(x));
+if (!j || !["declared", "undeclared", "unreadable"].includes(j.state) || !list(j.protected) || !list(j.protectedPatterns)) process.exit(1);
+console.log("STATE\t" + j.state);
+if (j.state === "unreadable") console.log("REASON\t" + String(j.reason || "the branch model cannot be read").replace(/\s+/g, " ").replace(/[.\s]+$/, ""));
+for (const n of j.protected) console.log("NAME\t" + n);
+for (const g of j.protectedPatterns) console.log("GLOB\t" + g);
+' 2>/dev/null)" || model=''
+  case "$(printf '%s\n' "$model" | sed -n 's/^STATE	//p')" in
+    unreadable)
       # Refuse, don't guess: say why once and skip the checkpoint, since we can't tell a work branch from a line.
-      printf '[bespunky-workflow] Skipped the pre-compaction checkpoint: %s.\n' "${model#ERROR	}"
+      printf '[bespunky-workflow] Skipped the pre-compaction checkpoint: %s.\n' "$(printf '%s\n' "$model" | sed -n 's/^REASON	//p')"
       exit 0 ;;
-    UNDECLARED | '') ;;
-    *)
+    declared | undeclared)
       names="$(printf '%s\n' "$model" | sed -n 's/^NAME	//p')"
       globs="$(printf '%s\n' "$model" | sed -n 's/^GLOB	//p')" ;;
   esac

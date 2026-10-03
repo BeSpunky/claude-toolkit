@@ -18,8 +18,11 @@
 // unknown `projection.schema` major — is REFUSED with an error that says what to do. Guessing would render
 // rules for a model the project did not declare, into a document that is always in context.
 //
-// Reads the working tree (an Nx `Tree` has no git). The contract's authoritative copy is the integration tip;
-// the working-tree copy is its stated fallback, and a sync runs on the tree it is about to commit.
+// WHO RESOLVES. Which copy of the file is in force (the integration tip's, local or remote, vs the working tree's)
+// is a git question, and an Nx `Tree` has no git — so this module does NOT resolve. A sync resolves once
+// (house-branches.sh, the same rule as the engine) and hands the result in: `branchModelFromOption` reads that
+// (the projection JSON, or `undeclared`). Only a STANDALONE generator call, with nothing handed in, falls back to
+// `readBranchModel` — the working tree's copy, which is the right answer only when nobody resolved anything.
 import type { Tree } from '@nx/devkit';
 
 /** Where the declaration lives, relative to the workspace root. */
@@ -27,6 +30,9 @@ export const BRANCH_MODEL_FILE = '.bespunky/branches.json';
 
 /** The projection schema MAJOR this payload can read. Anything else is refused, never guessed at. */
 export const PROJECTION_SCHEMA = 1;
+
+/** The literal a caller passes (`branchProjection`) for a model it resolved as UNDECLARED. */
+export const UNDECLARED = 'undeclared';
 
 /**
  * The names protected while the model is UNDECLARED, wherever a branch by that name exists: every name the
@@ -59,22 +65,46 @@ export type BranchModel =
   | { declared: true; projection: BranchProjection }
   | { declared: false };
 
-/** Read the project's branch model from the tree. Throws on a file this payload cannot read honestly. */
+/**
+ * The branch model as RESOLVED by the caller (the generator's `branchProjection` option): the projection JSON, or
+ * `undeclared`. Throws on a value this payload cannot read honestly — the caller resolved it, so a bad value is a
+ * caller bug or a newer schema, never a reason to fall back to the Tree.
+ */
+export function branchModelFromOption(value: string): BranchModel {
+  if (value === UNDECLARED) return { declared: false };
+  const source = 'the resolved branch model (branchProjection)';
+  let projection: unknown;
+  try {
+    projection = JSON.parse(value);
+  } catch (error) {
+    throw refusal(source, `it is not valid JSON (${(error as Error).message})`);
+  }
+  if (!isRecord(projection)) throw refusal(source, `it is neither a projection object nor "${UNDECLARED}"`);
+  return parseProjection(projection, source);
+}
+
+/** Read the project's branch model from the tree (standalone use only — see above). Throws on a file this payload cannot read honestly. */
 export function readBranchModel(tree: Tree): BranchModel {
   if (!tree.exists(BRANCH_MODEL_FILE)) return { declared: false };
+  const source = BRANCH_MODEL_FILE;
 
   let file: unknown;
   try {
     file = JSON.parse(tree.read(BRANCH_MODEL_FILE, 'utf8') ?? '');
   } catch (error) {
-    throw refusal(`it is not valid JSON (${(error as Error).message})`);
+    throw refusal(source, `it is not valid JSON (${(error as Error).message})`);
   }
   const projection = isRecord(file) ? file['projection'] : undefined;
-  if (!isRecord(projection)) throw refusal('it has no `projection` block — re-write it with the skill (`branches.mjs write`)');
+  if (!isRecord(projection)) throw refusal(source, 'it has no `projection` block — re-write it with the skill (`branches.mjs write`)');
+  return parseProjection(projection, source);
+}
 
-  if (projection['schema'] !== PROJECTION_SCHEMA) {
-    throw refusal(
-      `its \`projection.schema\` is ${JSON.stringify(projection['schema'])}, and this @bespunky/nx-tools reads only schema ${PROJECTION_SCHEMA}. ` +
+/** Validate a projection block. The schema check is on the MAJOR (`1`, `1.1` … are readable; `2` is not). */
+function parseProjection(projection: Record<string, unknown>, source: string): BranchModel {
+  const refuse = (why: string) => refusal(source, why);
+  if (String(projection['schema']).split('.')[0] !== String(PROJECTION_SCHEMA)) {
+    throw refuse(
+      `its \`projection.schema\` is ${JSON.stringify(projection['schema'])}, and this @bespunky/nx-tools reads only schema major ${PROJECTION_SCHEMA}. ` +
         'A newer toolkit wrote it: update @bespunky/nx-tools (a sync with the current toolkit) rather than guessing at the model',
     );
   }
@@ -82,13 +112,13 @@ export function readBranchModel(tree: Tree): BranchModel {
   const strings = (field: keyof BranchProjection): string[] => {
     const value = projection[field];
     if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item === '')) {
-      throw refusal(`\`projection.${field}\` must be an array of branch names or globs`);
+      throw refuse(`\`projection.${field}\` must be an array of branch names or globs`);
     }
     return value as string[];
   };
   const string = (field: keyof BranchProjection): string => {
     const value = projection[field];
-    if (typeof value !== 'string' || value === '') throw refusal(`\`projection.${field}\` must be a non-empty string`);
+    if (typeof value !== 'string' || value === '') throw refuse(`\`projection.${field}\` must be a non-empty string`);
     return value;
   };
 
@@ -108,8 +138,8 @@ export function readBranchModel(tree: Tree): BranchModel {
   };
 }
 
-function refusal(why: string): Error {
-  return new Error(`Cannot read the branch model in ${BRANCH_MODEL_FILE}: ${why}.`);
+function refusal(source: string, why: string): Error {
+  return new Error(`Cannot read the branch model in ${source}: ${why}.`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

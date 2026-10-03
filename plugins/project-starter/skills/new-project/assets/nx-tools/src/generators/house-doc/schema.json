@@ -24,6 +24,10 @@
       "type": "string",
       "description": "The bespunky-project-starter plugin version that shipped these generators, stamped into HOUSE.md's header for provenance. Deliberately NOT what the hook compares (the house convention bumps it on any change, including ones that regenerate nothing). Passed by scaffold.sh; defaults to 'unknown' on a direct generator call."
     },
+    "branchProjection": {
+      "type": "string",
+      "description": "The branch model the caller RESOLVED: its projection as JSON, or the literal 'undeclared'. When present, house-doc renders it and does not read .bespunky/branches.json from the workspace (the working copy is not necessarily the model in force — the integration tip's is, and resolving that is a git question). Passed by scaffold.sh; absent on a direct generator call, which reads the workspace's copy."
+    },
     "packageManager": {
       "type": "string",
       "enum": [
