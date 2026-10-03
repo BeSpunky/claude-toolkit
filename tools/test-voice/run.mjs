@@ -108,7 +108,7 @@ test('negation is understood: rejections are not picks, mixed yes/no is unsure',
 // ---- the ask tool, against fake audio -------------------------------------------
 // The server finds its scripts at ../scripts relative to itself, so the fixture IS that layout: the real server
 // files under mcp/, fakes under scripts/. Fake listen.sh replays scripted transcripts, one per call.
-function serverFixture({ transcripts = [], listenSeconds = 0, saySeconds = 0, stopDelay = 0 } = {}) {
+function serverFixture({ transcripts = [], listenSeconds = 0, saySeconds = 0, sayCode = 0, stopDelay = 0 } = {}) {
   const root = tmp('server');
   fs.mkdirSync(path.join(root, 'mcp'));
   fs.mkdirSync(path.join(root, 'scripts'));
@@ -116,16 +116,20 @@ function serverFixture({ transcripts = [], listenSeconds = 0, saySeconds = 0, st
   const log = path.join(root, 'log');
   fs.writeFileSync(path.join(root, 'transcripts'), transcripts.join('\n') + '\n');
   fs.writeFileSync(path.join(root, 'scripts', 'speaker.sh'), `#!/usr/bin/env bash
-[ "$1" = stop ] && sleep ${stopDelay}
 printf 'speaker %s\\n' "$*" >> '${log}'
 [ "$1" = say ] && { trap 'echo say-killed >> "${log}"; exit 143' TERM; sleep ${saySeconds} & wait $!; }
-exit 0
+exit ${sayCode}
+`);
+  fs.writeFileSync(path.join(root, 'scripts', 'voice.sh'), `#!/usr/bin/env bash
+[ "$1" = stop ] && sleep ${stopDelay}
+printf 'voice %s\\n' "$*" >> '${log}'
 `);
   fs.writeFileSync(path.join(root, 'scripts', 'listen.sh'), `#!/usr/bin/env bash
 printf 'listen %s\\n' "$*" >> '${log}'
 trap 'echo listen-killed >> "${log}"; exit 143' TERM
 n=$(cat '${root}/n' 2>/dev/null || echo 0); echo $((n+1)) > '${root}/n'
 t=$(sed -n "$((n+1))p" '${root}/transcripts')
+[ "$t" = '<stopped>' ] && exit 143
 for w in $t; do acc="\${acc:+$acc }$w"; echo "partial: $acc"; done
 sleep ${listenSeconds} & wait $!
 [ -n "$t" ] || { echo 'bespunky-voice: no speech recognized' >&2; exit 1; }
@@ -191,7 +195,7 @@ test('a client cancel silences the speaker, kills the recording, and sends no re
     s.rpc({ method: 'notifications/cancelled', params: { requestId: 1 } });
     await sleep(400);
     assert.ok(s.logLines().includes('listen-killed'), s.logLines().join(' | '));
-    assert.ok(s.logLines().includes('speaker stop'));
+    assert.ok(s.logLines().includes('voice stop'));
     assert.equal(await s.response(1, 500), undefined);
   } finally { s.close(); }
 });
@@ -234,8 +238,21 @@ test("a cancel's stop lands before the next question is spoken", async () => {
     s.ask(2, { question: 'Second?', options: [{ label: 'A' }, { label: 'B' }] });
     assert.equal((await s.response(2)).matched.label, 'B');
     const log = s.logLines();
-    assert.ok(log.indexOf('speaker stop') < log.indexOf('speaker say --wait Second?'), log.join(' | '));
+    assert.ok(log.indexOf('voice stop') < log.indexOf('speaker say --wait Second?'), log.join(' | '));
   } finally { s.close(); }
+});
+
+test('a Stop from outside (band, Esc, typing) while asking or listening returns cancelled', async () => {
+  for (const [opts, what] of [[{ sayCode: 143 }, 'while asking'], [{ transcripts: ['<stopped>'] }, 'while listening']]) {
+    const s = serverFixture(opts);
+    try {
+      s.ask(1, { question: 'Commit now?' });
+      const r = await s.response(1);
+      assert.equal(r.cancelled, true, what);
+      assert.equal(r.error, undefined, what);
+      if (opts.sayCode) assert.ok(!s.logLines().some((l) => l.startsWith('listen')), what);
+    } finally { s.close(); }
+  }
 });
 
 // ---- the speaker owns the utterance -----------------------------------------------
@@ -263,6 +280,23 @@ test('stop silences a detached utterance', async () => {
   await sleep(300);
   assert.ok(!alive(pid));
   assert.ok(!fs.existsSync(f.pidfile));
+});
+test('.speaking.pid exists exactly while something is being said', async () => {
+  const f = speakerFixture();
+  f.run(['say', 'short'], { FAKE_SPEAK_SECONDS: '0.5' });
+  await sleep(200);
+  assert.ok(fs.existsSync(f.pidfile), 'present while speaking');
+  await sleep(800);
+  assert.ok(!fs.existsSync(f.pidfile), 'gone once the utterance ended on its own');
+});
+test('say --wait reports a stopped utterance as 143, a finished one as 0', async () => {
+  const f = speakerFixture();
+  assert.equal(f.run(['say', '--wait', 'done']).status, 0);
+  const env = { ...process.env, HOME: f.root, FAKE_SPEAK_SECONDS: '30' };
+  const waiting = new Promise((r) => spawn('bash', [path.join(f.root, 'scripts', 'speaker.sh'), 'say', '--wait', 'long'], { env, stdio: 'ignore' }).on('close', r));
+  await sleep(300);
+  f.run(['stop']);
+  assert.equal(await waiting, 143);
 });
 test('replay says the last utterance again', () => {
   const f = speakerFixture();
@@ -294,10 +328,29 @@ test('a stale pidfile never kills a stranger', async () => {
 });
 
 // ---- hooks ---------------------------------------------------------------------
-test('silence.sh stops the speaker and prints nothing (its stdout would reach the model)', () => {
+test('voice.sh stop silences speech AND ends the open recording; a stale announcement is cleared', async () => {
+  const root = tmp('voice');
+  const scripts = path.join(root, 'scripts');
+  const home = path.join(root, '.claude', 'bespunky-voice');
+  fs.mkdirSync(scripts); fs.mkdirSync(home, { recursive: true });
+  fs.copyFileSync(path.join(PLUGIN, 'scripts', 'voice.sh'), path.join(scripts, 'voice.sh'));
+  fs.writeFileSync(path.join(scripts, 'speaker.sh'), `#!/usr/bin/env bash\necho "speaker $*" >> '${root}/log'\n`);
+  fs.writeFileSync(path.join(scripts, 'listen.sh'), `#!/usr/bin/env bash\ntrap 'rm -f "${home}/.listening.pid"; exit 143' TERM\necho $$ > '${home}/.listening.pid'\nsleep 30 & wait $!\n`);
+  const listener = spawn('bash', [path.join(scripts, 'listen.sh')], { stdio: 'ignore' });
+  await sleep(300);
+  const run = () => spawnSync('bash', [path.join(scripts, 'voice.sh'), 'stop'], { env: { ...process.env, HOME: root } });
+  run();
+  await sleep(300);
+  assert.ok(!alive(listener.pid), 'recording ended');
+  assert.equal(fs.readFileSync(path.join(root, 'log'), 'utf8').trim(), 'speaker stop');
+  fs.writeFileSync(path.join(home, '.listening.pid'), '999999'); fs.writeFileSync(path.join(home, '.hearing'), 'x');
+  run();
+  assert.ok(!fs.existsSync(path.join(home, '.listening.pid')) && !fs.existsSync(path.join(home, '.hearing')), 'stale announcement cleared');
+});
+test('silence.sh stops the voice and prints nothing (its stdout would reach the model)', () => {
   const root = tmp('silence');
   fs.mkdirSync(path.join(root, 'scripts'));
-  fs.writeFileSync(path.join(root, 'scripts', 'speaker.sh'), `#!/usr/bin/env bash\necho "$*" > '${root}/called'\necho noise\n`);
+  fs.writeFileSync(path.join(root, 'scripts', 'voice.sh'), `#!/usr/bin/env bash\necho "$*" > '${root}/called'\necho noise\n`);
   const r = spawnSync('bash', [path.join(PLUGIN, 'hooks', 'silence.sh')], { encoding: 'utf8', env: { ...process.env, CLAUDE_PLUGIN_ROOT: root } });
   assert.equal(r.stdout, '');
   assert.equal(fs.readFileSync(path.join(root, 'called'), 'utf8').trim(), 'stop');

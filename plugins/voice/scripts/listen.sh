@@ -229,11 +229,22 @@ fi
 # The caller cancels by SIGTERMing our process group; we may also be signalled
 # alone. Either way the EXIT trap stops the recorder and any partial job and
 # removes every temp file.
+#
+# The open recording is ANNOUNCED — read by the voice band, stopped by voice.sh:
+#   .listening.pid  this script's pid, exactly while it records
+#   .hearing        the transcript heard so far (every partial, in both modes —
+#                   the live transcript is a property of listening, not of the
+#                   caller's output format)
+# Both are removed on exit, only if still ours.
 WORK="$(mktemp -d)"
 RAW="$WORK/take.raw"; LEVELS="$WORK/levels"; : >"$LEVELS"
 REC_PID=""; PART_PID=""
+LISTENING="$VOICE_HOME/.listening.pid"; HEARING="$VOICE_HOME/.hearing"
+mkdir -p "$VOICE_HOME" 2>/dev/null
+echo "$$" >"$LISTENING" 2>/dev/null; : >"$HEARING" 2>/dev/null
 cleanup() {
   local p
+  if [ "$(cat "$LISTENING" 2>/dev/null)" = "$$" ]; then rm -f "$LISTENING" "$HEARING"; fi
   for p in "$REC_PID" "$PART_PID"; do
     [ -n "$p" ] && kill -TERM "$p" 2>/dev/null
   done
@@ -254,7 +265,12 @@ trap 'exit 129' HUP
 mkfifo "$WORK/tick" && exec {TICK_FD}<>"$WORK/tick" \
   || { echo "bespunky-voice: cannot create the tick clock" >&2; exit 1; }
 
-emit() { [ "$STREAM" = 1 ] && printf '%s: %s\n' "$1" "$2"; return 0; }
+# A transcript event: always to .hearing (the band), and to stdout in --stream.
+emit() {
+  [ "$(cat "$LISTENING" 2>/dev/null)" = "$$" ] && printf '%s' "$2" >"$HEARING.$$" 2>/dev/null && mv -f "$HEARING.$$" "$HEARING" 2>/dev/null
+  [ "$STREAM" = 1 ] && printf '%s: %s\n' "$1" "$2"
+  return 0
+}
 size_of() { stat -c %s "$1" 2>/dev/null || echo 0; }
 # Snapshot the first "$2" bytes of the take as a WAV at "$1".
 snapshot_wav() { head -c "$2" "$RAW" | sox "${SOX_RAW[@]}" - -t wav "$1" 2>/dev/null; }
@@ -344,8 +360,7 @@ while :; do
     fi
     continue
   fi
-  [ "$STREAM" = 1 ] || continue
-  # Partials: harvest a finished job; start the next one on the cadence. One
+  # Partials (both modes — see .hearing above): harvest a finished job; start the next one on the cadence. One
   # job at a time, in the background, so the end-of-speech check never waits on it.
   if [ -n "$PART_PID" ] && ! kill -0 "$PART_PID" 2>/dev/null; then
     wait "$PART_PID" 2>/dev/null
