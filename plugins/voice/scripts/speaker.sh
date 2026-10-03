@@ -3,7 +3,7 @@
 #
 # speak.sh turns text into sound; this script owns the UTTERANCE — the process
 # that is speaking right now, and what was said last — so speech can be stopped
-# and replayed from anywhere: a hook, the /voice command, the MCP ask tool. Every
+# and replayed from anywhere: a hook, the /speak command, the MCP ask tool. Every
 # caller that speaks goes through here; none of them keeps its own pid.
 #
 #   speaker.sh say [--wait] <text…>   stop whatever is speaking, remember <text>,

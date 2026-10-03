@@ -14,7 +14,7 @@ installing a plugin mid-session does not fire SessionStart). Tell the user to
 restart Claude Code or start a new session once to activate the voice plugin, then
 stop — do not try to run the scripts.
 
-The user ran: `/voice $ARGUMENTS`
+The user ran: `/speak $ARGUMENTS`
 
 Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
 (treat empty as `say`):

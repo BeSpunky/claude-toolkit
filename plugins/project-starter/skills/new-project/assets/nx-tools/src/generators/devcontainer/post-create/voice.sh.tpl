@@ -6,7 +6,7 @@
 # On a host with no audio the probe mounts an empty dir instead, so the container still opens.
 # So this step self-adapts on what actually ARRIVED: a socket in that folder means there is a
 # speaker + mic to reach. When there is, install the free espeak-ng TTS floor (+ pulseaudio-utils
-# for `paplay`) and pre-install the plugin, so `/voice` speaks the moment the container opens.
+# for `paplay`) and pre-install the plugin, so `/speak` works the moment the container opens.
 # Piper (the natural-voice upgrade) stays a manual, machine-local opt-in via the plugin's
 # install-piper.sh — same stance as the claude-toolkit repo's own devcontainer. Best-effort +
 # retry: a transient apt blip only warns, never aborts post-create (set -e) and leaves the
@@ -32,7 +32,7 @@ if [ -n "$(find /run/bespunky/host/pulse/ -maxdepth 1 -type s 2>/dev/null | head
     echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
     echo "[post-create]            sudo apt-get update && sudo apt-get install -y pulseaudio-utils espeak-ng"
   fi
-  # Pre-install the voice plugin at project scope so /voice is live on open. Best-effort:
+  # Pre-install the voice plugin at project scope so /speak is live on open. Best-effort:
   # the marketplace was added by the plugin pre-install; if that was offline, .claude/settings.json offers
   # install on first run. (The other house plugins are pre-installed by the plugin step;
   # bespunky-voice is gated here because without a host audio socket it can't play audio.)

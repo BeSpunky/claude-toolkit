@@ -19,7 +19,7 @@
 #                  native PulseAudio/PipeWire socket — (a host probe on every open + one bind mount +
 #                  remoteEnv PULSE_SERVER) and post-create.sh self-adapts to a socket being present
 #                  to install the espeak-ng TTS floor + pulseaudio-utils and pre-install the
-#                  bespunky-voice plugin — so /voice speaks the moment the container opens. Opt-in
+#                  bespunky-voice plugin — so /speak works the moment the container opens. Opt-in
 #                  because it records the project's INTENT ("this project wants audio"); where the
 #                  socket is stays a per-machine fact, resolved on the host at open time.
 #                  NEVER enabled by default.

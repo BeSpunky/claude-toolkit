@@ -4,7 +4,7 @@
 // WHY IT IS A VIEW OVER STATE FILES. The audio does not live in the engine: an
 // utterance is a detached process group started by speaker.sh, a recording is
 // listen.sh's parecord, and either may be started by a command hook, the
-// /voice command or the ask_by_voice MCP server — three separate processes,
+// /speak command or the ask_by_voice MCP server — three separate processes,
 // none of them this module. The runtime therefore publishes the truth as files
 // under ~/.claude/bespunky-voice/ (`.speaking.pid` + `last-utterance.txt`,
 // `.listening.pid` + `.hearing`), and the band only READS them: a poller folds
@@ -13,7 +13,7 @@
 // Esc hook act through the runtime's own front door (`voice.sh stop|replay`),
 // never by touching a process themselves.
 //
-// THE PLUGIN WORKS WITHOUT IT. Speaking, listening, /voice stop and replay are
+// THE PLUGIN WORKS WITHOUT IT. Speaking, listening, /speak stop and replay are
 // all command hooks, a command and an MCP tool; with mods disabled (or on a
 // build without them) those remain the floor and nothing here is missed but
 // the view. Never put behaviour here that the floor needs.

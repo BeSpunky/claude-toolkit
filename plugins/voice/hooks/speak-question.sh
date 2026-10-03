@@ -3,7 +3,7 @@
 #
 # Fires (per hooks.json matcher) right BEFORE an AskUserQuestion or ExitPlanMode
 # tool renders — so you HEAR the question, then the picker is already on screen.
-# Only speaks when you've turned auto-speak on (/voice auto on); otherwise silent.
+# Only speaks when you've turned auto-speak on (/speak auto on); otherwise silent.
 #
 # Writes nothing to stdout. A PreToolUse hook's stdout goes to the debug log (not
 # the model context, and not the transcript), so this is purely to keep that log
