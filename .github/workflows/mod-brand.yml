@@ -1,0 +1,30 @@
+# Guard the toolkit's MOD BRAND: one source (tools/mod-brand/brand.tsx), projected into every plugin that
+# ships a mod (`hooks/_brand.tsx`). A projection that drifts is a second brand nobody chose — and it drifts
+# silently, because each plugin's own tests import its own copy and pass either way.
+name: mod brand
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mod-brand-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No install: node only, against throwaway fixture repos under the OS temp dir, then this repo.
+      - name: Check the brand projections and the drift check itself
+        run: node tools/test-mod-brand/run.mjs
