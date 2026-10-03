@@ -21,5 +21,5 @@ command -v node >/dev/null 2>&1 || exit 0
 SPOKEN="$(printf '%s' "$INPUT" | node "$PLUGIN_ROOT/hooks/extract-turn-question.mjs" 2>/dev/null)"
 [ -n "$SPOKEN" ] || exit 0
 
-bash "$PLUGIN_ROOT/scripts/speak-detached.sh" "$SPOKEN"
+bash "$PLUGIN_ROOT/scripts/speaker.sh" say "$SPOKEN"
 exit 0

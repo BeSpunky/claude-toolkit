@@ -25,7 +25,7 @@ SPOKEN="$(printf '%s' "$INPUT" | node "$PLUGIN_ROOT/hooks/extract-spoken.mjs" 2>
 [ -n "$SPOKEN" ] || exit 0
 
 # --- speak it, detached (cancelling any in-flight utterance), so the question UI
-# renders immediately. Shared with the Stop hook via speak-detached.sh.
-bash "$PLUGIN_ROOT/scripts/speak-detached.sh" "$SPOKEN"
+# renders immediately. The speaker owns the utterance (stop / replay).
+bash "$PLUGIN_ROOT/scripts/speaker.sh" say "$SPOKEN"
 
 exit 0

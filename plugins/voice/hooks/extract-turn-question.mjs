@@ -57,5 +57,5 @@ process.stdin.on('end', () => {
   if (q.length > CAP) q = '…' + q.slice(q.length - CAP);
 
   q = q.trim();
-  if (q) process.stdout.write('Claude asks: ' + q);
+  if (q) process.stdout.write(q);
 });
