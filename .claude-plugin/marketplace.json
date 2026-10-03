@@ -10,25 +10,25 @@
       "name": "bespunky",
       "source": "./plugins/bespunky",
       "description": "The BeSpunky toolkit front door. /bespunky:index is a self-maintaining catalog of every installed toolkit skill, grouped by plugin with its invocation and a one-line 'use when', read from the live skill set so it never goes stale. Typing /bespunky in the slash menu filters to the whole toolkit. Also rotates a few tips for installed toolkit plugins into Claude Code's working spinner; turn them off, on or list them with /bespunky:tips.",
-      "version": "0.2.1"
+      "version": "0.2.2"
     },
     {
       "name": "bespunky-house",
       "source": "./plugins/house",
       "description": "The BeSpunky house standard for any repo, as a stack of detected layers on an Nx floor: the agent DX (composed devcontainer, Claude settings, window identity, HOUSE docs) by default; Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. /bespunky-house:new creates a project, /bespunky-house:upgrade migrates one to the current standard, /bespunky-house:add-layer adds a layer. Generator-first; consented, never automatic.",
-      "version": "0.39.1"
+      "version": "0.40.0"
     },
     {
       "name": "bespunky-workflow",
       "source": "./plugins/workflow",
       "description": "How work moves from idea to production, whatever is being built. branch-and-release: a declared branch model (trunk to gitflow), per-feature worktrees, human-gated moves. local-server-isolation: test servers on random free ports. feature-package: one effort, one slug, one folder of durable docs. session-handoff: relay one live effort into a fresh session. project-standing: orient in a project after a gap. delegate-and-parallelize: orchestrate budgeted subagents.",
-      "version": "0.10.1"
+      "version": "0.10.2"
     },
     {
       "name": "bespunky-engineering",
       "source": "./plugins/engineering",
       "description": "BeSpunky engineering skills, stack-agnostic. Foundation: architect-mentality (the mindset) and architecture-first (solve through design, not patches; fix the root cause). Technique routers: software-design, advanced-typescript, nx-monorepo-and-dx. Plus resumable-state (a deliberate home for view and working state) and typed-reactive-navigation (typed per-domain navigation, never a raw router call), each with an Angular adapter. Angular-only skills live in bespunky-angular.",
-      "version": "0.6.3"
+      "version": "0.6.4"
     },
     {
       "name": "bespunky-angular",
@@ -58,13 +58,13 @@
       "name": "bespunky-voice",
       "source": "./plugins/voice",
       "description": "Hear Claude's questions and answer by voice, away from the screen. Questions are asked the way a person asks them (`/speak say`, or automatically with `/speak auto on`). A band above the prompt shows what's said and heard, live, with Replay and Stop. The `voice-conversation` skill + `ask_by_voice` MCP tool run a hands-free back-and-forth. Swappable TTS (espeak-ng / say, upgradable to local Piper), local whisper.cpp STT; audio bridged by the BeSpunky devcontainer.",
-      "version": "0.8.2"
+      "version": "0.8.3"
     },
     {
       "name": "bespunky-vscode-identity",
       "source": "./plugins/bespunky-vscode-identity",
       "description": "Make every project's VSCode window recognizable at a glance, without Peacock's whole-window glow. `window-identity` picks a project-fitting emoji for the window title and a quiet bar colour derived from the design-system primary (else a stable name hash), written by the @bespunky/nx-tools:window-identity generator with a no-clobber ratchet. A SessionStart hook offers the upgrade to the brand colour once a design system appears.",
-      "version": "0.2.1"
+      "version": "0.2.2"
     },
     {
       "name": "bespunky-communication",
@@ -76,7 +76,7 @@
       "name": "bespunky-project-starter",
       "source": "./plugins/project-starter",
       "description": "Deprecated: renamed to bespunky-house. Nothing to learn - your next /bespunky-project-starter:sync installs bespunky-house@claude-toolkit at the same scope and runs its upgrade, which is what /sync became (adding a layer is now /bespunky-house:add-layer, creating a project /bespunky-house:new). Then `claude plugin uninstall bespunky-project-starter`. Or install bespunky-house yourself now.",
-      "version": "0.39.1"
+      "version": "0.40.0"
     }
   ]
 }

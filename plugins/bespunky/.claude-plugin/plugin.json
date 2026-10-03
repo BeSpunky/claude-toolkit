@@ -1,7 +1,7 @@
 {
   "name": "bespunky",
   "description": "The BeSpunky toolkit front door. /bespunky:index is a self-maintaining catalog of every installed toolkit skill, grouped by plugin with its invocation and a one-line 'use when', read from the live skill set so it never goes stale. Typing /bespunky in the slash menu filters to the whole toolkit. Also rotates a few tips for installed toolkit plugins into Claude Code's working spinner; turn them off, on or list them with /bespunky:tips.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"

@@ -1,7 +1,7 @@
 {
   "name": "bespunky-project-starter",
   "description": "Deprecated: renamed to bespunky-house. Nothing to learn - your next /bespunky-project-starter:sync installs bespunky-house@claude-toolkit at the same scope and runs its upgrade, which is what /sync became (adding a layer is now /bespunky-house:add-layer, creating a project /bespunky-house:new). Then `claude plugin uninstall bespunky-project-starter`. Or install bespunky-house yourself now.",
-  "version": "0.39.1",
+  "version": "0.40.0",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"
