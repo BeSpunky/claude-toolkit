@@ -17,10 +17,17 @@
 // all command hooks, a command and an MCP tool; with mods disabled (or on a
 // build without them) those remain the floor and nothing here is missed but
 // the view. Never put behaviour here that the floor needs.
+//
+// ENGINE HEALTH. When nothing is said or heard, the band warns about an engine
+// that will let the person down — a broken Piper about to speak in the robotic
+// voice, no speech recognition for ask_by_voice — so the robotic voice is never
+// a surprise. The verdict is the runtime's (`voice-health.sh`, the same probe
+// /speak status runs); the band only reads it, once at the start and again when
+// an engine's install moves or the verdict ages — never on the 300ms tick.
 
 import type { EngineInterface, FsEntry, Register } from 'claude-code'
 
-import type { VoiceBand } from '../types/index.d.ts'
+import type { VoiceBand, VoiceHealth } from '../types/index.d.ts'
 
 /** The one value the band draws from; written by the poller alone. */
 const BAND = { plugin: 'bespunky-voice', key: 'band' } as const
@@ -40,6 +47,10 @@ const STALE_SPEAKING_MS = 180_000
 const STALE_LISTENING_MS = 60_000
 /** How long the last utterance stays up after speech ends. */
 const LINGER_MS = 20_000
+/** A health verdict is re-taken this often even when nothing on disk moved. */
+const HEALTH_TTL_MS = 600_000
+/** The runtime entries whose change means the verdict may have changed. */
+const HEALTH_INPUTS = ['voice-health.sh', 'tts-engine.sh', 'listen.sh', 'piper', 'voices', 'whisper']
 
 type Verb = 'stop' | 'replay'
 
@@ -53,6 +64,10 @@ export type Snapshot = {
   lastText: string
   /** `.hearing`. */
   heard: string
+  /** The engines' last verdict, when one has been taken. */
+  health?: VoiceHealth
+  /** The warning the person dismissed this session. */
+  dismissed?: string
 }
 
 /**
@@ -74,8 +89,42 @@ export function decide(previous: VoiceBand, files: Snapshot, now: number): Voice
   if (previous.phase === 'lingering' && now < previous.until) {
     return previous
   }
+  const warning = files.health && healthWarning(files.health)
+  if (warning && warning !== files.dismissed) {
+    return { phase: 'warning', text: warning }
+  }
 
   return IDLE
+}
+
+/** What a healthy-enough voice says: nothing. Otherwise one short line. */
+export function healthWarning(health: VoiceHealth): string | undefined {
+  const tts = {
+    natural: undefined,
+    system: undefined,
+    broken: 'Piper broken — falling back to the robotic voice',
+    robotic: 'robotic voice — Piper not installed',
+    none: 'no speech engine — nothing will be spoken',
+  }[health.tts]
+  const stt = {
+    ok: undefined,
+    broken: 'speech recognition broken',
+    missing: 'no speech recognition',
+  }[health.stt]
+  const problems = [tts, stt].filter(Boolean)
+
+  return problems.length === 0 ? undefined : `voice: ${problems.join('; ')} — /speak status`
+}
+
+/** `voice-health.sh`'s two lines, or undefined when they aren't its output. */
+export function parseHealth(stdout: string): VoiceHealth | undefined {
+  const verdicts = new Map(stdout.split('\n').map(line => line.split('\t', 2) as [string, string?]))
+  const tts = verdicts.get('tts')
+  const stt = verdicts.get('stt')
+  const isTts = (v?: string): v is VoiceHealth['tts'] => ['natural', 'broken', 'robotic', 'system', 'none'].includes(v ?? '')
+  const isStt = (v?: string): v is VoiceHealth['stt'] => ['ok', 'broken', 'missing'].includes(v ?? '')
+
+  return isTts(tts) && isStt(stt) ? { tts, stt } : undefined
 }
 
 /**
@@ -96,10 +145,13 @@ export async function guardAbort<T>(signal: AbortSignal, work: () => Promise<T>,
 
 export const register: Register = on => {
   let poller: { cancel: () => void } | undefined
+  /** The warning dismissed this session: it stays down until it changes. */
+  const dismissal = { text: '' }
 
   on('session.start', async ($, e, next) => {
     poller?.cancel()
-    poller = await startPolling($)
+    dismissal.text = ''
+    poller = await startPolling($, dismissal)
 
     return next(e)
   })
@@ -118,6 +170,31 @@ export const register: Register = on => {
     }
 
     const { Box, Button, Text } = $.ui.resolve(e)
+
+    if (shown.phase === 'warning') {
+      const room = (e.props.bodyColumns || e.viewport?.columns || 80) - DISMISS_CELLS
+
+      return (
+        <Box flexDirection="row" gap={1}>
+          <Box flexGrow={1} flexShrink={1}>
+            <Text color="warning" wrap="truncate-end">
+              {`⚠ ${fit(shown.text, room - 2)}`}
+            </Text>
+          </Box>
+          <Button
+            key="voice-dismiss"
+            label="Dismiss"
+            hotkey="d"
+            role="dismiss"
+            onPress={() => {
+              dismissal.text = shown.text
+              void $.state.set(BAND, IDLE)
+            }}
+          />
+        </Box>
+      )
+    }
+
     const isLingering = shown.phase === 'lingering'
     const room = (e.props.bodyColumns || e.viewport?.columns || 80) - (isLingering ? REPLAY_CELLS : BOTH_CELLS)
     const line =
@@ -146,9 +223,10 @@ export const register: Register = on => {
 /** `[ Replay ]` and `[ Stop ]` with their gaps, in cells. */
 const REPLAY_CELLS = 11
 const BOTH_CELLS = 20
+const DISMISS_CELLS = 12
 
 /** Polls the runtime's files into `band`, writing only on a change. */
-async function startPolling($: EngineInterface) {
+async function startPolling($: EngineInterface, dismissal: { text: string }) {
   const dir = await voiceDir($)
 
   if (dir === undefined) {
@@ -159,7 +237,25 @@ async function startPolling($: EngineInterface) {
 
   const lastText = cachedText($, `${dir}/last-utterance.txt`)
   const heard = cachedText($, `${dir}/.hearing`)
+  const health = healthProbe($, dir)
   let isPolling = false
+
+  /** One `fs.list` per tick; a file's text is read only when it changed. */
+  const snapshot = async (now: number): Promise<Snapshot> => {
+    const entries: FsEntry[] = await $.fs.list(dir).catch(() => [])
+    const of = (name: string) => entries.find(entry => entry.name === name)
+    const speaking = of('.speaking.pid')
+    const listening = of('.listening.pid')
+
+    return {
+      speakingSince: speaking?.mtimeMs,
+      listeningSince: listening?.mtimeMs,
+      lastText: speaking ? await lastText(of('last-utterance.txt')) : '',
+      heard: listening ? await heard(of('.hearing')) : '',
+      health: health(entries, now),
+      dismissed: dismissal.text,
+    }
+  }
 
   return $.clock.every(POLL_MS, () => {
     if (isPolling) {
@@ -168,8 +264,8 @@ async function startPolling($: EngineInterface) {
     isPolling = true
     void (async () => {
       try {
-        const files = await snapshot(dir, lastText, heard)
-        const [now, { value: previous = IDLE, version }] = await Promise.all([$.clock.now(), $.state.get(BAND)])
+        const now = await $.clock.now()
+        const [files, { value: previous = IDLE, version }] = await Promise.all([snapshot(now), $.state.get(BAND)])
         const next = decide(previous, files, now)
 
         if (JSON.stringify(next) !== JSON.stringify(previous)) {
@@ -180,24 +276,46 @@ async function startPolling($: EngineInterface) {
       }
     })()
   })
-
-  /** One `fs.list` per tick; a file's text is read only when it changed. */
-  async function snapshot(dir: string, last: TextFile, hearing: TextFile): Promise<Snapshot> {
-    const entries: FsEntry[] = await $.fs.list(dir).catch(() => [])
-    const of = (name: string) => entries.find(entry => entry.name === name)
-    const speaking = of('.speaking.pid')
-    const listening = of('.listening.pid')
-
-    return {
-      speakingSince: speaking?.mtimeMs,
-      listeningSince: listening?.mtimeMs,
-      lastText: speaking ? await last(of('last-utterance.txt')) : '',
-      heard: listening ? await hearing(of('.hearing')) : '',
-    }
-  }
 }
 
 type TextFile = (entry: FsEntry | undefined) => Promise<string>
+
+/**
+ * The engines' last verdict from `voice-health.sh`, re-taken in the background
+ * when one of HEALTH_INPUTS moved or the verdict is HEALTH_TTL_MS old — the
+ * probe runs piper, so it never rides the tick. No runtime script, no verdict:
+ * a machine without the voice installed sees nothing.
+ */
+function healthProbe($: EngineInterface, dir: string) {
+  let verdict: VoiceHealth | undefined
+  let takenFor = ''
+  let takenAt = -Infinity
+  let isProbing = false
+
+  return (entries: FsEntry[], now: number) => {
+    const inputs = HEALTH_INPUTS.map(name => {
+      const entry = entries.find(each => each.name === name)
+
+      return `${name}:${entry?.mtimeMs ?? '-'}`
+    }).join(' ')
+    const hasScript = entries.some(entry => entry.name === 'voice-health.sh')
+
+    if (!hasScript) {
+      verdict = undefined
+    } else if (!isProbing && (inputs !== takenFor || now - takenAt >= HEALTH_TTL_MS)) {
+      isProbing = true
+      takenFor = inputs
+      takenAt = now
+      void $.process
+        .run(['bash', `${dir}/voice-health.sh`], { timeoutMs: 20_000 })
+        .then(ran => (verdict = ran.exitCode === 0 ? parseHealth(ran.stdout) : undefined))
+        .catch(() => (verdict = undefined))
+        .finally(() => (isProbing = false))
+    }
+
+    return verdict
+  }
+}
 
 /** A file's text, re-read only when its mtime or size moved. */
 function cachedText($: EngineInterface, path: string): TextFile {
