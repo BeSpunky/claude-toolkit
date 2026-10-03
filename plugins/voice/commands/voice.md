@@ -38,7 +38,7 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
 
 - **stop** — Silence whatever is being said right now:
   `bash ~/.claude/bespunky-voice/speaker.sh stop`. (Speech also stops on its own
-  the moment the user submits a prompt.)
+  the moment the user submits a prompt or answers a question picker.)
 
 - **answer** — Capture the user's spoken reply and act on it. Run:
   ```

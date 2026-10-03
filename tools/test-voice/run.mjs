@@ -19,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../plugins/voice');
 const { classifyIntent, matchOption } = await import(path.join(PLUGIN, 'mcp/answer.mjs'));
-const { phraseQuestion, spokenFor } = await import(path.join(PLUGIN, 'hooks/extract-spoken.mjs'));
+const { phraseQuestion } = await import(path.join(PLUGIN, 'hooks/phrasing.mjs'));
+const { spokenFor } = await import(path.join(PLUGIN, 'hooks/extract-spoken.mjs'));
+const { questionFromText } = await import(path.join(PLUGIN, 'hooks/extract-turn-question.mjs'));
 
 const cases = [];
 const test = (name, fn) => cases.push({ name, fn });
@@ -47,6 +49,33 @@ test('several questions are joined as speech', () => {
     { question: 'Which size?', options: [{ label: 'Small' }, { label: 'Large' }] }] } });
   assert.equal(s, 'Which color: Red or Blue? And Which size: Small or Large?');
 });
+test('sentence-long choices lose their own punctuation and get a breath before "or"', () => {
+  assert.equal(
+    phraseQuestion('What should happen when the token expires?', [{ label: 'Silently refresh it and retry the request.' }, { label: 'Log the user out and redirect.' }]),
+    'What should happen when the token expires: Silently refresh it and retry the request, or Log the user out and redirect?');
+  assert.equal(phraseQuestion('Which file?', [{ label: 'Use `nx.json`' }, { label: 'Use `package.json`' }]), 'Which file: Use nx.json or Use package.json?');
+});
+test('a pick-any question says so; a recommended yes is a suggestion', () => {
+  assert.equal(phraseQuestion('Which features?', [{ label: 'Routing' }, { label: 'State' }, { label: 'Testing' }], { multiSelect: true }), 'Which features: Routing, State, and Testing? Pick any.');
+  assert.equal(phraseQuestion('Update the README?', [{ label: 'Yes (Recommended)' }, { label: 'No' }]), "Update the README? I'd say yes.");
+});
+test('a prose question after a list is asked with the list as its choices — never the last bullet glued on', () => {
+  assert.equal(questionFromText('Routes:\n\n- **Rebase** — rewrites history.\n- **Merge** — keeps it.\n- Migrate to the new API — most work.\n\nWhich one?'),
+    'Which one: Rebase, Merge, or Migrate to the new API?');
+  assert.equal(questionFromText('Options:\n1. commit\n2. stash\n\nWhich would you prefer?'), 'Which would you prefer: commit or stash?');
+  assert.equal(questionFromText('I looked. The cache is stale. Should I clear it?'), 'The cache is stale. Should I clear it?');
+  assert.equal(questionFromText('Done, no question.'), '');
+});
+test('the Stop hook stays silent when the turn ended on a tool call', () => {
+  const dir = tmp('turn');
+  const transcript = path.join(dir, 't.jsonl');
+  const line = (content) => JSON.stringify({ type: 'assistant', message: { content } });
+  const run = () => spawnSync('node', [path.join(PLUGIN, 'hooks/extract-turn-question.mjs')], { input: JSON.stringify({ transcript_path: transcript }), encoding: 'utf8' }).stdout;
+  fs.writeFileSync(transcript, line([{ type: 'text', text: 'Shall I go on?' }]) + '\n');
+  assert.equal(run(), 'Shall I go on?');
+  fs.writeFileSync(transcript, line([{ type: 'text', text: 'Shall I go on?' }, { type: 'tool_use', name: 'AskUserQuestion' }]) + '\n');
+  assert.equal(run(), '');
+});
 test('a malformed payload says nothing', () => {
   for (const p of [null, 42, {}, { tool_name: 'AskUserQuestion', tool_input: { questions: 'x' } }]) assert.equal(spokenFor(p), '');
 });
@@ -56,9 +85,9 @@ test('"repeat that" and friends are a repeat, only as the whole reply', () => {
   for (const t of ['Repeat that.', 'say that again please', 'What?', 'Sorry, can you repeat the question?', 'come again']) assert.equal(classifyIntent(t), 'repeat', t);
   assert.equal(classifyIntent('I want what you said first'), null);
 });
-test('"stop" and friends are a cancel, only as the whole reply', () => {
-  for (const t of ['Stop.', 'never mind', 'Nevermind', 'okay cancel that', 'forget it']) assert.equal(classifyIntent(t), 'cancel', t);
-  assert.equal(classifyIntent('no, stop doing the migration first'), null);
+test('"stop" and friends are a cancel — padded or repeated — but only as the whole reply', () => {
+  for (const t of ['Stop.', 'never mind', 'Nevermind', 'okay cancel that', 'forget it', 'Please stop.', 'Stop, stop.', 'No, stop.', 'Never mind, stop.']) assert.equal(classifyIntent(t), 'cancel', t);
+  for (const t of ['no, stop doing the migration first', 'Stop the migration.', 'no']) assert.equal(classifyIntent(t), null, t);
 });
 test('options match by label, ordinal and yes/no; unsure stays unmatched', () => {
   const opts = [{ label: 'Commit now' }, { label: 'Keep going' }];
@@ -66,19 +95,32 @@ test('options match by label, ordinal and yes/no; unsure stays unmatched', () =>
   assert.equal(matchOption('the second one', opts).index, 1);
   assert.equal(matchOption('yeah', opts).index, 0);
   assert.equal(matchOption('no idea', opts), null);
+  assert.equal(matchOption("I can't decide", opts), null);
+});
+test('negation is understood: rejections are not picks, mixed yes/no is unsure', () => {
+  const opts = [{ label: 'Commit now' }, { label: 'Keep going' }];
+  assert.equal(matchOption('Not the first one, the second.', opts).index, 1);
+  assert.equal(matchOption('not commit now, keep going', opts).index, 1);
+  assert.equal(matchOption("Don't.", opts).index, 1);
+  for (const t of ["Don't do it.", "No, I'm sure.", 'Not okay.']) assert.equal(matchOption(t, opts), null, t);
 });
 
 // ---- the ask tool, against fake audio -------------------------------------------
 // The server finds its scripts at ../scripts relative to itself, so the fixture IS that layout: the real server
 // files under mcp/, fakes under scripts/. Fake listen.sh replays scripted transcripts, one per call.
-function serverFixture({ transcripts = [], listenSeconds = 0 } = {}) {
+function serverFixture({ transcripts = [], listenSeconds = 0, saySeconds = 0, stopDelay = 0 } = {}) {
   const root = tmp('server');
   fs.mkdirSync(path.join(root, 'mcp'));
   fs.mkdirSync(path.join(root, 'scripts'));
   for (const f of ['ask-server.mjs', 'answer.mjs']) fs.copyFileSync(path.join(PLUGIN, 'mcp', f), path.join(root, 'mcp', f));
   const log = path.join(root, 'log');
   fs.writeFileSync(path.join(root, 'transcripts'), transcripts.join('\n') + '\n');
-  fs.writeFileSync(path.join(root, 'scripts', 'speaker.sh'), `#!/usr/bin/env bash\nprintf 'speaker %s\\n' "$*" >> '${log}'\n`);
+  fs.writeFileSync(path.join(root, 'scripts', 'speaker.sh'), `#!/usr/bin/env bash
+[ "$1" = stop ] && sleep ${stopDelay}
+printf 'speaker %s\\n' "$*" >> '${log}'
+[ "$1" = say ] && { trap 'echo say-killed >> "${log}"; exit 143' TERM; sleep ${saySeconds} & wait $!; }
+exit 0
+`);
   fs.writeFileSync(path.join(root, 'scripts', 'listen.sh'), `#!/usr/bin/env bash
 printf 'listen %s\\n' "$*" >> '${log}'
 trap 'echo listen-killed >> "${log}"; exit 143' TERM
@@ -173,6 +215,29 @@ test('a recognition failure is relayed, not guessed', async () => {
   } finally { s.close(); }
 });
 
+test('a cancel while the question is still being spoken never opens the mic', async () => {
+  const s = serverFixture({ transcripts: ['yes'], saySeconds: 30 });
+  try {
+    s.ask(1, { question: 'Commit now?' });
+    await sleep(300);
+    s.rpc({ method: 'notifications/cancelled', params: { requestId: 1 } });
+    await sleep(500);
+    assert.ok(s.logLines().includes('say-killed'), s.logLines().join(' | '));
+    assert.ok(!s.logLines().some((l) => l.startsWith('listen')), s.logLines().join(' | '));
+  } finally { s.close(); }
+});
+test("a cancel's stop lands before the next question is spoken", async () => {
+  const s = serverFixture({ transcripts: ['commit now', 'b'], listenSeconds: 2, stopDelay: 0.4 });
+  try {
+    s.ask(1, { question: 'First?' });
+    await sleep(300);
+    s.ask(2, { question: 'Second?', options: [{ label: 'A' }, { label: 'B' }] });
+    assert.equal((await s.response(2)).matched.label, 'B');
+    const log = s.logLines();
+    assert.ok(log.indexOf('speaker stop') < log.indexOf('speaker say --wait Second?'), log.join(' | '));
+  } finally { s.close(); }
+});
+
 // ---- the speaker owns the utterance -----------------------------------------------
 function speakerFixture() {
   const root = tmp('speaker');
@@ -206,6 +271,17 @@ test('replay says the last utterance again', () => {
   f.run(['replay', '--wait']);
   assert.deepEqual(f.said(), ['hello there', 'hello there']);
 });
+test('concurrent says leave exactly one voice, and stop silences it', async () => {
+  const f = speakerFixture();
+  const env = { ...process.env, HOME: f.root, FAKE_SPEAK_SECONDS: '30' };
+  await Promise.all([1, 2, 3, 4, 5, 6].map((u) => new Promise((r) => spawn('bash', [path.join(f.root, 'scripts', 'speaker.sh'), 'say', `u${u}`], { env, stdio: 'ignore' }).on('close', r))));
+  await sleep(300);
+  const speaking = () => spawnSync('pgrep', ['-fc', `^bash ${path.join(f.root, 'scripts', 'speak.sh')}`], { encoding: 'utf8' }).stdout.trim();
+  assert.equal(speaking(), '1');
+  f.run(['stop']);
+  await sleep(300);
+  assert.equal(speaking(), '0');
+});
 test('a stale pidfile never kills a stranger', async () => {
   const f = speakerFixture();
   const stranger = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
@@ -215,6 +291,28 @@ test('a stale pidfile never kills a stranger', async () => {
   await sleep(200);
   assert.ok(alive(stranger.pid));
   stranger.kill();
+});
+
+// ---- hooks ---------------------------------------------------------------------
+test('silence.sh stops the speaker and prints nothing (its stdout would reach the model)', () => {
+  const root = tmp('silence');
+  fs.mkdirSync(path.join(root, 'scripts'));
+  fs.writeFileSync(path.join(root, 'scripts', 'speaker.sh'), `#!/usr/bin/env bash\necho "$*" > '${root}/called'\necho noise\n`);
+  const r = spawnSync('bash', [path.join(PLUGIN, 'hooks', 'silence.sh')], { encoding: 'utf8', env: { ...process.env, CLAUDE_PLUGIN_ROOT: root } });
+  assert.equal(r.stdout, '');
+  assert.equal(fs.readFileSync(path.join(root, 'called'), 'utf8').trim(), 'stop');
+});
+test('install-runtime publishes scripts, prunes retired ones, and never prunes after a failed publish', () => {
+  const home = tmp('runtime');
+  const dest = path.join(home, '.claude', 'bespunky-voice');
+  const run = (root) => spawnSync('bash', [path.join(PLUGIN, 'hooks', 'install-runtime.sh')], { env: { ...process.env, HOME: home, CLAUDE_PLUGIN_ROOT: root } });
+  fs.mkdirSync(dest, { recursive: true });
+  fs.writeFileSync(path.join(dest, 'speak-detached.sh'), '');
+  run(PLUGIN);
+  assert.ok(fs.existsSync(path.join(dest, 'speaker.sh')));
+  assert.ok(!fs.existsSync(path.join(dest, 'speak-detached.sh')));
+  run(path.join(home, 'gone'));
+  assert.ok(fs.existsSync(path.join(dest, 'speaker.sh')));
 });
 
 // ---- run ------------------------------------------------------------------------
