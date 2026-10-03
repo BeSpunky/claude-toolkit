@@ -19,7 +19,22 @@
 #   3. a design system exists             → there is something real to upgrade the colour TO
 # This runs at the start of every session in every project on the machine, so silence is the common outcome
 # and a false alarm is worse than a missed one.
+#
+# MACHINE-READABLE MODE (`--json`). The same detection, for readers that are not the model (the
+# `name-hash-toast.ts` mod): instead of the notice it prints ONE line, `{"state":"<state>"}`, naming the gate
+# that decided — `unapplied` (1), `resolved` (2), `no-design-system` (3), `declined` (the snooze), or
+# `upgradable` (every gate passed: the case the notice is for). The gates are written once, below; a reader
+# asks, never re-implements them.
 set -uo pipefail
+
+MODE=notice
+[ "${1:-}" = "--json" ] && MODE=json
+
+# Ends the run at the gate that decided: silent for the notice, the state word for `--json`.
+verdict() {
+  [ "$MODE" = json ] && printf '{"state":"%s"}\n' "$1"
+  exit 0
+}
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
@@ -30,19 +45,22 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 MARKER="$PROJECT_DIR/.vscode/.window-identity.json"
 
 # (1) No identity here → not this feature's business. Stay quiet (covers every non-house, non-applied project).
-[ -f "$MARKER" ] || exit 0
+[ -f "$MARKER" ] || verdict unapplied
 
 # Read a top-level "key": "value" — no jq (hooks run in a bare shell; same grep/sed contract the sibling
 # project-starter hook uses).
+# The value is a string ("name-hash") or a bare scalar (true) — the snooze file holds a bare `true`, so a
+# string-only match would hand back the whole line and the snooze would never hold. No match → nothing printed.
 json_value() {
   [ -f "$1" ] || return 1
-  grep -m1 "\"$2\"" "$1" 2>/dev/null | sed -E "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*/\1/"
+  grep -m1 "\"$2\"" "$1" 2>/dev/null |
+    sed -nE "s/.*\"$2\"[[:space:]]*:[[:space:]]*(\"([^\"]+)\"|([A-Za-z0-9.+-]+)).*/\2\3/p"
 }
 
 # (2) Only the name-hash placeholder is upgradable. A design-system or manual colour is already resolved;
 # a garbled/absent source is treated as "not name-hash" and left alone (never guess an upgrade).
 SOURCE="$(json_value "$MARKER" source || true)"
-[ "$SOURCE" = "name-hash" ] || exit 0
+[ "$SOURCE" = "name-hash" ] || verdict resolved
 
 # (3) Is there a design system to upgrade TO? The design system is marked by its Nx tag `type:design-system`
 # (the same key the generators detect it by — not a path, which --directory can move). Cheap, bounded scan of
@@ -51,7 +69,7 @@ if ! grep -rlqF 'type:design-system' \
       --include='project.json' --include='package.json' \
       --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
       "$PROJECT_DIR" 2>/dev/null; then
-  exit 0
+  verdict no-design-system
 fi
 
 # This developer already declined the upgrade. A refusal that evaporated at session end would nag at every
@@ -59,8 +77,10 @@ fi
 # now" must not silence it for teammates. Boolean, because this hook can't tell a real primary from a
 # placeholder; a user who declines can still run the skill by hand anytime (which re-checks the tokens).
 if [ "$(json_value "$PROJECT_DIR/.claude/window-identity-snooze.json" declinedNameHashUpgrade || true)" = "true" ]; then
-  exit 0
+  verdict declined
 fi
+
+[ "$MODE" = json ] && verdict upgradable
 
 # --- the notice ----------------------------------------------------------------------------------------------
 # stdout on exit 0 is injected into Claude's context. A STATEMENT OF FACT to relay, not an order to obey: a
