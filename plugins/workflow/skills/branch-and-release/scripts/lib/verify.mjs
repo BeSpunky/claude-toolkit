@@ -6,12 +6,13 @@
 // except no-regression, which reads the full history — an un-carried fix is a live bug whatever model is picked.
 import { chainOf, feederOf, productionLine, releaseLines, resolveLine, project, canonical } from './model.mjs';
 import { match } from './patterns.mjs';
+import { detectLongLived } from './long-lived.mjs';
 
 const TRAILER_NA = /^Not-applicable-upstream:/m;
 const CHERRY_FROM = /\(cherry picked from commit ([0-9a-f]{7,64})\)/g;
 const SHOW = 5; // commits listed per result
 
-export function verify(git, model, { proposed = false, branches = git.branchNames(model.remote || 'origin') } = {}) {
+export function verify(git, model, { proposed = false, branches = git.branchNames(model.remote || 'origin'), longLived } = {}) {
   const remote = model.remote || 'origin';
   const results = [];
   const add = (invariant, line, status, reason, commits) => results.push({ invariant, line, status, reason, ...(commits?.length ? { commits } : {}) });
@@ -106,6 +107,11 @@ export function verify(git, model, { proposed = false, branches = git.branchName
       add(1, name, 'warning', 'line does not exist (yet)');
       continue;
     }
+    if (proposed) {
+      // A proposal is adopted today: its baseline IS today's tip, so there is no history to judge yet.
+      add(1, name, 'ok', `proposed: the line exists (tip ${t.slice(0, 9)}); its history before adoption is forgiven — direct commits are checked from adoption on`);
+      continue;
+    }
     const b = baselineOf(name, t, 1);
     if (b === undefined) continue;
     const firstParent = git.lines(['rev-list', '--first-parent', '--parents', `${b}..${t}`]).map((l) => l.split(' '));
@@ -156,6 +162,14 @@ export function verify(git, model, { proposed = false, branches = git.branchName
     const pt = tip(f.predecessor);
     if (!st || !pt) {
       add(2, s.branch, 'warning', `cannot check: ${!st ? s.branch : f.predecessor} does not exist`);
+      continue;
+    }
+    if (proposed) {
+      // History is forgiven, but TODAY's state still decides whether the first promotion can be what the model says.
+      const extra = git.lines(['rev-list', '--count', st, `^${pt}`])[0];
+      if (extra === '0') add(2, s.branch, 'ok', `proposed: today ${s.branch} is contained in ${f.predecessor} by ancestry — the first ${s.promote === 'ff' ? 'fast-forward' : 'promotion'} can proceed`);
+      else if (s.promote === 'ff') add(2, s.branch, 'warning', `proposed: today ${s.branch} has ${extra} commit(s) ${f.predecessor} lacks — the first fast-forward promotion would fail until they are carried into ${f.predecessor}`);
+      else add(2, s.branch, 'ok', `proposed: today ${s.branch} has ${extra} commit(s) ${f.predecessor} lacks by ancestry — a ${s.promote} promotion does not need ancestry; history before adoption is forgiven`);
       continue;
     }
     const b = baselineOf(s.branch, st, 2);
@@ -252,6 +266,16 @@ export function verify(git, model, { proposed = false, branches = git.branchName
           add(4, r, 'warning', `already shipped into ${model.releases.shipsTo} — delete it once it is carried`);
         }
       }
+    }
+  }
+  if (proposed) {
+    // A long-lived line (by name) the proposal does not model would keep existing with no role: nothing guards
+    // it, nothing promotes into it. Not a violation — retiring it may be the point — but it must be said.
+    const modelled = new Set([...chainOf(model), ...releases, ...hotfixes]);
+    const lines = longLived ?? detectLongLived(git, git.try(['rev-parse', '--show-toplevel']), { remote, branches }).lines;
+    for (const n of lines.filter((x) => !modelled.has(x))) {
+      hygiene++;
+      add(4, n, 'warning', `exists but the proposed model gives it no role — retire it deliberately (or model it), so it does not linger unguarded`);
     }
   }
   if (!hygiene) add(4, '*', 'ok', 'nothing stranded');

@@ -10,10 +10,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { verify } from './verify.mjs';
 import { SCHEMA } from './model.mjs';
+import { detectLongLived } from './long-lived.mjs';
+import { WORKFLOW, triggerScope, deploySignals, workflowTriggers } from './workflows.mjs';
 
-const LONG_LIVED = ['development', 'develop', 'staging', 'qa', 'main', 'master', 'production', 'trunk'];
-const RANK = { development: 0, develop: 0, trunk: 0, staging: 1, qa: 1, main: 2, master: 2, production: 2 };
 const HISTORY = 400; // first-parent commits examined per line
+const RECENT_DAYS = 90; // direct commits older than this are history, not a live practice
+const DAY = 86400;
 
 export function evidence(git, top, resolved) {
   const facts = [];
@@ -29,7 +31,11 @@ export function evidence(git, top, resolved) {
     fact('branches', ref.replace(/^refs\/(heads|remotes)\//, (_, k) => (k === 'heads' ? '' : 'remote:')), { tip: sha.slice(0, 12), lastActivity: date }, 'observed');
   }
   const names = git.branchNames(remote);
-  const longLived = [...new Set([...(model ? [model.integration.branch, ...model.stages.map((s) => s.branch)] : []), ...LONG_LIVED.filter((n) => names.includes(n))])].filter((n) => names.includes(n));
+  // Which of them are LINES: not a name list — the declared lines, conventional names, the remote default, CI
+  // push targets, and whatever repeatedly promotes into or out of those (lib/long-lived.mjs). Reasons per line.
+  const detected = detectLongLived(git, top, { model, remote, branches: names });
+  const longLived = detected.lines;
+  for (const n of longLived) fact('long-lived', n, { reasons: detected.reasons[n] }, detected.reasons[n].every((r) => r === 'declared') ? 'observed' : 'inferred');
   const tip = (n) => git.sha(git.ref(n, remote) ?? n);
 
   // ---- ahead/behind matrix -------------------------------------------------------------------------------
@@ -44,33 +50,51 @@ export function evidence(git, top, resolved) {
     }
 
   // ---- how each long-lived line advanced -----------------------------------------------------------------
-  const ordered = model ? [model.integration.branch, ...model.stages.map((s) => s.branch)].filter((n) => longLived.includes(n)) : [...longLived].sort((a, b) => (RANK[a] ?? 9) - (RANK[b] ?? 9));
+  const ordered = model ? [model.integration.branch, ...model.stages.map((s) => s.branch)].filter((n) => longLived.includes(n)) : longLived;
   const upstreamOf = (n) => {
     const i = ordered.indexOf(n);
     return i > 0 ? ordered[i - 1] : null;
   };
+  // Every count names its unit: COMMITS walked on a line's first-parent history, or promotion EVENTS (moves).
+  const now = Math.floor(Date.now() / 1000);
   for (const n of longLived) {
-    const fp = git.lines(['rev-list', '--first-parent', '--parents', '-n', String(HISTORY), tip(n)]).map((l) => l.split(' '));
-    const merges = fp.filter((p) => p.length > 2).length;
-    const singles = fp.filter((p) => p.length <= 2).map((p) => p[0]);
+    const fp = git.lines(['log', '--first-parent', '-n', String(HISTORY), '--format=%H %P%x09%ct', tip(n)]).map((l) => {
+      const [shas, time] = l.split('\t');
+      return { parents: shas.split(' ').length - 1, sha: shas.split(' ')[0], time: Number(time) };
+    });
+    const merges = fp.filter((c) => c.parents > 1).length;
+    const singles = fp.filter((c) => c.parents <= 1);
     const up = upstreamOf(n);
     const upTip = up && tip(up);
-    const ffArrivals = upTip ? singles.filter((c) => git.isAncestor(c, upTip)).length : 0;
-    fact('advancement', n, { examined: fp.length, mergeCommits: merges, ffArrivalsFrom: up, ffArrivals, directCommits: singles.length - ffArrivals }, 'inferred');
+    const ffArrived = upTip ? singles.filter((c) => git.isAncestor(c.sha, upTip)) : [];
+    const direct = singles.filter((c) => !ffArrived.includes(c));
+    const recent = direct.filter((c) => now - c.time <= RECENT_DAYS * DAY).length;
+    fact(
+      'advancement',
+      n,
+      {
+        examinedCommits: fp.length,
+        mergeCommits: merges,
+        ffArrivedFrom: up,
+        ffArrivedCommits: ffArrived.length,
+        directCommits: { total: direct.length, [`last${RECENT_DAYS}Days`]: recent, older: direct.length - recent, newest: direct.length ? isoDay(Math.max(...direct.map((c) => c.time))) : null },
+      },
+      'inferred',
+    );
 
     // How long the downstream line sat behind: arrival times come only from the LOCAL reflog.
     if (up) {
-      const arrivals = reflog(git, n);
-      const upArrivals = new Map(reflog(git, up).map(([sha, t]) => [sha, t]));
+      const arrivals = reflog(git, n).filter((a) => a.kind === 'moved');
+      const upArrivals = new Map(reflog(git, up).map((a) => [a.sha, a.time]));
       const lags = [];
-      for (const [sha, t] of arrivals) {
+      for (const { sha, time } of arrivals) {
         const upT = upArrivals.get(sha);
-        if (upT !== undefined && t >= upT) lags.push(t - upT);
+        if (upT !== undefined && time >= upT) lags.push(time - upT);
       }
       if (lags.length) {
         lags.sort((a, b) => a - b);
         const median = lags[Math.floor(lags.length / 2)];
-        fact('lag', `${up} → ${n}`, { promotions: lags.length, medianSeconds: median, maxSeconds: lags.at(-1), reading: median < 600 ? 'back-to-back (ceremony?)' : 'separated (a gate in use?)' }, 'inferred');
+        fact('lag', `${up} → ${n}`, { promotionEvents: lags.length, medianSeconds: median, maxSeconds: lags.at(-1), reading: median < 600 ? 'back-to-back (ceremony?)' : 'separated (a gate in use?)' }, 'inferred');
       } else fact('lag', `${up} → ${n}`, 'promotion timing is not in this clone’s reflog (arrival times are local-only)', 'unobservable');
     }
   }
@@ -89,6 +113,9 @@ export function evidence(git, top, resolved) {
   }
   for (const [key, count] of series) fact('tags', key, { count }, 'inferred');
   for (const t of tags.slice(0, 10)) fact('tags', t, { containedIn: longLived.filter((n) => git.isAncestor(`refs/tags/${t}^{commit}`, tip(n))) }, 'observed');
+  const onALine = new Set(longLived.flatMap((n) => git.lines(['for-each-ref', `--merged=${tip(n)}`, '--format=%(refname:short)', 'refs/tags'])));
+  const loose = tags.filter((t) => !onALine.has(t));
+  if (loose.length) fact('tags', 'not on any line', { count: loose.length, examples: loose.slice(0, 5), reading: 'no long-lived line contains them — e.g. restore points, or tags on work that never landed' }, 'observed');
 
   const picked = git.lines(['log', '--all', '--format=%H', '--grep=cherry picked from commit']);
   fact('cherry-picks', '(cherry picked from commit …) trailers', { count: picked.length }, 'observed');
@@ -98,10 +125,16 @@ export function evidence(git, top, resolved) {
   fact('landing', 'single commits ending "(#N)" (squash/rebase PR merges)', { count: squashLike }, 'inferred');
 
   // ---- bindings (working tree, tracked files only) -------------------------------------------------------
-  const files = git.lines(['ls-files']);
-  for (const f of files.filter((x) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(x))) {
-    const triggers = workflowTriggers(fs.readFileSync(path.join(top, f), 'utf8'));
-    fact('bindings', f, triggers.length ? triggers : 'no branch/tag filters', 'inferred');
+  // A repo that SHIPS templates (a generator payload, vendored deps) carries files that are someone else's
+  // bindings, not its own — see `shipped()`.
+  const tracked = git.lines(['ls-files']);
+  const files = tracked.filter((f) => !shipped(f));
+  const skipped = tracked.filter((f) => shipped(f) && BINDING_LIKE.some((re) => re.test(f)));
+  for (const f of files.filter((x) => WORKFLOW.test(x))) {
+    const text = fs.readFileSync(path.join(top, f), 'utf8');
+    const triggers = workflowTriggers(text).map((t) => ({ ...t, ...triggerScope(t, longLived) }));
+    const signals = deploySignals(text);
+    fact('bindings', f, triggers.length ? { triggers, deploys: signals.length > 0, deploySignals: signals } : 'no branch/tag filters', 'inferred');
   }
   for (const f of files.filter((x) => /(^|\/)apphosting[^/]*\.ya?ml$/.test(x))) fact('bindings', f, 'App Hosting config', 'observed');
   if (files.includes('firebase.json')) fact('bindings', 'firebase.json', 'present', 'observed');
@@ -113,71 +146,59 @@ export function evidence(git, top, resolved) {
       fact('bindings', '.firebaserc', 'unparseable', 'observed');
     }
   }
-  for (const f of files.filter((x) => /(env|environment)[^/]*$/i.test(x) && /(staging|production|prod)/i.test(path.basename(x)))) fact('bindings', f, 'environment file', 'observed');
+  for (const f of files.filter((x) => ENV_FILE.test(x) && /(staging|production|prod)/i.test(path.basename(x)))) fact('bindings', f, 'environment file', 'observed');
+  if (skipped.length) fact('bindings', '(shipped templates skipped)', { count: skipped.length, examples: skipped.slice(0, 3), rule: SHIPPED_RULE }, 'observed');
   fact('bindings', 'App Hosting backends / console-only deploy targets', 'live in the cloud console — ask', 'unobservable');
 
   // ---- remote side ---------------------------------------------------------------------------------------
   remoteFacts(fact, longLived);
 
   // ---- invariant 3 over full history ---------------------------------------------------------------------
-  const probe = model ?? provisional(names);
+  const probe = model ?? provisional(longLived);
   if (probe) {
-    for (const r of verify(git, probe, { proposed: true, branches: names }).filter((x) => x.invariant === 3))
+    for (const r of verify(git, probe, { proposed: true, branches: names, longLived }).filter((x) => x.invariant === 3))
       fact('regression', r.line, { status: r.status, reason: r.reason, ...(r.commits ? { commits: r.commits } : {}) }, model ? 'observed' : 'inferred');
-  } else fact('regression', '*', 'no integration/production pair recognisable by name', 'unobservable');
+  } else fact('regression', '*', 'fewer than two long-lived lines detected — no integration/production pair to compare', 'unobservable');
 
   return facts;
 }
 
+/** A branch's local reflog, newest first: { sha, time, kind }. Only a `moved` entry can be a promotion: a
+ *  `created` one is where the branch came into existence (branch/clone/rename) and a `committed` one was made
+ *  ON the line — counting either reads the line's birth or its own work as a promotion. */
 function reflog(git, name) {
   return git
-    .lines(['log', '-g', '--date=unix', '--format=%H %gd', `refs/heads/${name}`])
+    .lines(['log', '-g', '--date=unix', '--format=%H %gd%x09%gs', `refs/heads/${name}`])
     .map((l) => {
-      const m = /^([0-9a-f]+) .*@\{(\d+)\}$/.exec(l);
-      return m ? [m[1], Number(m[2])] : null;
+      const m = /^([0-9a-f]+) .*@\{(\d+)\}\t(.*)$/.exec(l);
+      if (!m) return null;
+      const kind = /^(branch: Created from|clone: from|Branch: renamed)/.test(m[3]) ? 'created' : /^commit\b/.test(m[3]) ? 'committed' : 'moved';
+      return { sha: m[1], time: Number(m[2]), kind };
     })
     .filter(Boolean);
 }
 
-/** A model guessed from names alone, only to run the regression probe on an undeclared repo. */
-function provisional(names) {
-  const integration = ['development', 'develop'].find((n) => names.includes(n));
-  const production = ['main', 'master'].find((n) => names.includes(n));
-  if (!integration || !production) return null;
-  return { schema: SCHEMA, remote: 'origin', integration: { branch: integration, baseline: null }, stages: [{ branch: production, promote: 'ff', baseline: null }], releases: null, hotfixes: null, work: { pattern: '{type}/{slug}' }, fixFlow: null, landing: { via: 'merge', prStyle: null }, tags: [] };
+const isoDay = (t) => new Date(t * 1000).toISOString().slice(0, 10);
+
+const ENV_FILE = /(env|environment)[^/]*$/i;
+/** What would read as a binding if it were the repo's own (used only to report what `shipped()` skipped). */
+const BINDING_LIKE = [/(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/, /(^|\/)apphosting[^/]*\.ya?ml$/, /(^|\/)firebase\.json$/, /(^|\/)\.firebaserc$/, ENV_FILE];
+
+const SHIPPED_RULE = 'template or payload files the repo ships, not bindings of its own: *.tpl / *.template, anything under node_modules/ or vendor/, and files/ or templates/ directories below a generators/ directory';
+/** True for a tracked file that is a template or payload this repo SHIPS to others (SHIPPED_RULE). */
+export function shipped(file) {
+  const segs = file.split('/');
+  if (/\.(tpl|template)$/i.test(segs.at(-1))) return true;
+  if (segs.some((s) => s === 'node_modules' || s === 'vendor')) return true;
+  const gen = segs.findIndex((s) => s === 'generators');
+  return gen >= 0 && segs.slice(gen + 1, -1).some((s) => s === 'files' || s === 'templates');
 }
 
-/** Crude `on:` read: [{ event, filter, values }]. Not a YAML parser — hence `inferred`. */
-export function workflowTriggers(text) {
-  const out = [];
-  const lines = text.split('\n');
-  let event = null;
-  let eventIndent = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].replace(/\s+#.*$/, '');
-    const indent = line.search(/\S/);
-    if (indent < 0) continue;
-    const ev = /^\s*(push|pull_request|pull_request_target|release|workflow_run)\s*:/.exec(line);
-    if (ev) {
-      event = ev[1];
-      eventIndent = indent;
-      continue;
-    }
-    if (event && indent <= eventIndent) event = null;
-    const f = /^\s*(branches|branches-ignore|tags|tags-ignore)\s*:\s*(.*)$/.exec(line);
-    if (!f || !event) continue;
-    let values = [];
-    if (f[2].startsWith('[')) values = f[2].replace(/[[\]]/g, '').split(',');
-    else if (f[2]) values = [f[2]];
-    else
-      for (let j = i + 1; j < lines.length; j++) {
-        const item = /^\s*-\s*(.+)$/.exec(lines[j]);
-        if (!item) break;
-        values.push(item[1]);
-      }
-    out.push({ event, filter: f[1], values: values.map((v) => v.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean) });
-  }
-  return out;
+/** A model guessed from the detected lines alone, only to run the regression probe on an undeclared repo: the
+ *  most upstream line as integration, the most downstream as production. */
+function provisional(lines) {
+  if (lines.length < 2) return null;
+  return { schema: SCHEMA, remote: 'origin', integration: { branch: lines[0], baseline: null }, stages: [{ branch: lines.at(-1), promote: 'ff', baseline: null }], releases: null, hotfixes: null, work: { pattern: '{type}/{slug}' }, fixFlow: null, landing: { via: 'merge', prStyle: null }, tags: [] };
 }
 
 function gh(args) {

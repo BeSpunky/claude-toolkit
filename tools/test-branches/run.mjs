@@ -684,11 +684,170 @@ const cases = {
     assert.ok(facts.some((f) => f.area === 'remote' && f.tag === 'unobservable'), 'gh facts unobservable');
     const wf = facts.find((f) => f.subject === '.github/workflows/deploy.yml');
     assert.equal(wf.tag, 'inferred');
-    assert.deepEqual(wf.value, [{ event: 'push', filter: 'branches', values: ['main'] }, { event: 'push', filter: 'tags', values: ['v*'] }]);
+    assert.deepEqual(wf.value.triggers.map(({ event, filter, values }) => ({ event, filter, values })), [{ event: 'push', filter: 'branches', values: ['main'] }, { event: 'push', filter: 'tags', values: ['v*'] }]);
     assert.ok(facts.some((f) => f.area === 'bindings' && f.subject === 'apphosting.staging.yaml' && f.tag === 'observed'));
     assert.ok(facts.some((f) => f.area === 'shapes' && f.subject === 'release/2.0' && f.tag === 'observed'));
     assert.ok(facts.some((f) => f.area === 'regression' && f.subject === 'main'));
     assert.ok(facts.some((f) => f.area === 'advancement' && f.subject === 'main'));
+  },
+
+  'evidence: shipped templates are not bindings — *.tpl, node_modules, generator files/ — and the skip is stated'() {
+    const r = repo();
+    r.write('src/environments/environment.prod.ts', 'x');
+    r.write('tools/gen/src/generators/fb/environment.prod.ts.tpl', 'x');
+    r.write('node_modules/lib/environment.staging.js', 'x');
+    r.write('tools/gen/src/generators/app/files/src/environment.production.ts', 'x');
+    r.git('add', '-Af');
+    r.git('commit', '-q', '-m', 'files');
+    const b = r.json(['evidence', '--json']).data.facts.filter((f) => f.area === 'bindings');
+    const envs = b.filter((f) => f.value === 'environment file').map((f) => f.subject);
+    assert.deepEqual(envs, ['src/environments/environment.prod.ts']);
+    const skipped = b.find((f) => f.subject === '(shipped templates skipped)');
+    assert.equal(skipped.value.count, 3);
+    assert.match(skipped.value.rule, /\.tpl/);
+  },
+
+  'evidence: a CI trigger reads exclusive or shared, and deploy-looking workflows are flagged'() {
+    const r = repo();
+    r.branch('development');
+    r.branch('staging');
+    r.write('.github/workflows/test.yml', 'on:\n  push:\n    branches: [main, development, staging]\njobs:\n  t:\n    # never publish from here\n    steps:\n      - run: npm test\n');
+    r.write('.github/workflows/ship.yml', 'on:\n  push:\n    branches: [main]\njobs:\n  s:\n    steps:\n      - run: npx firebase deploy --only hosting\n');
+    r.git('add', '-A');
+    r.git('commit', '-q', '-m', 'ci');
+    const facts = r.json(['evidence', '--json']).data.facts;
+    const test = facts.find((f) => f.subject === '.github/workflows/test.yml').value;
+    assert.equal(test.triggers[0].scope, 'shared: every long-lived line');
+    assert.deepEqual(test.triggers[0].lines, ['development', 'staging', 'main']);
+    assert.equal(test.deploys, false, 'a commented "publish" is not a signal');
+    const ship = facts.find((f) => f.subject === '.github/workflows/ship.yml').value;
+    assert.equal(ship.triggers[0].scope, 'exclusive');
+    assert.deepEqual(ship.triggers[0].lines, ['main']);
+    assert.equal(ship.deploys, true);
+    assert.ok(ship.deploySignals.includes('firebase deploy'));
+  },
+
+  'evidence: direct commits are dated, and every count names its unit (commits vs promotion events)'() {
+    const r = repo();
+    r.branch('development');
+    r.sw('development');
+    r.write('old.txt', 'old');
+    r.git('add', '-A');
+    execFileSync('git', ['commit', '-q', '-m', 'old direct'], { cwd: r.dir, env: { ...ENV, GIT_COMMITTER_DATE: '2025-01-01T00:00:00Z', GIT_AUTHOR_DATE: '2025-01-01T00:00:00Z' } });
+    r.commit('recent direct');
+    r.sw('main');
+    r.ff('development');
+    const adv = Object.fromEntries(r.json(['evidence', '--json']).data.facts.filter((f) => f.area === 'advancement').map((f) => [f.subject, f.value]));
+    assert.deepEqual(adv.development.directCommits, { total: 3, last90Days: 2, older: 1, newest: new Date().toISOString().slice(0, 10) });
+    assert.equal(adv.main.ffArrivedFrom, 'development');
+    assert.equal(adv.main.ffArrivedCommits, 3);
+    assert.equal(adv.main.examinedCommits, 3);
+    assert.equal(adv.main.directCommits.total, 0);
+    for (const k of ['ffArrivals', 'examined', 'ffArrivalsFrom']) assert.ok(!(k in adv.main), `no unit-less ${k}`);
+  },
+
+  'evidence: lag counts promotion EVENTS — a line\'s creation and its own commits are not promotions'() {
+    const r = repo();
+    r.branch('development');
+    r.branch('staging');
+    for (let i = 0; i < 3; i++) {
+      r.sw('development');
+      r.commit(`feat ${i}`);
+      r.sw('staging');
+      r.ff('development');
+      r.sw('main');
+      r.ff('staging');
+    }
+    const lag = Object.fromEntries(r.json(['evidence', '--json']).data.facts.filter((f) => f.area === 'lag').map((f) => [f.subject, f.value]));
+    assert.equal(lag['development → staging'].promotionEvents, 3);
+    assert.equal(lag['staging → main'].promotionEvents, 3);
+  },
+
+  'evidence: tags no line contains are reported as their own fact'() {
+    const r = repo();
+    r.branch('development');
+    r.git('tag', 'v1', 'main');
+    r.git('switch', '-q', '-c', 'scratch');
+    r.commit('restore point');
+    r.git('tag', 'sync-backup-1');
+    r.sw('main');
+    r.git('branch', '-q', '-D', 'scratch');
+    const loose = r.json(['evidence', '--json']).data.facts.find((f) => f.area === 'tags' && f.subject === 'not on any line');
+    assert.equal(loose.value.count, 1);
+    assert.deepEqual(loose.value.examples, ['sync-backup-1']);
+    assert.match(loose.value.reading, /restore points/);
+  },
+
+  'evidence: long-lived lines are detected beyond the name list — uat → live by CI + promotions; int → prod by default + fast-forwards'() {
+    const r = repo();
+    r.git('branch', '-m', 'main', 'live');
+    r.write('.github/workflows/deploy.yml', 'on:\n  push:\n    branches: [live]\njobs:\n  d:\n    steps:\n      - run: ./deploy.sh\n');
+    r.git('add', '-A');
+    r.git('commit', '-q', '-m', 'ci');
+    r.branch('uat');
+    const mergeDefault = (b) => r.git('merge', '-q', '--no-ff', '--no-edit', b);
+    for (let i = 0; i < 2; i++) {
+      r.sw('uat');
+      r.git('switch', '-q', '-c', `feat/f${i}`);
+      r.commit(`feat ${i}`);
+      r.sw('uat');
+      mergeDefault(`feat/f${i}`);
+      r.sw('live');
+      mergeDefault('uat');
+    }
+    // a work branch that synced from uat once is not a line
+    r.git('switch', '-q', '-c', 'feat/wip', 'uat');
+    r.commit('wip');
+    r.sw('uat');
+    r.commit('uat direct');
+    r.sw('feat/wip');
+    mergeDefault('uat');
+    r.sw('live');
+    const facts = r.json(['evidence', '--json']).data.facts;
+    const ll = Object.fromEntries(facts.filter((f) => f.area === 'long-lived').map((f) => [f.subject, f.value.reasons]));
+    assert.deepEqual(Object.keys(ll), ['uat', 'live'], 'pipeline order, work branches excluded');
+    assert.ok(ll.live.some((x) => /^ci: push target/.test(x)));
+    assert.ok(ll.uat.some((x) => /^promotion: feeds live \(2×\)/.test(x)));
+    assert.ok(facts.every((f) => f.area !== 'long-lived' || f.tag === 'inferred'));
+    assert.equal(facts.find((f) => f.area === 'advancement' && f.subject === 'live').value.ffArrivedFrom, 'uat');
+    assert.ok(facts.some((f) => f.area === 'regression' && f.subject === 'live'), 'the regression probe runs on detected lines');
+
+    const q = repo();
+    q.git('branch', '-m', 'main', 'prod');
+    q.git('update-ref', 'refs/remotes/origin/prod', 'prod');
+    q.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/prod');
+    q.branch('int');
+    for (let i = 0; i < 2; i++) {
+      q.sw('int');
+      q.commit(`c ${i}`);
+      q.sw('prod');
+      q.ff('int');
+    }
+    const ql = Object.fromEntries(q.json(['evidence', '--json']).data.facts.filter((f) => f.area === 'long-lived').map((f) => [f.subject, f.value.reasons]));
+    assert.deepEqual(Object.keys(ql), ['int', 'prod']);
+    assert.ok(ql.prod.includes('default branch of origin'));
+    assert.ok(ql.int.some((x) => /^promotion: feeds prod/.test(x)));
+  },
+
+  'verify --proposed: says what it checked, and warns (never fails) on a long-lived line the proposal leaves unmodelled'() {
+    const r = repo();
+    r.branch('development');
+    r.branch('staging');
+    const v = verifyJson(r, ['--proposed', r.proposed('two-line')]);
+    assert.equal(v.code, 0, v.out);
+    for (const x of find(v.data, 1)) {
+      assert.doesNotMatch(x.reason, /nothing new since baseline/);
+      assert.match(x.reason, /proposed: the line exists .* forgiven/);
+    }
+    assert.match(find(v.data, 2, 'main', 'ok')[0].reason, /today main is contained in development/);
+    const w = find(v.data, 4, 'staging', 'warning');
+    assert.equal(w.length, 1, 'staging left unmodelled is a hygiene warning');
+    assert.match(w[0].reason, /no role/);
+
+    r.sw('main');
+    r.commit('main ahead');
+    const v2 = verifyJson(r, ['--proposed', r.proposed('two-line')]);
+    assert.match(find(v2.data, 2, 'main', 'warning')[0].reason, /first fast-forward promotion would fail/);
   },
 
   // ---- Amendment 2: resolution ------------------------------------------------------------------------------
