@@ -88,7 +88,7 @@ Protected lines meet only through their declared moves, so they stay conflict-fr
 | "cut a release `<v>`" | `cut-release <version>` |
 | "ship release `<v>`" | `ship-release <version>` |
 | a production bug to fix alone | `hotfix <line> <slug>` |
-| after anything lands off integration | `carry <commit\|branch>` |
+| after anything lands off integration — or, upstream-first, after a fix lands on it | `carry <branch>` (or `carry <commit…>`) |
 
 **Landing ("done / verified").** First rebase onto the base and re-verify. Then **settle the package** ([[feature-package]]): its conclusions are committed and travel with the code; its self-ignoring `mocks/` will not — **offer keep-or-bin now** (*"keep the mocks as a record, or bin them?"*), because keeping means `git add -f` **before** the merge, and after teardown the folder is gone. **Finalize `DECISION.md` and stamp its `status:` frontmatter** (`concluded | abandoned | superseded`, `concluded:` date, a one-line `summary:`, `tags:`) — the one legitimate moment to distil the package, additively. Then run what `plan land` prints (a grouping `--no-ff` merge or a PR, per `landing`), push, and tear down the worktree and branch.
 
@@ -98,7 +98,7 @@ Protected lines meet only through their declared moves, so they stay conflict-fr
 
 ## The carry rule
 
-**A change that lands anywhere but integration is not done until it is carried** — to integration and to every open line that would otherwise regress. *How* is the model's `fixFlow`: **merge-forward** (land at the source, then merge that line into integration and every newer open release line) or **upstream-first** (land on integration first, then `cherry-pick -x` back to each maintained line). `plan carry` prints the steps; `verify` (no regression) catches what was missed. A fix that cannot apply upstream carries a `Not-applicable-upstream:` trailer saying why.
+**A change that lands anywhere but integration is not done until it is carried** — to integration and to every open line that would otherwise regress. *How* is the model's `fixFlow`: **merge-forward** (land at the source, then merge that line into integration and every newer open release line) or **upstream-first** (land on integration first, then `cherry-pick -x` back to each maintained line). `plan carry <branch>` prints the steps — run it **after** the branch has landed and **before** deleting it (`plan land` hands off to it and leaves the branch for it to remove). Under a squash or rebase PR landing the commits that reached integration are new ones; carry finds them itself — the one commit whose patch equals the branch's combined diff (squash), or one patch-equivalent commit per branch commit (rebase), and only failing that a `(#N)` PR commit that names the branch, flagged as matched by reference, not content. When it cannot decide it refuses rather than guesses: name the commits yourself, `plan carry <commit> [<commit>…]`. `verify` (no regression) catches what was missed. A fix that cannot apply upstream carries a `Not-applicable-upstream:` trailer saying why.
 
 ## Changing the model
 
