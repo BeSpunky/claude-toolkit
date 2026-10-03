@@ -1,0 +1,33 @@
+# Guard the branch-model engine's promises.
+#
+# `plugins/workflow/skills/branch-and-release/scripts/branches.mjs` is the one thing that interprets a project's
+# `.bespunky/branches.json`: which copy is in force, whether history follows the model, and the exact commands
+# for every gated move. Each of those is trusted downstream without a second look — a resolution that picks the
+# wrong copy, or an invariant that stops firing, fails silently in someone else's repo.
+name: branches tests
+
+on:
+  push:
+    branches: [main, development, staging]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branches-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No install: node + git only, against throwaway repos under the OS temp dir (no network).
+      - name: Run branch-model engine tests
+        run: node tools/test-branches/run.mjs
