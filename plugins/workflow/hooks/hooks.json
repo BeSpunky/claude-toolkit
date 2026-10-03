@@ -1,4 +1,7 @@
 {
+  "modules": [
+    "./mods.ts"
+  ],
   "hooks": {
     "SessionStart": [
       {

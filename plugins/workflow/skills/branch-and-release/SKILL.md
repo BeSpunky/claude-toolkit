@@ -58,9 +58,10 @@ Before you design, read code, invoke another skill, plan, or make the first edit
 git worktree add .claude/worktrees/<slug> -b <type>/<slug> <work-base>   # the base comes from the model, never from memory
 cd .claude/worktrees/<slug> && <install>                                # worktrees start with no deps installed
 mkdir -p docs/features/"$(date -u +%F)-<slug>"                         # the effort's package namespace
+printf -- '---\neffort: <slug>\nsummary: <what this effort is for, one line>\n---\n' > docs/features/"$(date -u +%F)-<slug>"/DECISION.md   # born with its one line
 ```
 
-**The slug is the effort's identity — use it everywhere.** It names the branch, the worktree *and* the effort's **package** ([[feature-package]]: `docs/features/<YYYY-MM-DD>-<slug>/`). Create the package with the tree, not at the end; skip it only for genuinely trivial work.
+**The slug is the effort's identity — use it everywhere.** It names the branch, the worktree *and* the effort's **package** ([[feature-package]]: `docs/features/<YYYY-MM-DD>-<slug>/`). Create the package with the tree, not at the end, born with a `DECISION.md` whose one-line `summary:` says what the effort is for (a returning reader sees it beside the slug); skip it only for genuinely trivial work.
 
 **Worktree-blind tooling is the one trap a worktree adds.** A tool that caches *one* workspace root across trees (a daemon, a language server, a build cache keyed on an absolute path) silently builds, tests or serves the **main** tree's source from inside a worktree. **In an Nx workspace (every house project) every `nx` command run from a worktree is prefixed** — `NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$(pwd)" <pm> nx …`; see [`reference/nx-worktree-override.md`](reference/nx-worktree-override.md). `.claude/worktrees/` is gitignored.
 

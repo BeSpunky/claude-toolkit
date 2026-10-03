@@ -72,4 +72,5 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
   diagnosis it printed (every endpoint tried, why each failed, and the fix) —
   and which speech engine will actually speak (natural Piper voice or the
   robotic fallback, with the reason and the repair command when it's the
-  fallback).
+  fallback), and whether the listening engine (whisper.cpp) can hear — with the
+  reason and the repair command when it's broken or missing.

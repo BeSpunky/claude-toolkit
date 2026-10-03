@@ -19,14 +19,35 @@
 #
 # SCOPE. It writes ONLY when the current branch is a feature effort with an existing package — so checkpoints
 # accrue exactly where wanted and never litter a protected line (per the declared branch model) or a throwaway branch. No package → it only nudges.
+#
+# THE RECEIPT (`--last`). Every checkpoint written is also recorded, as one line of JSON, in a receipt kept in the
+# worktree's own git dir (never committed, one per worktree). `checkpoint-on-compact.sh --last` prints it — the
+# machine-readable twin of the model-facing notice below, for readers that are not the model (the
+# `checkpoint-toast.ts` mod toasts the path to the person). Where checkpoints go and what they are named stays
+# decided HERE alone; a reader asks, never re-derives. No receipt, or no repo → `--last` prints nothing.
 set -uo pipefail
+
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+
+# The receipt's path: per-worktree (`--git-path` maps a non-shared name into this worktree's own git dir).
+receipt_path() {
+  local p
+  p="$(git -C "$PROJECT_DIR" rev-parse --git-path bespunky-workflow/last-checkpoint.json 2>/dev/null)" || return 1
+  case "$p" in /*) ;; *) p="$PROJECT_DIR/$p" ;; esac
+  printf '%s\n' "$p"
+}
+
+if [ "${1:-}" = "--last" ]; then
+  receipt="$(receipt_path)" || exit 0
+  [ -f "$receipt" ] && cat "$receipt" 2>/dev/null
+  exit 0
+fi
 
 # PreCompact delivers a JSON payload on stdin; we only care about the trigger (auto|manual), read best-effort.
 STDIN="$(cat 2>/dev/null || true)"
 TRIGGER="$(printf '%s' "$STDIN" | sed -nE 's/.*"trigger"[[:space:]]*:[[:space:]]*"([a-z]+)".*/\1/p' | head -1)"
 case "$TRIGGER" in auto | manual) ;; *) TRIGGER="unknown" ;; esac
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
 # Current effort = the branch's slug, its last path segment (feat/gift-picker → gift-picker; a hotfix line
@@ -130,6 +151,17 @@ file="$pkg/handoffs/${stamp}-auto.md"
   echo "Distill this into a real baton with the \`bespunky-workflow:session-handoff\` CAPTURE format"
   echo "(goal · state · next action · decisions · corrections · verification), then this file can be dropped."
 } > "$file" 2>/dev/null || exit 0
+
+# --- the receipt (for `--last`): best-effort, silent, never in the way of the notice --------------------------
+# `id` is unique per run (two checkpoints in one minute share a file name), so a reader can tell a new write from
+# the last one; `file` is relative to the project dir. JSON-escape the two strings that come from the filesystem.
+json_str() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+if receipt="$(receipt_path)"; then
+  mkdir -p "$(dirname "$receipt")" 2>/dev/null &&
+    printf '{"id":"%s-%s","file":"%s","asOf":"%s","branch":"%s"}\n' \
+      "$(date +%s 2>/dev/null || echo 0)" "$$" "$(json_str "${file#"$PROJECT_DIR"/}")" "$stamp" "$(json_str "$branch")" \
+      >"$receipt" 2>/dev/null || true
+fi
 
 # --- ask the model to distill (the enrich half; harmless if the turn never comes) ----------------------------
 cat <<EOF

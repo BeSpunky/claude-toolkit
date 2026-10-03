@@ -4,3 +4,4 @@
 "Open it so I can watch" starts a shared browser that you and Claude drive together
 Ask Claude to "verify in the browser" and it checks the running app, not just the source
 Debugging CSS live? The shared browser gives measured proof (computed styles, bounding boxes)
+While the shared browser is up, its noVNC URL sits in the status line under the prompt

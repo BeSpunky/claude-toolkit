@@ -50,13 +50,24 @@ Never invent a second name for the same effort.
 
 **The date is the trail.** `2026-07-14-gift-picker` sorts chronologically and — crucially — lets the *next* pass at the same feature (a redesign, a rethink, a year later) sit **beside** the first rather than overwrite it. The old package is the record of what was tried and why it was replaced. The lookup above takes the **newest** match, so a revisit's package is the current one; the earlier dated package remains as history. That is exactly the thing you want when someone asks "didn't we already try this?"
 
-**Nothing here is mandatory — but a package that produced only throwaway evidence must still write its conclusion.** A package holds the artifacts the effort *actually produced* — a bug fix may have only a `handoffs/` baton; a design effort may have the full quartet. An empty file written for completeness is worse than no file. But note the trap: git does not track an empty directory, and `mocks/` **self-ignores** — so a design spike that got explored and *rejected*, leaving nothing but mocks, would vanish entirely on merge, taking the record of "we tried this and ruled it out" with it. That record is exactly a **conclusion**: write `DECISION.md` ("explored X, rejected because Y") even when every concept was binned. Record the conclusion, throw the evidence — and the conclusion is what keeps the package from evaporating. The package is a home, not a checklist.
+**Beyond the one-line summary it is born with, nothing here is mandatory — but a package that produced only throwaway evidence must still write its conclusion.** A package holds the artifacts the effort *actually produced* — a bug fix may have only a `handoffs/` baton; a design effort may have the full quartet. An empty file written for completeness is worse than no file. But note the trap: git does not track an empty directory, and `mocks/` **self-ignores** — so a design spike that got explored and *rejected*, leaving nothing but mocks, would vanish entirely on merge, taking the record of "we tried this and ruled it out" with it. That record is exactly a **conclusion**: write `DECISION.md` ("explored X, rejected because Y") even when every concept was binned. Record the conclusion, throw the evidence — and the conclusion is what keeps the package from evaporating. The package is a home, not a checklist.
 
 ---
 
 ## Born with the worktree, not written at the end
 
 The package is created **when the effort starts** — at the same moment [[branch-and-release]] opens the worktree, and by the same act. It is filled *as the work happens*: the brief when the brief is distilled, the decision the moment the user makes it, the baton when the context runs out.
+
+**It is born with ONE line: what the effort is for.** The slug is an identity, not an explanation — `sync-one-run` means nothing to someone returning in a month. So the act that creates the package also creates `DECISION.md` carrying a single frontmatter line, written in plain words for that returning reader:
+
+```yaml
+---
+effort: gift-picker
+summary: A faster way to pick a gift — the current three-step form loses people on mobile.
+---
+```
+
+That line is what [[project-standing]] shows beside the slug while the effort is in flight. It says what the effort is *for* (the problem or the goal), not what you plan to build. It is the one thing every package has, the quick fix included, and it costs one sentence. At the merge gate the same line is rewritten as the outcome (see *The package's lifecycle*).
 
 This ordering is the whole value. **A document written at the end is a memory** — reconstructed, tidied, and confidently wrong about the parts that matter. The reason a design was rejected, the constraint that turned out to be fatal, the exact sentence the user said when they chose — those are perfectly clear in the moment and irretrievably vague a week later. Write them when they happen or lose them.
 
@@ -124,7 +135,7 @@ A skill that finds itself inventing a folder for its output is a skill that has 
 
 ## The package's lifecycle — and the archive tier
 
-A package is born in-flight and, at the end, **concludes**. Mark that boundary on `DECISION.md` with frontmatter — written **once**, at the merge / abandon / pivot gate, so it never rots:
+A package is born in-flight, its `DECISION.md` carrying only `effort:` and the one-line `summary:` of what it is for. At the end it **concludes**: mark that boundary by adding `status:` (and `concluded:`, `tags:`) and **rewriting `summary:` as the outcome**. That happens **once**, at the merge / abandon / pivot gate, so it never rots:
 
 ```yaml
 ---
@@ -136,7 +147,7 @@ tags: [ui, checkout]
 ---
 ```
 
-The **presence of `status:`** (not of the file) is the concluded-signal — a mid-flight `DECISION.md` has none. That one line is what lets a returning reader collapse a finished effort to a single row instead of re-reading the package.
+The **presence of `status:`** (not of the file, and not of `summary:`) is the concluded-signal — a mid-flight `DECISION.md` has none. That one line is what lets a returning reader collapse a finished effort to a single row instead of re-reading the package.
 
 As history grows, concluded-and-aged packages move to an **archive tier** — `docs/features/archive/<year>/<pkg>/` — by an additive `git mv` (blame preserved), **never an erase**. The live directory stays scannable; the archive is searched on demand via that frontmatter. This whole lifecycle — reconstructing standing, collapsing concluded efforts, and the archive sweep — is owned by [[project-standing]] (the cold pick-up). This skill just defines the *home*; that skill *reads* it.
 

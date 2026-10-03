@@ -46,6 +46,24 @@ P="$TMP/current"; stamp "$P" "$INSTALLED" 'nx,agent'
 out="$(run_hook "$P")"
 ok 'current stamp, no new layer: silent' "$( [ -z "$out" ] && echo 1 || echo 0)" "$out"
 
+# --json: the SAME detection, recorded for the band (hooks/band.tsx). Each case is `kind:action` per notice,
+# so a regression that re-orders the rules in one rendering and not the other shows up here.
+run_json() {
+  CLAUDE_PROJECT_DIR="$1" CLAUDE_PLUGIN_ROOT="$PLUGIN" bash "$HOOK" --json 2>/dev/null \
+    | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(j.notices.map(n=>`${n.kind}:${n.action}`).join(" "))'
+}
+out="$(run_json "$TMP/old")"
+ok '--json: older stamp → toolkit-moved, offers a sync' "$( [ "$out" = 'toolkit-moved:sync' ] && echo 1 || echo 0)" "$out"
+out="$(run_json "$TMP/grew")"
+ok '--json: grown layer → layer-drift, offers a sync' "$( [ "$out" = 'layer-drift:sync' ] && echo 1 || echo 0)" "$out"
+out="$(run_json "$TMP/current")"
+ok '--json: current → no notices' "$( [ -z "$out" ] && echo 1 || echo 0)" "$out"
+P="$TMP/ahead"; stamp "$P" 999.0.0 'nx,agent'
+out="$(run_json "$P")"
+ok '--json: project ahead of machine → update the toolkit, never a sync' "$( [ "$out" = 'machine-behind:update-toolkit' ] && echo 1 || echo 0)" "$out"
+out="$(CLAUDE_PROJECT_DIR="$ROOT" CLAUDE_PLUGIN_ROOT="$PLUGIN" bash "$HOOK" --json 2>/dev/null)"
+ok '--json: plugin root inside the project → silent' "$( [ "$out" = '{"notices":[]}' ] && echo 1 || echo 0)" "$out"
+
 # A root-owned volume mount point: the container's post-create most likely failed on it. ONE fact, naming the
 # path and owner and the exact fix, from the same derivation the sync preflight uses (the project's
 # devcontainer.json). Needs a non-root user with passwordless sudo to build the fixture; skipped out loud otherwise.

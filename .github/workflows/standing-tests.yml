@@ -1,0 +1,29 @@
+# Guard the project-standing engine and the SessionStart notice that reads it.
+#
+name: standing tests
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standing-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No install: node, git and bash, against throwaway repos under the OS temp dir.
+      - name: Run standing engine tests
+        run: node tools/test-standing/run.mjs
