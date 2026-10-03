@@ -44,3 +44,26 @@ band only shows its state and sends it two commands.
 ## Release
 `bespunky-voice` minor bump (a new surface). No `nx-tools` payload change → nothing
 to migrate.
+
+## As built (2026-10-03)
+
+- **Runtime state made true** (980dca4): an utterance clears its own `.speaking.pid`
+  when it ends; `listen.sh` announces `.listening.pid` + `.hearing` in both modes (so
+  `/voice answer` gets a live transcript too); `voice.sh stop|replay` is "the voice";
+  a stop from outside surfaces as exit 143, which `ask_by_voice` returns as
+  `cancelled` (the user dropped the question) rather than as a failure.
+- **The band** (431640b): `hooks/band.tsx`, listed under `modules` beside the
+  command hooks in the same `hooks.json`. One `$.state` value
+  (`idle | speaking | listening | lingering`) folded by a pure function from the files
+  on a 300 ms poll. Settled ambiguities: staleness is each pid file's own age;
+  the 20 s linger follows speech that ends to idle, not speech followed by listening
+  (the `ask_by_voice` flow); Replay also shows while listening.
+- Checks: `claude plugin validate` clean, `claude plugin test` 10/10 (terminal +
+  desktop), `tools/test-voice` 32/32, release 0.5.0.
+
+## Not verified live
+
+That the engine aborts `next.signal` on Esc (the test kit can't interrupt a
+dispatch — the abort→stop helper is tested with a real AbortSignal); how the band
+looks on a real terminal (emoji width) and in the desktop app; VS Code / mobile
+draw no `AbovePrompt`.
