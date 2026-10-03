@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-03
+summary: Project standing is derived from git + feature packages on demand (project-standing skill), backed by a SessionStart dormancy notice and a PreCompact checkpoint hook; never a stored status doc.
+tags: [project-standing, continuity, hooks, feature-package, session-handoff]
+---
+
 # Decision — project continuity architecture
 
 > What was chosen, why, and what was rejected. The conclusion is durable; this doc supersedes nothing yet.
@@ -75,3 +82,17 @@ Continuity artifacts are versioned and co-located with the code. A PM platform w
 - **Reload** to pick up the new skill/hooks in-session (`/reload-plugins`), then a live cold-open sanity check.
 - Consider a follow-up: teach the scaffolder's generated `HOUSE.md` to mention `project-standing` as the cold front door (so scaffolded projects advertise it), and revisit the deferred one-way ClickUp export as its own plugin (D8).
 - Smoke tests run: SessionStart silent-when-active + notice-when-dormant; PreCompact checkpoint written to the right package. Not yet exercised through a real compaction or a real months-cold repo.
+
+## Conclusion (2026-10-03, stamped retroactively)
+
+The effort was finished in July and never stamped, so by its own rule (no `status:` = in progress) it kept
+reporting itself open. Added on top, nothing above rewritten.
+
+What happened to "Still open":
+- **Commit & promote** — done: `454f3f9` (2026-07-24) shipped the skill, hooks, feature-package tiers and
+  catalog entries; it is on `main`.
+- **HOUSE.md follow-up** — done: `3ed701d` (2026-07-27) teaches the generated `HOUSE.md` the cold front door.
+  Later fixes: `7ce1cec`, `200f594` (the snooze file moved inside the git dir).
+- **Deliberately deferred, each its own future effort if wanted:** the one-way ClickUp export (D8); a
+  `docs/features/archive/` sweep (none has been needed yet); exercising the hooks through a real compaction and
+  a real months-cold return.
