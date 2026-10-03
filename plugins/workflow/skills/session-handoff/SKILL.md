@@ -123,12 +123,12 @@ When you finish, **tell the user the baton's full path** (inside the effort's pa
 
 ## Mode: RESUME — pick up the baton
 
-Resume is a **re-grounding, never blind trust.** The baton reflects what was true at its as-of stamp; the world has moved since (the user did things, another session ran, `development` advanced). Run these steps before doing any work:
+Resume is a **re-grounding, never blind trust.** The baton reflects what was true at its as-of stamp; the world has moved since (the user did things, another session ran, the integration line advanced). Run these steps before doing any work:
 
 1. **Locate the baton, then load it.** Unless the user names one, compute it from the repo — the newest baton in this effort's package, found from the current branch's slug:
 
    ```bash
-   slug=$(git branch --show-current | sed 's|^[^/]*/||')          # feat/gift-picker → gift-picker
+   slug=$(git branch --show-current | sed 's|.*/||')             # feat/gift-picker → gift-picker (last segment)
    pkg=$(ls -d docs/features/*-"$slug" 2>/dev/null | tail -1)      # newest dated package for this slug
    ls -t "$pkg"/handoffs/*.md | head -1                            # its latest baton
    ```

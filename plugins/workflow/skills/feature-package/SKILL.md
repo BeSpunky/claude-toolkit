@@ -108,7 +108,7 @@ A skill that finds itself inventing a folder for its output is a skill that has 
 2. **Write artifacts into it as they are produced**, under their conventional names. Not at the end.
 3. **Keep evidence self-ignoring** — a `.gitignore` containing `*` inside any throwaway folder, and *nothing* outside it depending on it.
 4. **Capture decisions in the user's own words**, the moment they make them, along with what was rejected and why.
-5. **At the end of the effort**, offer the user the throw: *"Keep the mocks/scratch as a record, or bin them?"* Default is bin. The conclusions stay and are committed on the feature branch, so they promote to `development` with the code they explain.
+5. **At the end of the effort**, offer the user the throw: *"Keep the mocks/scratch as a record, or bin them?"* Default is bin. The conclusions stay and are committed on the feature branch, so they land on the integration line with the code they explain.
 6. **When a feature is revisited later**, open a **new dated package** with the same slug. Read the old one first — it tells you what was already tried and rejected — and never overwrite it.
 
 ---
