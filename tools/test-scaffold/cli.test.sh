@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# The engine's COMMAND LINE: `house.sh new | upgrade | add-layer | help`, and the deprecated scaffold.sh shim.
+# The engine's COMMAND LINE: `house.sh new | upgrade | add-layer | help`.
 #
 # WHAT THIS GUARDS. Each command's name says what it does (docs/features/2026-10-03-house-plugin-rename/
 # DECISION.md), and that only stays true while the parser enforces it: `upgrade` must never quietly bring a layer
 # into being, `add-layer` must always be told which, and the old spellings (`--sync`, `--ensure`, a bare path) must
-# be answered with the commands that exist rather than half-understood. The shim is the other half: every HOUSE.md
-# generated before the rename prints `scaffold.sh --sync`, so a translation regression breaks every such project's
-# documented upgrade, silently, far from here.
+# be answered with the commands that exist rather than half-understood.
 #
 # NOTHING HERE RUNS A REAL RUN. Every accepted invocation carries --print-inner (render, run nothing), and `new`
 # is pointed at an empty PROJECTS_DIR; every refusal fires before anything is read from the project.
@@ -15,9 +13,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOUSE_SH="$ROOT/plugins/house/engine/house.sh"
-SHIM="$ROOT/plugins/house/engine/scaffold.sh"
 [ -f "$HOUSE_SH" ] || { echo "FATAL: house.sh not found at $HOUSE_SH" >&2; exit 2; }
-[ -f "$SHIM" ] || { echo "FATAL: scaffold.sh (the shim) not found at $SHIM" >&2; exit 2; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -98,25 +94,5 @@ refused "new --add-layer swallowing a flag"             "--add-layer needs a com
 renders "new --preset=angular --firebase --staging"     "nx,agent,node,web,angular,design-system,firebase" new --print-inner --preset=angular --firebase --staging newp shop
 [ -z "$(ls -A "$PROJECTS_DIR")" ] && ok "nothing was created under PROJECTS_DIR" || fail "a render created a project"
 
-echo "── scaffold.sh: the deprecated shim translates and hands over"
-[ -x "$SHIM" ] && ok "the shim is executable" || fail "the shim is not executable"
-# shim <label> <expected new form> <expected ENSURED> <old args…>
-shim() {
-  local label="$1" want="$2" ens="$3"; shift 3
-  run "$SHIM" "$@"
-  local _notes; _notes="$(in_text "$ERR" -c '^NOTE: scaffold.sh is deprecated')" || true
-  if [ "$RC" -eq 0 ] && [ "$_notes" = "1" ] && in_text "$ERR" -qF -- "this is now: house.sh $want" \
-     && in_text "$OUT" -q "^ENSURED='$ens'$"; then ok "$label"
-  else fail "$label (rc=$RC, notes=$_notes): $(in_text "$ERR" -m1 'deprecated' || printf '%s' "$ERR" | head -2 | tr '\n' ' ')"; fi
-}
-shim "--sync → upgrade"                     "upgrade --yes --print-inner $P"           "nx"        --sync --yes --print-inner "$P"
-shim "--sync --ensure=X → add-layer X"      "add-layer --yes --print-inner agent $P"   "nx,agent"  --sync --ensure=agent --yes --print-inner "$P"
-shim "--sync --ensure X (space form)"       "add-layer --print-inner --yes agent $P"         "nx,agent"  --sync --ensure agent --print-inner --yes "$P"
-shim "--sync --firebase → add-layer firebase" "add-layer --print-inner --yes firebase $P" "nx,firebase" --sync --firebase --print-inner --yes "$P"
-shim "no --sync → new, --ensure → --add-layer" "new --print-inner --add-layer=nx,agent newp" "nx,agent" --print-inner --ensure=nx,agent newp
-run "$SHIM" --sync --ensure=bogus --yes "$P"
-[ "$RC" -ne 0 ] && in_text "$ERR" -qF "unknown layer 'bogus'" && ok "the shim leaves validation to house.sh" \
-  || fail "the shim did not hand a bad layer to house.sh's validation (rc=$RC)"
-
-if [ "$FAILED" -eq 0 ]; then echo "house.sh command line + scaffold.sh shim: all cases passed"; fi
+if [ "$FAILED" -eq 0 ]; then echo "house.sh command line: all cases passed"; fi
 exit "$FAILED"
