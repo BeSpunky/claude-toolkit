@@ -1,6 +1,9 @@
 ---
 effort: ask-before-compat
-summary: Toolkit skills never default to backwards compatibility — when Claude considers a stub, shim, alias or deprecation period, it asks the user whether it is needed
+status: concluded
+concluded: 2026-10-03
+summary: Backwards compatibility is never the default — the always-on Architecture-first directive and the engineering skills make Claude break cleanly and ask, as its own question, before building any alias, shim, stub or deprecation window
+tags: [engineering, house-rules, backwards-compatibility, ask-the-user]
 ---
 
 # Decision — ask before keeping backwards compatibility
@@ -21,7 +24,7 @@ migration (moving existing state forward) is not compatibility and stays owed.
 ## Where it lives
 
 - **Always on:** the Architecture-first directive in `house-doc/HOUSE.rules.md.tpl` (every house project
-  imports it every session) and its canonical copy in README → *The always-on half*. Payload 0.39.1;
+  imports it every session) and its canonical copy in README → *The always-on half*. Payload 0.39.2;
   nothing to migrate — HOUSE.rules.md is an owned artifact every upgrade regenerates.
 - **Depth:** `architecture-first` — a patch smell, a refactor-gate line (what it breaks, and the question),
   two stop signals, a done criterion. `software-design` → contracts: *Changing a contract*.
