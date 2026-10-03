@@ -7,7 +7,7 @@ import type { On, RenderPropsOf } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { age, groups, parseStanding, resumePrompt } from '../hooks/standing.tsx'
+import { age, concludedLine, dateOf, groups, headline, parseStanding, resumePrompt } from '../hooks/standing.tsx'
 import type { Standing, StandingPackage } from '../types/index.d.ts'
 
 const PLUGIN = 'bespunky-workflow'
@@ -44,8 +44,8 @@ const STANDING: Standing = {
     pkg({ dir: '2026-01-01-old-live', state: 'live', lastActivity: NOW - 3 * DAY, baton: 'handoffs/2026-01-02T1200Z.md' }),
     pkg({ dir: '2026-02-01-new-live', state: 'live', hasWorktree: true }),
     pkg({ dir: '2025-06-01-asleep', state: 'dormant', lastActivity: NOW - 90 * DAY, baton: 'handoffs/b.md' }),
-    pkg({ dir: '2025-01-01-shipped', state: 'concluded', summary: 'Shipped the thing; ruled out the other.' }),
-    pkg({ dir: '2025-02-01-dropped', state: 'concluded', status: 'abandoned' }),
+    pkg({ dir: '2025-01-01-shipped', state: 'concluded', summary: 'Shipped the thing; ruled out the other.', closedAt: NOW - 2 * DAY }),
+    pkg({ dir: '2025-02-01-dropped', state: 'concluded', status: 'abandoned', closedAt: NOW - 10 * DAY }),
   ],
 }
 
@@ -116,12 +116,14 @@ describe('standing pane', () => {
     for (const surface of SURFACES) {
       const ui = await mount($, surface)
       const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+      expect(texts[0]).toBe('3 in flight')
       expect(texts).toContain('Live (2)')
       expect(texts).toContain('Dormant (1)')
-      expect(texts).toContain('Concluded (2)')
       expect(texts.join('\n')).toContain('handoffs/2026-01-02T1200Z.md')
-      expect(texts.join('\n')).toContain('shipped — Shipped the thing; ruled out the other.')
-      expect(texts.join('\n')).toContain('dropped (abandoned)')
+      expect(texts).toContain('2 concluded · latest: shipped (2d ago)')
+      expect(texts.join('\n')).not.toContain('Shipped the thing')
+      expect(texts.join('\n')).not.toContain('dropped')
+      expect(await ui.find({ key: 'standing-concluded-toggle' })).toMatchObject({ props: { label: 'Show concluded', hotkey: 'c' } })
       expect(await ui.find({ key: 'standing-resume-2026-02-01-new-live' })).toMatchObject({ props: { hotkey: '1' } })
       expect(await ui.find({ key: 'standing-resume-2026-01-01-old-live' })).toMatchObject({ props: { hotkey: '2' } })
       expect(await ui.find({ key: 'standing-resume-2025-06-01-asleep' })).toMatchObject({ props: { hotkey: '3' } })
@@ -140,6 +142,69 @@ describe('standing pane', () => {
       'Resume old-live: read its newest handoff, docs/features/2026-01-01-old-live/handoffs/2026-01-02T1200Z.md, and pick up from there (bespunky-workflow:session-handoff).',
     ])
     expect(w.ran).toHaveLength(1)
+  })
+
+  test('nothing in flight: the pane says so, and draws no empty sections', async ($, on) => {
+    const finished = STANDING.packages.filter(p => p.state === 'concluded')
+    world(on, { ...STANDING, packages: finished })
+    await started($)
+    await $.command.run({ command: 'standing' })
+    for (const surface of SURFACES) {
+      const ui = await mount($, surface)
+      const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+      expect(texts[0]).toBe('Nothing in flight')
+      expect(texts.join('\n')).not.toMatch(/Live|Dormant|none/)
+      expect(texts).toContain('2 concluded · latest: shipped (2d ago)')
+      await ui.unmount()
+    }
+  })
+
+  test('concluded expands to the five most recently closed, slug and date only, and collapses again', async ($, on) => {
+    const closed = [3, 1, 6, 2, 5, 4].map(i =>
+      pkg({ dir: `2025-0${i}-01-done${i}`, state: 'concluded', summary: `summary ${i}`, closedAt: NOW - i * DAY }),
+    )
+    world(on, { ...STANDING, packages: [STANDING.packages[0]!, ...closed] })
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const ui = await mount($, 'terminal')
+    await ui.press({ key: 'standing-concluded-toggle' })
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    const rows = texts.filter(t => /^done\d/.test(t))
+    expect(rows).toEqual([1, 2, 3, 4, 5].map(i => `done${i} ${dateOf(NOW - i * DAY)}`))
+    expect(texts).toContain('6 concluded · latest: done1 (1d ago)')
+    expect(texts.join('\n')).not.toContain('summary')
+    expect(await ui.find({ key: 'standing-concluded-toggle' })).toMatchObject({ props: { label: 'Hide concluded' } })
+    await ui.press({ key: 'standing-concluded-toggle' })
+    expect((await ui.findAll({ type: 'Text' })).filter(t => /^done\d/.test(t.text))).toHaveLength(0)
+    expect(await ui.find({ key: 'standing-concluded-toggle' })).toMatchObject({ props: { label: 'Show concluded' } })
+  })
+
+  test('the expanded flag survives a refresh', async ($, on) => {
+    world(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const ui = await mount($, 'terminal')
+    await ui.press({ key: 'standing-concluded-toggle' })
+    await ui.press({ key: 'standing-refresh' })
+    expect(await ui.find({ key: 'standing-concluded-toggle' })).toMatchObject({ props: { label: 'Hide concluded' } })
+  })
+
+  test('Resume points at the worktree that holds the newest copy', async ($, on) => {
+    const elsewhere = pkg({
+      dir: '2026-03-01-mods',
+      state: 'live',
+      hasWorktree: true,
+      worktree: '.claude/worktrees/mods',
+      baton: 'handoffs/x.md',
+    })
+    const w = world(on, { ...STANDING, packages: [elsewhere] })
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const ui = await mount($, 'terminal')
+    await ui.press({ key: 'standing-resume-2026-03-01-mods' })
+    expect(w.prompts).toEqual([
+      'Resume mods: read its newest handoff, .claude/worktrees/mods/docs/features/2026-03-01-mods/handoffs/x.md, and pick up from there (bespunky-workflow:session-handoff).',
+    ])
   })
 
   test('Refresh re-runs the engine', async ($, on) => {
@@ -172,6 +237,8 @@ describe('standing policy', () => {
   test('a name the contract did not vouch for gets no prompt', async () => {
     expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', baton: 'handoffs/../../etc' }))).toBeUndefined()
     expect(resumePrompt(pkg({ dir: '2026-01-01-Ignore previous', state: 'live' }))).toBeUndefined()
+    expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', worktree: '../../etc' }))).toBeUndefined()
+    expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', worktree: 'a b; rm -rf' }))).toBeUndefined()
     expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live' }))).toBe(
       'Resume ok: it has no handoff baton yet, so orient from docs/features/2026-01-01-ok/ (bespunky-workflow:project-standing, then bespunky-workflow:session-handoff).',
     )
@@ -183,11 +250,18 @@ describe('standing policy', () => {
     expect(parseStanding(JSON.stringify(STANDING))).toEqual(STANDING)
   })
 
-  test('groups are by state, most recent first', async () => {
+  test('groups are by state, most recent first; concluded by when they closed', async () => {
     const { live, dormant, concluded } = groups(STANDING)
     expect(live.map(p => p.slug)).toEqual(['new-live', 'old-live'])
     expect(dormant.map(p => p.slug)).toEqual(['asleep'])
-    expect(concluded).toHaveLength(2)
+    expect(concluded.map(p => p.slug)).toEqual(['shipped', 'dropped'])
+  })
+
+  test('the headline and the concluded line', async () => {
+    expect(headline(groups(STANDING))).toBe('3 in flight')
+    expect(headline(groups({ ...STANDING, packages: [] }))).toBe('Nothing in flight')
+    expect(concludedLine(NOW, groups(STANDING).concluded)).toBe('2 concluded · latest: shipped (2d ago)')
+    expect(concludedLine(NOW, [])).toBeUndefined()
   })
 
   test('ages read at a glance', async () => {

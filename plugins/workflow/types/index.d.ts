@@ -27,12 +27,19 @@ export type StandingPackage = {
   lastActivity: number
   /** A worktree has a branch named for this slug checked out. */
   hasWorktree: boolean
+  /**
+   * Where the newest copy was found, when not in the session's checkout: that worktree's project
+   * dir, relative to the session's when inside it, else absolute. Charset-validated at the source.
+   */
+  worktree?: string
   /** The newest baton, relative to the package: `handoffs/<name>`. */
   baton?: string
   /** DECISION.md frontmatter of a closed package. Free text: for display only, never a prompt. */
   summary?: string
   concluded?: string
   tags?: string[]
+  /** When a closed package closed (its `concluded:` date, else when DECISION.md last moved), seconds since the epoch. */
+  closedAt?: number
 }
 
 /** What `standing.mjs --json` prints. `repo` is null outside a git repository. */
@@ -55,6 +62,10 @@ export type StandingView = { phase: 'empty'; why: string } | { phase: 'ready'; s
 
 declare module 'claude-code' {
   interface PluginState {
-    'bespunky-workflow': { standing: StandingView }
+    'bespunky-workflow': {
+      standing: StandingView
+      /** The pane lists the most recent concluded packages instead of one summary line. */
+      showConcluded: boolean
+    }
   }
 }

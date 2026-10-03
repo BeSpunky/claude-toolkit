@@ -1,6 +1,8 @@
 // bespunky-workflow — the STANDING PANE: `/standing` opens a pane listing this project's
-// feature packages grouped live / dormant / concluded, each in-flight one with its newest
-// handoff baton and a Resume button.
+// in-flight feature packages (live / dormant), each with its newest handoff baton and a Resume
+// button. Its job is "what needs me?", so it leads with that answer ("Nothing in flight" when
+// so) and draws a section only when it has rows; finished work is history, collapsed to one line
+// (count + the latest) that a toggle expands to the most recent few.
 //
 // WHY IT IS A VIEW OVER THE ENGINE. What a feature package is, whether it is in flight, how
 // recently it moved and which baton is newest are DERIVED by the project-standing engine
@@ -23,14 +25,20 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Standing, StandingPackage, StandingView } from '../types/index.d.ts'
 
 const VIEW = { plugin: 'bespunky-workflow', key: 'standing' } as const
+const SHOW_CONCLUDED = { plugin: 'bespunky-workflow', key: 'showConcluded' } as const
 const PANE = 'standing'
 const COMMAND = 'standing'
 const ENGINE = 'skills/project-standing/scripts/standing.mjs'
 
 const PACKAGE_DIR = /^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+$/
 const BATON = /^handoffs\/[A-Za-z0-9._-]{1,120}$/
+/** The engine's worktree rule: a relative or absolute path of safe segments, never `.` or `..`. */
+const WORKTREE = /^\/?(?!\.\.?(?:\/|$))[A-Za-z0-9._@+-]+(?:\/(?!\.\.?(?:\/|$))[A-Za-z0-9._@+-]+)*$/
 /** Digits 1–9 press the first nine Resume buttons. */
 const HOTKEYS = '123456789'
+const CONCLUDED_HOTKEY = 'c'
+/** How many concluded packages the expanded list shows. */
+const RECENT_CONCLUDED = 5
 
 /** The engine's JSON, checked for the shape the pane relies on; anything else is no standing. */
 export function parseStanding(stdout: string): Standing | undefined {
@@ -59,12 +67,34 @@ export function viewOf(standing: Standing | undefined): StandingView {
 
 export type Groups = { live: StandingPackage[]; dormant: StandingPackage[]; concluded: StandingPackage[] }
 
-/** The packages by state, most recently active first. */
+/** The packages by state: in flight most recently active first, concluded most recently closed first. */
 export function groups(standing: Standing): Groups {
   const newest = (a: StandingPackage, b: StandingPackage) => b.lastActivity - a.lastActivity || b.dir.localeCompare(a.dir)
-  const of = (state: StandingPackage['state']) => standing.packages.filter(pkg => pkg.state === state).sort(newest)
+  const closedLast = (a: StandingPackage, b: StandingPackage) =>
+    (b.closedAt ?? b.lastActivity) - (a.closedAt ?? a.lastActivity) || newest(a, b)
+  const of = (state: StandingPackage['state']) => standing.packages.filter(pkg => pkg.state === state)
 
-  return { live: of('live'), dormant: of('dormant'), concluded: of('concluded') }
+  return { live: of('live').sort(newest), dormant: of('dormant').sort(newest), concluded: of('concluded').sort(closedLast) }
+}
+
+/** The pane's first line: the answer to "what needs me?". */
+export function headline({ live, dormant }: Groups) {
+  const inFlight = live.length + dormant.length
+
+  return inFlight === 0 ? 'Nothing in flight' : `${inFlight} in flight`
+}
+
+/** The collapsed concluded section: "28 concluded · latest: <slug> (<age>)". */
+export function concludedLine(now: number, concluded: StandingPackage[]) {
+  const [latest] = concluded
+  if (latest === undefined) return undefined
+
+  return `${concluded.length} concluded · latest: ${latest.slug} (${age(now, latest.closedAt ?? latest.lastActivity)})`
+}
+
+/** An epoch as its UTC calendar date, `YYYY-MM-DD`. */
+export function dateOf(epoch: number) {
+  return new Date(epoch * 1000).toISOString().slice(0, 10)
 }
 
 /**
@@ -73,7 +103,8 @@ export function groups(standing: Standing): Groups {
  */
 export function resumePrompt(pkg: StandingPackage): string | undefined {
   if (!PACKAGE_DIR.test(pkg.dir)) return undefined
-  const where = `docs/features/${pkg.dir}/`
+  if (pkg.worktree !== undefined && !WORKTREE.test(pkg.worktree)) return undefined
+  const where = `${pkg.worktree === undefined ? '' : `${pkg.worktree}/`}docs/features/${pkg.dir}/`
   if (pkg.baton === undefined) {
     return `Resume ${pkg.slug}: it has no handoff baton yet, so orient from ${where} (bespunky-workflow:project-standing, then bespunky-workflow:session-handoff).`
   }
@@ -135,7 +166,9 @@ export const register: Register = on => {
     }
 
     const { standing } = view
-    const { live, dormant, concluded } = groups(standing)
+    const { value: showConcluded = false } = await $.state.get(SHOW_CONCLUDED)
+    const grouped = groups(standing)
+    const { live, dormant, concluded } = grouped
     const resumable = [...live, ...dormant]
     const hotkeyOf = (pkg: StandingPackage) => HOTKEYS[resumable.indexOf(pkg)]
 
@@ -168,28 +201,51 @@ export const register: Register = on => {
       )
     }
 
+    // A section only when it has rows: an empty heading answers nothing.
+    const section = (title: string, rows: StandingPackage[]) =>
+      rows.length === 0 ? null : (
+        <Box key={`standing-${title.toLowerCase()}`} flexDirection="column">
+          <Text bold>
+            {title} ({rows.length})
+          </Text>
+          {rows.map(inFlight)}
+        </Box>
+      )
+
     const closed = (pkg: StandingPackage) => (
       <Text key={`standing-row-${pkg.dir}`} dimColor wrap="truncate-end">
-        {pkg.slug}
+        {pkg.slug} {dateOf(pkg.closedAt ?? pkg.lastActivity)}
         {pkg.status === 'concluded' ? '' : ` (${pkg.status})`}
-        {pkg.summary ? ` — ${pkg.summary}` : ''}
       </Text>
     )
 
-    const section = (title: string, rows: StandingPackage[], draw: (pkg: StandingPackage) => unknown) => (
-      <Box key={`standing-${title.toLowerCase()}`} flexDirection="column">
-        <Text bold>
-          {title} ({rows.length})
-        </Text>
-        {rows.length === 0 ? <Text dimColor>none</Text> : rows.map(draw)}
-      </Box>
-    )
+    const summary = concludedLine(standing.now, concluded)
+    const history =
+      summary === undefined ? null : (
+        <Box key="standing-concluded" flexDirection="column">
+          <Box flexDirection="row" gap={1}>
+            <Box flexGrow={1} flexShrink={1}>
+              <Text dimColor wrap="truncate-end">
+                {summary}
+              </Text>
+            </Box>
+            <Button
+              key="standing-concluded-toggle"
+              label={showConcluded ? 'Hide concluded' : 'Show concluded'}
+              hotkey={CONCLUDED_HOTKEY}
+              onPress={() => void toggleConcluded($)}
+            />
+          </Box>
+          {showConcluded && concluded.slice(0, RECENT_CONCLUDED).map(closed)}
+        </Box>
+      )
 
     return (
       <Box flexDirection="column" gap={1}>
-        {section('Live', live, inFlight)}
-        {section('Dormant', dormant, inFlight)}
-        {section('Concluded', concluded, closed)}
+        <Text bold>{headline(grouped)}</Text>
+        {section('Live', live)}
+        {section('Dormant', dormant)}
+        {history}
         {controls}
       </Box>
     )
@@ -221,6 +277,11 @@ async function derive($: EngineInterface): Promise<Standing | undefined> {
 
     return undefined
   }
+}
+
+/** Expands or collapses the concluded section. */
+async function toggleConcluded($: EngineInterface) {
+  await update($, SHOW_CONCLUDED, shown => !(shown ?? false))
 }
 
 /** Queues the resume prompt for Claude; the pane itself does nothing else. */
