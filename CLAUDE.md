@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-<!-- @bespunky/house-tooling:start (generated pointer — do not edit between these markers; `scaffold.sh --sync` regenerates it) -->
+<!-- @bespunky/house-tooling:start (generated pointer — do not edit between these markers; `house.sh upgrade` regenerates it) -->
 ## House rules & tooling
 
 The house **directives** that govern every change in this project — architect mentality, **architecture-first**, the **branch & release rules**, and **a feature is a package** — are imported on the line below, so they are **always in context**. They are **mandatory, not optional reference.**
@@ -11,7 +11,7 @@ The house **directives** that govern every change in this project — architect 
 
 The **mechanical how-to** — the stack · generators · Nx — lives in **[`HOUSE.md`](HOUSE.md)**. **Read it before you branch, or reach for a house command.**
 
-Both files are **generator-owned**, regenerated on every `scaffold.sh --sync` to match the installed `@bespunky/nx-tools`. **Never hand-edit them** — this project's own guidance goes below, outside these markers.
+Both files are **generator-owned**, regenerated on every `house.sh upgrade` to match the installed `@bespunky/nx-tools`. **Never hand-edit them** — this project's own guidance goes below, outside these markers.
 <!-- @bespunky/house-tooling:end -->
 
 ## What this repo is
@@ -27,7 +27,7 @@ The repo is also its own **local marketplace**: `.claude-plugin/marketplace.json
 - `plugins/<plugin>/.claude-plugin/plugin.json` — the plugin manifest (`name`, `description`, `version`).
 - `plugins/<plugin>/skills/<skill>/SKILL.md` — a skill. Subagents go at `plugins/<plugin>/agents/<name>.md`, slash commands at `plugins/<plugin>/commands/<name>.md`, hooks at `plugins/<plugin>/hooks/hooks.json`.
 
-**Hooks are the "runs without being chosen" escape hatch.** A skill only fires when Claude judges it relevant, and there is **no plugin-install/update hook event** at all — so anything that must happen *reliably* (not "if the model thinks to") needs a hook. A plugin's hooks run in the sessions of everyone who has that plugin **installed**, i.e. in the consumer's project, not here. `house` uses this: a `SessionStart` hook orders the stamp in the project's `HOUSE.md` header against the installed `@bespunky/nx-tools` version and, when the toolkit has moved on, tells Claude to offer `scaffold.sh --sync`.
+**Hooks are the "runs without being chosen" escape hatch.** A skill only fires when Claude judges it relevant, and there is **no plugin-install/update hook event** at all — so anything that must happen *reliably* (not "if the model thinks to") needs a hook. A plugin's hooks run in the sessions of everyone who has that plugin **installed**, i.e. in the consumer's project, not here. `house` uses this: a `SessionStart` hook orders the stamp in the project's `HOUSE.md` header against the installed `@bespunky/nx-tools` version and, when the toolkit has moved on, tells Claude to offer an upgrade (`/bespunky-house:upgrade`).
 
 Three rules that hook earned the hard way, and that any new hook should keep:
 - **Detect, don't execute.** It *relays a fact*; it never runs the upgrade (Docker, minutes, rewrites files). A hook that commands the model to act is one compliant model away from doing the thing you refused to automate — and in a headless run there is no one to consent.
