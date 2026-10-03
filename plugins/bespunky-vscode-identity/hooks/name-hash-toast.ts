@@ -18,6 +18,8 @@
 
 import type { EngineInterface, Register } from 'claude-code'
 
+import { brandLine } from './_brand.tsx'
+
 /** What `check-window-identity.sh --json` names: the gate that decided. */
 export type IdentityState = 'unapplied' | 'resolved' | 'no-design-system' | 'declined' | 'upgradable'
 
@@ -66,7 +68,7 @@ async function announce($: EngineInterface) {
     const text = identityToast(await detect($, project), (await $.store.get(key)) === true)
 
     if (text !== undefined) {
-      $.ui.toast(text, { timeoutMs: TOAST_MS })
+      $.ui.toast(brandLine(text), { timeoutMs: TOAST_MS })
       await $.store.set(key, true)
     }
   } catch (error) {

@@ -5,6 +5,7 @@ import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { brandLine } from '../hooks/_brand.tsx'
 import { TOAST_TEXT, identityToast, parseState } from '../hooks/name-hash-toast.ts'
 
 const ROOT = '/work/project'
@@ -40,12 +41,12 @@ describe('name-hash toast', () => {
   test('upgradable: toasts once, and a later session for the same project stays quiet', async ($, on) => {
     const w = world(on, '{"state":"upgradable"}\n')
     await start($, w)
-    expect(w.toasts).toEqual([TOAST_TEXT])
+    expect(w.toasts).toEqual([brandLine(TOAST_TEXT)])
     expect(w.ran[0]?.argv.slice(-2)).toEqual([expect.stringMatching(/\/hooks\/check-window-identity\.sh$/), '--json'])
     expect(w.ran[0]?.env?.CLAUDE_PROJECT_DIR).toBe(ROOT)
 
     await start($, w)
-    expect(w.toasts).toEqual([TOAST_TEXT])
+    expect(w.toasts).toEqual([brandLine(TOAST_TEXT)])
   })
 
   for (const state of ['unapplied', 'resolved', 'no-design-system', 'declined']) {
@@ -61,7 +62,7 @@ describe('name-hash toast', () => {
     await start($, w, false)
     expect(w.ran).toEqual([])
     await start($, w)
-    expect(w.toasts).toEqual([TOAST_TEXT])
+    expect(w.toasts).toEqual([brandLine(TOAST_TEXT)])
   })
 
   test('the script saying nothing usable is silent', async ($, on) => {
