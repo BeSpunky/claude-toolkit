@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# A sync names the project after the PROJECT, not after the directory it happens to run in.
+# An upgrade names the project after the PROJECT, not after the directory it happens to run in.
 #
-# WHY THIS IS A TEST. The house sync opens its own git worktree (`house-sync-<date>`) when it starts on a protected
+# WHY THIS IS A TEST. The house upgrade opens its own git worktree (`house-sync-<date>`) when it starts on a protected
 # branch, and `PROJECT="$(basename "$TARGET")"` then told every generator the project was called
 # `house-sync-2026-10-02`: house-doc, the window identity, and — whenever the app can't be inferred (no app, or
 # more than one) — the app the per-app steps run on. Nothing fails; the date slug is simply written into the
@@ -10,14 +10,14 @@
 #
 # What is asserted: a linked worktree `house-sync-2026-10-02` of `myrepo` renders a program that names `myrepo`
 # everywhere a name is passed and never names the worktree; the program reaches its directory only through the
-# environment; and the shipped identity rule (lifted out of scaffold.sh) answers correctly for the main worktree,
+# environment; and the shipped identity rule (lifted out of house.sh) answers correctly for the main worktree,
 # a linked one, a workspace in a SUBDIRECTORY of its repository (named after the subdirectory, in any worktree),
 # and a directory outside git (its own name, as before).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCAFFOLD="$ROOT/plugins/project-starter/skills/new-project/assets/scaffold.sh"
-[ -f "$SCAFFOLD" ] || { echo "FATAL: scaffold.sh not found at $SCAFFOLD" >&2; exit 2; }
+HOUSE_SH="$ROOT/plugins/house/engine/house.sh"
+[ -f "$HOUSE_SH" ] || { echo "FATAL: house.sh not found at $HOUSE_SH" >&2; exit 2; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -27,7 +27,7 @@ FAILED=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILED=1; }
 
-# myrepo (main worktree, on main) + a linked worktree named the way the house sync names its own.
+# myrepo (main worktree, on main) + a linked worktree named the way the house upgrade names its own.
 REPO="$TMP/myrepo"
 mkdir -p "$REPO/web"
 printf '{ "name": "myrepo", "private": true }\n' > "$REPO/package.json"
@@ -41,12 +41,12 @@ git -C "$REPO" worktree add -q -b chore/house-sync-2026-10-02 "$WT" 2>/dev/null 
   || { echo "FATAL: could not create the linked worktree fixture." >&2; exit 2; }
 
 # ── the rendered program ────────────────────────────────────────────────────────────────────────────────────────
-echo "── a sync inside a linked worktree names the repository, not the worktree"
-_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$WT" 2>/dev/null)"
-[ -n "$_prog" ] || { echo "FATAL: the sync did not render (see render.test.sh)." >&2; exit 2; }
+echo "── an upgrade inside a linked worktree names the repository, not the worktree"
+_prog="$(bash "$HOUSE_SH" upgrade --print-inner --yes "$WT" 2>/dev/null)"
+[ -n "$_prog" ] || { echo "FATAL: the upgrade did not render (see render.test.sh)." >&2; exit 2; }
 grep -qF -- '--project=myrepo' <<< "$_prog" \
   && ok "the plan is told --project=myrepo" || fail "the plan is not told --project=myrepo"
-grep -qF -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' '' 'myrepo'" <<< "$_prog" \
+grep -qF -- "_resolve_upgrade_app 'node_modules/@bespunky/nx-tools' '' 'myrepo'" <<< "$_prog" \
   && ok "the fallback app name is myrepo" || fail "the fallback app name is not myrepo"
 if grep -q 'house-sync-2026-10-02' <<< "$_prog"; then
   fail "the program names the worktree directory: $(grep -m1 'house-sync-2026-10-02' <<< "$_prog")"
@@ -59,8 +59,8 @@ grep -qF 'cd "$SCAFFOLD_WORK_ROOT/$SCAFFOLD_PROJECT_DIR_NAME"' <<< "$_prog" \
 
 # ── the identity rule ───────────────────────────────────────────────────────────────────────────────────────────
 echo "── the identity is the directory's name in the main worktree"
-FN="$(sed -n '/^_project_identity() {/,/^}/p' "$SCAFFOLD")"
-[ -n "$FN" ] || { echo "FATAL: could not lift _project_identity out of scaffold.sh — the markers moved." >&2; exit 2; }
+FN="$(sed -n '/^_project_identity() {/,/^}/p' "$HOUSE_SH")"
+[ -n "$FN" ] || { echo "FATAL: could not lift _project_identity out of house.sh — the markers moved." >&2; exit 2; }
 eval "$FN"
 id_case() {   # <label> <dir> <expected>
   local got; got="$(_project_identity "$2")"
@@ -73,5 +73,5 @@ id_case 'a subdirectory workspace (main)'   "$REPO/web" web
 id_case 'a subdirectory workspace (linked)' "$WT/web"   web
 id_case 'a directory outside git'           "$NOGIT"    plain-dir
 
-[ "$FAILED" -eq 0 ] && echo "a sync names the project, not its directory"
+[ "$FAILED" -eq 0 ] && echo "an upgrade names the project, not its directory"
 exit "$FAILED"

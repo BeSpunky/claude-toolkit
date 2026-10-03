@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Adding a dev dependency is decided IN THE PROGRAM, at call time — never composed on the host.
 #
-# WHY THIS IS A TEST. The add used to be a string composed by scaffold.sh before the program ran (`yarn add -D -E`),
+# WHY THIS IS A TEST. The add used to be a string composed by house.sh before the program ran (`yarn add -D -E`),
 # a snapshot of "is this a workspace root, and which yarn will run here?" taken before — for a scaffold — the
 # project even existed. At a yarn 1 WORKSPACES root that string exits 1 ("…add the dependency to the workspace root
 # rather than the workspace itself… run this command again with the -W flag"), so the install of the house tooling
-# failed on every such sync; and a `--linking=workspaces` scaffold IS such a root by construction. It passed the
+# failed on every such upgrade; and a `--linking=workspaces` scaffold IS such a root by construction. It passed the
 # toolkit's own testing only because `--local` installs by manifest rewrite + `yarn install`, never `yarn add` —
 # the failure is invisible from exactly the path a maintainer exercises. Hence both halves here:
 #
 #   the WIRING  — the rendered program defines `_pm_add_dev` before its first call, every install goes through it,
-#                 and no `<pm> add …` line is composed on the host any more (scaffold and sync, both hosts);
+#                 and no `<pm> add …` line is composed on the host any more (scaffold and upgrade, both hosts);
 #   the DECISION — the shipped function, lifted out of the rendered program and run in a sandbox against stub
 #                 package managers, picks the root flag from the workspace and the package manager's own version:
 #                 yarn 1 + `workspaces` → -W, yarn 1 without → none, berry → none; pnpm-workspace.yaml → -w; npm
@@ -18,8 +18,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCAFFOLD="$ROOT/plugins/project-starter/skills/new-project/assets/scaffold.sh"
-[ -f "$SCAFFOLD" ] || { echo "FATAL: scaffold.sh not found at $SCAFFOLD" >&2; exit 2; }
+HOUSE_SH="$ROOT/plugins/house/engine/house.sh"
+[ -f "$HOUSE_SH" ] || { echo "FATAL: house.sh not found at $HOUSE_SH" >&2; exit 2; }
 command -v node >/dev/null || { echo "FATAL: node is required (the function reads package.json with it) — cannot test." >&2; exit 2; }
 
 TMP="$(mktemp -d)"
@@ -59,17 +59,17 @@ defined_before_use() {
     ok "$label — no package-manager add is composed outside _pm_add_dev"
   fi
 }
-_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$FIX" 2>/dev/null)"
-defined_before_use "sync" "$_prog"
+_prog="$(bash "$HOUSE_SH" upgrade --print-inner --yes "$FIX" 2>/dev/null)"
+defined_before_use "upgrade" "$_prog"
 grep -qE '^[[:space:]]*_pm_add_dev yarn @bespunky/nx-tools@' <<< "$_prog" \
-  && ok "sync — the toolkit install is _pm_add_dev yarn @bespunky/nx-tools@<version>" \
-  || fail "sync — the toolkit install does not go through _pm_add_dev"
+  && ok "upgrade — the toolkit install is _pm_add_dev yarn @bespunky/nx-tools@<version>" \
+  || fail "upgrade — the toolkit install does not go through _pm_add_dev"
 grep -qF '_pm_add_dev yarn "@nx/devkit@$_nxv"' <<< "$_prog" \
-  && ok "sync — the @nx/devkit floor goes through _pm_add_dev" \
-  || fail "sync — the @nx/devkit floor does not go through _pm_add_dev"
-defined_before_use "scaffold --preset=node" "$(bash "$SCAFFOLD" --print-inner --preset=node newproj 2>/dev/null)"
+  && ok "upgrade — the @nx/devkit floor goes through _pm_add_dev" \
+  || fail "upgrade — the @nx/devkit floor does not go through _pm_add_dev"
+defined_before_use "scaffold --preset=node" "$(bash "$HOUSE_SH" new --print-inner --preset=node newproj 2>/dev/null)"
 defined_before_use "scaffold --preset=angular --linking=workspaces" \
-  "$(bash "$SCAFFOLD" --print-inner --preset=angular --linking=workspaces newproj shop 2>/dev/null)"
+  "$(bash "$HOUSE_SH" new --print-inner --preset=angular --linking=workspaces newproj shop 2>/dev/null)"
 
 # ── the decision ──────────────────────────────────────────────────────────────────────────────────────────────────
 echo "── the root flag is the workspace's and the package manager's answer, at call time"

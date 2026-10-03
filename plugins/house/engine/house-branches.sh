@@ -1,8 +1,8 @@
 # shellcheck shell=bash
-# THE DECLARED BRANCH MODEL, AS THE SCAFFOLDER SEES IT — which lines a sync must never commit onto, and whether
+# THE DECLARED BRANCH MODEL, AS THE SCAFFOLDER SEES IT — which lines an upgrade must never commit onto, and whether
 # the project has declared a model at all.
 #
-# WHY THIS EXISTS. A sync's migration ladder commits onto whatever branch HEAD is, so the preflight must know
+# WHY THIS EXISTS. An upgrade's migration ladder commits onto whatever branch HEAD is, so the preflight must know
 # which branches are PROTECTED. That used to be hard-coded (development/staging/main/master, armed by "a
 # 'development' branch exists"), which is wrong for every project that is not three-line — and right only by
 # accident for the ones that were forced into three-line. The model is now a declared project fact,
@@ -11,12 +11,12 @@
 # as `layers.sh` from the layer registry (contract: docs/features/2026-10-03-branch-model/CONTRACT.md §2).
 # It never interprets the model, never guesses past an unknown schema, and never writes the file.
 #
-# RENDERED BY VALUE. scaffold.sh sources this and renders the functions into its program with `declare -f`
+# RENDERED BY VALUE. house.sh sources this and renders the functions into its program with `declare -f`
 # (as it does house-mounts.sh), so the check runs wherever the program does — natively or inside the fallback
 # container — with no file to find there.
 #
 # WHY NODE, when house-mounts.sh is pure bash. That file is also read by the SessionStart hook, which must stay a
-# few stat calls; this one has a single reader, the sync program, which already requires node before the
+# few stat calls; this one has a single reader, the upgrade program, which already requires node before the
 # preflight verdict (the version probe compares with it) — node is the runtime on both the native path (22.18+)
 # and the container path (the typescript-node image). And this is JSON: a grep/sed reading of it would be the
 # one parser in the toolkit that could be fooled by formatting, in the one check that decides where commits land.
@@ -29,7 +29,7 @@
 #      projection.schema major) → UNREADABLE: the reader refuses to act, and protection is the §3 list.
 #   2. a readable working copy names integration I and remote R → BOTH refs/heads/I and refs/remotes/R/I are
 #      considered (a stale local integration branch must not hide a fresh remote one — that is the bug that let
-#      a sync commit onto production), keeping those that exist AND hold the file:
+#      an upgrade commit onto production), keeping those that exist AND hold the file:
 #        - neither ref exists      → the working copy is in force (bootstrap), with a note;
 #        - none holds the file     → NOT LANDED: undeclared, but protected = the §3 names that exist UNION the copy's
 #                                    protected / protectedPatterns (never fewer protections than the copy says);
@@ -197,5 +197,5 @@ house_branch_model() {
 }
 
 # house_branches_fns — every function above, by value, for rendering into a program (`declare -f`). One list, so
-# the renderers (scaffold.sh, and the gate's test) cannot carry a stale subset of it.
+# the renderers (house.sh, and the gate's test) cannot carry a stale subset of it.
 house_branches_fns() { declare -f house_branches_undeclared_protected _house_bm_parse _house_bm_has _house_bm_existing _house_bm_union house_branch_model; }

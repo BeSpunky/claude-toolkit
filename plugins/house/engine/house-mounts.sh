@@ -5,10 +5,10 @@
 # WHY THIS EXISTS. A devcontainer that mounts a named volume at ${containerWorkspaceFolder}/node_modules gets a
 # mount point Docker CREATES ROOT-OWNED the first time that volume exists. Unless the container's post-create
 # reclaims it, `yarn install` dies with `EACCES: mkdir '<ws>/node_modules/…'` and the container comes up with no
-# dependencies at all. Such a project cannot even sync its way out: the sync's own install hits the same wall,
+# dependencies at all. Such a project cannot even upgrade its way out: the upgrade's own install hits the same wall,
 # minutes in, after the migrations have started. So the condition is DETECTED up front, by two readers:
 #
-#   scaffold.sh   a sync PREFLIGHT refusal (`unwritable-mounts`), before anything is written. The functions are
+#   house.sh   an upgrade PREFLIGHT refusal (`unwritable-mounts`), before anything is written. The functions are
 #                 rendered into the program with `declare -f`, so the check runs wherever the program does —
 #                 natively or inside the fallback container — with no file to find there.
 #   the SessionStart hook (hooks/check-house-version.sh), which relays it as one fact: post-create most likely
@@ -18,7 +18,7 @@
 # READ FROM THE PROJECT'S OWN devcontainer.json (every `type=volume` mount targeting
 # ${containerWorkspaceFolder}/…), never hard-coded: a layer that adds a volume (`.angular`, a future one) is
 # covered the day the devcontainer carries it. `node_modules` and `.nx` are the floor in every case — they are
-# what an install and Nx write into, so a root-owned one breaks a sync whether or not a container put it there.
+# what an install and Nx write into, so a root-owned one breaks an upgrade whether or not a container put it there.
 # Each path's in-workspace ANCESTORS are candidates too: Docker creates the missing parents of a mount point
 # (`.nx` for `.nx/cache`) root-owned in exactly the same way.
 #

@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FILES = join(HERE, '../../plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/dev/files');
+const FILES = join(HERE, '../../plugins/house/engine/nx-tools/src/generators/dev/files');
 
 let failed = 0;
 const ok = (label, cond) => {

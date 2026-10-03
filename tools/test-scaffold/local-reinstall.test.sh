@@ -11,14 +11,14 @@
 # — on the very entry it was about to replace. Reproduced end to end on a throwaway repo before the fix.
 #
 # HOW. The rendered program's local install is fenced by `# local-install:begin/end` markers. This renders a real
-# `--sync --local` program for a fixture whose manifest pins an unresolvable version, extracts that fence, and runs
+# `upgrade --local` program for a fixture whose manifest pins an unresolvable version, extracts that fence, and runs
 # it against a dummy tarball — npm always, yarn too when it is installed. No network is needed: the only
 # dependency is a file: tarball. The fence is asserted present, so the test cannot pass by matching nothing.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCAFFOLD="$ROOT/plugins/project-starter/skills/new-project/assets/scaffold.sh"
+HOUSE_SH="$ROOT/plugins/house/engine/house.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
@@ -49,7 +49,7 @@ fixture() {
 check_pm() {
   local pm="$1" dir program snippet
   dir="$(fixture "$pm")"
-  program="$(bash "$SCAFFOLD" --print-inner --sync --yes --local "$dir" 2>/dev/null)"
+  program="$(bash "$HOUSE_SH" upgrade --print-inner --yes --local "$dir" 2>/dev/null)"
   snippet="$(printf '%s\n' "$program" | sed -n '/# local-install:begin/,/# local-install:end/p')"
   if [ -z "$snippet" ]; then fail "$pm: the rendered --local program has no local-install fence"; return; fi
   if in_text "$snippet" -qE '(yarn add|npm install --save-dev|pnpm add)'; then

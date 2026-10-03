@@ -17,7 +17,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TPL="$ROOT/plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/reap-emulators.sh.tpl"
+TPL="$ROOT/plugins/house/engine/nx-tools/src/generators/firebase-emulators/reap-emulators.sh.tpl"
 
 [ -f "$TPL" ] || { echo "FATAL: reap-emulators.sh.tpl not found at $TPL" >&2; exit 2; }
 grep -q 'is_orphan' "$TPL" || {

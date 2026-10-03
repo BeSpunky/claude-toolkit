@@ -13,7 +13,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TPL="$ROOT/plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl"
+TPL="$ROOT/plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl"
 
 [ -f "$TPL" ] || { echo "FATAL: emulators.sh.tpl not found at $TPL" >&2; exit 2; }
 grep -q 'seed_dir' "$TPL" || {

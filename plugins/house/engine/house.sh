@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# Scaffold a BeSpunky-standard project, OR sync the house generators on an existing project.
+# The house engine: create a BeSpunky-standard project, or bring an existing one up to the current house standard.
 #
-# Default mode  : SCAFFOLD a new project — sync with an ensure set against an empty directory. The set is a
-#                 PRESET (default `agent`: the house DX on the Nx floor, wrapper-hosted, no package.json, no
-#                 framework; `--preset=angular` is the house web app) and/or `--ensure=<csv>`. Presets are data
-#                 beside the layer registry (nx-tools/src/layers/presets.ts, projected into layers.sh).
-# Sync mode     : bring an EXISTING workspace up to the current house standard — detect which layers it has,
-#                 run the versioned MIGRATIONS between where it is and where this checkout is, then re-apply
-#                 the generators that own their output outright. Not convergence: the generators no longer
-#                 recognise every shape the toolkit ever produced. Each one-way change ships instead as a
-#                 migration keyed to the version that introduced it, collected and ordered by `nx migrate`.
-# Firebase opt-in: --firebase is --ensure=firebase (two spellings of one intent). The layer brings the emulator
+# Three commands, each named for what it does (docs/features/2026-10-03-house-plugin-rename/DECISION.md):
+#   new       : SCAFFOLD a new project — an upgrade with an ensure set against an empty directory. The set is a
+#               PRESET (default `agent`: the house DX on the Nx floor, wrapper-hosted, no package.json, no
+#               framework; `--preset=angular` is the house web app) and/or `--add-layer=<csv>`. Presets are data
+#               beside the layer registry (nx-tools/src/layers/presets.ts, projected into layers.sh).
+#   upgrade   : bring an EXISTING workspace up to the current house standard — detect which layers it has,
+#               run the versioned MIGRATIONS between where it is and where this checkout is, then re-apply
+#               the generators that own their output outright. Not convergence: the generators no longer
+#               recognise every shape the toolkit ever produced. Each one-way change ships instead as a
+#               migration keyed to the version that introduced it, collected and ordered by `nx migrate`.
+#               It adds NO layer: --add-layer, --preset and --firebase are refused there.
+#   add-layer : an upgrade that also brings the named layers into being (the internal "ensure set").
+# Internally the two run shapes stay MODE=scaffold (new) and MODE=sync (upgrade, add-layer) — the planner's and
+# layers.sh's vocabulary; only the command line speaks the user's words.
+# Firebase opt-in: --firebase is the `firebase` layer in the ensure set (two spellings of one intent). The layer brings the emulator
 #                  suite, Cloud Functions as an Nx app (<appsDir>/functions), the workspace-level `firebase`
 #                  project and the seed/cache/reset tooling; its devcontainer FRAGMENT (layers/firebase.ts)
 #                  brings the Firebase/Google Cloud CLIs, the JDK and the forwarded emulator ports. It requires
@@ -26,7 +31,7 @@
 # GitHub repo    : full scaffold creates a PRIVATE GitHub repo via `gh` and pushes to it. This runs
 #                  host-side AFTER the Docker scaffold (gh auth lives on the host, not in the bare base
 #                  image). Skipped gracefully (local repo only) when gh is missing/unauthenticated.
-#                  Opt out with --no-github. Sync mode never touches the remote.
+#                  Opt out with --no-github. Upgrade mode never touches the remote.
 #                  Why a repo always: Firebase App Hosting deploys are GitHub-driven — linking the repo
 #                  at `firebase apphosting:backends:create` is what makes Firebase provision its own
 #                  Cloud Build CI/CD. We generate NO deploy workflow; the repo existing from minute one
@@ -34,33 +39,35 @@
 #                  deploy methodology). Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
-#   scaffold.sh [--preset=<id>] [--ensure=<layers>] [--layout=<id>] [--linking=<id>] [--firebase] [--staging] [--voice] [--no-github] [--docker] [--local] <project-name> [app-name]
-#   scaffold.sh --sync [--preset=<id>] [--ensure=<layers>] [--firebase] [--voice] [--no-backup] [--yes] [--docker] [--local] <project-path|project-name> [app-name]
+#   house.sh new       [--preset=<id>] [--add-layer=<layers>] [--layout=<id>] [--linking=<id>] [--firebase] [--staging] [--voice] [--no-github] [--docker] [--local] <project-name> [app-name]
+#   house.sh upgrade   [--staging] [--voice] [--no-backup] [--yes] [--docker] [--local] <project-path|project-name> [app-name]
+#   house.sh add-layer [--preset=<id>] [--firebase] [--staging] [--voice] [--no-backup] [--yes] [--docker] [--local] <layers> <project-path|project-name> [app-name]
+#   house.sh help
 #
 #   --local installs @bespunky/nx-tools from the WORKING TREE (npm pack) instead of the registry — for
 #           developing the toolkit itself, where the version under test is not published yet.
 #
-#   --staging (scaffold or sync) additionally scaffolds the staging environment bundle; requires --firebase. A sync
+#   --staging (new, upgrade, add-layer) additionally scaffolds the staging environment bundle; requires the firebase layer. An upgrade
 #             refuses it when the project's DECLARED branch model has no pre-production stage to deploy it from.
-#   --ensure=<csv> brings layers into being — which ones each mode can create comes from the layer registry
-#                  (assets/layers.sh). Everything else is DETECTED, never ensured. The Nx floor is always
+#   <layers> / --add-layer=<csv>  bring layers into being — which ones each command can create comes from the layer
+#                  registry (engine/layers.sh). Everything else is DETECTED, never ensured. The Nx floor is always
 #                  ensured; a scaffold also ensures whatever the requested layers require.
-#   --preset=<id>  a named ensure set (unions with --ensure). A scaffold with neither gets the default preset.
+#   --preset=<id>  a named ensure set (unions with the layers). `new` with neither gets the default preset.
 #   --layout=<id>  scaffold only: WHERE projects live — a named layout (layers.sh HOUSE_LAYOUTS, from LAYOUTS in
 #                  workspace-layout.ts), declared into nx.json `workspaceLayout`. Omitted: today's apps/ + packages/.
 #   --linking=<id> scaffold only: HOW projects reach each other — `paths` (the default: project.json + tsconfig
-#                  paths) or `workspaces` (a TS-solution workspace; needs the node layer). A sync refuses both:
+#                  paths) or `workspaces` (a TS-solution workspace; needs the node layer). An upgrade refuses both:
 #                  an existing workspace's layout and linking are DETECTED, never chosen.
 #   [app-name]     scaffold: the first app's name (default: the project name) — only when an ensured layer's
-#                  stack creates apps (the angular preset); refused otherwise. sync: the app to refresh.
+#                  stack creates apps (the angular preset); refused otherwise. upgrade: the app to refresh.
 #
-# Sync restore point: preflight refuses a dirty tree, so a sync only ever starts from a CLEAN one — and then
-# HEAD already is the pre-sync state, so a regenerated file (e.g. firebase.config.ts) is always recoverable:
+# Upgrade restore point: preflight refuses a dirty tree, so an upgrade only ever starts from a CLEAN one — and then
+# HEAD already is the pre-upgrade state, so a regenerated file (e.g. firebase.config.ts) is always recoverable:
 # review with `git diff <sha>`, restore with `git checkout <sha> -- <path>`. A directory that is not a git
-# repository has no restore point, so sync ABORTS there rather than change files unprotected — unless
+# repository has no restore point, so upgrade ABORTS there rather than change files unprotected — unless
 # --no-backup says that is understood.
 #
-# Sync CONSENT GATE (--yes): a sync rewrites generated files and takes minutes — it must never
+# Upgrade CONSENT GATE (--yes): an upgrade rewrites generated files and takes minutes — it must never
 # happen because something *inferred* that it should. The SessionStart hook that
 # detects a stale project deliberately only RELAYS that fact; this gate is what makes that boundary
 # structural rather than a matter of an agent's good behavior:
@@ -69,42 +76,41 @@
 #                 ASSERTS a human has explicitly agreed in this session. An agent may pass it only after
 #                 the user actually said yes — never to satisfy the gate.
 #   - CI=true   : there is no human to consent, and --yes cannot conjure one → REFUSE unconditionally.
-# The gate governs the ACT of syncing, so --print-inner (a dry render that runs nothing) is exempt from all
+# The gate governs the ACT of upgrading, so --print-inner (a dry render that runs nothing) is exempt from all
 # three arms — it is what the render test exercises under CI.
 # Scaffold mode has no gate: creating a NEW project is the thing the user just asked for, and it can't
 # clobber anything that already exists.
 #
-# Leading flags (--sync, --preset, --ensure, --layout, --linking, --firebase, --staging, --voice, --local, --no-github, --no-backup, --yes, --docker)
-# may be given in any order.
+# The COMMAND comes first; its flags follow it, in any order, and precede the positionals.
 # PROJECTS_DIR env overrides target root in full mode (default: ~/projects).
 #
 # WHERE IT RUNS. Docker was never the requirement — a modern NODE is (Docker only ever existed here to
 # supply one when the host's Node was too old). So this runs on the LOCAL Node when it's new enough —
 # Node 22.18+, the bar for compile-generators.mts's unflagged type-stripping — with no daemon, no image
-# pull and no mounts; that is exactly the case INSIDE a devcontainer, so `--sync` works there directly.
+# pull and no mounts; that is exactly the case INSIDE a devcontainer, so `upgrade` works there directly.
 # Otherwise it falls back to the typescript-node base image via `docker run`, exactly as before. Both
 # paths run the SAME rendered command sequence, so they cannot drift (mirrors tools/publish-nx-tools).
 # Force the image with --docker. Never nvm.
 set -euo pipefail
 
-ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# THE LAYER REGISTRY, as this shell sees it. assets/layers.sh is GENERATED from nx-tools/src/layers/*.ts (the
+ENGINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# THE LAYER REGISTRY, as this shell sees it. engine/layers.sh is GENERATED from nx-tools/src/layers/*.ts (the
 # single source of truth) and checked for drift by tools/test-layers/run.mjs. It is a shell projection rather
-# than a node call because this outer shell validates --ensure BEFORE anything is installed — and on the
+# than a node call because this outer shell validates the layers BEFORE anything is installed — and on the
 # Docker path the host may have no usable Node at all. It defines data and functions; sourcing runs nothing.
 # Nothing in this script lists layers by hand: ids, ensurability, hints and the --help text all come from it.
 # shellcheck source=layers.sh
-. "$ASSETS_DIR/layers.sh"
+. "$ENGINE_DIR/layers.sh"
 # The house MOUNT POINTS (node_modules, .nx, every workspace volume the project's devcontainer declares) and which
 # of them the current user cannot write. Shared with the SessionStart hook so the two derive them identically;
 # rendered into the program below with `declare -f`, because the program may run inside the fallback container.
 # shellcheck source=house-mounts.sh
-. "$ASSETS_DIR/house-mounts.sh"
+. "$ENGINE_DIR/house-mounts.sh"
 HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_post_create)"
 # The project's DECLARED BRANCH MODEL (.bespunky/branches.json → its `projection`): which lines are protected, and
 # whether a model is declared at all. Rendered by value for the same reason.
 # shellcheck source=house-branches.sh
-. "$ASSETS_DIR/house-branches.sh"
+. "$ENGINE_DIR/house-branches.sh"
 HOUSE_BRANCHES_FNS="$(house_branches_fns)"
 
 # The command line is the first place anyone looks, and until now it was the one place that said nothing:
@@ -113,90 +119,120 @@ HOUSE_BRANCHES_FNS="$(house_branches_fns)"
 # run WRITES, so they belong here rather than only in a header comment nobody runs.
 usage() {
   cat <<'USAGE'
-scaffold.sh — create a BeSpunky-standard project, or bring an existing one up to the house standard.
+house.sh — create a BeSpunky-standard project, or bring an existing one up to the house standard.
 
-  scaffold.sh [flags] <project-name> [app-name]              # SCAFFOLD a new project
-  scaffold.sh --sync [flags] <project-path|name> [app-name]  # SYNC an existing one
+  house.sh new       [flags] <project-name> [app-name]                # CREATE a new project
+  house.sh upgrade   [flags] <project-path|name> [app-name]           # UPGRADE an existing one (adds no layer)
+  house.sh add-layer [flags] <layers> <project-path|name> [app-name]  # UPGRADE it and add <layers>
+  house.sh help                                                       # this message
 
-Flags must come BEFORE the project path. A project is a stack of LAYERS; a scaffold creates the
-ones it is asked for (a preset and/or --ensure) — by default only the house DX on the Nx floor.
+The COMMAND comes first; its flags follow it and come BEFORE the positionals. A project is a stack of
+LAYERS. `new` creates the ones it is asked for (a preset and/or --add-layer) — by default only the house
+DX on the Nx floor. `upgrade` runs the versioned house migrations, then re-applies the generators that
+own their output; it brings no layer into being. `add-layer` is an upgrade that also creates <layers>.
 
-  --sync            Sync an existing project instead of creating one: run the versioned house
-                    migrations, then re-apply the generators that own their output.
-  --preset=<id>     A named set of layers to start from (unions with --ensure):
-USAGE
-  for _p in $(printf '%s' "$HOUSE_PRESETS" | tr ',' ' '); do
-    _d=""; [ "$_p" = "$HOUSE_PRESET_DEFAULT" ] && _d=" (scaffold default)"
-    printf '                      %-8s %s%s\n' "$_p" "$(house_preset_layers "$_p" | sed 's/,/, /g')" "$_d"
-  done
-  cat <<'USAGE'
-                    e.g. scaffold.sh --preset=angular [--firebase] shop [app] — the house web app.
-  --ensure=<csv>    Layers to BRING INTO BEING (everything else is detected, never ensured). A
-                    scaffold also creates whatever they require.
+  <layers>, --add-layer=<csv>
+                    Layers to BRING INTO BEING, comma-separated (everything else is detected, never
+                    ensured): the first positional of `add-layer`, or `new`'s --add-layer. `new` also
+                    creates whatever they require. Addable:
 USAGE
   # Rendered from the registry projection, so the list a user reads is the list the script accepts.
-  printf '                      sync    : %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SYNC" | sed 's/,/, /g')"
-  printf '                      scaffold: %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SCAFFOLD" | sed 's/,/, /g')"
+  printf '                      add-layer: %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SYNC" | sed 's/,/, /g')"
+  printf '                      new      : %s\n' "$(printf '%s' "$HOUSE_LAYERS_ENSURABLE_SCAFFOLD" | sed 's/,/, /g')"
   printf '                    The %s floor is ALWAYS ensured: a repo without Nx gets it initialised in place\n' "$HOUSE_LAYER_FLOOR"
   cat <<'USAGE'
                     (through the Nx wrapper, ./nx, when the repo has no package.json — it does not
-                    become a Node project). `--ensure=agent` on a bare repo is the usual retrofit: the
-                    stack-agnostic DX layer (devcontainer, Claude settings, window identity).
+                    become a Node project). `house.sh add-layer agent <path>` on a bare repo is the
+                    usual retrofit: the stack-agnostic DX layer (devcontainer, Claude settings,
+                    window identity).
+  --preset=<id>     new, add-layer: a named set of layers (unions with the layers):
 USAGE
-  printf '  --layout=<id>     Scaffold only: where projects live, declared in nx.json workspaceLayout:\n'
+  for _p in $(printf '%s' "$HOUSE_PRESETS" | tr ',' ' '); do
+    _d=""; [ "$_p" = "$HOUSE_PRESET_DEFAULT" ] && _d=" (new's default)"
+    printf '                      %-8s %s%s\n' "$_p" "$(house_preset_layers "$_p" | sed 's/,/, /g')" "$_d"
+  done
+  cat <<'USAGE'
+                    e.g. house.sh new --preset=angular [--firebase] shop [app] — the house web app.
+USAGE
+  printf '  --layout=<id>     new only: where projects live, declared in nx.json workspaceLayout:\n'
   for _p in $(printf '%s' "$HOUSE_LAYOUTS" | tr ',' ' '); do
     printf '                      %-10s %s\n' "$_p" "$(house_layout_title "$_p")"
   done
   printf '                    Omitted: apps under %s/, libraries under packages/ (the house default).\n' "$HOUSE_LAYOUT_DEFAULT_APPS_DIR"
-  printf '  --linking=<id>    Scaffold only: how projects reach each other:\n'
+  printf '  --linking=<id>    new only: how projects reach each other:\n'
   for _p in $(printf '%s' "$HOUSE_LINKINGS" | tr ',' ' '); do
     _d=""; [ "$_p" = "$HOUSE_LINKING_DEFAULT" ] && _d=" (default)"
     printf '                      %-10s %s%s\n' "$_p" "$(house_linking_title "$_p")" "$_d"
   done
   cat <<'USAGE'
-                    A sync refuses both: an existing workspace's layout and linking are DETECTED.
-  --firebase        Include the Firebase layer (emulator suite, Cloud Functions app, devcontainer wiring);
-                    the same as --ensure=firebase.
-  --staging         Also scaffold the staging environment bundle. Requires --firebase. A sync refuses it
-                    when the declared branch model has no pre-production stage to deploy it from.
+                    upgrade and add-layer refuse both: an existing workspace's layout and linking
+                    are DETECTED.
+  --firebase        new, add-layer: include the Firebase layer (emulator suite, Cloud Functions app,
+                    devcontainer wiring); the same as adding `firebase` to the layers.
+  --staging         Also scaffold the staging environment bundle. Requires the firebase layer. An
+                    upgrade refuses it when the declared branch model has no pre-production stage to
+                    deploy it from.
   --voice           Bridge the host's audio (WSLg or native PulseAudio/PipeWire) into the devcontainer
                     and provision bespunky-voice.
   --local           Install @bespunky/nx-tools from the WORKING TREE (npm pack) instead of the registry.
                     For developing the toolkit itself; leaves the project holding an unpublished build.
-  --yes, -y         Assert that a human explicitly agreed to this sync, in this conversation. The sync
-                    refuses to run unattended without it. Never pass it to satisfy the gate.
-  --no-backup       Sync a directory that is NOT a git repository, with no restore point at all.
-                    Migrations are ONE-WAY; there is no undo without one. (In a git repository the
-                    restore point is the clean HEAD preflight requires — nothing to skip.)
-  --no-github       Scaffold only: do not create a private GitHub repo.
+  --yes, -y         upgrade, add-layer: assert that a human explicitly agreed to this upgrade, in this
+                    conversation. The upgrade refuses to run unattended without it. Never pass it to
+                    satisfy the gate.
+  --no-backup       upgrade, add-layer: upgrade a directory that is NOT a git repository, with no
+                    restore point at all. Migrations are ONE-WAY; there is no undo without one. (In a
+                    git repository the restore point is the clean HEAD preflight requires.)
+  --no-github       new only: do not create a private GitHub repo.
   --docker          Force the container even when the local Node would do.
   --print-inner     Render the command sequence this run would execute, print it, and exit without
-                    running anything. For debugging the scaffolder itself.
-  --help, -h        This message.
+                    running anything. For debugging the engine itself.
+  --help, -h        This message (also: house.sh help).
 
-Environment: PROJECTS_DIR (default ~/projects) is where a scaffold creates the project.
+Environment: PROJECTS_DIR (default ~/projects) is where `new` creates the project.
              NX_CHANNEL=next scaffolds on the Nx beta line.
 USAGE
 }
 
-MODE="scaffold"
+# --- THE COMMAND: the first token, always ---------------------------------------------------------------------
+# Each command's name says what it does — the reason it replaced `--sync` / `--ensure`, which made one script do
+# three jobs behind flags (DECISION.md). The internal run shape stays MODE: `new` is a scaffold, `upgrade` and
+# `add-layer` are the same upgrade run, the latter with a non-empty ensure set. An old invocation (`--sync`, a bare
+# path) is simply not a command, and the error says which ones are; scaffold.sh beside this script is the shim
+# that translates old command lines for the HOUSE.md files that still print them.
+CMD="${1:-}"
+case "$CMD" in
+  new)            MODE="scaffold"; shift;;
+  upgrade|add-layer) MODE="sync"; shift;;
+  help|--help|-h) usage; exit 0;;
+  '')             usage >&2
+                  echo >&2
+                  echo "ERROR: no command given. house.sh takes a command first: new | upgrade | add-layer | help." >&2
+                  exit 1;;
+  *)              echo "ERROR: unknown command '$CMD'. house.sh takes a command first:" >&2
+                  echo "         house.sh new | upgrade | add-layer | help" >&2
+                  echo "       Run 'house.sh help' for the full usage." >&2
+                  exit 1;;
+esac
+# The run, as a noun the messages can use — the internal MODE is not a word a user typed.
+A_RUN="an upgrade"; [ "$MODE" = "scaffold" ] && A_RUN="a scaffold"
+
 FIREBASE=0
 VOICE=0    # --voice: bridge the host's audio (WSLg or PulseAudio/PipeWire) into the devcontainer + provision bespunky-voice (opt-in).
-STAGING=0  # --staging: also scaffold a first-class staging environment (requires --firebase).
-GITHUB=1   # scaffold mode creates a private GitHub repo by default; --no-github opts out.
-BACKUP=1   # sync refuses a non-git directory (no restore point); --no-backup accepts that.
-CONSENT=0  # --yes: asserts a human explicitly agreed to this sync (see the consent gate above).
+STAGING=0  # --staging: also scaffold a first-class staging environment (requires the firebase layer).
+GITHUB=1   # `new` creates a private GitHub repo by default; --no-github opts out.
+BACKUP=1   # an upgrade refuses a non-git directory (no restore point); --no-backup accepts that.
+CONSENT=0  # --yes: asserts a human explicitly agreed to this upgrade (see the consent gate above).
 FORCE_DOCKER=0  # --docker: use the base image even when the local Node would do (escape hatch).
-ENSURE_ARG=""   # --ensure=<csv>: layers to BRING INTO BEING (see the layer model below). Empty = detect only.
-PRESET_ARG=""   # --preset=<id>: a named ensure set (src/layers/presets.ts); unions with --ensure.
-LAYOUT_ARG=""   # --layout=<id>: scaffold only — where projects live (LAYOUTS, projected into layers.sh).
-LINKING_ARG=""  # --linking=<id>: scaffold only — how projects reach each other (paths | workspaces).
+ENSURE_ARG=""   # the layers to BRING INTO BEING (add-layer's <layers>, new's --add-layer). Empty = detect only.
+PRESET_ARG=""   # --preset=<id>: a named ensure set (src/layers/presets.ts); unions with the layers.
+LAYOUT_ARG=""   # --layout=<id>: new only — where projects live (LAYOUTS, projected into layers.sh).
+LINKING_ARG=""  # --linking=<id>: new only — how projects reach each other (paths | workspaces).
 LOCAL_TOOLS=0   # --local: install @bespunky/nx-tools from the WORKING TREE instead of npm (toolkit dev).
 PRINT_INNER=0   # --print-inner: render the command sequence to stdout and exit, running nothing.
+LAYER_FLAGS=""  # the layer-bringing flags given (--add-layer, --preset, --firebase) — `upgrade` refuses each.
 while [ "${1:-}" != "" ]; do
   case "$1" in
-    --sync)       MODE="sync";   shift;;
-    --firebase)   FIREBASE=1;    shift;;
+    --firebase)   FIREBASE=1;    LAYER_FLAGS="$LAYER_FLAGS --firebase"; shift;;
     --voice)      VOICE=1;       shift;;
     --staging)    STAGING=1;     shift;;
     --no-github)  GITHUB=0;      shift;;
@@ -205,11 +241,11 @@ while [ "${1:-}" != "" ]; do
     --docker)     FORCE_DOCKER=1; shift;;
     --local)      LOCAL_TOOLS=1;  shift;;
     --print-inner) PRINT_INNER=1; shift;;
-    --ensure=*)   ENSURE_ARG="${1#--ensure=}"; shift;;
-    --preset=*)   PRESET_ARG="${1#--preset=}"; shift;;
+    --add-layer=*) ENSURE_ARG="${1#--add-layer=}"; LAYER_FLAGS="$LAYER_FLAGS --add-layer"; shift;;
+    --preset=*)   PRESET_ARG="${1#--preset=}"; LAYER_FLAGS="$LAYER_FLAGS --preset"; shift;;
     --layout=*)   LAYOUT_ARG="${1#--layout=}"; shift;;
     --linking=*)  LINKING_ARG="${1#--linking=}"; shift;;
-    # Same guard as --preset/--ensure below: a flag-shaped value is a mistyped command line, not a value.
+    # Same guard as --preset/--add-layer below: a flag-shaped value is a mistyped command line, not a value.
     --layout|--linking)
                   case "${2:-}" in
                     ''|-*) echo "ERROR: $1 needs a value, got '${2:-}'. Did you mean $1=<id>?" >&2; exit 1;;
@@ -220,28 +256,29 @@ while [ "${1:-}" != "" ]; do
                     ''|-*) echo "ERROR: --preset needs a preset name, got '${2:-}'. Known presets: $HOUSE_PRESETS" >&2
                            exit 1;;
                   esac
-                  PRESET_ARG="$2"; shift 2;;
-    # The space form takes the NEXT argument as its value, so `--ensure --yes <proj>` would silently swallow
+                  PRESET_ARG="$2"; LAYER_FLAGS="$LAYER_FLAGS --preset"; shift 2;;
+    # The space form takes the NEXT argument as its value, so `--add-layer --yes <proj>` would silently swallow
     # `--yes` as a layer list — and the consent gate runs before layer validation, so the user would be told
     # they hadn't consented rather than that they'd mistyped. Reject a flag-shaped value outright.
-    --ensure)     case "${2:-}" in
-                    ''|-*) echo "ERROR: --ensure needs a comma-separated layer list, got '${2:-}'." >&2
-                           echo "       Did you mean --ensure=<layers>? Known layers: $HOUSE_LAYERS" >&2
+    --add-layer)  case "${2:-}" in
+                    ''|-*) echo "ERROR: --add-layer needs a comma-separated layer list, got '${2:-}'." >&2
+                           echo "       Did you mean --add-layer=<layers>? Known layers: $HOUSE_LAYERS" >&2
                            exit 1;;
                   esac
-                  ENSURE_ARG="$2"; shift 2;;
+                  ENSURE_ARG="$2"; LAYER_FLAGS="$LAYER_FLAGS --add-layer"; shift 2;;
     --help|-h)    usage; exit 0;;
     # Lists the valid flags rather than only naming the bad one. Costs two lines and answers the question
-    # the reader actually has — including the one case that will keep arriving for a while, `--repair`,
-    # which is the old name for `--sync` and is still written into the HOUSE.md of any project generated
-    # before that rename. No special case for it: it is simply not a flag, and the list says what is.
+    # the reader actually has — including the cases that will keep arriving for a while: `--sync` / `--ensure`
+    # (the command line before the subcommands) and `--repair` (older still), written into the HOUSE.md of
+    # projects generated before those renames. No special case for them: they are simply not flags, and the
+    # help says what is. (Old command lines are translated by scaffold.sh, the deprecated shim beside this.)
     #
-    # MATCHES `-*`, NOT `--*`. A single-dash unknown (`-h`, `-v`, `-x`) used to fall through to the `*)`
-    # break and then hit the after-the-path guard below, which answered a bare `scaffold.sh -h` with
-    # "it comes AFTER the project path" — of an invocation that has no path at all, and then advised
-    # putting the flag first, where it already was. An unknown flag is an unknown flag wherever it sits.
-    -*)           echo "ERROR: unknown flag '$1'" >&2
-                  echo "       Run 'scaffold.sh --help' for the full list." >&2
+    # MATCHES `-*`, NOT `--*`. A single-dash unknown (`-v`, `-x`) used to fall through to the `*)`
+    # break and then hit the after-the-path guard below, which answered it with "it comes AFTER the project
+    # path" — of an invocation that has no path at all, and then advised putting the flag first, where it
+    # already was. An unknown flag is an unknown flag wherever it sits.
+    -*)           echo "ERROR: unknown flag '$1' for 'house.sh $CMD'" >&2
+                  echo "       Run 'house.sh help' for the full list." >&2
                   exit 1;;
     *)            break;;
   esac
@@ -255,28 +292,64 @@ done
 if [ "$PRINT_INNER" = "1" ]; then exec 3>&1 1>&2; fi
 
 # Flags are LEADING only — the loop above stops at the first non-flag, and everything after it is positional.
-# So a flag written after the project path is not rejected, it is silently absorbed as the APP NAME: `--sync
-# <proj> --local` renders `nx g …:serve --project=--local` with --local itself still off. Worse, `--sync
+# So a flag written after a positional is not rejected, it is silently absorbed as the APP NAME: `upgrade
+# <proj> --local` renders `nx g …:serve --project=--local` with --local itself still off. Worse, `upgrade
 # <proj> --yes` reports that the user has not consented, which sends the reader looking at the wrong thing
-# entirely — the same mis-diagnosis the --ensure guard above exists to prevent, one argument over. Catch it
+# entirely — the same mis-diagnosis the --add-layer guard above exists to prevent, one argument over. Catch it
 # where the mistake actually is.
 for _arg in "$@"; do
   case "$_arg" in
-    # `-*`, not just `--*`: `-y` is an accepted alias for `--yes`, so `--sync <proj> -y` was absorbed as the
-    # app name and answered with "refusing to sync without consent" — the exact mis-diagnosis this guard
+    # `-*`, not just `--*`: `-y` is an accepted alias for `--yes`, so `upgrade <proj> -y` was absorbed as the
+    # app name and answered with "refusing to upgrade without consent" — the exact mis-diagnosis this guard
     # exists to prevent, just one dash short of catching it.
-    -*)  echo "ERROR: '$_arg' looks like a flag, but it comes AFTER the project path, so it would be read" >&2
-         echo "       as a positional argument (the app name). Flags must come FIRST:" >&2
-         echo "         scaffold.sh $_arg ... <project> [app-name]" >&2
+    -*)  echo "ERROR: '$_arg' looks like a flag, but it comes AFTER a positional argument (the project path," >&2
+         echo "       or add-layer's layers), so it would be read as one. Flags come right after the command:" >&2
+         echo "         house.sh $CMD $_arg ... <project> [app-name]" >&2
          exit 1;;
   esac
 done
+
+# --- what each command takes: one name, one job ----------------------------------------------------------------
+# `upgrade` brings NO layer into being — that is `add-layer`'s whole job, and a command whose name says "upgrade"
+# must not quietly also turn a library into an Angular app. So every layer-bringing flag is refused there, naming
+# the command that does take it, rather than accepted and silently widening the run.
+if [ "$CMD" = "upgrade" ] && [ -n "$LAYER_FLAGS" ]; then
+  echo "ERROR: 'house.sh upgrade' adds no layer, so it does not take${LAYER_FLAGS}." >&2
+  echo "       Bringing layers into being is its own command (an upgrade that also adds them):" >&2
+  echo "         house.sh add-layer [flags] <layers> <project-path> [app-name]   e.g. house.sh add-layer firebase ." >&2
+  echo "       Nothing has been written." >&2
+  exit 1
+fi
+# `add-layer` takes its layers as its first POSITIONAL — the thing the command is about — so a second spelling of
+# the same list as a flag is refused rather than unioned: two places to say one thing is one too many.
+if [ "$CMD" = "add-layer" ]; then
+  case "$LAYER_FLAGS" in
+    *--add-layer*) echo "ERROR: 'house.sh add-layer' takes its layers as the first positional, not --add-layer:" >&2
+                   echo "         house.sh add-layer [flags] <layers> <project-path> [app-name]" >&2
+                   exit 1;;
+  esac
+  # The layers positional is ALWAYS required — even with --preset. Were it optional there, `add-layer --preset=angular
+  # .` and `add-layer --preset=angular agent .` would differ only by counting positionals, and a forgotten list would
+  # turn the project path into one ('.' as a layer) or the app name into the path. One shape, never ambiguous.
+  if [ "$#" -lt 2 ]; then
+    echo "ERROR: 'house.sh add-layer' needs the layers to add AND the project${1:+ — got only '$1'}." >&2
+    echo "       The <layers> positional is always required, --preset or not (a preset only unions with it):" >&2
+    echo "         house.sh add-layer [flags] <layers> <project-path> [app-name]   e.g. house.sh add-layer agent ." >&2
+    echo "       Known layers: $HOUSE_LAYERS" >&2
+    exit 1
+  fi
+  [ -n "$(printf '%s' "$1" | tr -d '[:space:],')" ] || {
+    echo "ERROR: 'house.sh add-layer' was given an empty layer list. To upgrade without adding one: house.sh upgrade <project-path>" >&2
+    exit 1; }
+  ENSURE_ARG="$1"
+  shift
+fi
 # $3 and beyond are silently ignored otherwise, which hides a typo'd flag or a mis-quoted path.
 [ "$#" -le 2 ] || { echo "ERROR: too many arguments — expected at most <project> [app-name], got: $*" >&2; exit 1; }
 APP_ARG="${2:-}"   # the app name AS GIVEN — a scaffold refuses one when nothing it ensures creates an app
 
 # --- whose package manager is this? ---------------------------------------------------------------------------
-# A SCAFFOLD creates the project, so it sets the house standard: yarn. A SYNC does not get that choice. The
+# A SCAFFOLD creates the project, so it sets the house standard: yarn. AN UPGRADE does not get that choice. The
 # package manager is a decision the project already made, encoded in a lockfile its whole team and its CI
 # depend on — and running `yarn install` in an npm repo doesn't switch it, it produces a SECOND lockfile
 # alongside the first. Two lockfiles that disagree is a genuinely bad state to leave someone in: `npm ci`
@@ -303,7 +376,7 @@ detect_package_manager() {
 # The bar is compile-generators.mts: TypeScript run directly by node, which needs type-stripping ON BY
 # DEFAULT — Node 22.18+ (flagged/experimental before that). Anything older, or no local node / no local
 # copy of THIS PROJECT'S package manager, falls back to the image. Inside a devcontainer this is always
-# true, which is why `--sync` runs there with no Docker. Mirrors publish.sh's local_node_ok().
+# true, which is why `upgrade` runs there with no Docker. Mirrors publish.sh's local_node_ok().
 local_node_ok() {
   command -v node >/dev/null && command -v "$PM" >/dev/null || return 1
   local major minor
@@ -331,22 +404,22 @@ fi
 # Base-image lookup + engine-aware file ownership for the Docker fallback, shared with tools/extract-tool
 # (see the header of container-engine.sh for why it lives beside this script).
 # shellcheck source=container-engine.sh
-. "$ASSETS_DIR/container-engine.sh"
-# Pin the workspace's @bespunky/nx-tools to the SAME version these assets ship (read from
+. "$ENGINE_DIR/container-engine.sh"
+# Pin the workspace's @bespunky/nx-tools to the SAME version this engine ships (read from
 # the source package.json), so the installed runtime executors can never lag the applied project.json
 # shape — a 0.x MINOR bump (e.g. 0.3→0.4) would otherwise fall outside a hard-coded caret and silently
 # leave the project on the previous executor. Derived, never hand-maintained.
-NX_TOOLS_VERSION="$(grep -m1 '"version"' "$ASSETS_DIR/nx-tools/package.json" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+NX_TOOLS_VERSION="$(grep -m1 '"version"' "$ENGINE_DIR/nx-tools/package.json" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
 [ -n "$NX_TOOLS_VERSION" ] || NX_TOOLS_VERSION="0.4.0"
-# The plugin version that ships these assets, read from the manifest three levels up (assets/ lives at
-# <plugin>/skills/new-project/assets). Together with NX_TOOLS_VERSION it is STAMPED into the project by the
+# The plugin version that ships this engine, read from the manifest one level up (engine/ lives at
+# <plugin>/engine). Together with NX_TOOLS_VERSION it is STAMPED into the project by the
 # house-doc generator (into HOUSE.md's header — root-level and committed, so it reaches every clone), which
-# is what lets project-starter's SessionStart hook notice — with a few greps, not a Docker run — that the
-# installed toolkit has moved past this project, and ask for a sync. NX_TOOLS_VERSION is the one the hook
+# is what lets the house plugin's SessionStart hook notice — with a few greps, not a Docker run — that the
+# installed toolkit has moved past this project, and ask for an upgrade. NX_TOOLS_VERSION is the one the hook
 # actually compares (it determines what the generators produce); PLUGIN_VERSION is provenance. Derived, never
-# hand-maintained; "unknown" if the manifest can't be read (a raw assets checkout), which the hook reads as
-# "behind" and resolves by syncing.
-PLUGIN_VERSION="$(grep -m1 '"version"' "$ASSETS_DIR/../../../.claude-plugin/plugin.json" 2>/dev/null | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+# hand-maintained; "unknown" if the manifest can't be read (a raw engine checkout), which the hook reads as
+# "behind" and resolves by upgrading.
+PLUGIN_VERSION="$(grep -m1 '"version"' "$ENGINE_DIR/../.claude-plugin/plugin.json" 2>/dev/null | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
 [ -n "$PLUGIN_VERSION" ] || PLUGIN_VERSION="unknown"
 GIT_NAME="$(git config --global user.name 2>/dev/null || whoami)"
 GIT_EMAIL="$(git config --global user.email 2>/dev/null || echo "$(whoami)@localhost")"
@@ -357,13 +430,13 @@ GIT_EMAIL="$(git config --global user.email 2>/dev/null || echo "$(whoami)@local
 #                     fixup). Reaches the program as environment, never as text (see INNER_ENV).
 #   PROJECT           the project's NAME — what the generators are told (--project=, house-doc, the window
 #                     identity), the fallback app name, the GitHub repository. Validated by _check_name below.
-# A scaffold creates the directory FROM the name, so the two coincide. A sync finds a directory that already
-# exists, and the directory is not always named after the project: the house sync opens its own git worktree
-# (house-sync-<date>) when it starts on a protected branch, and naming the project after that slug stamped a date
-# into every generator that asked who the project is. So on a sync the identity is the name the project has in
+# A scaffold creates the directory FROM the name, so the two coincide. An upgrade finds a directory that already
+# exists, and the directory is not always named after the project: the house upgrade opens its own git worktree
+# (dated, named after the run) when it starts on a protected branch, and naming the project after that slug stamped a date
+# into every generator that asked who the project is. So on an upgrade the identity is the name the project has in
 # its MAIN worktree, read from git (_project_identity), and the directory keeps its own name for paths.
 # A missing argument is a usage question, not a bash error. `${1:?…}` printed a raw parameter-expansion
-# message ("scaffold.sh: line 213: 1: Usage: …") whose embedded usage line named only --firebase — the most
+# message ("house.sh: line 213: 1: Usage: …") whose embedded usage line named only --firebase — the most
 # likely discovery path in the whole script, advertising a fraction of the flags.
 if [ "$#" -eq 0 ]; then
   usage >&2
@@ -378,7 +451,7 @@ fi
 # worktree's TOP maps to the main worktree's name: a workspace in a subdirectory of its repository is named after
 # that subdirectory, which is the same in every worktree, so it keeps its own basename. Anything else — not a git
 # repository, a bare or submodule layout whose common dir is not a `.git` beside a working tree — has no main
-# worktree to ask, and falls back to the directory's own name, which is what a sync has always used.
+# worktree to ask, and falls back to the directory's own name, which is what an upgrade has always used.
 _project_identity() {   # <absolute target dir>
   local _common _top
   _common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || _common=""
@@ -399,7 +472,7 @@ if [ "$MODE" = "scaffold" ]; then
   APP="${2:-$PROJECT}"
   PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
   TARGET="$PROJECTS_DIR/$PROJECT"
-  [ -e "$TARGET" ] && { echo "ERROR: '$TARGET' already exists. Choose another name (or use --sync)." >&2; exit 1; }
+  [ -e "$TARGET" ] && { echo "ERROR: '$TARGET' already exists. Choose another name (or upgrade it: house.sh upgrade <path>)." >&2; exit 1; }
 else
   TARGET_INPUT="$1"
   if [ -d "$TARGET_INPUT" ]; then
@@ -428,7 +501,7 @@ else
   # Not inferred here. It used to be, from a bash glob over apps/*/project.json that skipped `functions` by name —
   # which knew one layout (apps/), one way of defining a project (project.json) and the house server app by its
   # name. A workspace keeping its apps under packages/, or defining them in package.json (TS-solution), had no
-  # app as far as that glob could see, so the sync fell back to the folder name, skipped every per-app step and
+  # app as far as that glob could see, so the upgrade fell back to the folder name, skipped every per-app step and
   # still stamped the project current. Which projects are this workspace's apps is a question for the project
   # GRAPH, so it is asked of the installed package (`layers/cli.js apps`) inside the program, after the install —
   # the first point where the answer can be read honestly, and well before the one step that needs it (the plan).
@@ -442,7 +515,7 @@ fi
 # from the project graph (inside the program — a runtime variable there, never rendered into its source, and
 # checked by this same function the moment it is inferred), and $PROJECT from a directory name — so a cloned
 # repository can choose them. A directory literally named `$(...)` or containing a backtick therefore becomes a command
-# substitution evaluated at render time, from nothing more than `git clone` plus a sync the user was invited
+# substitution evaluated at render time, from nothing more than `git clone` plus an upgrade the user was invited
 # to run by the SessionStart hook. That is remote code execution through a file name.
 #
 # Quoting each interpolation site would work only until someone adds the next one. Refusing the input is the
@@ -461,7 +534,7 @@ _check_name() {
       echo "       Allowed: letters, digits, and . _ @ / -" >&2
       echo "       This name is passed to the house generators as a command argument, so it is refused" >&2
       echo "       rather than escaped. Rename the directory, or pass an explicit name:" >&2
-      echo "         scaffold.sh --sync <project-path> <app-name>" >&2
+      echo "         house.sh upgrade <project-path> <app-name>" >&2
       exit 1 ;;
   esac
 }
@@ -470,14 +543,14 @@ _check_name project "$PROJECT"
 # the program, the moment it is inferred (CHECK_NAME_FN below) — before any generator receives it.
 [ -z "$APP" ] || _check_name app "$APP"
 
-# The app a SYNC refreshes when none was given — resolved INSIDE the program (rendered there with `declare -f`),
+# The app an UPGRADE refreshes when none was given — resolved INSIDE the program (rendered there with `declare -f`),
 # after the install, by asking the installed package for the workspace's client apps (`layers/cli.js apps`: the
 # project graph, project.json and package.json projects alike, classified by projectRole; the server-side app —
 # Cloud Functions — excluded by its `platform:server` tag, not by its name). Exactly one → that app. More than one
 # → inference declines and says so (the correct answer rather than a guess). None → the project name, as before.
 # Sets APP and APP_ROOT (empty when the app is not one of the workspace's client apps), and hands APP_ROOT to the
-# outer summary through the sync lock's state file — the summary runs on the host, which may have no Node.
-_resolve_sync_app() {   # <nx-tools dir> <app as given, or ''> <fallback name>
+# outer summary through the upgrade lock's state file — the summary runs on the host, which may have no Node.
+_resolve_upgrade_app() {   # <nx-tools dir> <app as given, or ''> <fallback name>
   local _apps _n _tab
   _tab="$(printf '\t')"
   _apps="$(node "$1/src/layers/cli.js" apps)" || {
@@ -491,7 +564,7 @@ _resolve_sync_app() {   # <nx-tools dir> <app as given, or ''> <fallback name>
     elif [ "$_n" -gt 1 ]; then
       echo "NOTE: this workspace has more than one app ($(printf '%s\n' "$_apps" | cut -f1 | paste -sd' ' -)), so the app to refresh can't be inferred."
       echo "      Defaulting to '$3'. Pass one explicitly to target a different app:"
-      echo "        scaffold.sh --sync <project> <app-name>"
+      echo "        house.sh upgrade <project> <app-name>"
     fi
   fi
   APP="${APP:-$3}"
@@ -500,16 +573,16 @@ _resolve_sync_app() {   # <nx-tools dir> <app as given, or ''> <fallback name>
   echo "[app] the app to refresh: $APP${APP_ROOT:+ ($APP_ROOT)}"
   if [ -n "$APP_ROOT" ] && [ -d .bespunky-sync.lock ]; then printf 'app=%s\n' "$APP_ROOT" >> .bespunky-sync.lock/state 2>/dev/null || true; fi
 }
-CHECK_NAME_FN="$(declare -f _check_name _resolve_sync_app)"
+CHECK_NAME_FN="$(declare -f _check_name _resolve_upgrade_app)"
 
 # Resolved and VALIDATED before the consent gate below. Argument validation is pure string work — it
 # reads nothing, writes nothing, and reaches no network — so doing it first costs nothing and stops the
-# script answering a typo with the wrong complaint: `--ensure=bogus` used to be met with "refusing to
-# sync without consent", because the gate ran first. A malformed request should be told it is malformed.
-# (It also settles FIREBASE before the banner below reports it, so `--ensure=firebase` announces itself.)
+# script answering a typo with the wrong complaint: `--ensure=bogus` (now add-layer bogus) used to be met with "refusing to
+# upgrade without consent", because the gate ran first. A malformed request should be told it is malformed.
+# (It also settles FIREBASE before the banner below reports it, so add-layer firebase announces itself.)
 # --- THE LAYER SET -------------------------------------------------------------------------------------------
 # A project is not one shape; it is a STACK OF LAYERS, each with its own detector and its own generators. This
-# is what lets --sync run on a repo that is not the scaffolder's own Angular+Firebase shape — including a
+# is what lets an upgrade run on a repo that is not the scaffolder's own Angular+Firebase shape — including a
 # plain TypeScript repo, or this toolkit itself.
 #
 # Two distinct questions, deliberately separated:
@@ -517,16 +590,16 @@ CHECK_NAME_FN="$(declare -f _check_name _resolve_sync_app)"
 #            run time, inside the target. Never declared, never inferred from flags.
 #   ENSURE — which layers should this run BRING INTO BEING? An explicit request, never a guess. Creating an
 #            Angular app in someone's repo because a flag defaulted to it is exactly the kind of surprise a
-#            sync must never spring.
+#            upgrade must never spring.
 #
-# The generators that run = the union. Detected layers get REFRESHED (that is what sync is); ensured layers
-# get created and then refreshed by the same blocks. Which is the whole simplification: SCAFFOLD IS SYNC
+# The generators that run = the union. Detected layers get REFRESHED (that is what upgrade is); ensured layers
+# get created and then refreshed by the same blocks. Which is the whole simplification: SCAFFOLD IS UPGRADE
 # WITH A FULL ENSURE SET AGAINST AN EMPTY DIRECTORY. One rendered sequence below serves both modes, so the
 # two can no longer drift the way two hand-maintained command lists did.
 # PRESETS are named ensure sets — data beside the registry (src/layers/presets.ts, projected into layers.sh),
-# so nothing here names one. --preset and --ensure UNION: the preset is a starting set, --ensure the general
+# so nothing here names one. --preset and the layers UNION: the preset is a starting set, the layers the general
 # form. A SCAFFOLD with neither gets the DEFAULT preset — the house DX on the Nx floor, no framework: a new
-# project wears a stack only when asked to (--preset=angular is the house web app). A SYNC has no default:
+# project wears a stack only when asked to (--preset=angular is the house web app). AN UPGRADE has no default:
 # it ensures nothing above the floor unless asked — the difference between "bring my house tooling up to date"
 # and "turn my library into an Angular app".
 _layer_listed() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }
@@ -545,19 +618,19 @@ ENSURE_LAYERS="${PRESET:+$(house_preset_layers "$PRESET")}"
 
 # --- THE WORKSPACE SHAPE: layout (where projects live) and linking (how they reach each other) -----------------
 # Two orthogonal facts about a workspace, kept to the same detect/ensure split as the layers: a SCAFFOLD may CHOOSE
-# them, because it is creating the workspace; a SYNC only DETECTS them (resolveWorkspaceLayout, detectLinking —
+# them, because it is creating the workspace; an UPGRADE only DETECTS them (resolveWorkspaceLayout, detectLinking —
 # inside the package), because the shape of a workspace that exists is the shape its projects already have, and
-# "choosing" one there would be a relocation no flag should perform. So a sync REFUSES both flags rather than
+# "choosing" one there would be a relocation no flag should perform. So an upgrade REFUSES both flags rather than
 # silently ignoring them — an ignored flag reads as if it had been applied.
 # Validated against the projection (HOUSE_LAYOUTS / HOUSE_LINKINGS, from LAYOUTS and the linking kinds), here,
 # before anything is installed. Omitted, each reproduces today's output exactly: no workspaceLayout declared (the
 # resolver's default — apps/ + packages/), and `paths` linking.
 if [ "$MODE" = "sync" ] && { [ -n "$LAYOUT_ARG" ] || [ -n "$LINKING_ARG" ]; }; then
   _chosen="${LAYOUT_ARG:+--layout=$LAYOUT_ARG }${LINKING_ARG:+--linking=$LINKING_ARG}"
-  echo "ERROR: --sync does not take ${_chosen% }: an existing workspace's layout and linking are" >&2
+  echo "ERROR: house.sh $CMD does not take ${_chosen% }: an existing workspace's layout and linking are" >&2
   echo "       DETECTED from it (nx.json workspaceLayout and where its projects live; its tsconfig and package-" >&2
-  echo "       manager workspaces), never chosen by a sync — choosing would mean relocating projects." >&2
-  echo "       Drop the flag; it is for a NEW project (scaffold.sh --layout=<id> --linking=<id> <project>)." >&2
+  echo "       manager workspaces), never chosen by an upgrade — choosing would mean relocating projects." >&2
+  echo "       Drop the flag; it is for a NEW project (house.sh new --layout=<id> --linking=<id> <project>)." >&2
   echo "       Nothing has been written." >&2
   exit 1
 fi
@@ -584,7 +657,7 @@ ENSURE_LAYERS="$(printf '%s' "$ENSURE_LAYERS" | tr -d '[:space:]')"
 #
 # It regressed exactly that way: layering gated the emulator generator on `layer_active firebase`, whose
 # detector is `firebase.json` — a file that by definition does NOT exist on the project you are adding
-# Firebase to. So `--sync --firebase` silently skipped the wiring while still handing the devcontainer
+# Firebase to. So `--sync --firebase` (today: add-layer firebase) silently skipped the wiring while still handing the devcontainer
 # `--firebase=true`, producing a Firebase-flavoured container (gcloud CLI, vsfire, emulator ports) attached
 # to no emulators at all. Worse, this script's own error text advised that exact command as the way to add
 # Firebase. Tying the two together makes the flag mean what it says, in both directions.
@@ -596,19 +669,19 @@ esac
 # THE FLOOR IS ALWAYS ENSURED. Nx is the mechanism under every house run — the generators are devkit generators
 # run through `nx g`, the migration ladder is native `nx migrate` — so a repo without it gets it initialised in
 # place instead of a refusal ("Let's keep Nx as a base assumption. If it's not there, we require/install/init
-# it" — the user). This amends "a sync ensures nothing by default" to "a sync ensures nothing ABOVE THE FLOOR".
+# it" — the user). This amends "an upgrade ensures nothing by default" to "an upgrade ensures nothing ABOVE THE FLOOR".
 # It replaces the old agent⇒nx implication, which encoded the same fact as if it were a property of one layer.
 case ",$ENSURE_LAYERS," in
   *",$HOUSE_LAYER_FLOOR,"*) ;;
   *) ENSURE_LAYERS="$HOUSE_LAYER_FLOOR${ENSURE_LAYERS:+,$ENSURE_LAYERS}" ;;
 esac
 
-# Validated against the REGISTRY (assets/layers.sh), here in the outer shell, where the error still has a human
+# Validated against the REGISTRY (engine/layers.sh), here in the outer shell, where the error still has a human
 # in front of it — rather than letting a typo silently ensure nothing at all. Every list, hint and rule below
 # comes from the layer descriptors; nothing here names a layer.
 #
 #   known       — is it a registered layer?
-#   ensurable   — does THIS MODE have a step that creates it? A sync can only create what a generator genuinely
+#   ensurable   — does THIS MODE have a step that creates it? An upgrade can only create what a generator genuinely
 #                 builds from nothing (the floor, the agent DX, the Firebase retrofit); the rest are added with
 #                 their own native tooling and then DETECTED. Accepting more would be a promise the script
 #                 cannot keep — and worse, it would STAMP the layer as applied while the next run, which
@@ -616,28 +689,28 @@ esac
 #   via:<id>    — creatable only together with <id>, whose creation produces it (a scaffold's `web` is the
 #                 dev-server of the Angular app the `angular` layer creates).
 #   requires    — every layer a requested one requires must be THERE when it is created: either already in the
-#                 workspace (detected — a sync only; a scaffold's directory is empty) or created by this run.
+#                 workspace (detected — an upgrade only; a scaffold's directory is empty) or created by this run.
 #                 Whatever is missing is ADDED to the ensure set (the closure below, announced — asking for
 #                 `angular` and being told to also type `node` would be the script refusing to do arithmetic it
-#                 can do), and then has to pass the same ensurability check as a requested layer. So a sync that
+#                 can do), and then has to pass the same ensurability check as a requested layer. So an upgrade that
 #                 asks for a layer whose requirement it can neither detect nor create is refused HERE, before
 #                 anything is written — not planned, half-applied and stamped as if it had worked.
 for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
   _layer_listed "$_l" "$HOUSE_LAYERS" || {
-    echo "ERROR: unknown layer '$_l' in --ensure. Known layers: $HOUSE_LAYERS" >&2; exit 1; }
+    echo "ERROR: unknown layer '$_l'. Known layers: $HOUSE_LAYERS" >&2; exit 1; }
 done
 # What the workspace already HAS, from the registry's own evidence (layers.sh) — read, never declared. Empty for a
 # scaffold, whose directory does not exist yet.
 EVIDENT=""
 [ "$MODE" = "sync" ] && EVIDENT="$(house_layers_evident "$TARGET")"
-# A layer a sync cannot create but the workspace already has needs nothing created: the sync REFRESHES it, as it
+# A layer an upgrade cannot create but the workspace already has needs nothing created: the upgrade REFRESHES it, as it
 # does every detected layer. Refusing it with "add it with its own tooling" would be false about a layer that is
 # right there (a hand-written .bespunky/dev.json already makes `web` present).
 if [ -n "$EVIDENT" ]; then
   _kept=""
   for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
     if [ "$(house_layer_ensurable_sync "$_l")" = "no" ] && _layer_listed "$_l" "$EVIDENT"; then
-      echo "NOTE: the '$_l' layer is already present here (detected) — the sync refreshes it; nothing to create."
+      echo "NOTE: the '$_l' layer is already present here (detected) — the upgrade refreshes it; nothing to create."
     else
       _kept="${_kept:+$_kept,}$_l"
     fi
@@ -689,13 +762,13 @@ fi
 if [ "$MODE" = "scaffold" ] && [ "$LINKING" = "workspaces" ] && [ "$HOST" = "wrapper" ]; then
   echo "ERROR: --linking=workspaces links projects through package-manager workspaces, which need a package.json —" >&2
   echo "       and this scaffold ensures no 'node' layer (layers: $ENSURE_LAYERS), so it would have none." >&2
-  echo "       Ensure it:  scaffold.sh --ensure=node --linking=workspaces $PROJECT   (or --preset=node / --preset=angular)" >&2
+  echo "       Add it:  house.sh new --add-layer=node --linking=workspaces $PROJECT   (or --preset=node / --preset=angular)" >&2
   echo "       Nothing has been written." >&2
   exit 1
 fi
 
 # --- resolve the package manager + the three commands the rendered sequences use -------------------------------
-# Scaffold sets the house standard (it is creating the project); sync adopts whatever the project already
+# Scaffold sets the house standard (it is creating the project); upgrade adopts whatever the project already
 # uses. Everything downstream goes through these three variables, so a new package manager is one case here
 # rather than twenty call sites.
 
@@ -737,7 +810,7 @@ esac
 #            tooling belongs. But it is FATAL outside one: `--workspace-root may only be used inside a workspace`,
 #            exit 1 (verified on pnpm 11.9.0). This used to be tolerated because the install was gated and
 #            trailed by a `|| echo NOTE:`; now that installing the toolkit is unconditional and runs under
-#            `set -e`, passing it unconditionally would abort every sync on a plain pnpm repo. So ask the
+#            `set -e`, passing it unconditionally would abort every upgrade on a plain pnpm repo. So ask the
 #            workspace which shape it is (pnpm-workspace.yaml).
 #   npm      adds to the root it runs in, workspaces or not — nothing to say.
 #
@@ -821,21 +894,21 @@ for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
     via:*)
       _via="${_ens#via:}"
       _layer_listed "$_via" "$ENSURE_LAYERS" || {
-        echo "ERROR: a $MODE can ensure the '$_l' layer only together with '$_via', whose creation produces it." >&2
-        echo "       Add it: --ensure=$ENSURE_LAYERS,$_via" >&2
+        echo "ERROR: $A_RUN can ensure the '$_l' layer only together with '$_via', whose creation produces it." >&2
+        echo "       Add it to the layers: $ENSURE_LAYERS,$_via" >&2
         _refused=1; } ;;
     *)
       _for="$(_needed_by "$_l")"
       if [ -n "$_for" ]; then
-        echo "ERROR: the '$_for' layer requires '$_l', which this repo does not have — and a $MODE cannot create it." >&2
+        echo "ERROR: the '$_for' layer requires '$_l', which this repo does not have — and $A_RUN cannot create it." >&2
         echo "       Add '$_l' with its own tooling, then re-run and it will be DETECTED:" >&2
       elif [ "$MODE" = "scaffold" ]; then
         echo "ERROR: a scaffold cannot ENSURE the '$_l' layer — nothing on this path creates it." >&2
         echo "       Scaffold the project, then add it with its own tooling:" >&2
       else
-        echo "ERROR: --sync cannot ENSURE the '$_l' layer — this repo does not have it, and a sync only refreshes" >&2
-        echo "       a layer that is already there. It brings house tooling up to date; it does not add a framework." >&2
-        echo "       Add the layer with its own tooling, then re-run --sync and it will be DETECTED:" >&2
+        echo "ERROR: add-layer cannot ADD the '$_l' layer — this repo does not have it, and nothing an upgrade" >&2
+        echo "       runs creates it: it brings house tooling up to date and adds house layers, never a framework." >&2
+        echo "       Add the layer with its own tooling, then re-run house.sh upgrade and it will be DETECTED:" >&2
       fi
       # The hint is written host-neutrally (`nx …`); spell it the way THIS repo runs Nx — `./nx` on a wrapper
       # host, `yarn nx` / `npx --no-install nx` / `pnpm exec nx` on a package.json host.
@@ -846,7 +919,7 @@ for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
   esac
 done
 if [ "$_refused" = "1" ]; then
-  echo "       Ensurable by a $MODE: $_ensurable. Nothing has been written." >&2
+  echo "       Addable by $A_RUN: $_ensurable. Nothing has been written." >&2
   exit 1
 fi
 [ -n "$PRESET" ] && echo "Preset: $PRESET — $(house_preset_title "$PRESET")"
@@ -864,33 +937,33 @@ for _l in $(printf '%s' "$ENSURE_LAYERS" | tr ',' ' '); do
 done
 if [ "$MODE" = "scaffold" ] && [ -n "$APP_ARG" ] && [ -z "$APP_STACK" ]; then
   echo "ERROR: an app name ('$APP_ARG') was given, but nothing this scaffold ensures creates an app" >&2
-  echo "       (layers: $ENSURE_LAYERS). Ask for a stack that does, e.g.:  scaffold.sh --preset=angular $PROJECT $APP_ARG" >&2
+  echo "       (layers: $ENSURE_LAYERS). Ask for a stack that does, e.g.:  house.sh --preset=angular $PROJECT $APP_ARG" >&2
   exit 1
 fi
 
-# --- sync consent gate (see the header) ---
-# The point of this gate is that it cannot be satisfied by inference. A sync is a real, minutes-long,
+# --- upgrade consent gate (see the header) ---
+# The point of this gate is that it cannot be satisfied by inference. An upgrade is a real, minutes-long,
 # file-rewriting action; the hook that notices a stale project can only SAY so. Consent has to come from a
 # human, and this is where that is enforced instead of hoped for.
 #
 # It runs FIRST — before the runtime decision below, before any network call, before anything is read or
-# written. An unconsented sync must fail for want of CONSENT, not trip over a missing daemon on its way to
+# written. An unconsented upgrade must fail for want of CONSENT, not trip over a missing daemon on its way to
 # the same place: "docker not found" would send an agent off to fix Docker and come back (which is precisely
 # the inference this gate exists to stop) — and, worse, is now a lie, since the local Node usually suffices.
 # --print-inner is exempt: it RENDERS the program and exits (see --print-inner below) without running a single command
-# of it, so there is nothing here to consent to. The gate guards the *act* of syncing, not describing it —
-# and the render test (tools/test-scaffold/render.test.sh) drives exactly `--sync --yes --print-inner` under
+# of it, so there is nothing here to consent to. The gate guards the *act* of upgrading, not describing it —
+# and the render test (tools/test-scaffold/render.test.sh) drives exactly `upgrade --yes --print-inner` under
 # CI=true, which the unconditional CI refusal below would otherwise kill before it could render anything.
 if [ "$MODE" = "sync" ] && [ "$PRINT_INNER" != "1" ]; then
   if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
-    echo "ERROR: refusing to sync in CI — a sync rewrites generated files and no human is here to agree." >&2
-    echo "       Run it locally, review the diff against the pre-sync HEAD, and commit the result." >&2
+    echo "ERROR: refusing to upgrade in CI — an upgrade rewrites generated files and no human is here to agree." >&2
+    echo "       Run it locally, review the diff against the pre-upgrade HEAD, and commit the result." >&2
     exit 1
   fi
 
   if [ "$CONSENT" != "1" ]; then
     if [ -t 0 ] && [ -t 1 ]; then
-      echo "About to sync '$TARGET': re-runs the house generators, REWRITING generated files"
+      echo "About to upgrade '$TARGET': re-runs the house generators, REWRITING generated files"
       echo "(HOUSE.md, .claude/settings.json, .devcontainer/*, serve/worktree/design-system targets)."
       echo "It starts only from a clean git tree, so HEAD is the restore point."
       printf "Proceed? [y/N] "
@@ -900,15 +973,15 @@ if [ "$MODE" = "sync" ] && [ "$PRINT_INNER" != "1" ]; then
         *) echo "Aborted — nothing was changed." >&2; exit 1 ;;
       esac
     else
-      echo "ERROR: refusing to sync without consent — nothing is attached to this shell to ask." >&2
-      echo "       A sync rewrites generated files and takes several minutes." >&2
+      echo "ERROR: refusing to upgrade without consent — nothing is attached to this shell to ask." >&2
+      echo "       An upgrade rewrites generated files and takes several minutes." >&2
       echo "       If (and ONLY if) the user has explicitly agreed to it, re-run with --yes." >&2
       exit 1
     fi
   fi
 fi
 
-# --- runtime decision: local Node vs Docker (AFTER the consent gate, so an unconsented sync never gets
+# --- runtime decision: local Node vs Docker (AFTER the consent gate, so an unconsented upgrade never gets
 #     here). Docker was never the requirement — a modern Node is. When the local Node is new enough we run
 #     the generators NATIVELY (no daemon, no image, no mounts) with the path roots bound to real host dirs;
 #     otherwise we fall back to the base image, binding the roots to the container mount points. The
@@ -917,7 +990,7 @@ if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
   RUNTIME="native"
   echo "Node $(node -v) is new enough — running the generators natively (no Docker)."
   WORK_ROOT="$PROJECTS_DIR"          # where the <project> dir lives (host path)
-  ASSETS_ROOT="$ASSETS_DIR"          # nx-tools + compile-generators.mts (host path)
+  ENGINE_ROOT="$ENGINE_DIR"          # nx-tools + compile-generators.mts (host path)
   MAJOR="$(node -p 'process.versions.node.split(".")[0]')"   # generated devcontainer's nodeMajor = this Node's
   RUNTIME_DESC="native node $(node -v)"
 else
@@ -936,21 +1009,21 @@ else
   echo "Base image: $IMAGE"
   echo "Container engine: $(container_engine_describe)"
   WORK_ROOT="/work"                  # PROJECTS_DIR is mounted here (see docker run -v below)
-  ASSETS_ROOT="/assets"              # ASSETS_DIR is mounted here (ro)
+  ENGINE_ROOT="/engine"              # ENGINE_DIR is mounted here (ro)
   RUNTIME_DESC="image=$IMAGE"
 fi
 # THE ROOTS REACH THE PROGRAM AS ENVIRONMENT, NEVER AS TEXT. The project and app names are validated before they
-# are rendered (_check_name), but the directory ABOVE the project, the assets path and the git identity are not
+# are rendered (_check_name), but the directory ABOVE the project, the engine path and the git identity are not
 # names and cannot be validated into an alphabet — an O'Brien in the parent path closed the rendered quote, and
 # the cd's argument ran on into the next lines of the program; a crafted parent directory could inject a command.
 # Quoting each site would hold only until the next site is added. So the program refers to them as variables, and
 # the runtime hands them over (env for the native run, -e for the container). The project's DIRECTORY name is one
-# of them: on a sync it is no longer the validated project name but whatever the directory happens to be called
+# of them: on an upgrade it is no longer the validated project name but whatever the directory happens to be called
 # (a worktree, a clone renamed by hand), so it is a path like the others and travels the same way.
 INNER_ENV=(
   "SCAFFOLD_WORK_ROOT=$WORK_ROOT"
   "SCAFFOLD_PROJECT_DIR_NAME=$PROJECT_DIR_NAME"
-  "SCAFFOLD_ASSETS_ROOT=$ASSETS_ROOT"
+  "SCAFFOLD_ENGINE_ROOT=$ENGINE_ROOT"
   "SCAFFOLD_GIT_NAME=$GIT_NAME"
   "SCAFFOLD_GIT_EMAIL=$GIT_EMAIL"
 )
@@ -974,13 +1047,13 @@ INNER_ENV=(
 # --- Firebase opt-in plumbing ---
 #   Scaffold mode: the house `app` generator attaches the per-app Firebase client from its --layers (the ensure
 #     set, which --firebase populates) — firebase.json does not exist yet at first-app time to be detected.
-#   Sync mode: the app already exists; the `firebase` layer's per-app step re-applies the client to it.
+#   Upgrade mode: the app already exists; the `firebase` layer's per-app step re-applies the client to it.
 # --staging (opt-in) requires Firebase; it adds environment.staging.ts + a `staging` build config +
 # apphosting.staging.yaml so the workflow's staging App Hosting backend builds its own config/database.
-[ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires --firebase." >&2; exit 1; }
+[ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires the firebase layer (new: --firebase; add-layer: firebase among the layers)." >&2; exit 1; }
 APP_STAGING_FLAG=""
 [ "$STAGING" = "1" ] && APP_STAGING_FLAG=" --staging=true"
-# The SYNC side of Firebase is no longer a block here: it is the `firebase` layer's per-app generator step in
+# The UPGRADE side of Firebase is no longer a block here: it is the `firebase` layer's per-app generator step in
 # the registry (nx-tools/src/layers/firebase.ts), planned at run time like every other layer's generators —
 # refreshed whenever the layer is DETECTED, wired (--wireProviders) only when this run ENSURES it.
 #
@@ -997,7 +1070,7 @@ APP_STAGING_FLAG=""
 #   $VAR   expands NOW (render time). Use \$VAR for a variable the RENDERED script should evaluate.
 #
 # Rule of thumb: inside these blocks write comments in plain prose with no backticks, no parentheses-with-$,
-# and no double quotes. Verify with `scaffold.sh --print-inner …` — it renders the whole program without
+# and no double quotes. Verify with `house.sh --print-inner …` — it renders the whole program without
 # executing it, and ANY stderr during rendering means something in a string was evaluated that should not
 # have been. Pipe it into `bash -n /dev/stdin` to syntax-check the result.
 # ============================================================================================================
@@ -1064,7 +1137,7 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   fi
   # --local: install the WORKING TREE instead of the registry, for developing the toolkit itself.
   #
-  # Still a real install — npm packs the assets into a tarball and installs that, so the package is declared,
+  # Still a real install — npm packs the engine's nx-tools into a tarball and installs that, so the package is declared,
   # resolved and pruning-proof exactly like the published one. Only its origin differs. Without this, every
   # toolkit change would have to reach npm before it could be tested anywhere, including on this repo.
   #
@@ -1079,9 +1152,9 @@ if [ "$LOCAL_TOOLS" = "1" ]; then
   # that can see this path (the outer shell never learns it).
   INSTALL_NX_TOOLS="_local_stage=\"\$(mktemp -d)\"
   trap 'rm -rf \"\$_local_stage\"' EXIT INT TERM
-  cp -r \"\$SCAFFOLD_ASSETS_ROOT/nx-tools\" \"\$_local_stage/nx-tools\"
+  cp -r \"\$SCAFFOLD_ENGINE_ROOT/nx-tools\" \"\$_local_stage/nx-tools\"
   mkdir -p \"\$_local_stage/ts\"
-  (cd \"\$_local_stage/ts\" && npm init -y >/dev/null 2>&1 && npm install --no-save --no-audit --no-fund --silent 'typescript@^5' && node \"\$SCAFFOLD_ASSETS_ROOT/compile-generators.mts\" \"\$_local_stage/nx-tools\")
+  (cd \"\$_local_stage/ts\" && npm init -y >/dev/null 2>&1 && npm install --no-save --no-audit --no-fund --silent 'typescript@^5' && node \"\$SCAFFOLD_ENGINE_ROOT/compile-generators.mts\" \"\$_local_stage/nx-tools\")
   _local_tgz=\"\$(cd \"\$_local_stage/nx-tools\" && npm pack --silent --pack-destination \"\$_local_stage\")\"
   echo \"[tools] --local: installing the working tree (\$_local_tgz) instead of the published package\"
 $LOCAL_ADD
@@ -1148,23 +1221,23 @@ $LOCAL_ADD
 fi
 
 # --- PREFLIGHT: the preconditions that must hold BEFORE the first write ----------------------------------------
-# A sync's most damaging failures are not bad writes. They are IRREVERSIBLE GIT ACTS performed on a repository
+# An upgrade's most damaging failures are not bad writes. They are IRREVERSIBLE GIT ACTS performed on a repository
 # that was never asked whether it was ready.
 #
 # `nx migrate --run-migrations --create-commits` stages with `git add -A` and commits onto whatever branch HEAD
 # is. So a DIRTY TREE gets welded into a migration commit — this is how one project's in-flight libraries, its
 # functions app and its docs ended up inside a commit named after a devcontainer marker file, silently, under a
-# run that reported SYNC_OK. And on a PROTECTED BRANCH the ladder lands its commits directly on a protected line
+# run that reported UPGRADE_OK. And on a PROTECTED BRANCH the ladder lands its commits directly on a protected line
 # (`development`, `main`, …), which the house branch rules call non-negotiable never to do — performed by the house's own tooling, on the
 # user's behalf, without asking.
 #
-# Sync is also the command you run after being away, which is exactly the state where a tree is most likely to
+# Upgrade is also the command you run after being away, which is exactly the state where a tree is most likely to
 # be dirty and you are least likely to remember what was in it. The command's own use case selects for the
 # condition that breaks it.
 #
 # THE GATE CLASSIFIES; IT NEVER RESOLVES. A shell script cannot know whether the dirty work is related to this
-# sync, whether a feature package is open, whether a worktree already exists, or what the user said a minute
-# ago. The session driving the sync knows all of it. So preflight answers exactly one question — is it safe to
+# upgrade, whether a feature package is open, whether a worktree already exists, or what the user said a minute
+# ago. The session driving the upgrade knows all of it. So preflight answers exactly one question — is it safe to
 # write? — and hands the decision back, in a form an agent can act on:
 #
 #   refuse  a blocking state with a required fix   (dirty tree, protected branch, detached HEAD, downgrade,
@@ -1186,14 +1259,14 @@ fi
 # SIGNAL, and protects in the meantime. A repo with NO COMMITS gets neither: it is new, and being asked about a
 # branch model while creating an empty project would be absurd.
 #
-# NO OVERRIDE FLAG, deliberately. Every resolution — commit it, stash it, branch and commit there, sync on a new
+# NO OVERRIDE FLAG, deliberately. Every resolution — commit it, stash it, branch and commit there, upgrade on a new
 # branch, open a worktree — ends with a clean tree on a working branch. An --allow-dirty would exist for exactly
 # one purpose: reproducing the bug this removes.
 #
 # EVERY CHECK RUNS, THEN ONE VERDICT. Checks append a verdict instead of exiting, so a run that is wrong in three
 # ways says so once instead of over three round trips. That is also why the DOWNGRADE refusal now lives here
 # rather than inside MIGRATE_PROBE: it was the first precondition and simply had no company. The two checks that
-# fire AFTER this gate — an Nx workspace and an nx binary — stay where they are on purpose: '--ensure' may
+# fire AFTER this gate — an Nx workspace and an nx binary — stay where they are on purpose: the ensured layers may
 # create what they check, so they are post-ensure conditions, not pre-write ones, and aggregating them here
 # would report a missing nx.json that the run was about to create.
 # THE BRANCH MODEL, RESOLVED ONCE PER RUN (house-branches.sh). Two consumers read this one result: the preflight
@@ -1202,7 +1275,7 @@ fi
 # is not the model in force: its schema may differ from the integration tip's, a branch cut before the declaration
 # carries none, and an Nx workspace nested below the git root would look for .bespunky/ in the wrong directory.
 # '_bm_projection' is what the planner passes on: the projection JSON (declared), the literal 'undeclared', or
-# empty (unreadable — a sync has already refused; a standalone house-doc then refuses on the Tree itself).
+# empty (unreadable — an upgrade has already refused; a standalone house-doc then refuses on the Tree itself).
 BRANCH_MODEL_BLOCK="
 $HOUSE_BRANCHES_FNS
 _bm=\"\$(house_branch_model)\"
@@ -1231,8 +1304,8 @@ _signal() {
 }
 # UNWRITABLE MOUNT POINTS — a directory this run must write into exists but is not this user's to write. The
 # classic cause: a devcontainer mounts a named volume at <ws>/node_modules, Docker creates the mount point
-# root-owned, and nothing reclaimed it — so the container came up with no dependencies, and this sync's own
-# install would die on the same EACCES minutes in, leaving a half-run sync behind. Unlike
+# root-owned, and nothing reclaimed it — so the container came up with no dependencies, and this upgrade's own
+# install would die on the same EACCES minutes in, leaving a half-run upgrade behind. Unlike
 # every other refusal here the fix is not a judgment about the user's work: it is a deterministic ownership fix
 # of the project's own mount points, so the verdict carries the exact command.
 $HOUSE_MOUNTS_FNS
@@ -1242,12 +1315,12 @@ if [ -n \"\$_um\" ]; then
   _um_list=\"\$(printf '%s\n' \"\$_um\" | awk '{printf \"           %-28s owner: %s\\n\", \$1, \$2}')\"
   _um_fix='sudo chown -R \"\$(id -un):\$(id -gn)\" '\"\$_um_paths\"
   _um_pc=\"\$(house_post_create .)\"
-  _um_then='then re-run the sync.'
-  [ -n \"\$_um_pc\" ] && _um_then=\"then re-run the container's post-create (bash \$_um_pc), and re-run the sync.\"
-  _refuse unwritable-mounts \"[preflight] unwritable-mounts: directories this sync must write into are not writable by \$(id -un).
+  _um_then='then re-run the upgrade.'
+  [ -n \"\$_um_pc\" ] && _um_then=\"then re-run the container's post-create (bash \$_um_pc), and re-run the upgrade.\"
+  _refuse unwritable-mounts \"[preflight] unwritable-mounts: directories this upgrade must write into are not writable by \$(id -un).
 \$_um_list
            A named-volume mount point is created ROOT-OWNED by Docker; unless the container's post-create
-           reclaims it, every install into it fails with EACCES — this sync's included.
+           reclaims it, every install into it fails with EACCES — this upgrade's included.
            Fix (the project's own mount points, nothing else):
              \$_um_fix
            \$_um_then\"
@@ -1284,7 +1357,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            The migration ladder runs 'nx migrate --run-migrations --create-commits', which stages with
            'git add -A'. Every path above would be committed under a migration's message, untracked
            directories included.
-           Resolve it however suits the work — commit, stash, branch and commit there, or sync in a
+           Resolve it however suits the work — commit, stash, branch and commit there, or upgrade in a
            worktree — then re-run. This gate does not choose for you.\"
   fi
   # A repository with no commits is NEW, not ambiguous: nothing to protect, no branch model to have adopted,
@@ -1298,7 +1371,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 \$_bm_notes\"
     # THE EFFECTIVE PROTECTED SET, in every state — the resolver's, never rebuilt here from the state word. Rebuilding
     # it ('undeclared' → the fallback names) is how a not-yet-landed declaration's own protected lines were dropped,
-    # and a sync committed onto a production line the working copy named.
+    # and an upgrade committed onto a production line the working copy named.
     _bm_protected=\"\$(_bm_get protected)\"
     _bm_patterns=\"\$(_bm_get protectedPatterns)\"
     _bm_shown=\"\$(printf '%s' \"\$_bm_protected \$_bm_patterns\" | sed 's/^ *//; s/ *\$//; s/  */, /g')\"
@@ -1318,7 +1391,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
         # wrote it, and the protected set it encodes is exactly what this run would be guessing at.
         _refuse branch-model-unreadable \"[preflight] branch-model-unreadable: .bespunky/branches.json (read from \$(_bm_get source)) cannot be read with certainty:
            \$(_bm_get reason).
-           It decides which branches this sync may commit onto, so the run stops rather than guess.
+           It decides which branches this upgrade may commit onto, so the run stops rather than guess.
            Update the toolkit (an unknown schema), or repair the declaration through the branch-and-release
            skill's change procedure — never by hand: its projection is derived.\$_bm_notes\"
         ;;
@@ -1359,8 +1432,8 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            project's declared branch model: \$_bm_summary.
            The migration ladder commits onto the current branch, so this run would commit directly onto a
            line that advances only by the model's own landings and promotions.
-           Open a worktree off '\$_bm_integration' (the integration line) and sync there, then land it like
-           any other change: a sync is toolkit maintenance, so its changes land on the integration line like
+           Open a worktree off '\$_bm_integration' (the integration line) and upgrade there, then land it like
+           any other change: an upgrade is toolkit maintenance, so its changes land on the integration line like
            any work — a fix meant for '\$_branch' itself goes through the branch-and-release skill.\"
         elif [ -n \"\$_bm_pending\" ]; then
           _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', protected by this tree's branch model
@@ -1368,13 +1441,13 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            there yet — so every branch named \$_bm_shown is protected until it does.
            The migration ladder commits onto the current branch, so this run would commit directly onto a
            protected line. Land the declaration on '\$_bm_pending' first (the branch-and-release skill), then
-           open a worktree off '\$_bm_pending' and sync there.\"
+           open a worktree off '\$_bm_pending' and upgrade there.\"
         else
           _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', and this project declares no branch model —
            so every branch named \$_bm_shown is protected until it does.
            The migration ladder commits onto the current branch; with no model, nothing says whether
            '\$_branch' is where work happens or the production line, and landing a stack of commits on the
-           latter cannot be taken back. Open a worktree off '\$_branch' and sync there; where it lands waits
+           latter cannot be taken back. Open a worktree off '\$_branch' and upgrade there; where it lands waits
            for the model (see 'branch-model: undeclared').\"
         fi
       fi
@@ -1395,11 +1468,11 @@ fi"
 # probe writes nothing, it only reads node_modules and HOUSE.md, so composing the full picture first costs
 # nothing and tells the reader what they are being stopped from doing.
 #
-# The FIRST LINE IS THE CONTRACT: one token plus space-separated codes, in the same vocabulary as SYNC_OK and
-# SYNC_PARTIAL, so the /sync command can branch on it without parsing prose. The human detail follows.
+# The FIRST LINE IS THE CONTRACT: one token plus space-separated codes, in the same vocabulary as UPGRADE_OK and
+# UPGRADE_PARTIAL, so the /bespunky-house:upgrade command can branch on it without parsing prose. The human detail follows.
 PREFLIGHT_VERDICT="
 if [ -n \"\$_REFUSE_CODES\" ]; then
-  echo \"SYNC_REFUSED:\$_REFUSE_CODES\" >&2
+  echo \"UPGRADE_REFUSED:\$_REFUSE_CODES\" >&2
   echo '[preflight] NOTHING HAS BEEN WRITTEN — the project is exactly as it was.' >&2
   if [ -n \"\$MIGRATE_FROM\" ]; then
     echo \"[preflight] This run would have migrated \$MIGRATE_FROM -> $NX_TOOLS_VERSION.\" >&2
@@ -1412,7 +1485,7 @@ elif [ -n \"\$_SIGNAL_TEXT\" ]; then
   echo \"\$_SIGNAL_TEXT\" >&2
 fi"
 
-# --- run the house MIGRATIONS (sync mode) ---------------------------------------------------------------------
+# --- run the house MIGRATIONS (upgrade mode) ---------------------------------------------------------------------
 # Versioned one-way deltas, collected and ordered by `nx migrate`. This is what replaced convergence: a
 # generator no longer has to recognise every shape the toolkit ever produced, because each one-way change
 # ships as a migration keyed to the version that introduced it.
@@ -1453,7 +1526,7 @@ fi"
 #                           dependencies still triggers a real install afterwards, through a separate path
 #                           that takes the --skipInstall flag rather than this variable — deliberately not
 #                           passed, because a dependency a migration added has to actually be installed.
-#   rm -f migrations.json — Nx never deletes it. Left behind, the next sync re-executes the same ladder
+#   rm -f migrations.json — Nx never deletes it. Left behind, the next upgrade re-executes the same ladder
 #                           against an already-migrated tree, and it litters the project besides.
 MIGRATE_PROBE="
 _installed=''
@@ -1462,27 +1535,27 @@ _installed=''
 # ANCHORED on the stamp marker, not on a bare 'nx-tools=' anywhere in the file. HOUSE.md is prose, and an
 # unanchored match takes the FIRST hit in the document — so a sentence like 'pin @bespunky/nx-tools=9.9.9'
 # in the guidance above the stamp becomes the project's recorded version, and the downgrade guard below then
-# hard-refuses a perfectly ordinary sync. The hook reads the same stamp and anchors it this way too.
+# hard-refuses a perfectly ordinary upgrade. The hook reads the same stamp and anchors it this way too.
 _stamped=\"\$(grep -o '@bespunky/house-tooling:stamp[^>]*' HOUSE.md 2>/dev/null | head -1 \\
   | grep -o 'nx-tools=[0-9][0-9A-Za-z.+_-]*' | head -1 | cut -d= -f2)\"
 # Version ordering, and it is worth doing properly because BOTH the migration floor and the downgrade
 # refusal hang off it — get it wrong in one direction and migrations are skipped, in the other and a valid
-# sync is hard-refused.
+# upgrade is hard-refused.
 #
 # \`sort -V\` is not the tool. It places 0.24.0-rc.1 AFTER 0.24.0 (the opposite of semver, so an rc stamp
 # reads as a phantom downgrade), it orders 1.2 before 1.2.0 (they are the same version), it treats
 # 1.0.0+build as distinct from 1.0.0 (build metadata carries no precedence), and it sorts a non-numeric
-# string ABOVE every number — so one hand-mangled character in a HOUSE.md stamp refuses every future sync.
+# string ABOVE every number — so one hand-mangled character in a HOUSE.md stamp refuses every future upgrade.
 # All four were reproduced against the previous implementation.
 #
 # So: compare the leading numeric segments numerically, padded to three, ignoring anything after them; then
 # break a tie on prerelease presence (a prerelease is BELOW its own release — an rc has not had the
 # release's migrations run against it). Node does the parsing because node is already a hard requirement
 # here and this is not worth hand-rolling in sh a second time. Anything unparseable degrades to 'equal',
-# which makes the sync a no-op for that comparison rather than a refusal: refusing on garbage would block
+# which makes the upgrade a no-op for that comparison rather than a refusal: refusing on garbage would block
 # a user over a typo they cannot see.
 # The same ordering is implemented in the toolkit's tools/check-release-invariants/rules.cjs, which
-# guards releases there. This copy exists because scaffold.sh runs in CONSUMER projects, where that
+# guards releases there. This copy exists because house.sh runs in CONSUMER projects, where that
 # module does not exist. IF YOU CHANGE THE ORDERING HERE, CHANGE IT THERE TOO.
 _vlt() {
   node -e \"
@@ -1512,11 +1585,11 @@ _vmax() { if _vlt \"\$1\" \"\$2\"; then printf '%s' \"\$2\"; else printf '%s' \"
 #                              not demonstrably run still needs to run, and the older figure is the only
 #                              one we can be sure about.
 #   Is this a DOWNGRADE?       The NEWER of the two. If ANY evidence says this project has already been at
-#                              a version above this checkout, syncing moves it backwards.
+#                              a version above this checkout, upgrading moves it backwards.
 #
 # Taking the min for both looks tidy and quietly disables the downgrade guard: a project stamped 0.99.0 with
 # 0.24.2 still in node_modules has min = 0.24.2, which compares equal to a 0.24.2 target, so the guard never
-# fires — and the sync then re-stamps HOUSE.md from 0.99.0 down, destroying the only record that the newer
+# fires — and the upgrade then re-stamps HOUSE.md from 0.99.0 down, destroying the only record that the newer
 # migrations ever ran.
 #
 # EITHER SOURCE ALONE IS ENOUGH. Gating this on node_modules being populated is the same mistake one level
@@ -1529,7 +1602,7 @@ _vmax() { if _vlt \"\$1\" \"\$2\"; then printf '%s' \"\$2\"; else printf '%s' \"
 # The probe DECIDES here but ANNOUNCES later. Everything below still has to pass: the downgrade refusal a few
 # lines down, and then the two hard preconditions (an Nx workspace, an nx binary). Printing 'migrating from
 # the stamp' here meant the run could announce a migration and then refuse to perform one — and since the
-# /sync command instructs Claude to treat the [migrate] line as the most consequential thing the sync prints,
+# /bespunky-house:upgrade command instructs Claude to treat the [migrate] line as the most consequential thing the upgrade prints,
 # that became a model confidently reporting a ladder that never ran. So the note is composed here, where the
 # facts are, and emitted by MIGRATE_RUN, where the migration actually happens.
 if [ -n \"\$_installed\" ] && ! _vok \"\$_installed\"; then
@@ -1538,7 +1611,7 @@ if [ -n \"\$_installed\" ] && ! _vok \"\$_installed\"; then
 fi
 if [ -n \"\$_stamped\" ] && ! _vok \"\$_stamped\"; then
   echo \"[migrate] WARNING: HOUSE.md's stamp is not a readable version (\$_stamped) — ignoring it. Fix the stamp\" >&2
-  echo \"[migrate]   line in HOUSE.md, or re-run the sync once to have it rewritten.\" >&2
+  echo \"[migrate]   line in HOUSE.md, or re-run the upgrade once to have it rewritten.\" >&2
   _stamped=''
 fi
 # HOUSE.md WITHOUT A STAMP IS NOT A BASELINE — it is a project from before stamping existed.
@@ -1549,7 +1622,7 @@ fi
 # as 'the toolkit has never been here' is the dangerous one: the ladder is skipped, the generators (which no
 # longer heal anything) rewrite firebase.config.ts over the only copy of the production credentials, the
 # legacy targets and the pre-toggle environment files are left in place, and house-doc then stamps the
-# project CURRENT — so no later sync will ever migrate it either. One silent run, unrecoverable.
+# project CURRENT — so no later upgrade will ever migrate it either. One silent run, unrecoverable.
 #
 # The presence of HOUSE.md is proof the toolkit HAS been applied. So: no stamp but a HOUSE.md means an
 # unknown pre-stamping version, and the honest floor is the bottom. 0.0.0 is exact semver, so nx takes it at
@@ -1574,7 +1647,7 @@ elif [ -n \"\$_stamped\" ]; then
   MIGRATE_NOTE=\"[migrate] @bespunky/nx-tools is not in node_modules, but HOUSE.md is stamped \$_stamped — migrating from the stamp\"
 fi
 # ORDER THEM, DON'T JUST DIFF THEM. A project AHEAD of this checkout is an ordinary state — a teammate
-# synced from a newer toolkit — and it is not staleness. Treating it as staleness would install a DOWNGRADE,
+# upgraded from a newer toolkit — and it is not staleness. Treating it as staleness would install a DOWNGRADE,
 # run the older generators over the newer shape, and re-stamp HOUSE.md to the older version, recording a
 # state nothing ever migrated back down to. Migrations do not walk backwards, so there is no repair path
 # either. Refuse before anything is written.
@@ -1587,9 +1660,9 @@ fi
 if [ -n \"\$_highest\" ] && [ \"\$_highest\" != '$NX_TOOLS_VERSION' ] && _vlt '$NX_TOOLS_VERSION' \"\$_highest\"; then
   _refuse downgrade \"[preflight] downgrade: this project is on house tooling \$_highest, which is NEWER than
            this checkout's $NX_TOOLS_VERSION (installed=\${_installed:-none}, HOUSE.md stamp=\${_stamped:-none}).
-           Syncing would install an older payload, run older generators over the newer shape, and re-stamp
+           Upgrading would install an older payload, run older generators over the newer shape, and re-stamp
            HOUSE.md downwards. Migrations do not walk backwards, so there is no repair path.
-           Update your toolkit first, then sync:  claude plugin marketplace update claude-toolkit\"
+           Update your toolkit first, then upgrade:  claude plugin marketplace update claude-toolkit\"
 fi"
 
 # Two collection strategies, chosen at render time because --local is known then. The PUBLISHED path is
@@ -1632,13 +1705,13 @@ else
   [ -n \"\$MIGRATE_NOTE\" ] && echo \"\$MIGRATE_NOTE\"
   echo \"[migrate] house tooling \$MIGRATE_FROM -> $NX_TOOLS_VERSION\"
   # --create-commits gives ONE COMMIT PER MIGRATION, which is the difference between a reviewable ladder and
-  # a single unreadable blob. A sync can apply many one-way deltas across every project in the workspace at
+  # a single unreadable blob. An upgrade can apply many one-way deltas across every project in the workspace at
   # once; landing them as one diff makes \`git log -p\` useless exactly where it matters most, and reverting a
-  # single bad migration impossible without unpicking it by hand. The pre-sync HEAD is the blunt undo for the
+  # single bad migration impossible without unpicking it by hand. The pre-upgrade HEAD is the blunt undo for the
   # whole run; these commits are the fine-grained one.
   #
   # Two things Nx's implementation forces us to handle rather than pass the flag blindly:
-  #   1. It is a HARD ERROR outside a git repo ('--create-commits requires a git repository'). A sync
+  #   1. It is a HARD ERROR outside a git repo ('--create-commits requires a git repository'). An upgrade
   #      normally cannot reach here without git, because the restore-point check aborts first — but --no-backup skips
   #      that, and then this would kill an otherwise fine run over a bookkeeping nicety. Detect and drop it.
   #   2. Every commit is built with \`git add -A\`, so whatever is uncommitted when the ladder starts is
@@ -1646,14 +1719,14 @@ else
   #      the first migration. Preflight has already refused a dirty tree, so that is only ever THIS RUN's own
   #      work so far (the floor, the toolkit install), and the note below says exactly that.
   #   3. That same \`git add -A\` will happily commit node_modules on a repo that does not ignore it — which
-  #      is a live case, because --ensure=agent exists to retrofit repos of any shape. Thousands of vendored
+  #      is a live case, because add-layer agent exists to retrofit repos of any shape. Thousands of vendored
   #      files landing in someone's history as a side effect of a version bump is far worse than losing the
   #      per-migration granularity, so check first and drop the flag rather than the repo's history.
   _do_commits=0
   if git rev-parse --git-dir >/dev/null 2>&1; then
     # NO COMMITTER IDENTITY = NO COMMITS, and Nx does not treat that as fatal: it reports that it could not
     # create the checkpoint commit, prints a git fatal per migration, and carries on -- after which this
-    # script prints SYNC_OK. The migrations are applied and stamped, but the commit ladder the user was
+    # script prints UPGRADE_OK. The migrations are applied and stamped, but the commit ladder the user was
     # promised is simply absent and the work is left as a pile of dirty files with a half-staged index.
     # Check first and say so, the same way the node_modules case does, rather than advertising a safety net
     # that will not appear.
@@ -1690,7 +1763,7 @@ else
       fi
       # The tree was clean when preflight passed, so any change here is THIS run's own: the floor and the
       # toolkit install. Saying the tree has uncommitted changes, with a pointer to a backup, described the
-      # user's work on every migrating sync of a clean tree when the dirt was the sync's own.
+      # user's work on every migrating upgrade of a clean tree when the dirt was the upgrade's own.
       if [ -n \"\$(git status --porcelain 2>/dev/null)\" ]; then
         echo '[migrate] the toolkit install this run just made is committed first, in the checkpoint commit Nx'
         echo '[migrate]   makes before the first migration.'
@@ -1708,7 +1781,7 @@ $MIGRATE_COLLECT
   # to migrate) and catastrophic for the other one: if the file was written and then disappeared, the
   # ladder is skipped, nothing says so, and house-doc stamps the project as migrated. So count what was
   # collected, and refuse to continue if that count cannot be accounted for. Refusing here is the whole
-  # point -- a stamped-but-unmigrated project is unrecoverable, while a failed sync is just a re-run.
+  # point -- a stamped-but-unmigrated project is unrecoverable, while a failed upgrade is just a re-run.
   _expected=0
   if [ -f migrations.json ]; then
     _expected=\"\$(node -p '(JSON.parse(require(\"fs\").readFileSync(\"migrations.json\",\"utf8\")).migrations||[]).length' 2>/dev/null || echo 0)\"
@@ -1735,12 +1808,12 @@ $MIGRATE_COLLECT
     NX_MIGRATE_SKIP_INSTALL=true NX_MIGRATE_USE_LOCAL=true $NX_RUN migrate --run-migrations --if-exists --agentic=false
   fi
   # nx never deletes migrations.json — it only ever writes it. So if it is gone now, something else
-  # removed it mid-run (a concurrent sync is the way this actually happens), and --if-exists will have
+  # removed it mid-run (a concurrent upgrade is the way this actually happens), and --if-exists will have
   # quietly applied nothing. Stop BEFORE house-doc writes a stamp that would make this permanent.
   if [ \"\$_expected\" -gt 0 ] && [ ! -f migrations.json ]; then
     echo 'ERROR: the migration list disappeared while it was being applied, so the ladder did NOT run.' >&2
-    echo '       This is what two syncs running at once does. Nothing has been stamped, so the project' >&2
-    echo '       is still in its previous state — re-run the sync once nothing else is touching it.' >&2
+    echo '       This is what two upgrades running at once does. Nothing has been stamped, so the project' >&2
+    echo '       is still in its previous state — re-run the upgrade once nothing else is touching it.' >&2
     exit 1
   fi
   rm -f migrations.json
@@ -1749,7 +1822,7 @@ fi"
 # --- lay the Nx FLOOR on a repo that has none (always ensured) ---
 # `nx init` is the Nx-native answer to "make this existing repo an Nx workspace" — as opposed to
 # create-nx-workspace, which is greenfield-only and is what the scaffold path uses. It is what makes every
-# layer above reachable in a repo that was never scaffolded by this tool, and it now runs on ANY sync of a repo
+# layer above reachable in a repo that was never scaffolded by this tool, and it now runs on ANY upgrade of a repo
 # without nx.json: the floor is always ensured, everything above it stays opt-in.
 #
 # HOW depends on the host (see HOST above):
@@ -1808,7 +1881,7 @@ if [ "$HOST" = "wrapper" ]; then
   NX_RUNTIME_BLOCK="
 if [ ! -f .nx/nxw.js ]; then
   echo 'ERROR: nx.json is here, but neither a package.json nor the Nx wrapper (.nx/nxw.js) — there is no Nx' >&2
-  echo '       this sync can run. Restore the wrapper (npx nx@latest init --useDotNxInstallation) or add a' >&2
+  echo '       this upgrade can run. Restore the wrapper (npx nx@latest init --useDotNxInstallation) or add a' >&2
   echo '       package.json with nx as a devDependency, then re-run.' >&2
   exit 1
 fi
@@ -1822,14 +1895,14 @@ if [ ! -x node_modules/.bin/nx ]; then
   echo '[install] node_modules/.bin/nx is missing — installing the workspace dependencies first.'
   $PM_INSTALL || {
     echo \"ERROR: '$PM_INSTALL' failed, so the workspace has no nx to migrate or generate with.\" >&2
-    echo '       Fix the install (network? lockfile? package manager?) and re-run the sync.' >&2
+    echo '       Fix the install (network? lockfile? package manager?) and re-run the upgrade.' >&2
     exit 1
   }
 fi
 if [ ! -x node_modules/.bin/nx ]; then
   echo \"ERROR: node_modules/.bin/nx still not found after '$PM_INSTALL'.\" >&2
   echo '       This workspace has an nx.json but does not depend on nx — add it as a devDependency' >&2
-  echo '       (nx add is not available yet), then re-run the sync.' >&2
+  echo '       (nx add is not available yet), then re-run the upgrade.' >&2
   exit 1
 fi"
 fi
@@ -1850,41 +1923,41 @@ fi"
 fi
 
 # --- the RESTORE POINT, decided before anything runs — and READ, never made -----------------------------------
-# A sync REWRITES files on two counts: the generators regenerate what they own outright (firebase.config.ts, for
+# An upgrade REWRITES files on two counts: the generators regenerate what they own outright (firebase.config.ts, for
 # one), and the MIGRATIONS apply one-way deltas with no reverse. So it must start from a point it can be undone to.
 #
-# PREFLIGHT MAKES THAT POINT FREE. It refuses a dirty tree, so every sync that runs at all starts from a clean one,
-# and then HEAD already is the pre-sync state. The tag this used to build through a throwaway index existed for the
-# dirty case — which preflight now refuses — and it was built BEFORE preflight ran, so a refused sync had already
+# PREFLIGHT MAKES THAT POINT FREE. It refuses a dirty tree, so every upgrade that runs at all starts from a clean one,
+# and then HEAD already is the pre-upgrade state. The tag this used to build through a throwaway index existed for the
+# dirty case — which preflight now refuses — and it was built BEFORE preflight ran, so a refused upgrade had already
 # written a tag (and the advice printed on failure, reset --hard to that tag, put a synthetic WIP commit onto the
 # user's branch). Reading HEAD writes nothing, so a refusal stays the "nothing has been written" it claims to be.
 #
-#   SYNC_BASE    a diffable commit for SYNC_NEXT; the EMPTY TREE for a repository with no commits yet, which is
+#   UPGRADE_BASE    a diffable commit for UPGRADE_NEXT; the EMPTY TREE for a repository with no commits yet, which is
 #                exactly what was there.
 #   RESTORE_SHA  the commit a failed run is restored to; empty when there is none.
 #   BACKUP_REF   the same, as display text for the summary lines.
 BACKUP_REF="(--no-backup)"
 RESTORE_SHA=""
-SYNC_BASE=""
+UPGRADE_BASE=""
 RESTORE_BLOCK=""
 if [ "$MODE" = "sync" ]; then
   if git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     if RESTORE_SHA="$(git -C "$TARGET" rev-parse --verify -q HEAD 2>/dev/null)"; then
       BACKUP_REF="HEAD(${RESTORE_SHA:0:7})"
-      SYNC_BASE="$RESTORE_SHA"
+      UPGRADE_BASE="$RESTORE_SHA"
       # Printed by the PROGRAM, after the preflight verdict: a refused run has no restore point to announce.
       RESTORE_BLOCK="
-echo 'BACKUP_OK: working tree clean — the pre-sync restore point is $BACKUP_REF ($RESTORE_SHA).'
-echo '  Review this sync: git diff $RESTORE_SHA ; restore a file: git checkout $RESTORE_SHA -- <path>'"
+echo 'BACKUP_OK: working tree clean — the pre-upgrade restore point is $BACKUP_REF ($RESTORE_SHA).'
+echo '  Review this upgrade: git diff $RESTORE_SHA ; restore a file: git checkout $RESTORE_SHA -- <path>'"
     else
       RESTORE_SHA=""
       BACKUP_REF="(no commits yet)"
-      SYNC_BASE="$(git -C "$TARGET" hash-object -t tree /dev/null)"
+      UPGRADE_BASE="$(git -C "$TARGET" hash-object -t tree /dev/null)"
     fi
   elif [ "$BACKUP" = "1" ]; then
-    echo "BACKUP_ABORT: '$TARGET' is not a git repository, so a sync would change files with no way back." >&2
-    echo "  Create a restore point first:  (cd \"$TARGET\" && git init && git add -A && git commit -m 'pre-sync')" >&2
-    echo "  …or re-run with --no-backup to sync without one." >&2
+    echo "BACKUP_ABORT: '$TARGET' is not a git repository, so an upgrade would change files with no way back." >&2
+    echo "  Create a restore point first:  (cd \"$TARGET\" && git init && git add -A && git commit -m 'pre-upgrade')" >&2
+    echo "  …or re-run with --no-backup to upgrade without one." >&2
     exit 1
   else
     echo "WARNING: --no-backup on a directory that is not a git repository — there is NO restore point, and the"
@@ -1893,21 +1966,21 @@ echo '  Review this sync: git diff $RESTORE_SHA ; restore a file: git checkout $
 fi
 
 # --- two lockfiles: damage this toolkit caused, and will otherwise keep believing ----------------------------
-# Before nx-tools 0.18.0 the generated post-create.sh hardcoded `yarn install`, while scaffold.sh already
+# Before nx-tools 0.18.0 the generated post-create.sh hardcoded `yarn install`, while house.sh already
 # detected npm and pnpm correctly. So a devcontainer build on an npm project ran yarn and left a yarn.lock
 # beside package-lock.json. After that `npm ci` fails for the whole team, and the cause — a container rebuild
 # weeks earlier — is nowhere near the symptom.
 #
 # The 0.18.0 fix made it PERMANENT rather than repairing it: every detector here checks yarn.lock BEFORE
 # package-lock.json, so the stray file the old script planted became the evidence every later run trusts, and
-# the sync itself keeps choosing yarn in an npm project.
+# the upgrade itself keeps choosing yarn in an npm project.
 #
 # The `packageManager` field is an EXPLICIT declaration, not an artifact — the one piece of evidence that settles
 # which lockfile is legitimate. Where it names npm or pnpm, a yarn.lock contradicts something the project stated
 # about itself, and this toolkit is what put it there: removed. Anywhere else nothing is deleted, only reported.
 #
 # RENDERED INTO THE PROGRAM, after the preflight verdict — it is a write, and it once ran in this outer shell
-# before preflight: a refused sync had already deleted the file, and then listed that deletion as the user's own
+# before preflight: a refused upgrade had already deleted the file, and then listed that deletion as the user's own
 # dirty change.
 STRAY_LOCKFILE_BLOCK=""
 if [ "$MODE" = "sync" ]; then
@@ -1915,12 +1988,12 @@ if [ "$MODE" = "sync" ]; then
     _stray_act="rm -f yarn.lock
     echo \"NOTE: removed a stray yarn.lock — this project declares packageManager: $PM and also has \$_other.\"
     echo '      A pre-0.18 devcontainer build created it by running yarn install regardless of the project'
-    echo '      package manager, which breaks $PM ci for everyone and made every later sync pick yarn.'
+    echo '      package manager, which breaks $PM ci for everyone and made every later upgrade pick yarn.'
     echo '      If it was tracked, git restore yarn.lock brings it back.'"
   else
     _stray_act="echo \"WARNING: this workspace has TWO lockfiles — yarn.lock and \$_other.\" >&2
     echo '         A pre-0.18 devcontainer build may have created the yarn.lock by running yarn install' >&2
-    echo '         regardless of the project package manager. While both exist, this sync and post-create.sh' >&2
+    echo '         regardless of the project package manager. While both exist, this upgrade and post-create.sh' >&2
     echo '         resolve to yarn, and installs from the other lockfile fail.' >&2
     echo '         Nothing was deleted: which one is legitimate cannot be determined from here. Delete the one' >&2
     echo '         that is not yours, or declare it with npm pkg set packageManager=<pm>@<version>, and re-run.' >&2"
@@ -1940,7 +2013,7 @@ fi
 # ENSURED, not ACTIVE — the distinction the house keeps strictly apart. ACTIVE is detected-OR-ensured; ENSURED is
 # only what this run was explicitly asked to create. The scaffold's first app attaches it before anything can be
 # detected, and the planner uses it for BASELINE acts (wiring a provider into app.config.ts, which the project owns
-# thereafter) that must never happen on a detect-only sync.
+# thereafter) that must never happen on a detect-only upgrade.
 ENSURED_BLOCK="
 ENSURED='$ENSURE_LAYERS'"
 
@@ -1968,7 +2041,7 @@ echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 # --- THE PLAN: every house generator this run executes, from the layer registry (one sequence, both modes) ---
 # This replaces the hand-written, layer-gated nx g blocks that used to live here. The planner (the installed
 # @bespunky/nx-tools src/layers/cli.js plan) derives the sequence from the registered layer descriptors:
-#   per-app steps (sync only — a scaffold's app generator composes them), then workspace steps in registry order,
+#   per-app steps (upgrade only — a scaffold's app generator composes them), then workspace steps in registry order,
 #   then house-doc LAST, ungated, because it STAMPS the layer set this run applied.
 # Each line it prints is: gen TAB generator TAB arg TAB arg … | warn TAB sentence | partial. Arguments are
 # TAB-separated FIELDS, read into an array and passed quoted — never word-split — so a value may carry spaces and
@@ -1977,7 +2050,7 @@ echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 #
 # fd 9, not stdin: nx g may read stdin, and would swallow the rest of the plan.
 PLAN_RUN_BLOCK="
-_SYNC_PARTIAL=\${_SYNC_PARTIAL:-0}
+_UPGRADE_PARTIAL=\${_UPGRADE_PARTIAL:-0}
 _plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM --branch-projection=\"\${_bm_projection:-}\")\" || {
   echo 'ERROR: the layer planner failed — no house generators were run, and nothing has been stamped.' >&2
   exit 1
@@ -1993,12 +2066,12 @@ while IFS=\"\$_tab\" read -r -u 9 _kind _gen _args; do
     warn)
       echo \"[layers] WARNING: \$_gen\" ;;
     partial)
-      _SYNC_PARTIAL=1 ;;
+      _UPGRADE_PARTIAL=1 ;;
   esac
 done 9<<< \"\$_plan\""
 
 # --- the SCAFFOLD bootstrap: what creates the ensured layers from an empty directory ---
-# Derived from the ENSURE set, never hard-wired: scaffold is sync with an ensure set against an empty directory.
+# Derived from the ENSURE set, never hard-wired: scaffold is upgrade with an ensure set against an empty directory.
 # The default (`agent`) scaffolds a wrapper-hosted Nx repo with the agent DX and bootstraps no stack at all; the
 # `angular` preset lays a package.json host, adds @nx/angular and creates the first app — because its layers say
 # so (node, angular's nxPlugin, angular's app-creating adapter), not because this script names them.
@@ -2041,7 +2114,7 @@ if [ "$HOST" = "node" ]; then
 env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' $CREATE_WORKSPACE_PRESET --packageManager=yarn --nxCloud=skip --no-interactive
 cd \"\$SCAFFOLD_PROJECT_DIR_NAME\""
 else
-  # No package.json: an empty repository, then the SAME wrapper floor a sync lays on a Python or Go repo.
+  # No package.json: an empty repository, then the SAME wrapper floor an upgrade lays on a Python or Go repo.
   SCAFFOLD_FLOOR_BLOCK="mkdir \"\$SCAFFOLD_PROJECT_DIR_NAME\"
 cd \"\$SCAFFOLD_PROJECT_DIR_NAME\"
 git init -q
@@ -2076,7 +2149,7 @@ SCAFFOLD_LAYOUT_BLOCK=""
 
 # The first app, through the HOUSE app generator (never the raw framework generator): the stack adapter creates
 # it with the house defaults, then it ATTACHES every capability the workspace wears — each layer's per-app steps,
-# the same ones a sync runs. This is the SAME one command a developer runs to add any LATER app, so the first app
+# the same ones an upgrade runs. This is the SAME one command a developer runs to add any LATER app, so the first app
 # and the Nth share one code path. --layers hands it the ensure set: at first-app time nothing this run ensures
 # exists yet to be detected (firebase.json, for one).
 SCAFFOLD_APP_BLOCK=""
@@ -2101,7 +2174,7 @@ $SCAFFOLD_LAYOUT_BLOCK
 $SCAFFOLD_APP_BLOCK
 $LAYER_RESOLVE_BLOCK
 APP='$APP'
-# A sync resolved the branch model in its preflight; a scaffold has no preflight, so it resolves here (a new
+# An upgrade resolved the branch model in its preflight; a scaffold has no preflight, so it resolves here (a new
 # repository: undeclared, unless a declaration was already carried in).
 $BRANCH_MODEL_BLOCK
 $PLAN_RUN_BLOCK
@@ -2121,12 +2194,12 @@ $ENSURED_BLOCK
 # PREFLIGHT AND THE PROBE COME FIRST — before nx init, not merely before the install. Both only READ (git
 # state, the installed toolkit, HOUSE.md), so they are safe this early, and the gate's refusals claim to stop
 # before anything is written. With the floor ahead of them that claim would be false: nx init creates nx.json
-# (and, on the node host, a lockfile) in someone's repo before we decided the sync should not happen at all.
+# (and, on the node host, a lockfile) in someone's repo before we decided the upgrade should not happen at all.
 #
 # GATHER, GATHER, DECIDE. The checks and the probe both APPEND verdicts; PREFLIGHT_VERDICT is the single place
 # that reports and exits. The probe sits between them on purpose — it writes nothing, and running it first is
 # what lets a refusal name the ladder the user is being stopped from running.
-_SYNC_PARTIAL=0
+_UPGRADE_PARTIAL=0
 _stage() { [ -d .bespunky-sync.lock ] && printf 'stage=%s\n' \"\$1\" > .bespunky-sync.lock/state 2>/dev/null || true; }
 _stage preflight
 $PREFLIGHT_CHECKS
@@ -2146,15 +2219,15 @@ $MIGRATE_RUN
 _stage generators
 $LAYER_RESOLVE_BLOCK
 $CHECK_NAME_FN
-_resolve_sync_app '$NXT_DIR' '$APP' '$PROJECT'
+_resolve_upgrade_app '$NXT_DIR' '$APP' '$PROJECT'
 $PLAN_RUN_BLOCK
 $FINALIZE_LOCAL
-# A run that skipped generators is not a clean run, and the outer summary prints SYNC_OK either way.
+# A run that skipped generators is not a clean run, and the outer summary prints UPGRADE_OK either way.
 # Say so here, while the reason is still on screen, so neither a human nor a model reads that final
 # line as everything-was-applied.
-if [ \"\$_SYNC_PARTIAL\" = '1' ]; then
-  echo 'SYNC_PARTIAL: some generators were skipped — see the [layers] WARNING lines above. The project'
-  echo '  was still stamped, so a later sync will NOT retry them on its own; re-run addressing the warning.'
+if [ \"\$_UPGRADE_PARTIAL\" = '1' ]; then
+  echo 'UPGRADE_PARTIAL: some generators were skipped — see the [layers] WARNING lines above. The project'
+  echo '  was still stamped, so a later upgrade will NOT retry them on its own; re-run addressing the warning.'
 fi"
 fi
 
@@ -2165,11 +2238,11 @@ fi
 # double-quoted strings where a stray backtick or an unescaped quote is live command substitution, so being
 # able to LOOK at the output is the difference between checking a change and hoping.
 #
-# Placed here, after every block is rendered and BEFORE ANYTHING WRITES — before the sync lock, and the program
+# Placed here, after every block is rendered and BEFORE ANYTHING WRITES — before the upgrade lock, and the program
 # itself is where every write lives. It once sat after the lock, the backup tag and the stray-lockfile cleanup,
 # so "running nothing" deleted a yarn.lock and tagged a dirty tree. It shows exactly what would have run —
 # including the mode, layer and package-manager decisions already baked in. Writes to stdout and exits 0, so
-# `scaffold.sh --sync --print-inner <proj> | bash -n /dev/stdin` is a syntax check. The roots are environment
+# `house.sh upgrade --print-inner <proj> | bash -n /dev/stdin` is a syntax check. The roots are environment
 # (INNER_ENV), so the printed program names them as variables.
 if [ "$PRINT_INNER" = "1" ]; then
   printf '%s\n' "$INNER" >&3
@@ -2177,33 +2250,33 @@ if [ "$PRINT_INNER" = "1" ]; then
 fi
 
 # --- single writer per project ------------------------------------------------------------------------------
-# Two syncs on one project is not a hypothetical: it is one impatient re-run, or a hook-suggested sync landing
+# Two upgrades on one project is not a hypothetical: it is one impatient re-run, or a hook-suggested upgrade landing
 # on top of a manual one. They race over node_modules, the lockfile, HOUSE.md — and over `migrations.json`,
-# which is the dangerous one. Every sync starts its migrate step with `rm -f migrations.json`; if that lands
+# which is the dangerous one. Every upgrade starts its migrate step with `rm -f migrations.json`; if that lands
 # between another run's collect and its `--run-migrations`, `--if-exists` turns "the ladder vanished" into
 # "nothing to do", that run applies ZERO migrations, and house-doc then stamps the project current. The
-# result is a project that claims to be migrated and is not, which no later sync will ever revisit.
+# result is a project that claims to be migrated and is not, which no later upgrade will ever revisit.
 #
 # `mkdir` is the lock because it is atomic on every filesystem that matters — test-then-create is not. The
 # PID inside lets a genuinely dead run be taken over rather than wedging the project forever, which is the
 # failure mode that makes people delete lock files by hand and lose the protection entirely.
-SYNC_LOCK=""
+UPGRADE_LOCK=""
 if [ "$MODE" = "sync" ]; then
-  SYNC_LOCK="$TARGET/.bespunky-sync.lock"
-  if ! mkdir "$SYNC_LOCK" 2>/dev/null; then
-    _holder="$(cat "$SYNC_LOCK/pid" 2>/dev/null || echo '')"
+  UPGRADE_LOCK="$TARGET/.bespunky-sync.lock"
+  if ! mkdir "$UPGRADE_LOCK" 2>/dev/null; then
+    _holder="$(cat "$UPGRADE_LOCK/pid" 2>/dev/null || echo '')"
     if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then
-      echo "ERROR: another sync is already running for this project (pid $_holder)." >&2
-      echo "       Two syncs at once can leave the project stamped as migrated when it is not." >&2
+      echo "ERROR: another upgrade is already running for this project (pid $_holder)." >&2
+      echo "       Two upgrades at once can leave the project stamped as migrated when it is not." >&2
       echo "       Wait for it to finish, or stop it, then re-run." >&2
       exit 1
     fi
     # The holder is gone — a killed or crashed run. Take it over rather than refusing forever.
-    echo "NOTE: found a stale sync lock from pid ${_holder:-unknown} (no longer running) — taking it over."
-    rm -rf "$SYNC_LOCK"
-    mkdir "$SYNC_LOCK" 2>/dev/null || { echo "ERROR: could not create the sync lock at $SYNC_LOCK." >&2; exit 1; }
+    echo "NOTE: found a stale upgrade lock from pid ${_holder:-unknown} (no longer running) — taking it over."
+    rm -rf "$UPGRADE_LOCK"
+    mkdir "$UPGRADE_LOCK" 2>/dev/null || { echo "ERROR: could not create the upgrade lock at $UPGRADE_LOCK." >&2; exit 1; }
   fi
-  printf '%s\n' "$$" > "$SYNC_LOCK/pid" 2>/dev/null || true
+  printf '%s\n' "$$" > "$UPGRADE_LOCK/pid" 2>/dev/null || true
 
   # SELF-IGNORING, and it has to be created HERE rather than left to a generator.
   #
@@ -2213,15 +2286,15 @@ if [ "$MODE" = "sync" ]; then
   # `git status` forever. It has happened twice in the toolkit's own history (abd143e, b8b293b).
   #
   # The `claude-settings` generator also writes a `.gitignore` rule for this path, but that generator runs
-  # AFTER the migration step — so on the very first sync that carries migrations, the rule lands after the
+  # AFTER the migration step — so on the very first upgrade that carries migrations, the rule lands after the
   # commit that needed it. A guard that only takes effect once you no longer need it is not a guard. A
   # `.gitignore` containing `*` inside the directory ignores the directory and itself, from the moment the
   # lock exists, with no ordering assumption at all — the same self-ignoring pattern the house rules already
   # prescribe for `mocks/` and scratch directories.
-  printf '*\n' > "$SYNC_LOCK/.gitignore" 2>/dev/null || true
+  printf '*\n' > "$UPGRADE_LOCK/.gitignore" 2>/dev/null || true
 
   # Released on ANY exit, including the refusals above this line's own guards and every early failure below.
-  trap 'rm -rf "$SYNC_LOCK"' EXIT INT TERM
+  trap 'rm -rf "$UPGRADE_LOCK"' EXIT INT TERM
 
 fi
 
@@ -2246,11 +2319,11 @@ if [ "$MODE" = "sync" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/de
   [ -n "$_gd" ] && [ -e "$_gd/CHERRY_PICK_HEAD" ]  && _busy="a cherry-pick"
   [ -n "$_gd" ] && [ -e "$_gd/REVERT_HEAD" ]       && _busy="a revert"
   if [ -n "$_busy" ]; then
-    echo "ERROR: $_busy is in progress in this repository, so the sync will not run." >&2
+    echo "ERROR: $_busy is in progress in this repository, so the upgrade will not run." >&2
     echo "       The house migrations commit as they go, and git stages EVERYTHING when they do — mid-$_busy" >&2
     echo "       that would commit the unresolved state, and in the merge case record the branch as merged" >&2
     echo "       when its content never was." >&2
-    echo "       Finish or abort it first, then re-run the sync." >&2
+    echo "       Finish or abort it first, then re-run the upgrade." >&2
     exit 1
   fi
 
@@ -2258,7 +2331,7 @@ if [ "$MODE" = "sync" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/de
   #    `git checkout <branch>` refuses because the tree is dirty, and forcing it discards the entire run.
   #    And HEAD, the restore point, is not a durable ref here.
   if ! git -C "$TARGET" symbolic-ref -q HEAD >/dev/null 2>&1; then
-    echo "ERROR: this repository has a detached HEAD, so the sync will not run." >&2
+    echo "ERROR: this repository has a detached HEAD, so the upgrade will not run." >&2
     echo "       The migrations commit as they go; on a detached HEAD those commits belong to no branch and" >&2
     echo "       are lost the moment you check one out." >&2
     echo "       Check out a branch first (git switch -c <name> keeps what is here), then re-run." >&2
@@ -2283,7 +2356,7 @@ else
   for _kv in "${INNER_ENV[@]}"; do _inner_env_args+=(-e "$_kv"); done
   container_run_as_host_user \
     -e HOME=/home/node "${_inner_env_args[@]}" \
-    -v "$PROJECTS_DIR":/work -v "$ASSETS_DIR":/assets:ro -w /work \
+    -v "$PROJECTS_DIR":/work -v "$ENGINE_DIR":/engine:ro -w /work \
     "$IMAGE" \
     bash -lc "$INNER" || INNER_RC=$?
 
@@ -2330,16 +2403,16 @@ fi
 # --- the run died somewhere: say where, and what that means for the project ------------------------------------
 if [ "$INNER_RC" -ne 0 ]; then
   _st=""; _mig=""
-  if [ -n "${SYNC_LOCK:-}" ] && [ -f "$SYNC_LOCK/state" ]; then
-    _st="$(sed -n 's/^stage=//p' "$SYNC_LOCK/state" 2>/dev/null | tail -1)"
-    _mig="$(sed -n 's/^migrations=//p' "$SYNC_LOCK/state" 2>/dev/null | tail -1)"
+  if [ -n "${UPGRADE_LOCK:-}" ] && [ -f "$UPGRADE_LOCK/state" ]; then
+    _st="$(sed -n 's/^stage=//p' "$UPGRADE_LOCK/state" 2>/dev/null | tail -1)"
+    _mig="$(sed -n 's/^migrations=//p' "$UPGRADE_LOCK/state" 2>/dev/null | tail -1)"
   fi
-  # A PREFLIGHT REFUSAL is not a failure: it decided not to start, said why on its own first line (SYNC_REFUSED),
-  # and wrote nothing — so there is nothing to diagnose and nothing to restore. Adding SYNC_FAILED and
+  # A PREFLIGHT REFUSAL is not a failure: it decided not to start, said why on its own first line (UPGRADE_REFUSED),
+  # and wrote nothing — so there is nothing to diagnose and nothing to restore. Adding UPGRADE_FAILED and
   # restore advice on top of it told the reader a run had died and needed undoing.
   [ "$_st" = "refused" ] && exit "$INNER_RC"
   echo "" >&2
-  echo "SYNC_FAILED $TARGET (exit $INNER_RC)${_st:+ — died during: $_st}" >&2
+  echo "UPGRADE_FAILED $TARGET (exit $INNER_RC)${_st:+ — died during: $_st}" >&2
   _wrote=1
   case "$_st" in
     preflight|probe)
@@ -2362,7 +2435,7 @@ if [ "$INNER_RC" -ne 0 ]; then
   esac
   # RESTORE, NEVER RESET. The way back is to put the FILES back as they were, leaving the branch, its history and
   # anything else the user has done since exactly where they are — a reset --hard moves the branch and discards
-  # the working tree wholesale, which is the one undo that can destroy something the sync did not make. Restoring
+  # the working tree wholesale, which is the one undo that can destroy something the upgrade did not make. Restoring
   # leaves the migration commits in history (revert them like any commit, if wanted) and a reviewable diff.
   if [ "$_wrote" = "1" ]; then
     echo "  restore    : $BACKUP_REF" >&2
@@ -2378,7 +2451,7 @@ fi
 
 # --- what, if anything, does this run still need from the human? ---------------------------------------------
 #
-# THE SYNC IS OVER; THIS IS NOT A RE-RUN. Some of what a sync writes is read by Claude Code only when a
+# THE UPGRADE IS OVER; THIS IS NOT A RE-RUN. Some of what an upgrade writes is read by Claude Code only when a
 # session starts (`.claude/settings.json` — enabled plugins, marketplaces, output style; `.mcp.json` — MCP
 # servers; the hooks belonging to plugins this run enabled) and some of what it writes to `.devcontainer/`
 # — mounts, runArgs, containerEnv, features — applies only when a container is CREATED. Neither can be made
@@ -2394,7 +2467,7 @@ fi
 #                      silence here has previously been read as "probably restart, to be safe".
 #   unknown            no git base to compare against, so the honest answer is that it cannot tell.
 #
-# SEPARATELY, `SYNC_RELOAD` names the generated GUIDANCE files that changed. These are `@`-imported at
+# SEPARATELY, `UPGRADE_RELOAD` names the generated GUIDANCE files that changed. These are `@`-imported at
 # session start too, but their content needs no restart at all — reading the file puts it in context
 # immediately. Naming them is what lets the caller close that gap in-session instead of banking it into a
 # boundary it does not deserve.
@@ -2404,54 +2477,54 @@ fi
 # a script cannot know what that costs them right now.
 # A FUNCTION, and marked for extraction, because this is the half that regresses silently. A boundary that
 # stops being reported does not look like a bug — it looks like a clean run, right up until someone spends an
-# afternoon on settings that were never in effect. tools/test-scaffold/sync-next.test.sh evaluates the block
+# afternoon on settings that were never in effect. tools/test-scaffold/upgrade-next.test.sh evaluates the block
 # between these markers against real git fixtures; keep them intact and keep the function self-contained
 # (no globals beyond its arguments), or the test silently covers nothing.
-# --->8--- SYNC_NEXT
-_sync_next() {   # <target> <base-sha|''> — sets SYNC_NEXT and SYNC_RELOAD
+# --->8--- UPGRADE_NEXT
+_upgrade_next() {   # <target> <base-sha|''> — sets UPGRADE_NEXT and UPGRADE_RELOAD
   local target="$1" base="$2" changed=""
-  SYNC_NEXT="unknown"
-  SYNC_RELOAD=""
+  UPGRADE_NEXT="unknown"
+  UPGRADE_RELOAD=""
   [ -n "$base" ] || return 0
   # Committed deltas (the migration ladder commits as it goes) + working-tree edits + brand-new untracked
   # files, which `git diff` alone would miss entirely — and a first retrofit creates most of these files.
   # BOTH RELATIVE TO THE PROJECT. `ls-files` answers relative to its -C directory, but `diff --name-only` answers
   # relative to the REPOSITORY ROOT — so in a project that is a subdirectory of its repo, a changed
-  # `.devcontainer/devcontainer.json` came back as `web/.devcontainer/…`, missed every anchor below, and a sync
+  # `.devcontainer/devcontainer.json` came back as `web/.devcontainer/…`, missed every anchor below, and an upgrade
   # that needed a rebuild reported `none`. `--relative` makes the diff speak the same coordinates (and limits it
   # to the project, which is the question asked).
   changed="$( { git -C "$target" diff --relative --name-only "$base" 2>/dev/null
                 git -C "$target" ls-files --others --exclude-standard 2>/dev/null; } | sort -u )"
-  SYNC_NEXT="none"
+  UPGRADE_NEXT="none"
   # THE ANCHORS ARE LOAD-BEARING — do not relax `^\.claude/settings\.json$` to `^\.claude/`.
   #
   # The house devcontainer bind-mounts `${localWorkspaceFolder}/.claude/data` onto `/home/node/.claude`, so
   # Claude Code's entire runtime state — the plugin cache, installed_plugins.json, auth — physically lives
-  # INSIDE the project this function is diffing. And `/sync` step 1 runs `claude plugin update`, which writes
-  # there on the way in. Match `.claude/` as a prefix and every sync ever run reports `restart-session`,
-  # earned by nothing but the sync's own bookkeeping — and a boundary that fires on every run is a boundary
+  # INSIDE the project this function is diffing. And `/bespunky-house:upgrade` step 1 runs `claude plugin update`, which writes
+  # there on the way in. Match `.claude/` as a prefix and every upgrade ever run reports `restart-session`,
+  # earned by nothing but the upgrade's own bookkeeping — and a boundary that fires on every run is a boundary
   # everyone learns to ignore, which is exactly what this line exists to prevent. `.claude/data/` is also
   # gitignored, so this is belt and braces; the anchor is the half that does not depend on a project having
-  # been synced yet.
+  # been upgraded yet.
   if printf '%s\n' "$changed" | grep -q '^\.devcontainer/'; then
-    SYNC_NEXT="rebuild-container"
+    UPGRADE_NEXT="rebuild-container"
   elif printf '%s\n' "$changed" | grep -qE '^(\.claude/settings\.json|\.mcp\.json)$'; then
-    SYNC_NEXT="restart-session"
+    UPGRADE_NEXT="restart-session"
   fi
   # `|| true` IS LOad-BEARING under this script's `set -euo pipefail`. grep exits 1 when it matches nothing,
   # an assignment takes the exit status of its command substitution, and `set -e` then kills the script — so
-  # the NO-GUIDANCE-CHANGED case (an ordinary steady-state sync) would die silently right here, after every
-  # generator had run, printing no SYNC_NEXT, no SYNC_OK, and no error. Found by running a real sync twice:
+  # the NO-GUIDANCE-CHANGED case (an ordinary steady-state upgrade) would die silently right here, after every
+  # generator had run, printing no UPGRADE_NEXT, no UPGRADE_OK, and no error. Found by running a real upgrade twice:
   # the first changed HOUSE.md and passed, the second did not and exited 1 with an empty tail.
-  SYNC_RELOAD="$(printf '%s\n' "$changed" | grep -E '^(HOUSE\.rules\.md|HOUSE\.md|CLAUDE\.md)$' | tr '\n' ' ' || true)"
-  SYNC_RELOAD="${SYNC_RELOAD% }"
+  UPGRADE_RELOAD="$(printf '%s\n' "$changed" | grep -E '^(HOUSE\.rules\.md|HOUSE\.md|CLAUDE\.md)$' | tr '\n' ' ' || true)"
+  UPGRADE_RELOAD="${UPGRADE_RELOAD% }"
 }
-# ---8<--- SYNC_NEXT
+# ---8<--- UPGRADE_NEXT
 
 if [ "$MODE" = "sync" ]; then
-  _sync_next "$TARGET" "$SYNC_BASE"
-  echo "SYNC_NEXT: $SYNC_NEXT"
-  case "$SYNC_NEXT" in
+  _upgrade_next "$TARGET" "$UPGRADE_BASE"
+  echo "UPGRADE_NEXT: $UPGRADE_NEXT"
+  case "$UPGRADE_NEXT" in
     rebuild-container)
       echo "  .devcontainer/ changed, and mounts, runArgs, containerEnv and features only apply when the"
       echo "  container is created. Run 'Dev Containers: Rebuild Container' when it suits you — that also"
@@ -2465,8 +2538,8 @@ if [ "$MODE" = "sync" ]; then
       echo "  No git base to compare against, so this run cannot tell what changed. If .devcontainer/,"
       echo "  .claude/settings.json or .mcp.json moved, rebuild or restart accordingly." ;;
   esac
-  if [ -n "$SYNC_RELOAD" ]; then
-    echo "SYNC_RELOAD: $SYNC_RELOAD"
+  if [ -n "$UPGRADE_RELOAD" ]; then
+    echo "UPGRADE_RELOAD: $UPGRADE_RELOAD"
     echo "  Generated house guidance changed. It is @-imported at session start, but reading the file now puts"
     echo "  it in context immediately — no restart required for its content."
   fi
@@ -2477,19 +2550,19 @@ if [ "$MODE" = "scaffold" ]; then
 else
   # THE SUMMARY STATES WHAT THE PROJECT IS NOW, read back from the project — never the run's own inputs. It used
   # to echo them: `app=apps/<repo>` was the DEFAULT app name, printed for a repo that has no app at all, and
-  # `firebase=0` was "--firebase was not passed", printed for a project whose Firebase layer the sync had just
-  # detected and synced. So: the layer set house-doc STAMPED (the final, detected one — firebase included when
+  # `firebase=0` was "--firebase was not passed", printed for a project whose Firebase layer the upgrade had just
+  # detected and upgraded. So: the layer set house-doc STAMPED (the final, detected one — firebase included when
   # present), and the app only when it exists (as the project graph resolved it).
   _final_layers="$(grep -o '@bespunky/house-tooling:stamp[^>]*' "$TARGET/HOUSE.md" 2>/dev/null | head -1 \
     | grep -o 'layers=[a-z0-9,-]*' | head -1 | cut -d= -f2)"
-  # The app's root, as the program resolved it from the project graph (`_resolve_sync_app`), handed over through
+  # The app's root, as the program resolved it from the project graph (`_resolve_upgrade_app`), handed over through
   # the lock's state file — empty when the app is not one of the workspace's apps, and then not printed.
   _app_dir=""
-  [ -n "${SYNC_LOCK:-}" ] && [ -f "$SYNC_LOCK/state" ] && _app_dir="$(sed -n 's/^app=//p' "$SYNC_LOCK/state" 2>/dev/null | tail -1)"
+  [ -n "${UPGRADE_LOCK:-}" ] && [ -f "$UPGRADE_LOCK/state" ] && _app_dir="$(sed -n 's/^app=//p' "$UPGRADE_LOCK/state" 2>/dev/null | tail -1)"
   # voice: whether the project's devcontainer now bridges audio — read from its ownership marker, which records the
   # answer the devcontainer generator was actually given (an explicit --voice, or the project's earlier choice
-  # carried forward). The flag alone said voice=0 for a project that had just been synced WITH voice.
+  # carried forward). The flag alone said voice=0 for a project that had just been upgraded WITH voice.
   _voice=0
   grep -qE '"voice"[[:space:]]*:[[:space:]]*true' "$TARGET/.devcontainer/.bespunky-devcontainer.json" 2>/dev/null && _voice=1
-  echo "SYNC_OK $TARGET ($RUNTIME_DESC layers=${_final_layers:-unknown}${_app_dir:+ app=$_app_dir} voice=$_voice backup=$BACKUP_REF)"
+  echo "UPGRADE_OK $TARGET ($RUNTIME_DESC layers=${_final_layers:-unknown}${_app_dir:+ app=$_app_dir} voice=$_voice backup=$BACKUP_REF)"
 fi

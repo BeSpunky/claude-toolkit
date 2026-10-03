@@ -1,11 +1,11 @@
 # shellcheck shell=bash
 # container-engine.sh — SOURCED (never executed) by every host-side launcher that falls back to the
-# typescript-node base image: scaffold.sh (beside it) and this repo's tools/extract-tool/extract-tool.sh.
+# typescript-node base image: house.sh (beside it) and this repo's tools/extract-tool/extract-tool.sh.
 #
-# Why it lives HERE, under the new-project assets: scaffold.sh runs inside consumers' projects from the
+# Why it lives HERE, in the house plugin's engine: house.sh runs inside consumers' projects from the
 # INSTALLED plugin directory, where this repo's tools/ does not exist — so the one copy both can reach is
 # the one shipped with the plugin. extract-tool lives in this repo and reaches it by a repo-relative path.
-# (The reverse — a helper under tools/ — would leave scaffold.sh unable to source it once installed.)
+# (The reverse — a helper under tools/ — would leave house.sh unable to source it once installed.)
 #
 # It answers two questions both launchers used to answer by copy-paste:
 #   1. WHICH base image  — the newest typescript-node major published on MCR (>= 18; 24 when offline).

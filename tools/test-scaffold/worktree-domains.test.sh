@@ -17,7 +17,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-GEN="$ROOT/plugins/project-starter/skills/new-project/assets/nx-tools/src/generators"
+GEN="$ROOT/plugins/house/engine/nx-tools/src/generators"
 
 for bin in node git flock ss setsid; do
   command -v "$bin" >/dev/null 2>&1 || { echo "  skip  $bin unavailable"; exit 0; }
