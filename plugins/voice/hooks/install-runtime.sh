@@ -30,4 +30,13 @@ for f in "$PLUGIN_ROOT"/scripts/*.sh; do
   fi
 done
 
+# Retire what the plugin no longer ships, so a published copy of a removed script
+# (e.g. speak-detached.sh, replaced by speaker.sh) can't be called by mistake.
+# Only *.sh at the top level is ours to prune; piper/, voices/, whisper/ and the
+# state files are never touched.
+for f in "$DEST"/*.sh; do
+  [ -f "$f" ] || continue
+  [ -f "$PLUGIN_ROOT/scripts/$(basename "$f")" ] || rm -f "$f" 2>/dev/null || true
+done
+
 exit 0

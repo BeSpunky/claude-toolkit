@@ -34,6 +34,17 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/silence-on-prompt.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
