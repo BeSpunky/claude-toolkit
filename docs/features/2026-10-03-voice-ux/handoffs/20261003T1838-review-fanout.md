@@ -5,7 +5,7 @@ User: "Send agents to sanity check" (2026-10-03). Read-only reviewers, branch fe
 | id | scope | status | re-run safe |
 | --- | --- | --- | --- |
 | R1 | mcp/ask-server.mjs + mcp/answer.mjs (protocol, async, cancel, supersede, intents) | returned | yes |
-| R2 | scripts/listen.sh (stream contract, VAD, lifecycle) | dispatched | yes |
+| R2 | scripts/listen.sh (stream contract, VAD, lifecycle) | returned | yes |
 | R3 | scripts/speaker.sh, hooks/*, hooks.json, install-runtime, command + skill docs | returned | yes |
 | R4 | end-to-end behaviour: phrasing on realistic payloads, docs vs. behaviour, tests' blind spots | returned | yes |
 
@@ -33,3 +33,18 @@ fall to negate → option 2. LOW ordinal ignores negation ("Not the first one, t
 cancel()'s un-awaited `speaker stop` can kill the NEXT ask's question, which then listens for an unheard question.
 LOW serverInfo.version hardcoded. Sound: ids 0/string, no response after cancel, supersede once, progress
 monotonic, group kill, stdin end, stdout clean.
+
+## R2 (listen.sh) — returned
+MED-HIGH speaking from t=0 inflates the noise floor (20th pct over speech) → a quieter continuation is cut.
+MED any 3 above-threshold chunks count as speech → a cough + 1.3 s quiet ends the take before the answer.
+LOW-MED muted/all-zero mic never gets the 8 s no-speech early-out. LOW "Terminated" on stderr. Sound: trailing
+count, sort cost, non-integer knobs, stdout contract, cleanup on every TERM path.
+
+## Fix round
+| id | scope | owner | status |
+| --- | --- | --- | --- |
+| F1 | answer.mjs, ask-server race + version, speaker lock + process group, install-runtime guard | main | done (b81bab8) |
+| F2 | phrasing.mjs, list-aware Stop hook, PostToolUse silence, tests 18→28 | main | done (083e57d) |
+| F3 | listen.sh end-of-speech (R2 1–4) | subagent | dispatched |
+Not fixed, by decision: `/voice answer` stays non-streaming — a slash command's Bash output isn't shown live;
+the live transcript belongs to the hands-free tool.
