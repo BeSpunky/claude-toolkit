@@ -73,5 +73,143 @@ Each line kind carries its own rules (where it forks, how it advances, what fast
 where a fix must flow back to). The investigation must also recognise these shapes in an existing repo
 (`release/*` / `hotfix/*` branches, tag-per-version history, CI triggers on patterns).
 
-**Next design step (on hold at the user's request):** model line kinds and their flow rules, then re-check
-the declaration, the skill's method, and the change procedure against them.
+**Next design step:** model line kinds and their flow rules, then re-check the declaration, the skill's
+method, and the change procedure against them. — Done below (*Model v2*), on the user's "go ahead with the
+next design step".
+
+## Model v2 — line kinds and flows (supersedes *The concept* above)
+
+The first concept ("one ordered pipeline") is the special case. The general model: **a branch model is a small
+graph of *lines*, each of a fixed KIND whose flow rules are built in.** The declaration composes kinds; it
+never spells out rules. Same discipline as the layer registry — a closed vocabulary with semantics, not a
+configuration language where every repo invents its own verbs.
+
+### The five kinds
+
+| Kind | How many | Forks from | Advances by | Notes |
+| --- | --- | --- | --- | --- |
+| **integration** | exactly 1 | — | `--no-ff` merge of a rebased work branch | where work lands; `development`, `develop`, or `main` on trunk |
+| **stage** | 0..N, ordered | its predecessor | `--ff-only` from its predecessor | environment chain (`staging`, `qa`); last one may be production |
+| **release** | pattern, 0..many | integration (or a declared stage) | `--no-ff` merge of stabilisation work branches | `release/{version}`; **ships into** a stage, or is **maintained** (is itself the production line for its version) |
+| **hotfix** | pattern, ephemeral | a production line | — (it *is* a work branch with a different base) | lands back on the line it forked from, then is carried |
+| **work** | pattern, ephemeral | integration (default) or a release line | commits | `feat/` · `fix/` — today's worktree branches |
+
+**Production** is a *role*, not a kind: the stage the chain ends on, plus every maintained release line. A
+stage named as a release target is fed by release merges instead of by fast-forward (gitflow's `main`); stages
+after it fast-forward from it as usual.
+
+### The one new rule: carry
+
+Today's model never needs back-flow — everything enters at integration and only moves forward. Release and
+hotfix lines add the one place work lands **downstream** of integration, so one rule covers it:
+
+> **A change that lands anywhere but integration is not done until it is carried** — to integration and to
+> every open line that would otherwise regress.
+
+How it is carried is the model's **fix flow**, a real fork in practice, declared once:
+
+- **merge-forward** (gitflow): land at the source (hotfix → production, stabilisation fix → release), then
+  merge that line into integration and every newer open release line. Keeps *ancestry* — checkable with
+  `git merge-base --is-ancestor`.
+- **upstream-first** (maintained-versions projects, Linux/Node style): land on integration first, then
+  `cherry-pick -x` back to each maintained line that needs it. Ancestry does not hold; equivalence is checked
+  by `git cherry` / the `-x` trailer.
+
+### A second axis the first draft missed: how work lands
+
+`landing: merge | pull-request`. Today's skill merges locally and pushes; a repo whose branch protection
+requires PRs cannot land that way at all. Same gates, different mechanics (`gh pr create` → merge via the PR,
+the merge style matching the kind's rule). The investigation detects it (protection rules, merge-commit
+messages like "Merge pull request #…").
+
+### The declaration, revised
+
+```jsonc
+// .bespunky/branches.json
+{
+  "version": 1,
+  "preset": "gitflow",                 // optional: a named composition, expanded then validated
+  "integration": "develop",
+  "stages": [ { "branch": "main", "production": true, "deploys": "npm publish (CI)" } ],
+  "releases": { "pattern": "release/{version}", "cutFrom": "develop", "shipsTo": "main", "maintained": false },
+  "hotfixes": { "pattern": "hotfix/{slug}", "from": "production" },
+  "fixFlow": "merge-forward",
+  "landing": "merge"
+}
+```
+
+**Presets are data** (as with layer presets): `trunk` · `two-line` · `three-line` (today's) · `gitflow` ·
+`maintained-releases`. They are a starting point the investigation proposes; the expanded declaration is what
+is committed and what everything reads, so a preset can later change without silently changing a project.
+
+**Validated at load, as the layer registry is:** exactly one integration line; stages are a simple chain; a
+release `shipsTo` names a stage; `fixFlow` is set whenever releases or hotfixes exist; patterns don't overlap
+each other or a named line.
+
+### Invariants — what "verify" checks
+
+1. **No direct commits** on any declared line or line pattern (first-parent history is only merges and
+   fast-forwards). Generalises today's "never commit onto development/staging/main".
+2. **Chain ancestry:** each fast-forward-fed stage is an ancestor of its predecessor.
+3. **No regression:** every production line's content is in integration — by ancestry under merge-forward, by
+   patch equivalence under upstream-first. *This* is the invariant gitflow repos break silently when a hotfix
+   is never merged back.
+4. **Nothing stranded:** no merged-and-shipped release/hotfix branch left undeleted, no open one forked from a
+   line that no longer exists.
+
+The same checks power three things: verify before/after a model change, the investigation's evidence, and a
+pre-promotion guard (replacing today's `--ff-only`-as-a-guard trick, which only covered rule 2).
+
+### Gates — still human, now named by the model
+
+Unchanged: only the relevance check and opening a work worktree run unasked. Every move between lines waits
+for an explicit signal — *land*, *promote to `<stage>`*, *cut release `<v>`*, *ship release `<v>`*, *hotfix*.
+Two judgments the skill now has to make:
+
+- **"Release" is ambiguous** under a model with release lines (cut one, or ship one?) — the skill asks rather
+  than picks.
+- **Hotfix or fix?** A bug reported against production while integration carries unreleased work: fixing on
+  integration ships it with everything else; a hotfix ships it alone. That changes what reaches users, so the
+  skill **asks** (only in models that declare hotfixes; otherwise there is nothing to choose).
+
+### Where the semantics live
+
+**One engine, everything else reads the data contract.** A Node built-ins-only script in the workflow plugin
+(`branch-and-release/scripts/branches.mjs`, beside the skill that owns the method — the skill is used in
+non-house repos too, so it cannot live in `nx-tools`). It answers: `describe` (the model in words and a
+table), `plan <gate> …` (the exact commands for a move, never executed by the script), `verify [--proposed
+<file>]` (the invariants, against the current or a proposed model), `evidence` (the investigation's raw
+facts). Claude runs it; it decides nothing.
+
+The other readers take **names only**, from the JSON schema, never semantics: `house-doc` renders the rules in
+role words with the real names filled in (and the "not yet declared — investigate and ask" text when the file
+is absent); `scaffold.sh`'s preflight reads the set of protected names/patterns; `--staging` refuses when the
+model has no stage to bind it to.
+
+### Re-check: the investigation
+
+Beyond the branch list and per-rung usage history (above), it now also recognises **shapes**:
+`release/*` / `hotfix/*` branches, live or only in merge-commit messages; tag series and which line carries
+them (two tag series on two lines → maintained versions); cherry-pick trailers (upstream-first); CI triggers
+on branch *patterns*; required-PR protection (→ `landing`). And it runs invariant 3 against history: a repo
+that has hotfixes that never reached integration has a real, current bug, and the user is told so whatever
+model they pick.
+
+### Re-check: changing the model
+
+The four steps stand, sharpened by the engine:
+
+1. **Verify** — `verify` now, and `verify --proposed` against the new model: would this repo satisfy it
+   today? (Moving to gitflow on a repo whose `main` is not in `develop` fails rule 3 — that is the first
+   thing to fix, not a footnote.)
+2. **Risk** — every binding on every affected line *or pattern*; open release lines and in-flight hotfixes
+   (a model change mid-release is the riskiest case — say so); what is irreversible (deleting a remote
+   branch, rewriting protection).
+3. **Confirm.**
+4. **Apply** — write the expanded declaration, regenerate house docs, create/delete branches, carry anything
+   owed; report external bindings; `verify` again.
+
+### Out of scope, still
+
+Non-git VCS; monorepos with **different** branch models per project (one model per repo); enforcing anything
+server-side — the toolkit verifies and reports, it does not configure GitHub protection on its own authority.
