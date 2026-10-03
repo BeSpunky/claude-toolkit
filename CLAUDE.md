@@ -123,6 +123,7 @@ The dev loop:
 | Check the release invariants | `node tools/check-release-invariants/check.mjs` (also CI + the pre-push hook) |
 | Check description limits | `node tools/check-descriptions/check.mjs` — plugin ≤ 500, skill ≤ 1024 and no `<` `>` (what claude.ai stores; also CI + the pre-push hook) |
 | Check that every shebang can run | `node tools/check-script-modes/check.mjs` — a tracked file declaring `#!` must be executable (also CI + the pre-push hook). Exemptions are predicates with reasons *inside the checker*, printed on every run; add one there, never by loosening the rule |
+| Test the voice plugin's conversation logic | `node tools/test-voice/run.mjs` — phrasing, reply understanding, the `ask_by_voice` server (live transcript, repeat, cancel, supersede) and the speaker, against fake audio scripts (node + bash; also CI). The audio boundaries themselves (`speak.sh`, `listen.sh`) are exercised by hand |
 | Test the spinner-tips engine | `node tools/test-tips/run.mjs` — the tips hook's promises about the user's settings file (node only; also CI) |
 | Test the scaffolder's guards | `bash tools/test-scaffold/run.sh` — the refusals whose regression would be **silent** (~1s, bash + git only; also CI) |
 | Test the layer registry | `node tools/test-layers/run.mjs` — projection drift (`assets/layers.sh` vs the registry), plans, presets, the agent artifacts; `--write` regenerates `layers.sh` after a descriptor or preset change (also CI) |
