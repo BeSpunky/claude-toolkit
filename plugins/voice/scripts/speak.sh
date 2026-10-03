@@ -3,7 +3,7 @@
 #
 # Turn text into speech and play it to the user's default audio sink. This is the
 # ONE place the plugin touches an audio engine — the swappable boundary. Callers
-# (the /voice command, the auto-speak hook) hand it ready-to-read text; how that
+# (the /speak command, the auto-speak hook) hand it ready-to-read text; how that
 # text becomes sound is entirely this script's concern, so the engine can change
 # without touching a single caller.
 #

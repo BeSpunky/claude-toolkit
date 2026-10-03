@@ -25,12 +25,12 @@ The user wants to answer your questions by **voice**, hands-free. While in this 
   - `cancelled: true` → the user said "stop" / "never mind" (or interrupted).
     Drop the question; don't re-ask unless they bring it up.
 - The user can say **"repeat that"** at any point — the tool re-asks by itself.
-  `/voice replay` and `/voice stop` work for anything spoken, and the voice band
+  `/speak replay` and `/speak stop` work for anything spoken, and the voice band
   above the prompt shows what's said and heard, with Replay and Stop.
 - Keep spoken questions **short and one at a time** — the user is listening, not
   reading. Prefer 2–4 clear options with distinct labels (the matcher keys off
   the label words, ordinals like "the second one", and yes/no).
-- You do **not** need auto-speak (`/voice auto on`) in this mode — the tool speaks
+- You do **not** need auto-speak (`/speak auto on`) in this mode — the tool speaks
   each question itself, so turning both on would double up.
 - Continue using voice for questions until the user says to stop ("back to text",
   "stop voice"), then resume normal questions.
@@ -43,5 +43,5 @@ speech-to-text isn't installed, have them run
 `bash ~/.claude/bespunky-voice/install-whisper.sh` once. If it reports no
 reachable audio endpoint, relay that diagnosis — voice needs a reachable
 PulseAudio-protocol sink (WSLg, or the host's native PulseAudio/PipeWire), bridged
-by the BeSpunky devcontainer; `/voice status` shows what was tried. Fall back to text
+by the BeSpunky devcontainer; `/speak status` shows what was tried. Fall back to text
 questions until it's ready — never guess an answer.

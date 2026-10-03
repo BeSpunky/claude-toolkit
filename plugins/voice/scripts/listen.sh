@@ -2,7 +2,7 @@
 # bespunky-voice — listen.sh
 #
 # Capture the microphone and transcribe it to text. This is the STT boundary —
-# the input mirror of speak.sh: callers (the /voice answer command, the MCP ask
+# the input mirror of speak.sh: callers (the /speak answer command, the MCP ask
 # tool) get back text and never touch an audio device or an STT engine.
 #
 # Output contract (status/errors always → stderr; failure = non-zero exit):

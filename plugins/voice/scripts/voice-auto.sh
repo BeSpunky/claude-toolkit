@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bespunky-voice — voice-auto.sh : toggle / inspect AUTOMATIC speaking.
 #
-# The manual trigger (/voice say) always works. This governs only the AUTOMATIC
+# The manual trigger (/speak say) always works. This governs only the AUTOMATIC
 # half: when ON, the PreToolUse hook speaks each multiple-choice question and
 # plan-approval as it appears. Default is OFF — the plugin never makes a sound
 # you didn't ask for until you opt in.
@@ -24,7 +24,7 @@ case "${1:-status}" in
     ;;
   off)
     rm -f "$STATE"
-    echo "auto-speak: OFF — nothing is spoken unless you run /voice say."
+    echo "auto-speak: OFF — nothing is spoken unless you run /speak say."
     ;;
   status)
     if [ -f "$STATE" ] && [ "$(cat "$STATE" 2>/dev/null)" = on ]; then

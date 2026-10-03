@@ -4,7 +4,7 @@
 # The voice is two activities owned by two scripts: speaking (speaker.sh owns the
 # utterance) and listening (listen.sh announces its open recording). Every way a
 # person says "enough" — the band's Stop, Esc on the ask tool, typing a prompt,
-# answering the picker, /voice stop — means BOTH, so they all call this one verb
+# answering the picker, /speak stop — means BOTH, so they all call this one verb
 # rather than each knowing the two halves.
 #
 #   voice.sh stop     silence speech and end any open recording

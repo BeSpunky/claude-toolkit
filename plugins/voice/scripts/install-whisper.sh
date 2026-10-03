@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bespunky-voice — install-whisper.sh
 #
-# Local speech-to-text for /voice answer — the input mirror of install-piper.sh.
+# Local speech-to-text for /speak answer — the input mirror of install-piper.sh.
 # Builds whisper.cpp and downloads a model into ~/.claude/bespunky-voice/whisper
 # (machine-local, persists across rebuilds, never committed — we ship the
 # installer, not the ~140 MB model or the compiled binary). Idempotent.

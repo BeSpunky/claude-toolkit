@@ -101,7 +101,7 @@ echo "[install-piper] installed voices:"
 ls -1 "$VOICES_DIR"/*.onnx 2>/dev/null | sed 's#.*/##;s/\.onnx$//' | grep -v '^default$' || true
 
 # --- 3. prove it: synthesize a word with the default voice --------------------
-# The same health check speak.sh's fallback and `/voice status` rely on — so
+# The same health check speak.sh's fallback and `/speak status` rely on — so
 # "done" here means the natural voice will actually be the one that speaks.
 # shellcheck source=tts-engine.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tts-engine.sh"
