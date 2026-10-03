@@ -159,3 +159,40 @@ fixes.
 
 **`projection.remote`** is added (default `"origin"`), so readers resolve remote tips without parsing the model.
 Schema stays `1` (additive; readers treat a missing `remote` as `"origin"`).
+
+## Amendment 2 (after the implementation bug review) — resolution, revised; fewer resolvers
+
+The review reproduced a sync committing onto production: a stale local integration branch without the file
+made the resolver say "undeclared" and throw away the working copy's `protected` list. Root cause: resolution
+was implemented three times and each copy stopped at the first ref it found. Two changes.
+
+**Fewer resolvers.** The PreCompact hook lives in the same plugin as the engine, so it calls
+`branches.mjs status --json` instead of resolving. House-doc never resolves either: the sync program passes it
+the projection it already resolved (generator option `branchProjection`, a JSON string; absent → house-doc
+reads the Tree, for standalone use). That leaves exactly two resolvers — the engine (`lib/resolve.mjs`) and
+`house-branches.sh` (it runs in consumers' repos where the workflow plugin's path is not knowable) — and the test
+suites of both run the SAME scenario list below.
+
+**The rule (supersedes Amendment 1's list):**
+1. Working-tree copy present but unparseable, without `projection`, or `projection.schema` major ≠ 1 →
+   **unreadable**: refuse to act; anything protective protects the §3 list.
+2. Parseable working copy → integration `I`, remote `R` (`projection.remote`, default `origin`). Consider BOTH
+   `refs/heads/I` and `refs/remotes/R/I`; keep those that exist AND hold the file.
+   - neither ref exists → the working copy is in force (bootstrap), with a note;
+   - refs exist but none holds the file → **not landed**: undeclared, but protected = the §3 list **∪** the
+     working copy's `protected` / `protectedPatterns` (never fewer protections than the copy declares);
+   - one holds it → that copy;
+   - both hold it → identical → that copy; else the one whose commit descends from the other's; diverged →
+     the local one, with a note.
+3. No working-tree copy → self-confirming search: for each §3 name, try the local branch AND `origin/<name>`;
+   accept a copy only if its `projection.integration` names that same branch.
+4. Nothing → undeclared.
+
+**`status --json` shape** (what the hook and Claude consume):
+`{ "state": "declared"|"undeclared"|"unreadable", "source": "<ref>|working-tree"|null,
+   "projection": {…}|null, "protected": [...], "protectedPatterns": [...], "notes": [...], "reason": "…"|null }`
+— `protected`/`protectedPatterns` are ALWAYS the effective set for that state (declared: the projection's;
+undeclared: §3 names that exist ∪ any not-landed copy's; unreadable: the §3 list). Exit 0 declared · 3
+undeclared · 1 unreadable.
+
+Schema check everywhere: **major** of `projection.schema` must be 1 (`String(schema).split('.')[0] === '1'`).
