@@ -141,3 +141,18 @@ fixes.
 - Remote-side (only when `gh auth status` succeeds, else `unobservable`): branch protection, required PRs,
   GitHub environments, PR merge styles used ("Merge pull request #").
 - Invariant 3 over full history against the current branch names.
+
+## Amendment 1 (after U2/U4 returned) — resolution and `remote`
+
+**Resolving the copy in force** — one algorithm, used by the engine's `status`, `checkpoint-on-compact.sh` and
+`house-branches.sh`:
+1. Working-tree copy present → read its `projection.integration` (+ `projection.remote`); take the copy at
+   `<integration>` (local branch first, then `<remote>/<integration>`). Found → that copy wins (warn if it
+   differs from the working tree). Not found → the declaration has not landed yet → **undeclared**, with a note.
+2. No working-tree copy → **self-confirming search**: for each name in the §3 list, a copy at that branch
+   (local, then `origin/`) is accepted only if its own `projection.integration` names that same branch.
+   (Covers a work branch forked before the declaration landed.)
+3. Nothing found → undeclared.
+
+**`projection.remote`** is added (default `"origin"`), so readers resolve remote tips without parsing the model.
+Schema stays `1` (additive; readers treat a missing `remote` as `"origin"`).
