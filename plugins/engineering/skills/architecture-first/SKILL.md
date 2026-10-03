@@ -23,6 +23,7 @@ Each of these is the model trying to *route around* the design instead of *evolv
 - Widening a type to `any`/`unknown`, or **casting**, to silence a design mismatch.
 - Bumping a **timeout, retry count, limit, or sleep** to mask a structural problem.
 - A `// HACK` / `// TODO` / "temporary workaround" with no design behind it.
+- **Backwards compatibility nobody asked for** — a deprecated alias, a shim that translates the old call, a stub left at the old name or path, a re-export so old imports keep resolving, a reader that accepts both the old and the new shape, a "for now" deprecation window. Each one keeps two shapes alive where the change meant to leave one, and it is a decision about *other people's* code and installs — so it is the user's, not yours. Make the clean break the default and **ask, as its own explicit question**, whether anything existing needs a transition (who, and for how long). A compat layer mentioned in passing inside a bigger proposal has not been asked about. (A **migration** that moves existing state to the new shape is not this — it is part of the change and is owed.)
 - A **hardcoded visual value** — a raw hex, a magic `px`, a hand-typed `200ms ease`, a copy-pasted card, a style reach-in across a component boundary (`::ng-deep`, `:global`, `>>>`), an `!important`, a one-off `variant` boolean. Every smell above has a styling twin: a raw colour **is** a magic value, a duplicated card **is** copy-paste, and a style reach-in **is** reaching into another module's internals. It is worse there, because CSS has no compiler to catch the drift. See `bespunky-design-system:design-system-first`.
 
 If your next edit is one of these, stop — the design is missing something. Run the loop.
@@ -58,6 +59,7 @@ Make the cost legible in the proposal:
 
 - the **seam(s)** affected and the **target shape**;
 - the **migration / rollout steps** — and whether it can land incrementally;
+- **what it breaks for existing consumers** (old names, paths, flags, contracts, installs) — stated as a break, with the question *"does anything existing need a transition, or is a clean break fine?"* asked on its own. Never answer it yourself by building an alias, shim or stub;
 - the **blast radius** — what depends on what's changing;
 - the **debt it removes or avoids**, versus the debt a shortcut would incur.
 
@@ -108,7 +110,7 @@ The recognition instinct is **always-on** — every time you write something, as
 
 These sentences mean the design is missing something — never act on them, run the loop instead:
 
-> "I'll just add an `if` for this case." · "I'll hardcode this for now." · "Let me copy this and tweak it." · "I'll add a flag so it also does Y." · "Let me cast / widen the type to make it compile." · "I'll bump the timeout." · "I'll catch and ignore this error." · "Good enough, the symptom's gone."
+> "I'll just add an `if` for this case." · "I'll hardcode this for now." · "Let me copy this and tweak it." · "I'll add a flag so it also does Y." · "Let me cast / widen the type to make it compile." · "I'll bump the timeout." · "I'll catch and ignore this error." · "Good enough, the symptom's gone." · "I'll keep the old name working too." · "I'll leave a shim / alias / stub so nothing breaks."
 
 ## Done criteria
 
@@ -118,6 +120,7 @@ These sentences mean the design is missing something — never act on them, run 
 - No duplicated logic — shared behavior is extracted to one place.
 - New behavior is reachable as a natural case of the design, **without** a flag.
 - Any refactor was designed and confirmed before implementation.
+- **No unrequested backwards compatibility** — every alias, shim, stub, re-export or deprecation window that ships was explicitly asked about and wanted by the user; otherwise the old shape is gone.
 - Coupling and duplication did not increase.
 - **No new hardcoded visual value** — every colour, space, radius, type step, elevation, duration and easing came from the design system's tokens, and any UI pattern that appeared a second time was **promoted** into the design system rather than copied (`bespunky-design-system:design-system-first`).
 - Any code generic enough to serve other projects was **extracted to the shared libraries** (when reachable) or made extraction-ready and **staged as a candidate** (when sandboxed) via the house mechanism — never left inlined.

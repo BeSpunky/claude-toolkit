@@ -73,6 +73,7 @@ A solo throwaway project doesn't need a release pipeline or multi-env configs (*
 
 - Keep publish/deploy credentials in CI secrets, never in committed config.
 - A release pipeline that isn't run in CI drifts from "works locally" — run it where it ships.
+- A deprecation cycle by default. A breaking change ships as a breaking change (a major bump, or the project's equivalent); an alias, shim or transition window for the old surface is added only when the user, asked explicitly, says existing consumers need one.
 
 ---
 

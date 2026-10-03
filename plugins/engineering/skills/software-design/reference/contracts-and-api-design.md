@@ -50,6 +50,14 @@ For the deeper naming rules — **name by purpose not architectural role** (no `
 
 **Why.** *Abstractions must never trap* — remove burden without removing control; never strand a consumer the design didn't anticipate.
 
+## Changing a contract — break cleanly, and ask before keeping the old one
+
+**What.** When a contract changes (a renamed function or flag, a moved path, a new shape), the default is a **clean break**: change the contract, update every consumer you can reach in the same change, and say plainly what breaks for the ones you can't. Keeping the old surface working — an alias, a shim that translates the old call, a re-export from the old path, a reader that accepts both shapes, a deprecation window — is **not** the default. When you find yourself considering one, **ask the user, as its own explicit question**, whether anything existing needs it, who, and for how long.
+
+**Why.** *Everything is a black box* — a contract kept in two shapes is two contracts, and the old one is the half nobody is designing any more. Whether outside consumers need a transition is a fact about them that you cannot see from the code; guessing "yes" silently ships surface the user never chose to support. A **migration** that moves existing state onto the new shape is different: it completes the change rather than preserving the old contract.
+
+---
+
 ## When NOT to over-design
 
 An internal helper used in one place needs far less ceremony than a published, long-lived API — match rigor to **reach and lifetime** (`architect-mentality` → *Know when not to do it*).
@@ -59,6 +67,7 @@ An internal helper used in one place needs far less ceremony than a published, l
 - Leaking internals through the contract (returning a mutable internal structure, exposing a field that should be private) — you can never change them again.
 - "Convenience" overloads and optional flags that make behavior unpredictable.
 - An over-broad initial surface — every public thing is a future breaking change waiting to happen.
+- Backwards compatibility by default — an alias, shim or stub "so nothing breaks" that the user never asked for. Ask first (see *Changing a contract*).
 
 ---
 

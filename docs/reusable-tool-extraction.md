@@ -121,7 +121,7 @@ Replace the local lib with the published public-npm package; close the loop. Run
 - **Step 1** — `adopt-extracted <lib>`: adds the package dependency (`yarn add @bespunky/<name>` from public npm — no registry wiring, per the `nx-enso` precedent §6), **rewrites imports** from the local TS path alias → the package (best-effort module-specifier codemod), and **keeps the local lib**; marker → `adopting`.
 - **Verify** — build the project to confirm the package works.
 - **Step 2** — `adopt-extracted <lib> --finalize`: confirms the dep is present, then **removes the local lib** (project, files, tsconfig path alias). Loop closed.
-- **`--keepShim`** — one-step staged migration instead: the lib becomes `export * from '@bespunky/<name>'` and stays; old import paths keep working.
+- **`--keepShim`** — one-step staged migration instead: the lib becomes `export * from '@bespunky/<name>'` and stays; old import paths keep working. This is a backwards-compatibility layer: use it only when the user, asked explicitly, says existing call sites need a transition.
 - **Code:** `nx-tools/src/generators/adopt-extracted/`.
 - ⚠️ **Untested end-to-end**; the import codemod is best-effort — review the diff and the build before `--finalize`.
 
