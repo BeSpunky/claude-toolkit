@@ -1,4 +1,11 @@
-# voice-band — decision 
+---
+status: concluded
+concluded: 2026-10-03
+summary: A voice band mod in bespunky-voice shows what is said and heard, live, with Replay and Stop, as a view over truthful runtime state; one voice.sh stop ends speech and recording on every cancel path.
+tags: [voice, mod, hooks-module, ui, cancel, replay]
+---
+
+# voice-band — decision
 
 Brief: [`BRIEF.md`](BRIEF.md).
 
