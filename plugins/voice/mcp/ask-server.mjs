@@ -21,6 +21,7 @@
 // lives in answer.mjs. Transport: newline-delimited JSON-RPC 2.0 over stdio.
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { classifyIntent, matchOption } from './answer.mjs';
@@ -28,6 +29,9 @@ import { classifyIntent, matchOption } from './answer.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SPEAKER = join(HERE, '..', 'scripts', 'speaker.sh');
 const LISTEN = join(HERE, '..', 'scripts', 'listen.sh');
+// Reported to the client as serverInfo.version — the plugin's own release, read
+// rather than restated so the two can never drift.
+const VERSION = (() => { try { return JSON.parse(readFileSync(join(HERE, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version; } catch { return '0.0.0'; } })();
 const MAX_REPEATS = 2; // "say that again" is honoured this many times per question
 
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
@@ -71,6 +75,19 @@ const TOOL = {
 // ---- an ask in flight: its child processes, its progress, its cancellation --
 // One microphone, one speaker: a new ask supersedes any still running.
 const inflight = new Map(); // JSON-RPC request id → Ask
+
+// A cancel silences the speaker through `speaker.sh stop`. That stop must LAND
+// before the next question is spoken — run concurrently, it can read the pidfile
+// after the new question wrote it and silence a question nobody then hears.
+// Every `say` waits for the stop in flight, if any.
+let silencing = Promise.resolve();
+function silenceSpeaker() {
+  silencing = new Promise((resolve) => {
+    const c = spawn('bash', [SPEAKER, 'stop'], { stdio: 'ignore' });
+    c.on('error', resolve);
+    c.on('close', resolve);
+  });
+}
 
 class Ask {
   constructor(id, progressToken) {
@@ -118,7 +135,7 @@ class Ask {
     this.cancelled = why;
     for (const c of this.children) { try { process.kill(-c.pid, 'SIGTERM'); } catch { /* already gone */ } }
     // The utterance belongs to the speaker, not to us — ask it to stop.
-    spawn('bash', [SPEAKER, 'stop'], { stdio: 'ignore', detached: true }).unref();
+    silenceSpeaker();
   }
 }
 
@@ -134,6 +151,8 @@ export async function askByVoice({ question, options }, ask) {
   for (let round = 0; ; round++) {
     // Speak — the question exactly as Claude phrased it.
     ask.progress('🔊 Asking…');
+    await silencing;
+    if (ask.cancelled) return cancelledResult(ask.cancelled);
     const spoke = await ask.run([SPEAKER, 'say', '--wait', question]);
     if (ask.cancelled) return cancelledResult(ask.cancelled);
     if (spoke.code !== 0) {
@@ -189,7 +208,7 @@ function handle(line) {
       return ok(id, {
         protocolVersion: params?.protocolVersion || '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'bespunky-voice', version: '0.2.0' },
+        serverInfo: { name: 'bespunky-voice', version: VERSION },
       });
     case 'notifications/initialized':
       return; // notifications take no response
