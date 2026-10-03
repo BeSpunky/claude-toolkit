@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-03
+summary: Silero VAD decides what is speech and when it ended; whisper only transcribes speech, so room noise can no longer become words or steer end-of-speech; the listener tick clock no longer crashes on Stop.
+tags: [voice, stt, vad, whisper, hallucination, bash]
+---
+
 # voice-silero-vad — decision
 
 Brief and root cause: [`BRIEF.md`](BRIEF.md). Confirmed by the user: "yes, do it".
