@@ -5,7 +5,7 @@ import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { brandStatus } from '../hooks/_brand.tsx'
+import { brandLine } from '../hooks/_brand.tsx'
 import { isProtected, parseStatus, parseViolations, statusLine } from '../hooks/branch-status.ts'
 import type { Model } from '../hooks/branch-status.ts'
 
@@ -111,13 +111,13 @@ describe('branch status line', () => {
   test('session start pins the branch in the declared chain, with violations', async ($, on) => {
     const w = world(on, { branch: 'feat/x', status: ok(DECLARED), verify: ok({ violations: 1 }, 1) })
     await start($, w)
-    expect(w.last()).toBe(brandStatus('feat/x → development → main · ⚠ 1 violation'))
+    expect(w.last()).toBe(brandLine('feat/x → development → main · ⚠ 1 violation'))
   })
 
   test('undeclared (exit 3) and unreadable (exit 1) are honest', async ($, on) => {
     const w = world(on, { branch: 'main', status: ok(UNDECLARED, 3) })
     await start($, w)
-    expect(w.last()).toBe(brandStatus('⚠ on protected main · branch model undeclared'))
+    expect(w.last()).toBe(brandLine('⚠ on protected main · branch model undeclared'))
     expect(w.ran.some(argv => argv[2] === 'verify')).toBe(false)
   })
 
@@ -131,14 +131,14 @@ describe('branch status line', () => {
     const state: World = { branch: 'feat/x', status: ok(DECLARED), verify: ok({ violations: 0 }) }
     const w = world(on, state)
     await start($, w)
-    expect(w.last()).toBe(brandStatus('feat/x → development → main'))
+    expect(w.last()).toBe(brandLine('feat/x → development → main'))
     const verifies = () => w.ran.filter(argv => argv[2] === 'verify').length
     const before = verifies()
 
     state.branch = 'development'
     await $.prompt.submit({ text: 'hi' } as never).catch(() => undefined)
     await settle(w)
-    expect(w.last()).toBe(brandStatus("⚠ on protected development, don't commit here · development → main"))
+    expect(w.last()).toBe(brandLine("⚠ on protected development, don't commit here · development → main"))
     expect(verifies()).toBe(before)
   })
 
@@ -157,6 +157,6 @@ describe('branch status line', () => {
     state.verify = ok({ violations: 2 }, 1)
     await $.tool.call({ tool: 'Bash', command: 'git checkout main' } as never)
     await settle(w)
-    expect(w.last()).toBe(brandStatus("⚠ on protected main, don't commit here · development → main · ⚠ 2 violations"))
+    expect(w.last()).toBe(brandLine("⚠ on protected main, don't commit here · development → main · ⚠ 2 violations"))
   })
 })
