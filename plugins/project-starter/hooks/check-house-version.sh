@@ -51,6 +51,23 @@
 # worse than a missed one.
 set -uo pipefail
 
+# --- two renderings of ONE detection ---------------------------------------------------------------------------
+# Bare (as hooks.json runs it), every notice is the text below, relayed to the model. With `--json` the SAME
+# checks run, in the same order with the same exits and snoozes, and each notice is recorded instead as one
+# `{ kind, action, summary }` object — for the project-starter band (hooks/band.tsx), which shows it above the
+# prompt. The band never re-derives an ordering rule: this file is the only place they live, so the two
+# surfaces cannot disagree about when a project is behind. `action` is what the notice asks of a human:
+# `sync` (a sync is the fix), `update-toolkit` (this machine is behind — a sync here would be wrong or would
+# refuse) or `fix-mounts` (post-create failed). Every value in `summary` is one this hook already validates
+# before echoing; JSON-escaping is the only extra step. Prints `{"notices":[]}` when there is nothing to say.
+MODE=text
+[ "${1:-}" = --json ] && MODE=json
+JSON_NOTICES=''
+json_text() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'; }
+record() { JSON_NOTICES="${JSON_NOTICES:+$JSON_NOTICES,}{\"kind\":\"$1\",\"action\":\"$2\",\"summary\":\"$(json_text "$3")\"}"; }
+emit_json() { printf '{"notices":[%s]}\n' "$JSON_NOTICES"; }
+[ "$MODE" = json ] && trap emit_json EXIT
+
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 
@@ -82,9 +99,13 @@ if [ -f "$MOUNTS_SH" ]; then
     _um_paths="$(printf '%s\n' "$_um" | cut -d' ' -f1 | paste -sd' ' -)"
     _um_owners="$(printf '%s\n' "$_um" | awk '{printf "%s%s (%s)", (NR>1?", ":""), $1, $2}')"
     _um_pc="$(house_post_create "$PROJECT_DIR")"
+    if [ "$MODE" = json ]; then
+      record post-create-failed fix-mounts "Post-create most likely failed: $_um_owners not writable by $(id -un), so the project has no dependencies."
+    else
     cat <<EOF
 [bespunky-project-starter] This container's post-create most likely FAILED: $_um_owners — not writable by $(id -un), so the install into it died with EACCES and the project has no dependencies. Fix, in the project root: \`sudo chown -R "\$(id -un):\$(id -gn)" $_um_paths\`${_um_pc:+, then \`bash $_um_pc\`}. Relay this to the user.
 EOF
+    fi
   fi
 fi
 
@@ -232,6 +253,9 @@ fi
 if [ -n "$DRIFTED" ]; then
   SNOOZED_LAYERS="$(json_value "$PROJECT_DIR/.claude/house-snooze.json" declinedLayers || true)"
   if [ "$SNOOZED_LAYERS" != "$DRIFTED" ]; then
+    if [ "$MODE" = json ]; then
+      record layer-drift sync "Layer never applied: $DRIFTED. A sync adds its house files."
+    else
     cat <<EOF
 [bespunky-project-starter] This project has grown a layer its house tooling was never applied for.
 
@@ -252,6 +276,7 @@ drift — MERGE this key into \`.claude/house-snooze.json\` (gitignored) in the 
 keys already there (the other house notices snooze themselves in the same file, and overwriting it re-arms them):
 { "declinedLayers": "$DRIFTED" }
 EOF
+    fi
     exit 0
   fi
 fi
@@ -328,6 +353,13 @@ if [ -n "$AHEAD_NX" ]; then
   # reported so a further float asks the question again rather than inheriting an old "not now".
   SNOOZED_DEP="$(json_value "$PROJECT_DIR/.claude/house-snooze.json" declinedNxToolsDependency || true)"
   if [ "$SNOOZED_DEP" != "$AHEAD_NX" ]; then
+    if [ "$MODE" = json ]; then
+      if [ -n "$SYNC_CAVEAT" ]; then
+        record dependency-ahead update-toolkit "Project depends on nx-tools@$AHEAD_NX but nx-tools@$STAMPED_NX was applied, and this machine only has nx-tools@$INSTALLED_NX. Update the toolkit before syncing."
+      else
+        record dependency-ahead sync "Project depends on nx-tools@$AHEAD_NX ($AHEAD_SRC) but nx-tools@$STAMPED_NX was applied: migrations were likely skipped."
+      fi
+    else
     cat <<EOF
 [bespunky-project-starter] This project DEPENDS on newer house tooling than has been APPLIED to it.
 
@@ -355,6 +387,7 @@ gap — MERGE this key into \`.claude/house-snooze.json\` (gitignored) in the pr
 already there (the other house notices snooze themselves in the same file, and overwriting it re-arms them):
 { "declinedNxToolsDependency": "$AHEAD_NX" }
 EOF
+    fi
     exit 0
   fi
 fi
@@ -380,6 +413,9 @@ case "$DIRECTION" in
   lt)
     # The PROJECT is ahead of this machine's plugin. A sync here would DOWNGRADE the project's generated
     # files and re-stamp it backwards. Say the true thing, and say plainly that a sync is the wrong move.
+    if [ "$MODE" = json ]; then
+      record machine-behind update-toolkit "This machine's toolkit (nx-tools@$INSTALLED_NX) is older than the project's (nx-tools@$STAMPED_NX). Update the plugin; do not sync."
+    else
     cat <<EOF
 [bespunky-project-starter] This machine's house tooling is OLDER than the project's.
 
@@ -394,6 +430,7 @@ generators installed here, downgrading the project and stamping it backwards for
 The house migrations only walk FORWARD, so nothing about that is undone by the next sync from an up-to-date
 machine; it is simply a mess someone then has to unpick by hand.
 EOF
+    fi
     ;;
   *)
     # gt (the toolkit moved on) — or an unorderable/absent stamp, which means the project predates stamping (or
@@ -407,14 +444,20 @@ EOF
     if [ "$DIRECTION" = "gt" ]; then
       FROM="nx-tools@$STAMPED_NX"
       HEADLINE="The installed house tooling is NEWER than this project's generated tooling."
+      SUMMARY="The toolkit moved on: this project has nx-tools@$STAMPED_NX applied, this machine has nx-tools@$INSTALLED_NX."
     elif [ -n "$STAMPED_NX" ]; then
       FROM="nx-tools@$STAMPED_NX (not a plain numeric version, so it cannot be ordered against the installed one)"
       HEADLINE="This project's stamp and the installed house tooling DIFFER, but which is newer cannot be determined."
+      SUMMARY="This project's nx-tools@$STAMPED_NX differs from this machine's nx-tools@$INSTALLED_NX (order unknown)."
     else
       FROM="an unrecorded version (generated before house stamping existed)"
       HEADLINE="This project's generated tooling predates house stamping, so it is behind by definition."
+      SUMMARY="This project predates house stamping; this machine has nx-tools@$INSTALLED_NX."
     fi
 
+    if [ "$MODE" = json ]; then
+      record toolkit-moved sync "$SUMMARY"
+    else
     cat <<EOF
 [bespunky-project-starter] $HEADLINE
 
@@ -435,6 +478,7 @@ nothing). If they decline, record it so they are not asked again for this versio
 there (the other house notices snooze themselves in the same file, and overwriting it re-arms them):
 { "declinedNxToolsVersion": "$INSTALLED_NX" }
 EOF
+    fi
     ;;
 esac
 exit 0
