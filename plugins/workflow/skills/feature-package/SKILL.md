@@ -42,7 +42,7 @@ docs/features/2026-07-14-gift-picker/     # the package — slug matches branch 
 **The slug is the identity.** It is the *same* slug that names the branch and the worktree in [[branch-and-release]] (`feat/gift-picker`, `.claude/worktrees/gift-picker`). One name, three places. From the branch you know the slug but **not** the date, so find the package by the slug — newest match wins:
 
 ```bash
-slug=$(git branch --show-current | sed 's|^[^/]*/||')     # feat/gift-picker → gift-picker
+branch=$(git branch --show-current); slug=${branch##*/}  # the LAST path segment: feat/gift-picker, hotfix/main/gift-picker → gift-picker
 ls -d docs/features/*-"$slug" | tail -1                    # → docs/features/2026-07-14-gift-picker
 ```
 
@@ -108,7 +108,7 @@ A skill that finds itself inventing a folder for its output is a skill that has 
 2. **Write artifacts into it as they are produced**, under their conventional names. Not at the end.
 3. **Keep evidence self-ignoring** — a `.gitignore` containing `*` inside any throwaway folder, and *nothing* outside it depending on it.
 4. **Capture decisions in the user's own words**, the moment they make them, along with what was rejected and why.
-5. **At the end of the effort**, offer the user the throw: *"Keep the mocks/scratch as a record, or bin them?"* Default is bin. The conclusions stay and are committed on the feature branch, so they promote to `development` with the code they explain.
+5. **At the end of the effort**, offer the user the throw: *"Keep the mocks/scratch as a record, or bin them?"* Default is bin. The conclusions stay and are committed on the feature branch, so they land on the integration line with the code they explain.
 6. **When a feature is revisited later**, open a **new dated package** with the same slug. Read the old one first — it tells you what was already tried and rejected — and never overwrite it.
 
 ---

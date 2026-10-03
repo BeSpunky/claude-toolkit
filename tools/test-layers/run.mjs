@@ -334,6 +334,20 @@ check('a plain sync on a bare repo runs only the floor (gitignore + the stamp; e
   const got = render(plan(ctxFor(FIXTURES['HOUSE.md only (the floor stamp, no agent tooling)']()), STAMP));
   ok(got.length === 2 && got[0] === 'gitignore --layers=nx' && got[1].startsWith('house-doc ') && got[1].endsWith('--layers=nx'), `got ${got.join(' | ')}`);
 });
+// The branch model a sync RESOLVED reaches house-doc as ONE argument, spaces and JSON intact — the rendered sequence
+// reads the plan's TAB-separated fields into an array, so nothing is word-split; only control characters are refused.
+check('house-doc receives the resolved branch projection as one argument; absent → not passed', (ok) => {
+  const projection = JSON.stringify({ schema: 1, integration: 'dev', protected: ['dev', 'prod'], summary: 'dev → prod (two lines)' });
+  const tree = () => FIXTURES['HOUSE.md only (the floor stamp, no agent tooling)']();
+  const stampOf = (lines) => lines.find((l) => l.kind === 'gen' && l.generator === 'house-doc')?.args ?? [];
+  const passed = stampOf(plan(ctxFor(tree()), { ...STAMP, branchProjection: projection }));
+  ok(passed.includes(`--branchProjection=${projection}`), `got ${JSON.stringify(passed)}`);
+  ok(stampOf(plan(ctxFor(tree()), { ...STAMP, branchProjection: 'undeclared' })).includes('--branchProjection=undeclared'), 'the undeclared literal');
+  ok(!stampOf(plan(ctxFor(tree()), STAMP)).some((a) => a.startsWith('--branchProjection')), 'absent → house-doc reads the Tree');
+  let refused = '';
+  try { plan(ctxFor(tree()), { ...STAMP, branchProjection: 'a\tb' }); } catch (error) { refused = error.message; }
+  ok(/unsafe argument/.test(refused), `a TAB inside an argument is refused: ${refused}`);
+});
 check('voice is carried forward from the devcontainer marker', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['agent project with voice remembered']()), STAMP));
   const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';

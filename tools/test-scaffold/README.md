@@ -27,7 +27,7 @@ guards, gates, ordering. Not everything the scaffolder does.
 | File | Covers |
 | --- | --- |
 | `render.test.sh` | That `scaffold.sh` can **assemble its program at all**, in every mode — the one failure that precedes all the others. |
-| `preflight-gate.test.sh` | The pre-write gate: dirty tree, protected branch, detached HEAD, the no-branch-model ask, per-file untracked counting, and that several blockers are reported in one pass. |
+| `preflight-gate.test.sh` | The pre-write gate: dirty tree, detached HEAD, the protected branches of a DECLARED model (names + release globs) and of an undeclared one, the `branch-model: undeclared` signal, an unknown projection schema, `--staging` without a pre-production stage, per-file untracked counting, and that several blockers are reported in one pass. |
 | `emulators-only.test.sh` | What `tools/emulators.sh` hands `firebase emulators:start` — the derived `--only`, and that passing it does not silently disable export-on-exit. |
 | `emulator-seeds.test.sh` | The seed cascade: seeds shared from the main worktree, data isolated per stack, and a worktree never writing back into main's. |
 | `reap-ownership.test.sh` | That the reaper kills orphans and not a second, legitimately-running suite. |

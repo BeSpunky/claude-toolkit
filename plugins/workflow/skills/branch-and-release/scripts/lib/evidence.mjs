@@ -1,0 +1,237 @@
+// The investigation's raw facts (CONTRACT §6) — the input to "which model does this repo actually run?".
+//
+// Projects scaffolded under the old fixed model all HAVE development/staging/main whether they use them or not,
+// so the branch list alone proves nothing. Each fact is tagged by how it is known:
+//   observed     — read directly (refs, history, files, an authenticated API answer)
+//   inferred     — derived by a heuristic that can be wrong (a crude YAML read, a history pattern)
+//   unobservable — cannot be known from here; it becomes a question to the user, never an assumption
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { verify } from './verify.mjs';
+import { SCHEMA } from './model.mjs';
+import { detectLongLived } from './long-lived.mjs';
+import { WORKFLOW, triggerScope, deploySignals, workflowTriggers } from './workflows.mjs';
+
+const HISTORY = 400; // first-parent commits examined per line
+const RECENT_DAYS = 90; // direct commits older than this are history, not a live practice
+const DAY = 86400;
+
+export function evidence(git, top, resolved) {
+  const facts = [];
+  const fact = (area, subject, value, tag) => facts.push({ area, subject, value, tag });
+  const model = resolved.declared ? resolved.model : null;
+  const remote = model?.remote || 'origin';
+
+  // ---- branches ------------------------------------------------------------------------------------------
+  const refs = git.lines(['for-each-ref', '--format=%(refname)\t%(objectname)\t%(committerdate:iso-strict)', 'refs/heads', 'refs/remotes']);
+  for (const l of refs) {
+    const [ref, sha, date] = l.split('\t');
+    if (ref.endsWith('/HEAD')) continue;
+    fact('branches', ref.replace(/^refs\/(heads|remotes)\//, (_, k) => (k === 'heads' ? '' : 'remote:')), { tip: sha.slice(0, 12), lastActivity: date }, 'observed');
+  }
+  const names = git.branchNames(remote);
+  // Which of them are LINES: not a name list — the declared lines, conventional names, the remote default, CI
+  // push targets, and whatever repeatedly promotes into or out of those (lib/long-lived.mjs). Reasons per line.
+  const detected = detectLongLived(git, top, { model, remote, branches: names });
+  const longLived = detected.lines;
+  for (const n of longLived) fact('long-lived', n, { reasons: detected.reasons[n] }, detected.reasons[n].every((r) => r === 'declared') ? 'observed' : 'inferred');
+  const tip = (n) => git.sha(git.ref(n, remote) ?? n);
+
+  // ---- ahead/behind matrix -------------------------------------------------------------------------------
+  for (let i = 0; i < longLived.length; i++)
+    for (let j = i + 1; j < longLived.length; j++) {
+      const [a, b] = [longLived[i], longLived[j]];
+      const out = git.try(['rev-list', '--left-right', '--count', `${tip(a)}...${tip(b)}`]);
+      if (out) {
+        const [ahead, behind] = out.split(/\s+/).map(Number);
+        fact('matrix', `${a} vs ${b}`, { [`${a} ahead`]: ahead, [`${b} ahead`]: behind }, 'observed');
+      }
+    }
+
+  // ---- how each long-lived line advanced -----------------------------------------------------------------
+  const ordered = model ? [model.integration.branch, ...model.stages.map((s) => s.branch)].filter((n) => longLived.includes(n)) : longLived;
+  const upstreamOf = (n) => {
+    const i = ordered.indexOf(n);
+    return i > 0 ? ordered[i - 1] : null;
+  };
+  // Every count names its unit: COMMITS walked on a line's first-parent history, or promotion EVENTS (moves).
+  const now = Math.floor(Date.now() / 1000);
+  for (const n of longLived) {
+    const fp = git.lines(['log', '--first-parent', '-n', String(HISTORY), '--format=%H %P%x09%ct', tip(n)]).map((l) => {
+      const [shas, time] = l.split('\t');
+      return { parents: shas.split(' ').length - 1, sha: shas.split(' ')[0], time: Number(time) };
+    });
+    const merges = fp.filter((c) => c.parents > 1).length;
+    const singles = fp.filter((c) => c.parents <= 1);
+    const up = upstreamOf(n);
+    const upTip = up && tip(up);
+    const ffArrived = upTip ? singles.filter((c) => git.isAncestor(c.sha, upTip)) : [];
+    const direct = singles.filter((c) => !ffArrived.includes(c));
+    const recent = direct.filter((c) => now - c.time <= RECENT_DAYS * DAY).length;
+    fact(
+      'advancement',
+      n,
+      {
+        examinedCommits: fp.length,
+        mergeCommits: merges,
+        ffArrivedFrom: up,
+        ffArrivedCommits: ffArrived.length,
+        directCommits: { total: direct.length, [`last${RECENT_DAYS}Days`]: recent, older: direct.length - recent, newest: direct.length ? isoDay(Math.max(...direct.map((c) => c.time))) : null },
+      },
+      'inferred',
+    );
+
+    // How long the downstream line sat behind: arrival times come only from the LOCAL reflog.
+    if (up) {
+      const arrivals = reflog(git, n).filter((a) => a.kind === 'moved');
+      const upArrivals = new Map(reflog(git, up).map((a) => [a.sha, a.time]));
+      const lags = [];
+      for (const { sha, time } of arrivals) {
+        const upT = upArrivals.get(sha);
+        if (upT !== undefined && time >= upT) lags.push(time - upT);
+      }
+      if (lags.length) {
+        lags.sort((a, b) => a - b);
+        const median = lags[Math.floor(lags.length / 2)];
+        fact('lag', `${up} → ${n}`, { promotionEvents: lags.length, medianSeconds: median, maxSeconds: lags.at(-1), reading: median < 600 ? 'back-to-back (ceremony?)' : 'separated (a gate in use?)' }, 'inferred');
+      } else fact('lag', `${up} → ${n}`, 'promotion timing is not in this clone’s reflog (arrival times are local-only)', 'unobservable');
+    }
+  }
+
+  // ---- release / hotfix shapes, tags, cherry-picks -------------------------------------------------------
+  for (const n of names.filter((b) => /^(release|hotfix|releases|hotfixes)[/-]/.test(b))) fact('shapes', n, 'live branch', 'observed');
+  const mergeNames = new Set();
+  for (const s of git.lines(['log', '--all', '--merges', '--format=%s'])) for (const m of s.matchAll(/\b((?:release|hotfix)[/-][^\s'"`,]+)/g)) mergeNames.add(m[1]);
+  for (const n of mergeNames) if (!names.includes(n)) fact('shapes', n, 'named in a merge message (branch gone)', 'observed');
+
+  const tags = git.lines(['for-each-ref', '--sort=-creatordate', '--format=%(refname:short)', 'refs/tags']);
+  const series = new Map();
+  for (const t of tags) {
+    const key = t.replace(/\d+/g, '#');
+    series.set(key, (series.get(key) ?? 0) + 1);
+  }
+  for (const [key, count] of series) fact('tags', key, { count }, 'inferred');
+  for (const t of tags.slice(0, 10)) fact('tags', t, { containedIn: longLived.filter((n) => git.isAncestor(`refs/tags/${t}^{commit}`, tip(n))) }, 'observed');
+  const onALine = new Set(longLived.flatMap((n) => git.lines(['for-each-ref', `--merged=${tip(n)}`, '--format=%(refname:short)', 'refs/tags'])));
+  const loose = tags.filter((t) => !onALine.has(t));
+  if (loose.length) fact('tags', 'not on any line', { count: loose.length, examples: loose.slice(0, 5), reading: 'no long-lived line contains them — e.g. restore points, or tags on work that never landed' }, 'observed');
+
+  const picked = git.lines(['log', '--all', '--format=%H', '--grep=cherry picked from commit']);
+  fact('cherry-picks', '(cherry picked from commit …) trailers', { count: picked.length }, 'observed');
+  const prMerges = git.lines(['log', '--all', '--merges', '--format=%s', '--grep=^Merge pull request #']).length;
+  const squashLike = git.lines(['log', '--all', '--no-merges', '--format=%s']).filter((s) => / \(#\d+\)$/.test(s)).length;
+  fact('landing', 'merge commits "Merge pull request #…"', { count: prMerges }, 'observed');
+  fact('landing', 'single commits ending "(#N)" (squash/rebase PR merges)', { count: squashLike }, 'inferred');
+
+  // ---- bindings (working tree, tracked files only) -------------------------------------------------------
+  // A repo that SHIPS templates (a generator payload, vendored deps) carries files that are someone else's
+  // bindings, not its own — see `shipped()`.
+  const tracked = git.lines(['ls-files']);
+  const files = tracked.filter((f) => !shipped(f));
+  const skipped = tracked.filter((f) => shipped(f) && BINDING_LIKE.some((re) => re.test(f)));
+  for (const f of files.filter((x) => WORKFLOW.test(x))) {
+    const text = fs.readFileSync(path.join(top, f), 'utf8');
+    const triggers = workflowTriggers(text).map((t) => ({ ...t, ...triggerScope(t, longLived) }));
+    const signals = deploySignals(text);
+    fact('bindings', f, triggers.length ? { triggers, deploys: signals.length > 0, deploySignals: signals } : 'no branch/tag filters', 'inferred');
+  }
+  for (const f of files.filter((x) => /(^|\/)apphosting[^/]*\.ya?ml$/.test(x))) fact('bindings', f, 'App Hosting config', 'observed');
+  if (files.includes('firebase.json')) fact('bindings', 'firebase.json', 'present', 'observed');
+  if (files.includes('.firebaserc')) {
+    try {
+      const rc = JSON.parse(fs.readFileSync(path.join(top, '.firebaserc'), 'utf8'));
+      fact('bindings', '.firebaserc', { projects: rc.projects ?? {} }, 'observed');
+    } catch {
+      fact('bindings', '.firebaserc', 'unparseable', 'observed');
+    }
+  }
+  for (const f of files.filter((x) => ENV_FILE.test(x) && /(staging|production|prod)/i.test(path.basename(x)))) fact('bindings', f, 'environment file', 'observed');
+  if (skipped.length) fact('bindings', '(shipped templates skipped)', { count: skipped.length, examples: skipped.slice(0, 3), rule: SHIPPED_RULE }, 'observed');
+  fact('bindings', 'App Hosting backends / console-only deploy targets', 'live in the cloud console — ask', 'unobservable');
+
+  // ---- remote side ---------------------------------------------------------------------------------------
+  remoteFacts(fact, longLived);
+
+  // ---- invariant 3 over full history ---------------------------------------------------------------------
+  const probe = model ?? provisional(longLived);
+  if (probe) {
+    for (const r of verify(git, probe, { proposed: true, branches: names, longLived }).filter((x) => x.invariant === 3))
+      fact('regression', r.line, { status: r.status, reason: r.reason, ...(r.commits ? { commits: r.commits } : {}) }, model ? 'observed' : 'inferred');
+  } else fact('regression', '*', 'fewer than two long-lived lines detected — no integration/production pair to compare', 'unobservable');
+
+  return facts;
+}
+
+/** A branch's local reflog, newest first: { sha, time, kind }. Only a `moved` entry can be a promotion: a
+ *  `created` one is where the branch came into existence (branch/clone/rename) and a `committed` one was made
+ *  ON the line — counting either reads the line's birth or its own work as a promotion. */
+function reflog(git, name) {
+  return git
+    .lines(['log', '-g', '--date=unix', '--format=%H %gd%x09%gs', `refs/heads/${name}`])
+    .map((l) => {
+      const m = /^([0-9a-f]+) .*@\{(\d+)\}\t(.*)$/.exec(l);
+      if (!m) return null;
+      const kind = /^(branch: Created from|clone: from|Branch: renamed)/.test(m[3]) ? 'created' : /^commit\b/.test(m[3]) ? 'committed' : 'moved';
+      return { sha: m[1], time: Number(m[2]), kind };
+    })
+    .filter(Boolean);
+}
+
+const isoDay = (t) => new Date(t * 1000).toISOString().slice(0, 10);
+
+const ENV_FILE = /(env|environment)[^/]*$/i;
+/** What would read as a binding if it were the repo's own (used only to report what `shipped()` skipped). */
+const BINDING_LIKE = [/(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/, /(^|\/)apphosting[^/]*\.ya?ml$/, /(^|\/)firebase\.json$/, /(^|\/)\.firebaserc$/, ENV_FILE];
+
+const SHIPPED_RULE = 'template or payload files the repo ships, not bindings of its own: *.tpl / *.template, anything under node_modules/ or vendor/, and files/ or templates/ directories below a generators/ directory';
+/** True for a tracked file that is a template or payload this repo SHIPS to others (SHIPPED_RULE). */
+export function shipped(file) {
+  const segs = file.split('/');
+  if (/\.(tpl|template)$/i.test(segs.at(-1))) return true;
+  if (segs.some((s) => s === 'node_modules' || s === 'vendor')) return true;
+  const gen = segs.findIndex((s) => s === 'generators');
+  return gen >= 0 && segs.slice(gen + 1, -1).some((s) => s === 'files' || s === 'templates');
+}
+
+/** A model guessed from the detected lines alone, only to run the regression probe on an undeclared repo: the
+ *  most upstream line as integration, the most downstream as production. */
+function provisional(lines) {
+  if (lines.length < 2) return null;
+  return { schema: SCHEMA, remote: 'origin', integration: { branch: lines[0], baseline: null }, stages: [{ branch: lines.at(-1), promote: 'ff', baseline: null }], releases: null, hotfixes: null, work: { pattern: '{type}/{slug}' }, fixFlow: null, landing: { via: 'merge', prStyle: null }, tags: [] };
+}
+
+function gh(args) {
+  return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000, env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' } }).trim();
+}
+
+function remoteFacts(fact, longLived) {
+  const unobservable = (why) => {
+    for (const s of ['branch protection', 'required pull requests', 'GitHub environments', 'who pushes to protected lines']) fact('remote', s, why, 'unobservable');
+  };
+  let repo;
+  try {
+    gh(['auth', 'status']);
+  } catch {
+    return unobservable('gh is not installed or not authenticated — ask');
+  }
+  try {
+    repo = gh(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
+  } catch {
+    return unobservable('this repo has no GitHub remote gh can resolve — ask');
+  }
+  for (const b of longLived) {
+    try {
+      const p = JSON.parse(gh(['api', `repos/${repo}/branches/${b}/protection`]));
+      fact('remote', `protection: ${b}`, { protected: true, requiredPullRequests: Boolean(p.required_pull_request_reviews), requiredChecks: p.required_status_checks?.contexts ?? [], linearHistory: Boolean(p.required_linear_history?.enabled) }, 'observed');
+    } catch (e) {
+      fact('remote', `protection: ${b}`, 'not protected, or not visible to this token', 'unobservable');
+    }
+  }
+  try {
+    fact('remote', 'GitHub environments', gh(['api', `repos/${repo}/environments`, '-q', '.environments[].name']).split('\n').filter(Boolean), 'observed');
+  } catch {
+    fact('remote', 'GitHub environments', 'not visible to this token', 'unobservable');
+  }
+  fact('remote', 'who pushes to protected lines', 'not in git history — ask', 'unobservable');
+}

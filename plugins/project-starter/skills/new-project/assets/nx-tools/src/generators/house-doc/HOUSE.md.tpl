@@ -279,22 +279,22 @@ Auth and Functions callables run through the **dev-server's own origin**, not a 
 
 ## Branch & release parameters
 
-The **rules** — the mandatory `bespunky-workflow:branch-and-release` skill invocation, the Step-0 relevance check, and the four always-on promotion rules — are in [`HOUSE.rules.md`](HOUSE.rules.md), which `CLAUDE.md` imports. This section is the **project-specific parameters** those rules read.
+The **rules** — the mandatory `bespunky-workflow:branch-and-release` skill invocation, the Step-0 relevance check, and the always-on protection and promotion rules — are in [`HOUSE.rules.md`](HOUSE.rules.md), which `CLAUDE.md` imports. This section is the **project-specific parameters** those rules read.
 
-**The four branches** — work flows one way, `feature` → `development` → `staging` → `main`, each a strict ancestor of the next:
+{{#branches-declared}}
+**The branch model** — declared in `{{BRANCH_MODEL_FILE}}` (the copy on the integration line's tip is authoritative): **{{BRANCH_SUMMARY}}**.
 
-| Branch | Role |
-| --- | --- |
-| `development` | integration — all ongoing/finished work not yet promoted |
-| `staging` | pre-production / release-candidate line |
-| `main` | production / released line |
+{{BRANCH_TABLE}}
 
-{{#firebase}}
-**Deploy binding (this project):** `staging` and `main` each track a Firebase App Hosting environment — pushing either triggers an auto-rollout (`staging` → staging, `main` → production). `development` tracks **no** environment, so pushing it does **not** deploy. (Production is `main`; App Hosting's prod backend tracks it — "master" in conversation means `main` here.) The topology is set up when the repo is linked at `firebase apphosting:backends:create` (see the Firebase deploy recipe above).
-{{/firebase}}
-{{^firebase}}
-**Deploy binding (this project):** none yet — no deploy target is wired. `staging` and `main` are promotion checkpoints kept ready to bind to a deploy mechanism (Firebase App Hosting, a CI workflow, a container push, …): bind it to fire on push to `staging` for staging and `main` for production. Until then the pipeline is pure branch hygiene.
-{{/firebase}}
+New work branches off {{BRANCH_WORK_BASE}} and, by default, lands on {{BRANCH_INTEGRATION}} (unless the skill's plan says otherwise — e.g. stabilisation work on a release line); work and hotfix branches are never protected. This table is the model's **projection** — names and roles only. How each line advances, what its patterns mean and where it deploys are the model's semantics: ask the skill's engine (`branches.mjs describe`), never infer them from this table. The model changes only through the skill's change procedure, never by hand-editing the file.
+
+**Deploy bindings (this project):** if any are recorded, they live in the model (each line's, pattern's or tag's `deploys`), and `branches.mjs describe` lists them — this page cannot see them, so it does not claim any. Bindings are documentation — nothing verifies them against the deploy mechanism itself.{{#firebase}} Each Firebase App Hosting backend tracks one branch, chosen when the repo is linked at `firebase apphosting:backends:create` (see the Firebase deploy recipe above); record which line each backend tracks as that line's `deploys`.{{/firebase}}
+{{/branches-declared}}
+{{^branches-declared}}
+**The branch model is not declared yet** — there is no `{{BRANCH_MODEL_FILE}}`. Until there is, no model is assumed, and every existing branch named {{BRANCH_UNDECLARED_PROTECTED}} (locally or on the remote) is **protected**: never committed onto directly, never promoted into or out of without the user. Before the first branch or promotion action of a session, the skill investigates how this repo actually works (its branches, their history, its CI and deploy configuration) and asks the user which model it follows; declaring that model, through the skill's change procedure, writes the file and replaces this section on the next sync.
+
+**Deploy bindings (this project):** not declared. The investigation reads what it can observe ({{#firebase}}`apphosting*.yaml`, `firebase.json`, {{/firebase}}CI workflows, environment files) and asks about the rest; once declared they live in the model and `branches.mjs describe` lists them.
+{{/branches-declared}}
 
 {{#web}}
 **Serving an in-flight worktree** — the same `{{SERVE}} <app>` serves a tree you're **not** cwd'd into via `--worktree`, so an in-flight feature is testable in the real app before it's promoted, without merging it back:

@@ -81,8 +81,9 @@ export interface PlanContext {
 }
 
 /**
- * One house generator run. `args` returns argv words — each ONE shell word, never containing whitespace or
- * shell metacharacters (the plan refuses one that does), because the rendered sequence word-splits them.
+ * One house generator run. `args` returns argv words — each ONE argument, carried as one TAB-separated field of
+ * the plan and passed quoted (never word-split), so it may hold spaces; the plan refuses a TAB, newline or other
+ * control character, which would split or corrupt the line.
  *
  * `skip` is the per-step precondition: return a sentence to SKIP the step and say why; with `partial: true`
  * the sync is reported as SYNC_PARTIAL (a step that should have run did not).

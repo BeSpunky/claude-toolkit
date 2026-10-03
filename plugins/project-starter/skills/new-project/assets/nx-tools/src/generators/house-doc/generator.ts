@@ -44,6 +44,8 @@ import { SERVE_EXECUTOR } from '../_utils/dev-server';
 import { resolveWorkspaceLayout } from '../_utils/workspace-layout';
 import { detectLinking } from '../_utils/linking';
 import { houseProjectHome } from '../_utils/project-files';
+import { branchModelFromOption, readBranchModel } from '../_utils/branch-model';
+import { branchDocs } from './branch-docs';
 
 interface HouseDocSchema {
   // Render the Firebase sections. Default: auto-detect firebase.json at the workspace root.
@@ -64,6 +66,12 @@ interface HouseDocSchema {
   // (a SKILL.md typo, a README line), and demanding a multi-minute sync for a change that
   // regenerates nothing would train everyone to ignore the notice.
   pluginVersion?: string;
+  // The branch model the CALLER resolved: the projection as JSON, or `undeclared`. A sync passes it (it resolved
+  // the copy in force from git — the integration tip, local or remote — which a Tree cannot see). When present
+  // the Tree's `.bespunky/branches.json` is NOT read: that is the working copy, whose schema, existence and even
+  // location (an Nx workspace nested below the git root) may differ from the model in force. Absent → standalone
+  // use: the Tree's copy.
+  branchProjection?: string;
 }
 
 // The pointer block's bounds. START matches the opening marker's stable prefix (the marker line carries a
@@ -139,7 +147,17 @@ export default async function houseDocGenerator(
   // Cloud Functions' real home — found the way firebase-emulators finds it (an existing project wins over the
   // canonical `<appsDir>/functions`), so a project whose functions predate the layout model is described as it is.
   const functions = firebase ? houseProjectHome(tree, 'functions', `${layout.appsDir}/functions`) : undefined;
+  // THE BRANCH MODEL — the project's DECLARED one (`.bespunky/branches.json`, read through its projection only), or
+  // the protective undeclared rule when there is none. The rules used to hard-code development → staging → main,
+  // which is a model this project may never have chosen; rendering it into an always-on directive told the agent
+  // to protect, branch off and promote lines that might not exist. Read BEFORE anything is written: a model this
+  // payload cannot read (an unknown projection schema) refuses the whole generator rather than leave a half-sync.
+  const branches = branchDocs(
+    options.branchProjection !== undefined ? branchModelFromOption(options.branchProjection) : readBranchModel(tree),
+  );
+  Object.assign(flags, branches.flags);
   const tokens: Record<string, string> = {
+    ...branches.tokens,
     DS_ROOT: dsRoot,
     PM: packageManager,
     SERVE: serve,

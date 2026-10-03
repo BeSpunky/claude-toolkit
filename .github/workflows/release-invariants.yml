@@ -29,8 +29,8 @@ name: release invariants
 
 on:
   push:
-    # The house pipeline is feature → development → staging → main, and drift matters at every integration
-    # point, not only the last one.
+    # THIS repo's current long-lived lines (its own declared branch model, not a toolkit default) — drift
+    # matters at every integration point, not only the last one. Update this list if the model changes.
     branches: [main, development, staging]
   pull_request:
   workflow_dispatch:

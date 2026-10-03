@@ -3,7 +3,8 @@
 
 Back after a break? Ask "where did I leave off?" and project-standing works it out from git and feature packages
 Context getting long? Say "hand this off" to write a baton a fresh session can resume from
-Unrelated requests get their own git worktree off development automatically, so branches never mix
+Unrelated requests get their own git worktree off your integration branch automatically, so branches never mix
+Trunk, staged, gitflow or maintained releases? Say "simplify our branches" and Claude checks CI and history before proposing a branch model
 Every effort's notes, mocks and decisions live in docs/features/<date>-<slug>/, next to its branch
 Big task? Claude can split it into subagents running in parallel; you can set the agent budget
 Testing a server? The house rule binds a random port, so the dev server you started by hand is never clobbered

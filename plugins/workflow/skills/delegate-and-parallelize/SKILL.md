@@ -204,7 +204,7 @@ Delegates **gather and execute**. You **decide**. The line is not about difficul
 - **The decision itself** — which design, which tradeoff, which of the options. An agent can research three approaches and report them; choosing is yours, because you are the one holding what the user actually wants.
 - **Interpreting the user's intent.** The agent never heard them.
 - **The final synthesis.** Findings from six agents are six findings, not an answer. Reconciling them — including noticing where two of them contradict — is the job you kept.
-- **Anything human-gated.** The three promotion gates, a release, a destructive or outward-facing action. A gate that a subagent can walk through is not a gate.
+- **Anything human-gated.** The branch model's gates (landing, every promotion), a release, a destructive or outward-facing action. A gate that a subagent can walk through is not a gate.
 - **Anything you cannot verify.** If you would not be able to tell a good result from a plausible one, delegating it does not produce a result — it produces a claim.
 
 ---

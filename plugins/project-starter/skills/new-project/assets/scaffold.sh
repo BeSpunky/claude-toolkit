@@ -40,7 +40,8 @@
 #   --local installs @bespunky/nx-tools from the WORKING TREE (npm pack) instead of the registry — for
 #           developing the toolkit itself, where the version under test is not published yet.
 #
-#   --staging (scaffold or sync) additionally scaffolds the staging environment bundle; requires --firebase.
+#   --staging (scaffold or sync) additionally scaffolds the staging environment bundle; requires --firebase. A sync
+#             refuses it when the project's DECLARED branch model has no pre-production stage to deploy it from.
 #   --ensure=<csv> brings layers into being — which ones each mode can create comes from the layer registry
 #                  (assets/layers.sh). Everything else is DETECTED, never ensured. The Nx floor is always
 #                  ensured; a scaffold also ensures whatever the requested layers require.
@@ -100,6 +101,11 @@ ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=house-mounts.sh
 . "$ASSETS_DIR/house-mounts.sh"
 HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_post_create)"
+# The project's DECLARED BRANCH MODEL (.bespunky/branches.json → its `projection`): which lines are protected, and
+# whether a model is declared at all. Rendered by value for the same reason.
+# shellcheck source=house-branches.sh
+. "$ASSETS_DIR/house-branches.sh"
+HOUSE_BRANCHES_FNS="$(house_branches_fns)"
 
 # The command line is the first place anyone looks, and until now it was the one place that said nothing:
 # `--help` was answered with "unknown flag", and a bare invocation printed a raw bash parameter-expansion
@@ -151,7 +157,8 @@ USAGE
                     A sync refuses both: an existing workspace's layout and linking are DETECTED.
   --firebase        Include the Firebase layer (emulator suite, Cloud Functions app, devcontainer wiring);
                     the same as --ensure=firebase.
-  --staging         Also scaffold the staging environment bundle. Requires --firebase.
+  --staging         Also scaffold the staging environment bundle. Requires --firebase. A sync refuses it
+                    when the declared branch model has no pre-production stage to deploy it from.
   --voice           Bridge the host's audio (WSLg or native PulseAudio/PipeWire) into the devcontainer
                     and provision bespunky-voice.
   --local           Install @bespunky/nx-tools from the WORKING TREE (npm pack) instead of the registry.
@@ -1147,8 +1154,8 @@ fi
 # `nx migrate --run-migrations --create-commits` stages with `git add -A` and commits onto whatever branch HEAD
 # is. So a DIRTY TREE gets welded into a migration commit — this is how one project's in-flight libraries, its
 # functions app and its docs ended up inside a commit named after a devcontainer marker file, silently, under a
-# run that reported SYNC_OK. And on a PROTECTED BRANCH the ladder lands its commits directly on `development`,
-# which the house branch rules call non-negotiable never to do — performed by the house's own tooling, on the
+# run that reported SYNC_OK. And on a PROTECTED BRANCH the ladder lands its commits directly on a protected line
+# (`development`, `main`, …), which the house branch rules call non-negotiable never to do — performed by the house's own tooling, on the
 # user's behalf, without asking.
 #
 # Sync is also the command you run after being away, which is exactly the state where a tree is most likely to
@@ -1160,13 +1167,24 @@ fi
 # ago. The session driving the sync knows all of it. So preflight answers exactly one question — is it safe to
 # write? — and hands the decision back, in a form an agent can act on:
 #
-#   refuse  a blocking state with a required fix   (dirty tree, protected branch, detached HEAD, downgrade)
-#   ask     genuinely ambiguous, no correct default (real history on a lone 'main' — no branch model yet)
+#   refuse  a blocking state with a required fix   (dirty tree, protected branch, detached HEAD, downgrade,
+#           an unreadable branch model, --staging with no pre-production stage)
+#   signal  a fact the driving session acts on, which blocks nothing by itself ('branch-model: undeclared')
 #
-# The ASK verdict is why this is not simply a stricter refusal. A repo whose only branch is 'main' might be one
-# that has never adopted the branch model, or one where 'main' IS the working branch. Both are ordinary, and
-# guessing either way is wrong for the other half of the world. A repo with NO COMMITS is not ambiguous — it is
-# new, and being asked about a branch model while creating an empty project would be absurd.
+# WHICH BRANCHES ARE PROTECTED IS DECLARED, NOT INFERRED. The project's branch model lives in
+# .bespunky/branches.json, read through house-branches.sh (its derived `projection` only, from the integration
+# line's tip). Declared → its protected lines and release-line globs are refused, and the remedy names its own
+# integration line. Undeclared → every name the toolkit ever forced, plus gitflow's, is protected — everything
+# protective, nothing assumed. This replaced a heuristic ("a 'development' branch exists, so the house model was
+# adopted") that was wrong for every model but one, and right only by accident for projects forced into it.
+#
+# The undeclared state used to be an ASK ('no-branch-model') for one case: real history on a lone 'main', which
+# might be a project that never adopted a model, or one where 'main' IS the working line. That ambiguity is real
+# and still not this script's to resolve — but it is no longer resolved by a yes/no about this one run. It is
+# resolved by DECLARING the model: the session investigates the repository (bindings, history, shapes) and asks
+# the user, through the workflow plugin's branch-and-release skill. So the script reports the absence as a
+# SIGNAL, and protects in the meantime. A repo with NO COMMITS gets neither: it is new, and being asked about a
+# branch model while creating an empty project would be absurd.
 #
 # NO OVERRIDE FLAG, deliberately. Every resolution — commit it, stash it, branch and commit there, sync on a new
 # branch, open a worktree — ends with a clean tree on a working branch. An --allow-dirty would exist for exactly
@@ -1178,20 +1196,38 @@ fi
 # fire AFTER this gate — an Nx workspace and an nx binary — stay where they are on purpose: '--ensure' may
 # create what they check, so they are post-ensure conditions, not pre-write ones, and aggregating them here
 # would report a missing nx.json that the run was about to create.
+# THE BRANCH MODEL, RESOLVED ONCE PER RUN (house-branches.sh). Two consumers read this one result: the preflight
+# (which lines this run may not commit onto) and house-doc (which model the house docs render) — house-doc is
+# handed the projection rather than reading the Tree, because the Tree is the working copy, and the working copy
+# is not the model in force: its schema may differ from the integration tip's, a branch cut before the declaration
+# carries none, and an Nx workspace nested below the git root would look for .bespunky/ in the wrong directory.
+# '_bm_projection' is what the planner passes on: the projection JSON (declared), the literal 'undeclared', or
+# empty (unreadable — a sync has already refused; a standalone house-doc then refuses on the Tree itself).
+BRANCH_MODEL_BLOCK="
+$HOUSE_BRANCHES_FNS
+_bm=\"\$(house_branch_model)\"
+_bm_get() { printf '%s\n' \"\$_bm\" | sed -n \"s/^\$1=//p\"; }
+_bm_state=\"\$(_bm_get state)\"
+case \"\$_bm_state\" in
+  declared)   _bm_projection=\"\$(_bm_get projection)\" ;;
+  undeclared) _bm_projection='undeclared' ;;
+  *)          _bm_projection='' ;;
+esac"
+
 PREFLIGHT_CHECKS="
+$BRANCH_MODEL_BLOCK
 _REFUSE_CODES=''
 _REFUSE_TEXT=''
-_ASK_CODES=''
-_ASK_TEXT=''
+_SIGNAL_TEXT=''
 _refuse() {
   _REFUSE_CODES=\"\$_REFUSE_CODES \$1\"
   _REFUSE_TEXT=\"\$_REFUSE_TEXT
 \$2\"
 }
-_ask() {
-  _ASK_CODES=\"\$_ASK_CODES \$1\"
-  _ASK_TEXT=\"\$_ASK_TEXT
-\$2\"
+# A SIGNAL blocks nothing. It is printed whether or not the run is refused, so the session learns the fact either way.
+_signal() {
+  _SIGNAL_TEXT=\"\$_SIGNAL_TEXT
+\$1\"
 }
 # UNWRITABLE MOUNT POINTS — a directory this run must write into exists but is not this user's to write. The
 # classic cause: a devcontainer mounts a named volume at <ws>/node_modules, Docker creates the mount point
@@ -1255,11 +1291,53 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   # and no history to strand. Every branch question below presupposes a HEAD.
   if git rev-parse --verify HEAD >/dev/null 2>&1; then
     _branch=\"\$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')\"
-    # The house branch model, in one place. 'master' is included because a repo that predates the rename still
-    # has production bound to it, and landing nine migration commits there is the same act by another name.
-    _structure=0
-    git show-ref --verify --quiet refs/heads/development 2>/dev/null && _structure=1
-    git show-ref --verify --quiet refs/remotes/origin/development 2>/dev/null && _structure=1
+    # THE BRANCH MODEL — what is protected here, and whether anyone has said. Resolved once, above the gate
+    # (BRANCH_MODEL_BLOCK; see house-branches.sh for which copy is authoritative); this block only acts on it.
+    _bm_notes=\"\$(_bm_get note | sed 's/^/           note: /')\"
+    [ -n \"\$_bm_notes\" ] && _bm_notes=\"
+\$_bm_notes\"
+    # THE EFFECTIVE PROTECTED SET, in every state — the resolver's, never rebuilt here from the state word. Rebuilding
+    # it ('undeclared' → the fallback names) is how a not-yet-landed declaration's own protected lines were dropped,
+    # and a sync committed onto a production line the working copy named.
+    _bm_protected=\"\$(_bm_get protected)\"
+    _bm_patterns=\"\$(_bm_get protectedPatterns)\"
+    _bm_shown=\"\$(printf '%s' \"\$_bm_protected \$_bm_patterns\" | sed 's/^ *//; s/ *\$//; s/  */, /g')\"
+    # NOT LANDED (undeclared, but the tree carries a declaration): the integration line that copy names — where it
+    # must land before it is in force, and so the base every remedy below points at. Empty when nothing is declared.
+    _bm_pending=\"\$(_bm_get pending)\"
+    if [ -n \"\$_bm_shown\" ]; then _bm_shown_line=\"every branch named \$_bm_shown is protected\"
+    else _bm_shown_line='no branch here is protected by name (none of the names it would protect exists)'; fi
+    case \"\$_bm_state\" in
+      declared)
+        _bm_integration=\"\$(_bm_get integration)\"
+        _bm_summary=\"\$(_bm_get summary)\"
+        _signal \"[preflight] branch-model: declared — \$_bm_summary   (read from \$(_bm_get source))\$_bm_notes\"
+        ;;
+      unreadable)
+        # NO GUESSING past a declaration this toolkit cannot read: an unknown schema major means a newer engine
+        # wrote it, and the protected set it encodes is exactly what this run would be guessing at.
+        _refuse branch-model-unreadable \"[preflight] branch-model-unreadable: .bespunky/branches.json (read from \$(_bm_get source)) cannot be read with certainty:
+           \$(_bm_get reason).
+           It decides which branches this sync may commit onto, so the run stops rather than guess.
+           Update the toolkit (an unknown schema), or repair the declaration through the branch-and-release
+           skill's change procedure — never by hand: its projection is derived.\$_bm_notes\"
+        ;;
+      *)
+        if [ -n \"\$_bm_pending\" ]; then
+          _signal \"[preflight] branch-model: undeclared (not landed)
+           This tree carries a branch model (.bespunky/branches.json) naming '\$_bm_pending' as its integration
+           line, but it has not landed on '\$_bm_pending' yet — a declaration is not in force until it does.
+           Until then \$_bm_shown_line.
+           Land the declaration on '\$_bm_pending' through the bespunky-workflow:branch-and-release skill.\$_bm_notes\"
+        else
+          _signal \"[preflight] branch-model: undeclared
+           This project declares no branch model (.bespunky/branches.json), so nothing here says which lines
+           exist or where work lands. Until one is declared, \$_bm_shown_line.
+           The model is not this script's to decide: investigate the repository and ASK the user — the
+           bespunky-workflow:branch-and-release skill carries the procedure (choosing a branch model).\$_bm_notes\"
+        fi
+        ;;
+    esac
     if [ \"\$_branch\" = 'HEAD' ]; then
       # Detached HEAD: --create-commits would produce commits no branch points at. They are unreachable the
       # moment anything else is checked out, and nothing in the run would say so.
@@ -1267,35 +1345,48 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            The migration ladder commits as it goes, and commits made here belong to no branch — they become
            unreachable as soon as anything is checked out.
            Check out a branch (or create one at this commit) and re-run.\"
-    elif [ \"\$_structure\" = '1' ]; then
-      # ONLY PROTECT WHAT EXISTS. The refusal is derived from the repository's own state, not declared: a
-      # 'development' branch is the evidence that this project has adopted the branch model and therefore has
-      # something to violate. This is what keeps a fresh scaffold and a first-time retrofit from being refused
-      # by a rule about a structure they do not have yet — one rule, no mode conditional in the one command
-      # sequence that exists specifically so scaffold and sync cannot drift.
-      case \"\$_branch\" in
-        development|staging|main|master)
-          _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', and this project has
-           adopted the house branch model ('development' exists).
-           The migration ladder commits onto the current branch, so this run would commit directly onto a
-           branch that advances only by merging the branch below it.
-           Open a worktree off 'development' and sync there, then promote it like any other change.\"
-          ;;
-      esac
     else
-      case \"\$_branch\" in
-        main|master)
-          # Genuinely ambiguous, and the one place this gate asks instead of deciding. No 'development' exists,
-          # so either the branch model was never adopted (and '\$_branch' is simply where work happens) or it is
-          # about to be. Refusing would block an ordinary retrofit; proceeding would land migration commits on
-          # what may be the production line. Neither is a safe default, so the human chooses.
-          _ask no-branch-model \"[preflight] no-branch-model: HEAD is on '\$_branch' and no 'development' branch
-           exists, so this project has no house branch structure to check against.
-           The migration ladder will commit onto '\$_branch'. That is fine if it is where this project works,
-           and wrong if it is the production line.
-           Decide once: sync here, or establish the branch structure first and sync off 'development'.\"
-          ;;
-      esac
+      # ONE RULE FOR BOTH STATES: is HEAD a protected line? Only the SET differs — the declaration's, or the
+      # undeclared fallback. Globs (release/*) are matched with 'case', never expanded against the filesystem.
+      _bm_hit=''
+      for _n in \$_bm_protected; do [ \"\$_branch\" = \"\$_n\" ] && _bm_hit=\"\$_n\"; done
+      set -f
+      for _p in \$_bm_patterns; do case \"\$_branch\" in \$_p) _bm_hit=\"\$_p\" ;; esac; done
+      set +f
+      if [ -n \"\$_bm_hit\" ]; then
+        if [ \"\$_bm_state\" = 'declared' ]; then
+          _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', a protected line ('\$_bm_hit') of this
+           project's declared branch model: \$_bm_summary.
+           The migration ladder commits onto the current branch, so this run would commit directly onto a
+           line that advances only by the model's own landings and promotions.
+           Open a worktree off '\$_bm_integration' (the integration line) and sync there, then land it like
+           any other change: a sync is toolkit maintenance, so its changes land on the integration line like
+           any work — a fix meant for '\$_branch' itself goes through the branch-and-release skill.\"
+        elif [ -n \"\$_bm_pending\" ]; then
+          _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', protected by this tree's branch model
+           (.bespunky/branches.json), which names '\$_bm_pending' as its integration line but has not landed
+           there yet — so every branch named \$_bm_shown is protected until it does.
+           The migration ladder commits onto the current branch, so this run would commit directly onto a
+           protected line. Land the declaration on '\$_bm_pending' first (the branch-and-release skill), then
+           open a worktree off '\$_bm_pending' and sync there.\"
+        else
+          _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', and this project declares no branch model —
+           so every branch named \$_bm_shown is protected until it does.
+           The migration ladder commits onto the current branch; with no model, nothing says whether
+           '\$_branch' is where work happens or the production line, and landing a stack of commits on the
+           latter cannot be taken back. Open a worktree off '\$_branch' and sync there; where it lands waits
+           for the model (see 'branch-model: undeclared').\"
+        fi
+      fi
+    fi
+    # --staging scaffolds an environment bundle meant to deploy from a PRE-PRODUCTION stage. A declared model with
+    # none (trunk, two-line, gitflow, maintained releases) has nothing for it to bind to, and the bundle would document a
+    # deploy line the project does not have. Undeclared → no basis to refuse on; the bundle behaves as it always has.
+    if [ '$STAGING' = '1' ] && [ \"\$_bm_state\" = 'declared' ] && [ -z \"\$(_bm_get preproduction)\" ]; then
+      _refuse staging-without-stage \"[preflight] staging-without-stage: --staging adds a staging environment bundle, deployed from a
+           pre-production stage — and this project's declared branch model has none: \$_bm_summary.
+           Either drop --staging, or add a pre-production stage to the model first (the branch-and-release
+           skill's change procedure: verify, risks, confirm), then re-run.\"
     fi
   fi
 fi"
@@ -1307,21 +1398,18 @@ fi"
 # The FIRST LINE IS THE CONTRACT: one token plus space-separated codes, in the same vocabulary as SYNC_OK and
 # SYNC_PARTIAL, so the /sync command can branch on it without parsing prose. The human detail follows.
 PREFLIGHT_VERDICT="
-if [ -n \"\$_REFUSE_CODES\" ] || [ -n \"\$_ASK_CODES\" ]; then
-  if [ -n \"\$_REFUSE_CODES\" ]; then
-    echo \"SYNC_REFUSED:\$_REFUSE_CODES\" >&2
-  fi
-  if [ -n \"\$_ASK_CODES\" ]; then
-    echo \"SYNC_ASK:\$_ASK_CODES\" >&2
-  fi
+if [ -n \"\$_REFUSE_CODES\" ]; then
+  echo \"SYNC_REFUSED:\$_REFUSE_CODES\" >&2
   echo '[preflight] NOTHING HAS BEEN WRITTEN — the project is exactly as it was.' >&2
   if [ -n \"\$MIGRATE_FROM\" ]; then
     echo \"[preflight] This run would have migrated \$MIGRATE_FROM -> $NX_TOOLS_VERSION.\" >&2
   fi
-  [ -n \"\$_REFUSE_TEXT\" ] && echo \"\$_REFUSE_TEXT\" >&2
-  [ -n \"\$_ASK_TEXT\" ] && echo \"\$_ASK_TEXT\" >&2
+  echo \"\$_REFUSE_TEXT\" >&2
+  [ -n \"\$_SIGNAL_TEXT\" ] && echo \"\$_SIGNAL_TEXT\" >&2
   _stage refused
   exit 1
+elif [ -n \"\$_SIGNAL_TEXT\" ]; then
+  echo \"\$_SIGNAL_TEXT\" >&2
 fi"
 
 # --- run the house MIGRATIONS (sync mode) ---------------------------------------------------------------------
@@ -1882,13 +1970,15 @@ echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 # @bespunky/nx-tools src/layers/cli.js plan) derives the sequence from the registered layer descriptors:
 #   per-app steps (sync only — a scaffold's app generator composes them), then workspace steps in registry order,
 #   then house-doc LAST, ungated, because it STAMPS the layer set this run applied.
-# Each line it prints is: gen TAB generator TAB argv-words | warn TAB sentence | partial. The argv words are
-# refused at plan time unless shell-safe and free of duplicated flags, so word-splitting them here is deliberate.
+# Each line it prints is: gen TAB generator TAB arg TAB arg … | warn TAB sentence | partial. Arguments are
+# TAB-separated FIELDS, read into an array and passed quoted — never word-split — so a value may carry spaces and
+# JSON (house-doc's --branchProjection is the resolved branch-model projection). The planner refuses an argument
+# holding a TAB, newline or other control character, and a duplicated flag.
 #
 # fd 9, not stdin: nx g may read stdin, and would swallow the rest of the plan.
 PLAN_RUN_BLOCK="
 _SYNC_PARTIAL=\${_SYNC_PARTIAL:-0}
-_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM)\" || {
+_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM --branch-projection=\"\${_bm_projection:-}\")\" || {
   echo 'ERROR: the layer planner failed — no house generators were run, and nothing has been stamped.' >&2
   exit 1
 }
@@ -1896,8 +1986,10 @@ _tab=\"\$(printf '\\t')\"
 while IFS=\"\$_tab\" read -r -u 9 _kind _gen _args; do
   case \"\$_kind\" in
     gen)
-      echo \"[layers] nx g @bespunky/nx-tools:\$_gen \$_args\"
-      $NX_RUN g \"@bespunky/nx-tools:\$_gen\" \$_args ;;
+      _argv=()
+      [ -n \"\$_args\" ] && IFS=\"\$_tab\" read -r -a _argv <<< \"\$_args\"
+      echo \"[layers] nx g @bespunky/nx-tools:\$_gen \${_argv[*]+\${_argv[*]}}\"
+      $NX_RUN g \"@bespunky/nx-tools:\$_gen\" \${_argv[@]+\"\${_argv[@]}\"} ;;
     warn)
       echo \"[layers] WARNING: \$_gen\" ;;
     partial)
@@ -2009,6 +2101,9 @@ $SCAFFOLD_LAYOUT_BLOCK
 $SCAFFOLD_APP_BLOCK
 $LAYER_RESOLVE_BLOCK
 APP='$APP'
+# A sync resolved the branch model in its preflight; a scaffold has no preflight, so it resolves here (a new
+# repository: undeclared, unless a declaration was already carried in).
+$BRANCH_MODEL_BLOCK
 $PLAN_RUN_BLOCK
 # --local only: correct the manifest's temp-dir tarball spec back to the plain version BEFORE the commit, or
 # the scaffold's one commit records a file: path that exists on no machine (and is deleted moments later).
@@ -2239,8 +2334,8 @@ if [ "$INNER_RC" -ne 0 ]; then
     _st="$(sed -n 's/^stage=//p' "$SYNC_LOCK/state" 2>/dev/null | tail -1)"
     _mig="$(sed -n 's/^migrations=//p' "$SYNC_LOCK/state" 2>/dev/null | tail -1)"
   fi
-  # A PREFLIGHT REFUSAL is not a failure: it decided not to start, said why on its own first line (SYNC_REFUSED /
-  # SYNC_ASK), and wrote nothing — so there is nothing to diagnose and nothing to restore. Adding SYNC_FAILED and
+  # A PREFLIGHT REFUSAL is not a failure: it decided not to start, said why on its own first line (SYNC_REFUSED),
+  # and wrote nothing — so there is nothing to diagnose and nothing to restore. Adding SYNC_FAILED and
   # restore advice on top of it told the reader a run had died and needed undoing.
   [ "$_st" = "refused" ] && exit "$INNER_RC"
   echo "" >&2
