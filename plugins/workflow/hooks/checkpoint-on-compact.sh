@@ -37,38 +37,63 @@ slug="${branch##*/}"
 
 # --- which lines are protected? the DECLARED branch model, never a hard-coded list -----------------------------
 # The model lives in .bespunky/branches.json; readers like this one parse ONLY its derived `projection` block
-# (names + globs), and refuse a schema major they don't know rather than guess. The copy on the integration
-# line's tip is authoritative (the working tree's copy names that line); when that ref can't be resolved, the
-# working-tree copy stands in; when the file is absent from the tip, the repo is undeclared.
+# (names + globs), and refuse a schema major they don't know rather than guess. Which copy is in force follows
+# the toolkit's one resolution rule (reference: project-starter's assets/house-branches.sh):
+#   1. the working-tree copy names the integration line → that line's copy (local branch, else
+#      <projection.remote|origin>/<line>) is the model; the line exists but holds no copy → UNDECLARED (not landed);
+#      the line exists nowhere → the working-tree copy stands in.
+#   2. no working-tree copy → a SELF-CONFIRMING search: a copy on one of the undeclared names below counts only
+#      when it names that same branch as its integration line (a work branch cut before the model landed).
+#   3. nothing → UNDECLARED.
 # Undeclared (or no node to read JSON with — the toolkit's other hooks already rely on node) → the protective
 # fallback: every name the toolkit ever forced, plus gitflow's.
 UNDECLARED_PROTECTED="main master development develop staging"
-DECL="$PROJECT_DIR/.bespunky/branches.json"
 names="$UNDECLARED_PROTECTED"
 globs=""
-if [ -f "$DECL" ] && command -v node >/dev/null 2>&1; then
-  model="$(node - "$PROJECT_DIR" "$DECL" <<'NODE' 2>/dev/null
-const fs = require('fs'), cp = require('child_process');
-const [dir, file] = process.argv.slice(2);
+if command -v node >/dev/null 2>&1; then
+  model="$(node - "$PROJECT_DIR" "$UNDECLARED_PROTECTED" <<'NODE' 2>/dev/null
+const fs = require('fs'), path = require('path'), cp = require('child_process');
+const [dir, undeclared] = process.argv.slice(2);
+const F = '.bespunky/branches.json';
 const fail = (msg) => { console.log('ERROR\t' + msg); process.exit(0); };
+const parse = (text) => { try { const p = JSON.parse(text).projection; return p && typeof p === 'object' ? p : null; } catch { return null; } };
 const read = (text, where) => {
   let doc; try { doc = JSON.parse(text); } catch { fail(where + ' is not valid JSON'); }
   const p = doc && doc.projection;
   if (!p || typeof p !== 'object') fail(where + ' has no projection block');
-  if (p.schema !== 1) fail(where + ' has projection.schema ' + JSON.stringify(p.schema) + '; this plugin reads only schema 1 (update bespunky-workflow)');
+  if (String(p.schema).split('.')[0] !== '1') fail(where + ' has projection.schema ' + JSON.stringify(p.schema) + '; this plugin reads only schema 1 (update bespunky-workflow)');
   return p;
 };
-let p = read(fs.readFileSync(file, 'utf8'), 'the working-tree .bespunky/branches.json');
-const integ = String(p.integration || '');
 const git = (args) => cp.execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-let resolved = true;
-try { git(['rev-parse', '--verify', '--quiet', integ + '^{commit}']); } catch { resolved = false; }
-if (resolved) {
-  let tip; try { tip = git(['show', integ + ':.bespunky/branches.json']); } catch { console.log('UNDECLARED'); process.exit(0); }
-  p = read(tip, integ + ':.bespunky/branches.json');
+const ref = (branch, remote) => {
+  for (const r of ['refs/heads/' + branch, 'refs/remotes/' + remote + '/' + branch]) {
+    try { git(['rev-parse', '--verify', '--quiet', r + '^{commit}']); return r; } catch {}
+  }
+  return null;
+};
+const show = (r) => { try { return git(['show', r + ':' + F]); } catch { return null; } };
+const out = (p) => {
+  for (const n of p.protected || []) console.log('NAME\t' + n);
+  for (const g of p.protectedPatterns || []) console.log('GLOB\t' + g);
+  process.exit(0);
+};
+let wt = null; try { wt = fs.readFileSync(path.join(dir, F), 'utf8'); } catch {}
+const wp = wt === null ? null : parse(wt);
+if (wp && typeof wp.integration === 'string') {
+  const r = ref(wp.integration, typeof wp.remote === 'string' ? wp.remote : 'origin');
+  if (!r) out(read(wt, 'the working-tree ' + F));
+  const tip = show(r);
+  if (tip === null) { console.log('UNDECLARED'); process.exit(0); }
+  out(read(tip, r + ':' + F));
 }
-for (const n of p.protected || []) console.log('NAME\t' + n);
-for (const g of p.protectedPatterns || []) console.log('GLOB\t' + g);
+if (wt !== null) read(wt, 'the working-tree ' + F); // present but unreadable → fail loudly via read()
+for (const cand of undeclared.split(' ')) {
+  const r = ref(cand, 'origin'); if (!r) continue;
+  const t = show(r); if (t === null) continue;
+  const p = parse(t);
+  if (p && p.integration === cand) out(read(t, r + ':' + F));
+}
+console.log('UNDECLARED');
 NODE
 )"
   case "$model" in

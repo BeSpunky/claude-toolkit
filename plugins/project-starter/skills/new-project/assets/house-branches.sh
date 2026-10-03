@@ -32,7 +32,8 @@
 #      cut before the model was declared still finds it, and nothing is inferred from a name alone.
 #   3. the integration tip cannot be resolved at all → the working tree's copy, with a note saying so.
 #   4. nothing found → UNDECLARED.
-# The projection carries no `remote`, so step 1 resolves remote tips through `origin` only.
+# Remote tips resolve through `projection.remote` (absent → `origin`); the self-confirming search, which has no
+# projection yet to name one, uses `origin`.
 
 # The names the toolkit ever forced, plus gitflow's (CONTRACT §3): protected while a project declares no model,
 # and the candidates for the self-confirming search. A function, not a variable, so `declare -f` carries it.
@@ -55,7 +56,9 @@ if (!name(p.integration)) fail("projection.integration is not a branch name");
 for (const k of ["production", "chain", "protected", "protectedPatterns"])
   if (!Array.isArray(p[k]) || !p[k].every(name)) fail("projection." + k + " is not a list of branch names");
 const prod = new Set(p.production);
+if (p.remote !== undefined && !name(p.remote)) fail("projection.remote is not a remote name");
 say("integration=" + p.integration);
+say("remote=" + (p.remote || "origin"));
 say("summary=" + String(p.summary || p.chain.join(" -> ")).replace(/\s+/g, " "));
 say("protected=" + p.protected.join(" "));
 say("protectedPatterns=" + p.protectedPatterns.join(" "));
@@ -65,10 +68,12 @@ say("preproduction=" + p.chain.filter(b => b !== p.integration && !prod.has(b)).
 '
 }
 
-# _house_bm_ref <branch> — the ref holding that line's tip: the local branch, else origin's. Exit 1 when neither.
+# _house_bm_ref <branch> [remote] — the ref holding that line's tip: the local branch, else the remote's (default
+# origin). Exit 1 when neither.
 _house_bm_ref() {
+  local remote="${2:-origin}"
   if git rev-parse --verify -q "refs/heads/$1" >/dev/null 2>&1; then echo "refs/heads/$1"
-  elif git rev-parse --verify -q "refs/remotes/origin/$1" >/dev/null 2>&1; then echo "refs/remotes/origin/$1"
+  elif git rev-parse --verify -q "refs/remotes/$remote/$1" >/dev/null 2>&1; then echo "refs/remotes/$remote/$1"
   else return 1; fi
 }
 
@@ -79,15 +84,17 @@ _house_bm_ref() {
 #   reason=…                                unreadable only
 #   note=…                                  zero or more, human-facing
 house_branch_model() {
-  local f='.bespunky/branches.json' top wt='' integ='' ref='' json='' src='' out cand r t i
+  local f='.bespunky/branches.json' top wt='' integ='' remote='' ref='' json='' src='' out cand r t i
   local notes=()
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo 'state=undeclared'; return 0; }
   if [ -f "$top/$f" ]; then
     wt="$(cat "$top/$f")"
-    integ="$(printf '%s' "$wt" | _house_bm_parse 2>/dev/null | sed -n 's/^integration=//p' || true)"
+    out="$(printf '%s' "$wt" | _house_bm_parse 2>/dev/null || true)"
+    integ="$(printf '%s\n' "$out" | sed -n 's/^integration=//p')"
+    remote="$(printf '%s\n' "$out" | sed -n 's/^remote=//p')"
   fi
   if [ -n "$integ" ]; then
-    ref="$(_house_bm_ref "$integ")" || ref=''
+    ref="$(_house_bm_ref "$integ" "$remote")" || ref=''
   else
     for cand in $(house_branches_undeclared_protected); do
       r="$(_house_bm_ref "$cand")" || continue
@@ -109,7 +116,7 @@ house_branch_model() {
     fi
   elif [ -n "$wt" ]; then
     src='working-tree'; json="$wt"
-    [ -n "$integ" ] && notes+=("the integration line '$integ' could not be resolved (no local or origin branch), so this tree's copy of $f was read")
+    [ -n "$integ" ] && notes+=("the integration line '$integ' could not be resolved (no local or ${remote:-origin} branch), so this tree's copy of $f was read")
   else
     echo 'state=undeclared'; return 0
   fi
