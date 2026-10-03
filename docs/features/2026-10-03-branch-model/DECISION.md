@@ -213,3 +213,60 @@ The four steps stand, sharpened by the engine:
 
 Non-git VCS; monorepos with **different** branch models per project (one model per repo); enforcing anything
 server-side — the toolkit verifies and reports, it does not configure GitHub protection on its own authority.
+
+## Review round 1 — adversarial design review (2026-10-03)
+
+The user, asked whether to build: *"I will let you review it first."* A fresh reviewer with no part in the
+design found ten issues. Each was checked against the design and the code; all ten hold. What changes:
+
+1. **Which copy of the file is authoritative** (blocker). The file is committed, so every branch has its own
+   copy, which can be stale or missing. **Decision:** the file on the integration branch's tip is the model.
+   Readers resolve it with `git show <integration>:.bespunky/branches.json`, taking the integration name from
+   the local copy and warning when the two disagree. The first declaration, and every model change, lands on
+   the (new) integration line like any other change. That is the one landing that happens under the model
+   being replaced.
+2. **PR merges never fast-forward** (blocker). A required-PR `staging`/`main` can never pass `--ff-only`, and
+   one PR promotion breaks chain ancestry for good. **Decision:** how a stage advances is its own setting,
+   `promote: ff | merge | pr` (this also covers GitLab-flow stages that advance by merge). The PR merge style
+   is declared (`merge | squash | rebase`). Invariant 2 becomes *content* containment (the stage's tree equals
+   the promoted commit's tree) whenever ancestry can't hold.
+3. **Invariant 3 fails healthy gitflow.** `main`'s release merge commits never become ancestors of `develop`.
+   **Decision:** no-regression means *no non-merge commit on production that integration lacks*, by ancestry
+   or patch equivalence (`git cherry`). Merge commits are ignored.
+4. **Invariant 1 can't be checked as stated.** Fast-forwards leave no trace, squash merges look like direct
+   commits, and all history from before the model breaks the rule. **Decision:** each declared line records a
+   **baseline commit**, and checks start there. The check reads history according to the declared landing
+   style; where squash makes it unreadable, it reports *advisory* and says why. Release lines may declare that
+   direct version-bump commits are allowed.
+5. **Hotfix × upstream-first, and several maintained lines.** **Decision:** what a hotfix means now follows the
+   declared fix flow. Under upstream-first it is a work branch off integration, then cherry-picked back. The
+   hotfix pattern names its target line (`hotfix/{line}/{slug}`). A fix that cannot apply upstream (the code is
+   gone) carries a declared `Not-applicable-upstream:` trailer, which the no-regression check accepts.
+6. **The first sync after rollout would strip protection from every consumer.** Re-rendering "not declared,
+   ask" would drop "never commit onto development/staging/main" and turn every relevance check into a
+   question. **Decision:** the undeclared state renders a rule that assumes no model: *every existing
+   long-lived branch is protected, and before the first branch or promotion action of a session, investigate
+   and ask*. This asks once per session (still asking, as the user required) and keeps the repo safe in the
+   meantime.
+7. **Three parsers, three update channels, version skew.** The workflow plugin auto-updates, `nx-tools` is
+   pinned per project, and `scaffold.sh` is bash. A house project enables the workflow plugin, but house-doc
+   cannot depend on a machine's plugin path. **Decision:** the engine is the only thing that *interprets* the
+   model. When it writes the file, it also writes a flat, derived `projection` block (`integration`,
+   `protected` names and globs, `schema`): the same pattern as `layers.sh` from the layer registry. House-doc
+   and `scaffold.sh` read only that block and refuse an unknown `schema` major. `verify` fails if the
+   projection has drifted from the model. House-doc renders rules in role words plus names, never semantics.
+8. **Real models it could not express.** **Decision:** bindings (`deploys`) can attach to patterns and tags
+   as well as stages (deploy-on-tag, release branches deployed to QA); stages may advance by merge (#2); a
+   model may name its `remote` (fork-to-upstream setups), defaulting to `origin`.
+9. **Some evidence is invisible to the investigation.** Protection rules, environments and pushers need
+   authenticated `gh`; App Hosting backends often live in the console; squash-deleted branches leave no
+   trace. **Decision:** each piece of evidence is reported as *observed*, *inferred* or *unobservable*, and the
+   unobservable ones become questions to the user, never assumptions.
+10. **Trimmed.** `preset` becomes `derivedFrom` (a label for where the model started, not a live link).
+    Invariant 4 becomes a hygiene warning (long-lived maintained lines are normal). `deploys` is documented as
+    documentation, not verified. `workflow/hooks/checkpoint-on-compact.sh` joins the list of readers (it skips
+    `main|master|development|staging` by name).
+
+The reviewer's "keep as is" list matches the design's core and stands: a closed vocabulary of kinds; nothing
+writes the file without a human decision, and the engine plans and verifies but never executes; the
+no-regression history check runs during the investigation, whatever model is picked.
