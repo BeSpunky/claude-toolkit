@@ -32,6 +32,7 @@ const pkg = (over: Partial<StandingPackage> & Pick<StandingPackage, 'dir' | 'sta
   status: over.state === 'concluded' ? 'concluded' : 'in-flight',
   lastActivity: NOW - DAY,
   hasWorktree: false,
+  about: null,
   ...over,
 })
 
@@ -41,10 +42,22 @@ const STANDING: Standing = {
   now: NOW,
   repo: { lastCommit: NOW - DAY, commitAgeDays: 1, hasFeatures: true, hasRecentDoc: true },
   packages: [
-    pkg({ dir: '2026-01-01-old-live', state: 'live', lastActivity: NOW - 3 * DAY, baton: 'handoffs/2026-01-02T1200Z.md' }),
+    pkg({
+      dir: '2026-01-01-old-live',
+      state: 'live',
+      lastActivity: NOW - 3 * DAY,
+      baton: 'handoffs/2026-01-02T1200Z.md',
+      about: 'Make the old thing live again.',
+    }),
     pkg({ dir: '2026-02-01-new-live', state: 'live', hasWorktree: true }),
     pkg({ dir: '2025-06-01-asleep', state: 'dormant', lastActivity: NOW - 90 * DAY, baton: 'handoffs/b.md' }),
-    pkg({ dir: '2025-01-01-shipped', state: 'concluded', summary: 'Shipped the thing; ruled out the other.', closedAt: NOW - 2 * DAY }),
+    pkg({
+      dir: '2025-01-01-shipped',
+      state: 'concluded',
+      summary: 'Shipped the thing; ruled out the other.',
+      about: 'Shipped the thing; ruled out the other.',
+      closedAt: NOW - 2 * DAY,
+    }),
     pkg({ dir: '2025-02-01-dropped', state: 'concluded', status: 'abandoned', closedAt: NOW - 10 * DAY }),
   ],
 }
@@ -130,6 +143,36 @@ describe('standing pane', () => {
       expect(await ui.find({ key: 'standing-resume-2025-01-01-shipped' })).toBeUndefined()
       await ui.unmount()
     }
+  })
+
+  test('every row says what it is about, under its slug; a row with nothing to say shows nothing extra', async ($, on) => {
+    const w = world(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    for (const surface of SURFACES) {
+      const ui = await mount($, surface)
+      const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+      const row = texts.indexOf('old-live')
+      const about = texts.indexOf('Make the old thing live again.')
+      expect(row).toBeGreaterThanOrEqual(0)
+      expect(about).toBeGreaterThan(row)
+      expect(await ui.find({ key: 'standing-about-2026-01-01-old-live' })).toBeDefined()
+      expect(await ui.find({ key: 'standing-about-2026-02-01-new-live' })).toBeUndefined()
+      expect(await ui.find({ key: 'standing-about-2025-06-01-asleep' })).toBeUndefined()
+      expect(texts.join('\n')).not.toContain('Shipped the thing')
+      await ui.press({ key: 'standing-concluded-toggle' })
+      const expanded = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+      const shipped = expanded.findIndex(t => t.startsWith('shipped '))
+      expect(shipped).toBeGreaterThanOrEqual(0)
+      expect(expanded[shipped + 1]).toBe('Shipped the thing; ruled out the other.')
+      expect(await ui.find({ key: 'standing-about-2025-02-01-dropped' })).toBeUndefined()
+      await ui.press({ key: 'standing-concluded-toggle' })
+      await ui.unmount()
+    }
+    // The about line is drawn, never sent: Resume's prompt carries validated names only.
+    const ui = await mount($, 'terminal')
+    await ui.press({ key: 'standing-resume-2026-01-01-old-live' })
+    expect(w.prompts.join('\n')).not.toContain('Make the old thing')
   })
 
   test('Resume queues a prompt naming the newest baton, and does nothing else', async ($, on) => {

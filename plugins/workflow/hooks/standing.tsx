@@ -13,7 +13,7 @@
 //
 // DETECT, DON'T EXECUTE. The pane changes nothing. Resume only queues a prompt for Claude
 // ("resume <slug> — read its newest handoff"), which the person can watch and interrupt; the
-// orientation itself stays the skill's job. Free text from the repo (a summary, tags) is
+// orientation itself stays the skill's job. Free text from the repo (the about line, a summary, tags) is
 // drawn, never put into a prompt; the prompt carries only names the engine validated.
 //
 // NEVER OPENED UNASKED. A session start only registers the command. The pane opens when the
@@ -172,6 +172,16 @@ export const register: Register = on => {
     const resumable = [...live, ...dormant]
     const hotkeyOf = (pkg: StandingPackage) => HOTKEYS[resumable.indexOf(pkg)]
 
+    // What the package is about, under its row: the slug alone may mean nothing a month later.
+    const aboutLine = (pkg: StandingPackage) =>
+      typeof pkg.about === 'string' && pkg.about !== '' ? (
+        <Box key={`standing-about-${pkg.dir}`} paddingLeft={2}>
+          <Text dimColor wrap="truncate-end">
+            {pkg.about}
+          </Text>
+        </Box>
+      ) : null
+
     const inFlight = (pkg: StandingPackage) => {
       const prompt = resumePrompt(pkg)
       const hotkey = hotkeyOf(pkg)
@@ -179,7 +189,7 @@ export const register: Register = on => {
 
       return (
         <Box key={`standing-row-${pkg.dir}`} flexDirection="row" gap={1}>
-          <Box flexGrow={1} flexShrink={1}>
+          <Box flexGrow={1} flexShrink={1} flexDirection="column">
             <Text wrap="truncate-end">
               <Text bold>{pkg.slug}</Text>
               <Text dimColor>
@@ -188,6 +198,7 @@ export const register: Register = on => {
                 {pkg.hasWorktree ? ' · worktree' : ''} · {where}
               </Text>
             </Text>
+            {aboutLine(pkg)}
           </Box>
           {prompt !== undefined && (
             <Button
@@ -213,10 +224,13 @@ export const register: Register = on => {
       )
 
     const closed = (pkg: StandingPackage) => (
-      <Text key={`standing-row-${pkg.dir}`} dimColor wrap="truncate-end">
-        {pkg.slug} {dateOf(pkg.closedAt ?? pkg.lastActivity)}
-        {pkg.status === 'concluded' ? '' : ` (${pkg.status})`}
-      </Text>
+      <Box key={`standing-row-${pkg.dir}`} flexDirection="column">
+        <Text dimColor wrap="truncate-end">
+          {pkg.slug} {dateOf(pkg.closedAt ?? pkg.lastActivity)}
+          {pkg.status === 'concluded' ? '' : ` (${pkg.status})`}
+        </Text>
+        {aboutLine(pkg)}
+      </Box>
     )
 
     const summary = concludedLine(standing.now, concluded)

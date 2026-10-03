@@ -34,6 +34,11 @@ export type StandingPackage = {
   worktree?: string
   /** The newest baton, relative to the package: `handoffs/<name>`. */
   baton?: string
+  /**
+   * What the package is about, in one plain line (DECISION.md's summary, else BRIEF.md's summary or
+   * first sentence); null when neither says. Free text: for display only, never a prompt.
+   */
+  about: string | null
   /** DECISION.md frontmatter of a closed package. Free text: for display only, never a prompt. */
   summary?: string
   concluded?: string
