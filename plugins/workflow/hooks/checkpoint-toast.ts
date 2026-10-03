@@ -15,6 +15,8 @@
 
 import type { EngineInterface, Register } from 'claude-code'
 
+import { brandLine } from './_brand.tsx'
+
 /** What `checkpoint-on-compact.sh --last` prints: the last checkpoint written. */
 export type CheckpointReceipt = {
   /** Unique per write, so a rewrite of the same file still reads as new. */
@@ -52,7 +54,7 @@ export const register: Register = on => {
     const text = checkpointToast(before, await lastCheckpoint($))
 
     if (text !== undefined) {
-      $.ui.toast(text, { timeoutMs: TOAST_MS })
+      $.ui.toast(brandLine(text), { timeoutMs: TOAST_MS })
     }
 
     return result

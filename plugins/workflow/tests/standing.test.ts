@@ -7,7 +7,8 @@ import type { On, RenderPropsOf } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { age, concludedLine, dateOf, groups, headline, parseStanding, resumePrompt } from '../hooks/standing.tsx'
+import { BRAND, brandLine, brandTitle } from '../hooks/_brand.tsx'
+import { CLOSED_TOAST, REOPEN_HINT, age, concludedLine, dateOf, groups, headline, parseStanding, resumePrompt } from '../hooks/standing.tsx'
 import type { Standing, StandingPackage } from '../types/index.d.ts'
 
 const PLUGIN = 'bespunky-workflow'
@@ -90,9 +91,21 @@ function world(on: On, standing: Standing | 'crash' = STANDING) {
 
     return { value: { isPlaced: true as const } }
   })
-  on('ui.toast', () => ({ value: undefined }))
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
 
-  return { ran, prompts, opened }
+    return { value: undefined }
+  })
+
+  const closes: unknown[] = []
+  on('ui.close', ($, e) => {
+    closes.push(e)
+
+    return { value: undefined }
+  })
+
+  return { ran, prompts, opened, toasts, closes }
 }
 
 async function started($: Engine) {
@@ -129,7 +142,8 @@ describe('standing pane', () => {
     for (const surface of SURFACES) {
       const ui = await mount($, surface)
       const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-      expect(texts[0]).toBe('3 in flight')
+      expect(texts[0]).toBe(brandTitle('standing'))
+      expect(texts).toContain('3 in flight')
       expect(texts).toContain('Live (2)')
       expect(texts).toContain('Dormant (1)')
       expect(texts.join('\n')).toContain('handoffs/2026-01-02T1200Z.md')
@@ -195,7 +209,8 @@ describe('standing pane', () => {
     for (const surface of SURFACES) {
       const ui = await mount($, surface)
       const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-      expect(texts[0]).toBe('Nothing in flight')
+      expect(texts[0]).toBe(brandTitle('standing'))
+      expect(texts).toContain('Nothing in flight')
       expect(texts.join('\n')).not.toMatch(/Live|Dormant|none/)
       expect(texts).toContain('2 concluded · latest: shipped (2d ago)')
       await ui.unmount()
@@ -273,6 +288,71 @@ describe('standing pane', () => {
     const out = await $.command.run({ command: 'standing' })
     expect(out.text).toBe('No project standing to show: the project-standing engine did not answer.')
     expect(w.opened).toEqual([])
+  })
+})
+
+describe('standing pane, as the toolkit draws it', () => {
+  test('the pane is titled with the toolkit mark, in the brand accent', async ($, on) => {
+    world(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    for (const surface of SURFACES) {
+      const ui = await mount($, surface)
+      const title = await ui.find({ type: 'Text', text: brandTitle('standing') })
+      expect(title).toMatchObject({ props: { color: BRAND.accent, bold: true } })
+      await ui.unmount()
+    }
+  })
+
+  test('packages are separated by a thin rule; a slug and its about line stay together', async ($, on) => {
+    world(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const ui = await mount($, 'terminal')
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    const isRule = (t: string | undefined) => /^─+$/.test(t ?? '')
+    const live = texts.indexOf('Live (2)')
+    const dormant = texts.indexOf('Dormant (1)')
+    // Live: new-live, a rule, old-live and its about line; no rule after the last row of a section.
+    const between = texts.slice(live + 1, dormant)
+    expect(between.filter(isRule)).toHaveLength(1)
+    expect(isRule(between.at(-1))).toBe(false)
+    const about = texts.indexOf('Make the old thing live again.')
+    expect(isRule(texts[about - 1])).toBe(false)
+    expect(texts.slice(about - 3, about)).toContain('old-live')
+    // The title's rule is the only other one above the sections; Dormant has one row, so none.
+    expect(texts.slice(dormant + 1).filter(isRule)).toHaveLength(0)
+    // The expanded concluded list is separated the same way.
+    await ui.press({ key: 'standing-concluded-toggle' })
+    const expanded = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    const shipped = expanded.findIndex(t => t.startsWith('shipped '))
+    expect(isRule(expanded[shipped + 2])).toBe(true)
+    expect(expanded[shipped + 3]).toStartWith('dropped ')
+  })
+
+  test('an inline pane starts a row below the transcript; a docked one does not', async ($, on) => {
+    world(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const inline = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', component: 'Pane', requestId: 'standing', props: { ...PROPS, placement: 'inline' } })
+    expect((await inline.find({ type: 'Box' }))?.props).toMatchObject({ marginTop: 1 })
+    await inline.unmount()
+    const docked = await mount($, 'terminal')
+    expect((await docked.find({ type: 'Box' }))?.props).toMatchObject({ marginTop: 0 })
+  })
+
+  test('the control row says how a closed pane comes back, and closing toasts it', async ($, on) => {
+    const w = world(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const ui = await mount($, 'terminal')
+    expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain(REOPEN_HINT)
+    expect(REOPEN_HINT).toBe('/standing reopens it')
+    await ui.press({ key: 'standing-close' })
+    expect(w.closes).toEqual([{ id: 'standing', origin: { kind: 'plugin' } }])
+    expect(w.toasts).toEqual([brandLine(CLOSED_TOAST)])
+    // The person's own close (the engine's mark, ctrl+x x) reaches the module's ui.close hook instead, which
+    // toasts the same line; the test engine cannot raise a person's close, so that path is pinned by reading.
   })
 })
 

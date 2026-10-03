@@ -4,6 +4,7 @@
 import type { On } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 
+import { brandLine } from '../hooks/_brand.tsx'
 import { checkpointToast, parseReceipt } from '../hooks/checkpoint-toast.ts'
 
 const ROOT = '/work/project'
@@ -40,7 +41,7 @@ describe('checkpoint toast', () => {
   test('a checkpoint written during compaction is toasted with its relative path', async ($, on) => {
     const w = world(on, receipt('1-1', 'docs/features/old/handoffs/old-auto.md'), receipt('2-2'))
     await $.classic.PreCompact({ trigger: 'auto', custom_instructions: null })
-    expect(w.toasts).toEqual([`checkpoint saved → ${FILE}`])
+    expect(w.toasts).toEqual([brandLine(`checkpoint saved → ${FILE}`)])
     expect(w.ran[0]?.argv.slice(-2)).toEqual([expect.stringMatching(/\/hooks\/checkpoint-on-compact\.sh$/), '--last'])
     expect(w.ran[0]?.env?.CLAUDE_PROJECT_DIR).toBe(ROOT)
   })
@@ -48,7 +49,7 @@ describe('checkpoint toast', () => {
   test('the first checkpoint ever (no receipt before) is toasted', async ($, on) => {
     const w = world(on, '', receipt('1-1'))
     await $.classic.PreCompact({ trigger: 'manual', custom_instructions: null })
-    expect(w.toasts).toEqual([`checkpoint saved → ${FILE}`])
+    expect(w.toasts).toEqual([brandLine(`checkpoint saved → ${FILE}`)])
   })
 
   test('no checkpoint written (protected line, no package) is silent', async ($, on) => {

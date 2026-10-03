@@ -17,12 +17,19 @@
 // drawn, never put into a prompt; the prompt carries only names the engine validated.
 //
 // NEVER OPENED UNASKED. A session start only registers the command. The pane opens when the
-// person runs /standing; the floor without mods is the skill and the SessionStart notice.
+// person runs /standing; the floor without mods is the skill and the SessionStart notice. Because
+// it never comes back by itself, closing it says how to: the control row carries the hint, and a
+// close by any hand toasts it.
+//
+// THE TOOLKIT'S LOOK. The frame, title, rules and mark come from ./_brand.tsx (generated from
+// tools/mod-brand/brand.tsx): this module draws only its own rows.
 
 import { update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Standing, StandingPackage, StandingView } from '../types/index.d.ts'
+
+import { BrandDivider, BrandFrame, brandLine } from './_brand.tsx'
 
 const VIEW = { plugin: 'bespunky-workflow', key: 'standing' } as const
 const SHOW_CONCLUDED = { plugin: 'bespunky-workflow', key: 'showConcluded' } as const
@@ -39,6 +46,9 @@ const HOTKEYS = '123456789'
 const CONCLUDED_HOTKEY = 'c'
 /** How many concluded packages the expanded list shows. */
 const RECENT_CONCLUDED = 5
+/** How the pane comes back once closed: the one thing a closed pane cannot show. */
+export const REOPEN_HINT = `/${COMMAND} reopens it`
+export const CLOSED_TOAST = `Standing closed — ${REOPEN_HINT}`
 
 /** The engine's JSON, checked for the shape the pane relies on; anything else is no standing. */
 export function parseStanding(stdout: string): Standing | undefined {
@@ -140,28 +150,43 @@ export const register: Register = on => {
     if (view.phase === 'empty') {
       return { text: `No project standing to show: ${view.why}.` }
     }
-    await $.ui.open({ id: PANE, title: 'Standing' })
+    await $.ui.open({ id: PANE, title: 'standing' })
     const { live, dormant, concluded } = groups(view.standing)
 
     return { text: `Standing: ${live.length} live, ${dormant.length} dormant, ${concluded.length} concluded.` }
   })
 
+  // Closed by the person's own hand (the engine's close mark, ctrl+x x), say how it comes back. The
+  // pane's Close button says it itself (`close`); an unload is no one's choice and says nothing.
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    const closed = await next(e)
+    if (e.origin.kind === 'person') {
+      $.ui.toast(brandLine(CLOSED_TOAST))
+    }
+
+    return closed
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Button, Text } = ui
     const { value: view } = await $.state.get(VIEW)
     const controls = (
-      <Box flexDirection="row" gap={1}>
+      <Box key="standing-controls" flexDirection="row" gap={1}>
         <Button key="standing-refresh" label="Refresh" hotkey="r" onPress={() => void refresh($)} />
-        <Button key="standing-close" label="Close" role="dismiss" onPress={() => void $.ui.close({ id: PANE })} />
+        <Button key="standing-close" label="Close" role="dismiss" onPress={() => void close($)} />
+        <Text dimColor wrap="truncate-end">
+          {REOPEN_HINT}
+        </Text>
       </Box>
     )
 
     if (view === undefined || view.phase === 'empty') {
       return (
-        <Box flexDirection="column">
+        <BrandFrame ui={ui} site={e} mod={COMMAND}>
           <Text dimColor>{view === undefined ? 'Nothing derived yet.' : `Nothing to show: ${view.why}.`}</Text>
           {controls}
-        </Box>
+        </BrandFrame>
       )
     }
 
@@ -212,6 +237,13 @@ export const register: Register = on => {
       )
     }
 
+    // Items space out, each item's own lines stay together: a thin rule BETWEEN packages, never
+    // inside one (a slug and its about line are one item) and never after the last.
+    const separated = (rows: StandingPackage[], draw: (pkg: StandingPackage) => JSX.Element) =>
+      rows.flatMap((pkg, index) =>
+        index === 0 ? [draw(pkg)] : [<BrandDivider key={`standing-divider-${pkg.dir}`} ui={ui} site={e} />, draw(pkg)],
+      )
+
     // A section only when it has rows: an empty heading answers nothing.
     const section = (title: string, rows: StandingPackage[]) =>
       rows.length === 0 ? null : (
@@ -219,7 +251,7 @@ export const register: Register = on => {
           <Text bold>
             {title} ({rows.length})
           </Text>
-          {rows.map(inFlight)}
+          {separated(rows, inFlight)}
         </Box>
       )
 
@@ -250,18 +282,18 @@ export const register: Register = on => {
               onPress={() => void toggleConcluded($)}
             />
           </Box>
-          {showConcluded && concluded.slice(0, RECENT_CONCLUDED).map(closed)}
+          {showConcluded && separated(concluded.slice(0, RECENT_CONCLUDED), closed)}
         </Box>
       )
 
     return (
-      <Box flexDirection="column" gap={1}>
+      <BrandFrame ui={ui} site={e} mod={COMMAND}>
         <Text bold>{headline(grouped)}</Text>
         {section('Live', live)}
         {section('Dormant', dormant)}
         {history}
         {controls}
-      </Box>
+      </BrandFrame>
     )
   })
 }
@@ -293,6 +325,12 @@ async function derive($: EngineInterface): Promise<Standing | undefined> {
   }
 }
 
+/** The Close button: closes the pane and says how it comes back. */
+async function close($: EngineInterface) {
+  await $.ui.close({ id: PANE })
+  $.ui.toast(brandLine(CLOSED_TOAST))
+}
+
 /** Expands or collapses the concluded section. */
 async function toggleConcluded($: EngineInterface) {
   await update($, SHOW_CONCLUDED, shown => !(shown ?? false))
@@ -300,6 +338,6 @@ async function toggleConcluded($: EngineInterface) {
 
 /** Queues the resume prompt for Claude; the pane itself does nothing else. */
 async function resume($: EngineInterface, pkg: StandingPackage, prompt: string) {
-  $.ui.toast(`Asked Claude to resume ${pkg.slug}`)
+  $.ui.toast(brandLine(`Asked Claude to resume ${pkg.slug}`))
   await $.prompt.submit({ text: prompt, asUser: true })
 }

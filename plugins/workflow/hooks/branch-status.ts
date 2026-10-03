@@ -22,6 +22,8 @@
 
 import type { EngineInterface, Register } from 'claude-code'
 
+import { brandLine } from './_brand.tsx'
+
 /** What `branches.mjs status --json` said, already checked against its contract — or that it said nothing. */
 export type Model =
   | { state: 'declared'; summary: string; protected: string[]; protectedPatterns: string[] }
@@ -215,7 +217,8 @@ async function readInto($: EngineInterface, k: Keeper, depth: Depth) {
   const line = statusLine(k.head, k.model, k.violations)
   if (line !== k.shown) {
     k.shown = line
-    $.ui.status(line)
+    // The toolkit's mark goes on at the boundary: the fold says what, the brand says whose.
+    $.ui.status(line === undefined ? undefined : brandLine(line))
   }
 }
 
