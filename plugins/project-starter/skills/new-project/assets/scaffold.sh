@@ -1302,6 +1302,11 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
     _bm_protected=\"\$(_bm_get protected)\"
     _bm_patterns=\"\$(_bm_get protectedPatterns)\"
     _bm_shown=\"\$(printf '%s' \"\$_bm_protected \$_bm_patterns\" | sed 's/^ *//; s/ *\$//; s/  */, /g')\"
+    # NOT LANDED (undeclared, but the tree carries a declaration): the integration line that copy names — where it
+    # must land before it is in force, and so the base every remedy below points at. Empty when nothing is declared.
+    _bm_pending=\"\$(_bm_get pending)\"
+    if [ -n \"\$_bm_shown\" ]; then _bm_shown_line=\"every branch named \$_bm_shown is protected\"
+    else _bm_shown_line='no branch here is protected by name (none of the names it would protect exists)'; fi
     case \"\$_bm_state\" in
       declared)
         _bm_integration=\"\$(_bm_get integration)\"
@@ -1318,12 +1323,19 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            skill's change procedure — never by hand: its projection is derived.\$_bm_notes\"
         ;;
       *)
-        _signal \"[preflight] branch-model: undeclared
+        if [ -n \"\$_bm_pending\" ]; then
+          _signal \"[preflight] branch-model: undeclared (not landed)
+           This tree carries a branch model (.bespunky/branches.json) naming '\$_bm_pending' as its integration
+           line, but it has not landed on '\$_bm_pending' yet — a declaration is not in force until it does.
+           Until then \$_bm_shown_line.
+           Land the declaration on '\$_bm_pending' through the bespunky-workflow:branch-and-release skill.\$_bm_notes\"
+        else
+          _signal \"[preflight] branch-model: undeclared
            This project declares no branch model (.bespunky/branches.json), so nothing here says which lines
-           exist or where work lands. Until one is declared, every existing branch named
-           \$_bm_shown is protected.
+           exist or where work lands. Until one is declared, \$_bm_shown_line.
            The model is not this script's to decide: investigate the repository and ASK the user — the
            bespunky-workflow:branch-and-release skill carries the procedure (choosing a branch model).\$_bm_notes\"
+        fi
         ;;
     esac
     if [ \"\$_branch\" = 'HEAD' ]; then
@@ -1348,7 +1360,15 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            The migration ladder commits onto the current branch, so this run would commit directly onto a
            line that advances only by the model's own landings and promotions.
            Open a worktree off '\$_bm_integration' (the integration line) and sync there, then land it like
-           any other change.\"
+           any other change: a sync is toolkit maintenance, so its changes land on the integration line like
+           any work — a fix meant for '\$_branch' itself goes through the branch-and-release skill.\"
+        elif [ -n \"\$_bm_pending\" ]; then
+          _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', protected by this tree's branch model
+           (.bespunky/branches.json), which names '\$_bm_pending' as its integration line but has not landed
+           there yet — so every branch named \$_bm_shown is protected until it does.
+           The migration ladder commits onto the current branch, so this run would commit directly onto a
+           protected line. Land the declaration on '\$_bm_pending' first (the branch-and-release skill), then
+           open a worktree off '\$_bm_pending' and sync there.\"
         else
           _refuse protected-branch \"[preflight] protected-branch: HEAD is on '\$_branch', and this project declares no branch model —
            so every branch named \$_bm_shown is protected until it does.

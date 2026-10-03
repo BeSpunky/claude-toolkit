@@ -96,6 +96,20 @@ signal() {
 }
 
 FAILED=0
+# What the gate SAYS, not only what it decides: a refusal whose remedy names the wrong base, or a "protected" list
+# naming branches the repo does not have, passes every verdict check and still sends the reader the wrong way.
+says() {   # says <label> <dir> <needle>… — each needle must appear; a needle starting with '!' must NOT
+  local out n ok=1
+  out="$( cd "$2" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT" ) 2>&1 )"
+  local label="$1"; shift 2
+  for n in "$@"; do
+    case "$n" in
+      '!'*) case "$out" in *"${n#!}"*) ok=0; printf '  FAIL %-32s says [%s]\n' "$label" "${n#!}" ;; esac ;;
+      *)    case "$out" in *"$n"*) ;; *) ok=0; printf '  FAIL %-32s missing [%s]\n' "$label" "$n" ;; esac ;;
+    esac
+  done
+  if [ "$ok" = 1 ]; then printf '  ok   %-32s\n' "$label"; else printf '%s\n' "$out" | sed 's/^/         /'; FAILED=1; fi
+}
 check() {   # check <label> <expected> <dir> [<expected branch-model signal>]
   local got; got="$(gate "$3")"
   [ $# -ge 4 ] && got="$got | $(signal "$3")" && set -- "$1" "$2 | $4" "$3"
@@ -112,12 +126,22 @@ check 'not a git repo' 'PASS' "$d"
 d="$(mkrepo empty)"
 check 'git repo, no commits' 'PASS' "$d"
 
+upstream0() {   # upstream0 <name> <branch> — a clone whose only §3 name lives on origin (no local branch of it)
+  local seed="$TMP/$1-seed" bare="$TMP/$1.git" clone="$TMP/$1"
+  mkdir -p "$seed"; git -C "$seed" init -q -b "$2"; commit "$seed"
+  git clone -q --bare "$seed" "$bare"; git clone -q "$bare" "$clone" 2>/dev/null
+  git -C "$clone" checkout -q -b tmp-x; git -C "$clone" branch -q -D "$2"
+  echo "$clone"
+}
+
 # ── The branch model: UNDECLARED ────────────────────────────────────────────────────────────────────────────
 # No .bespunky/branches.json: the gate SIGNALS it (the /sync session investigates and asks) and, meanwhile,
 # protects every name the toolkit ever forced plus gitflow's. A lone `main` used to be an ASK about this one run;
 # its ambiguity is now resolved by declaring the model, and the run is kept off `main` until then.
 d="$(mkrepo lone)"; commit "$d"
 check 'undeclared, lone main' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+# Only the §3 names that EXIST are reported — master/develop/... are not branches here.
+says 'undeclared names only existing' "$d" 'every branch named main is protected' '!master' "!'develop'" '!staging'
 git -C "$d" checkout -q -b develop
 check 'undeclared, on develop' 'SYNC_REFUSED: protected-branch' "$d" undeclared
 git -C "$d" checkout -q -b fix/x
@@ -128,6 +152,10 @@ d="$(mkrepo prot)"; commit "$d"; git -C "$d" branch development
 check 'undeclared, development exists' 'SYNC_REFUSED: protected-branch' "$d" undeclared
 git -C "$d" checkout -q -b feat/y
 check 'undeclared, development, feat' 'PASS' "$d" undeclared
+says 'undeclared lists main+development' "$d" 'every branch named main, development is protected'
+# A §3 name that exists only on origin is still a line someone has — it is listed.
+c="$(upstream0 up-only staging)"; git -C "$c" checkout -q -b feat/o
+says 'undeclared, origin-only staging' "$c" 'every branch named staging is protected'
 
 # ── The branch model: DECLARED ──────────────────────────────────────────────────────────────────────────────
 # Only the PROJECTION is read (CONTRACT §2). Fixtures carry just enough of the rest to be honest JSON.
@@ -163,6 +191,9 @@ git -C "$d" checkout -q main
 check 'declared, on main (no copy here)' 'SYNC_REFUSED: protected-branch' "$d" declared
 git -C "$d" checkout -q -b release/1.2 develop
 check 'declared, glob release/1.2' 'SYNC_REFUSED: protected-branch' "$d" declared
+# A release line's refusal points at integration — and says WHY that is the right base for a sync.
+says 'release line: base + why' "$d" "Open a worktree off 'develop' (the integration line)" \
+  'a sync is toolkit maintenance' "a fix meant for 'release/1.2' itself goes through the branch-and-release skill"
 # `staging` is protected only while undeclared — a declared model that has no `staging` line does not own it.
 git -C "$d" checkout -q -b staging develop
 check 'declared, unlisted staging' 'PASS' "$d" declared
@@ -225,6 +256,11 @@ declare_model "$d" 1 dev dev,prod prod 'rel/*'
 git -C "$d" add -A && git -C "$d" commit -qm 'propose dev → prod'
 resolves 'not landed' "$d" undeclared - 'not in force until it lands'
 check 'not landed, HEAD on its prod' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+# The refusal names the declaration's own integration line as the base — never HEAD, never "declares no model".
+says 'not landed: base is its dev' "$d" "names 'dev' as its integration line but has not landed" \
+  "Land the declaration on 'dev' first" "open a worktree off 'dev' and sync there" \
+  'every branch named main, dev, prod, rel/* is protected' 'undeclared (not landed)' \
+  "!Open a worktree off 'prod'" '!declares no branch model' '!master'
 git -C "$d" checkout -q -b rel/1
 check 'not landed, its glob rel/1' 'SYNC_REFUSED: protected-branch' "$d" undeclared
 git -C "$d" checkout -q -b chore/m

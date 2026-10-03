@@ -94,6 +94,8 @@ const declared = (name, projection, check) => ({
     // Semantics stay with the engine — the generic deploy text, never a hard-coded binding.
     t.ok(params.includes('`branches.mjs describe`'), 'deploy bindings point at describe');
     t.ok(!/staging → staging|pushing either triggers/.test(params), 'no hard-coded deploy binding');
+    // The projection carries no deploy data, so the page must not read as if bindings exist.
+    t.ok(params.includes('if any are recorded') && !params.includes('recorded in the model (each'), 'deploy bindings are not asserted to exist');
     check(t, rules, params);
   },
 });

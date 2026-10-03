@@ -31,19 +31,20 @@
 #      considered (a stale local integration branch must not hide a fresh remote one — that is the bug that let
 #      a sync commit onto production), keeping those that exist AND hold the file:
 #        - neither ref exists      → the working copy is in force (bootstrap), with a note;
-#        - none holds the file     → NOT LANDED: undeclared, but protected = the §3 list UNION the working copy's
+#        - none holds the file     → NOT LANDED: undeclared, but protected = the §3 names that exist UNION the copy's
 #                                    protected / protectedPatterns (never fewer protections than the copy says);
 #        - one holds it            → that copy;
 #        - both hold it            → identical → that copy; else the one whose commit descends from the other's;
 #                                    diverged → the local one, with a note.
 #   3. no working copy → SELF-CONFIRMING search: each §3 name, local branch AND origin/<name>; a copy is accepted
 #      only when its own projection.integration names the very branch it was read from.
-#   4. nothing → UNDECLARED.
+#   4. nothing → UNDECLARED: protected = the §3 names that exist (locally or on origin).
 # Every state reports the EFFECTIVE protected set (`protected=` / `protectedPatterns=`), so a caller never has to
 # reconstruct one from the state word — that reconstruction is exactly where the working copy's list was lost.
 
-# The names the toolkit ever forced, plus gitflow's (CONTRACT §3): protected while a project declares no model,
-# and the candidates for the self-confirming search. A function, not a variable, so `declare -f` carries it.
+# The names the toolkit ever forced, plus gitflow's (CONTRACT §3): the candidates for the self-confirming search,
+# the protected set while a declaration is UNREADABLE, and — narrowed to the ones that exist — while UNDECLARED.
+# A function, not a variable, so `declare -f` carries it.
 house_branches_undeclared_protected() { echo 'main master development develop staging'; }
 
 # _house_bm_parse — stdin: a branches.json. stdout: KEY=VALUE lines from its projection; on anything it cannot
@@ -79,6 +80,21 @@ say("projection=" + JSON.stringify(p));
 # _house_bm_has <ref> — exit 0 when that ref exists.
 _house_bm_has() { git rev-parse --verify -q "$1^{commit}" >/dev/null 2>&1; }
 
+# _house_bm_existing <remote…> — the §3 names that EXIST here, as a local branch or on any of the given remotes
+# (CONTRACT Amendment 2: undeclared protects the §3 names that exist). Not a guard narrowed for its own sake: the
+# set is reported to a human ("every branch named …"), and naming lines the repository does not have is a lie the
+# reader then has to see through. Matching HEAD is unaffected — HEAD's own branch always exists.
+_house_bm_existing() {
+  local out='' n r hit
+  for n in $(house_branches_undeclared_protected); do
+    hit=0
+    _house_bm_has "refs/heads/$n" && hit=1
+    for r in "$@"; do [ "$hit" = 1 ] && break; _house_bm_has "refs/remotes/$r/$n" && hit=1; done
+    [ "$hit" = 1 ] && out="${out:+$out }$n"
+  done
+  printf '%s' "$out"
+}
+
 # _house_bm_union <list> <list> — space-joined, order kept, duplicates dropped.
 _house_bm_union() {
   local out='' n
@@ -93,6 +109,8 @@ _house_bm_union() {
 #   source=<ref>|working-tree               declared/unreadable: where the copy was read
 #   protected= protectedPatterns=           ALWAYS — the effective set for this state (see above)
 #   integration= remote= summary= chain= production= preproduction= projection=<compact JSON>   declared only
+#   pending=<integration>                   undeclared only, when NOT LANDED: the line the tree's copy names, where
+#                                           the declaration must land before it is in force
 #   reason=…                                unreadable only
 #   note=…                                  zero or more, human-facing
 # Never fails: every git or parse failure is a state, so `x="$(house_branch_model)"` is safe under `set -e`.
@@ -129,8 +147,11 @@ house_branch_model() {
       notes+=("the integration line '$integ' does not exist yet (no local or $remote branch), so this tree's copy of $f is in force")
     elif [ "${#refs[@]}" = 0 ]; then
       echo 'state=undeclared'
-      echo "protected=$(_house_bm_union "$undeclared" "$wt_prot")"
+      local rems='origin'; [ "$remote" = origin ] || rems="origin $remote"
+      # shellcheck disable=SC2086 # a space-joined list of remote names, split on purpose
+      echo "protected=$(_house_bm_union "$(_house_bm_existing $rems)" "$wt_prot")"
       echo "protectedPatterns=$wt_pat"
+      echo "pending=$integ"
       notes+=("this tree carries $f naming '$integ' as its integration line, but '$integ' does not — a declaration is not in force until it lands there; meanwhile the lines it declares are protected too")
       _bm_emit_notes
       return 0
@@ -160,7 +181,7 @@ house_branch_model() {
       done
     done
     if [ -z "$src" ]; then
-      echo 'state=undeclared'; echo "protected=$undeclared"; echo 'protectedPatterns='; return 0
+      echo 'state=undeclared'; echo "protected=$(_house_bm_existing origin)"; echo 'protectedPatterns='; return 0
     fi
   fi
 
@@ -177,4 +198,4 @@ house_branch_model() {
 
 # house_branches_fns — every function above, by value, for rendering into a program (`declare -f`). One list, so
 # the renderers (scaffold.sh, and the gate's test) cannot carry a stale subset of it.
-house_branches_fns() { declare -f house_branches_undeclared_protected _house_bm_parse _house_bm_has _house_bm_union house_branch_model; }
+house_branches_fns() { declare -f house_branches_undeclared_protected _house_bm_parse _house_bm_has _house_bm_existing _house_bm_union house_branch_model; }
