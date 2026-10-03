@@ -1,0 +1,28 @@
+# Guard the bespunky-voice conversation logic: phrasing, reply understanding, the ask tool, the speaker.
+name: voice tests
+
+on:
+  push:
+    branches: [main, development, staging]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No install: the tests need only node, with fake audio scripts under the OS temp dir.
+      - name: Run voice tests
+        run: node tools/test-voice/run.mjs
