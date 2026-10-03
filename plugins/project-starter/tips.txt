@@ -8,3 +8,4 @@ Want the house web app? Ask for the angular preset (scaffold.sh --preset=angular
 Add only the house DX to any repo: /bespunky-project-starter:sync --ensure=agent
 Testing a toolkit change before it's published? Add --local to a sync to install your working tree
 Pick where projects live and how they link at scaffold: --layout=apps-libs|packages --linking=paths|workspaces
+The row above the prompt saying your house tooling is behind has a Sync button — it asks Claude, never syncs by itself
