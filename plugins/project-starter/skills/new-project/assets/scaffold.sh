@@ -1360,7 +1360,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
       fi
     fi
     # --staging scaffolds an environment bundle meant to deploy from a PRE-PRODUCTION stage. A declared model with
-    # none (trunk, two-line, maintained releases) has nothing for it to bind to, and the bundle would document a
+    # none (trunk, two-line, gitflow, maintained releases) has nothing for it to bind to, and the bundle would document a
     # deploy line the project does not have. Undeclared → no basis to refuse on; the bundle behaves as it always has.
     if [ '$STAGING' = '1' ] && [ \"\$_bm_state\" = 'declared' ] && [ -z \"\$(_bm_get preproduction)\" ]; then
       _refuse staging-without-stage \"[preflight] staging-without-stage: --staging adds a staging environment bundle, deployed from a

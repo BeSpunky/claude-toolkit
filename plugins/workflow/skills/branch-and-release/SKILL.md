@@ -13,7 +13,7 @@ description: >-
 Run it from anywhere in the repo — `<base>` is the base directory this skill was loaded from:
 
 ```bash
-node "<base>/scripts/branches.mjs" status        # the model in one line; --json for the projection
+node "<base>/scripts/branches.mjs" status        # the model in one line; --json for the full object: state, source, projection, protected, protectedPatterns, notes, reason
 node "<base>/scripts/branches.mjs" describe      # every line, its role, how it advances, its bindings
 node "<base>/scripts/branches.mjs" plan <gate>   # the exact commands for a move — printed, NEVER executed
 node "<base>/scripts/branches.mjs" verify        # the invariants: direct commits, containment, no regression
@@ -25,7 +25,8 @@ node "<base>/scripts/branches.mjs" verify        # the invariants: direct commit
 - **`3` — undeclared.** No model exists yet, so **assume none**:
   - **Protect** every existing local or remote branch named `main`, `master`, `development`, `develop` or `staging` — the names the toolkit once forced, plus gitflow's. Never commit onto them, never promote between them.
   - **Once per session, before the first branch or promotion action**, run the investigation in [`reference/choosing-a-branch-model.md`](reference/choosing-a-branch-model.md) and **ASK** the user which model to declare. *"No json means asking the user"* — never pick one silently, and never write the file to escape this state. If they defer, ask which line *this* effort forks from and lands on, use that for the session, and ask again next session.
-- **`1` — the declaration is invalid** (or its projection has drifted). Stop, report the engine's errors verbatim, fix the declaration through [`reference/changing-the-model.md`](reference/changing-the-model.md). Never guess past it.
+  - **The one deliberate exception is a sync** (`/sync`, its step *3b*): it opens its own worktree off the *current* branch without asking and defers the model question to its report — nothing a sync writes depends on the model; only *landing* its branch does, and that waits on the answer anyway. Everywhere else, the ask-once-per-session rule holds.
+- **`1` — the declaration is `unreadable`**: not valid JSON, no projection (it was not written by `branches.mjs write`), a projection schema major the engine does not know, or failed validation. Stop, report the engine's reason verbatim, fix the declaration through [`reference/changing-the-model.md`](reference/changing-the-model.md). Never guess past it. (A projection that has *drifted* from its declaration is not caught here — `status` reads the projection as written; `verify` catches drift, invariant 5.)
 
 ## The roles
 
@@ -82,7 +83,8 @@ Protected lines meet only through their declared moves, so they stay conflict-fr
 | Signal | Gate |
 | --- | --- |
 | "done / verified" | `land <work-branch>` |
-| "go to `<stage>`", "go live", "ship it", "deploy to prod" | `promote <stage>` (next stage, or the one named) |
+| "go to `<stage>`" | `promote <stage>` (a chain-fed stage) |
+| "go live", "ship it", "deploy to prod" | depends on how production advances: **chain-fed** (two-line, three-line) → `promote <production stage>`; **release-fed** (gitflow: `main` is fed by release lines) → `ship-release <version>` — `promote` refuses it; **trunk** → no gate: landing on integration *is* production (a release is a tag the project cuts); **maintained releases** → no promotion: `ship-release <version>` tags the maintained line (`cut-release` first if it doesn't exist) |
 | "cut a release `<v>`" | `cut-release <version>` |
 | "ship release `<v>`" | `ship-release <version>` |
 | a production bug to fix alone | `hotfix <line> <slug>` |
@@ -91,7 +93,7 @@ Protected lines meet only through their declared moves, so they stay conflict-fr
 **Landing ("done / verified").** First rebase onto the base and re-verify. Then **settle the package** ([[feature-package]]): its conclusions are committed and travel with the code; its self-ignoring `mocks/` will not — **offer keep-or-bin now** (*"keep the mocks as a record, or bin them?"*), because keeping means `git add -f` **before** the merge, and after teardown the folder is gone. **Finalize `DECISION.md` and stamp its `status:` frontmatter** (`concluded | abandoned | superseded`, `concluded:` date, a one-line `summary:`, `tags:`) — the one legitimate moment to distil the package, additively. Then run what `plan land` prints (a grouping `--no-ff` merge or a PR, per `landing`), push, and tear down the worktree and branch.
 
 **Two judgments the engine cannot make — ask:**
-- **"Release" is ambiguous when the model has release lines** — cut one, or ship one? Ask which. (Without release lines, a release is a promotion to production.)
+- **"Release" is ambiguous when the model has release lines** — cut one, or ship one? Ask which. (Without release lines, a release is a promotion to production — or, on trunk, a tag.)
 - **Hotfix or fix on integration?** Only in models that declare hotfixes: a fix on integration ships with everything else unreleased there; a hotfix ships it alone. That changes what reaches users — ask.
 
 ## The carry rule

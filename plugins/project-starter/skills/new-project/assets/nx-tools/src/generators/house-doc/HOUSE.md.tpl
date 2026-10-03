@@ -286,7 +286,7 @@ The **rules** — the mandatory `bespunky-workflow:branch-and-release` skill inv
 
 {{BRANCH_TABLE}}
 
-New work branches off {{BRANCH_WORK_BASE}} and lands on {{BRANCH_INTEGRATION}}; work and hotfix branches are never protected. This table is the model's **projection** — names and roles only. How each line advances, what its patterns mean and where it deploys are the model's semantics: ask the skill's engine (`branches.mjs describe`), never infer them from this table. The model changes only through the skill's change procedure, never by hand-editing the file.
+New work branches off {{BRANCH_WORK_BASE}} and, by default, lands on {{BRANCH_INTEGRATION}} (unless the skill's plan says otherwise — e.g. stabilisation work on a release line); work and hotfix branches are never protected. This table is the model's **projection** — names and roles only. How each line advances, what its patterns mean and where it deploys are the model's semantics: ask the skill's engine (`branches.mjs describe`), never infer them from this table. The model changes only through the skill's change procedure, never by hand-editing the file.
 
 **Deploy bindings (this project):** recorded in the model (each line's, pattern's or tag's `deploys`) and listed by `branches.mjs describe`. They are documentation — nothing verifies them against the deploy mechanism itself.{{#firebase}} Each Firebase App Hosting backend tracks one branch, chosen when the repo is linked at `firebase apphosting:backends:create` (see the Firebase deploy recipe above); record which line each backend tracks as that line's `deploys`.{{/firebase}}
 {{/branches-declared}}

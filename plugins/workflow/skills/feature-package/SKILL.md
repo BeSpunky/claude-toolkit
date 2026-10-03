@@ -42,7 +42,7 @@ docs/features/2026-07-14-gift-picker/     # the package — slug matches branch 
 **The slug is the identity.** It is the *same* slug that names the branch and the worktree in [[branch-and-release]] (`feat/gift-picker`, `.claude/worktrees/gift-picker`). One name, three places. From the branch you know the slug but **not** the date, so find the package by the slug — newest match wins:
 
 ```bash
-slug=$(git branch --show-current | sed 's|^[^/]*/||')     # feat/gift-picker → gift-picker
+branch=$(git branch --show-current); slug=${branch##*/}  # the LAST path segment: feat/gift-picker, hotfix/main/gift-picker → gift-picker
 ls -d docs/features/*-"$slug" | tail -1                    # → docs/features/2026-07-14-gift-picker
 ```
 

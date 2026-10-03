@@ -12,19 +12,32 @@ The user's rule is absolute: **no declaration means asking.** This procedure end
 node "<base>/scripts/branches.mjs" evidence --json
 ```
 
-It returns the raw facts, each tagged **`observed`** (read directly), **`inferred`** (read heuristically — e.g. a crude YAML read of a CI trigger) or **`unobservable`** (it could not see — e.g. branch protection without an authenticated `gh`, an App Hosting backend that lives only in the console, a squash-deleted branch). Read it all before judging; supplement with the repo's own docs (`HOUSE.md`, `CLAUDE.md`, README deploy notes) where they say what a branch is for.
+It returns the raw facts, each tagged **`observed`** (read directly), **`inferred`** (read heuristically — e.g. a crude YAML read of a CI trigger) or **`unobservable`** (it could not see — e.g. branch protection without an authenticated `gh`, an App Hosting backend that lives only in the console, a squash-deleted branch). Read it all before judging; supplement with the repo's own docs (`CLAUDE.md`, README deploy notes) where they say what a branch is for.
+
+**A `HOUSE.md` generated before the branch model was declarable is not evidence.** It describes the `development → staging → main` flow the toolkit *forced* on every project, not anything the project chose — reading it as intent is exactly the circularity this investigation exists to break. (A `HOUSE.md` rendered from a declared model only restates the declaration.)
+
+`<scratch>` below is a scratch directory **outside the repo** — the session's scratchpad, or a `mktemp -d` — so a proposal never lands in a commit by accident.
 
 ## 2. Judge each existing long-lived branch
+
+**"Long-lived" means exactly the lines `evidence` reports under `advancement`**: every branch (local or on the remote) whose name is one of the conventional long-lived names — `development`, `develop`, `staging`, `qa`, `main`, `master`, `production`, `trunk` — plus, when a model is declared, its integration line and every stage. Release and hotfix branches are not judged here; they are reported as **shapes** (below). A long-lived line with an unconventional name (say `prod-eu`) is invisible to the evidence — if the branch list shows one, judge it by hand and say so.
 
 For every long-lived branch, reach one verdict and show the evidence for it:
 
 | Verdict | Means | Typical evidence |
 | --- | --- | --- |
-| **justified** | it is a real gate or a real binding | a CI/deploy trigger fires on it; it sat **ahead** of its downstream neighbour for real stretches (staging held a candidate while production waited); tags or releases are cut from it; required-PR protection on it |
+| **justified** | it is a real gate or a real binding | a CI trigger that is **exclusive to that line, or deploys/publishes** from it; it sat **ahead** of its downstream neighbour for real stretches (staging held a candidate while production waited — the `lag` facts); tags or releases are cut from it; required-PR protection on it |
 | **ceremonial** | it exists and moves, but gates nothing | always promoted **back-to-back** with its neighbour (staging and main advanced within minutes, every time); no binding fires on it; never ahead for long |
 | **unused** | nothing moves through it | stale tip; no advances since scaffolding; no bindings |
 
-Then look for **shapes** beyond the chain: live `release/*` / `hotfix/*` branches, or their names in merge messages (→ release or hotfix lines); a tag series, and which line carries it (two series on two lines → maintained releases); `(cherry picked from commit …)` trailers (→ upstream-first fix flow); "Merge pull request #" merges or required-PR protection (→ `landing: pr`, and its merge style); direct commits on a protected line (→ the old model was not being followed — say so, don't judge it).
+Reading the evidence for those verdicts:
+
+- **A CI trigger justifies a line only if it is exclusive to that line or deploys/publishes.** A test workflow whose `branches:` lists every long-lived line (or runs on every push) fires on all of them alike and justifies none of them.
+- **"Ahead for real stretches" is the `lag` facts** (`<upstream> → <line>`: promotions counted, median and max seconds between the upstream receiving a commit and this line receiving it; a median under ten minutes reads *back-to-back*). They come from the **local reflog** only, so on a fresh clone, or wherever the reflog has expired, the fact is `unobservable` — then **ask** how promotions actually happened; don't infer a gate or its absence.
+- **`directCommits` on a protected line are dated history, not a verdict.** If most of them are old (before a workflow existed, or from the scaffold), report the **date split** — *"41 direct commits on `main`, 39 before 2025-03, 2 since"* — rather than reading them as a live violation; check the dates with `git log --first-parent --no-merges <line>`.
+- **`deploys` in the model is free-text documentation** of what a push fires — the engine never verifies it. Fill it from the bindings evidence and the user's answers; it doesn't make a line justified.
+
+Then look for **shapes** beyond the chain: live `release/*` / `hotfix/*` branches, or their names in merge messages (→ release or hotfix lines); a tag series, and which line carries it (two series on two lines → maintained releases); `(cherry picked from commit …)` trailers (→ upstream-first fix flow); "Merge pull request #" merges or required-PR protection (→ `landing: pr`, and its merge style); direct commits on a protected line (→ the old model was not being followed — say so, don't judge it). **Tags that no long-lived line contains** (the `tags` fact's empty `containedIn`) are **reported, not modelled**: they mark something off the chain — a deleted branch, an abandoned candidate, or `sync-backup-*` tags, restore points a toolkit sync left behind, and say nothing about the branch model. Name them; don't invent a line to hold them.
 
 **Confidence travels with every claim.** Present each evidence item with its tag. **Every `unobservable` item becomes a question to the user**, never an assumption — *"I can't see branch protection on `main` (gh isn't authenticated): does it require PRs?"*, *"Is there an App Hosting backend bound to `staging` in the console?"*.
 

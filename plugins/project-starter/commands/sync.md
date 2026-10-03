@@ -294,7 +294,7 @@ someone's git state.
   branch-and-release skill's change procedure, never by hand (the projection is derived). Tell the user which.
 
 - **`staging-without-stage`** — `--staging` was passed, and the declared model has no pre-production stage for
-  the staging bundle to deploy from (trunk, two-line, maintained releases). Put the choice to the user: drop
+  the staging bundle to deploy from (trunk, two-line, gitflow, maintained releases). Put the choice to the user: drop
   `--staging`, or add a pre-production stage to the model first — a model change, which goes through the
   branch-and-release skill's change procedure (verify, risks, confirm) — then re-run.
 

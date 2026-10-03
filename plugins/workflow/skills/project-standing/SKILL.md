@@ -61,7 +61,7 @@ The common case. Read-only; it observes, it does not act. Reconstruct the standi
 2. **Classify each** by cross-referencing the package and git:
    - Read `DECISION.md` frontmatter `status`. Absent ⇒ **in-flight**; present ⇒ **concluded** (collapse to `summary`).
    - `git worktree list` — a `feat/<slug>` worktree still open ⇒ actively live.
-   - `git branch --merged <integration>` / `git log <integration>..feat/<slug>` — merged ⇒ landed; ahead ⇒ unmerged work. `<integration>` is the line work lands on, named by the declared branch model ([[branch-and-release]] resolves it); in a repo with no declared model, check against each protected name that exists (`development`, `develop`, `main`, `master`).
+   - `git branch --merged <integration>` / `git log <integration>..feat/<slug>` — merged ⇒ landed; ahead ⇒ unmerged work. `<integration>` is the line work lands on, named by the declared branch model ([[branch-and-release]] resolves it); in a repo with no declared model, check against each protected name that exists (`main`, `master`, `development`, `develop`, `staging`).
    - **Dormancy**: newest signal for the effort — newest baton mtime, or last commit on `feat/<slug>` (`git log -1 --format=%cr feat/<slug>`). In-flight + recent ⇒ **LIVE**; in-flight + dormant (> ~2 weeks) ⇒ **STALLED**.
 3. **Pick the baton to read first** — for each live/stalled effort, the newest file in its `handoffs/` is the richest state. Name it; don't dump it.
 4. **Render** (see the report shape below): live/stalled efforts in **full**, concluded ones as **one line each**.
