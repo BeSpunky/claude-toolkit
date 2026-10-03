@@ -170,7 +170,8 @@ claude-toolkit/
 │   ├── hooks/                             # continuity, made reliable rather than hoped-for
 │   │   ├── hooks.json                    # SessionStart + PreCompact registrations, and the one mods.ts module (registers every mod)
 │   │   ├── detect-standing.sh            # SessionStart — silent unless in-flight work has gone dormant; then relays a fact pointing at project-standing (detect, don't execute)
-│   │   ├── standing.tsx                  # mod — `/standing` opens a pane: feature packages live / dormant / concluded, newest baton each, Resume queues a prompt (never acts)
+│   │   ├── standing.tsx                  # mod — `/standing` opens a pane: feature packages live / dormant / concluded, newest baton each, Resume queues a prompt (never acts); closing it says `/standing` reopens it
+│   │   ├── _brand.tsx                    # GENERATED — the toolkit's one mod look (`✦ bespunky` mark, frame, rules), projected into every mod-shipping plugin from tools/mod-brand/brand.tsx
 │   │   ├── checkpoint-on-compact.sh      # PreCompact — writes a mechanical checkpoint (branch, HEAD, uncommitted files) into the live effort's package before context is lost, even headless; asks the model to distill it; `--last` prints the last checkpoint's receipt (JSON) for non-model readers
 │   │   └── checkpoint-toast.ts           # mod — toasts "checkpoint saved → <path>" to the person when that hook writes one (reads `--last`, re-derives nothing)
 │   └── skills/
