@@ -15,9 +15,16 @@
 
 The **rules** — the mandatory `bespunky-workflow:branch-and-release` skill invocation, the Step-0 relevance check, and the always-on protection and promotion rules — are in [`HOUSE.rules.md`](HOUSE.rules.md), which `CLAUDE.md` imports. This section is the **project-specific parameters** those rules read.
 
-**The branch model is not declared yet** — there is no `.bespunky/branches.json`. Until there is, no model is assumed, and every existing branch named `main`, `master`, `development`, `develop` or `staging` (locally or on the remote) is **protected**: never committed onto directly, never promoted into or out of without the user. Before the first branch or promotion action of a session, the skill investigates how this repo actually works (its branches, their history, its CI and deploy configuration) and asks the user which model it follows; declaring that model, through the skill's change procedure, writes the file and replaces this section on the next sync.
+**The branch model** — declared in `.bespunky/branches.json` (the copy on the integration line's tip is authoritative): **development → main**.
 
-**Deploy bindings (this project):** not declared. The investigation reads what it can observe (CI workflows, environment files) and asks about the rest; once declared they live in the model and `branches.mjs describe` lists them.
+| Line | Role |
+| --- | --- |
+| `development` | integration · new work branches from here |
+| `main` | stage · production |
+
+New work branches off `development` and, by default, lands on `development` (unless the skill's plan says otherwise — e.g. stabilisation work on a release line); work and hotfix branches are never protected. This table is the model's **projection** — names and roles only. How each line advances, what its patterns mean and where it deploys are the model's semantics: ask the skill's engine (`branches.mjs describe`), never infer them from this table. The model changes only through the skill's change procedure, never by hand-editing the file.
+
+**Deploy bindings (this project):** if any are recorded, they live in the model (each line's, pattern's or tag's `deploys`), and `branches.mjs describe` lists them — this page cannot see them, so it does not claim any. Bindings are documentation — nothing verifies them against the deploy mechanism itself.
 
 ## Common Commands
 
