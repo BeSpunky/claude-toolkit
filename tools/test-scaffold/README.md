@@ -86,6 +86,6 @@ test.
   marketplace, the migration ceiling). Run in CI and by the pre-push hook.
 - **This directory** — guards whether the scaffolder **behaves** once it gets there.
 
-The pre-push hook deliberately does not run these: it guards pushes to `main`/`development`/`staging` for
+The pre-push hook deliberately does not run these: it guards pushes to the declared protected lines (`main`/`development`) for
 release bookkeeping, and widening its remit is a separate decision. CI runs them at those same integration
 points; locally, run `run.sh` — it is fast enough that there is no reason not to.

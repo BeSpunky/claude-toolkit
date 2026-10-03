@@ -16,7 +16,7 @@ on:
   # these integration points are where CI genuinely gets a look, which is why the local `run.sh` is the
   # primary safety net and this is the backstop.
   push:
-    branches: [main, development, staging]
+    branches: [main, development]
   pull_request:
   workflow_dispatch:
 

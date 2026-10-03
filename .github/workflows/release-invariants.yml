@@ -31,7 +31,7 @@ on:
   push:
     # THIS repo's current long-lived lines (its own declared branch model, not a toolkit default) — drift
     # matters at every integration point, not only the last one. Update this list if the model changes.
-    branches: [main, development, staging]
+    branches: [main, development]
   pull_request:
   workflow_dispatch:
 

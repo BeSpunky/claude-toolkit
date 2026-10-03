@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "derivedFrom": "two-line",
+  "remote": "origin",
+  "integration": {
+    "branch": "development",
+    "baseline": "7af334125a239f5b117d0a2805dd95d12dd29d7a"
+  },
+  "stages": [
+    {
+      "branch": "main",
+      "promote": "ff",
+      "baseline": "7af334125a239f5b117d0a2805dd95d12dd29d7a",
+      "deploys": "publish-nx-tools.yml publishes @bespunky/nx-tools to npm; origin's default branch — what marketplace consumers pull"
+    }
+  ],
+  "releases": null,
+  "hotfixes": null,
+  "work": {
+    "pattern": "{type}/{slug}",
+    "types": [
+      "feat",
+      "fix",
+      "chore",
+      "docs",
+      "refactor"
+    ]
+  },
+  "fixFlow": null,
+  "landing": {
+    "via": "merge",
+    "prStyle": null
+  },
+  "tags": [],
+  "projection": {
+    "schema": 1,
+    "remote": "origin",
+    "integration": "development",
+    "production": [
+      "main"
+    ],
+    "productionPatterns": [],
+    "chain": [
+      "development",
+      "main"
+    ],
+    "protected": [
+      "development",
+      "main"
+    ],
+    "protectedPatterns": [],
+    "workBase": "development",
+    "summary": "development → main"
+  }
+}
