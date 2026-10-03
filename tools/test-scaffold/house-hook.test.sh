@@ -12,9 +12,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PLUGIN="$ROOT/plugins/project-starter"
+PLUGIN="$ROOT/plugins/house"
 HOOK="$PLUGIN/hooks/check-house-version.sh"
-INSTALLED="$(node -p "require('$PLUGIN/skills/new-project/assets/nx-tools/package.json').version")"
+INSTALLED="$(node -p "require('$PLUGIN/engine/nx-tools/package.json').version")"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP" 2>/dev/null || sudo -n rm -rf "$TMP"' EXIT
@@ -53,19 +53,19 @@ run_json() {
     | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(j.notices.map(n=>`${n.kind}:${n.action}`).join(" "))'
 }
 out="$(run_json "$TMP/old")"
-ok '--json: older stamp → toolkit-moved, offers a sync' "$( [ "$out" = 'toolkit-moved:sync' ] && echo 1 || echo 0)" "$out"
+ok '--json: older stamp → toolkit-moved, offers an upgrade' "$( [ "$out" = 'toolkit-moved:upgrade' ] && echo 1 || echo 0)" "$out"
 out="$(run_json "$TMP/grew")"
-ok '--json: grown layer → layer-drift, offers a sync' "$( [ "$out" = 'layer-drift:sync' ] && echo 1 || echo 0)" "$out"
+ok '--json: grown layer → layer-drift, offers an upgrade' "$( [ "$out" = 'layer-drift:upgrade' ] && echo 1 || echo 0)" "$out"
 out="$(run_json "$TMP/current")"
 ok '--json: current → no notices' "$( [ -z "$out" ] && echo 1 || echo 0)" "$out"
 P="$TMP/ahead"; stamp "$P" 999.0.0 'nx,agent'
 out="$(run_json "$P")"
-ok '--json: project ahead of machine → update the toolkit, never a sync' "$( [ "$out" = 'machine-behind:update-toolkit' ] && echo 1 || echo 0)" "$out"
+ok '--json: project ahead of machine → update the toolkit, never an upgrade' "$( [ "$out" = 'machine-behind:update-toolkit' ] && echo 1 || echo 0)" "$out"
 out="$(CLAUDE_PROJECT_DIR="$ROOT" CLAUDE_PLUGIN_ROOT="$PLUGIN" bash "$HOOK" --json 2>/dev/null)"
 ok '--json: plugin root inside the project → silent' "$( [ "$out" = '{"notices":[]}' ] && echo 1 || echo 0)" "$out"
 
 # A root-owned volume mount point: the container's post-create most likely failed on it. ONE fact, naming the
-# path and owner and the exact fix, from the same derivation the sync preflight uses (the project's
+# path and owner and the exact fix, from the same derivation the upgrade preflight uses (the project's
 # devcontainer.json). Needs a non-root user with passwordless sudo to build the fixture; skipped out loud otherwise.
 if [ "$(id -u)" = 0 ] || ! sudo -n true 2>/dev/null; then
   echo "  skip root-owned mount point cases — need a non-root user with passwordless sudo"

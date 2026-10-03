@@ -1,11 +1,12 @@
 # Spinner tips for this plugin, shown now and then while Claude works (see plugins/bespunky/hooks/tips.mjs).
 # One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
 
-/bespunky-project-starter:sync brings a project up to the current house standard in one step
-A /sync on a protected branch opens its own worktree off the integration line — it never commits onto a protected line
-"Scaffold a new project" now means the house DX on Nx — no Angular, no package.json; add only the layers you pick
-Want the house web app? Ask for the angular preset (scaffold.sh --preset=angular) — Angular, dev loop, design system
-Add only the house DX to any repo: /bespunky-project-starter:sync --ensure=agent
-Testing a toolkit change before it's published? Add --local to a sync to install your working tree
-Pick where projects live and how they link at scaffold: --layout=apps-libs|packages --linking=paths|workspaces
-The row above the prompt saying your house tooling is behind has a Sync button — it asks Claude, never syncs by itself
+/bespunky-house:upgrade brings a project up to the current house standard in one step — it adds no layer
+An upgrade on a protected branch opens its own worktree off the integration line — it never commits onto a protected line
+/bespunky-house:new creates a project: the house DX on Nx — no Angular, no package.json; add only the layers you pick
+Want the house web app? Ask for the angular preset (house.sh new --preset=angular) — Angular, dev loop, design system
+Add only the house DX to any repo: /bespunky-house:add-layer agent
+Testing a toolkit change before it's published? Add --local to an upgrade to install your working tree
+Pick where projects live and how they link when creating one: --layout=apps-libs|packages --linking=paths|workspaces
+The row above the prompt saying your house tooling is behind has an Upgrade button — it asks Claude, never upgrades by itself
+Adding a layer is its own command: /bespunky-house:add-layer firebase — an upgrade that also creates the layer

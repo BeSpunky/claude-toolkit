@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SessionStart hook — "did the toolkit move out from under this project?"
 #
-# WHY THIS EXISTS. `scaffold.sh --sync` runs the house MIGRATIONS and re-applies the house generators, so a
+# WHY THIS EXISTS. `house.sh upgrade` runs the house MIGRATIONS and re-applies the house generators, so a
 # project picks up new house tooling — both the files the generators own and the one-way version deltas that
 # reshape what they don't. But nothing was telling anyone to run it: Claude Code has NO plugin-install/update
 # hook event, so
@@ -9,19 +9,19 @@
 # devcontainer, Claude settings, serve targets and HOUSE.md all frozen at whatever shipped the day it was
 # scaffolded.
 #
-# WHY IT ONLY DETECTS, AND NEVER RUNS. The obvious move — have a hook RUN the sync — is wrong, and
-# deliberately not done. A sync migrates, installs and regenerates; it takes minutes, tags the repo on a dirty
+# WHY IT ONLY DETECTS, AND NEVER RUNS. The obvious move — have a hook RUN the upgrade — is wrong, and
+# deliberately not done. An upgrade migrates, installs and regenerates; it takes minutes, tags the repo on a dirty
 # tree, and its migrations are ONE-WAY. (It does NOT require Docker — inside a devcontainer it runs on the
-# local Node natively; see scaffold.sh.) That is not something to ambush a session with. So this hook does the
-# cheap half — a few small file reads — and hands Claude a statement of fact to RELAY. It never runs the sync
+# local Node natively; see house.sh.) That is not something to ambush a session with. So this hook does the
+# cheap half — a few small file reads — and hands Claude a statement of fact to RELAY. It never runs the upgrade
 # and never orders the model to: a hook that commands action is one compliant model away from doing the thing
 # we refused to automate, and in a headless run (`claude -p`, CI) there is no one there to consent at all.
 # Detection is automatic; execution stays consented.
 #
 # WHAT IT COMPARES, AND WHY ONLY THAT. `@bespunky/nx-tools` — the package the generators come from, and so the
-# only thing that can change what a sync PRODUCES. Deliberately NOT the plugin version: the house convention
+# only thing that can change what an upgrade PRODUCES. Deliberately NOT the plugin version: the house convention
 # bumps a plugin's version on ANY change (a SKILL.md typo, a README line), and demanding a multi-minute
-# sync for a change that regenerates nothing would train everyone to ignore this notice. The plugin version
+# upgrade for a change that regenerates nothing would train everyone to ignore this notice. The plugin version
 # is still read and shown, for provenance.
 #
 # AND IT COMPARES THAT TWICE, against two different things. Against the INSTALLED plugin, the question is "has
@@ -39,10 +39,10 @@
 # DIRECTION MATTERS. The stamp is a REPO fact (committed, travels with every clone); the installed plugin is a
 # MACHINE fact. So "stamp newer than install" is an ordinary state — a teammate who hasn't run
 # `/plugin marketplace update`, a second machine, a CI checkout — not an error. Reporting that as "you're
-# behind, run --sync" would be a lie AND would push a sync that regenerates the project's house files with
+# behind, run an upgrade" would be a lie AND would push an upgrade that regenerates the project's house files with
 # OLDER generators, re-stamping it backwards and re-arming the notice for the teammate who was up to date.
 # Under migrations the hazard is sharper still: the ladder only walks FORWARD. There is no reverse migration,
-# so a sync from an older machine cannot undo the deltas the project has already had applied — it would leave
+# so an upgrade from an older machine cannot undo the deltas the project has already had applied — it would leave
 # files migrated to a shape the older generators no longer expect, and stamp that state as current. So the
 # versions are ORDERED, not merely compared, and each direction gets its own true sentence.
 #
@@ -54,11 +54,11 @@ set -uo pipefail
 # --- two renderings of ONE detection ---------------------------------------------------------------------------
 # Bare (as hooks.json runs it), every notice is the text below, relayed to the model. With `--json` the SAME
 # checks run, in the same order with the same exits and snoozes, and each notice is recorded instead as one
-# `{ kind, action, summary }` object — for the project-starter band (hooks/band.tsx), which shows it above the
+# `{ kind, action, summary }` object — for the house band (hooks/band.tsx), which shows it above the
 # prompt. The band never re-derives an ordering rule: this file is the only place they live, so the two
 # surfaces cannot disagree about when a project is behind. `action` is what the notice asks of a human:
-# `sync` (a sync is the fix), `update-toolkit` (this machine is behind — a sync here would be wrong or would
-# refuse) or `fix-mounts` (post-create failed). Every value in `summary` is one this hook already validates
+# `upgrade` (an upgrade is the fix), `update-toolkit` (this machine is behind — an upgrade here would be wrong or
+# would refuse) or `fix-mounts` (post-create failed). Every value in `summary` is one this hook already validates
 # before echoing; JSON-escaping is the only extra step. Prints `{"notices":[]}` when there is nothing to say.
 MODE=text
 [ "${1:-}" = --json ] && MODE=json
@@ -83,16 +83,16 @@ HOUSE_DOC="$PROJECT_DIR/HOUSE.md"
 # A MACHINE fact, and the most urgent one this hook can see. A devcontainer that mounts a named volume inside the
 # workspace (node_modules, .nx/cache, .angular…) gets a mount point Docker creates ROOT-OWNED; if post-create did
 # not reclaim it, its install died on EACCES and this session is running with no dependencies — every later
-# notice here is moot until that is fixed, and a sync would refuse on it (`unwritable-mounts`).
+# notice here is moot until that is fixed, and an upgrade would refuse on it (`unwritable-mounts`).
 #
 # Asked BEFORE the containment exit below, deliberately: that exit is about comparing versions, and a root-owned
-# node_modules is just as broken in the toolkit's own repo. Detection is assets/house-mounts.sh — the SAME
-# derivation the sync preflight uses, so the two cannot disagree — and costs a few greps of devcontainer.json and
+# node_modules is just as broken in the toolkit's own repo. Detection is engine/house-mounts.sh — the SAME
+# derivation the upgrade preflight uses, so the two cannot disagree — and costs a few greps of devcontainer.json and
 # `test -w` per candidate: no Node, nothing installed. One fact, silent otherwise, and it does not end the hook:
 # the version notices below stay true and are still told.
-MOUNTS_SH="$PLUGIN_ROOT/skills/new-project/assets/house-mounts.sh"
+MOUNTS_SH="$PLUGIN_ROOT/engine/house-mounts.sh"
 if [ -f "$MOUNTS_SH" ]; then
-  # shellcheck source=../skills/new-project/assets/house-mounts.sh
+  # shellcheck source=../engine/house-mounts.sh
   . "$MOUNTS_SH"
   _um="$(house_unwritable_mounts "$PROJECT_DIR")"
   if [ -n "$_um" ]; then
@@ -103,7 +103,7 @@ if [ -f "$MOUNTS_SH" ]; then
       record post-create-failed fix-mounts "Post-create most likely failed: $_um_owners not writable by $(id -un), so the project has no dependencies."
     else
     cat <<EOF
-[bespunky-project-starter] This container's post-create most likely FAILED: $_um_owners — not writable by $(id -un), so the install into it died with EACCES and the project has no dependencies. Fix, in the project root: \`sudo chown -R "\$(id -un):\$(id -gn)" $_um_paths\`${_um_pc:+, then \`bash $_um_pc\`}. Relay this to the user.
+[bespunky-house] This container's post-create most likely FAILED: $_um_owners — not writable by $(id -un), so the install into it died with EACCES and the project has no dependencies. Fix, in the project root: \`sudo chown -R "\$(id -un):\$(id -gn)" $_um_paths\`${_um_pc:+, then \`bash $_um_pc\`}. Relay this to the user.
 EOF
     fi
   fi
@@ -112,11 +112,11 @@ fi
 # IS THE PLUGIN THIS PROJECT'S OWN SOURCE? Then there is nothing to compare and never anything to say.
 #
 # This used to be free: HOUSE.md was absent from the toolkit repo, so the check above exited first. Layering
-# ends that — the whole point is that `--sync` now runs on repos like the toolkit itself, which means the
+# ends that — the whole point is that `upgrade` now runs on repos like the toolkit itself, which means the
 # toolkit gets a HOUSE.md and would start tripping its own hook. And the comparison there is not merely
 # noisy, it is MEANINGLESS: the marketplace is loaded from the working tree (`claude plugin marketplace
 # add .`), so "installed version" and "the version I am editing right now" are the same file. Every edit to
-# the payload's package.json would fire a notice telling the author to sync the repo they are mid-change in.
+# the payload's package.json would fire a notice telling the author to upgrade the repo they are mid-change in.
 #
 # Detected by CONTAINMENT rather than by name: the plugin root living inside the project means this session's
 # plugin IS this repo's source, whatever the repo is called or wherever it is checked out. Covers the toolkit,
@@ -142,7 +142,7 @@ is_version() {
 }
 
 # Read a "key": "value" out of a JSON file — no jq (hooks must run in a bare shell; this is the same grep/sed
-# contract scaffold.sh already relies on to read its own versions). Line-based, so a key nested one level down
+# contract house.sh already relies on to read its own versions). Line-based, so a key nested one level down
 # (a dependency inside devDependencies) reads exactly like a top-level one. The sed delimiter is `|` rather
 # than `/` precisely so a key may CONTAIN a slash — a scoped package name like `@bespunky/nx-tools` would
 # otherwise terminate the s/// expression and turn a lookup into a syntax error.
@@ -176,7 +176,7 @@ version_cmp() {
   echo eq
 }
 
-INSTALLED_NX="$(json_value "$PLUGIN_ROOT/skills/new-project/assets/nx-tools/package.json" version || true)"
+INSTALLED_NX="$(json_value "$PLUGIN_ROOT/engine/nx-tools/package.json" version || true)"
 INSTALLED_PLUGIN="$(json_value "$PLUGIN_ROOT/.claude-plugin/plugin.json" version || true)"
 STAMPED_NX="$(stamp_value nx-tools || true)"
 
@@ -221,14 +221,14 @@ note_drift() { DRIFTED="${DRIFTED:+$DRIFTED, }$1"; }
 # against a stamp that RECORDS layers: a project stamped before layers existed has an empty list, which is
 # not evidence that it lacks them — treating it as such would fire this notice at every pre-layer project on
 # the machine, every session, for a reason none of them can act on. Those are covered by the version branch
-# below, whose sync re-stamps them WITH layers.
+# below, whose upgrade re-stamps them WITH layers.
 #
 # Asking that question up front also means the probes — including the filesystem scan — never run for a
 # project that could not act on their answer.
 #
 # THE DETECTORS ARE THE REGISTRY'S. The layer list, each layer's evidence and the evaluator itself come from
-# assets/layers.sh — the shell projection GENERATED from nx-tools/src/layers/*.ts, the same descriptors the
-# generators and the sync detect with — so a new layer is noticed here the day it is registered, and this hook
+# engine/layers.sh — the shell projection GENERATED from nx-tools/src/layers/*.ts, the same descriptors the
+# generators and the upgrade detect with — so a new layer is noticed here the day it is registered, and this hook
 # can no longer disagree with the registry about what a layer is. It stays a few greps: the projection is pure
 # bash (no Node, no node_modules in the project), and its evaluator reads every project.json in ONE pruned
 # traversal however many layers there are. Sourcing it defines functions only. If it is missing (a partial
@@ -239,11 +239,11 @@ note_drift() { DRIFTED="${DRIFTED:+$DRIFTED, }$1"; }
 # see. When the toolkit has since moved (stamp older than install), the newer registry can detect a layer the
 # older one had no name for — `node`, say, on every project stamped before it existed — and "this project has
 # grown a layer" would be a false sentence about a project that changed nothing. That case is the version
-# notice's to tell (below), and the sync it offers re-stamps the layers anyway. So layer drift is asked only when
+# notice's to tell (below), and the upgrade it offers re-stamps the layers anyway. So layer drift is asked only when
 # the stamp and the install agree on the version.
-LAYERS_SH="$PLUGIN_ROOT/skills/new-project/assets/layers.sh"
+LAYERS_SH="$PLUGIN_ROOT/engine/layers.sh"
 if [ -n "$STAMPED_LAYERS" ] && [ "$STAMPED_LAYERS" != "none" ] && [ "$STAMPED_NX" = "$INSTALLED_NX" ] && [ -f "$LAYERS_SH" ]; then
-  # shellcheck source=../skills/new-project/assets/layers.sh
+  # shellcheck source=../engine/layers.sh
   . "$LAYERS_SH"
   for _id in $(house_layers_evident "$PROJECT_DIR" | tr ',' ' '); do
     has_layer "$_id" || note_drift "$_id"
@@ -254,10 +254,10 @@ if [ -n "$DRIFTED" ]; then
   SNOOZED_LAYERS="$(json_value "$PROJECT_DIR/.claude/house-snooze.json" declinedLayers || true)"
   if [ "$SNOOZED_LAYERS" != "$DRIFTED" ]; then
     if [ "$MODE" = json ]; then
-      record layer-drift sync "Layer never applied: $DRIFTED. A sync adds its house files."
+      record layer-drift upgrade "Layer never applied: $DRIFTED. An upgrade adds its house files."
     else
     cat <<EOF
-[bespunky-project-starter] This project has grown a layer its house tooling was never applied for.
+[bespunky-house] This project has grown a layer its house tooling was never applied for.
 
   present in the workspace but not in the stamp : $DRIFTED
   stamp records                                 : layers=$STAMPED_LAYERS
@@ -265,10 +265,10 @@ if [ -n "$DRIFTED" ]; then
 So the house files for that layer are missing. What each one brings:
 $(for _id in $(printf '%s' "$DRIFTED" | tr -d ' ' | tr ',' ' '); do printf '  %-14s— %s\n' "$_id" "$(house_layer_brings "$_id")"; done)
 
-A sync adds them: the sync path of the bespunky-project-starter:new-project skill — or, in one step, the
-\`/sync\` command, which updates the toolkit first and then syncs this project.
+An upgrade adds them — it detects every layer the workspace wears and applies its house files: in one step,
+the \`/bespunky-house:upgrade\` command, which updates the toolkit first and then upgrades this project.
 
-RELAY THIS TO THE USER — do not act on it. Offer the sync. It REFUSES to run unattended: it needs a human's
+RELAY THIS TO THE USER — do not act on it. Offer the upgrade. It REFUSES to run unattended: it needs a human's
 yes, and passing its \`--yes\` flag ASSERTS that the user has explicitly agreed in this conversation. Pass it
 only when that is true — never to satisfy the gate, never on inferred consent, and never in a scripted or
 headless run (there, simply do nothing). If they decline, record it so they are not asked again for this same
@@ -282,8 +282,8 @@ EOF
 fi
 
 # --- a floated dependency -------------------------------------------------------------------------------------
-# A THIRD way a project goes stale, and the one that hides best. The toolkit now runs VERSIONED MIGRATIONS: a
-# sync moves the project along a ladder of one-way deltas, from the version it has to the version being
+# A THIRD way a project goes stale, and the one that hides best. The toolkit now runs VERSIONED MIGRATIONS: an
+# upgrade moves the project along a ladder of one-way deltas, from the version it has to the version being
 # installed. So the `nx-tools=` stamp is not merely a label — it records WHICH state has actually been APPLIED
 # to this project.
 #
@@ -334,17 +334,17 @@ elif [ -n "$DEP_NX" ] && [ -n "$STAMPED_NX" ] && [ "$(version_cmp "$DEP_NX" "$ST
   AHEAD_NX="$DEP_NX"; AHEAD_SRC="declared in package.json"
 fi
 
-# WILL A SYNC ACTUALLY FIX THIS? Only if this machine's toolkit is at or above where the project already is.
-# A sync installs the version THIS machine ships, and the scaffolder refuses outright when the project is
-# already above it (that would be a downgrade, and migrations do not walk backwards). Offering a sync that is
+# WILL AN UPGRADE ACTUALLY FIX THIS? Only if this machine's toolkit is at or above where the project already is.
+# An upgrade installs the version THIS machine ships, and the scaffolder refuses outright when the project is
+# already above it (that would be a downgrade, and migrations do not walk backwards). Offering an upgrade that is
 # guaranteed to abort is worse than saying nothing: the user consents, the command fails, and a model that has
-# just been told to sync starts looking for a way around a guard that has none.
-SYNC_CAVEAT=''
+# just been told to upgrade starts looking for a way around a guard that has none.
+UPGRADE_CAVEAT=''
 if [ -n "$AHEAD_NX" ] && [ "$(version_cmp "$AHEAD_NX" "$INSTALLED_NX")" = gt ]; then
-  SYNC_CAVEAT="But NOT YET on this machine: the toolkit installed here is nx-tools@$INSTALLED_NX, which is OLDER
-than the $AHEAD_NX this project already has. A sync would be a downgrade, and it will REFUSE to run rather than
+  UPGRADE_CAVEAT="But NOT YET on this machine: the toolkit installed here is nx-tools@$INSTALLED_NX, which is OLDER
+than the $AHEAD_NX this project already has. An upgrade would be a downgrade, and it will REFUSE to run rather than
 walk the project backwards. Update the toolkit first — /plugin marketplace update claude-toolkit — and only
-then sync. Do not offer the sync until that is done.
+then upgrade. Do not offer the upgrade until that is done.
 "
 fi
 
@@ -354,18 +354,18 @@ if [ -n "$AHEAD_NX" ]; then
   SNOOZED_DEP="$(json_value "$PROJECT_DIR/.claude/house-snooze.json" declinedNxToolsDependency || true)"
   if [ "$SNOOZED_DEP" != "$AHEAD_NX" ]; then
     if [ "$MODE" = json ]; then
-      if [ -n "$SYNC_CAVEAT" ]; then
-        record dependency-ahead update-toolkit "Project depends on nx-tools@$AHEAD_NX but nx-tools@$STAMPED_NX was applied, and this machine only has nx-tools@$INSTALLED_NX. Update the toolkit before syncing."
+      if [ -n "$UPGRADE_CAVEAT" ]; then
+        record dependency-ahead update-toolkit "Project depends on nx-tools@$AHEAD_NX but nx-tools@$STAMPED_NX was applied, and this machine only has nx-tools@$INSTALLED_NX. Update the toolkit before upgrading."
       else
-        record dependency-ahead sync "Project depends on nx-tools@$AHEAD_NX ($AHEAD_SRC) but nx-tools@$STAMPED_NX was applied: migrations were likely skipped."
+        record dependency-ahead upgrade "Project depends on nx-tools@$AHEAD_NX ($AHEAD_SRC) but nx-tools@$STAMPED_NX was applied: migrations were likely skipped."
       fi
     else
     cat <<EOF
-[bespunky-project-starter] This project DEPENDS on newer house tooling than has been APPLIED to it.
+[bespunky-house] This project DEPENDS on newer house tooling than has been APPLIED to it.
 
   stamp records (state applied) : nx-tools@$STAMPED_NX
   ahead of it ($AHEAD_SRC) : nx-tools@$AHEAD_NX
-  installed on this machine     : nx-tools@$INSTALLED_NX (project-starter@$INSTALLED_PLUGIN)
+  installed on this machine     : nx-tools@$INSTALLED_NX (house@$INSTALLED_PLUGIN)
 
 The house tooling this project is RUNNING is ahead of the state that was last APPLIED to it. That happens
 without anyone doing anything wrong: the dependency was written as a floatable range by older versions of the
@@ -375,11 +375,11 @@ the state the stamp records — so a stamp behind the declared dependency means 
 versions were most likely never applied: the project is running new tooling against files still shaped for the
 old one.
 
-A sync reconciles the two: it runs the migrations from the stamped version forward, re-applies the house
-generators and re-stamps the project — the sync path of the bespunky-project-starter:new-project skill, or, in
-one step, the \`/sync\` command, which updates the toolkit first and then syncs this project.
-$SYNC_CAVEAT
-RELAY THIS TO THE USER — do not act on it. Offer the sync. It REFUSES to run unattended: it needs a human's
+An upgrade reconciles the two: it runs the migrations from the stamped version forward, re-applies the house
+generators and re-stamps the project — in one step, the \`/bespunky-house:upgrade\` command, which updates the
+toolkit first and then upgrades this project.
+$UPGRADE_CAVEAT
+RELAY THIS TO THE USER — do not act on it. Offer the upgrade. It REFUSES to run unattended: it needs a human's
 yes, and passing its \`--yes\` flag ASSERTS that the user has explicitly agreed in this conversation. Pass it
 only when that is true — never to satisfy the gate, never on inferred consent, and never in a scripted or
 headless run (there, simply do nothing). If they decline, record it so they are not asked again for this same
@@ -411,23 +411,23 @@ DIRECTION="$(version_cmp "$INSTALLED_NX" "${STAMPED_NX:-unknown}")"
 
 case "$DIRECTION" in
   lt)
-    # The PROJECT is ahead of this machine's plugin. A sync here would DOWNGRADE the project's generated
-    # files and re-stamp it backwards. Say the true thing, and say plainly that a sync is the wrong move.
+    # The PROJECT is ahead of this machine's plugin. An upgrade here would DOWNGRADE the project's generated
+    # files and re-stamp it backwards. Say the true thing, and say plainly that an upgrade is the wrong move.
     if [ "$MODE" = json ]; then
-      record machine-behind update-toolkit "This machine's toolkit (nx-tools@$INSTALLED_NX) is older than the project's (nx-tools@$STAMPED_NX). Update the plugin; do not sync."
+      record machine-behind update-toolkit "This machine's toolkit (nx-tools@$INSTALLED_NX) is older than the project's (nx-tools@$STAMPED_NX). Update the plugin; do not upgrade."
     else
     cat <<EOF
-[bespunky-project-starter] This machine's house tooling is OLDER than the project's.
+[bespunky-house] This machine's house tooling is OLDER than the project's.
 
   project was generated with : nx-tools@$STAMPED_NX
-  installed on this machine  : nx-tools@$INSTALLED_NX (project-starter@$INSTALLED_PLUGIN)
+  installed on this machine  : nx-tools@$INSTALLED_NX (house@$INSTALLED_PLUGIN)
 
 The project is fine; the PLUGIN here is behind. Mention this to the user and suggest they update it:
 \`/plugin marketplace update claude-toolkit\` (a git pull first, if they installed from a local clone).
 
-Do NOT run \`scaffold.sh --sync\` in this state — it regenerates the project's house files with the OLDER
+Do NOT run \`house.sh upgrade\` (or \`/bespunky-house:upgrade\`) in this state — it regenerates the project's house files with the OLDER
 generators installed here, downgrading the project and stamping it backwards for everyone else on the team.
-The house migrations only walk FORWARD, so nothing about that is undone by the next sync from an up-to-date
+The house migrations only walk FORWARD, so nothing about that is undone by the next upgrade from an up-to-date
 machine; it is simply a mess someone then has to unpick by hand.
 EOF
     fi
@@ -456,21 +456,20 @@ EOF
     fi
 
     if [ "$MODE" = json ]; then
-      record toolkit-moved sync "$SUMMARY"
+      record toolkit-moved upgrade "$SUMMARY"
     else
     cat <<EOF
-[bespunky-project-starter] $HEADLINE
+[bespunky-house] $HEADLINE
 
   project was generated with : $FROM
-  installed on this machine  : nx-tools@$INSTALLED_NX (project-starter@$INSTALLED_PLUGIN)
+  installed on this machine  : nx-tools@$INSTALLED_NX (house@$INSTALLED_PLUGIN)
 
 So this project's generated house files (HOUSE.md, .claude/settings.json, the devcontainer, the serve /
-worktree / design-system targets) are stale. Re-applying the house generators is what refreshes them: the
-sync path of the bespunky-project-starter:new-project skill — or, in one step, the \`/sync\` command, which updates the
-toolkit first and then syncs this project.
+worktree / design-system targets) are stale. Upgrading is what refreshes them: in one step, the \`/bespunky-house:upgrade\`
+command, which updates the toolkit first and then upgrades this project.
 
 RELAY THIS TO THE USER — do not act on it. Mention it briefly at the start of your reply, before their task,
-and offer the sync. The sync REFUSES to run unattended: it needs a human's yes, and passing its \`--yes\`
+and offer the upgrade. The upgrade REFUSES to run unattended: it needs a human's yes, and passing its \`--yes\`
 flag ASSERTS that the user has explicitly agreed in this conversation. Pass it only when that is true — never
 to satisfy the gate, never on inferred consent, and never in a scripted or headless run (there, simply do
 nothing). If they decline, record it so they are not asked again for this version — write

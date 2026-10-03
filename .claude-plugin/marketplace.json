@@ -13,9 +13,9 @@
       "version": "0.2.1"
     },
     {
-      "name": "bespunky-project-starter",
-      "source": "./plugins/project-starter",
-      "description": "Scaffold a new BeSpunky-standard project, or retrofit the house tooling onto any existing repo, as a stack of detected layers on an always-ensured Nx floor: the agent DX (composed devcontainer, Claude settings, window identity) by default, and Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. Generator-first; kept current by versioned migrations and a consented sync.",
+      "name": "bespunky-house",
+      "source": "./plugins/house",
+      "description": "The BeSpunky house standard for any repo, as a stack of detected layers on an Nx floor: the agent DX (composed devcontainer, Claude settings, window identity, HOUSE docs) by default; Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. /bespunky-house:new creates a project, /bespunky-house:upgrade migrates one to the current standard, /bespunky-house:add-layer adds a layer. Generator-first; consented, never automatic.",
       "version": "0.39.1"
     },
     {
@@ -71,6 +71,12 @@
       "source": "./plugins/communication",
       "description": "How Claude speaks: ships the 'Pitch to the listener' output style, every answer pitched to the person reading it. Brief by default, for a reader who stepped out; full depth the moment they engage. One question per message, placed last; short reports of finished work that never drop a caveat; structure only where it earns its place; no unexplained jargon or bare verdicts. Presentation only. Default in BeSpunky projects; elsewhere pick it with /output-style.",
       "version": "0.4.3"
+    },
+    {
+      "name": "bespunky-project-starter",
+      "source": "./plugins/project-starter",
+      "description": "Deprecated: renamed to bespunky-house. Nothing to learn - your next /bespunky-project-starter:sync installs bespunky-house@claude-toolkit at the same scope and runs its upgrade, which is what /sync became (adding a layer is now /bespunky-house:add-layer, creating a project /bespunky-house:new). Then `claude plugin uninstall bespunky-project-starter`. Or install bespunky-house yourself now.",
+      "version": "0.39.1"
     }
   ]
 }

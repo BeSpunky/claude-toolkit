@@ -1,4 +1,4 @@
-// bespunky-project-starter — the HOUSE BAND: a row above the prompt, shown only
+// bespunky-house — the HOUSE BAND: a row above the prompt, shown only
 // while this project's house tooling has something to say (the toolkit moved
 // on, a layer was never applied, the container's post-create failed), with one
 // button that asks Claude to deal with it and one that hides the band.
@@ -10,9 +10,10 @@
 // with `--json` and draws what it records, so the two surfaces cannot disagree
 // and no rule is written twice.
 //
-// DETECT, DON'T EXECUTE. The band never runs a sync, an update or a chown. Its
+// DETECT, DON'T EXECUTE. The band never runs an upgrade, an update or a chown. Its
 // button submits a prompt — the person's own request, made by pressing it — and
-// Claude then runs the consented path (the /sync command's own gates included).
+// Claude then runs the consented path (the /bespunky-house:upgrade command's own
+// gates included).
 //
 // THE PLUGIN WORKS WITHOUT IT. The SessionStart hook still relays the notice to
 // the model; with mods disabled nothing here is missed but the view.
@@ -24,26 +25,26 @@ import type { HouseAction, HouseBand, HouseNotice } from '../types/index.d.ts'
 import { BrandFrame, brandLine } from './_brand.tsx'
 
 /** The one value the band draws from. */
-const BAND = { plugin: 'bespunky-project-starter', key: 'band' } as const
+const BAND = { plugin: 'bespunky-house', key: 'band' } as const
 
 const CHECK_TIMEOUT_MS = 10_000
 /** A dismissed band cannot say how it comes back, so the dismissal does. */
 export const DISMISSED_TOAST = 'House notice hidden for this session; the next session checks again'
-const ACTIONS: readonly HouseAction[] = ['sync', 'update-toolkit', 'fix-mounts']
+const ACTIONS: readonly HouseAction[] = ['upgrade', 'update-toolkit', 'fix-mounts']
 
 /** Each action's button and the prompt it submits. */
 const BUTTONS: Record<HouseAction, { label: string; hotkey: string; prompt: (summary: string) => string }> = {
-  sync: {
-    label: 'Sync',
-    hotkey: 's',
+  upgrade: {
+    label: 'Upgrade',
+    hotkey: 'u',
     prompt: summary =>
-      `Run /sync (the bespunky-project-starter:sync skill) to bring this project up to the current house standard. The house band says: ${summary}`,
+      `Run /bespunky-house:upgrade to bring this project up to the current house standard. The house band says: ${summary}`,
   },
   'update-toolkit': {
     label: 'Update toolkit',
-    hotkey: 'u',
+    hotkey: 't',
     prompt: summary =>
-      `Help me update the claude-toolkit plugins on this machine. The house band says: ${summary} Do not run a sync as part of this.`,
+      `Help me update the claude-toolkit plugins on this machine. The house band says: ${summary} Do not run an upgrade as part of this.`,
   },
   'fix-mounts': {
     label: 'Fix',
@@ -94,7 +95,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // While the band is up, re-ask after each main-thread turn: a sync (or a fix)
+  // While the band is up, re-ask after each main-thread turn: an upgrade (or a fix)
   // that ran in it takes the band down. Nothing shown, nothing re-run.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
@@ -160,7 +161,7 @@ async function check($: EngineInterface, projectDir: string): Promise<HouseNotic
 
     return ran.exitCode === 0 ? parseNotices(ran.stdout) : []
   } catch (error) {
-    $.ui.log(`bespunky-project-starter: house check failed: ${error instanceof Error ? error.message : String(error)}`, {
+    $.ui.log(`bespunky-house: house check failed: ${error instanceof Error ? error.message : String(error)}`, {
       to: 'debug',
     })
 

@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "name": "bespunky-house",
+  "name": "bespunky-project-starter",
   "projectType": "library",
   "tags": [
     "type:claude-plugin"

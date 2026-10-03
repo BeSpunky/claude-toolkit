@@ -2,24 +2,24 @@
 # Resolve the CURRENTLY-INSTALLED root of a claude-toolkit plugin — the one on disk right now, not the one
 # this session happens to be running from. Prints an absolute path on stdout; every diagnostic goes to stderr.
 #
-#   resolve-plugin-root.sh [<plugin-id>]      # default: bespunky-project-starter@claude-toolkit
+#   resolve-plugin-root.sh [<plugin-id>]      # default: bespunky-house@claude-toolkit
 #
 # WHY THIS EXISTS. `${CLAUDE_PLUGIN_ROOT}` is fixed for the life of a session. `claude plugin update` writes a
 # new version to disk immediately, but the running session keeps pointing at the copy it started with — so
-# `/sync` used to STOP after updating and demand a restart, spending an entire run on nothing. That restart is
-# the single biggest reason the sync took two or three passes to complete.
+# the upgrade command (then `/sync`) used to STOP after updating and demand a restart, spending an entire run on
+# nothing. That restart is the single biggest reason an upgrade took two or three passes to complete.
 #
-# It is also why the payload version was wrong on the wasted run: `scaffold.sh` derives NX_TOOLS_VERSION from
-# its OWN directory (`${BASH_SOURCE[0]}` -> assets/nx-tools/package.json), so whichever copy executes decides
+# It is also why the payload version was wrong on the wasted run: `house.sh` derives NX_TOOLS_VERSION from
+# its OWN directory (`${BASH_SOURCE[0]}` -> engine/nx-tools/package.json), so whichever copy executes decides
 # which `@bespunky/nx-tools` gets installed and stamped into HOUSE.md. An old root installs an old payload and
-# stamps it; the next sync then has to walk the ladder that run should have walked. Resolving the root fixes
+# stamps it; the next upgrade then has to walk the ladder that run should have walked. Resolving the root fixes
 # the payload for free — there is no second knob.
 #
 # THE MANIFEST IS THE ANSWER, AND A DIRECTORY SCAN IS NOT. `installed_plugins.json` is written by the CLI at
 # install/update time and records `installPath` per scope. That is a keyed read of a fact the CLI just stated.
-# The thing this deliberately does NOT do is what `sync.md` used to forbid for good reason: `find … | head -1`
-# over the cache, which picks an ARBITRARY cached version — on a machine with several that has handed back a
-# scaffolder ten releases old. The cache also retains versions that are no longer installed, so "newest
+# The thing this deliberately does NOT do is what `upgrade.md` used to forbid for good reason: `find … | head -1`
+# over the cache, which picks an ARBITRARY cached version — on a machine with several that has handed back an
+# engine ten releases old. The cache also retains versions that are no longer installed, so "newest
 # directory" and "installed" are simply different questions. The scan survives only as a last-resort fallback
 # when the manifest is unreadable, and it says so out loud when it fires.
 #
@@ -30,11 +30,11 @@
 #
 # IT NEVER RESOLVES BACKWARDS. If the version it finds is OLDER than the root this session is running from,
 # that is the downgrade case the old prohibition existed to prevent, and it is a hard failure rather than a
-# silent pick — running an older scaffolder re-stamps HOUSE.md backwards and runs older generators over a
+# silent pick — running an older engine re-stamps HOUSE.md backwards and runs older generators over a
 # newer shape, which migrations cannot undo.
 set -uo pipefail
 
-PLUGIN_ID="${1:-bespunky-project-starter@claude-toolkit}"
+PLUGIN_ID="${1:-bespunky-house@claude-toolkit}"
 PLUGIN_NAME="${PLUGIN_ID%@*}"
 MARKETPLACE="${PLUGIN_ID#*@}"
 
@@ -43,13 +43,13 @@ MARKETPLACE="${PLUGIN_ID#*@}"
 # of the project itself. Three things follow, and all of them are wanted: the plugin cache is per-workspace
 # (two projects can sit on different toolkit versions without fighting), it is a BIND mount rather than a
 # volume so it survives `Rebuild Container` intact, and the manifest read below is a plain file read either
-# way. Nothing here needs to know which of the two it is looking at — but `scaffold.sh`'s SYNC_NEXT reporter
+# way. Nothing here needs to know which of the two it is looking at — but `house.sh`'s UPGRADE_NEXT reporter
 # does, since this state churns inside the tree it diffs; see the anchoring note there.
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 MANIFEST="$CONFIG_DIR/plugins/installed_plugins.json"
 CACHE_DIR="$CONFIG_DIR/plugins/cache/$MARKETPLACE/$PLUGIN_NAME"
 
-# Version ordering — the same comparator shape scaffold.sh uses (see its `_vlt`); kept as its own copy here
+# Version ordering — the same comparator shape house.sh uses (see its `_vlt`); kept as its own copy here
 # because this script runs standalone, before anything of the payload is resolved. The only way the two can
 # disagree is over prerelease ordering, and this marketplace has never shipped a prerelease.
 _version_of() {  # <plugin-root> -> version from its manifest, or empty
@@ -110,8 +110,18 @@ if [ -z "$RESOLVED" ] || [ ! -d "$RESOLVED" ]; then
 fi
 
 # --- never hand back an OLDER root than the one already running -------------------------------------------
+#
+# Only when the running root IS this plugin. Versions order within one plugin, not across two: the retired
+# `bespunky-project-starter` stub resolves `bespunky-house` from its own root, and comparing the stub's version
+# against the house's would refuse — or pass — on a number that says nothing about either.
+_name_of() {  # <plugin-root> -> name from its manifest, or empty
+  local manifest="$1/.claude-plugin/plugin.json"
+  [ -f "$manifest" ] || return 0
+  sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -1
+}
+
 CURRENT="${CLAUDE_PLUGIN_ROOT:-}"
-if [ -n "$CURRENT" ] && [ -d "$CURRENT" ]; then
+if [ -n "$CURRENT" ] && [ -d "$CURRENT" ] && [ "$(_name_of "$CURRENT")" = "$PLUGIN_NAME" ]; then
   RESOLVED_V="$(_version_of "$RESOLVED")"
   CURRENT_V="$(_version_of "$CURRENT")"
   if [ -n "$RESOLVED_V" ] && [ -n "$CURRENT_V" ] && _vlt "$RESOLVED_V" "$CURRENT_V"; then

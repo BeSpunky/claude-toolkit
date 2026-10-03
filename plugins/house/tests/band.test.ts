@@ -10,7 +10,7 @@ import type { Engine } from 'claude-code/testing'
 import { BRAND, WORDMARK, brandLine } from '../hooks/_brand.tsx'
 import { DISMISSED_TOAST, parseNotices, promptFor } from '../hooks/band.tsx'
 
-const PLUGIN = 'bespunky-project-starter'
+const PLUGIN = 'bespunky-house'
 const CWD = '/work/project'
 const SURFACES = ['terminal', 'desktop'] as const
 
@@ -23,7 +23,7 @@ const PROPS: RenderPropsOf['AbovePrompt'] = {
   view: {},
 }
 
-const MOVED = { kind: 'toolkit-moved', action: 'sync', summary: 'The toolkit moved on: 0.1.0 applied, 0.38.1 here.' }
+const MOVED = { kind: 'toolkit-moved', action: 'upgrade', summary: 'The toolkit moved on: 0.1.0 applied, 0.38.1 here.' }
 const BEHIND = { kind: 'machine-behind', action: 'update-toolkit', summary: "This machine's toolkit is older." }
 const MOUNTS = { kind: 'post-create-failed', action: 'fix-mounts', summary: 'Post-create most likely failed.' }
 
@@ -104,19 +104,19 @@ describe('house band', () => {
     expect(await ui.findAll({ type: 'Button' })).toHaveLength(0)
   })
 
-  test('a sync notice shows its reason, Sync and Dismiss', async ($, on) => {
+  test('an upgrade notice shows its reason, Upgrade and Dismiss', async ($, on) => {
     world(on, said(MOVED))
     await start($)
     for (const surface of SURFACES) {
       const ui = await mount($, surface)
       expect(await lines(ui)).toEqual([MOVED.summary])
-      expect(await ui.find({ key: 'house-toolkit-moved' })).toMatchObject({ props: { label: 'Sync', hotkey: 's' } })
+      expect(await ui.find({ key: 'house-toolkit-moved' })).toMatchObject({ props: { label: 'Upgrade', hotkey: 'u' } })
       expect(await ui.find({ key: 'house-dismiss' })).toMatchObject({ props: { label: 'Dismiss', hotkey: 'd' } })
       await ui.unmount()
     }
   })
 
-  test('Sync submits a prompt asking for /sync; the band never runs it', async ($, on) => {
+  test('Upgrade submits a prompt asking for /bespunky-house:upgrade; the band never runs it', async ($, on) => {
     const w = world(on, said(MOVED))
     await start($)
     for (const surface of SURFACES) {
@@ -124,19 +124,19 @@ describe('house band', () => {
       const ui = await mount($, surface)
       await ui.press({ key: 'house-toolkit-moved' })
       expect(w.submitted).toEqual([{ text: promptFor(MOVED as never), asUser: true }])
-      expect(w.submitted[0].text).toContain('/sync')
+      expect(w.submitted[0].text).toContain('/bespunky-house:upgrade')
       await ui.unmount()
     }
     expect(w.runs.every(run => run.argv.includes('--json'))).toBe(true)
   })
 
-  test('a machine behind the project offers an update, never a sync', async ($, on) => {
+  test('a machine behind the project offers an update, never an upgrade', async ($, on) => {
     const w = world(on, said(BEHIND))
     await start($)
     const ui = await mount($, 'terminal')
     expect(await ui.find({ key: 'house-machine-behind' })).toMatchObject({ props: { label: 'Update toolkit' } })
     await ui.press({ key: 'house-machine-behind' })
-    expect(w.submitted[0].text).toContain('Do not run a sync')
+    expect(w.submitted[0].text).toContain('Do not run an upgrade')
   })
 
   test('two notices draw two rows, one Dismiss', async ($, on) => {
@@ -161,7 +161,7 @@ describe('house band', () => {
     expect(w.runs).toHaveLength(before)
   })
 
-  test('after a turn the band re-asks, so a sync that ran takes it down', async ($, on) => {
+  test('after a turn the band re-asks, so an upgrade that ran takes it down', async ($, on) => {
     const w = world(on, said(MOVED))
     await start($)
     const ui = await mount($, 'terminal')
@@ -192,7 +192,7 @@ describe('house band', () => {
   test('parseNotices keeps only well-formed notices with a known action', () => {
     expect(parseNotices('')).toEqual([])
     expect(parseNotices('{"notices":"x"}')).toEqual([])
-    expect(parseNotices(said(MOVED, { kind: 'x', action: 'rm -rf', summary: 'no' }, { kind: 'y', action: 'sync', summary: '' }))).toEqual([
+    expect(parseNotices(said(MOVED, { kind: 'x', action: 'rm -rf', summary: 'no' }, { kind: 'y', action: 'upgrade', summary: '' }, { kind: 'z', action: 'sync', summary: 'retired' }))).toEqual([
       MOVED,
     ])
   })
