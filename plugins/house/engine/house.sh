@@ -197,8 +197,7 @@ USAGE
 # Each command's name says what it does — the reason it replaced `--sync` / `--ensure`, which made one script do
 # three jobs behind flags (DECISION.md). The internal run shape is MODE: `new`, or `upgrade` — `upgrade` and
 # `add-layer` are the same upgrade run, the latter with a non-empty ensure set. An old invocation (`--sync`, a bare
-# path) is simply not a command, and the error says which ones are; scaffold.sh beside this script is the shim
-# that translates old command lines for the HOUSE.md files that still print them.
+# path) is simply not a command, and the error says which ones are.
 CMD="${1:-}"
 case "$CMD" in
   new)            MODE="new"; shift;;
@@ -271,7 +270,7 @@ while [ "${1:-}" != "" ]; do
     # the reader actually has — including the cases that will keep arriving for a while: `--sync` / `--ensure`
     # (the command line before the subcommands) and `--repair` (older still), written into the HOUSE.md of
     # projects generated before those renames. No special case for them: they are simply not flags, and the
-    # help says what is. (Old command lines are translated by scaffold.sh, the deprecated shim beside this.)
+    # help says what is.
     #
     # MATCHES `-*`, NOT `--*`. A single-dash unknown (`-v`, `-x`) used to fall through to the `*)`
     # break and then hit the after-the-path guard below, which answered it with "it comes AFTER the project
@@ -2263,23 +2262,6 @@ fi
 UPGRADE_LOCK=""
 if [ "$MODE" = "upgrade" ]; then
   UPGRADE_LOCK="$TARGET/.bespunky-upgrade.lock"
-  # THE SAME LOCK UNDER ITS OLD NAME. Before 0.39.0 the lock was `.bespunky-sync.lock/`, so an older engine's
-  # upgrade still running on this project holds that one, and the rename must not quietly end the exclusion: a
-  # live holder refuses this run exactly as a live holder of the current lock does; a dead one's directory is
-  # taken over (removed) exactly as a stale current lock is — before the ladder, whose `0.39.0/rename-upgrade-lock`
-  # rung would otherwise find it and leave its .gitignore line in place.
-  _legacy_lock="$TARGET/.bespunky-sync.lock"
-  if [ -d "$_legacy_lock" ]; then
-    _holder="$(cat "$_legacy_lock/pid" 2>/dev/null || echo '')"
-    if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then
-      echo "ERROR: an older toolkit's upgrade is already running for this project (pid $_holder, $_legacy_lock)." >&2
-      echo "       Two upgrades at once can leave the project stamped as migrated when it is not." >&2
-      echo "       Wait for it to finish, or stop it, then re-run." >&2
-      exit 1
-    fi
-    echo "NOTE: found a stale lock from an older toolkit (.bespunky-sync.lock, pid ${_holder:-unknown}, no longer running) — removing it."
-    rm -rf "$_legacy_lock"
-  fi
   if ! mkdir "$UPGRADE_LOCK" 2>/dev/null; then
     _holder="$(cat "$UPGRADE_LOCK/pid" 2>/dev/null || echo '')"
     if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then

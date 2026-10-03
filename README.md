@@ -219,7 +219,6 @@ claude-toolkit/
     │   └── SKILL.md                          # /bespunky-house:new — the create-a-project skill (orchestrator)
     └── engine/
         ├── house.sh                          # the engine: `new` | `upgrade` | `add-layer` — ensure set → bootstrap (gated on it) → install → migrate → planner; local Node (Docker fallback for old Node)
-        ├── scaffold.sh                       # DEPRECATED shim: translates the old `--sync` / `--ensure` command line and execs house.sh
         ├── layers.sh                         # GENERATED shell projection of the layer registry + presets (node tools/test-layers/run.mjs --write)
         └── nx-tools/                         # @bespunky/nx-tools — house Nx generators + migrations, run by the engine
             ├── generators.json
@@ -451,9 +450,9 @@ plugin installed, switch by hand — the old plugin is gone from the marketplace
 2. Run `/bespunky-house:upgrade` in each house project. Its migration (`@bespunky/nx-tools` `0.39.0`) renames
    the plugin in the project's `.claude/settings.json` `enabledPlugins`, keeping its value.
 
-Scripts that called `scaffold.sh` keep working for now — `engine/scaffold.sh` translates the old command line
-(`--sync` → `upgrade`, `--sync --ensure=X` → `add-layer X`, `--ensure=` → `--add-layer=`) with a deprecation
-warning. Output lines that scripts parse changed name too: every `SYNC_*` token is now `UPGRADE_*`.
+Scripts that called the engine need rewriting: `scaffold.sh` is now `house.sh` with a command first —
+`--sync` → `upgrade`, `--sync --ensure=X` → `add-layer X`, no `--sync` → `new`, `--ensure=` → `--add-layer=`.
+Output lines that scripts parse changed name too: every `SYNC_*` token is now `UPGRADE_*`.
 
 ## The layer model — one tool, any repo shape
 
@@ -528,7 +527,7 @@ house.sh upgrade   [flags] <project-path> [app-name]              # migrate + re
 house.sh add-layer [flags] <layers-csv> <project-path> [app-name] # an upgrade that also brings layers into being
 ```
 
-Each name says what it does: `upgrade` refuses `--add-layer`, `--preset` and `--firebase` (naming `add-layer` instead). The old command line (`scaffold.sh [--sync] [--ensure=<csv>] …`) still works through `engine/scaffold.sh`, a **deprecated shim** that translates it, prints one deprecation line and hands over to `house.sh`.
+Each name says what it does: `upgrade` refuses `--add-layer`, `--preset` and `--firebase` (naming `add-layer` instead).
 
 `house.sh new [--preset=<id>] [--add-layer=<csv>] [--layout=<id>] [--linking=<id>] [--firebase] <project> [app]` — and **`new` is an `add-layer` against an empty directory**. With no `--preset` and no `--add-layer` it creates the **`agent` preset** — the house DX on the Nx floor, no `package.json`, no framework, no app. The Angular house app that used to be the default is now spelled `house.sh new --preset=angular [--firebase] [--staging] <project> [app]`; an `[app]` argument is refused unless an ensured layer creates apps. **Docker was never the requirement — a modern Node is.** When the local Node is new enough (22.18+, e.g. inside a devcontainer) it runs the generators **natively** — no daemon, no image, no mounts — so it works with no Docker at all; otherwise it falls back to running everything **inside the base image via `docker run`** (as your uid, mounting `~/projects`) so an old host Node is no obstacle. `--docker` forces the image; either way there's no nvm. This mirrors `tools/publish-nx-tools`.
 

@@ -18,9 +18,7 @@
 // RUNNING (a live holder's pid is a fact about a process, not about the tree — and on the container path the
 // process is not even in this pid namespace). Deleting it would pull the lock out from under that run; dropping
 // its `.gitignore` line would let this ladder's own `git add -A` checkpoint commit it. So both stay, and the log
-// says what to do once no older run holds it. (`house.sh` itself — which does own the lock protocol and can
-// check the holder — takes over a DEAD legacy lock before the ladder runs, so under the engine this branch is
-// reached only by a bare `nx migrate`.)
+// says what to do once no older run holds it.
 import { type Tree, logger } from '@nx/devkit';
 
 const TAG = '[0.39.0 rename-upgrade-lock]';

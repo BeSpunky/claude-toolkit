@@ -26,7 +26,7 @@ guards, gates, ordering. Not everything the scaffolder does.
 
 | File | Covers |
 | --- | --- |
-| `cli.test.sh` | The command line: `house.sh new \| upgrade \| add-layer \| help` — the command first, `upgrade` refusing every layer-bringing flag (`--add-layer`, `--preset`, `--firebase`) by naming `add-layer`, `add-layer` always requiring its `<layers>` positional (even with `--preset`), `--add-layer` on `new`, `add-layer --staging firebase`; and the deprecated `scaffold.sh` shim translating every old spelling (`--sync` → `upgrade`, `--sync --ensure=X` → `add-layer X`, `--ensure` → `--add-layer`) with one deprecation line. |
+| `cli.test.sh` | The command line: `house.sh new \| upgrade \| add-layer \| help` — the command first, `upgrade` refusing every layer-bringing flag (`--add-layer`, `--preset`, `--firebase`) by naming `add-layer`, `add-layer` always requiring its `<layers>` positional (even with `--preset`), `--add-layer` on `new`, `add-layer --staging firebase` |
 | `render.test.sh` | That `house.sh` can **assemble its program at all**, in every mode — the one failure that precedes all the others. |
 | `preflight-gate.test.sh` | The pre-write gate: dirty tree, detached HEAD, the protected branches of a DECLARED model (names + release globs) and of an undeclared one, the `branch-model: undeclared` signal, an unknown projection schema, `--staging` without a pre-production stage, per-file untracked counting, and that several blockers are reported in one pass. |
 | `emulators-only.test.sh` | What `tools/emulators.sh` hands `firebase emulators:start` — the derived `--only`, and that passing it does not silently disable export-on-exit. |
