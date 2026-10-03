@@ -70,7 +70,7 @@ of the effort that built the harness.
 
 ## Where it runs
 
-CI, on every push to `main`/`development`/`staging` and on pull requests
+CI, on every push to `main`/`development` and on pull requests
 (`.github/workflows/migration-tests.yml`).
 
 **Deliberately not in the pre-push hook.** That hook checks a pushed commit by materialising it in a

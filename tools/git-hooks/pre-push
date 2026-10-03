@@ -16,7 +16,9 @@
 # Git passes `<local ref> <local sha> <remote ref> <remote sha>` per ref on stdin, so the honest question —
 # "what is actually being pushed?" — is answerable, and is what this asks.
 #
-# It guards only `main`, `development` and `staging`. HOUSE.rules.md mandates committing small increments
+# It guards only this repo's protected lines — `projection.protected` of its declared branch model
+# (`.bespunky/branches.json`), falling back to main/development/staging when the file is absent or unreadable.
+# HOUSE.rules.md mandates committing small increments
 # while working in a worktree, and the bump is a dedicated `chore(release):` commit that lands at the merge
 # gate — so failing every mid-feature push would refuse the prescribed workflow by construction and train
 # everyone to type `--no-verify`, which disables every hook, not just this one. Unreleased content on a
@@ -34,7 +36,12 @@ CHECK="$REPO_ROOT/tools/check-release-invariants/check.mjs"
 [ -f "$CHECK" ] || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 
-PROTECTED_RE='^refs/heads/(main|development|staging)$'
+PROTECTED_NAMES="$(node -e '
+try { const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).projection;
+      if (String(p.schema).split(".")[0] === "1" && Array.isArray(p.protected) && p.protected.length) {
+        console.log(p.protected.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")); process.exit(0); } } catch {}
+console.log("main|development|staging");' "$REPO_ROOT/.bespunky/branches.json")"
+PROTECTED_RE="^refs/heads/($PROTECTED_NAMES)$"
 status=0
 
 # Each line: <local ref> <local sha> <remote ref> <remote sha>. A deletion has an all-zero local sha.
@@ -92,7 +99,7 @@ Push refused: a plugin (or the nx-tools payload) changed without a release.
   consumers never receive, and nothing anywhere will tell you. Release it with the command printed above,
   commit, and push again.
 
-  (Only pushes to main/development/staging are checked; feature branches are free.)
+  (Only pushes to the declared protected lines are checked; feature branches are free.)
 
   To push anyway:  git push --no-verify
 

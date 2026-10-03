@@ -14,7 +14,7 @@ on:
   # The house pipeline merges feature worktrees locally, so a feature branch is often never pushed at all —
   # these integration points are where CI genuinely gets a look.
   push:
-    branches: [main, development, staging]
+    branches: [main, development]
   pull_request:
   workflow_dispatch:
 
