@@ -16,13 +16,13 @@
       "name": "bespunky-project-starter",
       "source": "./plugins/project-starter",
       "description": "Scaffold a new BeSpunky-standard project, or retrofit the house tooling onto any existing repo, as a stack of detected layers on an always-ensured Nx floor: the agent DX (composed devcontainer, Claude settings, window identity) by default, and Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. Generator-first; kept current by versioned migrations and a consented sync.",
-      "version": "0.37.1"
+      "version": "0.38.0"
     },
     {
       "name": "bespunky-workflow",
       "source": "./plugins/workflow",
-      "description": "How work moves from idea to production, whatever is being built. branch-and-release: four-branch pipeline, per-feature worktrees, human-gated promotions. local-server-isolation: test servers on random free ports. feature-package: one effort, one slug, one folder of durable docs. session-handoff: relay one live effort into a fresh session. project-standing: orient in a project after a gap. delegate-and-parallelize: orchestrate budgeted subagents.",
-      "version": "0.8.2"
+      "description": "How work moves from idea to production, whatever is being built. branch-and-release: a declared branch model (trunk to gitflow), per-feature worktrees, human-gated moves. local-server-isolation: test servers on random free ports. feature-package: one effort, one slug, one folder of durable docs. session-handoff: relay one live effort into a fresh session. project-standing: orient in a project after a gap. delegate-and-parallelize: orchestrate budgeted subagents.",
+      "version": "0.9.0"
     },
     {
       "name": "bespunky-engineering",
