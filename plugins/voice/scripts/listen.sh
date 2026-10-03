@@ -69,38 +69,14 @@
 #                                       may still be thinking. Judged on the take's
 #                                       length, so a muted or dead mic gives up as early.
 #   BESPUNKY_VOICE_PARTIAL_SECONDS      --stream partial cadence (default 1)
-#   BESPUNKY_VOICE_WHISPER_BIN          whisper-cli path (default: the built one)
-#   BESPUNKY_VOICE_WHISPER_MODEL        final ggml model (default: best installed —
-#                                       medium.en, small.en, base.en, tiny.en)
-#   BESPUNKY_VOICE_WHISPER_PARTIAL_MODEL  partial model (default: fastest installed —
-#                                       tiny.en, base.en, else the final model)
-#   BESPUNKY_VOICE_VAD_BIN              speech-detector path (default: the built
-#                                       whisper-vad-speech-segments)
-#   BESPUNKY_VOICE_VAD_MODEL            Silero ggml model (default: newest installed)
+#   BESPUNKY_VOICE_WHISPER_BIN, _WHISPER_MODEL, _WHISPER_PARTIAL_MODEL, _VAD_BIN,
+#   _VAD_MODEL                          which engine and models — see stt-engine.sh
 set -uo pipefail
 
-VOICE_HOME="${HOME}/.claude/bespunky-voice"
-WHDIR="$VOICE_HOME/whisper"
-CLI="${BESPUNKY_VOICE_WHISPER_BIN:-$WHDIR/src/build/bin/whisper-cli}"
-VAD_BIN="${BESPUNKY_VOICE_VAD_BIN:-$WHDIR/src/build/bin/whisper-vad-speech-segments}"
-
-# First installed model of the given names (bigger = better, smaller = faster).
-_first_model() {
-  local m
-  for m in "$@"; do
-    [ -f "$WHDIR/models/ggml-$m.bin" ] && { echo "$WHDIR/models/ggml-$m.bin"; return 0; }
-  done
-  return 1
-}
-# Final model: explicit override, else the best-accuracy one installed.
-MODEL="${BESPUNKY_VOICE_WHISPER_MODEL:-}"
-[ -n "$MODEL" ] || MODEL="$(_first_model medium.en small.en base.en tiny.en)" || MODEL="$WHDIR/models/ggml-base.en.bin"
-# Partial model: explicit override, else the fastest installed, else the final one.
-PMODEL="${BESPUNKY_VOICE_WHISPER_PARTIAL_MODEL:-}"
-[ -n "$PMODEL" ] || PMODEL="$(_first_model tiny.en base.en)" || PMODEL="$MODEL"
-# Speech detector model: explicit override, else the newest Silero installed.
-VAD_MODEL="${BESPUNKY_VOICE_VAD_MODEL:-}"
-[ -n "$VAD_MODEL" ] || VAD_MODEL="$(_first_model silero-v6.2.0 silero-v5.1.2)" || VAD_MODEL="$WHDIR/models/ggml-silero-v6.2.0.bin"
+# The engine — whisper-cli, its models, the Silero detector — and whether it works:
+# one module, shared with voice-health.sh, so listening and the band never disagree.
+# shellcheck source=stt-engine.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/stt-engine.sh"
 
 MAXSEC="${BESPUNKY_VOICE_LISTEN_SECONDS:-20}"
 SILENCE_SEC="${BESPUNKY_VOICE_SILENCE_SECONDS:-1.3}"
@@ -172,11 +148,9 @@ esac
 
 # --- preconditions -------------------------------------------------------------
 
-[ -x "$CLI" ]    || { echo "bespunky-voice: STT engine not installed — run install-whisper.sh" >&2; exit 1; }
-[ -f "$MODEL" ]  || { echo "bespunky-voice: STT model missing — run install-whisper.sh" >&2; exit 1; }
-[ -f "$PMODEL" ] || PMODEL="$MODEL"
-[ -x "$VAD_BIN" ] && [ -f "$VAD_MODEL" ] \
-  || { echo "bespunky-voice: speech detector missing — run install-whisper.sh" >&2; exit 1; }
+voice_stt_verdict
+[ "$VOICE_STT_HEALTH" = ok ] \
+  || { echo "bespunky-voice: speech recognition $VOICE_STT_HEALTH: $VOICE_STT_PROBLEM — run install-whisper.sh" >&2; exit 1; }
 command -v parecord >/dev/null 2>&1 || { echo "bespunky-voice: no recorder (parecord)" >&2; exit 1; }
 command -v sox      >/dev/null 2>&1 || { echo "bespunky-voice: sox required for capture" >&2; exit 1; }
 
