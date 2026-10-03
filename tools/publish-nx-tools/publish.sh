@@ -2,7 +2,7 @@
 # Publish @bespunky/nx-tools to npm.
 #
 # The house Nx generators (scaffolding + reusable-tool extraction) live as TypeScript in the toolkit
-# (plugins/project-starter/.../assets/nx-tools). Nx can't run raw TS from node_modules, so a published
+# (plugins/house/engine/nx-tools). Nx can't run raw TS from node_modules, so a published
 # package must ship COMPILED JS — this script compiles (reusing compile-generators.mts, the same
 # transpile the scaffold uses) and publishes.
 #
@@ -22,7 +22,7 @@
 # Usage:
 #   tools/publish-nx-tools/publish.sh [--dry-run] [--otp <code>] [--docker]
 #
-# Bump the version in assets/nx-tools/package.json before a real publish.
+# Bump the version in engine/nx-tools/package.json before a real publish.
 set -euo pipefail
 
 # Args: --dry-run (validate only), --otp <code> / --otp=<code> (2FA one-time password).
@@ -44,7 +44,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ASSETS_DIR="$REPO_ROOT/plugins/project-starter/skills/new-project/assets"
+ASSETS_DIR="$REPO_ROOT/plugins/house/engine"
 [ -d "$ASSETS_DIR/nx-tools" ] || { echo "ERROR: nx-tools not found at $ASSETS_DIR/nx-tools" >&2; exit 1; }
 
 NPMRC="$HOME/.npmrc"
@@ -120,7 +120,7 @@ if [ -f "$ASSETS_DIR/nx-tools/migrations.json" ]; then
       console.error('ERROR: migrations are registered ABOVE the package version — they can never be collected.');
       console.error('       package.json version : '+pkg.version);
       for(const m of unreachable) console.error('       unreachable migration: '+m.name+' @ '+m.version);
-      console.error('       Bump assets/nx-tools/package.json to at least '+unreachable[unreachable.length-1].version+' and re-run.');
+      console.error('       Bump engine/nx-tools/package.json to at least '+unreachable[unreachable.length-1].version+' and re-run.');
       process.exit(1);
     }
   " || exit 1

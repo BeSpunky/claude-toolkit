@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# `scaffold.sh` must be able to RENDER the program it exists to produce.
+# `house.sh` must be able to RENDER the program it exists to produce.
 #
-# WHAT THIS GUARDS, AND WHY IT IS NOT A STYLE CHECK. scaffold.sh's real product is a ~500-line shell program
+# WHAT THIS GUARDS, AND WHY IT IS NOT A STYLE CHECK. house.sh's real product is a ~500-line shell program
 # assembled out of nested double-quoted strings. Inside such a string a backtick is COMMAND SUBSTITUTION,
 # evaluated at render time — including inside a `#` comment, which is the trap, because a comment reads as
 # inert prose to everyone who has ever written one. The script says so itself, at length, right above the
@@ -12,11 +12,11 @@
 # Nobody did, and it shipped. `66a4449` wrote four backticked words into a prose comment inside
 # WORKSPACE_GEN_BLOCK. The render then ran `agent`, `@`, `retire-inline-house-sections` and `--layers` as
 # commands, each exited 127, the assignment inherited that status, and `set -euo pipefail` killed the script
-# at line 1450 — before the first command of the sequence, on `--sync` AND on a fresh scaffold. Released on
+# at line 1450 — before the first command of the sequence, on an upgrade AND on a fresh scaffold. Released on
 # project-starter 0.27.0.
 #
 # THE FAILURE IS ONE STEP REMOVED FROM ITS SYMPTOM, which is what makes it worth a test rather than care.
-# What users reported was not "the scaffolder crashes" — it was "after running the sync, nx-tools doesn't
+# What users reported was not "the scaffolder crashes" — it was "after running the upgrade, nx-tools doesn't
 # install the latest version". Perfectly true, and it points at the install, the pin, the registry, the
 # migration ladder: everything except a comment four hundred lines away. A guard that fails at the render
 # names the cause on the first read.
@@ -28,12 +28,12 @@
 #                       the half that catches an unbalanced quote rather than a live command.
 #   no bash diagnostic on stderr
 #                     — catches the same class when it is NOT fatal (a substitution whose command exists and
-#                       fails, or if `set -e` is ever relaxed). scaffold.sh's own progress lines go to stderr
+#                       fails, or if `set -e` is ever relaxed). house.sh's own progress lines go to stderr
 #                       under --print-inner, so this matches bash's `script: line N:` diagnostics, not "any
-#                       output" as the comment in scaffold.sh loosely puts it.
+#                       output" as the comment in house.sh loosely puts it.
 #   the install line  — the render must still emit the pinned `@bespunky/nx-tools@<payload version>` install,
 #                       derived from the payload's package.json rather than hardcoded here. This is the
-#                       user-visible promise ("a sync installs the current house tooling") asserted directly,
+#                       user-visible promise ("an upgrade installs the current house tooling") asserted directly,
 #                       so a future refactor cannot quietly render a sequence that installs nothing.
 #   one author per flag
 #                     — no `nx g` line may pass the same flag twice. See `assert_one_author_per_flag` below
@@ -44,25 +44,25 @@
 # accident of this shape so far — the words that end up in prose are prose words, not commands.
 #
 # EVERY ARM IS A DIFFERENT SET OF BLOCKS. --local swaps INSTALL_NX_TOOLS and the migration collector for
-# much larger strings, --ensure/--firebase gate whole blocks in or out, and scaffold mode renders a
+# much larger strings, the layers/--firebase gate whole blocks in or out, and scaffold mode renders a
 # different program entirely. A render check that only ever exercised the default path would have missed
 # three of the four places this can go wrong.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ASSETS="$ROOT/plugins/project-starter/skills/new-project/assets"
-SCAFFOLD="$ASSETS/scaffold.sh"
+ENGINE="$ROOT/plugins/house/engine"
+HOUSE_SH="$ENGINE/house.sh"
 
-[ -f "$SCAFFOLD" ] || { echo "FATAL: scaffold.sh not found at $SCAFFOLD" >&2; exit 2; }
-grep -q -- '--print-inner' "$SCAFFOLD" || {
-  echo "FATAL: scaffold.sh no longer supports --print-inner — this test cannot render anything." >&2
+[ -f "$HOUSE_SH" ] || { echo "FATAL: house.sh not found at $HOUSE_SH" >&2; exit 2; }
+grep -q -- '--print-inner' "$HOUSE_SH" || {
+  echo "FATAL: house.sh no longer supports --print-inner — this test cannot render anything." >&2
   exit 2
 }
 
-# Derived, never hand-maintained — the same line scaffold.sh reads to build the pin.
-PAYLOAD_VERSION="$(grep -m1 '"version"' "$ASSETS/nx-tools/package.json" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
-[ -n "$PAYLOAD_VERSION" ] || { echo "FATAL: could not read the payload version from $ASSETS/nx-tools/package.json" >&2; exit 2; }
+# Derived, never hand-maintained — the same line house.sh reads to build the pin.
+PAYLOAD_VERSION="$(grep -m1 '"version"' "$ENGINE/nx-tools/package.json" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+[ -n "$PAYLOAD_VERSION" ] || { echo "FATAL: could not read the payload version from $ENGINE/nx-tools/package.json" >&2; exit 2; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -83,7 +83,7 @@ printf 'node_modules/\n' > "$FIX/.gitignore"
 git -C "$FIX" add -A >/dev/null 2>&1
 git -C "$FIX" commit -qm init
 
-# The WRAPPER host: a repo with no package.json (a Python service). The sync lays the Nx floor through the Nx
+# The WRAPPER host: a repo with no package.json (a Python service). The upgrade lays the Nx floor through the Nx
 # wrapper (./nx) instead of making it a Node project, so it renders a different install, probe and nx command.
 FIXW="$TMP/pyproject"
 mkdir -p "$FIXW"
@@ -108,7 +108,7 @@ fail() { printf '  FAIL %s\n' "$1"; FAILED=1; }
 # That line passed `--firebase=true` TWICE — once literally, and once from `$DC_LAYER_FLAGS`, which the
 # program had assembled from layer detection forty lines earlier. Nx coerces a repeated flag to an array,
 # the array fails a `boolean` schema, the generator exits 1, and `set -e` takes every generator after it
-# down with it (`0.29.0`, `--firebase` scaffolds, reported to the user as `SYNC_FAILED`). Nothing about the
+# down with it (`0.29.0`, `--firebase` scaffolds, reported to the user as `UPGRADE_FAILED`). Nothing about the
 # line looks wrong: you cannot see the duplicate without knowing what the variable expands to, and no
 # reader of a diff knows that. `nx g` itself is the only other thing that ever checks, and it checks in
 # someone else's project.
@@ -179,16 +179,16 @@ assert_one_author_per_flag() {
   fi
 }
 
-# render <label> <flags…> — renders one arm and asserts everything above about it.
+# render <label> <command> <flags…> — renders one arm and asserts everything above about it.
 #
-# stdout is the program, stderr is scaffold.sh's own commentary; they are captured SEPARATELY because the
+# stdout is the program, stderr is house.sh's own commentary; they are captured SEPARATELY because the
 # whole point is to read one without the other. (--print-inner already redirects its progress lines to
 # stderr and hands the program back on the original stdout, precisely so this is possible.)
 render() {
-  local label="$1"; shift
+  local label="$1" cmd="$2"; shift 2
   local out="$TMP/out.$$" err="$TMP/err.$$" rc=0
 
-  bash "$SCAFFOLD" --print-inner "$@" > "$out" 2> "$err" || rc=$?
+  bash "$HOUSE_SH" "$cmd" --print-inner "$@" > "$out" 2> "$err" || rc=$?
 
   if [ "$rc" -ne 0 ]; then
     fail "$label — render exited $rc (a failed command substitution in a block string aborts under set -e)"
@@ -208,7 +208,7 @@ render() {
   fi
 
   # bash prefixes its own diagnostics with `<script>: line N:` — the signature of something in a string
-  # having been evaluated. scaffold.sh's deliberate progress output never takes that shape.
+  # having been evaluated. house.sh's deliberate progress output never takes that shape.
   if grep -qE '(^|/)scaffold\.sh: line [0-9]+:' "$err"; then
     fail "$label — bash evaluated something inside a block string:"
     grep -E '(^|/)scaffold\.sh: line [0-9]+:' "$err" | head -6 | sed 's/^/         | /'
@@ -216,7 +216,7 @@ render() {
     ok "$label — nothing in a block string was evaluated"
   fi
 
-  # The pin the whole sync hangs on, and the thing the reported symptom was actually about. Asserted as
+  # The pin the whole upgrade hangs on, and the thing the reported symptom was actually about. Asserted as
   # "the payload version reaches the program" rather than as an exact command line: --local deliberately
   # installs a packed tarball and carries the version in the manifest correction instead, and the arms must
   # not have to know which. A render that forgets it entirely is the failure worth catching.
@@ -235,31 +235,32 @@ export PROJECTS_DIR="$TMP/projects"
 mkdir -p "$PROJECTS_DIR"
 
 echo "── rendering every block-selecting combination"
-render 'sync'                   --sync --yes "$FIX"
-render 'sync --local'           --sync --yes --local "$FIX"
-# Only nx, agent and firebase are ensurable by a sync — the rest are refused, deliberately, by the guard
+render 'upgrade'                upgrade --yes "$FIX"
+render 'upgrade --local'        upgrade --yes --local "$FIX"
+# Only nx, agent and firebase are addable by an upgrade — the rest are refused, deliberately, by the guard
 # preflight-gate.test.sh covers. The layer-gated generator blocks are rendered either way (they are gated
-# at RUN time by `layer_active` inside the program), so one plain sync arm already exercises all of them.
-render 'sync --ensure=agent'    --sync --yes --ensure=nx,agent "$FIX"
-render 'sync --firebase'        --sync --yes --firebase --ensure=firebase "$FIX"
-render 'scaffold'               "newproj"
-render 'scaffold --preset=angular' --preset=angular "newproj" "myapp"
-render 'scaffold --firebase'    --preset=angular --firebase --staging "newproj" "myapp"
+# at RUN time by `layer_active` inside the program), so one plain upgrade arm already exercises all of them.
+render 'add-layer nx,agent'     add-layer --yes nx,agent "$FIX"
+render 'add-layer --firebase'   add-layer --yes --firebase firebase "$FIX"
+render 'add-layer --staging firebase' add-layer --yes --staging firebase "$FIX"
+render 'new'                    new "newproj"
+render 'new --preset=angular'   new --preset=angular "newproj" "myapp"
+render 'new --firebase'         new --preset=angular --firebase --staging "newproj" "myapp"
 # --voice is a second opt-in that reaches the devcontainer generator by the same route as --firebase, and it
 # was broken by the same duplicate-author bug — undetected, because no arm had ever rendered it.
-render 'scaffold --voice'       --voice "newproj"
-render 'scaffold --local'       --local "newproj"
-render 'scaffold --local angular' --local --preset=angular "newproj"
-render 'sync (wrapper host)'    --sync --yes "$FIXW"
-render 'sync --local (wrapper)' --sync --yes --local --ensure=agent "$FIXW"
-render 'scaffold --ensure=nx,agent' --ensure=nx,agent "newproj"
+render 'new --voice'            new --voice "newproj"
+render 'new --local'            new --local "newproj"
+render 'new --local angular'    new --local --preset=angular "newproj"
+render 'upgrade (wrapper host)' upgrade --yes "$FIXW"
+render 'add-layer --local (wrapper)' add-layer --yes --local agent "$FIXW"
+render 'new --add-layer=nx,agent' new --add-layer=nx,agent "newproj"
 
-# SCAFFOLD = SYNC WITH AN ENSURE SET: the bootstrap is rendered FROM the ensure set, never hard-wired. It once ran
-# the Angular bootstrap unconditionally, so --ensure=nx,agent still created an Angular workspace and app; and the
+# NEW = AN UPGRADE WITH AN ENSURE SET: the bootstrap is rendered FROM the ensure set, never hard-wired. It once ran
+# the Angular bootstrap unconditionally, so --add-layer=nx,agent (now --add-layer) still created an Angular workspace and app; and the
 # default project is now the agent preset — wrapper-hosted, no package.json, no stack.
 echo "── the scaffold bootstrap is the ensure set's"
 _bootstrap() { printf '%s\n' "$1" | grep -vE '^[[:space:]]*#' | grep -E 'create nx-workspace|create-nx-workspace|nx add |nx-tools:app |useDotNxInstallation=true|^git init'; }
-_prog="$(bash "$SCAFFOLD" --print-inner "newproj" 2>/dev/null)"
+_prog="$(bash "$HOUSE_SH" new --print-inner "newproj" 2>/dev/null)"
 _b="$(_bootstrap "$_prog")"
 if in_text "$_prog" -q "^ENSURED='nx,agent'$" && in_text "$_b" -q 'useDotNxInstallation=true' \
    && ! in_text "$_b" -qE 'nx-workspace|nx add |nx-tools:app '; then
@@ -267,13 +268,13 @@ if in_text "$_prog" -q "^ENSURED='nx,agent'$" && in_text "$_b" -q 'useDotNxInsta
 else
   fail "the default scaffold is not the agent preset on the wrapper floor:"; printf '%s\n' "$_b" | sed 's/^/         | /'
 fi
-_prog="$(bash "$SCAFFOLD" --print-inner --ensure=nx,agent "newproj" 2>/dev/null)"
+_prog="$(bash "$HOUSE_SH" new --print-inner --add-layer=nx,agent "newproj" 2>/dev/null)"
 if ! in_text "$(_bootstrap "$_prog")" -qE 'nx-workspace|nx add |nx-tools:app '; then
-  ok "--ensure=nx,agent bootstraps no stack"
+  ok "--add-layer=nx,agent bootstraps no stack"
 else
-  fail "--ensure=nx,agent renders a stack bootstrap"
+  fail "--add-layer=nx,agent renders a stack bootstrap"
 fi
-_prog="$(bash "$SCAFFOLD" --print-inner --preset=angular --firebase "newproj" "shop" 2>/dev/null)"
+_prog="$(bash "$HOUSE_SH" new --print-inner --preset=angular --firebase "newproj" "shop" 2>/dev/null)"
 _b="$(_bootstrap "$_prog")"
 if in_text "$_b" -q 'create nx-workspace' && in_text "$_b" -q 'nx add @nx/angular' \
    && in_text "$_b" -q "nx-tools:app 'apps/shop' --stack=angular" && ! in_text "$_b" -q 'useDotNxInstallation=true' \
@@ -282,26 +283,26 @@ if in_text "$_b" -q 'create nx-workspace' && in_text "$_b" -q 'nx add @nx/angula
 else
   fail "--preset=angular does not render the Angular bootstrap:"; printf '%s\n' "$_b" | sed 's/^/         | /'
 fi
-if ! bash "$SCAFFOLD" --print-inner "newproj" "shop" >/dev/null 2>&1; then
+if ! bash "$HOUSE_SH" new --print-inner "newproj" "shop" >/dev/null 2>&1; then
   ok "an app name with nothing that creates an app is refused"
 else
-  fail "scaffold.sh newproj shop (agent preset) accepted an app name nothing uses"
+  fail "house.sh new newproj shop (agent preset) accepted an app name nothing uses"
 fi
 # And the wrapper host never makes a Python repo a Node project: no package-manager add, ./nx throughout.
-_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=agent "$FIXW" 2>/dev/null)"
+_prog="$(bash "$HOUSE_SH" add-layer --print-inner --yes agent "$FIXW" 2>/dev/null)"
 if in_text "$_prog" -q 'useDotNxInstallation=true' && ! in_text "$_prog" -qE 'yarn add|npm install --save-dev|pnpm add'; then
   ok "wrapper host: nx init through the wrapper, no package-manager add"
 else
   fail "wrapper host renders a Node-project install"
 fi
 # A refusal's hint is a command the user will paste: on a wrapper host Nx is `./nx`, and a bare `nx add …` fails.
-_err="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=angular "$FIXW" 2>&1 >/dev/null)"
+_err="$(bash "$HOUSE_SH" add-layer --print-inner --yes angular "$FIXW" 2>&1 >/dev/null)"
 if in_text "$_err" -q '`./nx add @nx/angular`' && ! in_text "$_err" -q '`nx add'; then
-  ok "wrapper host: the not-sync-ensurable hint says ./nx"
+  ok "wrapper host: the not-upgrade-addable hint says ./nx"
 else
-  fail "wrapper host: the not-sync-ensurable hint does not say ./nx:"; printf '%s\n' "$_err" | sed 's/^/         | /'
+  fail "wrapper host: the not-upgrade-addable hint does not say ./nx:"; printf '%s\n' "$_err" | sed 's/^/         | /'
 fi
-# THE APP A SYNC REFRESHES IS INFERRED BY THE PACKAGE, AT RUN TIME — never by a bash glob over apps/. That glob
+# THE APP A UPGRADE REFRESHES IS INFERRED BY THE PACKAGE, AT RUN TIME — never by a bash glob over apps/. That glob
 # knew one layout and one project file, and excluded the house's server app (Cloud Functions) by its NAME; a Firebase
 # core with no client app once had its per-app generators run on `functions` ("has nothing to serve"). Which projects
 # are client apps is now `layers/cli.js apps` (project graph + projectRole, `platform:server` excluded); what this
@@ -311,23 +312,23 @@ _FIXF="$TMP/fbcore"
 mkdir -p "$_FIXF/apps/functions" && git -C "$_FIXF" init -q
 printf '{"name":"fbcore"}\n' > "$_FIXF/package.json"; printf '{}\n' > "$_FIXF/nx.json"
 printf '{"name":"functions","root":"apps/functions","tags":["platform:server"]}\n' > "$_FIXF/apps/functions/project.json"
-_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$_FIXF" 2>/dev/null)"
-if in_text "$_prog" -q -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' '' 'fbcore'" \
+_prog="$(bash "$HOUSE_SH" upgrade --print-inner --yes "$_FIXF" 2>/dev/null)"
+if in_text "$_prog" -q -- "_resolve_upgrade_app 'node_modules/@bespunky/nx-tools' '' 'fbcore'" \
    && in_text "$_prog" -q -- '--app="$APP"' && ! in_text "$_prog" -q -- '--app=functions'; then
-  ok "sync: the app is inferred in the program by the package (layers/cli.js apps), fallback = the project name"
+  ok "upgrade: the app is inferred in the program by the package (layers/cli.js apps), fallback = the project name"
 else
-  fail "sync: the app is not inferred at run time by the package: $(printf '%s\n' "$_prog" | grep -o -- '_resolve_sync_app [^\n]*\|--app=[^ ]*' | head -2 | tr '\n' ' ')"
+  fail "upgrade: the app is not inferred at run time by the package: $(printf '%s\n' "$_prog" | grep -o -- '_resolve_upgrade_app [^\n]*\|--app=[^ ]*' | head -2 | tr '\n' ' ')"
 fi
-_prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$_FIXF" shop 2>/dev/null)"
-if in_text "$_prog" -q -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' 'shop' 'fbcore'"; then
-  ok "sync: an app given on the command line is handed to the program as given"
+_prog="$(bash "$HOUSE_SH" upgrade --print-inner --yes "$_FIXF" shop 2>/dev/null)"
+if in_text "$_prog" -q -- "_resolve_upgrade_app 'node_modules/@bespunky/nx-tools' 'shop' 'fbcore'"; then
+  ok "upgrade: an app given on the command line is handed to the program as given"
 else
-  fail "sync: the given app is not handed to the program"
+  fail "upgrade: the given app is not handed to the program"
 fi
 
 if [ "$FAILED" -eq 0 ]; then
-  echo "scaffold.sh renders cleanly in every mode"
+  echo "house.sh renders cleanly in every mode"
 else
-  echo "scaffold.sh FAILED to render — the scaffolder cannot run in at least one mode" >&2
+  echo "house.sh FAILED to render — the scaffolder cannot run in at least one mode" >&2
 fi
 exit "$FAILED"

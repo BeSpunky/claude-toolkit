@@ -10,7 +10,7 @@
  * ── WHY THE COMPILED PAYLOAD, NOT THE SOURCE ───────────────────────────────────────────────────────────────
  *
  * Generators and migrations ship as JavaScript — Nx loads them out of `node_modules`, transpiled by
- * `assets/compile-generators.mts`. Testing the TypeScript source instead would leave the transpile step — the
+ * `engine/compile-generators.mts`. Testing the TypeScript source instead would leave the transpile step — the
  * one thing between what is written here and what consumers execute — untested.
  *
  * ── WHY THE BUILD LANDS UNDER node_modules/.cache/ ─────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-export const ASSETS = join(REPO, 'plugins/project-starter/skills/new-project/assets');
+export const ASSETS = join(REPO, 'plugins/house/engine');
 export const PAYLOAD = join(ASSETS, 'nx-tools');
 const COMPILER = join(ASSETS, 'compile-generators.mts');
 

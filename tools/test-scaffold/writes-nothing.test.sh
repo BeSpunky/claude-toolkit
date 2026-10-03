@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# "NOTHING HAS BEEN WRITTEN" must be true — of a refused sync, and of a --print-inner that "runs nothing".
+# "NOTHING HAS BEEN WRITTEN" must be true — of a refused upgrade, and of a --print-inner that "runs nothing".
 #
 # WHAT THIS GUARDS. preflight-gate.test.sh proves the gate REFUSES; this proves that by the time it does, the
 # project is untouched. Both used to be false in the same way: the outer shell wrote BEFORE the rendered program
@@ -14,7 +14,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCAFFOLD="$ROOT/plugins/project-starter/skills/new-project/assets/scaffold.sh"
+HOUSE_SH="$ROOT/plugins/house/engine/house.sh"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -39,7 +39,7 @@ snapshot() { { git -C "$P" status --porcelain -uall; git -C "$P" tag; git -C "$P
 
 # ── --print-inner runs nothing, and the quoted parent is data, not code ────────────────────────────────────────
 before="$(snapshot)"
-prog="$(bash "$SCAFFOLD" --sync --yes --print-inner "$P" 2>"$TMP/render.err")"; rc=$?
+prog="$(bash "$HOUSE_SH" upgrade --yes --print-inner "$P" 2>"$TMP/render.err")"; rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'docker' "$TMP/render.err"; then
   echo "  skip  neither a Node 22.18+ nor docker here — the render needs one of them"
   exit 0
@@ -55,19 +55,19 @@ printf '%s\n' "$prog" | bash -n /dev/stdin 2>/dev/null && ok "the program parses
 in_text "$prog" -q "o'brien" && fail "the parent path is spelled INTO the program (it must arrive as environment)" \
   || ok "the parent path is not spelled into the program"
 
-# ── a refused sync writes nothing ─────────────────────────────────────────────────────────────────────────────
+# ── a refused upgrade writes nothing ─────────────────────────────────────────────────────────────────────────────
 # Only on the native runtime: the refusal is reached by RUNNING the program, and a Docker run is not a unit test.
 node_ok() { command -v node >/dev/null && command -v npm >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=18)?0:1)'; }
 if node_ok; then
   printf 'in flight\n' > "$P/wip.txt"
   before="$(snapshot)"
-  out="$(env -u CI bash "$SCAFFOLD" --sync --yes "$P" 2>&1)"; rc=$?
-  in_text "$out" -q '^SYNC_REFUSED: dirty-tree' && [ "$rc" -ne 0 ] && ok "a dirty tree is refused" \
+  out="$(env -u CI bash "$HOUSE_SH" upgrade --yes "$P" 2>&1)"; rc=$?
+  in_text "$out" -q '^UPGRADE_REFUSED: dirty-tree' && [ "$rc" -ne 0 ] && ok "a dirty tree is refused" \
     || fail "a dirty tree was not refused (rc=$rc)"
   [ "$(snapshot)" = "$before" ] && ok "…and the refusal wrote nothing (no tag, yarn.lock kept, only wip.txt dirty)" \
-    || fail "the refused sync changed the project: $(snapshot)"
-  in_text "$out" -qE 'SYNC_FAILED|reset --hard|restore +:' && fail "a refusal printed failure/restore advice" \
-    || ok "…and printed no SYNC_FAILED or restore advice on top of its own verdict"
+    || fail "the refused upgrade changed the project: $(snapshot)"
+  in_text "$out" -qE 'UPGRADE_FAILED|reset --hard|restore +:' && fail "a refusal printed failure/restore advice" \
+    || ok "…and printed no UPGRADE_FAILED or restore advice on top of its own verdict"
 else
   echo "  skip  the refusal half needs Node 22.18+ (the native runtime)"
 fi

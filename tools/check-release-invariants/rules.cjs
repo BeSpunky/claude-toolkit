@@ -17,8 +17,8 @@
 //
 // ── THE ONE DUPLICATE THAT REMAINS, AND WHY ────────────────────────────────────────────────────────────────
 //
-// `scaffold.sh` carries its own copy of this comparison (twice: a shell one in MIGRATE_PROBE and a JS one in
-// the `--local` migration collector). Those CANNOT use this module — scaffold.sh ships to consumers and runs
+// `house.sh` (plugins/house/engine) carries its own copy of this comparison (twice: a shell one in MIGRATE_PROBE and a JS one in
+// the `--local` migration collector). Those CANNOT use this module — house.sh ships to consumers and runs
 // inside their projects, where this repo does not exist, the same self-containment constraint the migrations
 // live under.
 //
@@ -46,7 +46,7 @@ function parseVersion(value) {
  * Compare two versions: -1 if a < b, 0 if equal, 1 if a > b. Throws on an unorderable input.
  *
  * PRERELEASE-AWARE, and it has to be. Comparing release cores alone makes `0.25.0-rc.1` equal to a migration
- * keyed `0.25.0`, so a ceiling guard would pass while the runtime collectors — scaffold.sh's probe and the
+ * keyed `0.25.0`, so a ceiling guard would pass while the runtime collectors — house.sh's probe and the
  * `--local` collector, which both rank a prerelease BELOW its release — treat that migration as unreachable.
  * The guard would then miss exactly the failure class it exists to catch.
  */

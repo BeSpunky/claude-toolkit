@@ -9,7 +9,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-GEN="$ROOT/plugins/project-starter/skills/new-project/assets/nx-tools/src/generators"
+GEN="$ROOT/plugins/house/engine/nx-tools/src/generators"
 command -v node >/dev/null 2>&1 || { echo "  skip  node unavailable"; exit 0; }
 
 band() { sed -nE "s/^export const NOVNC_BAND_$1 = ([0-9]+);.*/\1/p" "$GEN/shared-browser/novnc-band.ts"; }

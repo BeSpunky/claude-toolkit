@@ -10,8 +10,8 @@ Produce a **current** catalog of the toolkit's skills. Do NOT hard-code a list �
 
 ## How to render
 
-1. From the skills available to you right now, select every skill whose plugin namespace is **`bespunky`** or begins with **`bespunky-`** (e.g. `bespunky-project-starter`, `bespunky-engineering`, `bespunky-product-ux`, `bespunky-workflow`, `bespunky-browser-automation`). Ignore non-toolkit skills and built-in commands.
-2. **Group by plugin.** Order the groups so the entry points come first — this `bespunky` index, then `bespunky-project-starter`, `bespunky-engineering`, `bespunky-product-ux`, `bespunky-workflow`, `bespunky-browser-automation` (adapt to whatever is actually installed). Give each group a short heading naming the plugin's area.
+1. From the skills available to you right now, select every skill whose plugin namespace is **`bespunky`** or begins with **`bespunky-`** (e.g. `bespunky-house`, `bespunky-engineering`, `bespunky-product-ux`, `bespunky-workflow`, `bespunky-browser-automation`). Ignore non-toolkit skills and built-in commands.
+2. **Group by plugin.** Order the groups so the entry points come first — this `bespunky` index, then `bespunky-house`, `bespunky-engineering`, `bespunky-product-ux`, `bespunky-workflow`, `bespunky-browser-automation` (adapt to whatever is actually installed). Give each group a short heading naming the plugin's area.
 3. Under each group, list its skills. For each skill show:
    - its exact invocation — **`/<namespace>:<skill>`** — as typed text,
    - a **one-line "use when"** distilled from the skill's own description (the trigger, not the whole blurb).

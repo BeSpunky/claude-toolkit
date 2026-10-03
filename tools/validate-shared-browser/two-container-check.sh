@@ -32,7 +32,7 @@ KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TPL="$REPO_ROOT/plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/port-claim/port-claim.mjs.tpl"
+TPL="$REPO_ROOT/plugins/house/engine/nx-tools/src/generators/port-claim/port-claim.mjs.tpl"
 
 pass=0; fail=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$*"; pass=$((pass+1)); }

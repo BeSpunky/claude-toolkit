@@ -7,7 +7,7 @@
 # nothing re-runs on its own: the design phase happens whenever it happens, and the placeholder colour would
 # otherwise linger forever because no one remembers to upgrade it.
 #
-# WHY IT ONLY DETECTS (the project-starter hook's lesson). Re-deriving means reading tokens and rewriting
+# WHY IT ONLY DETECTS (the house hook's lesson). Re-deriving means reading tokens and rewriting
 # files — a real action with a colour choice attached. So this does the cheap half — a few file reads — and
 # hands Claude a statement of fact to relay. Claude offers; the human decides; the window-identity SKILL does
 # the actual re-derive (and it, not this hook, validates that the design-system primary is real and not still
@@ -48,7 +48,7 @@ MARKER="$PROJECT_DIR/.vscode/.window-identity.json"
 [ -f "$MARKER" ] || verdict unapplied
 
 # Read a top-level "key": "value" — no jq (hooks run in a bare shell; same grep/sed contract the sibling
-# project-starter hook uses).
+# house hook uses).
 # The value is a string ("name-hash") or a bare scalar (true) — the snooze file holds a bare `true`, so a
 # string-only match would hand back the whole line and the snooze would never hold. No match → nothing printed.
 json_value() {

@@ -1,0 +1,91 @@
+// House generator: install the always-on shared, co-driven browser tooling into the workspace.
+//
+// The workspace-level sibling of firebase-emulators' tooling. It writes the shared-browser CLI +
+// its Node (CDP) helpers into tools/shared-browser/, and registers them as a workspace Nx project
+// (`shared-browser`) exposing the lifecycle verbs as targets (up|down|status|restart|clean|url|logs).
+//
+// The shared browser is ONE headed Chromium on a virtual display (Xvfb), co-driven by a human over
+// noVNC (the one host-facing port — ALLOCATED per container, see the script header) and by an agent
+// over CDP (:9223, loopback), so a change
+// can be verified live in the same browser both watch. Full design: docs/shared-browser-DESIGN.md.
+//
+// Why workspace-level (not per-app): the shared browser is a single workspace-wide resource, not an
+// app concern — every app's `serve` target shared-browser layer (wired per-app by the `app` generator)
+// drives this same browser. So it is generated ONCE per workspace, from house.sh's
+// WORKSPACE_GEN_BLOCK (unconditional in both the scaffold and the upgrade path — it's always-on).
+//
+// Idempotent + upgrade-safe: every generator-owned file is rewritten on each run (the CLI and the three
+// helpers carry no user values) and the project's house targets are re-asserted, so a fresh run and an upgrade
+// run converge to the same tree — exactly like firebase-emulators re-asserts its always-owned tools/*.sh scripts.
+// formatFiles polishes the result at the end.
+import { type Tree, formatFiles } from '@nx/devkit';
+import { ensureHouseProject, houseProjectHome, type HouseProjectConfig } from '../_utils/project-files';
+import { readFileSync } from 'node:fs';
+import { NOVNC_BAND_SIZE, NOVNC_BAND_START } from './novnc-band';
+import { join } from 'node:path';
+import { PLAYWRIGHT_VERSION } from '../_utils/playwright';
+
+// Workspace-level: no inputs today. Kept as a named type for parity with the sibling generators
+// (and a place to grow options into) without tripping the no-empty-interface lint rule.
+type SharedBrowserSchema = Record<string, never>;
+
+export default async function sharedBrowserGenerator(
+  tree: Tree,
+  _options: SharedBrowserSchema = {}
+): Promise<void> {
+  // Load a .tpl sibling of this generator. The scaffold copies the whole nx-tools tree into
+  // node_modules before compiling the .ts → .js, so the .tpl files travel alongside the compiled
+  // generator and __dirname resolves to the dir that contains them (same idiom as firebase-emulators).
+  // The band placeholders come from ./novnc-band — the same module the devcontainer generator reads for
+  // its portsAttributes, so the script's band and the editor's requireLocalPort coverage cannot drift.
+  const template = (name: string) =>
+    readFileSync(join(__dirname, name), 'utf8')
+      .split('{{novncBandStart}}')
+      .join(String(NOVNC_BAND_START))
+      .split('{{novncBandSize}}')
+      .join(String(NOVNC_BAND_SIZE))
+      .split('{{playwrightVersion}}')
+      .join(PLAYWRIGHT_VERSION);
+  const root = 'tools/shared-browser';
+
+  // The CLI (bash) — the single entry point for up|down|status|restart|clean|url|logs|navigate.
+  // Invoked as `bash tools/shared-browser/shared-browser <verb>` (so the exec bit isn't strictly
+  // required), but set 0o755 anyway so `./shared-browser` works directly from a shell too. It has no
+  // file extension, so formatFiles/prettier leaves it (and its mode bit) untouched.
+  tree.write(`${root}/shared-browser`, template('shared-browser.tpl'), { mode: 0o755 });
+
+  // The Node ESM helpers the CLI + agents import over CDP: attach/detach lifecycle, the live-verify
+  // toolkit, and the long-lived event recorder. Authored by their own .tpl files (not this generator).
+  tree.write(`${root}/attach.mjs`, template('attach.mjs.tpl'));
+  tree.write(`${root}/verify.mjs`, template('verify.mjs.tpl'));
+  tree.write(`${root}/recorder.mjs`, template('recorder.mjs.tpl'));
+
+  // The browser's OWN Playwright runtime: one pinned playwright-core + its Chromium, installed on demand into
+  // a per-user cache outside the repo. The CLI, attach.mjs and recorder.mjs all load Playwright through it,
+  // so the shared browser never resolves the workspace's node_modules (a Python or Go repo has none).
+  tree.write(`${root}/runtime.mjs`, template('runtime.mjs.tpl'));
+
+  // Host-port arbitration (the noVNC band) lives in tools/port-claim/ — its own generator, because the
+  // worktree-domains proxy and the dev engine consult the same registry.
+
+  // The workspace Nx project that surfaces the lifecycle verbs as targets (each runs the CLI verb) — created the way
+  // this workspace defines projects (a project.json, or a package.json under TS-solution linking), its targets
+  // re-asserted on every run into whichever file already defines it.
+  const { name, ...config } = JSON.parse(template('project-config.json.tpl')) as { name: string } & HouseProjectConfig;
+  ensureHouseProject(tree, 'shared-browser', houseProjectHome(tree, name, root), config);
+
+  // Gitignore the runtime dir. By default SB_RUNTIME lives under ${XDG_RUNTIME_DIR:-/tmp} (outside
+  // the repo) so nothing lands here — but the capability documents relocating SB_RUNTIME into a
+  // workspace volume to persist a signed-in profile, at which point profile/logs/screenshots become
+  // committable (and events.jsonl's redaction is best-effort). Ignore that path up front. Idempotent.
+  const IGNORE_MARK = '/.shared-browser';
+  const existing = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
+  if (!existing.includes(IGNORE_MARK)) {
+    tree.write(
+      '.gitignore',
+      `${existing.trimEnd()}\n\n# shared-browser runtime (profile / logs / screenshots) when SB_RUNTIME is relocated into the workspace\n/.shared-browser\n`
+    );
+  }
+
+  await formatFiles(tree);
+}

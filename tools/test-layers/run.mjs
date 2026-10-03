@@ -3,13 +3,13 @@
  * Test the LAYER REGISTRY — and keep its shell projection honest.
  *
  *   node tools/test-layers/run.mjs           # check
- *   node tools/test-layers/run.mjs --write   # regenerate assets/layers.sh from the registry, then check
+ *   node tools/test-layers/run.mjs --write   # regenerate engine/layers.sh from the registry, then check
  *
  * ── WHY ────────────────────────────────────────────────────────────────────────────────────────────────
  *
  * The registry (nx-tools/src/layers/*.ts) is the single source of truth for what layers exist. Two readers
- * cannot load it — scaffold.sh's outer shell, which validates --ensure before anything is installed, and the
- * SessionStart hook, which must stay a few greps — so they read `assets/layers.sh`, a GENERATED projection.
+ * cannot load it — house.sh's outer shell, which validates the layers to add before anything is installed, and the
+ * SessionStart hook, which must stay a few greps — so they read `engine/layers.sh`, a GENERATED projection.
  * A generated file that can drift is a second source of truth with extra steps; this is what stops it
  * drifting: the check regenerates the projection from the compiled registry and fails on any difference.
  *
@@ -74,11 +74,11 @@ const check = (name, fn) => {
 console.log('projection');
 const projection = shellProjection();
 if (write) writeFileSync(PROJECTION, projection);
-check('assets/layers.sh matches the registry (regenerate: --write)', (ok) =>
+check('engine/layers.sh matches the registry (regenerate: --write)', (ok) =>
   ok(existsSync(PROJECTION) && readFileSync(PROJECTION, 'utf8') === projection, 'layers.sh is stale or missing'),
 );
-check('assets/layers.sh parses and defines the registered ids', (ok) => {
-  const out = execFileSync('bash', ['-c', `set -eu; . "$1"; printf '%s|%s|%s' "$HOUSE_LAYERS" "$HOUSE_LAYER_FLOOR" "$(house_layer_ensurable_scaffold web)"`, '_', PROJECTION]).toString();
+check('engine/layers.sh parses and defines the registered ids', (ok) => {
+  const out = execFileSync('bash', ['-c', `set -eu; . "$1"; printf '%s|%s|%s' "$HOUSE_LAYERS" "$HOUSE_LAYER_FLOOR" "$(house_layer_ensurable_new web)"`, '_', PROJECTION]).toString();
   ok(out === `${registry.LAYERS.map((l) => l.id).join(',')}|nx|via:angular`, `got ${out}`);
 });
 
@@ -304,7 +304,7 @@ const ctxFor = (tree, overrides = {}) => {
   const ordered = (ids) => new Set(registry.inRegistryOrder(ids));
   return {
     tree,
-    mode: 'sync',
+    mode: 'upgrade',
     active: ordered([...detected, ...ensured]),
     ensured: new Set(ensured),
     project: 'shop',
@@ -319,7 +319,7 @@ const ctxFor = (tree, overrides = {}) => {
 const render = (lines) =>
   lines.map((l) => (l.kind === 'gen' ? `${l.generator} ${l.args.join(' ')}`.trim() : l.kind === 'warn' ? 'WARN' : 'PARTIAL'));
 
-check('bare repo, --ensure=agent: the floor\'s gitignore, the agent trio, then the stamp — nothing else', (ok) => {
+check('bare repo, add-layer agent: the floor\'s gitignore, the agent trio, then the stamp — nothing else', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['bare nx workspace'](), { ensured: ['nx', 'agent'] }), STAMP));
   const want = [
     'gitignore --layers=nx,agent,node',
@@ -368,8 +368,8 @@ check('full house sync: per-app steps first, then workspace steps in registry or
   const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';
   ok(devcontainer.endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${devcontainer}`);
 });
-check('scaffold mode runs no per-app steps (the app generator composes them)', (ok) => {
-  const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { mode: 'scaffold' }), STAMP));
+check('new mode runs no per-app steps (the app generator composes them)', (ok) => {
+  const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { mode: 'new' }), STAMP));
   ok(!got.some((l) => /^(serve|serve-options|firebase-client|design-system-styles) /.test(l)), `got ${got.join(' | ')}`);
 });
 check('web without agent: web generators skipped, reported, sync marked partial', (ok) => {
@@ -391,7 +391,7 @@ check('unmet layer (firebase without node, wrapper repo): not composed, not stam
   ok(!got.some((l) => l.startsWith('firebase-')), `firebase generators ran: ${got.join(' | ')}`);
   ok(got.includes('PARTIAL'), 'an unmet layer is a partial sync');
   const warning = lines.find((l) => l.kind === 'warn')?.message ?? '';
-  ok(!warning.includes('--ensure=node'), `the hint advises an --ensure the sync refuses: ${warning}`);
+  ok(!warning.includes('add-layer node'), `the hint advises an add-layer the upgrade refuses: ${warning}`);
   ok(warning.includes(registry.layer('node').ensureHint), `the hint is node's own: ${warning}`);
 });
 check('a skipped requirement takes its dependants down with it (navigation over an unmet angular)', (ok) => {

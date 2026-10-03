@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# scaffold.sh's PREFLIGHT GATE, exercised against real git repositories.
+# house.sh's PREFLIGHT GATE, exercised against real git repositories.
 #
-# WHAT THIS GUARDS. The gate is the only thing standing between a sync and an irreversible git act on a
+# WHAT THIS GUARDS. The gate is the only thing standing between an upgrade and an irreversible git act on a
 # repository that was not ready — `nx migrate --run-migrations --create-commits` stages with `git add -A` and
 # commits onto whatever branch HEAD is. When a gate like that regresses it does not fail loudly; it simply
-# stops refusing, and the next sync quietly commits someone's in-flight work under a migration's name. That is
+# stops refusing, and the next upgrade quietly commits someone's in-flight work under a migration's name. That is
 # the exact failure this repo already shipped once, which is why the gate has a test at all.
 #
 # HOW IT REACHES THE CODE, AND THE HONEST COST. The gate ships as shell rendered into a string inside
-# scaffold.sh, executed in the project (sometimes inside Docker). Running the whole scaffolder in CI to reach
+# house.sh, executed in the project (sometimes inside Docker). Running the whole scaffolder in CI to reach
 # it would drag in argument parsing, runtime selection, Docker and a real install — heavy, slow, and testing
 # mostly other things. So this extracts the two blocks by their markers and evaluates them directly. That
 # tests the SHIPPED TEXT of the gate, but not its wiring into the run sequence; wiring stays covered by
-# reading the rendered order in scaffold.sh.
+# reading the rendered order in house.sh.
 #
 # The extraction is the fragile part, so it FAILS LOUDLY when it finds nothing. An empty extraction would eval
 # cleanly, every fixture would report PASS, and the suite would go green while testing literally nothing —
@@ -21,16 +21,16 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCAFFOLD="$ROOT/plugins/project-starter/skills/new-project/assets/scaffold.sh"
+HOUSE_SH="$ROOT/plugins/house/engine/house.sh"
 NX_TOOLS_VERSION=9.9.9   # render-time substitution; the gate only echoes it
 
-[ -f "$SCAFFOLD" ] || { echo "FATAL: scaffold.sh not found at $SCAFFOLD" >&2; exit 2; }
+[ -f "$HOUSE_SH" ] || { echo "FATAL: house.sh not found at $HOUSE_SH" >&2; exit 2; }
 
 extract() {   # extract <assignment marker> [<closing line>] — the block from its opening line to its closing line (`fi"`)
   local marker="$1" end="${2:-fi\"}" out
-  out="$(awk -v s="$marker" -v e="$end" 'index($0,s)==1{f=1} f{print} f&&$0==e{exit}' "$SCAFFOLD")"
+  out="$(awk -v s="$marker" -v e="$end" 'index($0,s)==1{f=1} f{print} f&&$0==e{exit}' "$HOUSE_SH")"
   if [ -z "$out" ]; then
-    echo "FATAL: could not extract '$marker' from scaffold.sh." >&2
+    echo "FATAL: could not extract '$marker' from house.sh." >&2
     echo "       The block moved or its closing marker changed. Refusing to run: an empty extraction" >&2
     echo "       would make every case below pass while testing nothing." >&2
     return 2
@@ -41,14 +41,14 @@ extract() {   # extract <assignment marker> [<closing line>] — the block from 
 # Captured, checked, THEN evaluated — deliberately not `eval "$(extract ...)"`. A failure inside a command
 # substitution exits only the subshell, so the inline form would print the fatal message and carry on with an
 # empty block. Caught in testing by the assertions below, which is precisely why they are also here.
-# The gate renders the shared mount-point functions in by value (scaffold.sh does the same `declare -f`), so the
+# The gate renders the shared mount-point functions in by value (house.sh does the same `declare -f`), so the
 # extracted assignment needs them defined before it is evaluated.
-# shellcheck source=../../plugins/project-starter/skills/new-project/assets/house-mounts.sh
-. "$ROOT/plugins/project-starter/skills/new-project/assets/house-mounts.sh"
+# shellcheck source=../../plugins/house/engine/house-mounts.sh
+. "$ROOT/plugins/house/engine/house-mounts.sh"
 HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_post_create)"
 # The branch-model reader, rendered in by value the same way.
-# shellcheck source=../../plugins/project-starter/skills/new-project/assets/house-branches.sh
-. "$ROOT/plugins/project-starter/skills/new-project/assets/house-branches.sh"
+# shellcheck source=../../plugins/house/engine/house-branches.sh
+. "$ROOT/plugins/house/engine/house-branches.sh"
 HOUSE_BRANCHES_FNS="$(house_branches_fns)"
 # The branch model is resolved once, above the gate, and the gate embeds that block — so it is extracted first.
 model_src="$(extract 'BRANCH_MODEL_BLOCK="' 'esac"')" || exit 2
@@ -70,8 +70,8 @@ for needle in dirty-tree protected-branch detached-head branch-model-unreadable 
   esac
 done
 case "${PREFLIGHT_VERDICT:-}" in
-  *SYNC_REFUSED*) ;;
-  *) echo "FATAL: extracted PREFLIGHT_VERDICT does not emit SYNC_REFUSED — wrong block?" >&2; exit 2 ;;
+  *UPGRADE_REFUSED*) ;;
+  *) echo "FATAL: extracted PREFLIGHT_VERDICT does not emit UPGRADE_REFUSED — wrong block?" >&2; exit 2 ;;
 esac
 
 TMP="$(mktemp -d)"
@@ -87,7 +87,7 @@ gate() {
   local out
   out="$( cd "$1" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT"; echo '__PASS__' ) 2>&1 )"
   if in_text "$out" -q '__PASS__'; then echo 'PASS'
-  else printf '%s\n' "$out" | grep -E '^SYNC_REFUSED:' | tr '\n' ' ' | sed 's/ *$//'; fi
+  else printf '%s\n' "$out" | grep -E '^UPGRADE_REFUSED:' | tr '\n' ' ' | sed 's/ *$//'; fi
 }
 # The branch-model SIGNAL the gate prints (blocking nothing by itself), reduced to its state word, or NONE.
 signal() {
@@ -136,21 +136,21 @@ upstream0() {   # upstream0 <name> <branch> — a clone whose only §3 name live
 }
 
 # ── The branch model: UNDECLARED ────────────────────────────────────────────────────────────────────────────
-# No .bespunky/branches.json: the gate SIGNALS it (the /sync session investigates and asks) and, meanwhile,
+# No .bespunky/branches.json: the gate SIGNALS it (the /bespunky-house:upgrade session investigates and asks) and, meanwhile,
 # protects every name the toolkit ever forced plus gitflow's. A lone `main` used to be an ASK about this one run;
 # its ambiguity is now resolved by declaring the model, and the run is kept off `main` until then.
 d="$(mkrepo lone)"; commit "$d"
-check 'undeclared, lone main' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+check 'undeclared, lone main' 'UPGRADE_REFUSED: protected-branch' "$d" undeclared
 # Only the §3 names that EXIST are reported — master/develop/... are not branches here.
 says 'undeclared names only existing' "$d" 'every branch named main is protected' '!master' "!'develop'" '!staging'
 git -C "$d" checkout -q -b develop
-check 'undeclared, on develop' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+check 'undeclared, on develop' 'UPGRADE_REFUSED: protected-branch' "$d" undeclared
 git -C "$d" checkout -q -b fix/x
 check 'undeclared, feature branch' 'PASS' "$d" undeclared
 
 # `development` existing is no longer evidence of anything: same verdicts, still undeclared.
 d="$(mkrepo prot)"; commit "$d"; git -C "$d" branch development
-check 'undeclared, development exists' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+check 'undeclared, development exists' 'UPGRADE_REFUSED: protected-branch' "$d" undeclared
 git -C "$d" checkout -q -b feat/y
 check 'undeclared, development, feat' 'PASS' "$d" undeclared
 says 'undeclared lists main+development' "$d" 'every branch named main, development is protected'
@@ -187,14 +187,14 @@ JSON
 d="$(mkrepo gf)"; commit "$d"; git -C "$d" checkout -q -b develop
 declare_model "$d" 1 develop develop,main main 'release/*'
 git -C "$d" add -A && git -C "$d" commit -qm 'declare model'
-check 'declared, on develop' 'SYNC_REFUSED: protected-branch' "$d" declared
+check 'declared, on develop' 'UPGRADE_REFUSED: protected-branch' "$d" declared
 git -C "$d" checkout -q main
-check 'declared, on main (no copy here)' 'SYNC_REFUSED: protected-branch' "$d" declared
+check 'declared, on main (no copy here)' 'UPGRADE_REFUSED: protected-branch' "$d" declared
 git -C "$d" checkout -q -b release/1.2 develop
-check 'declared, glob release/1.2' 'SYNC_REFUSED: protected-branch' "$d" declared
-# A release line's refusal points at integration — and says WHY that is the right base for a sync.
+check 'declared, glob release/1.2' 'UPGRADE_REFUSED: protected-branch' "$d" declared
+# A release line's refusal points at integration — and says WHY that is the right base for an upgrade.
 says 'release line: base + why' "$d" "Open a worktree off 'develop' (the integration line)" \
-  'a sync is toolkit maintenance' "a fix meant for 'release/1.2' itself goes through the branch-and-release skill"
+  'an upgrade is toolkit maintenance' "a fix meant for 'release/1.2' itself goes through the branch-and-release skill"
 # `staging` is protected only while undeclared — a declared model that has no `staging` line does not own it.
 git -C "$d" checkout -q -b staging develop
 check 'declared, unlisted staging' 'PASS' "$d" declared
@@ -203,7 +203,7 @@ check 'declared, work branch' 'PASS' "$d" declared
 # A file `release/x` on disk must not turn the glob into a filesystem expansion.
 mkdir -p "$d/release" && touch "$d/release/x" && git -C "$d" add -A && git -C "$d" commit -qm r
 git -C "$d" checkout -q -b release/2.0
-check 'declared, glob vs on-disk path' 'SYNC_REFUSED: protected-branch' "$d" declared
+check 'declared, glob vs on-disk path' 'UPGRADE_REFUSED: protected-branch' "$d" declared
 
 # A declaration that has not LANDED on its integration line is not in force (CONTRACT §1): the branch proposing
 # it is still undeclared, and protection falls back to the undeclared names.
@@ -239,7 +239,7 @@ seed() { echo "$TMP/$1-seed"; }
 
 # THE REPRODUCED BUG. Two-line `dev → prod`; this clone's LOCAL `dev` is stale (predates the declaration), the
 # remote's carries it, HEAD is on `prod`. Stopping at the first ref found said "undeclared" and protected only the
-# fallback names — so `prod`, the production line, let a sync commit onto it.
+# fallback names — so `prod`, the production line, let an upgrade commit onto it.
 c="$(upstream up-stale dev)"; s_="$(seed up-stale)"
 git -C "$s_" branch prod; git -C "$s_" push -q origin dev prod
 git -C "$c" fetch -q; git -C "$c" checkout -q dev 2>/dev/null; git -C "$c" checkout -q -b prod origin/prod
@@ -248,7 +248,7 @@ git -C "$s_" add -A && git -C "$s_" commit -qm 'declare dev → prod'; git -C "$
 git -C "$s_" push -q origin dev prod
 git -C "$c" fetch -q; git -C "$c" merge -q --ff-only origin/prod
 resolves 'stale local dev, fresh origin' "$c" declared refs/remotes/origin/dev
-check 'stale local dev, HEAD on prod' 'SYNC_REFUSED: protected-branch' "$c" declared
+check 'stale local dev, HEAD on prod' 'UPGRADE_REFUSED: protected-branch' "$c" declared
 
 # NOT LANDED: the working copy declares lines the integration tip does not carry yet. Undeclared — but never with
 # fewer protections than the copy itself declares: its `prod` and its `rel/*` stay protected beside the §3 names.
@@ -256,14 +256,14 @@ d="$(mkrepo notlanded)"; commit "$d"; git -C "$d" branch dev; git -C "$d" checko
 declare_model "$d" 1 dev dev,prod prod 'rel/*'
 git -C "$d" add -A && git -C "$d" commit -qm 'propose dev → prod'
 resolves 'not landed' "$d" undeclared - 'not in force until it lands'
-check 'not landed, HEAD on its prod' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+check 'not landed, HEAD on its prod' 'UPGRADE_REFUSED: protected-branch' "$d" undeclared
 # The refusal names the declaration's own integration line as the base — never HEAD, never "declares no model".
 says 'not landed: base is its dev' "$d" "names 'dev' as its integration line but has not landed" \
-  "Land the declaration on 'dev' first" "open a worktree off 'dev' and sync there" \
+  "Land the declaration on 'dev' first" "open a worktree off 'dev' and upgrade there" \
   'every branch named main, dev, prod, rel/* is protected' 'undeclared (not landed)' \
   "!Open a worktree off 'prod'" '!declares no branch model' '!master'
 git -C "$d" checkout -q -b rel/1
-check 'not landed, its glob rel/1' 'SYNC_REFUSED: protected-branch' "$d" undeclared
+check 'not landed, its glob rel/1' 'UPGRADE_REFUSED: protected-branch' "$d" undeclared
 git -C "$d" checkout -q -b chore/m
 check 'not landed, work branch' 'PASS' "$d" undeclared
 
@@ -278,7 +278,7 @@ declare_model "$s_" 1 dev dev,qa,prod prod ''
 git -C "$s_" add -A && git -C "$s_" commit -qm 'add qa'; git -C "$s_" push -q origin dev
 git -C "$c" fetch -q; git -C "$c" checkout -q -b qa
 resolves 'both hold, origin descends' "$c" declared refs/remotes/origin/dev
-check 'both hold, origin adds qa' 'SYNC_REFUSED: protected-branch' "$c" declared
+check 'both hold, origin adds qa' 'UPGRADE_REFUSED: protected-branch' "$c" declared
 git -C "$c" checkout -q dev; git -C "$c" merge -q --ff-only origin/dev
 declare_model "$c" 1 dev dev,qa,stg,prod prod ''
 git -C "$c" add -A && git -C "$c" commit -qm 'local adds stg'; git -C "$c" checkout -q -b feat/z
@@ -295,7 +295,7 @@ git -C "$c" fetch -q; git -C "$c" checkout -q -b prod origin/prod
 declare_model "$s_" 1 development development,prod prod ''
 git -C "$s_" add -A && git -C "$s_" commit -qm 'declare'; git -C "$s_" push -q origin development; git -C "$c" fetch -q
 resolves 'self-confirm via origin only' "$c" declared refs/remotes/origin/development
-check 'self-confirm, HEAD on prod' 'SYNC_REFUSED: protected-branch' "$c" declared
+check 'self-confirm, HEAD on prod' 'UPGRADE_REFUSED: protected-branch' "$c" declared
 
 # UNREADABLE: a working copy that is not JSON is refused — never skipped into the self-confirming search, which
 # would read some other branch's copy and act on it.
@@ -303,7 +303,7 @@ d="$(mkrepo badjson)"; commit "$d"; git -C "$d" checkout -q -b fix/j
 mkdir -p "$d/.bespunky"; echo '{ not json' > "$d/.bespunky/branches.json"
 git -C "$d" add -A && git -C "$d" commit -qm 'broken'
 resolves 'unparseable working copy' "$d" unreadable working-tree
-check 'unparseable working copy' 'SYNC_REFUSED: branch-model-unreadable' "$d"
+check 'unparseable working copy' 'UPGRADE_REFUSED: branch-model-unreadable' "$d"
 # …and a readable working copy whose integration TIP carries a schema this toolkit does not know: unreadable,
 # read from the tip.
 d="$(mkrepo tipschema)"; commit "$d"; git -C "$d" checkout -q -b dev
@@ -322,14 +322,14 @@ resolves 'schema 1.1 accepted' "$d" declared refs/heads/dev
 d="$(mkrepo schema)"; commit "$d"
 declare_model "$d" 2 main main main ''
 git -C "$d" add -A && git -C "$d" commit -qm 'future model'; git -C "$d" checkout -q -b fix/s
-check 'unknown projection schema' 'SYNC_REFUSED: branch-model-unreadable' "$d"
+check 'unknown projection schema' 'UPGRADE_REFUSED: branch-model-unreadable' "$d"
 
 # --staging needs a PRE-PRODUCTION stage to bind to. trunk/two-line have none; three-line has `staging`.
 render_checks 1
 d="$(mkrepo stg2)"; commit "$d"; git -C "$d" checkout -q -b development
 declare_model "$d" 1 development development,main main ''
 git -C "$d" add -A && git -C "$d" commit -qm 'two-line'; git -C "$d" checkout -q -b feat/s
-check '--staging, two-line' 'SYNC_REFUSED: staging-without-stage' "$d" declared
+check '--staging, two-line' 'UPGRADE_REFUSED: staging-without-stage' "$d" declared
 d="$(mkrepo stg3)"; commit "$d"; git -C "$d" checkout -q -b development
 declare_model "$d" 1 development development,staging,main main ''
 git -C "$d" add -A && git -C "$d" commit -qm 'three-line'; git -C "$d" checkout -q -b feat/s
@@ -343,7 +343,7 @@ check 'feature branch, clean' 'PASS' "$d"
 
 # Commits made on a detached HEAD belong to no branch and are unreachable the moment anything is checked out.
 d="$(mkrepo det)"; commit "$d"; git -C "$d" checkout -q --detach HEAD
-check 'detached HEAD' 'SYNC_REFUSED: detached-head' "$d"
+check 'detached HEAD' 'UPGRADE_REFUSED: detached-head' "$d"
 
 # ── The dirty tree, and the count that must not lie ─────────────────────────────────────────────────────────
 d="$(mkrepo dirty)"; commit "$d"; git -C "$d" branch development; git -C "$d" checkout -q -b fix/y
@@ -351,7 +351,7 @@ echo change >> "$d/f.txt"                                     # modified
 mkdir -p "$d/libs/keeper/src" "$d/libs/inquiry"               # untracked DIRECTORIES
 echo n > "$d/libs/keeper/src/a.ts"; echo n > "$d/libs/keeper/index.ts"; echo n > "$d/libs/inquiry/b.ts"
 echo s > "$d/staged.txt"; git -C "$d" add staged.txt          # staged
-check 'dirty tree, feature branch' 'SYNC_REFUSED: dirty-tree' "$d"
+check 'dirty tree, feature branch' 'UPGRADE_REFUSED: dirty-tree' "$d"
 
 # Git COLLAPSES an untracked directory to one porcelain entry, so without `-uall` three files across two new
 # libraries report as `untracked=1` — the figure a reader skims past, for the work least likely to be
@@ -370,11 +370,11 @@ fi
 # once, not over two round trips.
 d="$(mkrepo both)"; commit "$d"; git -C "$d" branch development; git -C "$d" checkout -q development
 echo change >> "$d/f.txt"
-check 'dirty + protected together' 'SYNC_REFUSED: dirty-tree protected-branch' "$d"
+check 'dirty + protected together' 'UPGRADE_REFUSED: dirty-tree protected-branch' "$d"
 
 # ── Unwritable mount points: a root-owned node_modules / volume mount refuses before anything is written ─────
 # Docker creates a named volume's mount point ROOT-OWNED; unless post-create reclaims it, every install into it
-# dies with EACCES — the sync's own included. The fixtures need a directory this user cannot write, so they need
+# dies with EACCES — the upgrade's own included. The fixtures need a directory this user cannot write, so they need
 # sudo and a non-root user; where either is missing the cases are skipped, said out loud, never passed.
 if [ "$(id -u)" = 0 ] || ! sudo -n true 2>/dev/null; then
   echo "  skip unwritable-mounts cases — need a non-root user with passwordless sudo"
@@ -383,7 +383,7 @@ else
   check 'writable node_modules' 'PASS' "$d"
   sudo -n mkdir "$d/node_modules"
   before="$(git -C "$d" status --porcelain -uall; ls -A "$d")"
-  check 'root-owned node_modules' 'SYNC_REFUSED: unwritable-mounts' "$d"
+  check 'root-owned node_modules' 'UPGRADE_REFUSED: unwritable-mounts' "$d"
   [ "$(git -C "$d" status --porcelain -uall; ls -A "$d")" = "$before" ] \
     && printf '  ok   %-32s\n' 'refusal wrote nothing' \
     || { printf '  FAIL %-32s\n' 'refusal wrote nothing'; FAILED=1; }
@@ -406,7 +406,7 @@ JSON
   sudo -n mkdir "$d/.angular" "$d/commented-out"
   out="$( cd "$d" && ( set -e; MIGRATE_FROM=''; _stage() { :; }; eval "$PREFLIGHT_CHECKS"; eval "$PREFLIGHT_VERDICT" ) 2>&1 )"
   want_all=1
-  for needle in 'SYNC_REFUSED: unwritable-mounts' '.angular' 'owner: root' \
+  for needle in 'UPGRADE_REFUSED: unwritable-mounts' '.angular' 'owner: root' \
       'sudo chown -R "$(id -un):$(id -gn)" .angular node_modules' 'bash .devcontainer/post-create.sh'; do
     case "$out" in *"$needle"*) ;; *) want_all=0; printf '  FAIL %-32s missing [%s]\n' 'remedy names paths + fix' "$needle" ;; esac
   done

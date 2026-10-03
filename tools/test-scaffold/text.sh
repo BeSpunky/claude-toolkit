@@ -1,6 +1,6 @@
 # tools/test-scaffold/text.sh — sourced by the scaffolder tests; defines in_text.
 #
-# in_text TEXT GREP-ARGS...   grep captured TEXT, e.g. `in_text "$out" -q 'SYNC_REFUSED'`.
+# in_text TEXT GREP-ARGS...   grep captured TEXT, e.g. `in_text "$out" -q 'UPGRADE_REFUSED'`.
 #
 # Why not `printf '%s\n' "$out" | grep -q …`: grep -q exits at its first match and
 # closes the pipe; if printf is still writing, it dies of SIGPIPE ("printf: write

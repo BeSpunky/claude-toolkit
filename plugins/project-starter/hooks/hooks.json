@@ -1,7 +1,4 @@
 {
-  "modules": [
-    "./band.tsx"
-  ],
   "hooks": {
     "SessionStart": [
       {
@@ -9,9 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/check-house-version.sh\"",
-            "timeout": 10,
-            "statusMessage": "Checking house tooling version..."
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/rename-notice.sh\"",
+            "timeout": 10
           }
         ]
       }

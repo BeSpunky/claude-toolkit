@@ -7,7 +7,7 @@
 # gone dormant and hands Claude a statement of fact pointing at the skill. Detection is automatic; the actual
 # orientation (model judgment) stays in the skill.
 #
-# WHY IT ONLY DETECTS-AND-RELAYS. Same rule the project-starter hook earned: a hook that COMMANDS the model to
+# WHY IT ONLY DETECTS-AND-RELAYS. Same rule the house hook earned: a hook that COMMANDS the model to
 # act is one compliant model away from doing the thing you didn't consent to. This one only relays — it never
 # reconstructs the standing itself (that's the skill's job) and never runs anything.
 #

@@ -7,7 +7,7 @@
 // is a no-op, and consumers stay behind with nothing anywhere reporting a problem.
 //
 // That asymmetry is the point. A missed `@bespunky/nx-tools` bump is LOUD (CI skips the publish, the next
-// `--sync` installs the old payload). A missed PLUGIN bump is SILENT and permanent. So this asks, after the
+// upgrade installs the old payload). A missed PLUGIN bump is SILENT and permanent. So this asks, after the
 // fact: did the thing that should have happened, happen?
 //
 // ── THE DESIGN RULE: NEVER GUESS GREEN ──────────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ const parsesAsVersion = (v) => parseVersion(v) !== null;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MARKETPLACE = '.claude-plugin/marketplace.json';
 const PLUGINS_DIR = 'plugins';
-const NX_TOOLS = 'plugins/project-starter/skills/new-project/assets/nx-tools';
+const NX_TOOLS = 'plugins/house/engine/nx-tools';
 
 // stderr is discarded on purpose: probing `<sha>^:<path>` legitimately fails for a root commit or a path that
 // did not exist yet, and git narrates each of those. Those are expected answers, gathered deliberately below.
@@ -108,10 +108,17 @@ function manifestHistory(manifestPath) {
  */
 function lastReleaseCommit(manifestPath) {
   const history = manifestHistory(manifestPath);
+  const versions = history.map(({ sha, path }) => versionAt(sha, path));
   for (let i = 0; i < history.length; i++) {
-    const at = versionAt(history[i].sha, history[i].path);
+    const at = versions[i];
     if (at === null) continue;
-    const older = i + 1 < history.length ? versionAt(history[i + 1].sha, history[i + 1].path) : null;
+    // The nearest OLDER commit at which the manifest existed — not merely the next one in the log. A plugin
+    // directory can be deleted and later re-created at the same path (a renamed plugin leaving a stub behind:
+    // `plugins/project-starter` → `plugins/house`, then a new `plugins/project-starter`). The next commit in
+    // the log is then the DELETION, where the manifest is absent; reading that as "first appearance" would
+    // call the re-creation a release even at a version consumers already have, which is exactly the silent
+    // failure this file exists to catch. The re-created manifest must out-version its predecessor.
+    const older = versions.slice(i + 1).find((v) => v !== null) ?? null;
     if (older === null) return { sha: history[i].sha, version: at }; // first appearance of the manifest
     if (isGreater(at, older)) return { sha: history[i].sha, version: at };
   }

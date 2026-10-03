@@ -9,7 +9,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-GEN="$ROOT/plugins/project-starter/skills/new-project/assets/nx-tools/src/generators"
+GEN="$ROOT/plugins/house/engine/nx-tools/src/generators"
 PIECE="$GEN/devcontainer/post-create/firebase-banner.sh.tpl"
 BANNER="$GEN/firebase-emulators/firebase-welcome.sh.tpl"
 

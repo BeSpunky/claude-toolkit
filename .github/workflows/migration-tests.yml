@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v5
 
       # 22.18+ is the floor: compile-generators.mts is TypeScript run directly, which relies on Node's
-      # built-in type stripping. The same floor scaffold.sh checks before deciding whether it needs Docker.
+      # built-in type stripping. The same floor house.sh checks before deciding whether it needs Docker.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -45,8 +45,8 @@ jobs:
       - name: Run migration tests
         run: node tools/test-migrations/run.mjs
 
-      # The layer registry and its generated shell projection (assets/layers.sh): drift between the two, and
-      # the detection/plan behaviour scaffold.sh and the SessionStart hook rely on. Same install, same reason.
+      # The layer registry and its generated shell projection (engine/layers.sh): drift between the two, and
+      # the detection/plan behaviour house.sh and the SessionStart hook rely on. Same install, same reason.
       - name: Run layer registry tests
         run: node tools/test-layers/run.mjs
 

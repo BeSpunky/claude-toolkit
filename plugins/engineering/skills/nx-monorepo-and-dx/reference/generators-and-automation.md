@@ -14,7 +14,7 @@ nx g @nx/js:lib --help       # exact options
 nx g @nx/angular:library libs/bookings/data --tags=type:data,scope:bookings   # libs/ = this workspace's libsDir
 ```
 
-**Why.** *Work smart* + *Place everything on purpose* — generated structure is consistent, correctly wired (placement per the workspace layout, linking — a `paths` alias or a workspace package — tags, test config), and not a copy-paste of the last one. This is the **house standard** (see the `project-starter` plugin).
+**Why.** *Work smart* + *Place everything on purpose* — generated structure is consistent, correctly wired (placement per the workspace layout, linking — a `paths` alias or a workspace package — tags, test config), and not a copy-paste of the last one. This is the **house standard** (see the `house` plugin).
 
 **When not.** Only fall back to hand-creating files when no generator covers the task.
 
@@ -24,7 +24,7 @@ nx g @nx/angular:library libs/bookings/data --tags=type:data,scope:bookings   # 
 
 **What.** When you repeatedly set up the same thing, encode it as a **local workspace generator/executor** (an `@nx/plugin` plugin) so it's one command, every time.
 
-**Why.** *Automate every repeated process* — the second time you'd do a multi-step setup by hand is the signal to make a generator. The `project-starter` plugin's house generators (`serve-options`, `devcontainer`, `claude-settings`) are the canonical example: every config change is generated via the Nx devkit `Tree`, never hand-edited.
+**Why.** *Automate every repeated process* — the second time you'd do a multi-step setup by hand is the signal to make a generator. The `house` plugin's house generators (`serve-options`, `devcontainer`, `claude-settings`) are the canonical example: every config change is generated via the Nx devkit `Tree`, never hand-edited.
 
 ---
 

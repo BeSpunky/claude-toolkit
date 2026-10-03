@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # THE WORKSPACE SHAPE — `--layout` (where projects live) and `--linking` (how they reach each other) — is CHOSEN only
-# by a scaffold and DETECTED by a sync. The regressions this guards would all be silent:
+# by a scaffold and DETECTED by an upgrade. The regressions this guards would all be silent:
 #
-#   - a sync that accepted the flags would read as if it had relocated or relinked a workspace it never touched
-#     (an ignored flag is a lie of omission), so a sync must REFUSE them, before anything is written;
+#   - an upgrade that accepted the flags would read as if it had relocated or relinked a workspace it never touched
+#     (an ignored flag is a lie of omission), so an upgrade must REFUSE them, before anything is written;
 #   - `--linking=workspaces` without a package.json does not exist (it IS package-manager workspaces) — scaffolding
 #     `paths` instead would hand back a different workspace than the one asked for;
 #   - omitting both must reproduce today's bootstrap exactly — no workspaceLayout declared, the `apps` preset with
@@ -15,7 +15,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCAFFOLD="$ROOT/plugins/project-starter/skills/new-project/assets/scaffold.sh"
+HOUSE_SH="$ROOT/plugins/house/engine/house.sh"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -24,47 +24,47 @@ FAILED=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILED=1; }
 
-# ── a sync refuses both flags, and writes nothing ─────────────────────────────────────────────────────────────
+# ── an upgrade refuses both flags, and writes nothing ─────────────────────────────────────────────────────────────
 P="$TMP/proj"
 mkdir -p "$P" && git -C "$P" init -q
 printf '{}\n' > "$P/nx.json"
 before="$(ls -A "$P")"
 for flag in --layout=packages --linking=workspaces; do
-  err="$(bash "$SCAFFOLD" --sync --yes "$flag" "$P" 2>&1 >/dev/null)"; rc=$?
-  if [ "$rc" -ne 0 ] && in_text "$err" -q -- "--sync does not take $flag" \
+  err="$(bash "$HOUSE_SH" upgrade --yes "$flag" "$P" 2>&1 >/dev/null)"; rc=$?
+  if [ "$rc" -ne 0 ] && in_text "$err" -q -- "upgrade does not take $flag" \
      && in_text "$err" -q 'DETECTED' && in_text "$err" -q 'Nothing has been written'; then
-    ok "sync refuses $flag (detected, never chosen)"
+    ok "upgrade refuses $flag (detected, never chosen)"
   else
-    fail "sync did not refuse $flag (rc=$rc): $(printf '%s' "$err" | head -2)"
+    fail "upgrade did not refuse $flag (rc=$rc): $(printf '%s' "$err" | head -2)"
   fi
 done
 # --print-inner is no loophole: the refusal is about the request, not the act.
-bash "$SCAFFOLD" --sync --yes --print-inner --layout=apps-libs "$P" >/dev/null 2>&1 \
-  && fail "sync --print-inner accepted --layout" || ok "sync refuses --layout under --print-inner too"
-[ "$(ls -A "$P")" = "$before" ] && ok "the refused syncs wrote nothing" || fail "a refused sync changed the project"
+bash "$HOUSE_SH" upgrade --yes --print-inner --layout=apps-libs "$P" >/dev/null 2>&1 \
+  && fail "upgrade --print-inner accepted --layout" || ok "upgrade refuses --layout under --print-inner too"
+[ "$(ls -A "$P")" = "$before" ] && ok "the refused upgrades wrote nothing" || fail "a refused upgrade changed the project"
 
 # ── unknown ids are refused with the known ones ───────────────────────────────────────────────────────────────
-err="$(bash "$SCAFFOLD" --print-inner --layout=monorepo newp 2>&1 >/dev/null)" \
+err="$(bash "$HOUSE_SH" new --print-inner --layout=monorepo newp 2>&1 >/dev/null)" \
   && fail "an unknown layout was accepted" \
   || { in_text "$err" -q 'apps-libs' && ok "an unknown layout is refused, listing the known ones" \
        || fail "unknown-layout refusal does not list the layouts: $err"; }
-err="$(bash "$SCAFFOLD" --print-inner --linking=symlinks newp 2>&1 >/dev/null)" \
+err="$(bash "$HOUSE_SH" new --print-inner --linking=symlinks newp 2>&1 >/dev/null)" \
   && fail "an unknown linking was accepted" \
   || { in_text "$err" -q 'workspaces' && ok "an unknown linking is refused, listing the known ones" \
        || fail "unknown-linking refusal does not list the linkings: $err"; }
-bash "$SCAFFOLD" --print-inner --layout --yes newp >/dev/null 2>&1 \
+bash "$HOUSE_SH" new --print-inner --layout --yes newp >/dev/null 2>&1 \
   && fail "--layout swallowed a flag as its value" || ok "--layout refuses a flag-shaped value"
 
 # ── workspaces linking needs a package.json ───────────────────────────────────────────────────────────────────
-err="$(bash "$SCAFFOLD" --print-inner --linking=workspaces newp 2>&1 >/dev/null)"; rc=$?
-if [ "$rc" -ne 0 ] && in_text "$err" -q 'need a package.json' && in_text "$err" -q -- '--ensure=node'; then
+err="$(bash "$HOUSE_SH" new --print-inner --linking=workspaces newp 2>&1 >/dev/null)"; rc=$?
+if [ "$rc" -ne 0 ] && in_text "$err" -q 'need a package.json' && in_text "$err" -q -- '--add-layer=node'; then
   ok "--linking=workspaces on the wrapper host (no node layer) is refused, naming the fix"
 else
   fail "--linking=workspaces without the node layer was not refused (rc=$rc)"
 fi
 
 # ── the bootstrap each choice renders ─────────────────────────────────────────────────────────────────────────
-render() { bash "$SCAFFOLD" --print-inner "$@" 2>/dev/null; }
+render() { bash "$HOUSE_SH" new --print-inner "$@" 2>/dev/null; }
 prog="$(render --preset=angular newp shop)"
 if in_text "$prog" -q -- "--preset=apps --workspaces=false" \
    && ! in_text "$prog" -q 'workspace-layout' \

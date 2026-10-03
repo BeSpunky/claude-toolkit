@@ -3,7 +3,7 @@
 #
 # Why Docker: the host's bare Node is too old for modern Nx (and modern JS syntax) — the BeSpunky
 # pattern runs all Node tooling inside the typescript-node base image via `docker run` (see
-# scaffold.sh). This launcher mounts ~/projects (so BOTH the source project and the shared @bespunky
+# house.sh). This launcher mounts ~/projects (so BOTH the source project and the shared @bespunky
 # workspace are visible) and runs extract-tool.mjs inside the container, where Node is modern and the
 # shared workspace's own Nx (its mounted node_modules) is available to scaffold the package shell.
 #
@@ -16,11 +16,11 @@
 set -euo pipefail
 
 TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Base-image lookup + engine-aware file ownership, shared with scaffold.sh. The helper ships with the
-# project-starter plugin (scaffold.sh runs from the installed plugin, where this repo's tools/ does not
+# Base-image lookup + engine-aware file ownership, shared with house.sh. The helper ships with the
+# bespunky-house plugin (house.sh runs from the installed plugin, where this repo's tools/ does not
 # exist), so this repo-local tool reaches it by its repo-relative path rather than owning a copy.
-# shellcheck source=../../plugins/project-starter/skills/new-project/assets/container-engine.sh
-. "$TOOL_DIR/../../plugins/project-starter/skills/new-project/assets/container-engine.sh"
+# shellcheck source=../../plugins/house/engine/container-engine.sh
+. "$TOOL_DIR/../../plugins/house/engine/container-engine.sh"
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
 
 FROM_INPUT=""
@@ -49,7 +49,7 @@ command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
 docker info >/dev/null 2>&1   || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
 command -v curl >/dev/null    || { echo "ERROR: curl not found" >&2; exit 1; }
 
-# --- resolve newest typescript-node base image (same source as scaffold.sh) ---
+# --- resolve newest typescript-node base image (same source as house.sh) ---
 echo "Resolving latest typescript-node base image..."
 IMAGE="$(base_image_for_major "$(base_image_node_major)")"
 echo "Base image: $IMAGE"

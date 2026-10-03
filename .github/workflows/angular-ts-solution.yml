@@ -17,20 +17,20 @@ on:
   push:
     branches: [main, development]
     paths:
-      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/adapters/angular/**'
-      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/_utils/linking/**'
-      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/_utils/project-files.ts'
-      - 'plugins/project-starter/skills/new-project/assets/compile-generators.mts'
+      - 'plugins/house/engine/nx-tools/src/adapters/angular/**'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/linking/**'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/project-files.ts'
+      - 'plugins/house/engine/compile-generators.mts'
       - 'tools/test-angular-ts-solution/**'
       - 'tools/test-generators/**'
       - 'package.json' # the pinned Nx the tripwire builds with
       - '.github/workflows/angular-ts-solution.yml'
   pull_request:
     paths:
-      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/adapters/angular/**'
-      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/_utils/linking/**'
-      - 'plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/_utils/project-files.ts'
-      - 'plugins/project-starter/skills/new-project/assets/compile-generators.mts'
+      - 'plugins/house/engine/nx-tools/src/adapters/angular/**'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/linking/**'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/project-files.ts'
+      - 'plugins/house/engine/compile-generators.mts'
       - 'tools/test-angular-ts-solution/**'
       - 'tools/test-generators/**'
       - 'package.json'

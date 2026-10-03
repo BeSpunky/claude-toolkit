@@ -1,8 +1,8 @@
 # Guard the scaffolder's GUARDS.
 #
-# `scaffold.sh` is the one part of this repo that runs inside other people's projects and writes to them. Most
+# `house.sh` is the one part of this repo that runs inside other people's projects and writes to them. Most
 # of what it does announces its own failure; its refusals do not. A gate that stops refusing looks exactly
-# like a gate with nothing to catch — the run reports SYNC_OK and the damage lands on someone else's
+# like a gate with nothing to catch — the run reports UPGRADE_OK and the damage lands on someone else's
 # repository, later, with nothing in the output to suggest a check was skipped.
 #
 # Kept separate from `release invariants` on purpose. That workflow asks whether a change REACHES consumers

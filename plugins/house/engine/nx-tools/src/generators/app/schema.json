@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyApp",
+  "title": "Create a house-standard application",
+  "description": "Scaffold a BeSpunky-standard app — the application sibling of publishable-lib. CREATES the app through the stack adapter (--stack; default: the workspace's own — Angular today, with the house defaults minimal/scss/routing/no-e2e), then ATTACHES every capability the workspace wears by running each active layer's per-app steps — the same steps a sync runs (the web dev loop's serve targets, the design system's sass channel + provider, the Firebase client, …). What the workspace wears is detected, plus --layers (what this run is bringing into being; house.sh passes its ensure set) and the legacy --firebase override. This is the single command for adding any further app to a BeSpunky workspace; never reach for the raw framework generator, which leaves the per-app config out.",
+  "type": "object",
+  "properties": {
+    "directory": {
+      "type": "string",
+      "description": "Workspace-relative directory for the app. Optional when --name is given: the app then goes to <appsDir>/<name>, the workspace's apps directory (nx.json workspaceLayout.appsDir, else where its apps already live, else apps/). The project name defaults to the directory's last segment.",
+      "$default": {
+        "$source": "argv",
+        "index": 0
+      }
+    },
+    "name": {
+      "type": "string",
+      "description": "Explicit project name. Defaults to the directory's last segment (matching @nx/angular). Given alone, it also places the app at <appsDir>/<name>."
+    },
+    "stack": {
+      "type": "string",
+      "description": "The stack (adapter id) to create the app with, e.g. `angular`. Defaults to the workspace's stack that can create apps."
+    },
+    "layers": {
+      "type": "string",
+      "description": "Comma-separated layers this run is bringing into being alongside the app, attached as if already detected (house.sh passes its ensure set: at first-app time nothing it ensures exists yet).",
+      "x-priority": "internal"
+    },
+    "firebase": {
+      "type": "boolean",
+      "description": "Legacy override for the Firebase capability: true attaches the Firebase client even before firebase.json exists, false withholds it. When omitted, detected (firebase.json) like every other capability."
+    },
+    "staging": {
+      "type": "boolean",
+      "description": "Opt-in (Firebase workspaces): also scaffold a first-class staging environment — environment.staging.ts + a `staging` build configuration + apphosting.staging.yaml — so the workflow's `staging` App Hosting backend builds its own config/database instead of silently building prod's. Forwarded to the firebase-emulators generator. Default false."
+    },
+    "style": {
+      "type": "string",
+      "description": "The file extension or preprocessor to use for component styles.",
+      "enum": [
+        "scss",
+        "css",
+        "sass",
+        "less"
+      ],
+      "default": "scss"
+    },
+    "workspaceName": {
+      "type": "string",
+      "description": "Override the workspace identity that seeds the emulators' offline `demo-<workspaceName>` project id. Defaults to the workspace root directory name — correct in every normal case; do not pass it unless retargeting.",
+      "x-priority": "internal"
+    },
+    "skipFormat": {
+      "type": "boolean",
+      "description": "Skip formatting files.",
+      "default": false,
+      "x-priority": "internal"
+    }
+  }
+}
