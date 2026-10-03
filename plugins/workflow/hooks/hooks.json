@@ -1,4 +1,7 @@
 {
+  "modules": [
+    "./checkpoint-toast.ts"
+  ],
   "hooks": {
     "SessionStart": [
       {

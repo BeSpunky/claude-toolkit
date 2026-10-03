@@ -8,3 +8,4 @@ Trunk, staged, gitflow or maintained releases? Say "simplify our branches" and C
 Every effort's notes, mocks and decisions live in docs/features/<date>-<slug>/, next to its branch
 Big task? Claude can split it into subagents running in parallel; you can set the agent budget
 Testing a server? The house rule binds a random port, so the dev server you started by hand is never clobbered
+Compacting? The checkpoint the PreCompact hook saves pops up as a toast with its path, so you know where it went
