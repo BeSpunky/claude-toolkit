@@ -71,12 +71,6 @@
       "source": "./plugins/communication",
       "description": "How Claude speaks: ships the 'Pitch to the listener' output style, every answer pitched to the person reading it. Brief by default, for a reader who stepped out; full depth the moment they engage. One question per message, placed last; short reports of finished work that never drop a caveat; structure only where it earns its place; no unexplained jargon or bare verdicts. Presentation only. Default in BeSpunky projects; elsewhere pick it with /output-style.",
       "version": "0.4.3"
-    },
-    {
-      "name": "bespunky-project-starter",
-      "source": "./plugins/project-starter",
-      "description": "Deprecated: renamed to bespunky-house. Nothing to learn - your next /bespunky-project-starter:sync installs bespunky-house@claude-toolkit at the same scope and runs its upgrade, which is what /sync became (adding a layer is now /bespunky-house:add-layer, creating a project /bespunky-house:new). Then `claude plugin uninstall bespunky-project-starter`. Or install bespunky-house yourself now.",
-      "version": "0.40.0"
     }
   ]
 }

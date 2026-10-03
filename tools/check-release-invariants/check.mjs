@@ -113,8 +113,8 @@ function lastReleaseCommit(manifestPath) {
     const at = versions[i];
     if (at === null) continue;
     // The nearest OLDER commit at which the manifest existed — not merely the next one in the log. A plugin
-    // directory can be deleted and later re-created at the same path (a renamed plugin leaving a stub behind:
-    // `plugins/project-starter` → `plugins/house`, then a new `plugins/project-starter`). The next commit in
+    // directory can be deleted and later re-created at the same path (a plugin renamed away, then something new
+    // published under its old directory). The next commit in
     // the log is then the DELETION, where the manifest is absent; reading that as "first appearance" would
     // call the re-creation a release even at a version consumers already have, which is exactly the silent
     // failure this file exists to catch. The re-created manifest must out-version its predecessor.

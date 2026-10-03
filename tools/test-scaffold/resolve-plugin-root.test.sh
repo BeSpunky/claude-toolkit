@@ -104,14 +104,6 @@ CFG="$TMP/f"; mk_cache "$CFG" 0.32.0; mk_manifest "$CFG" 0.32.0
 run "$CFG" "$CFG/plugins/cache/claude-toolkit/bespunky-house/0.32.0"
 ok "an EQUAL version resolves normally" "$([ "$RC" -eq 0 ] && echo 1 || echo 0)" "rc=$RC"
 
-# A session running ANOTHER plugin is not a downgrade baseline: the retired bespunky-project-starter stub
-# resolves bespunky-house from its own root, and its version says nothing about the house's.
-CFG="$TMP/x"; mk_cache "$CFG" 0.32.0; mk_manifest "$CFG" 0.32.0
-mkdir -p "$TMP/stub/.claude-plugin" && printf '{"name":"bespunky-project-starter","version":"9.0.0"}\n' > "$TMP/stub/.claude-plugin/plugin.json"
-run "$CFG" "$TMP/stub"
-ok "a session root of ANOTHER plugin never triggers the guard" \
-   "$([ "$RC" -eq 0 ] && [ "$OUT" = "$CFG/plugins/cache/claude-toolkit/bespunky-house/0.32.0" ] && echo 1 || echo 0)" "rc=$RC out='$OUT'"
-
 # ── nothing installed ────────────────────────────────────────────────────────────────────────────
 CFG="$TMP/g"; mkdir -p "$CFG/plugins"
 run "$CFG"

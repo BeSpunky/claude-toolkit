@@ -90,3 +90,16 @@ house.sh help | --help
 - Past feature packages under `docs/features/` keep the old words — they are history.
 - This repo's own `.claude/settings.json` gets the new plugin name from its next dogfood upgrade (the
   migration does it), not by hand.
+
+## Superseded — the hand-over stub is removed (2026-10-03)
+
+The `bespunky-project-starter` stub was never explicitly asked for — it rode along inside a larger proposal.
+The user, on learning it shipped:
+
+> "I didn't ask you to do that. Remove it completely."
+
+So `plugins/project-starter/` and its marketplace entry are gone, along with the code that existed only for
+it (the resolver's other-plugin guard and its test). Existing users switch by hand (README → *Renamed from
+`project-starter`*). The 0.39.0 settings migration stays: it migrates project state, it is not a compat layer.
+The user also asked that the toolkit never default to backwards compatibility — Claude must ask whether it is
+needed; that rule is its own effort.

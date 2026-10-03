@@ -110,18 +110,8 @@ if [ -z "$RESOLVED" ] || [ ! -d "$RESOLVED" ]; then
 fi
 
 # --- never hand back an OLDER root than the one already running -------------------------------------------
-#
-# Only when the running root IS this plugin. Versions order within one plugin, not across two: the retired
-# `bespunky-project-starter` stub resolves `bespunky-house` from its own root, and comparing the stub's version
-# against the house's would refuse — or pass — on a number that says nothing about either.
-_name_of() {  # <plugin-root> -> name from its manifest, or empty
-  local manifest="$1/.claude-plugin/plugin.json"
-  [ -f "$manifest" ] || return 0
-  sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -1
-}
-
 CURRENT="${CLAUDE_PLUGIN_ROOT:-}"
-if [ -n "$CURRENT" ] && [ -d "$CURRENT" ] && [ "$(_name_of "$CURRENT")" = "$PLUGIN_NAME" ]; then
+if [ -n "$CURRENT" ] && [ -d "$CURRENT" ]; then
   RESOLVED_V="$(_version_of "$RESOLVED")"
   CURRENT_V="$(_version_of "$CURRENT")"
   if [ -n "$RESOLVED_V" ] && [ -n "$CURRENT_V" ] && _vlt "$RESOLVED_V" "$CURRENT_V"; then
