@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-03
+summary: Voice asks like a person (Claude is the only author of what is said), shows the transcript live, ends on end-of-speech settled by the recogniser, and can be replayed or silenced from every path.
+tags: [voice, tts, stt, mcp, ux, cancel, replay]
+---
+
 # voice-ux — decision
 
 Brief and root causes: [`BRIEF.md`](BRIEF.md).
@@ -97,3 +104,10 @@ audio). End-of-speech was tuned on synthetic speech + noise; the container's mic
 probed with nobody speaking, produced near-full-scale noise and once ended a take
 early on a burst. **The first real hands-free session is the remaining check** —
 especially that partials appear under the tool call and that Esc reaches the tool.
+
+## Next
+
+The user, on whether to use Claude Code mods: "yes, merge and do the band next" — a
+voice control band (live transcript, Replay/Stop buttons, Esc via `next.signal`) is a
+follow-up effort, gated first on whether a marketplace-installed plugin's mod module
+loads for consumers at all.
