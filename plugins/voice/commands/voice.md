@@ -1,6 +1,6 @@
 ---
-description: Speak Claude's current question aloud, answer it by voice, or toggle automatic speaking. For when you're away from the screen.
-argument-hint: "[say | answer | auto on | auto off | test | status]"
+description: Speak Claude's current question aloud, replay or stop it, answer it by voice, or toggle automatic speaking. For when you're away from the screen.
+argument-hint: "[say | replay | stop | answer | auto on | auto off | test | status]"
 allowed-tools: Bash
 ---
 
@@ -8,7 +8,7 @@ The bespunky-voice runtime scripts live at a stable path, `~/.claude/bespunky-vo
 (published each session by the plugin's SessionStart hook). Always call them there,
 by absolute path.
 
-**First check** — if `~/.claude/bespunky-voice/speak.sh` does NOT exist, the
+**First check** — if `~/.claude/bespunky-voice/speaker.sh` does NOT exist, the
 SessionStart hook hasn't run yet (this happens right after a fresh install, since
 installing a plugin mid-session does not fire SessionStart). Tell the user to
 restart Claude Code or start a new session once to activate the voice plugin, then
@@ -19,17 +19,26 @@ The user ran: `/voice $ARGUMENTS`
 Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
 (treat empty as `say`):
 
-- **say** (or empty) — Write a SPOKEN-WORD summary of the question you most
-  recently put to the user and are still awaiting an answer on. Rules for the
-  summary: plain spoken sentences; **no** markdown, symbols, code, brackets,
-  tables, or structure read aloud; state the question, then each option as a
-  natural phrase ("Option one: …; option two: …"); include only what they need
-  to decide. Then speak it:
+- **say** (or empty) — Ask the question you most recently put to the user (and
+  are still awaiting an answer on) again, OUT LOUD, the way a person would ask it
+  across the room: one or two plain sentences that name the choices in the
+  sentence itself — "Should I commit now, or keep going and commit at the end?".
+  **No** markdown, symbols, code, or structure; **no** "option one", "your options
+  are", or "say your choice"; never list the choices and then summarise them
+  again. Include only what they need to decide. Then speak it:
   ```
-  bash ~/.claude/bespunky-voice/speak.sh "<your ear-ready summary>"
+  bash ~/.claude/bespunky-voice/speaker.sh say --wait "<the spoken question>"
   ```
   If you have NOT actually asked a question recently, tell the user that instead
   of inventing one to read.
+
+- **replay** (or **again**) — Say the last thing the voice said, again:
+  `bash ~/.claude/bespunky-voice/speaker.sh replay --wait`. If it reports nothing
+  has been said yet, tell the user so.
+
+- **stop** — Silence whatever is being said right now:
+  `bash ~/.claude/bespunky-voice/speaker.sh stop`. (Speech also stops on its own
+  the moment the user submits a prompt.)
 
 - **answer** — Capture the user's spoken reply and act on it. Run:
   ```
@@ -45,10 +54,11 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
 
 - **auto on** / **auto off** — Run `bash ~/.claude/bespunky-voice/voice-auto.sh on`
   (or `off`) and report the new state. When ON, the plugin automatically speaks
-  every multiple-choice question and plan-approval the moment it appears.
+  every multiple-choice question, plan approval and question that ends a turn,
+  the moment it appears.
 
 - **test** — Run
-  `bash ~/.claude/bespunky-voice/speak.sh "Voice check. If you can hear this clearly, the voice plugin is working."`
+  `bash ~/.claude/bespunky-voice/speaker.sh say --wait "Voice check. If you can hear this clearly, the voice plugin is working."`
   and confirm to the user whether it should have played. If it prints
   "falling back to the robotic voice", relay the reason and the repair command
   it names — the natural voice is installed but broken. If it fails with "no

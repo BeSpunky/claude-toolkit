@@ -4,3 +4,5 @@
 Stepping away from the keyboard? /bespunky-voice:voice auto on reads Claude's questions aloud
 Say "let's do this hands-free" to answer Claude's questions by speaking
 /bespunky-voice:voice test checks your speech-to-text and text-to-speech setup in one go
+Missed what the voice said? /bespunky-voice:voice replay says it again — or just say "repeat that" when it's listening
+Voice talking too long? Start typing — it stops the moment you send. Or say "never mind" while it listens

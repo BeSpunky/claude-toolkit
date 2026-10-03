@@ -10,14 +10,22 @@ The user wants to answer your questions by **voice**, hands-free. While in this 
 
 - For **every** question you would put to the user — a choice, a confirmation, a
   clarification — call the **`ask_by_voice`** MCP tool (from the bespunky-voice
-  server) **instead of** `AskUserQuestion` or asking in plain text. Pass a
-  `question` phrased for the ear (plain spoken words, no markup) and, when it's a
-  choice, the `options` (each a short `label`).
-- The tool speaks the question, records the spoken reply, and returns
-  `{ transcript, matched, options }`:
+  server) **instead of** `AskUserQuestion` or asking in plain text.
+- **`question` is said word for word** — so write it the way a person asks across
+  the room, with the choices named inside the sentence: *"Should I commit now, or
+  keep going and commit at the end?"* Plain words, no markup, no "option one", no
+  "your options are", no "say your choice". **`options` are never spoken** — they
+  only let the tool recognise which choice the reply means (give each a short,
+  distinct `label` that echoes the words you used in the question).
+- While the user speaks, the transcript appears live under the tool call. The tool
+  returns `{ transcript, matched, options }`:
   - `matched` non-null → proceed with `matched.label`.
   - `matched` null → interpret `transcript` yourself; if it's unclear or empty,
-    call `ask_by_voice` again to re-ask (rephrase or re-read the options).
+    call `ask_by_voice` again with the question rephrased.
+  - `cancelled: true` → the user said "stop" / "never mind" (or interrupted).
+    Drop the question; don't re-ask unless they bring it up.
+- The user can say **"repeat that"** at any point — the tool re-asks by itself.
+  `/voice replay` and `/voice stop` work for anything spoken.
 - Keep spoken questions **short and one at a time** — the user is listening, not
   reading. Prefer 2–4 clear options with distinct labels (the matcher keys off
   the label words, ordinals like "the second one", and yes/no).
