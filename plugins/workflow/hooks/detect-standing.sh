@@ -27,50 +27,43 @@ git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 # Legacy snooze location (see the snooze section below). Removed HERE, before any early exit: the dormancy checks
 # exit on every active session, so cleanup placed after them would wait for the next dormant stretch to run.
 rm -f "$PROJECT_DIR/.claude/.standing-snooze" 2>/dev/null || true
-FEATURES="$PROJECT_DIR/docs/features"
-[ -d "$FEATURES" ] || exit 0
+
+# --- the derivation: ONE engine, shared with the /standing pane ---------------------------------------------
+# Which packages exist, which are in flight, and how recently anything moved are DERIVED by the project-standing
+# skill's engine (`standing.mjs`), the same one the /standing pane draws from — so the notice and the pane can
+# never disagree about what is in flight. `--tsv` carries no free text: validated package names and enums only.
+# The engine validates every slug against the feature-package shape and SKIPS a name that fails, so a repo
+# cannot smuggle a sentence (let alone an instruction) into the model's context through a folder name.
+# No node, a missing engine, a crash → say nothing (a missed notice beats a false one).
+ENGINE="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}/skills/project-standing/scripts/standing.mjs"
+command -v node >/dev/null 2>&1 && [ -f "$ENGINE" ] || exit 0
+facts="$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" BESPUNKY_STANDING_STALE_DAYS="$STALE_DAYS" node "$ENGINE" --tsv 2>/dev/null)" || exit 0
+
+# repo<TAB>hasFeatures<TAB>hasRecentDoc<TAB>lastCommit<TAB>commitAgeDays, then pkg<TAB>dir<TAB>status<TAB>state<TAB>baton
+IFS="$(printf '\t')" read -r tag has_features recent_doc last_commit commit_age_days <<EOF_REPO
+$(printf '%s\n' "$facts" | head -n 1)
+EOF_REPO
+[ "$tag" = "repo" ] || exit 0
+[ "$has_features" = "1" ] || exit 0
+case "$last_commit" in '' | *[!0-9]*) last_commit=0 ;; esac
+case "$commit_age_days" in '' | *[!0-9-]*) exit 0 ;; esac
 
 # --- is the user actively working here? then say nothing -----------------------------------------------------
 # Recent = a live-tier doc edited within STALE_DAYS, OR a commit within STALE_DAYS. Either means "not dormant".
-# ! -path keeps the archive tier out of the check (portable; avoids GNU-only -not/-printf).
-recent_doc="$(find "$FEATURES" -type f ! -path "$FEATURES/archive/*" -mtime -"$STALE_DAYS" -print -quit 2>/dev/null || true)"
-
-now="$(date +%s 2>/dev/null || echo 0)"
-last_commit="$(git -C "$PROJECT_DIR" log -1 --format=%ct 2>/dev/null || echo 0)"
-case "$last_commit" in '' | *[!0-9]*) last_commit=0 ;; esac
-commit_age_days=$(( (now - last_commit) / 86400 ))
-
-[ -n "$recent_doc" ] && exit 0                       # a doc was touched recently → active → quiet
+[ "$recent_doc" = "1" ] && exit 0                     # a doc was touched recently → active → quiet
 [ "$commit_age_days" -lt "$STALE_DAYS" ] && exit 0   # a commit landed recently → active → quiet
 
-# --- collect the in-flight efforts (validated; nothing untrusted reaches Claude's context) -------------------
-# A live-tier package is IN-FLIGHT unless its DECISION.md carries a closing `status:`. Slugs come from directory
-# names — a repo could craft a hostile one — so every slug is validated against a strict charset before it is
-# ever echoed. A name that fails validation is skipped, not repeated back: a repo cannot smuggle a sentence
-# (let alone an instruction) into the model's context through a folder name.
+# --- the in-flight efforts: an unconcluded package (no closing `status:` in its DECISION.md) ------------------
 inflight=""
 count=0
-for d in "$FEATURES"/*/; do
-  base="$(basename "$d")"
-  [ "$base" = "archive" ] && continue
-  # Require the feature-package name shape: <YYYY-MM-DD>-<slug>, slug in [a-z0-9-], bounded length.
-  case "$base" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[a-z0-9]*) ;;
-    *) continue ;;
-  esac
-  slug="${base#????-??-??-}"
-  case "$slug" in '' | *[!a-z0-9-]*) continue ;; esac
-  [ "${#base}" -le 80 ] || continue
-
-  dec="$d/DECISION.md"
-  if [ -f "$dec" ] && grep -qiE '^status:[[:space:]]*(concluded|abandoned|superseded)\b' "$dec" 2>/dev/null; then
-    continue   # has a closing conclusion → not in-flight
-  fi
-
+while IFS="$(printf '\t')" read -r tag dir status _state _baton; do
+  [ "$tag" = "pkg" ] && [ "$status" = "in-flight" ] || continue
   count=$((count + 1))
-  [ "$count" -le 8 ] && inflight="$inflight  • docs/features/$base/
+  [ "$count" -le 8 ] && inflight="$inflight  • docs/features/$dir/
 "
-done
+done <<EOF_PKGS
+$facts
+EOF_PKGS
 
 [ "$count" -gt 0 ] || exit 0   # concluded / empty repo → nothing to relay
 

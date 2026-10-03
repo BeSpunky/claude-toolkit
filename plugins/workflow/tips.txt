@@ -2,6 +2,7 @@
 # One tip per line; blank lines and lines starting with # are ignored. Keep each short enough to glance at.
 
 Back after a break? Ask "where did I leave off?" and project-standing works it out from git and feature packages
+Run /standing for a pane of every feature package, live, dormant or concluded, with a Resume button for each
 Context getting long? Say "hand this off" to write a baton a fresh session can resume from
 Unrelated requests get their own git worktree off your integration branch automatically, so branches never mix
 Trunk, staged, gitflow or maintained releases? Say "simplify our branches" and Claude checks CI and history before proposing a branch model
