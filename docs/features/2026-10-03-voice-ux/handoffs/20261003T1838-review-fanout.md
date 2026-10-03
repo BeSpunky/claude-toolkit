@@ -45,6 +45,7 @@ count, sort cost, non-integer knobs, stdout contract, cleanup on every TERM path
 | --- | --- | --- | --- |
 | F1 | answer.mjs, ask-server race + version, speaker lock + process group, install-runtime guard | main | done (b81bab8) |
 | F2 | phrasing.mjs, list-aware Stop hook, PostToolUse silence, tests 18→28 | main | done (083e57d) |
-| F3 | listen.sh end-of-speech (R2 1–4) | subagent | dispatched |
+| F3 | listen.sh end-of-speech (R2 1–4) + recogniser-settled short runs / loud rooms | subagent | done |
+| F4 | release | main | done (0.4.1) |
 Not fixed, by decision: `/voice answer` stays non-streaming — a slash command's Bash output isn't shown live;
 the live transcript belongs to the hands-free tool.

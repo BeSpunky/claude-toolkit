@@ -65,6 +65,31 @@ No `nx-tools` payload change → nothing to migrate.
 - `speak-detached.sh` is retired; the SessionStart publish now prunes runtime
   scripts the plugin no longer ships.
 
+## Sanity review (2026-10-03) — what it changed
+
+The user asked: "Send agents to sanity check". Four reviewers (tool, listener,
+speaker/hooks/docs, the user's-eye view of the five annoyances) found real gaps;
+all fixed, tests 18 → 28, released as 0.4.1. The ones that changed the design:
+
+- **Silence on answer, not only on prompt.** Answering the picker or approving a
+  plan submits no prompt, so speech kept going after the user had moved on —
+  `silence.sh` also runs on `PostToolUse` for `AskUserQuestion|ExitPlanMode`.
+- **Prose questions are read by structure.** The end-of-turn path flattened the
+  text and said the last bullet + "Which one?"; a list directly above the question
+  is now its set of choices, phrased by the same `phrasing.mjs` as the picker.
+- **The recogniser decides what loudness can't.** A cough and "yes" are identical
+  by energy, and a loud room hides speech below any threshold. Short bursts and
+  the no-speech give-up are both settled by a fast transcription: words end the
+  take ("yes" ≈ 3.5 s; a 12 s answer at SNR 4 kept whole), no words mean noise.
+- **Replies understand negation** ("don't", "not the first one") and padded
+  commands ("please stop", "no, stop").
+- Speaker: one locked stop→launch step; its own process group via perl where
+  `setsid` is missing (macOS). Server: a cancel's stop lands before the next
+  question is spoken.
+
+Not changed, by decision: `/voice answer` stays non-streaming — a slash command's
+Bash output isn't shown live; the live transcript belongs to the hands-free tool.
+
 ## Not verified live
 
 The conversation logic is covered by `tools/test-voice/run.mjs` (real server, fake
