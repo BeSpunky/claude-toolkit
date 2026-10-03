@@ -1,19 +1,22 @@
-// Which copy of the declaration is THE model — CONTRACT Amendment 1, the one resolution algorithm shared with
-// `assets/house-branches.sh` (its reference implementation) and `checkpoint-on-compact.sh`. Keep them agreeing.
+// Which copy of the declaration is THE model — CONTRACT Amendment 2, the resolution rule shared with
+// `assets/house-branches.sh` (the only other resolver; both test suites run the same scenarios). Keep them agreeing.
 //
 // The file is committed, so every branch carries its own copy — stale on an old feature branch, missing on one
-// cut before the model was declared. The copy on the INTEGRATION LINE'S TIP is the model in force:
-//   1. a readable working-tree copy names the integration line (`projection.integration`, `projection.remote`):
-//      - that branch (local, else <remote>/<it>) holds a copy → that copy is the model (note when it differs);
-//      - the branch holds no copy → the declaration has not landed → UNDECLARED, with a note;
-//      - the branch exists nowhere (bootstrap, a clone without it) → the working-tree copy, with a note.
-//   2. no readable working-tree copy → self-confirming search over the §3 names: a copy at that branch (local,
-//      then origin/) counts only if its own projection.integration names that same branch.
-//   3. nothing found → undeclared (a working-tree copy with no projection is still surfaced, so validation can
-//      say what is wrong with it rather than the repo looking undeclared).
+// cut before the model was declared. The copy on the INTEGRATION LINE is the model in force:
+//   1. a working-tree copy that is unparseable, has no projection, or a projection.schema major other than 1 →
+//      UNREADABLE: refuse to act; protect the §3 list.
+//   2. a readable working-tree copy names integration I and remote R. Both refs/heads/I and refs/remotes/R/I
+//      are considered; those that exist AND hold the file are candidates:
+//      - neither ref exists (bootstrap, a clone without it) → the working-tree copy, with a note;
+//      - refs exist, none holds the file → NOT LANDED: undeclared, but protected = §3 ∪ the copy's own protections;
+//      - one holds it → that copy; both → identical → it; else the descendant's; diverged → the local one, noted.
+//   3. no working-tree copy → self-confirming search over the §3 names, local AND origin/<name>: a copy counts
+//      only if its own projection.integration names that same branch.
+//   4. nothing found → undeclared.
+// A chosen copy must itself be readable AND valid; one that is not is UNREADABLE (never guessed around).
 import fs from 'node:fs';
 import path from 'node:path';
-import { FILE, canonical, UNDECLARED_PROTECTED } from './model.mjs';
+import { FILE, canonical, UNDECLARED_PROTECTED, isSchemaMajor1, validate } from './model.mjs';
 
 function parse(text) {
   try {
@@ -22,53 +25,104 @@ function parse(text) {
     return undefined;
   }
 }
-const integrationOf = (m) => (m && typeof m.projection?.integration === 'string' ? m.projection.integration : null);
+
+/** Why a copy cannot be read as a model, or null when it can. */
+function unreadableWhy(model, where) {
+  if (model === undefined) return `${where}: not valid JSON`;
+  if (model === null || typeof model !== 'object' || Array.isArray(model)) return `${where}: not a JSON object`;
+  const p = model.projection;
+  if (!p || typeof p !== 'object') return `${where}: no projection (it was not written by \`branches.mjs write\`)`;
+  if (!isSchemaMajor1(p.schema)) return `${where}: projection.schema ${JSON.stringify(p.schema)} is a major this engine does not know (only 1)`;
+  if (typeof p.integration !== 'string' || !p.integration) return `${where}: projection.integration is missing`;
+  return null;
+}
+
+const uniq = (xs) => [...new Set(xs)];
 
 /**
- * @returns {{ declared: false, warnings: string[] } |
- *           { declared: true, model: object, source: string, warnings: string[] }}
+ * @returns {{ state: 'declared'|'undeclared'|'unreadable', declared: boolean, model: object|null,
+ *             source: string|null, projection: object|null, protected: string[], protectedPatterns: string[],
+ *             notes: string[], reason: string|null }}
+ * `protected` / `protectedPatterns` are always the EFFECTIVE set for the state.
  */
 export function resolveModel(git, top) {
-  const warnings = [];
-  const localPath = path.join(top, FILE);
-  const localText = fs.existsSync(localPath) ? fs.readFileSync(localPath, 'utf8') : null;
-  const local = localText === null ? undefined : parse(localText);
+  const notes = [];
+  const existing = (remotes) => {
+    const names = new Set(remotes.flatMap((r) => git.branchNames(r)));
+    return UNDECLARED_PROTECTED.filter((n) => names.has(n));
+  };
+  const exists = (ref) => git.ok(['show-ref', '--verify', '--quiet', ref]);
   const copyAt = (ref) => {
     const text = git.try(['show', `${ref}:${FILE}`]);
-    return text === null ? null : { text, model: parse(text) };
+    return text === null ? null : { ref, model: parse(text), sha: git.sha(ref) };
   };
 
-  const integ = integrationOf(local);
-  if (integ) {
-    const remote = typeof local.projection.remote === 'string' ? local.projection.remote : 'origin';
-    const ref = git.ref(integ, remote);
-    if (ref) {
-      const tip = copyAt(ref);
-      if (!tip) {
-        warnings.push(`this tree carries ${FILE} naming "${integ}" as its integration line, but "${integ}" does not — a declaration is not in force until it lands there`);
-        return { declared: false, warnings };
-      }
-      if (tip.model === undefined) throw new Error(`${ref}:${FILE}: not valid JSON`);
-      if (canonical(tip.model) !== canonical(local)) warnings.push(`this tree's copy of ${FILE} differs from the one on "${integ}" — the integration line's copy is the model in force`);
-      return { declared: true, model: tip.model, source: `${ref}:${FILE}`, warnings };
+  const declared = (model, source) => {
+    const why = unreadableWhy(model, source);
+    if (why) return unreadable(why, source);
+    const errors = validate(model);
+    if (errors.length) return unreadable(`${source}: ${errors.length} validation error(s): ${errors.join('; ')}`, source, model.projection);
+    const p = model.projection;
+    return { state: 'declared', declared: true, model, source, projection: p, protected: [...(p.protected ?? [])], protectedPatterns: [...(p.protectedPatterns ?? [])], notes, reason: null };
+  };
+  // Unreadable protects the whole §3 list — plus, when the copy's projection is itself readable, its own list
+  // (never fewer protections than a copy declares).
+  const unreadable = (reason, source, projection) => ({
+    state: 'unreadable', declared: false, model: null, source: source ?? null, projection: null,
+    protected: uniq([...UNDECLARED_PROTECTED, ...(Array.isArray(projection?.protected) ? projection.protected : [])]),
+    protectedPatterns: uniq(Array.isArray(projection?.protectedPatterns) ? projection.protectedPatterns : []),
+    notes, reason,
+  });
+  const undeclared = (reason, { remotes = ['origin'], extra = null } = {}) => ({
+    state: 'undeclared', declared: false, model: null, source: null, projection: null,
+    protected: uniq([...existing(remotes), ...(extra?.protected ?? [])]),
+    protectedPatterns: uniq(extra?.protectedPatterns ?? []),
+    notes, reason,
+  });
+
+  /** Among copies of the SAME line (local and remote-tracking), the one in force. */
+  const pick = (copies, line) => {
+    if (copies.length === 1) return copies[0];
+    const [a, b] = copies; // a = local, b = remote-tracking
+    if (canonical(a.model) === canonical(b.model)) return a;
+    if (git.isAncestor(a.sha, b.sha)) return b;
+    if (git.isAncestor(b.sha, a.sha)) return a;
+    notes.push(`${a.ref} and ${b.ref} have diverged and carry different copies of ${FILE} — read the local one; reconcile "${line}" with its remote`);
+    return a;
+  };
+
+  const localPath = path.join(top, FILE);
+  if (fs.existsSync(localPath)) {
+    const local = parse(fs.readFileSync(localPath, 'utf8'));
+    const why = unreadableWhy(local, `working-tree ${FILE}`);
+    if (why) return unreadable(why, 'working-tree');
+
+    const I = local.projection.integration;
+    const R = typeof local.projection.remote === 'string' && local.projection.remote ? local.projection.remote : 'origin';
+    const refs = [`refs/heads/${I}`, `refs/remotes/${R}/${I}`].filter(exists);
+    if (!refs.length) {
+      notes.push(`the integration line "${I}" could not be resolved (no local or ${R} branch), so this tree's copy of ${FILE} was read`);
+      return declared(local, 'working-tree');
     }
-    warnings.push(`the integration line "${integ}" could not be resolved (no local or ${remote} branch), so this tree's copy of ${FILE} was read`);
-    return { declared: true, model: local, source: FILE, warnings };
+    const copies = refs.map(copyAt).filter(Boolean);
+    if (!copies.length) {
+      notes.push(`this tree carries ${FILE} naming "${I}" as its integration line, but "${I}" does not — a declaration is not in force until it lands there`);
+      return undeclared(`not landed: ${refs.join(' and ')} ${refs.length > 1 ? 'hold' : 'holds'} no ${FILE}`, { remotes: uniq(['origin', R]), extra: local.projection });
+    }
+    const chosen = pick(copies, I);
+    if (chosen.model !== undefined && canonical(chosen.model) !== canonical(local)) notes.push(`this tree's copy of ${FILE} differs from the one on "${I}" — the integration line's copy is the model in force`);
+    return declared(chosen.model, chosen.ref);
   }
 
   for (const name of UNDECLARED_PROTECTED) {
-    const ref = git.ref(name, 'origin');
-    const tip = ref && copyAt(ref);
-    if (tip && integrationOf(tip.model) === name) {
-      warnings.push(`no readable ${FILE} in this tree (it predates the declaration) — read the one on ${ref}`);
-      return { declared: true, model: tip.model, source: `${ref}:${FILE}`, warnings };
-    }
+    const copies = [`refs/heads/${name}`, `refs/remotes/origin/${name}`]
+      .filter(exists)
+      .map(copyAt)
+      .filter((c) => c && c.model?.projection?.integration === name);
+    if (!copies.length) continue;
+    const chosen = pick(copies, name);
+    notes.push(`no ${FILE} in this tree (it predates the declaration) — read the one on ${chosen.ref}`);
+    return declared(chosen.model, chosen.ref);
   }
-
-  if (localText !== null) {
-    if (local === undefined) throw new Error(`${FILE}: not valid JSON`);
-    warnings.push(`this tree's ${FILE} has no projection (it was not written by \`branches.mjs write\`) — read as-is`);
-    return { declared: true, model: local, source: FILE, warnings };
-  }
-  return { declared: false, warnings };
+  return undeclared(`no ${FILE} on the integration line`);
 }

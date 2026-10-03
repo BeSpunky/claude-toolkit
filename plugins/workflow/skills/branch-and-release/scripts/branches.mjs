@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Git } from './lib/git.mjs';
-import { PRESETS, FILE, UNDECLARED_PROTECTED, UsageError, expand, validate, project, releaseLines } from './lib/model.mjs';
+import { PRESETS, FILE, UsageError, expand, validate, project, releaseLines } from './lib/model.mjs';
 import { resolveModel } from './lib/resolve.mjs';
 import { verify, NAMES } from './lib/verify.mjs';
 import { plan, format, GATES } from './lib/plan.mjs';
@@ -70,34 +70,53 @@ function reportErrors(errors, where) {
   return EXIT.fail;
 }
 
-/** The model in force, validated — or an exit code. */
-function inForce(git, top, { json = false } = {}) {
+/** What status --json emits (CONTRACT, Amendment 2) — a hook consumes it, so the shape is frozen here. */
+const statusShape = (r) => ({
+  state: r.state,
+  source: r.source,
+  projection: r.projection,
+  protected: r.protected,
+  protectedPatterns: r.protectedPatterns,
+  notes: r.notes,
+  reason: r.reason,
+});
+const STATE_EXIT = { declared: EXIT.ok, undeclared: EXIT.undeclared, unreadable: EXIT.fail };
+
+/** The model in force — or the exit code of a state no command may act under (undeclared, unreadable). */
+function inForce(git, top) {
   const r = resolveModel(git, top);
-  for (const w of r.warnings) err(`warning: ${w}`);
-  if (!r.declared) {
-    const names = git.branchNames();
-    const prot = UNDECLARED_PROTECTED.filter((n) => names.includes(n));
-    if (json) out(JSON.stringify({ declared: false, protected: prot }, null, 2));
-    else {
-      out(`undeclared: no ${FILE} on the integration line.`);
-      out(`Protected meanwhile (protect, never promote): ${prot.join(', ') || '(none of the known names exist)'}.`);
-      out('Investigate and ask before the first branch or promotion action (reference/choosing-a-branch-model.md).');
-    }
-    return { code: EXIT.undeclared };
+  for (const n of r.notes) err(`note: ${n}`);
+  if (r.state === 'declared') return { model: r.model, source: r.source, resolved: r };
+  if (r.state === 'unreadable') {
+    err(`unreadable: ${r.reason}`);
+    err(`Refusing to act. Protected meanwhile: ${r.protected.join(', ')}.`);
+  } else {
+    err(`undeclared: ${r.reason}.`);
+    err(`Protected meanwhile (protect, never promote): ${[...r.protected, ...r.protectedPatterns].join(', ') || '(none of the known names exist)'}.`);
+    err('Investigate and ask before the first branch or promotion action (reference/choosing-a-branch-model.md).');
   }
-  const errors = validate(r.model);
-  if (errors.length) return { code: reportErrors(errors, r.source) };
-  return { model: r.model, source: r.source };
+  return { code: STATE_EXIT[r.state], resolved: r };
 }
 
 const commands = {
   status(git, top, { opts }) {
-    const r = inForce(git, top, opts);
-    if (r.code !== undefined) return r.code;
-    const projection = r.model.projection ?? project(r.model);
-    if (!r.model.projection) err('warning: the model has no stored projection — showing the computed one (run `write`)');
-    out(opts.json ? JSON.stringify(projection, null, 2) : `${projection.summary}    (${r.source})`);
-    return EXIT.ok;
+    const r = resolveModel(git, top);
+    if (opts.json) {
+      out(JSON.stringify(statusShape(r), null, 2));
+      return STATE_EXIT[r.state];
+    }
+    for (const n of r.notes) err(`note: ${n}`);
+    const prot = [...r.protected, ...r.protectedPatterns].join(', ');
+    if (r.state === 'declared') out(`${r.projection.summary}    (${r.source})`);
+    else if (r.state === 'unreadable') {
+      out(`unreadable: ${r.reason}`);
+      out(`Refusing to act until it is fixed. Protected meanwhile: ${prot}.`);
+    } else {
+      out(`undeclared: ${r.reason}.`);
+      out(`Protected meanwhile (protect, never promote): ${prot || '(none of the known names exist)'}.`);
+      out('Investigate and ask before the first branch or promotion action (reference/choosing-a-branch-model.md).');
+    }
+    return STATE_EXIT[r.state];
   },
 
   describe(git, top) {
@@ -166,7 +185,7 @@ const commands = {
     if (!gate) throw new UsageError(`plan needs a gate (${Object.keys(GATES).join(', ')})`);
     const r = inForce(git, top);
     if (r.code !== undefined) return r.code;
-    out(`# plan ${[gate, ...args].join(' ')} — under: ${(r.model.projection ?? project(r.model)).summary}`);
+    out(`# plan ${[gate, ...args].join(' ')} — under: ${r.model.projection.summary}`);
     out(format(plan(git, r.model, gate, args, opts)));
     return EXIT.ok;
   },
@@ -201,7 +220,7 @@ const commands = {
   evidence(git, top, { opts }) {
     const r = resolveModel(git, top);
     const facts = evidence(git, top, r);
-    if (opts.json) out(JSON.stringify({ declared: r.declared, facts }, null, 2));
+    if (opts.json) out(JSON.stringify({ state: r.state, declared: r.declared, facts }, null, 2));
     else {
       for (const area of [...new Set(facts.map((f) => f.area))]) {
         out(`\n${area}`);

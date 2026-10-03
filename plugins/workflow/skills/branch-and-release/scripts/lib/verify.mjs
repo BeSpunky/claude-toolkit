@@ -86,6 +86,16 @@ export function verify(git, model, { proposed = false, branches = git.branchName
       return changed.length > 0 && changed.every((l) => /^[+-]\s*"version"\s*:/.test(l));
     });
   };
+  // A squash/rebase PR promotion lands the predecessor's whole STATE as one new commit: no ancestry, no single
+  // patch-id to match. Its faithful signature is the tree — the promoted commit's tree IS a state the source line
+  // had on its first-parent history. (A commit that also carried anything else would not match any such state.)
+  const treeOf = (c) => git.try(['rev-parse', `${c}^{tree}`]);
+  const statesCache = new Map();
+  const statesOf = (t) => {
+    if (!statesCache.has(t)) statesCache.set(t, new Set(git.lines(['log', '--first-parent', '--format=%T', t])));
+    return statesCache.get(t);
+  };
+  const isPromotedState = (c, sourceTip) => Boolean(sourceTip) && statesOf(sourceTip).has(treeOf(c));
   const allowsBump = (name) => releases.includes(name) && model.releases?.allowDirect?.includes('version-bump');
 
   // ---- 1. no direct commits ------------------------------------------------------------------------------
@@ -119,10 +129,12 @@ export function verify(git, model, { proposed = false, branches = git.branchName
     const upstreamFirst = releases.includes(name) && model.fixFlow === 'upstream-first';
     const equiv = upstreamFirst && intTip ? equivalent(intTip, t, b) : new Set();
 
+    const chainFed = isStage && feederOf(model, name).kind === 'chain';
     const direct = [];
     const bumps = [];
     for (const c of singles) {
       if (feederTips.some((ft) => git.isAncestor(c, ft))) continue;
+      if (chainFed && isPromotedState(c, feederTips[0])) continue;
       if (upstreamFirst && (equiv.has(c) || pickedFromUpstream(c, intTip))) continue;
       if (allowsBump(name) && versionBumpOnly(c)) {
         bumps.push(c);
@@ -193,15 +205,20 @@ export function verify(git, model, { proposed = false, branches = git.branchName
     const equiv = candidates.length ? equivalent(intTip, t, b) : new Set();
     const missing = [];
     let accepted = 0;
+    let promoted = 0;
     for (const c of candidates) {
       if (equiv.has(c) || pickedFromUpstream(c, intTip)) continue;
+      if (isPromotedState(c, intTip)) {
+        promoted++;
+        continue;
+      }
       if (TRAILER_NA.test(git.message(c)) || (allowsBump(name) && versionBumpOnly(c))) {
         accepted++;
         continue;
       }
       missing.push(c);
     }
-    const note = accepted ? ` (${accepted} accepted: Not-applicable-upstream or version bump)` : '';
+    const note = (accepted ? ` (${accepted} accepted: Not-applicable-upstream or version bump)` : '') + (promoted ? ` (${promoted} promoted state(s): tree equals a state ${integration} had)` : '');
     const scope = proposed ? 'in its full history' : 'since baseline';
     if (!missing.length) add(3, name, 'ok', `everything on ${name} ${scope} is in ${integration}${note}`);
     else add(3, name, 'violation', `${missing.length} fix(es) on ${name} ${scope} never carried to ${integration} — a later release would regress them${note}`, describe(missing));

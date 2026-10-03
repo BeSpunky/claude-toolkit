@@ -7,6 +7,9 @@ export const SCHEMA = 1;
 export const PROJECTION_SCHEMA = 1;
 export const FILE = '.bespunky/branches.json';
 
+/** The one schema check (CONTRACT, Amendment 2): the MAJOR of a schema value must be 1 — "1", 1, 1.2 all pass. */
+export const isSchemaMajor1 = (schema) => schema !== null && schema !== undefined && String(schema).split('.')[0] === '1';
+
 export const PROMOTE = ['ff', 'merge', 'pr'];
 export const FIX_FLOWS = ['merge-forward', 'upstream-first'];
 export const LANDING = ['merge', 'pr'];
@@ -131,7 +134,8 @@ export function validate(m) {
   if (!isObj(m)) return ['(root): the declaration must be a JSON object'];
 
   for (const k of Object.keys(m)) if (!TOP_KEYS.includes(k)) err(k, 'unknown field (the vocabulary is closed)');
-  if (m.schema !== SCHEMA) err('schema', `must be ${SCHEMA}`);
+  if (!isSchemaMajor1(m.schema)) err('schema', `must be schema major ${SCHEMA}`);
+  if (m.projection !== undefined && (!isObj(m.projection) || !isSchemaMajor1(m.projection.schema))) err('projection.schema', `must be projection schema major ${PROJECTION_SCHEMA}`);
   if (m.derivedFrom !== undefined && m.derivedFrom !== null && typeof m.derivedFrom !== 'string') err('derivedFrom', 'must be a preset id or null');
   if (m.remote !== undefined && !isName(m.remote)) err('remote', 'must be a remote name');
 

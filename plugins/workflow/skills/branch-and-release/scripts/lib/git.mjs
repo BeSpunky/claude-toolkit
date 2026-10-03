@@ -51,12 +51,13 @@ export class Git {
     return this.run(['rev-parse', '--show-toplevel']);
   }
 
-  /** The ref a line name resolves to: the local branch, else the remote-tracking one, else null. */
+  /** The ref a line name resolves to — the same rule as resolving the model (CONTRACT, Amendment 2): of the local
+   *  branch and `<remote>/<name>`, whichever exists; both → the one that descends from the other; diverged → the
+   *  local one. (Under PR flows a local line never moves, so "local first" would read a stale line.) */
   ref(name, remote = 'origin') {
-    for (const ref of [`refs/heads/${name}`, `refs/remotes/${remote}/${name}`]) {
-      if (this.ok(['show-ref', '--verify', '--quiet', ref])) return ref;
-    }
-    return null;
+    const [local, tracking] = [`refs/heads/${name}`, `refs/remotes/${remote}/${name}`].map((r) => (this.ok(['show-ref', '--verify', '--quiet', r]) ? r : null));
+    if (local && tracking && this.isAncestor(local, tracking) && !this.isAncestor(tracking, local)) return tracking;
+    return local ?? tracking;
   }
 
   sha(ref) {
