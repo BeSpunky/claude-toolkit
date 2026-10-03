@@ -47,6 +47,7 @@
 # much larger strings, --ensure/--firebase gate whole blocks in or out, and scaffold mode renders a
 # different program entirely. A render check that only ever exercised the default path would have missed
 # three of the four places this can go wrong.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -260,23 +261,23 @@ echo "── the scaffold bootstrap is the ensure set's"
 _bootstrap() { printf '%s\n' "$1" | grep -vE '^[[:space:]]*#' | grep -E 'create nx-workspace|create-nx-workspace|nx add |nx-tools:app |useDotNxInstallation=true|^git init'; }
 _prog="$(bash "$SCAFFOLD" --print-inner "newproj" 2>/dev/null)"
 _b="$(_bootstrap "$_prog")"
-if printf '%s\n' "$_prog" | grep -q "^ENSURED='nx,agent'$" && printf '%s\n' "$_b" | grep -q 'useDotNxInstallation=true' \
-   && ! printf '%s\n' "$_b" | grep -qE 'nx-workspace|nx add |nx-tools:app '; then
+if in_text "$_prog" -q "^ENSURED='nx,agent'$" && in_text "$_b" -q 'useDotNxInstallation=true' \
+   && ! in_text "$_b" -qE 'nx-workspace|nx add |nx-tools:app '; then
   ok "default scaffold = the agent preset: wrapper floor, no create-nx-workspace, no plugin, no app"
 else
   fail "the default scaffold is not the agent preset on the wrapper floor:"; printf '%s\n' "$_b" | sed 's/^/         | /'
 fi
 _prog="$(bash "$SCAFFOLD" --print-inner --ensure=nx,agent "newproj" 2>/dev/null)"
-if ! _bootstrap "$_prog" | grep -qE 'nx-workspace|nx add |nx-tools:app '; then
+if ! in_text "$(_bootstrap "$_prog")" -qE 'nx-workspace|nx add |nx-tools:app '; then
   ok "--ensure=nx,agent bootstraps no stack"
 else
   fail "--ensure=nx,agent renders a stack bootstrap"
 fi
 _prog="$(bash "$SCAFFOLD" --print-inner --preset=angular --firebase "newproj" "shop" 2>/dev/null)"
 _b="$(_bootstrap "$_prog")"
-if printf '%s\n' "$_b" | grep -q 'create nx-workspace' && printf '%s\n' "$_b" | grep -q 'nx add @nx/angular' \
-   && printf '%s\n' "$_b" | grep -q "nx-tools:app 'apps/shop' --stack=angular" && ! printf '%s\n' "$_b" | grep -q 'useDotNxInstallation=true' \
-   && printf '%s\n' "$_prog" | grep -q "^ENSURED='nx,agent,node,web,angular,design-system,firebase'$"; then
+if in_text "$_b" -q 'create nx-workspace' && in_text "$_b" -q 'nx add @nx/angular' \
+   && in_text "$_b" -q "nx-tools:app 'apps/shop' --stack=angular" && ! in_text "$_b" -q 'useDotNxInstallation=true' \
+   && in_text "$_prog" -q "^ENSURED='nx,agent,node,web,angular,design-system,firebase'$"; then
   ok "--preset=angular --firebase: package.json host, @nx/angular, the first app through the adapter"
 else
   fail "--preset=angular does not render the Angular bootstrap:"; printf '%s\n' "$_b" | sed 's/^/         | /'
@@ -288,14 +289,14 @@ else
 fi
 # And the wrapper host never makes a Python repo a Node project: no package-manager add, ./nx throughout.
 _prog="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=agent "$FIXW" 2>/dev/null)"
-if printf '%s\n' "$_prog" | grep -q 'useDotNxInstallation=true' && ! printf '%s\n' "$_prog" | grep -qE 'yarn add|npm install --save-dev|pnpm add'; then
+if in_text "$_prog" -q 'useDotNxInstallation=true' && ! in_text "$_prog" -qE 'yarn add|npm install --save-dev|pnpm add'; then
   ok "wrapper host: nx init through the wrapper, no package-manager add"
 else
   fail "wrapper host renders a Node-project install"
 fi
 # A refusal's hint is a command the user will paste: on a wrapper host Nx is `./nx`, and a bare `nx add …` fails.
 _err="$(bash "$SCAFFOLD" --print-inner --sync --yes --ensure=angular "$FIXW" 2>&1 >/dev/null)"
-if printf '%s\n' "$_err" | grep -q '`./nx add @nx/angular`' && ! printf '%s\n' "$_err" | grep -q '`nx add'; then
+if in_text "$_err" -q '`./nx add @nx/angular`' && ! in_text "$_err" -q '`nx add'; then
   ok "wrapper host: the not-sync-ensurable hint says ./nx"
 else
   fail "wrapper host: the not-sync-ensurable hint does not say ./nx:"; printf '%s\n' "$_err" | sed 's/^/         | /'
@@ -311,14 +312,14 @@ mkdir -p "$_FIXF/apps/functions" && git -C "$_FIXF" init -q
 printf '{"name":"fbcore"}\n' > "$_FIXF/package.json"; printf '{}\n' > "$_FIXF/nx.json"
 printf '{"name":"functions","root":"apps/functions","tags":["platform:server"]}\n' > "$_FIXF/apps/functions/project.json"
 _prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$_FIXF" 2>/dev/null)"
-if printf '%s\n' "$_prog" | grep -q -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' '' 'fbcore'" \
-   && printf '%s\n' "$_prog" | grep -q -- '--app="$APP"' && ! printf '%s\n' "$_prog" | grep -q -- '--app=functions'; then
+if in_text "$_prog" -q -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' '' 'fbcore'" \
+   && in_text "$_prog" -q -- '--app="$APP"' && ! in_text "$_prog" -q -- '--app=functions'; then
   ok "sync: the app is inferred in the program by the package (layers/cli.js apps), fallback = the project name"
 else
   fail "sync: the app is not inferred at run time by the package: $(printf '%s\n' "$_prog" | grep -o -- '_resolve_sync_app [^\n]*\|--app=[^ ]*' | head -2 | tr '\n' ' ')"
 fi
 _prog="$(bash "$SCAFFOLD" --print-inner --sync --yes "$_FIXF" shop 2>/dev/null)"
-if printf '%s\n' "$_prog" | grep -q -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' 'shop' 'fbcore'"; then
+if in_text "$_prog" -q -- "_resolve_sync_app 'node_modules/@bespunky/nx-tools' 'shop' 'fbcore'"; then
   ok "sync: an app given on the command line is handed to the program as given"
 else
   fail "sync: the given app is not handed to the program"

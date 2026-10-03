@@ -10,6 +10,7 @@
 #
 # Also: the parent directory is not a name and is never validated, so it must reach the program as data. A
 # parent named O'Brien used to close the rendered quote and run the rest of the line as shell.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -51,7 +52,7 @@ fi
   || fail "--print-inner changed the project: $(snapshot)"
 printf '%s\n' "$prog" | bash -n /dev/stdin 2>/dev/null && ok "the program parses with a quote in the parent path" \
   || fail "the program does not parse with a quote in the parent path"
-printf '%s\n' "$prog" | grep -q "o'brien" && fail "the parent path is spelled INTO the program (it must arrive as environment)" \
+in_text "$prog" -q "o'brien" && fail "the parent path is spelled INTO the program (it must arrive as environment)" \
   || ok "the parent path is not spelled into the program"
 
 # ── a refused sync writes nothing ─────────────────────────────────────────────────────────────────────────────
@@ -61,11 +62,11 @@ if node_ok; then
   printf 'in flight\n' > "$P/wip.txt"
   before="$(snapshot)"
   out="$(env -u CI bash "$SCAFFOLD" --sync --yes "$P" 2>&1)"; rc=$?
-  printf '%s' "$out" | grep -q '^SYNC_REFUSED: dirty-tree' && [ "$rc" -ne 0 ] && ok "a dirty tree is refused" \
+  in_text "$out" -q '^SYNC_REFUSED: dirty-tree' && [ "$rc" -ne 0 ] && ok "a dirty tree is refused" \
     || fail "a dirty tree was not refused (rc=$rc)"
   [ "$(snapshot)" = "$before" ] && ok "…and the refusal wrote nothing (no tag, yarn.lock kept, only wip.txt dirty)" \
     || fail "the refused sync changed the project: $(snapshot)"
-  printf '%s' "$out" | grep -qE 'SYNC_FAILED|reset --hard|restore +:' && fail "a refusal printed failure/restore advice" \
+  in_text "$out" -qE 'SYNC_FAILED|reset --hard|restore +:' && fail "a refusal printed failure/restore advice" \
     || ok "…and printed no SYNC_FAILED or restore advice on top of its own verdict"
 else
   echo "  skip  the refusal half needs Node 22.18+ (the native runtime)"

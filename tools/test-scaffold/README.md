@@ -58,7 +58,7 @@ asserted rather than read.
 Drop a `*.test.sh` file in this directory. `run.sh` globs them, so there is no list to update and no way to
 add a test that silently never runs. Exit non-zero to fail.
 
-Two conventions worth keeping, both learned the hard way here:
+Three conventions worth keeping, all learned the hard way here:
 
 - **Never pass vacuously.** If a test cannot reach the thing it tests, it must exit **2** and say so — not
   report success. `run.sh` applies the same rule to itself: an empty glob is a fatal error, not a green run.
@@ -66,6 +66,10 @@ Two conventions worth keeping, both learned the hard way here:
   aborts when the markers move. Writing that assertion is what revealed the first version *didn't* abort —
   `exit` inside `$( )` leaves only the subshell, so it printed its fatal message and carried on with an empty
   block. A guard nobody tested is a guard nobody has.
+- **Search captured output with `in_text`, never `printf … | grep -q`.** Source `text.sh` and write
+  `in_text "$out" -q 'pattern'`. `grep -q` quits at its first match and closes the pipe; a `printf` still writing
+  dies of SIGPIPE, and under `pipefail` a check whose text *matched* reads as failed — at random, by output size
+  and scheduling. It failed CI on `main` once (`d5f4a72`) before every check moved to the helper.
 
 ## How the preflight test reaches the code, and what it does not cover
 
