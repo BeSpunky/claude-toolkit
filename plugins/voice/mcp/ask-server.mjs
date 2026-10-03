@@ -8,18 +8,236 @@
 // answer, and hand that answer straight back into the conversation. No command to
 // run, no keyboard — Claude asks aloud and waits.
 //
-// Reuses the plugin's own boundaries: scripts/speak.sh (TTS) and scripts/listen.sh
-// (STT), located relative to THIS file so it never depends on env or the publish
-// step. Transport: newline-delimited JSON-RPC 2.0 over stdio.
+// Claude BLOCKS; this server must NOT. Everything it runs is asynchronous so that,
+// while a question is being spoken or an answer heard, the server can still:
+//   - relay what it hears AS IT HEARS IT (MCP progress notifications, which
+//     Claude Code shows under the running tool call),
+//   - honour a cancel (`notifications/cancelled`) by silencing the speaker and
+//     killing the recording at once.
+//
+// Reuses the plugin's own boundaries, located relative to THIS file so it never
+// depends on env or the publish step: scripts/speaker.sh (the utterance — say /
+// stop) and scripts/listen.sh (STT, in its --stream mode). Understanding the reply
+// lives in answer.mjs. Transport: newline-delimited JSON-RPC 2.0 over stdio.
 
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { classifyIntent, matchOption } from './answer.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SPEAK = join(HERE, '..', 'scripts', 'speak.sh');
+const SPEAKER = join(HERE, '..', 'scripts', 'speaker.sh');
 const LISTEN = join(HERE, '..', 'scripts', 'listen.sh');
-const ORD = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+// Reported to the client as serverInfo.version — the plugin's own release, read
+// rather than restated so the two can never drift.
+const VERSION = (() => { try { return JSON.parse(readFileSync(join(HERE, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version; } catch { return '0.0.0'; } })();
+const MAX_REPEATS = 2; // "say that again" is honoured this many times per question
+
+const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
+const ok = (id, result) => send({ jsonrpc: '2.0', id, result });
+const err = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
+
+const TOOL = {
+  name: 'ask_by_voice',
+  description:
+    'Ask the user a question OUT LOUD and get their SPOKEN answer back. Use this INSTEAD of ' +
+    'AskUserQuestion when the user is conversing hands-free by voice (away from the keyboard). ' +
+    'The `question` is spoken EXACTLY as written, so write it the way a person would ask it ' +
+    'aloud, naming the choices in the sentence itself ("Should I commit now, or keep going ' +
+    'first?") — no markup, no "option one", no "say your choice". `options` are NEVER read ' +
+    'aloud; they only let the tool recognise which choice the reply means. While the user ' +
+    'speaks, what is heard is shown live. Blocks until they answer. The user can say "repeat ' +
+    'that" (handled inside the tool) or "stop"/"never mind" (returns cancelled: true — drop ' +
+    'the question). If "matched" is null, interpret the transcript yourself, or call again ' +
+    'with the question rephrased.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      question: {
+        type: 'string',
+        description: 'The exact words to say — a natural spoken question that names its choices. Plain words, no markup.',
+      },
+      options: {
+        type: 'array',
+        description: 'The choices, for recognising the reply (omit for an open question). Not spoken.',
+        items: {
+          type: 'object',
+          properties: { label: { type: 'string' }, description: { type: 'string' } },
+          required: ['label'],
+        },
+      },
+    },
+    required: ['question'],
+  },
+};
+
+// ---- an ask in flight: its child processes, its progress, its cancellation --
+// One microphone, one speaker: a new ask supersedes any still running.
+const inflight = new Map(); // JSON-RPC request id → Ask
+
+// A cancel silences the speaker through `speaker.sh stop`. That stop must LAND
+// before the next question is spoken — run concurrently, it can read the pidfile
+// after the new question wrote it and silence a question nobody then hears.
+// Every `say` waits for the stop in flight, if any.
+let silencing = Promise.resolve();
+function silenceSpeaker() {
+  silencing = new Promise((resolve) => {
+    const c = spawn('bash', [SPEAKER, 'stop'], { stdio: 'ignore' });
+    c.on('error', resolve);
+    c.on('close', resolve);
+  });
+}
+
+class Ask {
+  constructor(id, progressToken) {
+    this.id = id;
+    this.progressToken = progressToken;
+    this.children = new Set();
+    this.cancelled = null; // null | 'client' | 'superseded'
+    this.tick = 0;
+  }
+
+  progress(message) {
+    if (this.progressToken === undefined || this.cancelled) return;
+    send({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: this.progressToken, progress: ++this.tick, message } });
+  }
+
+  // Run a script in its OWN process group (so cancel takes the whole tree down),
+  // handing each stdout line to onLine. Resolves with { code, stderr }.
+  run(args, onLine = () => {}) {
+    return new Promise((resolve) => {
+      const child = spawn('bash', args, { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      this.children.add(child);
+      let out = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (d) => {
+        out += d;
+        let nl;
+        while ((nl = out.indexOf('\n')) >= 0) {
+          const line = out.slice(0, nl);
+          out = out.slice(nl + 1);
+          if (line.trim()) onLine(line);
+        }
+      });
+      child.stderr.on('data', (d) => { stderr += d; });
+      let settled = false;
+      const done = (code) => { if (settled) return; settled = true; this.children.delete(child); if (out.trim()) onLine(out); out = ''; resolve({ code, stderr: stderr.trim() }); };
+      child.on('error', (e) => { stderr += String(e?.message || e); done(127); });
+      child.on('close', (code) => done(code ?? 1));
+    });
+  }
+
+  cancel(why) {
+    if (this.cancelled) return;
+    this.cancelled = why;
+    for (const c of this.children) { try { process.kill(-c.pid, 'SIGTERM'); } catch { /* already gone */ } }
+    // The utterance belongs to the speaker, not to us — ask it to stop.
+    silenceSpeaker();
+  }
+}
+
+const cancelledResult = (why) => ({
+  cancelled: true,
+  note: why === 'superseded' ? 'Superseded by a newer ask_by_voice call.' : 'Cancelled.',
+});
+
+export async function askByVoice({ question, options }, ask) {
+  if (!question || typeof question !== 'string') throw new Error('question is required');
+  const opts = Array.isArray(options) ? options.filter((o) => o && o.label) : [];
+
+  for (let round = 0; ; round++) {
+    // Speak — the question exactly as Claude phrased it.
+    ask.progress('🔊 Asking…');
+    await silencing;
+    if (ask.cancelled) return cancelledResult(ask.cancelled);
+    const spoke = await ask.run([SPEAKER, 'say', '--wait', question]);
+    if (ask.cancelled) return cancelledResult(ask.cancelled);
+    if (spoke.code !== 0) {
+      // Nobody heard the question, so listening for an answer would be a lie.
+      return { transcript: '', matched: null, error: spoke.stderr || 'could not speak the question', note: 'The question was not spoken. Relay `error` to the user and fall back to a typed question.' };
+    }
+
+    // Listen — relaying the transcript as it forms.
+    ask.progress('🎙 Listening…');
+    let transcript = '';
+    const heard = await ask.run([LISTEN, '--stream'], (line) => {
+      const m = /^(partial|final):\s?(.*)$/.exec(line);
+      if (!m) return;
+      if (m[1] === 'final') transcript = m[2].trim();
+      if (m[2].trim()) ask.progress(`🎙 “${m[2].trim()}”`);
+    });
+    if (ask.cancelled) return cancelledResult(ask.cancelled);
+
+    if (!transcript) {
+      // listen.sh explains its own failures on stderr (no reachable audio endpoint,
+      // STT not installed, nothing recognized) — pass that through verbatim.
+      return {
+        transcript: '',
+        matched: null,
+        ...(heard.stderr && { error: heard.stderr }),
+        note: 'No speech recognized. Call ask_by_voice again to re-ask, or fall back to a typed question. If `error` is set, relay it to the user.',
+      };
+    }
+
+    // Is the reply about the conversation itself?
+    const intent = classifyIntent(transcript);
+    if (intent === 'repeat' && round < MAX_REPEATS) continue;
+    if (intent === 'cancel') {
+      return { transcript, cancelled: true, note: 'The user cancelled this question by voice. Drop it — do not re-ask unless they bring it up.' };
+    }
+
+    const matched = matchOption(transcript, opts);
+    return {
+      transcript,
+      matched, // { index, label, by } or null
+      options: opts.map((o, i) => ({ index: i, label: o.label })),
+      note: matched ? 'Proceed with matched.label.' : 'No confident option match — interpret the transcript yourself, or re-ask.',
+    };
+  }
+}
+
+function handle(line) {
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }
+  const { id, method, params } = msg;
+  switch (method) {
+    case 'initialize':
+      return ok(id, {
+        protocolVersion: params?.protocolVersion || '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'bespunky-voice', version: VERSION },
+      });
+    case 'notifications/initialized':
+      return; // notifications take no response
+    case 'notifications/cancelled':
+      // The client gave up on the request: stop the sound now, and send nothing
+      // back for it (the protocol says a cancelled request gets no response).
+      return inflight.get(params?.requestId)?.cancel('client');
+    case 'ping':
+      return ok(id, {});
+    case 'tools/list':
+      return ok(id, { tools: [TOOL] });
+    case 'tools/call': {
+      if (params?.name !== 'ask_by_voice') return err(id, -32602, `unknown tool: ${params?.name}`);
+      for (const other of inflight.values()) other.cancel('superseded');
+      const ask = new Ask(id, params?._meta?.progressToken);
+      inflight.set(id, ask);
+      askByVoice(params.arguments || {}, ask)
+        .then((result) => ({ content: [{ type: 'text', text: JSON.stringify(result) }], isError: false }))
+        .catch((e) => ({ content: [{ type: 'text', text: `voice ask failed: ${e?.message || e}` }], isError: true }))
+        .then((result) => {
+          inflight.delete(id);
+          if (ask.cancelled !== 'client') ok(id, result);
+        });
+      return;
+    }
+    default:
+      if (id !== undefined) return err(id, -32601, `method not found: ${method}`);
+  }
+}
 
 // ---- JSON-RPC framing: one JSON message per line -----------------------------
 // Only attach to stdin when run as the server (not when imported by a test).
@@ -36,140 +254,10 @@ if (IS_MAIN) {
       if (line) handle(line);
     }
   });
-}
-const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
-const ok = (id, result) => send({ jsonrpc: '2.0', id, result });
-const err = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
-
-const TOOL = {
-  name: 'ask_by_voice',
-  description:
-    'Ask the user a question OUT LOUD and get their SPOKEN answer back. Speaks an ' +
-    'ear-friendly summary and the options through the speaker, records the user\'s ' +
-    'voice reply, transcribes it, and returns the transcript plus the best-matching ' +
-    'option. Use this INSTEAD of AskUserQuestion when the user is conversing hands-free ' +
-    'by voice (away from the keyboard). Blocks until the user answers. If the returned ' +
-    '"matched" is null, read the transcript yourself or call again to re-ask.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      question: { type: 'string', description: 'The question, phrased for the ear — plain spoken words, no markup.' },
-      options: {
-        type: 'array',
-        description: 'The choices (omit for an open-ended question). Each is spoken as "option one/two/…".',
-        items: {
-          type: 'object',
-          properties: { label: { type: 'string' }, description: { type: 'string' } },
-          required: ['label'],
-        },
-      },
-    },
-    required: ['question'],
-  },
-};
-
-function handle(line) {
-  let msg;
-  try { msg = JSON.parse(line); } catch { return; }
-  const { id, method, params } = msg;
-  switch (method) {
-    case 'initialize':
-      return ok(id, {
-        protocolVersion: params?.protocolVersion || '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'bespunky-voice', version: '0.1.0' },
-      });
-    case 'notifications/initialized':
-    case 'notifications/cancelled':
-      return; // notifications take no response
-    case 'ping':
-      return ok(id, {});
-    case 'tools/list':
-      return ok(id, { tools: [TOOL] });
-    case 'tools/call': {
-      if (params?.name !== 'ask_by_voice') return err(id, -32602, `unknown tool: ${params?.name}`);
-      try {
-        const text = askByVoice(params.arguments || {});
-        return ok(id, { content: [{ type: 'text', text }], isError: false });
-      } catch (e) {
-        return ok(id, { content: [{ type: 'text', text: `voice ask failed: ${e?.message || e}` }], isError: true });
-      }
-    }
-    default:
-      if (id !== undefined) return err(id, -32601, `method not found: ${method}`);
-  }
-}
-
-function askByVoice({ question, options }) {
-  if (!question || typeof question !== 'string') throw new Error('question is required');
-  const opts = Array.isArray(options) ? options.filter((o) => o && o.label) : [];
-
-  let spoken = `Claude asks: ${question}.`;
-  if (opts.length) {
-    spoken += ' Your options are: ' + opts.map((o, i) => `Option ${ORD[i] || i + 1}: ${o.label}.`).join(' ');
-    spoken += ' Say your choice.';
-  }
-
-  // Speak (blocking), then listen (blocking) — the whole point is to wait.
-  spawnSync('bash', [SPEAK, spoken], { stdio: 'ignore' });
-  const rec = spawnSync('bash', [LISTEN], { encoding: 'utf8', maxBuffer: 1 << 20 });
-  const transcript = ((rec.stdout || '').trim());
-
-  if (!transcript) {
-    // listen.sh explains its own failures on stderr (no reachable audio endpoint,
-    // STT not installed, nothing recognized) — pass that through verbatim.
-    const reason = (rec.stderr || '').trim();
-    return JSON.stringify({
-      transcript: '',
-      matched: null,
-      ...(reason && { error: reason }),
-      note: 'No speech recognized. Call ask_by_voice again to re-ask, or fall back to a typed question. If `error` is set, relay it to the user.',
-    });
-  }
-  const matched = matchOption(transcript, opts);
-  return JSON.stringify({
-    transcript,
-    matched, // { index, label, by } or null
-    options: opts.map((o, i) => ({ index: i, label: o.label })),
-    note: matched ? 'Proceed with matched.label.' : 'No confident option match — interpret the transcript yourself, or re-ask.',
+  // The client went away (session ended, server restarted): never leave a voice
+  // talking or a microphone open behind us.
+  process.stdin.on('end', () => {
+    for (const ask of inflight.values()) ask.cancel('client');
+    setTimeout(() => process.exit(0), 200);
   });
-}
-
-// Map a spoken transcript to an option. Order: exact label phrase → ordinal/number
-// → yes/no for two-option questions. Returns null when nothing is confident.
-const ORDW = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
-
-export function matchOption(transcript, opts) {
-  if (!opts.length) return null;
-  const t = ' ' + transcript.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ') + ' ';
-
-  // "unsure" answers must NOT be forced into a choice (e.g. "no idea" is not "no").
-  if (/\b(no idea|not sure|dont know|do not know|no clue|unsure|cant decide|cannot decide|neither)\b/.test(t)) return null;
-
-  // 1. an option label appears in the transcript (prefer the longest match)
-  let best = null;
-  opts.forEach((o, i) => {
-    const label = o.label.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (label && t.includes(' ' + label + ' ')) {
-      if (!best || label.length > best.len) best = { index: i, label: o.label, by: 'label', len: label.length };
-    }
-  });
-  if (best) { delete best.len; return best; }
-
-  // 2. "option/number/choice N", an ordinal word (first/second/…), or a lone digit.
-  // Deliberately NOT bare cardinals ("one"/"two") — "one" hides in "second one",
-  // "someone", "the one".
-  for (let i = 0; i < opts.length; i++) {
-    const n = i + 1;
-    if (new RegExp(`\\b(option|number|choice)\\s+(${ORD[i]}|${ORDW[i]}|${n})\\b`).test(t)) return { index: i, label: opts[i].label, by: 'ordinal' };
-    if (new RegExp(`\\b${ORDW[i]}\\b`).test(t)) return { index: i, label: opts[i].label, by: 'ordinal' };
-    if (new RegExp(`\\b${n}\\b`).test(t)) return { index: i, label: opts[i].label, by: 'number' };
-  }
-
-  // 3. yes/no for a two-choice question
-  if (opts.length === 2) {
-    if (/\b(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|affirmative)\b/.test(t)) return { index: 0, label: opts[0].label, by: 'affirm' };
-    if (/\b(no|nope|nah|dont|do not|cancel|stop|skip|negative)\b/.test(t)) return { index: 1, label: opts[1].label, by: 'negate' };
-  }
-  return null;
 }
