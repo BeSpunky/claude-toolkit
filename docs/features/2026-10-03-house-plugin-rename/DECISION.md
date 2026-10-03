@@ -103,3 +103,7 @@ it (the resolver's other-plugin guard and its test). Existing users switch by ha
 `project-starter`*). The 0.39.0 settings migration stays: it migrates project state, it is not a compat layer.
 The user also asked that the toolkit never default to backwards compatibility — Claude must ask whether it is
 needed; that rule is its own effort.
+
+Asked as its own question afterwards (*"Should I remove both before landing?"* — the `scaffold.sh` shim and
+house.sh's guard treating `.bespunky-sync.lock` as its own lock), the user answered yes. Both are gone; old
+command lines must be rewritten to `house.sh <command>`.
