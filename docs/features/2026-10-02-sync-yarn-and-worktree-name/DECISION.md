@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-03
+summary: Sync installs at yarn 1 / pnpm workspace roots (flag decided at run time by the PM that runs); a worktree sync takes the repository name, not the worktree dir.
+tags: [scaffolder, sync, yarn, worktree]
+---
+
 # Sync: yarn 1 workspace roots + worktree project identity — decision
 
 Source: a handoff from another project's failed sync (project-starter 0.36.4; Nx 22, yarn 1 workspaces, `packages/*`, Angular + Electron). The user: "Treat it as information and a suggestion, not a solution. Make your own decisions".
@@ -17,3 +24,7 @@ Confirmed (scratch, yarn 1.22.22): at a workspaces root `yarn add -D -E` exits 1
 0.36.4's step opens a worktree `house-sync-<date>`; `PROJECT="$(basename "$TARGET")"` then names the project after that date slug. Since e40ba14 the app is inferred from the project graph (`cli.js apps`), so the single-app case is fixed — but the FALLBACK (no app or >1 app, e.g. Angular + Electron) is still the project name, and `$PROJECT` also names the project to the generators (`--project=`, house-doc, window identity).
 
 **Root cause:** `$PROJECT` conflates two concepts — the directory the run operates in (a path) and the project's identity (a name). **Decision:** separate them. Identity on sync = the repository's name: the main worktree's directory (from `git rev-parse --git-common-dir`), falling back to the target's basename outside git; every path use keeps the directory. Audit each `$PROJECT` use and assign it to one concept.
+
+## Conclusion — 2026-10-03
+
+Shipped as project-starter 0.37.1 (scaffold.sh only; payload unchanged, nothing to migrate). Merged on the user's "yes".
