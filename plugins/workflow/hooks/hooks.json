@@ -1,6 +1,6 @@
 {
   "modules": [
-    "./branch-status.ts"
+    "./mods.ts"
   ],
   "hooks": {
     "SessionStart": [

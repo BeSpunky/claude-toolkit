@@ -168,9 +168,10 @@ claude-toolkit/
 ├── plugins/workflow/
 │   ├── .claude-plugin/plugin.json
 │   ├── hooks/                             # continuity, made reliable rather than hoped-for
-│   │   ├── hooks.json                    # SessionStart + PreCompact registrations
+│   │   ├── hooks.json                    # SessionStart + PreCompact registrations, and the mod module
 │   │   ├── detect-standing.sh            # SessionStart — silent unless in-flight work has gone dormant; then relays a fact pointing at project-standing (detect, don't execute)
-│   │   └── checkpoint-on-compact.sh      # PreCompact — writes a mechanical checkpoint (branch, HEAD, uncommitted files) into the live effort's package before context is lost, even headless; asks the model to distill it
+│   │   ├── checkpoint-on-compact.sh      # PreCompact — writes a mechanical checkpoint (branch, HEAD, uncommitted files) into the live effort's package before context is lost, even headless; asks the model to distill it; `--last` prints the last checkpoint's receipt (JSON) for non-model readers
+│   │   └── checkpoint-toast.ts           # mod — toasts "checkpoint saved → <path>" to the person when that hook writes one (reads `--last`, re-derives nothing)
 │   └── skills/
 │       ├── branch-and-release/            # the house git methodology — the declared branch model, per-feature worktrees, human-gated promotions
 │       │   └── SKILL.md
@@ -196,7 +197,8 @@ claude-toolkit/
 │   ├── .claude-plugin/plugin.json
 │   ├── hooks/                                # SessionStart: is the window colour still the name-hash placeholder while a design system now exists?
 │   │   ├── hooks.json
-│   │   └── check-window-identity.sh          # DETECTS + offers the name-hash → design-system re-derive; never runs it
+│   │   ├── check-window-identity.sh          # DETECTS + offers the name-hash → design-system re-derive; never runs it; `--json` names the deciding gate for non-model readers
+│   │   └── name-hash-toast.ts                # mod — toasts the same fact to the person, once per project (remembered in `$.store`); reads `--json`, re-implements no gate
 │   └── skills/window-identity/
 │       └── SKILL.md                          # the INTELLIGENCE: finds the DS primary + a project emoji, then calls the window-identity generator (the writer lives in nx-tools)
 └── plugins/project-starter/
