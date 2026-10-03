@@ -39,7 +39,7 @@ The user wants to answer your questions by **voice**, hands-free. While in this 
 
 If `ask_by_voice` is unavailable, the MCP server likely isn't loaded yet — tell
 the user to restart Claude Code (or `/reload-plugins`). If the tool returns that
-speech-to-text isn't installed, have them run
+speech-to-text or the speech detector isn't installed, have them run
 `bash ~/.claude/bespunky-voice/install-whisper.sh` once. If it reports no
 reachable audio endpoint, relay that diagnosis — voice needs a reachable
 PulseAudio-protocol sink (WSLg, or the host's native PulseAudio/PipeWire), bridged
