@@ -1,3 +1,10 @@
+---
+status: concluded
+concluded: 2026-10-03
+summary: Piper health is decided by running it — a present-but-broken install is reported and repaired, never silently replaced by the robotic voice.
+tags: [voice, piper, tts, silent-fallback]
+---
+
 # voice-piper-health — decision
 
 ## The problem
