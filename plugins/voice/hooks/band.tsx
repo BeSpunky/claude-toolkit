@@ -52,7 +52,7 @@ const LINGER_MS = 20_000
 /** A health verdict is re-taken this often even when nothing on disk moved. */
 const HEALTH_TTL_MS = 600_000
 /** The runtime entries whose change means the verdict may have changed. */
-const HEALTH_INPUTS = ['voice-health.sh', 'tts-engine.sh', 'listen.sh', 'piper', 'voices', 'whisper']
+const HEALTH_INPUTS = ['voice-health.sh', 'tts-engine.sh', 'stt-engine.sh', 'piper', 'voices', 'whisper']
 
 type Verb = 'stop' | 'replay'
 
