@@ -1,5 +1,5 @@
 // claude-toolkit devcontainer — a plugin-marketplace repo (markdown skills + Node tool scripts),
-// NOT an Nx/Angular app. Trimmed from the BeSpunky project-starter devcontainer generator:
+// NOT an Nx/Angular app. Trimmed from the BeSpunky house devcontainer generator:
 // dropped everything app/server-shaped (Angular+Nx extensions, worktree-domains :80 proxy,
 // shared-browser noVNC stack, Firebase, dev-server port forwarding, chokidar polling) and
 // kept only what a toolkit author needs: Claude CLI, gh, and the plugins dogfooded LIVE
