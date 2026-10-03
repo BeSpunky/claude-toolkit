@@ -12,10 +12,10 @@
 # when nobody is watching. It then ASKS the model (stdout) to enrich it into a proper distilled baton. If that
 # ask is honored, great; if not, the mechanical checkpoint still stands. Worst case is a thin baton, never none.
 #
-# WHY WRITING A FILE IS ALLOWED HERE. The rule the project-starter hook earned is "a hook may drive a CHEAP,
+# WHY WRITING A FILE IS ALLOWED HERE. The rule the house hook earned is "a hook may drive a CHEAP,
 # ADDITIVE, REVERSIBLE action; never a heavy, irreversible one." Appending a timestamped markdown file is the
 # cheap-additive class — and headless is the CASE FOR it, not against: an unattended agent most needs the
-# breadcrumb, and an append needs no consent. (A Docker sync or a delete would be the other class — banned.)
+# breadcrumb, and an append needs no consent. (A Docker upgrade or a delete would be the other class — banned.)
 #
 # SCOPE. It writes ONLY when the current branch is a feature effort with an existing package — so checkpoints
 # accrue exactly where wanted and never litter a protected line (per the declared branch model) or a throwaway branch. No package → it only nudges.

@@ -124,5 +124,5 @@ These sentences mean the design is missing something — never act on them, run 
 
 ## Keeping the rule always-on in a project
 
-- **New BeSpunky projects** get this baked into `CLAUDE.md` automatically by the `new-project` scaffold, so the rule is always in context.
+- **New BeSpunky projects** get this baked into `CLAUDE.md` automatically by the `bespunky-house:new` scaffold, so the rule is always in context.
 - **Existing projects** that install the `engineering` plugin: make sure the project's `CLAUDE.md` carries the architecture-first directive (the canonical block is in the plugin's README) so the rule is always in context. This skill then provides the full depth above.

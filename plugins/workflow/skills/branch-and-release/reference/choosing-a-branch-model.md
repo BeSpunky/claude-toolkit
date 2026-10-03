@@ -1,6 +1,6 @@
 # Choosing a branch model — the investigation
 
-> Used whenever a repo has **no declared model** (`branches.mjs status` exits `3`): by the skill, once per session before the first branch or promotion action, and by `/sync` when its preflight reports the model undeclared. Also used on request — "simplify our branches", "do we still need staging?", "set up gitflow". One procedure for all of them. `<base>` below is this skill's base directory.
+> Used whenever a repo has **no declared model** (`branches.mjs status` exits `3`): by the skill, once per session before the first branch or promotion action, and by `/bespunky-house:upgrade` (or `add-layer`) when its preflight reports the model undeclared. Also used on request — "simplify our branches", "do we still need staging?", "set up gitflow". One procedure for all of them. `<base>` below is this skill's base directory.
 
 **The goal is a model the repo's history and bindings justify — not the one its branch list implies.** Projects scaffolded by earlier versions of the toolkit were *forced* into `development → staging → main`, so every one of them *has* those branches whether it needs them or not. **A branch existing is not evidence it is needed.** Each long-lived line has to justify itself with what fires on it and how it was actually used.
 

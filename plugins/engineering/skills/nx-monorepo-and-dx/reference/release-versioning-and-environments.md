@@ -55,7 +55,7 @@ nx serve app --configuration=staging      # one click / one command per environm
 
 **What.** Pin the toolchain, the editor extension set, and mount heavy dirs (`node_modules`) as a volume in a devcontainer; onboarding becomes "reopen in container."
 
-**Why.** *Compensate for weaknesses* + *Automate every repeated process* — "works on my machine" stops being a category of bug. (The `project-starter` plugin generates the house devcontainer.)
+**Why.** *Compensate for weaknesses* + *Automate every repeated process* — "works on my machine" stops being a category of bug. (The `house` plugin generates the house devcontainer.)
 
 ---
 

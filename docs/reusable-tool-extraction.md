@@ -88,7 +88,7 @@ The marker is **committed** — that is the hand-off. The project keeps consumin
 
 ## 4. The tools (two generators + one host script)
 
-- **In-workspace generators** (`mark-extractable`, `adopt-extracted`) live in the house generator package (`nx-tools`), already copied into every scaffolded project. Toolkit source: `plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/`.
+- **In-workspace generators** (`mark-extractable`, `adopt-extracted`) live in the house generator package (`nx-tools`), already copied into every scaffolded project. Toolkit source: `plugins/house/engine/nx-tools/src/generators/`.
 - **The host script** (`extract-tool`) is a standalone Node CLI — *not* an Nx generator (§2.1) — that runs on the host with access to all `~/projects`. Toolkit home: a small `tools/` package in the toolkit (TBD location), runnable with `node` / `npx`.
 
 ### 4a. `mark-extractable` — generator, in project (sandbox-safe) — ✅ BUILT (Phase 1)
@@ -103,7 +103,7 @@ Marks an **existing** Nx library as an extraction candidate and captures its met
 
 ### 4b. `extract-tool` — host tool (cross-workspace), runs in Docker — ✅ BUILT (Phase 2)
 
-Lift a candidate from a project into the shared workspace as a publishable package. **Not** a generator (§2.1) — and **runs in Docker**, because the host's Node (v12) is too old for modern Nx. A thin launcher (`extract-tool.sh`) runs the logic (`extract-tool.mjs`) inside the `typescript-node` base image with `~/projects` mounted — exactly the `scaffold.sh` pattern — so both workspaces and the shared workspace's own Nx (its mounted `node_modules`) are reachable.
+Lift a candidate from a project into the shared workspace as a publishable package. **Not** a generator (§2.1) — and **runs in Docker**, because the host's Node (v12) is too old for modern Nx. A thin launcher (`extract-tool.sh`) runs the logic (`extract-tool.mjs`) inside the `typescript-node` base image with `~/projects` mounted — exactly the `house.sh` pattern — so both workspaces and the shared workspace's own Nx (its mounted `node_modules`) are reachable.
 
 - **Invocation:** `tools/extract-tool/extract-tool.sh --from <project> [--into bespunky] [--lib <name>] [--scope @bespunky] [--dry-run] [--no-scaffold] [--force]`.
 - **Pre:** Docker available; the lib has a valid `extraction.json` with `status: candidate`.
@@ -111,7 +111,7 @@ Lift a candidate from a project into the shared workspace as a publishable packa
 - **Update existing package (decision #4):** if the package dir exists, it's an *update* (replace `src/`, refresh peerDeps; version bump left to `nx release`).
 - **Output is a DRAFT for review** — source-derived peerDeps are best-effort; review them and the version before releasing. The tool does **not** publish.
 - **Code:** `tools/extract-tool/` (`.sh` launcher + `.mjs` logic).
-- ⚠️ **Untested end-to-end** (no marked candidate exists yet); built to the house `scaffold.sh` Docker pattern.
+- ⚠️ **Untested end-to-end** (no marked candidate exists yet); built to the house `house.sh` Docker pattern.
 
 ### 4c. `adopt-extracted` — generator, in project — ✅ BUILT (Phase 3)
 
@@ -162,8 +162,8 @@ The mechanism does **not** reinvent publishing — it uses the shared workspace'
 - **Phase 1 ✅** — marker convention (the explicit tag + `extraction.json`) + `mark-extractable` generator. Sandbox-safe.
 - **Phase 2 ✅** — the `extract-tool` host tool (Docker launcher + `.mjs`: scaffold the `@bespunky/<name>` package via `@nx/js:lib` / `@nx/angular:library`, copy source, set deps/peerDeps, mark `ingested`). Publish stays the existing `nx release`.
 - **Phase 3 ✅** — `adopt-extracted` generator: two-step verify-then-delete — add + import-codemod (keep lib) → build to verify → `--finalize` removes the local lib. `--keepShim` for staged migration.
-- **Phase 4 ✅ (distribution)** — `@bespunky/nx-tools` made **publishable** (compiled JS via `compile-generators.mts`; `files`/`publishConfig` set) + a Docker publish script (`tools/publish-nx-tools/`, user-run with npm auth). The scaffold's `HOUSE_BLOCK` (so both scaffold **and** `--sync`) adds `@bespunky/nx-tools` as a **devDep**, so it survives `yarn install` and the generators run natively in any project's devcontainer. The `architecture-first` skill already references "the house mechanism" generically.
-  - **Bootstrapping:** publish first (`tools/publish-nx-tools/publish.sh`), then new projects get the devDep automatically and existing ones via `scaffold.sh --sync`.
+- **Phase 4 ✅ (distribution)** — `@bespunky/nx-tools` made **publishable** (compiled JS via `compile-generators.mts`; `files`/`publishConfig` set) + a Docker publish script (`tools/publish-nx-tools/`, user-run with npm auth). The scaffold's `HOUSE_BLOCK` (so both `new` **and** `upgrade`) adds `@bespunky/nx-tools` as a **devDep**, so it survives `yarn install` and the generators run natively in any project's devcontainer. The `architecture-first` skill already references "the house mechanism" generically.
+  - **Bootstrapping:** publish first (`tools/publish-nx-tools/publish.sh`), then new projects get the devDep automatically and existing ones via `house.sh upgrade`.
 
 ## 8. Status — end-to-end tested ✅
 

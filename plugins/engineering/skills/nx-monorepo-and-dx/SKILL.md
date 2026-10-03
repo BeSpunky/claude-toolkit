@@ -1,7 +1,7 @@
 ---
 name: nx-monorepo-and-dx
 description: >-
-  Nx monorepo architecture and developer-experience techniques - the workspace-level expression of the architect mindset. Use when structuring an Nx (or general monorepo) workspace beyond a trivial change - organizing apps and libraries, drawing library boundaries and entry points, enforcing module boundaries with tags, configuring the cache and task pipeline, writing generators or automation, setting up testing, releasing/versioning packages, or making the dev environment and commands reproducible and one-step. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need. BeSpunky is generator-first; the project-starter plugin scaffolds the house standard.
+  Nx monorepo architecture and developer-experience techniques - the workspace-level expression of the architect mindset. Use when structuring an Nx (or general monorepo) workspace beyond a trivial change - organizing apps and libraries, drawing library boundaries and entry points, enforcing module boundaries with tags, configuring the cache and task pipeline, writing generators or automation, setting up testing, releasing/versioning packages, or making the dev environment and commands reproducible and one-step. This skill is a router - it indexes technique clusters and points to a reference file for each; read only the cluster you need. BeSpunky is generator-first; the house plugin scaffolds the house standard.
 ---
 
 # Nx Monorepo & DX
@@ -11,7 +11,7 @@ Workspace-level techniques that put the architect mindset into practice across a
 - **Everything is a black box with deliberate, directed connections** → libraries with explicit entry points and **enforced**, one-directional dependency rules.
 - **Automate every repeated process** → caching, generators, one-command pipelines, and reproducible environments so no one ever does the same thing by hand twice.
 
-Most examples are Nx-specific (modern Nx: `targetDefaults`, `namedInputs`, `nx affected`, `nx release`), but the ideas carry to any monorepo. BeSpunky is **generator-first** — never hand-create what a generator can produce; the `project-starter` plugin scaffolds the house standard and ships house generators you can learn from.
+Most examples are Nx-specific (modern Nx: `targetDefaults`, `namedInputs`, `nx affected`, `nx release`), but the ideas carry to any monorepo. BeSpunky is **generator-first** — never hand-create what a generator can produce; the `house` plugin scaffolds the house standard and ships house generators you can learn from.
 
 ## How to use this skill
 
@@ -38,5 +38,5 @@ Read only the one(s) you need.
 
 - **`architect-mentality`** — the agnostic mindset every technique here expresses (especially *Everything is a black box* and *Automate every repeated process*).
 - **`architecture-first`** — the operational discipline (root-cause, no patches, design-and-confirm refactors) that governs changes inside the workspace.
-- **`project-starter`** (separate plugin) — scaffolds the house Nx standard and ships example house generators.
+- **`house`** (separate plugin) — scaffolds the house Nx standard and ships example house generators.
 - **`bespunky-design-system:design-tokens-and-theming`** (separate plugin) — the styling layer of a publishable design-system library: which entry points it publishes (the SASS API, the primary TS surface, one per component), how public-vs-internal is enforced at both the folder and the export level, and how each is consumed in-repo versus published.

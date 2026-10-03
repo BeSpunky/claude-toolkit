@@ -11,7 +11,7 @@ activity bar + status bar + title bar with loud, fully-saturated colour — a gl
 means nothing about the project. This does the opposite: **a project glyph and a quiet band, both derived
 from the project itself.**
 
-You are the **intelligence**. The [`@bespunky/nx-tools:window-identity`](../../../project-starter/skills/new-project/assets/nx-tools/src/generators/window-identity/generator.ts)
+You are the **intelligence**. The [`@bespunky/nx-tools:window-identity`](../../../house/engine/nx-tools/src/generators/window-identity/generator.ts)
 generator is the **deterministic writer** — it owns `.vscode/settings.json`, does all the colour math, merges
 instead of clobbering, and enforces the no-clobber ratchet. Your job is the two things a generator can't do
 well: **find the design-system primary colour**, and **choose an emoji that fits this project**. Then you call
@@ -20,7 +20,7 @@ extending the scaffolder is generator work, never a hand-written file edit).
 
 Colours are **derived, never hand-typed** — from the design-system primary when one exists, else from a stable
 hash of the project name, so a window is distinct from birth and later **snaps** to the brand colour when the
-design system arrives. The generator is wired into the scaffold / `--sync` baseline, so most house projects
+design system arrives. The generator is wired into the `new` / `upgrade` baseline, so most house projects
 already carry a name-hash identity; your usual job is enriching the emoji and upgrading the colour to the
 design system.
 
@@ -81,8 +81,8 @@ The generator records where the colour came from in `.vscode/.window-identity.js
   carries a name-hash colour; once real tokens exist, re-run with `--primary=<brand hex>` and the band snaps
   to brand. (`--source` defaults to `design-system` whenever `--primary` is passed.)
 - **A human's manual pick is terminal.** If the user hand-picks a colour or emoji, pass **`--source=manual`**.
-  After that, no automated run — not a `--sync`, not a design-system re-derive — will ever overwrite it.
-- **A `--sync` re-asserting name-hash can't downgrade** a design-system or manual colour: lower rank → no-op.
+  After that, no automated run — not an upgrade, not a design-system re-derive — will ever overwrite it.
+- **An upgrade re-asserting name-hash can't downgrade** a design-system or manual colour: lower rank → no-op.
 
 ## When a project grows a design system — the offer
 

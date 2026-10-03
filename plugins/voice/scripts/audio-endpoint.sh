@@ -89,7 +89,7 @@ voice_resolve_endpoint() {
   if [ -z "$VOICE_ENDPOINT" ]; then
     VOICE_ENDPOINT_DIAGNOSIS="bespunky-voice: no reachable audio endpoint (a PulseAudio-protocol server). Tried, in order:$tried
 To fix:
-  - In a BeSpunky devcontainer: enable voice (scaffold.sh --sync --voice <project>) and rebuild the
+  - In a BeSpunky devcontainer: enable voice (house.sh upgrade --voice <project>) and rebuild the
     container, so the host's PulseAudio socket is bridged to /run/bespunky/host/pulse.
   - On a Linux host: make sure PulseAudio or PipeWire-pulse is running for your user (pactl info).
   - Elsewhere: point PULSE_SERVER at a reachable server (unix:/path/to/native, or tcp:host:port)."
