@@ -268,15 +268,17 @@ export function verify(git, model, { proposed = false, branches = git.branchName
       }
     }
   }
-  if (proposed) {
-    // A long-lived line (by name) the proposal does not model would keep existing with no role: nothing guards
-    // it, nothing promotes into it. Not a violation — retiring it may be the point — but it must be said.
-    const modelled = new Set([...chainOf(model), ...releases, ...hotfixes]);
-    const lines = longLived ?? detectLongLived(git, git.try(['rev-parse', '--show-toplevel']), { remote, branches }).lines;
-    for (const n of lines.filter((x) => !modelled.has(x))) {
-      hygiene++;
-      add(4, n, 'warning', `exists but the proposed model gives it no role — retire it deliberately (or model it), so it does not linger unguarded`);
-    }
+  // A long-lived line the model does not cover keeps existing with no role: nothing guards it, nothing promotes
+  // into it. That holds for a declared model exactly as for a proposed one — a line retired in intent but never
+  // deleted, or one created after the model was written. Not a violation (retiring it may be the point), but it
+  // must be said.
+  const modelled = new Set([...chainOf(model), ...releases, ...hotfixes]);
+  const lines = longLived ?? detectLongLived(git, git.try(['rev-parse', '--show-toplevel']), { remote, branches }).lines;
+  for (const n of lines.filter((x) => !modelled.has(x))) {
+    hygiene++;
+    add(4, n, 'warning', proposed
+      ? `exists but the proposed model gives it no role — retire it deliberately (or model it), so it does not linger unguarded`
+      : `exists but the declared model gives it no role — delete it, or model it through the change procedure, so it does not linger unguarded`);
   }
   if (!hygiene) add(4, '*', 'ok', 'nothing stranded');
 
