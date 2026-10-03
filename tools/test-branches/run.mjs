@@ -850,6 +850,29 @@ const cases = {
     assert.match(find(v2.data, 2, 'main', 'warning')[0].reason, /first fast-forward promotion would fail/);
   },
 
+  'verify (declared): warns (never fails) on a long-lived line the DECLARED model leaves unmodelled, until it is gone'() {
+    // The gap this closes: retiring `staging` by declaring two-line left the branch in place, and a plain
+    // `verify` said "nothing stranded" — the warning existed only under --proposed.
+    const r = repo();
+    r.branch('development');
+    r.branch('staging');
+    r.declare('two-line');
+    r.sw('main');
+    r.ff('development');
+    const v = verifyJson(r);
+    assert.equal(v.code, 0, v.out);
+    const w = find(v.data, 4, 'staging', 'warning');
+    assert.equal(w.length, 1, 'staging left unmodelled under a declared model is a hygiene warning');
+    assert.match(w[0].reason, /declared model gives it no role/);
+    assert.equal(find(v.data, 4, '*', 'ok').length, 0, 'not "nothing stranded" while staging lingers');
+
+    r.git('branch', '-D', 'staging');
+    const v2 = verifyJson(r);
+    assert.equal(v2.code, 0, v2.out);
+    assert.equal(find(v2.data, 4, 'staging').length, 0);
+    assert.match(find(v2.data, 4, '*', 'ok')[0].reason, /nothing stranded/);
+  },
+
   // ---- Amendment 2: resolution ------------------------------------------------------------------------------
   'resolution (A2): an unreadable working copy refuses — not JSON, no projection, unknown schema major'() {
     const shapes = {
