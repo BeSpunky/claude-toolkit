@@ -16,6 +16,8 @@
 
 import type { EngineInterface, Register } from 'claude-code'
 
+import { brandLine } from './_brand.tsx'
+
 /** Modest: the browser comes and goes on `up`/`down`, not every second. */
 const POLL_MS = 10_000
 const STATUS_TIMEOUT_MS = 8_000
@@ -42,7 +44,7 @@ export function entryFor(status: BrowserStatus | undefined): string | undefined 
 
   return isUnverified
     ? `⚠ shared browser: ${status.url} (host forward not confirmed)`
-    : `🌐 shared browser: ${status.url}`
+    : `shared browser: ${status.url}`
 }
 
 /** Parses the script's stdout; anything that isn't a status object is none. */
@@ -81,7 +83,8 @@ function startPolling($: EngineInterface) {
       const next = entryFor(await readStatus($))
       if (next !== shown) {
         shown = next
-        $.ui.status(next)
+        // The toolkit's mark goes on at the boundary: the policy says what, the brand says whose.
+        $.ui.status(next === undefined ? undefined : brandLine(next))
       }
     } finally {
       isPolling = false
