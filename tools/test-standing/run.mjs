@@ -125,6 +125,71 @@ const cases = {
     assert.equal(JSON.parse(engine(bare)).repo, null);
   },
 
+  'every worktree is scanned; a package seen twice keeps its newest copy'() {
+    const dir = fixture({ commitAge: 30, docAge: 30, files: FILES });
+    const stamp = new Date(Date.now() - 30 * DAY * 1000).toISOString();
+    const env = { ...process.env, GIT_AUTHOR_DATE: stamp, GIT_COMMITTER_DATE: stamp };
+    const git = (at, ...args) => execFileSync('git', ['-C', at, ...args], { stdio: 'pipe', env });
+    // A branch whose name is not the slug, so the package is classified by its activity, not by `hasWorktree`.
+    const tree = path.join(dir, '.claude/worktrees/other');
+    git(dir, 'worktree', 'add', '-q', '-b', 'feat/other', tree);
+    fs.mkdirSync(path.join(tree, 'docs/features/2026-01-06-gamma/handoffs'), { recursive: true });
+    fs.writeFileSync(path.join(tree, 'docs/features/2026-01-06-gamma/handoffs/2026-01-06T1200Z.md'), 'gamma\n');
+    git(tree, 'add', '-A');
+    git(tree, 'commit', '-qm', 'gamma');
+    // alpha also moves in the other tree (uncommitted, so its mtime is its activity): that copy is newer.
+    fs.writeFileSync(path.join(tree, 'docs/features/2026-01-01-alpha/handoffs/2026-01-03T1200Z.md'), 'newest\n');
+
+    const standing = JSON.parse(engine(dir));
+    const by = Object.fromEntries(standing.packages.map(p => [p.slug, p]));
+    assert.equal(standing.packages.filter(p => p.slug === 'alpha').length, 1, 'de-duplicated');
+    assert.equal(by.gamma.worktree, '.claude/worktrees/other');
+    assert.equal(by.gamma.state, 'dormant');
+    assert.equal(by.gamma.baton, 'handoffs/2026-01-06T1200Z.md');
+    assert.equal(by.alpha.worktree, '.claude/worktrees/other');
+    assert.equal(by.alpha.state, 'live');
+    assert.equal(by.alpha.baton, 'handoffs/2026-01-03T1200Z.md');
+    assert.equal(by.beta.worktree, undefined, 'a tie keeps the session checkout');
+    assert.equal(standing.repo.hasRecentDoc, true, 'recent work in another worktree is activity');
+    assert.match(engine(dir, '--tsv'), /^pkg\t2026-01-06-gamma\tin-flight\tdormant\thandoffs\/2026-01-06T1200Z\.md\t\.claude\/worktrees\/other$/m);
+
+    // Seen from inside the linked worktree, that checkout is the session's: its copies carry no worktree.
+    const inside = Object.fromEntries(JSON.parse(engine(tree)).packages.map(p => [p.slug, p]));
+    assert.deepEqual([inside.alpha.worktree, inside.gamma.worktree, inside.done.worktree], [undefined, undefined, undefined]);
+  },
+
+  'the notice names a package where it lives'() {
+    const dir = fixture({ commitAge: 30, docAge: 30, files: { 'README.md': 'x\n' } });
+    const stamp = new Date(Date.now() - 30 * DAY * 1000).toISOString();
+    const env = { ...process.env, GIT_AUTHOR_DATE: stamp, GIT_COMMITTER_DATE: stamp };
+    const git = (at, ...args) => execFileSync('git', ['-C', at, ...args], { stdio: 'pipe', env });
+    const tree = path.join(dir, '.claude/worktrees/other');
+    git(dir, 'worktree', 'add', '-q', '-b', 'feat/other', tree);
+    fs.mkdirSync(path.join(tree, 'docs/features/2026-01-06-gamma'), { recursive: true });
+    fs.writeFileSync(path.join(tree, 'docs/features/2026-01-06-gamma/BRIEF.md'), 'gamma\n');
+    git(tree, 'add', '-A');
+    git(tree, 'commit', '-qm', 'gamma');
+    assert.equal(
+      hook(dir).stdout,
+      `[bespunky-workflow] This project has 1 in-flight effort and hasn't been touched in ~30 days:\n  • .claude/worktrees/other/docs/features/2026-01-06-gamma/\n${NOTICE_TAIL}`,
+    );
+  },
+
+  'a closed package says when it closed'() {
+    const dir = fixture({
+      commitAge: 30,
+      docAge: 30,
+      files: {
+        'docs/features/2026-01-03-done/DECISION.md': '---\nstatus: concluded\nconcluded: 2026-01-09\n---\n',
+        'docs/features/2026-01-04-undated/DECISION.md': '---\nstatus: abandoned\nconcluded: someday\n---\n',
+      },
+    });
+    const by = Object.fromEntries(JSON.parse(engine(dir)).packages.map(p => [p.slug, p]));
+    assert.equal(by.done.closedAt, Date.parse('2026-01-09T00:00:00Z') / 1000);
+    assert.equal(by.undated.closedAt, by.undated.lastActivity, 'no usable date: when DECISION.md last moved');
+    assert.equal(by.done.closedAt === undefined, false);
+  },
+
   '--tsv carries no free text'() {
     const dir = fixture({ commitAge: 30, docAge: 30, files: FILES });
     const tsv = engine(dir, '--tsv');

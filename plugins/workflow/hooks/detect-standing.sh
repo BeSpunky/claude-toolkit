@@ -39,7 +39,7 @@ ENGINE="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}/skills/project-
 command -v node >/dev/null 2>&1 && [ -f "$ENGINE" ] || exit 0
 facts="$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" BESPUNKY_STANDING_STALE_DAYS="$STALE_DAYS" node "$ENGINE" --tsv 2>/dev/null)" || exit 0
 
-# repo<TAB>hasFeatures<TAB>hasRecentDoc<TAB>lastCommit<TAB>commitAgeDays, then pkg<TAB>dir<TAB>status<TAB>state<TAB>baton
+# repo<TAB>hasFeatures<TAB>hasRecentDoc<TAB>lastCommit<TAB>commitAgeDays, then pkg<TAB>dir<TAB>status<TAB>state<TAB>baton<TAB>worktree
 IFS="$(printf '\t')" read -r tag has_features recent_doc last_commit commit_age_days <<EOF_REPO
 $(printf '%s\n' "$facts" | head -n 1)
 EOF_REPO
@@ -54,16 +54,14 @@ case "$commit_age_days" in '' | *[!0-9-]*) exit 0 ;; esac
 [ "$commit_age_days" -lt "$STALE_DAYS" ] && exit 0   # a commit landed recently → active → quiet
 
 # --- the in-flight efforts: an unconcluded package (no closing `status:` in its DECISION.md) ------------------
-inflight=""
+# The engine scans every worktree, so a package may live in another checkout: its 6th column names that
+# worktree (empty for this one), and the path printed is where the package actually is. Parsed with awk, not
+# `read`: a tab is IFS whitespace, so an empty baton column would collapse and shift the worktree into its place.
+paths="$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pkg" && $3 == "in-flight" { print ($6 == "" ? "" : $6 "/") "docs/features/" $2 "/" }')"
 count=0
-while IFS="$(printf '\t')" read -r tag dir status _state _baton; do
-  [ "$tag" = "pkg" ] && [ "$status" = "in-flight" ] || continue
-  count=$((count + 1))
-  [ "$count" -le 8 ] && inflight="$inflight  • docs/features/$dir/
+[ -n "$paths" ] && count="$(printf '%s\n' "$paths" | wc -l | tr -d ' ')"
+inflight="$(printf '%s\n' "$paths" | head -n 8 | sed 's/^/  • /')
 "
-done <<EOF_PKGS
-$facts
-EOF_PKGS
 
 [ "$count" -gt 0 ] || exit 0   # concluded / empty repo → nothing to relay
 

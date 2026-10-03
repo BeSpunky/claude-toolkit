@@ -2,8 +2,9 @@
 // standing.mjs — the project-standing DERIVATION (bespunky-workflow:project-standing).
 //
 // The ONE place that reads docs/features/ and git and says what each feature package is: its validated name,
-// its closing status (from DECISION.md), whether it is live, dormant or concluded, its newest handoff baton,
-// and the repo-wide activity facts. Everything that needs those facts consumes THIS script, never its own
+// its closing status (from DECISION.md) and when it closed, whether it is live, dormant or concluded, its newest
+// handoff baton, which worktree holds its newest copy, and the repo-wide activity facts. Every worktree's
+// docs/features/ is read, not only the session's: in-flight work lives on its own branch, in its own checkout. Everything that needs those facts consumes THIS script, never its own
 // copy of the rules:
 //   - hooks/detect-standing.sh   (SessionStart) reads `--tsv` and decides whether to relay a notice;
 //   - hooks/standing.tsx         (the /standing pane) reads `--json` and draws it;
@@ -140,41 +141,41 @@ function dirtyPaths(root) {
   return dirty;
 }
 
-/** Branch short names checked out in any worktree. */
-function worktreeBranches(root) {
-  const out = git(root, ['worktree', 'list', '--porcelain']) ?? '';
+/** A worktree's location as consumers name it: relative to the session's project dir when inside it, else absolute. */
+const WORKTREE_RE = /^\/?(?!\.\.?(?:\/|$))[A-Za-z0-9._@+-]+(?:\/(?!\.\.?(?:\/|$))[A-Za-z0-9._@+-]+)*$/;
 
-  return out
-    .split('\n')
-    .filter(line => line.startsWith('branch refs/heads/'))
-    .map(line => line.slice('branch refs/heads/'.length));
+/**
+ * Every worktree of the repository (`git worktree list --porcelain`): its path and checked-out branch. Bare and
+ * prunable entries have no files to read but still name a branch, which is what `hasWorktree` asks about.
+ */
+function worktrees(root) {
+  const out = git(root, ['worktree', 'list', '--porcelain']) ?? '';
+  const trees = [];
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) trees.push({ path: line.slice('worktree '.length), readable: true });
+    const tree = trees.at(-1);
+    if (!tree) continue;
+    if (line.startsWith('branch refs/heads/')) tree.branch = line.slice('branch refs/heads/'.length);
+    else if (line === 'bare' || line.startsWith('prunable')) tree.readable = false;
+  }
+
+  return trees;
 }
 
-export function derive(projectDir, env = process.env, now = Math.floor(Date.now() / 1000)) {
-  const stale = staleDays(env);
-  const base = { version: 1, staleDays: stale, now, repo: null, packages: [] };
-  const top = git(projectDir, ['rev-parse', '--show-toplevel'])?.trim();
-  if (!top) return base;
+function realpath(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return undefined;
+  }
+}
 
-  const lastCommit = Number(git(projectDir, ['log', '-1', '--format=%ct'])?.trim()) || 0;
-  const features = path.join(projectDir, 'docs', 'features');
-  const hasFeatures = fs.existsSync(features) && fs.statSync(features).isDirectory();
-  const liveFiles = hasFeatures ? walk(features, new Set(['archive'])) : [];
-
-  const repo = {
-    lastCommit,
-    commitAgeDays: Math.trunc((now - lastCommit) / DAY),
-    hasFeatures,
-    hasRecentDoc: liveFiles.some(file => ageDays(now, file.mtime) < stale),
-  };
-  if (!hasFeatures) return { ...base, repo };
-
-  // git reports paths from the toplevel; map them back onto docs/features/<pkg>/... under projectDir.
-  const prefix = path.relative(top, features).split(path.sep).join('/');
-  const committed = commitTimes(projectDir);
-  const dirty = dirtyPaths(projectDir);
-  const branches = worktreeBranches(projectDir);
-
+/**
+ * The feature packages of ONE checkout's docs/features/: validated names, closing status and frontmatter, newest
+ * activity and baton. State is not decided here — a package may be seen in several checkouts, and only the copy
+ * that wins the de-duplication gets one.
+ */
+function scanTree(features, { prefix, committed, dirty }) {
   /** A file's activity: its mtime while it differs from HEAD, else its newest commit, else its mtime. */
   const activity = (relFromFeatures, mtime) => {
     const key = `${prefix}/${relFromFeatures}`;
@@ -184,7 +185,12 @@ export function derive(projectDir, env = process.env, now = Math.floor(Date.now(
   };
 
   // Codepoint order, as a C-locale shell glob lists them.
-  const names = fs.readdirSync(features).filter(name => !name.startsWith('.')).sort();
+  let names;
+  try {
+    names = fs.readdirSync(features).filter(name => !name.startsWith('.')).sort();
+  } catch {
+    return [];
+  }
   const packages = [];
   for (const dir of names) {
     if (dir === 'archive') continue;
@@ -208,34 +214,115 @@ export function derive(projectDir, env = process.env, now = Math.floor(Date.now(
     const status = closing ? closing[1].toLowerCase() : 'in-flight';
     const front = closing ? frontmatter(decision) : {};
 
-    const files = walk(full);
     let lastActivity = 0;
+    let decisionAt = 0;
     let baton;
-    for (const file of files) {
+    for (const file of walk(full)) {
       const rel = path.relative(features, file.path).split(path.sep).join('/');
       const at = activity(rel, file.mtime);
       lastActivity = Math.max(lastActivity, at);
+      if (file.path === path.join(full, 'DECISION.md')) decisionAt = at;
       const inHandoffs = path.dirname(file.path) === path.join(full, 'handoffs');
       const name = path.basename(file.path);
       if (inHandoffs && BATON_RE.test(name) && (!baton || at > baton.at || (at === baton.at && name > baton.name))) {
         baton = { name, at };
       }
     }
-    const hasWorktree = branches.some(branch => branch === slug || branch.endsWith(`/${slug}`));
-    const state =
-      status !== 'in-flight' ? 'concluded' : hasWorktree || ageDays(now, lastActivity) < stale ? 'live' : 'dormant';
 
-    const pkg = { dir, date: dir.slice(0, 10), slug, status, state, lastActivity, hasWorktree };
+    const pkg = { dir, date: dir.slice(0, 10), slug, status, lastActivity };
     if (baton) pkg.baton = `handoffs/${baton.name}`;
     if (closing) {
       if (typeof front.summary === 'string' && front.summary) pkg.summary = front.summary;
       if (typeof front.concluded === 'string' && front.concluded) pkg.concluded = front.concluded;
       if (front.tags?.length) pkg.tags = front.tags;
+      pkg.closedAt = closedAt(front.concluded, decisionAt || lastActivity);
     }
     packages.push(pkg);
   }
 
-  return { ...base, repo, packages };
+  return packages;
+}
+
+/** When a package closed: its `concluded:` date (UTC midnight) when that is a real date, else when DECISION.md last moved. */
+function closedAt(concluded, fallback) {
+  if (typeof concluded === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(concluded)) {
+    const at = Date.parse(`${concluded}T00:00:00Z`);
+    if (Number.isFinite(at) && new Date(at).toISOString().startsWith(concluded)) return Math.floor(at / 1000);
+  }
+
+  return fallback;
+}
+
+export function derive(projectDir, env = process.env, now = Math.floor(Date.now() / 1000)) {
+  const stale = staleDays(env);
+  const base = { version: 1, staleDays: stale, now, repo: null, packages: [] };
+  const top = git(projectDir, ['rev-parse', '--show-toplevel'])?.trim();
+  if (!top) return base;
+
+  const lastCommit = Number(git(projectDir, ['log', '-1', '--format=%ct'])?.trim()) || 0;
+  const features = path.join(projectDir, 'docs', 'features');
+  const hasFeatures = fs.existsSync(features) && fs.statSync(features).isDirectory();
+  const liveFiles = hasFeatures ? walk(features, new Set(['archive'])) : [];
+
+  const repo = {
+    lastCommit,
+    commitAgeDays: Math.trunc((now - lastCommit) / DAY),
+    hasFeatures,
+    hasRecentDoc: liveFiles.some(file => ageDays(now, file.mtime) < stale),
+  };
+
+  // In-flight packages live on their own branches, checked out in their own worktrees, so the session's checkout
+  // alone misses them. Every readable worktree is scanned at the same place relative to its toplevel; the session's
+  // own checkout first, so it wins a tie.
+  const all = worktrees(projectDir);
+  const branches = all.filter(tree => tree.branch).map(tree => tree.branch);
+  const sub = path.relative(top, projectDir);
+  const prefix = path.relative(top, features).split(path.sep).join('/');
+  const home = realpath(projectDir) ?? projectDir;
+  const topReal = realpath(top) ?? top;
+  const trees = [{ project: projectDir, root: projectDir, where: undefined }];
+  for (const tree of all) {
+    if (!tree.readable || (realpath(tree.path) ?? tree.path) === topReal) continue;
+    const project = path.join(tree.path, sub);
+    const real = realpath(project);
+    if (!real) continue;
+    const rel = path.relative(home, real);
+    const where = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel.split(path.sep).join('/') : real;
+    // A path that fails the charset is never echoed (it would reach a prompt through Resume and the notice).
+    if (!WORKTREE_RE.test(where)) continue;
+    trees.push({ project, root: tree.path, where });
+  }
+  const scanned = trees.filter(tree => fs.existsSync(path.join(tree.project, 'docs', 'features')));
+  if (!hasFeatures && scanned.length === 0) return { ...base, repo };
+
+  // One `git log --all` serves every tree (they share the repository); what differs from HEAD is per tree.
+  const committed = commitTimes(projectDir);
+  /** The same package seen in several checkouts: the copy with the newest activity wins (a tie keeps the earlier). */
+  const chosen = new Map();
+  for (const tree of scanned) {
+    const found = scanTree(path.join(tree.project, 'docs', 'features'), { prefix, committed, dirty: dirtyPaths(tree.root) });
+    for (const pkg of found) {
+      const held = chosen.get(pkg.dir);
+      if (held && held.lastActivity >= pkg.lastActivity) continue;
+      chosen.set(pkg.dir, tree.where === undefined ? pkg : { ...pkg, worktree: tree.where });
+    }
+  }
+
+  const packages = [...chosen.values()]
+    .sort((a, b) => (a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0))
+    .map(pkg => {
+      const hasWorktree = branches.some(branch => branch === pkg.slug || branch.endsWith(`/${pkg.slug}`));
+      const state =
+        pkg.status !== 'in-flight' ? 'concluded' : hasWorktree || ageDays(now, pkg.lastActivity) < stale ? 'live' : 'dormant';
+      const { dir, date, slug, status, lastActivity, ...rest } = pkg;
+
+      return { dir, date, slug, status, state, lastActivity, hasWorktree, ...rest };
+    });
+
+  // Work committed in another worktree is activity here too: the session's HEAD never sees it.
+  const elsewhere = packages.some(pkg => pkg.worktree !== undefined && ageDays(now, pkg.lastActivity) < stale);
+
+  return { ...base, repo: { ...repo, hasFeatures: hasFeatures || scanned.length > 0, hasRecentDoc: repo.hasRecentDoc || elsewhere }, packages };
 }
 
 /** Line format for shell consumers: no free text, only validated names and enums. */
@@ -243,7 +330,9 @@ function tsv(standing) {
   if (!standing.repo) return '';
   const { repo } = standing;
   const lines = [['repo', repo.hasFeatures ? 1 : 0, repo.hasRecentDoc ? 1 : 0, repo.lastCommit, repo.commitAgeDays].join('\t')];
-  for (const pkg of standing.packages) lines.push(['pkg', pkg.dir, pkg.status, pkg.state, pkg.baton ?? ''].join('\t'));
+  for (const pkg of standing.packages) {
+    lines.push(['pkg', pkg.dir, pkg.status, pkg.state, pkg.baton ?? '', pkg.worktree ?? ''].join('\t'));
+  }
 
   return `${lines.join('\n')}\n`;
 }
