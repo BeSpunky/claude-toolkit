@@ -1,7 +1,7 @@
 {
   "name": "bespunky-browser-automation",
   "description": "BeSpunky browser automation. `playwright` — drive a real browser headless (load, click, type, screenshot, scrape) for solo verification, bug repro, or repeatable scripts. `shared-browser` — one in-container Chromium the human watches and clicks over noVNC while Claude drives it over loopback CDP: co-debugging, live CSS/DOM verification with measured proof, pairing on a flow. Pre-installed and enabled in BeSpunky devcontainers.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"

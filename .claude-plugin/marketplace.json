@@ -16,13 +16,13 @@
       "name": "bespunky-project-starter",
       "source": "./plugins/project-starter",
       "description": "Scaffold a new BeSpunky-standard project, or retrofit the house tooling onto any existing repo, as a stack of detected layers on an always-ensured Nx floor: the agent DX (composed devcontainer, Claude settings, window identity) by default, and Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. Generator-first; kept current by versioned migrations and a consented sync.",
-      "version": "0.39.0"
+      "version": "0.39.1"
     },
     {
       "name": "bespunky-workflow",
       "source": "./plugins/workflow",
       "description": "How work moves from idea to production, whatever is being built. branch-and-release: a declared branch model (trunk to gitflow), per-feature worktrees, human-gated moves. local-server-isolation: test servers on random free ports. feature-package: one effort, one slug, one folder of durable docs. session-handoff: relay one live effort into a fresh session. project-standing: orient in a project after a gap. delegate-and-parallelize: orchestrate budgeted subagents.",
-      "version": "0.10.0"
+      "version": "0.10.1"
     },
     {
       "name": "bespunky-engineering",
@@ -46,7 +46,7 @@
       "name": "bespunky-browser-automation",
       "source": "./plugins/browser-automation",
       "description": "BeSpunky browser automation. `playwright` — drive a real browser headless (load, click, type, screenshot, scrape) for solo verification, bug repro, or repeatable scripts. `shared-browser` — one in-container Chromium the human watches and clicks over noVNC while Claude drives it over loopback CDP: co-debugging, live CSS/DOM verification with measured proof, pairing on a flow. Pre-installed and enabled in BeSpunky devcontainers.",
-      "version": "0.5.0"
+      "version": "0.5.1"
     },
     {
       "name": "bespunky-product-ux",
@@ -58,13 +58,13 @@
       "name": "bespunky-voice",
       "source": "./plugins/voice",
       "description": "Hear Claude's questions and answer by voice, away from the screen. Questions are asked the way a person asks them (`/speak say`, or automatically with `/speak auto on`). A band above the prompt shows what's said and heard, live, with Replay and Stop. The `voice-conversation` skill + `ask_by_voice` MCP tool run a hands-free back-and-forth. Swappable TTS (espeak-ng / say, upgradable to local Piper), local whisper.cpp STT; audio bridged by the BeSpunky devcontainer.",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "bespunky-vscode-identity",
       "source": "./plugins/bespunky-vscode-identity",
       "description": "Make every project's VSCode window recognizable at a glance, without Peacock's whole-window glow. `window-identity` picks a project-fitting emoji for the window title and a quiet bar colour derived from the design-system primary (else a stable name hash), written by the @bespunky/nx-tools:window-identity generator with a no-clobber ratchet. A SessionStart hook offers the upgrade to the brand colour once a design system appears.",
-      "version": "0.2.0"
+      "version": "0.2.1"
     },
     {
       "name": "bespunky-communication",
