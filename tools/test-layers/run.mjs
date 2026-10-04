@@ -606,10 +606,23 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
   ok(a.dc.image === 'mcr.microsoft.com/devcontainers/typescript-node:22' && a.dc.remoteUser === 'node', `image ${a.dc.image}`);
   ok(!a.dc.features['ghcr.io/devcontainers/features/node:1'] && !a.dc.overrideFeatureInstallOrder, 'no Node feature on a Node image');
   ok(a.dc.mounts.some((m) => m.includes('node_modules,type=volume')) && a.dc.remoteEnv.CHOKIDAR_USEPOLLING === 'true', 'node artifacts');
+  ok(
+    a.dc.remoteEnv.PATH === '${containerEnv:HOME}/.local/bin:${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}',
+    `PATH composed from agent + node, native Claude Code first: ${a.dc.remoteEnv.PATH}`,
+  );
   ok(!/xvfb|4200|runArgs/.test(a.dcText + a.post), 'web/Angular artifacts leaked');
   ok(bashParses(a.post) && a.post.includes('$PM_INSTALL'), 'post-create installs through the package manager');
   ok(a.house.includes('npx nx build <project>') && !a.house.includes('npm nx'), 'HOUSE.md renders `npx nx`, never `npm nx`');
   ok(a.house.includes('**Package manager**: npm'), 'the package manager is named');
+});
+
+checkAsync('agent: Claude Code installed ONCE, natively, before the plugin pre-install — no shadowing feature', async (ok) => {
+  const a = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent']);
+  ok(!Object.keys(a.dc.features).some((id) => id.includes('claude-code')), `a claude-code feature is back: ${Object.keys(a.dc.features)}`);
+  ok(a.dc.remoteEnv.PATH === '${containerEnv:HOME}/.local/bin:${containerEnv:PATH}', `PATH: ${a.dc.remoteEnv.PATH}`);
+  const install = a.post.indexOf('claude.ai/install.sh');
+  ok(install !== -1 && install > a.post.indexOf('apt-get') && install < a.post.indexOf('claude plugin install'), 'native install runs after the OS packages, before the plugins');
+  ok(bashParses(a.post), 'post-create parses');
 });
 
 checkAsync('full house shape (angular+firebase+design system, web): the 0.34 container, bespunky-angular enabled', async (ok) => {
