@@ -47,6 +47,8 @@ const THEIR_PATH = `{
 }
 `;
 
+const BROKEN_FILE = `{\n  "features": { "${FEATURE}": {} },\n  "remoteEnv": { "PATH": "${OLD_PATH}" \n`;
+
 export default {
   name: '0.40.0 · retire-claude-code-feature',
   ladder: ['0.40.0/retire-claude-code-feature'],
@@ -56,9 +58,11 @@ export default {
       setup: (tree) => {
         tree.write(DC, OWNED);
         tree.write(MARKER, marker(true));
+        tree.write('.devcontainer/devcontainer-lock.json', JSON.stringify({ features: { [FEATURE]: { version: '2.0.3' } } }, null, 2) + '\n');
       },
       expect: (tree, t) => {
         t.hasNot(DC, FEATURE);
+        t.hasNot('.devcontainer/devcontainer-lock.json', FEATURE);
         t.hasNot(DC, "Claude's permission posture");
         t.hasNot(DC, 'deliberately NOT a blanket skip');
         t.has(DC, '"ghcr.io/devcontainers/features/node:1": { "version": "22" }');
@@ -107,6 +111,14 @@ export default {
         tree.write(MARKER, marker(true));
       },
       expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === THEIR_PATH, 'the file was changed'),
+    },
+    {
+      name: 'unparseable devcontainer.json: left exactly as it is (and reported)',
+      setup: (tree) => {
+        tree.write(DC, BROKEN_FILE);
+        tree.write(MARKER, marker(true));
+      },
+      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === BROKEN_FILE, 'a file that does not parse was edited'),
     },
     {
       name: 'no devcontainer: nothing to do',

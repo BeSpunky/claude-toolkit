@@ -153,8 +153,14 @@
     "remove-superseded-claude-code-feature": {
       "version": "0.43.0",
       "layer": "agent",
-      "description": "Removes the `ghcr.io/devcontainers-extra/features/claude-code` feature (with the `//` lines explaining it) from devcontainer.json in EVERY workspace that wears the agent layer — owned or adopted. 0.40.0 removed it only from owned devcontainers; but the agent layer's post-create installs the same Claude Code natively and first on PATH, so the feature can no longer be depended on: it only adds a stale second copy. Without the agent layer it may be the only copy, and stays.",
+      "description": "Removes the `ghcr.io/devcontainers-extra/features/claude-code` feature (with the `//` lines explaining it) from devcontainer.json in EVERY workspace that wears the agent layer — owned or adopted. 0.40.0 removed it only from owned devcontainers; but the agent layer's post-create installs the same Claude Code natively and first on PATH, so the feature can no longer be depended on: it only adds a stale second copy. Without the agent layer it may be the only copy, and stays. Its pin in devcontainer-lock.json goes with it.",
       "implementation": "./src/migrations/0.43.0/remove-superseded-claude-code-feature"
+    },
+    "prune-orphaned-feature-locks": {
+      "version": "0.44.0",
+      "layer": "agent",
+      "description": "Removes every pin in .devcontainer/devcontainer-lock.json whose feature devcontainer.json no longer declares — nothing reads such a pin, and the next build drops it anyway, leaving an uncommitted diff. Cleans up after 0.40.0/0.43.0, which removed the claude-code feature from devcontainer.json but not from the lock. Skipped when devcontainer.json is missing or unreadable.",
+      "implementation": "./src/migrations/0.44.0/prune-orphaned-feature-locks"
     }
   }
 }

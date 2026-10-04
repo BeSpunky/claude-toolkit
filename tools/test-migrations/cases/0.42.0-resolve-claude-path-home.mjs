@@ -17,6 +17,8 @@ ${user}  "remoteEnv": {
 }
 `;
 
+const BROKEN_FILE = `{ "remoteUser": "node", "remoteEnv": { "PATH": "${BROKEN}:\${containerEnv:PATH}" `;
+
 export default {
   name: '0.42.0 · resolve-claude-path-home',
   ladder: ['0.42.0/resolve-claude-path-home'],
@@ -50,6 +52,14 @@ export default {
       name: "the project's own PATH that mentions the variable later is not the house's: untouched",
       setup: (tree) => tree.write(DC, file('  "remoteUser": "node",\n', `/opt/ours/bin:${BROKEN}:\${containerEnv:PATH}`)),
       expect: (tree, t) => t.has(DC, `"/opt/ours/bin:${BROKEN}:\${containerEnv:PATH}"`),
+    },
+    {
+      name: 'unparseable devcontainer.json: left exactly as it is (and reported)',
+      setup: (tree) => {
+        tree.write(DC, BROKEN_FILE);
+        
+      },
+      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === BROKEN_FILE, 'a file that does not parse was edited'),
     },
     {
       name: 'no devcontainer: nothing to do',

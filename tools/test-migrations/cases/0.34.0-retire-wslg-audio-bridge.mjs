@@ -82,6 +82,8 @@ const VARIANT = `{
 }
 `;
 
+const BROKEN_FILE = `{\n  "mounts": [ ${HOUSE_MOUNT}, \n`;
+
 export default {
   name: '0.34.0 · retire-wslg-audio-bridge',
   ladder: ['0.34.0/retire-wslg-audio-bridge'],
@@ -174,6 +176,11 @@ export default {
       },
     },
 
+    {
+      name: 'unparseable devcontainer.json: left exactly as it is (and reported)',
+      setup: (tree) => tree.write(DC, BROKEN_FILE),
+      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === BROKEN_FILE, 'a file that does not parse was edited'),
+    },
     {
       name: 'no devcontainer: no-op',
       setup: () => {},
