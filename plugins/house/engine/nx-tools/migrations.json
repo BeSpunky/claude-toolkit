@@ -143,6 +143,12 @@
       "layer": "agent",
       "description": "Claude Code is installed once, natively (post-create), instead of also by the `ghcr.io/devcontainers-extra/features/claude-code` feature, whose build-time copy in /usr/local/bin shadowed the one `claude update` and the auto-updater keep current — freezing every house container at its build-day version. Removes that feature (and the house comment above it) from a house-OWNED devcontainer.json; reports it, untouched, in an adopted one. Retargets the one `remoteEnv.PATH` the house ever wrote (the node layer's) to put ${containerEnv:HOME}/.local/bin first; any other PATH is reported, never edited.",
       "implementation": "./src/migrations/0.40.0/retire-claude-code-feature"
+    },
+    "resolve-claude-path-home": {
+      "version": "0.42.0",
+      "layer": "agent",
+      "description": "0.40.0 put `${containerEnv:HOME}/.local/bin` first in devcontainer.json `remoteEnv.PATH`, but a container's environment carries no HOME, so it resolved to `/.local/bin` and the build-time Claude Code kept shadowing the native one. Rewrites that first entry, in place, to `/home/<user>/.local/bin` (or `/root/.local/bin`) for the declared remoteUser/containerUser; a devcontainer declaring neither is reported, left as is. Any other PATH is untouched.",
+      "implementation": "./src/migrations/0.42.0/resolve-claude-path-home"
     }
   }
 }

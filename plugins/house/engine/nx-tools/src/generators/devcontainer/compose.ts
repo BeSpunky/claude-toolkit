@@ -102,7 +102,7 @@ export function compose(
   }
   const { features: imageFeatureList, ...image } = imageSource.fragment.image!;
   const remoteUser = tokens.runsAs ?? image.remoteUser;
-  const home = remoteUser === 'root' ? '/root' : `/home/${remoteUser}`;
+  const home = homeOf(remoteUser);
   const sub = (value: string) =>
     value.split('{{home}}').join(home).split('{{remoteUser}}').join(remoteUser).split('{{nodeMajor}}').join(tokens.nodeMajor);
   const subJson = (value: DevcontainerJson): DevcontainerJson => {
@@ -231,6 +231,11 @@ export function compose(
       (entry) => entry.piece,
     ),
   };
+}
+
+/** A container user's home directory — the one rule `{{home}}` resolves by (migrations reuse it). */
+export function homeOf(user: string): string {
+  return user === 'root' ? '/root' : `/home/${user}`;
 }
 
 /** One `key=value` field of a mount spec. */

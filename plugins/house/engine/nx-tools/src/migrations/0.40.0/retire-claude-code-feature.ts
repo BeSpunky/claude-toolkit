@@ -42,7 +42,7 @@ export default async function retireClaudeCodeFeature(tree: Tree): Promise<void>
   if (!root) {
     logger.warn(
       `${TAG} Left in place — ${DEVCONTAINER} could not be parsed as JSONC. Remove the "${FEATURE}" feature and ` +
-        `put \${containerEnv:HOME}/.local/bin first in remoteEnv.PATH, so \`claude update\` reaches the copy that runs.`,
+        `put the remote user's ~/.local/bin first in remoteEnv.PATH, so \`claude update\` reaches the copy that runs.`,
     );
     return;
   }
@@ -73,7 +73,7 @@ export default async function retireClaudeCodeFeature(tree: Tree): Promise<void>
   } else if (pathNode && typeof pathValue === 'string' && !pathValue.startsWith('${containerEnv:HOME}/.local/bin')) {
     logger.warn(
       `${TAG} Left in place — ${DEVCONTAINER} remoteEnv.PATH "${pathValue}" is not the value the house wrote, so it ` +
-        `is yours and was not changed. Put \${containerEnv:HOME}/.local/bin first in it, or \`claude update\` may ` +
+        `is yours and was not changed. Put the remote user's ~/.local/bin first in it, or \`claude update\` may ` +
         `update a copy of Claude Code that never runs.`,
     );
   }

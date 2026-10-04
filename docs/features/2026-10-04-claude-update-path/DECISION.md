@@ -66,3 +66,12 @@ added it itself); point 2 makes it harmless, and the generator reports it.
 bespunky-house 0.41.0, @bespunky/nx-tools 0.40.0 (CI publishes on the push to main). A consumer gets it with
 `/bespunky-house:upgrade` + a container rebuild. This repo's own devcontainer is ADOPTED, so its upgrade will
 retarget PATH and *report* the feature rather than remove it.
+
+## Follow-up — the PATH entry resolved to `/.local/bin` (payload 0.42.0)
+
+The first rebuild of this repo's container showed `/.local/bin` on PATH: `${containerEnv:HOME}` is empty, because
+a container's environment carries no HOME (it is set per user at login). The "follows any user" argument for it
+above was wrong. The agent layer now uses the composer's `{{home}}` token (resolved for the user the container
+runs as, adopted images included), and the 0.42.0 rung `resolve-claude-path-home` rewrites the broken first
+entry in place for the declared `remoteUser`/`containerUser` (neither declared → reported). Its own first draft
+split PATH on `:` — which cuts `${containerEnv:HOME}` in half; the fixture caught it.
