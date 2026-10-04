@@ -713,6 +713,48 @@ checkAsync('adopted devcontainer on its own image: only the active layers merged
   ok(marker.owned === false && marker.adopted.skipped.includes('image'), `adoption report: ${JSON.stringify(marker.adopted)}`);
 });
 
+checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it across runs, and drops what the project changed', async (ok) => {
+  const prov = require_(join(BUILD, 'src/generators/_utils/devcontainer-provenance'));
+  const DC = '.devcontainer/devcontainer.json';
+  const MARKER = '.devcontainer/.bespunky-devcontainer.json';
+  const GH = 'ghcr.io/devcontainers/features/github-cli';
+  const OURS = 'ghcr.io/example/features/ours';
+  const tree = wrapperRepo();
+  tree.write(DC, `{\n  "image": "python:3.12",\n  "features": { "${OURS}": {} },\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n`);
+  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  const recorded = () => JSON.parse(tree.read(MARKER, 'utf8')).adopted.houseAdded;
+  const has = (entry) => recorded().some((e) => JSON.stringify(e) === JSON.stringify(entry));
+  ok(has({ path: ['features', GH], value: {} }), `the house feature it added is recorded: ${JSON.stringify(recorded())}`);
+  ok(!recorded().some((e) => e.path[1] === OURS), "the project's own feature is never recorded as the house's");
+  ok(!recorded().some((e) => e.path[0] === 'image'), 'a key the house did not write is not recorded');
+  ok(recorded().some((e) => e.path[0] === 'mounts' && 'member' in e), 'an appended mount is recorded as a member');
+  const pathEntry = recorded().find((e) => e.path.join('.') === 'remoteEnv.PATH');
+  ok(pathEntry, 'remoteEnv.PATH (a whole remoteEnv map written at once) is recorded per entry');
+  ok(prov.houseWrote(tree, { path: ['features', GH], value: {} }) && !prov.houseWrote(tree, { path: ['features', OURS], value: {} }), 'houseWrote answers from the record');
+
+  // A second run adds nothing new: the record neither grows nor loses what the FIRST run added.
+  const before = recorded().length;
+  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  ok(recorded().length === before && has({ path: ['features', GH], value: {} }), `a re-run keeps the record as it was: ${before} -> ${recorded().length}`);
+
+  // The project edits a value the house added: it is theirs now — out of the record, and houseWrote says no.
+  const text = tree.read(DC, 'utf8').replace(pathEntry.value, '/opt/ours/bin:${containerEnv:PATH}');
+  tree.write(DC, text);
+  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  ok(!recorded().some((e) => e.path.join('.') === 'remoteEnv.PATH'), 'a value the project changed left the record');
+  ok(!prov.houseWrote(tree, pathEntry), 'houseWrote refuses a value the file no longer holds');
+  ok(has({ path: ['features', GH], value: {} }), 'everything else the house added is still recorded');
+});
+
+checkAsync('owned devcontainer: no provenance record — ownership already answers it', async (ok) => {
+  const prov = require_(join(BUILD, 'src/generators/_utils/devcontainer-provenance'));
+  const tree = createTreeWithEmptyWorkspace();
+  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  const marker = JSON.parse(tree.read('.devcontainer/.bespunky-devcontainer.json', 'utf8'));
+  ok(marker.owned === true && !marker.adopted, `owned marker: ${JSON.stringify(marker)}`);
+  ok(prov.houseWrote(tree, { path: ['features', 'anything'], value: {} }), 'an owned file is the house\'s');
+});
+
 checkAsync('post-create: web provisions the shared browser through its own runtime; @playwright/test is the js layer\'s', async (ok) => {
   const web = await artifacts(wrapperRepo(), ['nx', 'agent', 'web']);
   ok(web.post.includes('shared-browser" install --with-deps'), 'web: no `shared-browser install --with-deps`');
