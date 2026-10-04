@@ -11,3 +11,4 @@ Big task? Claude can split it into subagents running in parallel; you can set th
 Testing a server? The house rule binds a random port, so the dev server you started by hand is never clobbered
 The status line shows your branch in the declared model (feat/x → development → main) and warns on a protected line
 Compacting? The checkpoint the PreCompact hook saves pops up as a toast with its path, so you know where it went
+When Claude proposes landing your branch, a merge gate appears above the prompt: Land, Land & promote, Push, or Not yet
