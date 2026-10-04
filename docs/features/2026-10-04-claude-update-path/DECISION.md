@@ -1,6 +1,9 @@
 ---
 effort: claude-update-path
-summary: In house devcontainers, `claude update` installs a binary that never runs (the devcontainer feature's copy shadows it on PATH) — make the updated one the one that runs.
+status: concluded
+concluded: 2026-10-04
+summary: House devcontainers install Claude Code once, natively, with ~/.local/bin first on PATH — the claude-code feature's build-time copy had shadowed every `claude update`, freezing containers (and hiding the toolkit's mods); payload 0.40.0 migrates existing projects.
+tags: [house, devcontainer, claude-code, path, migration, agent-layer]
 ---
 
 # Claude Code in house devcontainers — one install, the one that updates
