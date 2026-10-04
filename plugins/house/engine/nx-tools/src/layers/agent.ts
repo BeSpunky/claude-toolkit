@@ -58,11 +58,13 @@ export const agent: LayerDescriptor = {
     // that shadowed the one `claude update` and the background auto-updater manage (~/.local/bin, late on PATH):
     // every update reported success and changed nothing, freezing the container at its build-day version. Claude
     // Code is installed ONCE, natively, by the `claude-code` post-create piece — the install the updater owns —
-    // and its directory is put first on PATH so no other copy can shadow it.
+    // and its directory is put first on PATH so no other copy can shadow it. `{{home}}`, the composer's token for
+    // the user the container runs as — NOT `${containerEnv:HOME}`: a container's environment carries no HOME (it
+    // is set per user at login), so that variable resolved empty and the entry came out as `/.local/bin`.
     // (Its permission posture is set once in .claude/settings.json — permissions.defaultMode: "auto".)
     path: [
       {
-        dir: '${containerEnv:HOME}/.local/bin',
+        dir: '{{home}}/.local/bin',
         why:
           'the native Claude Code install, first — the copy `claude update` and the auto-updater keep current, so\n' +
           'no other `claude` (an image\'s, a feature\'s) can shadow it.',

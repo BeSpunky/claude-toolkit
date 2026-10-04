@@ -278,8 +278,9 @@ export interface DevcontainerFragment {
    * Directories this layer puts IN FRONT of the image's PATH. Never a `remoteEnv` `PATH` of a layer's own: two
    * layers each setting `PATH` would collide (first wins, the other's directory silently gone), so the composer
    * owns the one `PATH` and builds it from every active layer's entries, in registry order, ahead of
-   * `${containerEnv:PATH}`. Written with devcontainer variables (`${containerEnv:HOME}`,
-   * `${containerWorkspaceFolder}`) so it follows whatever image and user the container actually runs.
+   * `${containerEnv:PATH}`. Written with `{{home}}` (the composer resolves it for the user the container runs as)
+   * and devcontainer variables like `${containerWorkspaceFolder}` — never `${containerEnv:HOME}`, which is empty:
+   * a container's environment carries no HOME.
    */
   path?: readonly ({ dir: string } & Explained)[];
   /** Environment for editor-spawned processes. Never `PATH` — that is composed from `path` (above). */
