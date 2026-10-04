@@ -25,7 +25,9 @@ Every update lands in the shadowed copy. The build-time copy is frozen at whatev
 with, so every house project silently pins Claude Code until the container is rebuilt — and hides every
 Claude Code feature the toolkit depends on (here: mods).
 
-## Proposed design (awaiting confirmation)
+## Design — confirmed
+
+> "yes, go ahead"
 
 1. **One install, owned by the house.** Drop the third-party feature; install natively for the remote user
    (`claude.ai/install.sh`) as an agent-layer post-create piece in `prepare` — before `plugins`, which needs
@@ -41,3 +43,23 @@ Claude Code feature the toolkit depends on (here: mods).
 Migrations: the devcontainer is an owned template artifact (class A), regenerated on every upgrade — nothing
 to migrate for owned ones. Adopted ones keep the old feature (removing it is a guess — the project may have
 added it itself); point 2 makes it harmless, and the generator reports it.
+
+## Found while building
+
+- **The migration was owed after all.** The first draft said "owned artifact, nothing to migrate" — wrong: the
+  devcontainer generator merges IN PLACE on owned devcontainers too and never removes a key it stopped
+  rendering, so the feature would have stayed in every existing project. Payload 0.40.0 ships
+  `retire-claude-code-feature`: removes the feature (and the house comment above it) when owned, reports it when
+  adopted, and retargets the one `remoteEnv.PATH` value the house ever wrote — on both paths, since the adopted
+  merge would otherwise keep the old PATH forever.
+- **The removal is a text cut, not `jsonc-parser` `modify`**: `modify(…, undefined)` re-serializes the
+  neighbouring member (`{ "version": "22" }` came back over three lines) — caught by the fixture.
+- **`${containerEnv:HOME}`, not the `{{home}}` token**, in the PATH entry: it follows whatever user an adopted
+  image really runs as, and the migration can write the same value without knowing the user.
+- The native install runs in the `install` phase, not `prepare`: it needs curl, which the OS-package step brings.
+
+## Shipped
+
+bespunky-house 0.41.0, @bespunky/nx-tools 0.40.0 (CI publishes on the push to main). A consumer gets it with
+`/bespunky-house:upgrade` + a container rebuild. This repo's own devcontainer is ADOPTED, so its upgrade will
+retarget PATH and *report* the feature rather than remove it.
