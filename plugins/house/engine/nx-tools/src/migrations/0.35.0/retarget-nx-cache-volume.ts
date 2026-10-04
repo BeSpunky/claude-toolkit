@@ -19,6 +19,7 @@
 // it is a cache, rebuilt on the first `nx` run; the orphaned Docker volume (`<folder>-nx`) can be removed with
 // `docker volume rm` and is named in the log.
 import { type Tree, logger } from '@nx/devkit';
+import { parseJsoncStrict } from '../../generators/_utils/jsonc-strict';
 import { applyEdits, findNodeAtLocation, getNodeValue, modify, parseTree } from 'jsonc-parser';
 
 const TAG = '[0.35.0 retarget-nx-cache-volume]';
@@ -41,7 +42,7 @@ export default async function retargetNxCacheVolume(tree: Tree): Promise<void> {
   const original = tree.read(DEVCONTAINER, 'utf8') ?? '';
   if (!original.includes(HOUSE_NX_MOUNT) && !original.includes(NX_TARGET)) return;
 
-  if (!parseTree(original, [], PARSE_OPTIONS)) {
+  if (!parseJsoncStrict(original)) {
     logger.warn(
       `${TAG} Left in place — ${DEVCONTAINER} could not be parsed as JSONC, so its .nx volume was not retargeted. ` +
         `Replace a mount targeting \${containerWorkspaceFolder}/.nx with "${CACHE_MOUNT}" and "${DATA_MOUNT}".`,

@@ -6,6 +6,7 @@
 // Code — kept), and one that never had it.
 const DC = '.devcontainer/devcontainer.json';
 const MARKER = '.devcontainer/.bespunky-devcontainer.json';
+const LOCK = '.devcontainer/devcontainer-lock.json';
 const FEATURE = 'ghcr.io/devcontainers-extra/features/claude-code';
 const adoptedMarker = JSON.stringify({ generator: '@bespunky/nx-tools:devcontainer', owned: false, layers: ['nx', 'agent', 'node'] });
 
@@ -33,6 +34,8 @@ const EXPLAINED = `{
 }
 `;
 
+const BROKEN_FILE = `{\n  "features": {\n    "${FEATURE}": {},\n    "ghcr.io/devcontainers/features/github-cli": {}\n`;
+
 export default {
   name: '0.43.0 · remove-superseded-claude-code-feature',
   ladder: ['0.43.0/remove-superseded-claude-code-feature'],
@@ -45,6 +48,19 @@ export default {
       },
       expect: (tree, t) => {
         t.ok(tree.read(DC, 'utf8') === TOOLKIT.replace(`    "${FEATURE}": {},\n`, ''), `unexpected file:\n${tree.read(DC, 'utf8')}`);
+      },
+    },
+    {
+      name: 'the pin in devcontainer-lock.json goes with it, the other pins stay',
+      setup: (tree) => {
+        tree.write(DC, TOOLKIT);
+        tree.write(MARKER, adoptedMarker);
+        tree.write(LOCK, JSON.stringify({ features: { [FEATURE]: { version: '2.0.3' }, 'ghcr.io/devcontainers/features/github-cli': { version: '1.1.0' } } }, null, 2) + '\n');
+      },
+      expect: (tree, t) => {
+        t.hasNot(DC, FEATURE);
+        t.hasNot(LOCK, FEATURE);
+        t.ok(JSON.parse(tree.read(LOCK, 'utf8')).features['ghcr.io/devcontainers/features/github-cli'].version === '1.1.0', 'the other pin was lost');
       },
     },
     {
@@ -64,6 +80,14 @@ export default {
       name: 'no agent layer: the feature may be the only Claude Code — kept (and said so)',
       setup: (tree) => tree.write(DC, EXPLAINED),
       expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === EXPLAINED, 'the file was changed'),
+    },
+    {
+      name: 'unparseable devcontainer.json: left exactly as it is (and reported)',
+      setup: (tree) => {
+        tree.write(DC, BROKEN_FILE);
+        tree.write(MARKER, adoptedMarker);
+      },
+      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === BROKEN_FILE, 'a file that does not parse was edited'),
     },
     {
       name: 'never had it: nothing to do',

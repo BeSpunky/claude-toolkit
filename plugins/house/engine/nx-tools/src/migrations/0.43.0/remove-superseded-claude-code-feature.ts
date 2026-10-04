@@ -14,16 +14,16 @@
 // Code, and it stays.
 //
 // WHAT IT TAKES WITH IT: the member, its comma, and the `//` lines directly above it (they explain a line that is
-// gone). Everything else in the file is untouched.
+// gone) — and the feature's pin in devcontainer-lock.json (through the shared `removeFeature`; the first release of
+// this rung forgot the lock, and 0.44.0 prunes what that left). Everything else is untouched.
 import { type Tree, logger } from '@nx/devkit';
-import { findNodeAtLocation, parseTree } from 'jsonc-parser';
+import { parseJsoncStrict } from '../../generators/_utils/jsonc-strict';
 import { isPresent } from '../../layers/registry';
-import { removeMemberWithLeadingComment } from '../../generators/_utils/jsonc-remove-member';
+import { removeFeature } from '../../generators/_utils/devcontainer-feature';
 
 const TAG = '[0.43.0 remove-superseded-claude-code-feature]';
 const DEVCONTAINER = '.devcontainer/devcontainer.json';
 const FEATURE = 'ghcr.io/devcontainers-extra/features/claude-code';
-const PARSE_OPTIONS = { allowTrailingComma: true, disallowComments: false };
 
 export default async function removeSupersededClaudeCodeFeature(tree: Tree): Promise<void> {
   if (!tree.exists(DEVCONTAINER)) return;
@@ -38,7 +38,7 @@ export default async function removeSupersededClaudeCodeFeature(tree: Tree): Pro
     return;
   }
 
-  const root = parseTree(original, [], PARSE_OPTIONS);
+  const root = parseJsoncStrict(original);
   if (!root) {
     logger.warn(
       `${TAG} Left in place — ${DEVCONTAINER} could not be parsed as JSONC. Remove its "${FEATURE}" feature by hand: the ` +
@@ -46,12 +46,11 @@ export default async function removeSupersededClaudeCodeFeature(tree: Tree): Pro
     );
     return;
   }
-  const feature = findNodeAtLocation(root, ['features', FEATURE]);
-  if (!feature) return;
-
-  tree.write(DEVCONTAINER, removeMemberWithLeadingComment(original, feature));
+  const removed = removeFeature(tree, FEATURE);
+  if (!removed.declaration && !removed.lock) return;
   logger.info(
-    `${TAG} ${DEVCONTAINER}: removed the "${FEATURE}" feature — superseded by the native Claude Code the house ` +
-      `post-create installs (first on PATH); it only added a stale second copy in /usr/local/bin. Rebuild the container.`,
+    `${TAG} removed the "${FEATURE}" feature from ${[removed.declaration && DEVCONTAINER, removed.lock && '.devcontainer/devcontainer-lock.json'].filter(Boolean).join(' and ')} — ` +
+      `superseded by the native Claude Code the house post-create installs (first on PATH); it only added a stale ` +
+      `second copy in /usr/local/bin. Rebuild the container.`,
   );
 }

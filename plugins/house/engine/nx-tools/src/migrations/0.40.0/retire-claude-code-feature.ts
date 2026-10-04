@@ -19,8 +19,9 @@
 //   - `remoteEnv.PATH`: the one value the house ever wrote there (the node layer's) is retargeted in place, on
 //     both paths, to the new composed value. Any other PATH is the project's own: reported, never edited.
 import { type Tree, logger } from '@nx/devkit';
-import { applyEdits, findNodeAtLocation, getNodeValue, modify, parseTree } from 'jsonc-parser';
-import { removeMemberWithLeadingComment } from '../../generators/_utils/jsonc-remove-member';
+import { parseJsoncStrict } from '../../generators/_utils/jsonc-strict';
+import { applyEdits, findNodeAtLocation, getNodeValue, modify } from 'jsonc-parser';
+import { removeFeature } from '../../generators/_utils/devcontainer-feature';
 
 const TAG = '[0.40.0 retire-claude-code-feature]';
 const DEVCONTAINER = '.devcontainer/devcontainer.json';
@@ -31,7 +32,6 @@ const FEATURE = 'ghcr.io/devcontainers-extra/features/claude-code';
 const OLD_HOUSE_PATH = '${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}';
 const NEW_HOUSE_PATH = '${containerEnv:HOME}/.local/bin:${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}';
 
-const PARSE_OPTIONS = { allowTrailingComma: true, disallowComments: false };
 const FORMAT = { insertSpaces: true, tabSize: 2, eol: '\n' };
 
 export default async function retireClaudeCodeFeature(tree: Tree): Promise<void> {
@@ -39,7 +39,7 @@ export default async function retireClaudeCodeFeature(tree: Tree): Promise<void>
   const original = tree.read(DEVCONTAINER, 'utf8') ?? '';
   if (!original.includes(FEATURE) && !original.includes(OLD_HOUSE_PATH)) return;
 
-  const root = parseTree(original, [], PARSE_OPTIONS);
+  const root = parseJsoncStrict(original);
   if (!root) {
     logger.warn(
       `${TAG} Left in place — ${DEVCONTAINER} could not be parsed as JSONC. Remove the "${FEATURE}" feature and ` +
@@ -53,9 +53,11 @@ export default async function retireClaudeCodeFeature(tree: Tree): Promise<void>
 
   const feature = findNodeAtLocation(root, ['features', FEATURE]);
   if (feature && owned) {
-    text = removeMemberWithLeadingComment(text, feature);
+    // Through the shared removal, so its pin leaves devcontainer-lock.json too (this rung's first release forgot it).
+    removeFeature(tree, FEATURE);
+    text = tree.read(DEVCONTAINER, 'utf8') ?? text;
     logger.info(
-      `${TAG} ${DEVCONTAINER}: removed the "${FEATURE}" feature — its build-time copy of Claude Code shadowed the ` +
+      `${TAG} ${DEVCONTAINER}: removed the "${FEATURE}" feature (and its lock pin) — its build-time copy of Claude Code shadowed the ` +
         `one \`claude update\` keeps current. post-create.sh now installs Claude Code natively. Rebuild the container.`,
     );
   } else if (feature) {
@@ -66,7 +68,7 @@ export default async function retireClaudeCodeFeature(tree: Tree): Promise<void>
     );
   }
 
-  const pathNode = findNodeAtLocation(parseTree(text, [], PARSE_OPTIONS)!, ['remoteEnv', 'PATH']);
+  const pathNode = findNodeAtLocation(parseJsoncStrict(text)!, ['remoteEnv', 'PATH']);
   const pathValue = pathNode ? (getNodeValue(pathNode) as unknown) : undefined;
   if (pathValue === OLD_HOUSE_PATH) {
     text = applyEdits(text, modify(text, ['remoteEnv', 'PATH'], NEW_HOUSE_PATH, { formattingOptions: FORMAT }));

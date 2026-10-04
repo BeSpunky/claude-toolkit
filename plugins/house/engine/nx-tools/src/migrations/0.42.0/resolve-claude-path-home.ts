@@ -15,14 +15,14 @@
 // `<home>/.local/bin` for the user the devcontainer declares (`remoteUser`, else `containerUser`). A
 // devcontainer that declares neither gives no user to resolve: reported, left as is.
 import { type Tree, logger } from '@nx/devkit';
-import { applyEdits, findNodeAtLocation, getNodeValue, modify, parseTree } from 'jsonc-parser';
+import { parseJsoncStrict } from '../../generators/_utils/jsonc-strict';
+import { applyEdits, findNodeAtLocation, getNodeValue, modify } from 'jsonc-parser';
 import { homeOf } from '../../generators/devcontainer/compose';
 
 const TAG = '[0.42.0 resolve-claude-path-home]';
 const DEVCONTAINER = '.devcontainer/devcontainer.json';
 const BROKEN = '${containerEnv:HOME}/.local/bin';
 
-const PARSE_OPTIONS = { allowTrailingComma: true, disallowComments: false };
 const FORMAT = { insertSpaces: true, tabSize: 2, eol: '\n' };
 
 export default async function resolveClaudePathHome(tree: Tree): Promise<void> {
@@ -30,15 +30,22 @@ export default async function resolveClaudePathHome(tree: Tree): Promise<void> {
   const original = tree.read(DEVCONTAINER, 'utf8') ?? '';
   if (!original.includes(BROKEN)) return;
 
-  const root = parseTree(original, [], PARSE_OPTIONS);
-  const pathNode = root && findNodeAtLocation(root, ['remoteEnv', 'PATH']);
+  const root = parseJsoncStrict(original);
+  if (!root) {
+    logger.warn(
+      `${TAG} Left in place — ${DEVCONTAINER} mentions "${BROKEN}" but could not be parsed as JSONC. If remoteEnv.PATH ` +
+        `starts with it, replace it with "/home/<user>/.local/bin" (or "/root/.local/bin") for the user the container runs as.`,
+    );
+    return;
+  }
+  const pathNode = findNodeAtLocation(root, ['remoteEnv', 'PATH']);
   const value = pathNode ? (getNodeValue(pathNode) as unknown) : undefined;
   // Compared as a PREFIX, never by splitting on `:` — the broken entry carries a colon of its own
   // (`${containerEnv:HOME}`), and so does every `${…}` variable after it.
   if (typeof value !== 'string' || !(value === BROKEN || value.startsWith(`${BROKEN}:`))) return;
 
   const declared = ['remoteUser', 'containerUser']
-    .map((key) => (root && findNodeAtLocation(root, [key]) ? getNodeValue(findNodeAtLocation(root, [key])!) : undefined))
+    .map((key) => (findNodeAtLocation(root, [key]) ? getNodeValue(findNodeAtLocation(root, [key])!) : undefined))
     .find((user): user is string => typeof user === 'string' && user.length > 0);
   if (!declared) {
     logger.warn(

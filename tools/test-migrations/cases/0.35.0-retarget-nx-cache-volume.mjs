@@ -51,6 +51,8 @@ const BOTH = `{
 }
 `;
 
+const BROKEN_FILE = `{\n  "mounts": [ "${OLD}", \n`;
+
 export default {
   name: '0.35.0 · retarget-nx-cache-volume',
   ladder: ['0.35.0/retarget-nx-cache-volume'],
@@ -96,6 +98,11 @@ export default {
         t.occurrences(DC, CACHE, 1);
         t.occurrences(DC, DATA, 1);
       },
+    },
+    {
+      name: 'unparseable devcontainer.json: left exactly as it is (and reported)',
+      setup: (tree) => tree.write(DC, BROKEN_FILE),
+      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === BROKEN_FILE, 'a file that does not parse was edited'),
     },
     {
       name: 'no devcontainer: nothing to do',

@@ -336,7 +336,7 @@ existed to save, and it will never spontaneously stop to ask whether it should h
 policy has two halves:
 
 1. **Always-on directives, loaded into context every session** — so the mindset and the rules are never out of mind.
-2. **The skills** — the depth: `architect-mentality` (the full architect mindset), `architecture-first` (the loop, the patch smells to refuse, the redesign moves), `redesign-means-rethink` (the entry gate to the experience-design trio), `design-system-first` (the styling discipline — the promotion loop, the styling patches to refuse, modelling the missing token), `branch-and-release` (the procedure behind the branch rules — the investigation, the declared branch model, the exact commands for every gated move), `feature-package` (one effort, one slug, one folder — where every durable artifact lives, and what may be thrown away), and `delegate-and-parallelize` (the pattern catalogue, the delegated-task contract, the recursion's termination conditions, the supervision duty a parent owes its children, and the resumable ledger that lets an interrupted tree be picked up instead of re-run).
+2. **The skills** — the depth: `architect-mentality` (the full architect mindset), `architecture-first` (the loop, the patch smells to refuse, the redesign moves, the finish gate), `redesign-means-rethink` (the entry gate to the experience-design trio), `design-system-first` (the styling discipline — the promotion loop, the styling patches to refuse, modelling the missing token), `branch-and-release` (the procedure behind the branch rules — the investigation, the declared branch model, the exact commands for every gated move), `feature-package` (one effort, one slug, one folder — where every durable artifact lives, and what may be thrown away), and `delegate-and-parallelize` (the pattern catalogue, the delegated-task contract, the recursion's termination conditions, the supervision duty a parent owes its children, and the resumable ledger that lets an interrupted tree be picked up instead of re-run).
 
 **New projects** get half (1) automatically. The `bespunky-house:new` scaffold writes the directives into a generated
 **`HOUSE.rules.md`** and has `CLAUDE.md` **`@`-import** it — `@HOUSE.rules.md`, on its own line inside the
@@ -352,7 +352,7 @@ repo with no UI is not handed the redesign directive, and only a repo whose stac
 
 **Existing projects** that install the plugins should paste the canonical directives below into their
 `CLAUDE.md` (or run `/bespunky-house:upgrade` and let the engine generate both files), so the mindset, the rule, the
-redesign discipline, the design-system discipline, the branch & release rules, the packaging rule, and the delegation discipline are
+redesign discipline, the finish gate, the design-system discipline, the branch & release rules, the packaging rule, and the delegation discipline are
 always in context — each is an always-on directive paired with the depth of its skill:
 
 ```markdown
@@ -367,6 +367,17 @@ For the full mindset, think with the **`bespunky-engineering:architect-mentality
 Every change — feature, bug, edge case, or "quick fix" — is solved through **design and infrastructure, never a patch.** No special-case `if`s keyed on one input/customer/env, no magic values, no copy-paste, no boolean flags to make one unit do two things, no casts to silence a type mismatch, no bumped timeouts to mask a structural problem. **For bugs, find and fix the root cause — never mask the symptom** (no swallowed errors, defaulted bad data, or guards bolted on at the symptom site). When the current design does not account for a requirement, **redesign and refactor** the relevant seam (model the missing concept, extract, decouple, build the missing abstraction, reuse) so the new behavior is a natural case of the design — don't bolt it on. Coupling, duplication, and special-casing must never grow. **If a refactor is needed to lay infrastructure for a feature or to fix a bug, design it first, get confirmation, and only then implement** — never refactor ad hoc mid-edit; if a correct redesign is genuinely large, surface it and its cost rather than patching silently. **Backwards compatibility is never the default.** When a change breaks an old name, path, flag, contract or install, never keep the old one working on your own initiative — no deprecated alias, shim, stub, re-export, fallback reader of the old shape, or deprecation window. **Ask the user, as its own explicit question, whether anything existing needs it**; a compat layer mentioned inside a larger proposal has not been asked about. (Moving existing state forward — a migration — is not compatibility; it is owed with the change.)
 
 For any non-trivial change, invoke the **`bespunky-engineering:architecture-first`** skill before writing code — it carries the full loop, the bug root-cause and refactor gates, the patch smells to refuse, and the redesign moves.
+
+## Finish the whole job — verified where it runs (non-negotiable)
+
+**"Done" means the whole job, observed working where it runs — before it ships, not after someone finds what is left.** Before you call a change done, land it, or release it:
+
+- **Sweep every occurrence.** Whatever you rename, remove, move or replace, search the whole repo for its identifier (`git grep`) — lock files, generated files, configs and docs included — and handle every hit in the same change. Removed from one file and still pinned in another is half a job.
+- **Judge a leftover by what can still depend on it, not by whose it is.** If your change supersedes it, nothing can — remove it. Report only what something might genuinely still use.
+- **Never ship an assumption about an environment you have not observed.** An env var, a path, a user, which binary is on PATH: check it in the real target (the container, the install, the running app), not only in a fixture, and look at the outcome the user will see.
+- **Verify end to end, then release once.** Exercise the change the way its consumer receives it (the real install / upgrade / build path) and inspect the result. A follow-up fix for something that check would have shown is a process failure, not iteration.
+
+For the method — the sweep, the dependency test, observing the target — the **`bespunky-engineering:architecture-first`** skill's *Finish gate*.
 
 ## Redesign means rethink
 

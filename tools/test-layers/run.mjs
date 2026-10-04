@@ -616,6 +616,14 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
   ok(a.house.includes('**Package manager**: npm'), 'the package manager is named');
 });
 
+checkAsync('HOUSE.rules.md: the stack-agnostic directives render in a repo with NO ui layer (none hides inside a layer gate)', async (ok) => {
+  const a = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent']);
+  for (const heading of ['## Architect mentality', '## Architecture-first (non-negotiable)', '## Finish the whole job — verified where it runs (non-negotiable)', '## A feature is a package (non-negotiable)']) {
+    ok(a.rules.includes(heading), `missing from a no-UI repo's HOUSE.rules.md: ${heading}`);
+  }
+  ok(!a.rules.includes('## Redesign means rethink'), 'the ui-gated directive leaked into a repo with no ui layer');
+});
+
 checkAsync('agent: Claude Code installed ONCE, natively, before the plugin pre-install — no shadowing feature', async (ok) => {
   const a = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent']);
   ok(!Object.keys(a.dc.features).some((id) => id.includes('claude-code')), `a claude-code feature is back: ${Object.keys(a.dc.features)}`);

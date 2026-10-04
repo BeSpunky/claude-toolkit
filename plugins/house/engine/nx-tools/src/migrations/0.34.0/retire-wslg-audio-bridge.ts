@@ -37,6 +37,7 @@
 //
 // SELF-CONTAINED by the migration contract: the house literals are frozen here as 0.33.x wrote them.
 import { type Tree, logger } from '@nx/devkit';
+import { parseJsoncStrict } from '../../generators/_utils/jsonc-strict';
 import { type Node, applyEdits, findNodeAtLocation, getNodeValue, modify, parseTree } from 'jsonc-parser';
 
 const TAG = '[retire-wslg-audio-bridge]';
@@ -75,7 +76,7 @@ export default async function retireWslgAudioBridge(tree: Tree): Promise<void> {
 
   if (tree.exists(DEVCONTAINER)) {
     const original = tree.read(DEVCONTAINER, 'utf8') ?? '';
-    if (!parseTree(original, [], PARSE_OPTIONS)) {
+    if (!parseJsoncStrict(original)) {
       // Unparseable: nothing here can be located safely. Say so only if it plausibly carries the bridge.
       if (original.includes(HOUSE_MOUNT) || original.includes(HOUSE_PULSE)) {
         reports.push(`${DEVCONTAINER}: could not be parsed as JSONC, so the WSLg audio bridge in it was left as-is.`);
