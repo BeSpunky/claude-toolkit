@@ -149,6 +149,12 @@
       "layer": "agent",
       "description": "0.40.0 put `${containerEnv:HOME}/.local/bin` first in devcontainer.json `remoteEnv.PATH`, but a container's environment carries no HOME, so it resolved to `/.local/bin` and the build-time Claude Code kept shadowing the native one. Rewrites that first entry, in place, to `/home/<user>/.local/bin` (or `/root/.local/bin`) for the declared remoteUser/containerUser; a devcontainer declaring neither is reported, left as is. Any other PATH is untouched.",
       "implementation": "./src/migrations/0.42.0/resolve-claude-path-home"
+    },
+    "remove-superseded-claude-code-feature": {
+      "version": "0.43.0",
+      "layer": "agent",
+      "description": "Removes the `ghcr.io/devcontainers-extra/features/claude-code` feature (with the `//` lines explaining it) from devcontainer.json in EVERY workspace that wears the agent layer — owned or adopted. 0.40.0 removed it only from owned devcontainers; but the agent layer's post-create installs the same Claude Code natively and first on PATH, so the feature can no longer be depended on: it only adds a stale second copy. Without the agent layer it may be the only copy, and stays.",
+      "implementation": "./src/migrations/0.43.0/remove-superseded-claude-code-feature"
     }
   }
 }
