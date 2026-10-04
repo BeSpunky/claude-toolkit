@@ -75,3 +75,16 @@ above was wrong. The agent layer now uses the composer's `{{home}}` token (resol
 runs as, adopted images included), and the 0.42.0 rung `resolve-claude-path-home` rewrites the broken first
 entry in place for the declared `remoteUser`/`containerUser` (neither declared → reported). Its own first draft
 split PATH on `:` — which cuts `${containerEnv:HOME}` in half; the fixture caught it.
+
+## Follow-up — the adopted leftover was half a job (payload 0.43.0)
+
+After the rebuild worked, the old feature was still in this repo's devcontainer. The user:
+
+> "Why is it there? That's half a job. Why didn't our migrations remove it?"
+
+0.40.0 removed it only from owned devcontainers, reporting it in adopted ones as "the project may rely on it"
+(here a human wrote it, in `9c24d7e`, before the house adopted the file). Wrong test: the rule protects lines
+something may still depend on, and nothing can depend on a feature the house has superseded with a guaranteed
+native install first on PATH. The 0.43.0 rung `remove-superseded-claude-code-feature` removes it wherever the
+agent layer is present, owned or adopted — and leaves it where that layer is absent (it may be the only copy).
+CLAUDE.md's migration rules now say: the test is "might something depend on it", not "might it be theirs".
