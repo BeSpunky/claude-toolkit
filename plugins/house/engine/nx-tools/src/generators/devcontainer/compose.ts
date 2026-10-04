@@ -11,6 +11,7 @@
 //   image          the LAST contributor wins (a stack layer specialises the neutral base), with its own features
 //   features …     concatenated, first occurrence of a key wins (de-duplicated)
 //   ports          merged by number: `forward` OR-ed, label/behaviour/why from the first contributor
+//   path           ONE `remoteEnv.PATH`: every layer's directories, registry order, ahead of the image's PATH
 //   osPackages     ONE apt transaction, de-duplicated, each group commented with its `why`
 //   postCreate     pieces run by phase (prepare → OS packages → install → plugins → provision), registry order,
 //                  after ONE derived section that reclaims every volume's ownership (see `volumeOwnership`)
@@ -151,6 +152,32 @@ export function compose(
     have.why = have.why ?? port.why;
   }
 
+  // PATH is composed, never declared: a layer's own `remoteEnv.PATH` would win or lose against another's by
+  // registry order alone, dropping a directory without a word. So the field is refused, and `path` builds it.
+  const declaredPath = all('remoteEnv').find(({ item }) => (item as { name: string }).name === 'PATH');
+  if (declaredPath) {
+    throw new Error(
+      `[devcontainer] \`${declaredPath.from}\` sets remoteEnv.PATH — contribute its directories through \`path\` instead, ` +
+        'so every layer\'s entries compose into the one PATH.',
+    );
+  }
+  const pathDirs = unique(
+    all('path').map(({ item }) => ({ ...(item as { dir: string; why?: string }) })),
+    (entry) => entry.dir,
+  ).map((entry) => ({ ...entry, dir: sub(entry.dir) }));
+  const composedPath = pathDirs.length
+    ? [
+        {
+          name: 'PATH',
+          value: [...pathDirs.map((entry) => entry.dir), '${containerEnv:PATH}'].join(':'),
+          why: pathDirs
+            .filter((entry) => entry.why)
+            .map((entry) => `${entry.dir}: ${entry.why}`)
+            .join('\n') || undefined,
+        },
+      ]
+    : [];
+
   const mounts = unique(
     all('mounts').map(({ item }) => {
       const entry = item as { mount: string; ownership?: VolumeOwnership; why?: string };
@@ -175,10 +202,13 @@ export function compose(
     ),
     mounts,
     volumes: mounts.flatMap((entry) => volumeOf(entry, home)),
-    remoteEnv: unique(
-      all('remoteEnv').map(({ item }) => ({ ...(item as { name: string; value: string; why?: string }) })),
-      (entry) => entry.name,
-    ).map((entry) => ({ ...entry, value: sub(entry.value) })),
+    remoteEnv: [
+      ...composedPath,
+      ...unique(
+        all('remoteEnv').map(({ item }) => ({ ...(item as { name: string; value: string; why?: string }) })),
+        (entry) => entry.name,
+      ).map((entry) => ({ ...entry, value: sub(entry.value) })),
+    ],
     containerEnv: unique(
       all('containerEnv').map(({ item }) => ({ ...(item as { name: string; value: string; why?: string }) })),
       (entry) => entry.name,
@@ -296,7 +326,7 @@ export function renderDevcontainerJson(name: string, layers: readonly string[], 
     ],
   });
   if (c.imageFeatures.length) {
-    // The image's own features carry the runtime the others may need (claude-code installs through npm), so
+    // The image's own features carry the runtime the others may need (a feature may build on Node), so
     // they install first. Feature ids here are version-less, as the spec's examples write them.
     add(
       'overrideFeatureInstallOrder',

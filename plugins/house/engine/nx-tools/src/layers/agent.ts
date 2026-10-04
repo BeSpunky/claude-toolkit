@@ -54,14 +54,21 @@ export const agent: LayerDescriptor = {
       features: [{ id: 'ghcr.io/devcontainers/features/node:1', options: { version: '{{nodeMajor}}' } }],
       why: 'A neutral base: this repo brings no stack image. Node comes as a feature — the Nx floor and the house tooling run on it.',
     },
-    features: [
+    // NO claude-code feature. It installed a SECOND Claude Code at build time (/usr/local/bin, early on PATH)
+    // that shadowed the one `claude update` and the background auto-updater manage (~/.local/bin, late on PATH):
+    // every update reported success and changed nothing, freezing the container at its build-day version. Claude
+    // Code is installed ONCE, natively, by the `claude-code` post-create piece — the install the updater owns —
+    // and its directory is put first on PATH so no other copy can shadow it.
+    // (Its permission posture is set once in .claude/settings.json — permissions.defaultMode: "auto".)
+    path: [
       {
-        id: 'ghcr.io/devcontainers-extra/features/claude-code',
+        dir: '${containerEnv:HOME}/.local/bin',
         why:
-          "Claude's permission posture is set once in .claude/settings.json (permissions.defaultMode: \"auto\")\n" +
-          '— deliberately NOT a blanket skip here. "auto" gives frictionless auto-approval WITH the background\n' +
-          'safety classifier, the right default even in an isolated container.',
+          'the native Claude Code install, first — the copy `claude update` and the auto-updater keep current, so\n' +
+          'no other `claude` (an image\'s, a feature\'s) can shadow it.',
       },
+    ],
+    features: [
       { id: 'ghcr.io/devcontainers/features/github-cli' },
     ],
     extensions: [
@@ -92,7 +99,11 @@ export const agent: LayerDescriptor = {
       },
       { packages: ['curl'], why: 'General utilities the house tooling shells out to.' },
     ],
-    postCreate: [{ phase: 'plugins', piece: 'claude-plugins' }],
+    // Claude Code installs in `install` — after the OS packages (it needs curl), before `plugins` (which runs it).
+    postCreate: [
+      { phase: 'install', piece: 'claude-code' },
+      { phase: 'plugins', piece: 'claude-plugins' },
+    ],
   },
   // The house plugins every agent-DX project carries. The stack-specific ones arrive with their layers
   // (`nx`, `web`, `angular`, `design-system`).
