@@ -274,7 +274,15 @@ export interface DevcontainerFragment {
    * root, so the composed post-create reclaims each one before anything installs (see `VolumeOwnership`).
    */
   mounts?: readonly ({ mount: string; ownership?: VolumeOwnership } & Explained)[];
-  /** Environment for editor-spawned processes. */
+  /**
+   * Directories this layer puts IN FRONT of the image's PATH. Never a `remoteEnv` `PATH` of a layer's own: two
+   * layers each setting `PATH` would collide (first wins, the other's directory silently gone), so the composer
+   * owns the one `PATH` and builds it from every active layer's entries, in registry order, ahead of
+   * `${containerEnv:PATH}`. Written with devcontainer variables (`${containerEnv:HOME}`,
+   * `${containerWorkspaceFolder}`) so it follows whatever image and user the container actually runs.
+   */
+  path?: readonly ({ dir: string } & Explained)[];
+  /** Environment for editor-spawned processes. Never `PATH` — that is composed from `path` (above). */
   remoteEnv?: readonly ({ name: string; value: string } & Explained)[];
   /** Environment for EVERY process in the container. */
   containerEnv?: readonly ({ name: string; value: string } & Explained)[];

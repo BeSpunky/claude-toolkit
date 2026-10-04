@@ -40,8 +40,8 @@ export const node: LayerDescriptor = {
       { key: 'typescript.preferences.importModuleSpecifier', value: 'relative' },
       { key: 'typescript.updateImportsOnFileMove.enabled', value: 'always' },
     ],
+    path: [{ dir: '${containerWorkspaceFolder}/node_modules/.bin', why: "the workspace's own tool binaries, by bare name." }],
     remoteEnv: [
-      { name: 'PATH', value: '${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}' },
       {
         name: 'CHOKIDAR_USEPOLLING',
         value: 'true',

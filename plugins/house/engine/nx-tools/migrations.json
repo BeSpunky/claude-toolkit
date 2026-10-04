@@ -137,6 +137,12 @@
       "layer": "nx",
       "description": "The upgrade's transient lock directory was renamed from `.bespunky-sync.lock/` to `.bespunky-upgrade.lock/` with the `sync` → `upgrade` command. Retargets the project's .gitignore line (any spelling of it) and the house heading above it in place, because the gitignore generator only appends and would otherwise leave the dead line forever; where the new name is already ignored the old line is removed. A `.bespunky-sync.lock/` directory still in the project may belong to an older upgrade that is running, so it and its line are left and reported, never deleted.",
       "implementation": "./src/migrations/0.39.0/rename-upgrade-lock"
+    },
+    "retire-claude-code-feature": {
+      "version": "0.40.0",
+      "layer": "agent",
+      "description": "Claude Code is installed once, natively (post-create), instead of also by the `ghcr.io/devcontainers-extra/features/claude-code` feature, whose build-time copy in /usr/local/bin shadowed the one `claude update` and the auto-updater keep current — freezing every house container at its build-day version. Removes that feature (and the house comment above it) from a house-OWNED devcontainer.json; reports it, untouched, in an adopted one. Retargets the one `remoteEnv.PATH` the house ever wrote (the node layer's) to put ${containerEnv:HOME}/.local/bin first; any other PATH is reported, never edited.",
+      "implementation": "./src/migrations/0.40.0/retire-claude-code-feature"
     }
   }
 }
