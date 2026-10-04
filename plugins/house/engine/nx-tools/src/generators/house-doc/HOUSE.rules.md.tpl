@@ -17,6 +17,17 @@ Every change — feature, bug, edge case, or "quick fix" — is solved through *
 For any non-trivial change, invoke the **`bespunky-engineering:architecture-first`** skill before writing code — it carries the full loop, the bug root-cause and refactor gates, the patch smells to refuse, and the redesign moves.
 
 {{#ui}}
+## Finish the whole job — verified where it runs (non-negotiable)
+
+**"Done" means the whole job, observed working where it runs — before it ships, not after someone finds what is left.** Before you call a change done, land it, or release it:
+
+- **Sweep every occurrence.** Whatever you rename, remove, move or replace, search the whole repo for its identifier (`git grep`) — lock files, generated files, configs and docs included — and handle every hit in the same change. Removed from one file and still pinned in another is half a job.
+- **Judge a leftover by what can still depend on it, not by whose it is.** If your change supersedes it, nothing can — remove it. Report only what something might genuinely still use.
+- **Never ship an assumption about an environment you have not observed.** An env var, a path, a user, which binary is on PATH: check it in the real target (the container, the install, the running app), not only in a fixture, and look at the outcome the user will see.
+- **Verify end to end, then release once.** Exercise the change the way its consumer receives it (the real install / upgrade / build path) and inspect the result. A follow-up fix for something that check would have shown is a process failure, not iteration.
+
+For the method — the sweep, the dependency test, observing the target — the **`bespunky-engineering:architecture-first`** skill's *Finish gate*.
+
 ## Redesign means rethink
 
 When asked to **redesign** any UI — a layout, screen, page, component, or flow — treat it as a **complete creative reconception from scratch**, never a modification or reskin of what exists. The existing implementation has **zero design authority**: do **not** read it to inform the new design, and don't even look at it before conceiving the new one. Reconceive the **form** from the intent, the requirements, and the feeling; honor the **purpose** (what the thing is for, its data and functionality), which comes from the spec and the user — never reverse-engineered from the old layout. Read the existing code **only after** the new design exists — to plan what to clean up, overwrite, or migrate, and to confirm what functionality must survive — then build the new design cleanly and **remove the old**. (A *targeted tweak* — "move this button", "change this colour" — is **not** a redesign; don't inflate it into one.)

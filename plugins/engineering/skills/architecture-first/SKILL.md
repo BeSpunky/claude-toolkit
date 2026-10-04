@@ -1,7 +1,7 @@
 ---
 name: architecture-first
 description: >-
-  Architecture-first engineering discipline - solve every feature, bug, or change through design and infrastructure, never a patch. Use BEFORE writing or modifying code for any non-trivial change, and the moment you reach for a special-case `if`, a magic value, a copy-paste, a boolean flag to make one function do two things, a cast to silence a type mismatch, or a "just handle this one case" fix. For bugs, trace to and fix the ROOT CAUSE - never mask the symptom. When the current design doesn't account for a requirement, redesign and refactor the relevant seam (model the concept, extract, decouple, build the missing abstraction, reuse) so the new behavior is a natural case of the design; when a refactor is needed to add a feature or fix a bug, design it and get confirmation before implementing. Triggers - "how should I implement", "fix this bug", "find the root cause", "add this feature", "the design doesn't handle X", refactoring, or any change that would otherwise grow coupling, duplication, or tech debt.
+  Architecture-first engineering discipline - solve every feature, bug, or change through design and infrastructure, never a patch, and finish the WHOLE job, verified where it runs, before it ships. Use BEFORE writing or modifying code for any non-trivial change; the moment you reach for a special-case `if`, a magic value, a copy-paste, a boolean flag to make one function do two things, a cast to silence a type mismatch, or a "just handle this one case" fix; and BEFORE calling a change done, landing or releasing it. For bugs, fix the ROOT CAUSE, never the symptom. When the design doesn't account for a requirement, redesign the seam (model the concept, extract, decouple, build the missing abstraction); design a needed refactor and get confirmation first. Finish gate: sweep every occurrence of what changed, remove what nothing can depend on, observe the result in the real environment. Triggers - "fix this bug", "add this feature", "the design doesn't handle X", refactoring, "done", "ship it".
 ---
 
 # Architecture-First — solve by design, never patch
@@ -68,6 +68,17 @@ Then:
 - **Confirmed** → implement on the agreed design.
 - **Too large to do now** → still never patch silently. A stopgap is only ever an **explicitly accepted, ticketed, time-boxed** exception — never the default path and never an unannounced one.
 
+## The finish gate — the whole job, verified where it runs, before it ships
+
+A design can be right and the job still half-done. The gate runs before you call anything done, land it, or release it, and it exists because the cheapest moment to find what is left is *before* a consumer does. Its four checks:
+
+1. **Sweep every occurrence.** For whatever you renamed, removed, moved or replaced, search the whole repo for its identifier — `git grep '<id>'`, not just the files you were already editing. Lock files, generated files, configs, docs, fixtures, other packages' copies: every hit is either handled in this change or deliberately left with a stated reason. A feature removed from `devcontainer.json` but still pinned in `devcontainer-lock.json` is the shape of this failure.
+2. **Judge a leftover by dependency, not ownership.** "It might be theirs" is not a reason to keep something; "something might still use it" is. When your change supersedes a thing — the capability it provided is now guaranteed another way — nothing can depend on it, so it goes, whoever wrote it, gated on the guarantee being present. Report only what something might genuinely still read.
+3. **Observe the environment; never ship an assumption about it.** Env vars, paths, users, home directories, which binary wins on `PATH`, whether a tool exists: check each in the real target — the container, the install, the running app — not only in a unit fixture, which encodes your assumption rather than testing it. (`${containerEnv:HOME}` looks right in a fixture and resolves empty in every real container.) Then look at the outcome the user will actually see: `which -a <tool>`, the rendered page, the command's output.
+4. **Verify end to end, then release once.** Exercise the change the way its consumer receives it — the real install, upgrade, build or deploy path (a locally packed build of the release, not the source tree) — and inspect the result before you ship. When the consumer-side check needs a human (a container rebuild, a device), ask for it *before* the release, not after. Each follow-up fix that check would have caught is a process failure to learn from, not normal iteration.
+
+When the gate turns something up, it belongs in this change — the same commit series, the same release — not a follow-up.
+
 ## Redesign moves — the only acceptable answers to "the design doesn't handle X"
 
 - **Model the concept.** The thing you wanted to `if` on is usually a missing domain concept. Give it a type / state / strategy and let the system dispatch on it.
@@ -122,6 +133,7 @@ These sentences mean the design is missing something — never act on them, run 
 - Any refactor was designed and confirmed before implementation.
 - **No unrequested backwards compatibility** — every alias, shim, stub, re-export or deprecation window that ships was explicitly asked about and wanted by the user; otherwise the old shape is gone.
 - Coupling and duplication did not increase.
+- **The finish gate passed** — every occurrence of what changed was swept and handled (lock and generated files included), every leftover was judged by what can still depend on it, and the result was observed working in the real environment, through the path its consumer receives it, before it shipped.
 - **No new hardcoded visual value** — every colour, space, radius, type step, elevation, duration and easing came from the design system's tokens, and any UI pattern that appeared a second time was **promoted** into the design system rather than copied (`bespunky-design-system:design-system-first`).
 - Any code generic enough to serve other projects was **extracted to the shared libraries** (when reachable) or made extraction-ready and **staged as a candidate** (when sandboxed) via the house mechanism — never left inlined.
 
