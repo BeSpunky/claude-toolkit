@@ -78,7 +78,7 @@
     "PULSE_SERVER": "unix:/run/bespunky/host/pulse/native",
     // Host fact passed through (empty off WSL): only picks the voice plugin's default mic gain.
     "BESPUNKY_HOST_WSL_DISTRO": "${localEnv:WSL_DISTRO_NAME}",
-    "PATH": "${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",
+    "PATH": "${containerEnv:HOME}/.local/bin:${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}",
     "CHOKIDAR_USEPOLLING": "true",
     "CHOKIDAR_INTERVAL": "1000"
   },
