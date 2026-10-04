@@ -3,10 +3,12 @@
 import type { Register } from 'claude-code'
 import { register as branchStatus } from './branch-status.ts'
 import { register as checkpointToast } from './checkpoint-toast.ts'
+import { register as mergeGate } from './merge-gate.tsx'
 import { register as standing } from './standing.tsx'
 
 export const register: Register = (on, options) => {
   branchStatus(on, options)
   checkpointToast(on, options)
+  mergeGate(on, options)
   standing(on, options)
 }

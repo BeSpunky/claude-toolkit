@@ -22,7 +22,7 @@
       "name": "bespunky-workflow",
       "source": "./plugins/workflow",
       "description": "How work moves from idea to production, whatever is being built. branch-and-release: a declared branch model (trunk to gitflow), per-feature worktrees, human-gated moves. local-server-isolation: test servers on random free ports. feature-package: one effort, one slug, one folder of durable docs. session-handoff: relay one live effort into a fresh session. project-standing: orient in a project after a gap. delegate-and-parallelize: orchestrate budgeted subagents.",
-      "version": "0.10.2"
+      "version": "0.11.0"
     },
     {
       "name": "bespunky-engineering",

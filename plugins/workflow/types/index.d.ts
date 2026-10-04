@@ -65,12 +65,37 @@ export type Standing = {
  */
 export type StandingView = { phase: 'empty'; why: string } | { phase: 'ready'; standing: Standing }
 
+/** One move the merge gate offers: a button that queues `prompt` as the person's own. */
+export type MergeGateMove = {
+  /** Stable per move, for the button's key: `land`, `land-promote`, `push`, `promote`. */
+  id: 'land' | 'land-promote' | 'push' | 'promote'
+  label: string
+  hotkey: string
+  /** Built only from names the engine and git vouched for; never from Claude's free text. */
+  prompt: string
+}
+
+/**
+ * The merge gate (hooks/merge-gate.tsx): what Claude proposed, folded with the engine's and git's facts into
+ * the moves the person can press. `null` when no proposal is standing.
+ */
+export type MergeGate = {
+  /** What the moves act on: `feat/x → development · 3 commits`. */
+  headline: string
+  /** Claude's one line on what is ready. Free text: drawn, never a prompt. */
+  note: string
+  /** First is the main action. */
+  moves: MergeGateMove[]
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'bespunky-workflow': {
       standing: StandingView
       /** The pane lists the most recent concluded packages instead of one summary line. */
       showConcluded: boolean
+      /** The standing proposal to land or promote, until the person answers it. */
+      mergeGate: MergeGate | null
     }
   }
 }

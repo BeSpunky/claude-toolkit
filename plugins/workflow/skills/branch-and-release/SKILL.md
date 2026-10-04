@@ -81,6 +81,8 @@ Protected lines meet only through their declared moves, so they stay conflict-fr
 
 **Every move is `plan <gate>` → show the user what it will do → execute it on their signal.** Before a promotion or a ship, run `verify`; a violation means something reached a protected line outside its declared move — **stop and reconcile, never `--force`**. The engine refuses a gate the model doesn't have.
 
+**Ask for the signal with the merge gate when you have it.** When the work is done and verified and you are proposing to land it (or to promote after a landing), and a `propose_move` tool from `bespunky-workflow` is available, call it as the **last act of the turn** instead of asking in prose: the person gets one-press buttons above the prompt (Land, Land & promote, Push branch, Not yet), derived from the model. It changes nothing itself — a press arrives as the person's next prompt, and *that* is the signal to run the move. If it answers *not shown*, or the tool isn't there (mods off, headless), ask in prose.
+
 | Signal | Gate |
 | --- | --- |
 | "done / verified" | `land <work-branch>` |

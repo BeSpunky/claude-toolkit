@@ -6,13 +6,14 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { brandLine } from '../hooks/_brand.tsx'
-import { isProtected, parseStatus, parseViolations, statusLine } from '../hooks/branch-status.ts'
-import type { Model } from '../hooks/branch-status.ts'
+import { isProtected, parseStatus } from '../hooks/branch-engine.ts'
+import type { Model } from '../hooks/branch-engine.ts'
+import { parseViolations, statusLine } from '../hooks/branch-status.ts'
 
 const DECLARED = {
   state: 'declared',
   source: 'refs/heads/development',
-  projection: { schema: 1, chain: ['development', 'main'], summary: 'development → main' },
+  projection: { schema: 1, remote: 'origin', integration: 'development', chain: ['development', 'main'], summary: 'development → main' },
   protected: ['development', 'main'],
   protectedPatterns: [],
   notes: [],

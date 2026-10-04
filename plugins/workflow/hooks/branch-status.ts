@@ -23,14 +23,8 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { brandLine } from './_brand.tsx'
-
-/** What `branches.mjs status --json` said, already checked against its contract — or that it said nothing. */
-export type Model =
-  | { state: 'declared'; summary: string; protected: string[]; protectedPatterns: string[] }
-  | { state: 'undeclared'; protected: string[]; protectedPatterns: string[] }
-  | { state: 'unreadable'; reason: string; protected: string[]; protectedPatterns: string[] }
-  /** Not a git repo, no node, a crash: nothing honest to show. */
-  | { state: 'absent' }
+import { enginePath, isProtected, parseStatus } from './branch-engine.ts'
+import type { Model } from './branch-engine.ts'
 
 /** HEAD: a branch name, `detached`, or no repository at all. */
 export type Head = { kind: 'branch'; name: string } | { kind: 'detached' } | { kind: 'none' }
@@ -57,55 +51,6 @@ export function statusLine(head: Head, model: Model, violations?: number): strin
   const broken = violations ? ` · ⚠ ${violations} violation${violations === 1 ? '' : 's'}` : ''
 
   return `${where}${broken}`
-}
-
-/**
- * Whether `branch` is a protected line: a name in the set, or a match for one of its globs. The globs are
- * the engine's published form (`toGlob`: each `{x}` → `*`), matched as the PreCompact hook matches them — a
- * shell `case`, where `*` spans any characters, `/` included.
- */
-export function isProtected(branch: string, model: { protected: string[]; protectedPatterns: string[] }) {
-  return model.protected.includes(branch) || model.protectedPatterns.some(glob => globToRegExp(glob).test(branch))
-}
-
-function globToRegExp(glob: string) {
-  const source = [...glob]
-    .map(ch => (ch === '*' ? '.*' : ch === '?' ? '.' : ch.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
-    .join('')
-
-  return new RegExp(`^${source}$`)
-}
-
-/**
- * `status --json` parsed against its contract (`statusShape`). The exit code is not trusted on its own — a
- * crash exits non-zero too — so the SHAPE decides, exactly as the PreCompact hook decides.
- */
-export function parseStatus(stdout: string): Model {
-  let json: unknown
-  try {
-    json = JSON.parse(stdout)
-  } catch {
-    return { state: 'absent' }
-  }
-  const j = json as Record<string, unknown> | null
-  const isList = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string' && x !== '')
-
-  if (!j || !isList(j.protected) || !isList(j.protectedPatterns)) {
-    return { state: 'absent' }
-  }
-  const sets = { protected: j.protected, protectedPatterns: j.protectedPatterns }
-  const projection = j.projection as { summary?: unknown } | null | undefined
-
-  switch (j.state) {
-    case 'declared':
-      return typeof projection?.summary === 'string' ? { state: 'declared', summary: projection.summary, ...sets } : { state: 'absent' }
-    case 'undeclared':
-      return { state: 'undeclared', ...sets }
-    case 'unreadable':
-      return { state: 'unreadable', reason: oneLine(String(j.reason || 'cannot be read')), ...sets }
-    default:
-      return { state: 'absent' }
-  }
 }
 
 /** `verify --json`'s `violations`, or nothing when it did not answer in shape. */
@@ -233,21 +178,16 @@ async function readHead($: EngineInterface): Promise<Head> {
   return inside?.exitCode === 0 ? { kind: 'detached' } : { kind: 'none' }
 }
 
-async function readModel($: EngineInterface): Promise<Model> {
-  const ran = await run($, ['node', engine($), 'status', '--json'])
-
-  return ran ? parseStatus(ran.stdout) : { state: 'absent' }
-}
-
 async function readViolations($: EngineInterface) {
-  const ran = await run($, ['node', engine($), 'verify', '--json'], 60_000)
+  const ran = await run($, ['node', enginePath($.plugin.root), 'verify', '--json'], 60_000)
 
   return ran ? parseViolations(ran.stdout) : undefined
 }
 
-/** The branch-model engine, shipped beside this module in the same plugin. */
-function engine($: EngineInterface) {
-  return `${$.plugin.root}/skills/branch-and-release/scripts/branches.mjs`
+async function readModel($: EngineInterface): Promise<Model> {
+  const ran = await run($, ['node', enginePath($.plugin.root), 'status', '--json'])
+
+  return ran ? parseStatus(ran.stdout) : { state: 'absent' }
 }
 
 /** A host command, or nothing when it could not start (no git, no node) or overran. */
@@ -257,8 +197,4 @@ async function run($: EngineInterface, argv: string[], timeoutMs = 15_000) {
   } catch {
     return undefined
   }
-}
-
-function oneLine(text: string) {
-  return text.replace(/\s+/g, ' ').trim().replace(/[.\s]+$/, '')
 }
