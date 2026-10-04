@@ -27,7 +27,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { MergeGate, MergeGateMove } from '../types/index.d.ts'
 
 import { BrandFrame } from './_brand.tsx'
-import { enginePath, isProtected, oneLine, parseStatus } from './branch-engine.ts'
+import { enginePath, isProtected, parseStatus } from './branch-engine.ts'
 import type { Model } from './branch-engine.ts'
 
 const GATE = { plugin: 'bespunky-workflow', key: 'mergeGate' } as const
@@ -59,7 +59,7 @@ export type Facts = {
 
 /** The tool's input, checked; a string says what is wrong with it. */
 export function parseProposal(input: Record<string, unknown>): Proposal | string {
-  const note = typeof input.note === 'string' ? oneLine(input.note).slice(0, NOTE_MAX) : ''
+  const note = typeof input.note === 'string' ? input.note.replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX) : ''
 
   if (input.gate === 'land') {
     return typeof input.branch === 'string' && BRANCH.test(input.branch)
