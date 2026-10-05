@@ -42,16 +42,17 @@ The user asked to talk by voice, so a missing engine is yours to fix, not theirs
 
 - **A speech or listening engine is missing or broken** (`ask_by_voice` returns an
   `error` about text-to-speech, speech recognition, the speech detector, `parecord`
-  or `sox`) → run the installer **yourself, right away, without asking**:
-  ```
-  bash ~/.claude/bespunky-voice/install.sh
-  ```
-  Give the Bash call a 10-minute timeout: the first run downloads the natural voice
-  and builds whisper.cpp (about a minute, longer on a slow machine). It installs only
-  what isn't working, so re-running is harmless. Tell the user in one line that you're
-  setting voice up, then call `ask_by_voice` again with the same question. If it
-  exits non-zero, relay its stderr (it names what it could not install and the
-  command to do it by hand) and fall back to typed questions.
+  or `sox`) → **delegate the install, right away, without asking**: dispatch the
+  **`bespunky-voice:voice-installer`** agent (prompt: `Install both halves.`).
+  It runs the installer in its own context — the downloads and the build log never
+  reach this session, which matters when voice is switched on mid-conversation.
+  Tell the user in one line that you're setting voice up, then wait for its
+  one-line result (it takes about a minute; don't poll, don't run it yourself too):
+  - `ready: …` → call `ask_by_voice` again with the same question.
+  - `failed: …` / `not ready: …` → relay it and fall back to typed questions.
+
+  Only where you cannot dispatch an agent (you are a subagent yourself) run
+  `bash ~/.claude/bespunky-voice/install.sh` directly, with a 10-minute timeout.
 - **`ask_by_voice` is unavailable** → the MCP server isn't loaded yet. Nothing to
   install: tell the user to restart Claude Code (or `/reload-plugins`).
 - **`~/.claude/bespunky-voice/install.sh` doesn't exist** → the plugin's SessionStart

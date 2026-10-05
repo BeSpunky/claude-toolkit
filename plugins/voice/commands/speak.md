@@ -16,11 +16,14 @@ stop — do not try to run the scripts.
 
 **A missing or broken engine is yours to fix, not the user's.** Whenever an action
 reports one — no speech engine, a broken or robotic voice, speech recognition
-or the speech detector missing, no `parecord`/`sox`/audio player — run
-`bash ~/.claude/bespunky-voice/install.sh` yourself, without asking (10-minute Bash
-timeout: the first run builds whisper.cpp), then retry the action. It installs only
-what isn't working. If it exits non-zero, relay its stderr. A missing **audio
-endpoint** is a host fact it cannot install — relay that diagnosis instead.
+or the speech detector missing, no `parecord`/`sox`/audio player — dispatch the
+`bespunky-voice:voice-installer` agent without asking (prompt: `Install speak.`,
+`Install listen.`, or `Install both halves.`), so the install output stays out of
+this session. Tell the user in one line, wait for its one-line result, and on
+`ready: …` retry the action; on `failed: …` / `not ready: …` relay it. (Only if you
+cannot dispatch an agent, run `bash ~/.claude/bespunky-voice/install.sh` yourself,
+10-minute timeout.) A missing **audio endpoint** is a host fact no install fixes —
+relay that diagnosis instead.
 
 The user ran: `/speak $ARGUMENTS`
 
