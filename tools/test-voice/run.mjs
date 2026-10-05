@@ -368,6 +368,61 @@ test('install-runtime publishes scripts, prunes retired ones, and never prunes a
   assert.ok(fs.existsSync(path.join(dest, 'speaker.sh')));
 });
 
+// ---- install.sh: installs exactly what isn't working -----------------------------
+// The plugin's scripts, with the two real installers replaced by stubs that record
+// being called and lay down a working fake engine — so no network, no build.
+function installRig() {
+  const root = tmp('install');
+  const scripts = path.join(root, 'scripts');
+  const home = path.join(root, 'home');
+  const bin = path.join(root, 'bin');
+  const voice = path.join(home, '.claude', 'bespunky-voice');
+  fs.cpSync(path.join(PLUGIN, 'scripts'), scripts, { recursive: true });
+  fs.mkdirSync(bin, { recursive: true });
+  const exe = (p, body) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 }); };
+  for (const c of ['paplay', 'parecord', 'pactl', 'sox']) exe(path.join(bin, c), 'exit 0');
+  const fakePiper = () => {
+    exe(path.join(voice, 'piper', 'piper'), 'while [ $# -gt 0 ]; do [ "$1" = --output_file ] && echo wav > "$2"; shift; done; exit 0');
+    fs.mkdirSync(path.join(voice, 'voices'), { recursive: true });
+    fs.writeFileSync(path.join(voice, 'voices', 'default.onnx'), '');
+  };
+  const fakeWhisper = () => {
+    for (const b of ['whisper-cli', 'whisper-vad-speech-segments']) exe(path.join(voice, 'whisper', 'src', 'build', 'bin', b), 'exit 0');
+    fs.mkdirSync(path.join(voice, 'whisper', 'models'), { recursive: true });
+    for (const m of ['base.en', 'silero-v6.2.0']) fs.writeFileSync(path.join(voice, 'whisper', 'models', `ggml-${m}.bin`), '');
+  };
+  exe(path.join(scripts, 'install-piper.sh'), `echo piper >> "${root}/called"`);
+  exe(path.join(scripts, 'install-whisper.sh'), `echo whisper >> "${root}/called"`);
+  const run = (...args) => {
+    const r = spawnSync('bash', [path.join(scripts, 'install.sh'), ...args], { encoding: 'utf8', env: { ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
+    const called = fs.existsSync(path.join(root, 'called')) ? fs.readFileSync(path.join(root, 'called'), 'utf8').trim().split('\n') : [];
+    fs.rmSync(path.join(root, 'called'), { force: true });
+    return { ...r, called };
+  };
+  return { run, fakePiper, fakeWhisper };
+}
+test('install.sh leaves a working voice alone', () => {
+  const rig = installRig();
+  rig.fakePiper(); rig.fakeWhisper();
+  const r = rig.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.called, []);
+  assert.match(r.stdout, /^tts\tnatural/m);
+  assert.match(r.stdout, /^stt\tok/m);
+});
+test('install.sh installs only the missing half, and fails when it still does not work', () => {
+  const rig = installRig();
+  rig.fakePiper();
+  let r = rig.run();
+  assert.deepEqual(r.called, ['whisper']);
+  assert.equal(r.status, 1);                               // the stub installed nothing
+  assert.match(r.stderr, /speech recognition still missing/);
+  rig.fakeWhisper();
+  r = rig.run('speak');
+  assert.deepEqual(r.called, []);
+  assert.equal(r.status, 0, r.stderr);
+});
+
 // ---- run ------------------------------------------------------------------------
 let failed = 0;
 for (const c of cases) {

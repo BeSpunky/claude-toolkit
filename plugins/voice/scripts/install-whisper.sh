@@ -32,7 +32,7 @@ for t in git make cc curl; do
 done
 if ! command -v cmake >/dev/null 2>&1; then
   echo "[install-whisper] installing cmake (sudo apt-get)..."
-  sudo apt-get update -qq && sudo apt-get install -y -qq cmake || { echo "[install-whisper] could not install cmake" >&2; exit 1; }
+  sudo -n apt-get update -qq >/dev/null 2>&1 && sudo -n apt-get install -y -qq cmake >/dev/null 2>&1 || { echo "[install-whisper] could not install cmake" >&2; exit 1; }
 fi
 
 # --- build whisper-cli + the speech detector ---------------------------------

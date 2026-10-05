@@ -52,16 +52,16 @@ case "${1:-status}" in
     voice_tts_verdict
     case "$VOICE_TTS_HEALTH" in
       natural) echo "speech engine: piper, natural (voice $VOICE_PIPER_VOICE)" ;;
-      broken)  echo "speech engine: robotic fallback — piper is installed but $VOICE_PIPER_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install-piper.sh" ;;
-      robotic) echo "speech engine: espeak-ng, robotic ($VOICE_PIPER_PROBLEM). Natural voice: bash ~/.claude/bespunky-voice/install-piper.sh" ;;
+      broken)  echo "speech engine: robotic fallback — piper is installed but $VOICE_PIPER_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install.sh speak" ;;
+      robotic) echo "speech engine: espeak-ng, robotic ($VOICE_PIPER_PROBLEM). Natural voice: bash ~/.claude/bespunky-voice/install.sh speak" ;;
       system)  echo "speech engine: macOS say" ;;
-      none)    echo "speech engine: none — install espeak-ng, or run bash ~/.claude/bespunky-voice/install-piper.sh" ;;
+      none)    echo "speech engine: none — install one: bash ~/.claude/bespunky-voice/install.sh speak" ;;
     esac
     voice_stt_verdict
     case "$VOICE_STT_HEALTH" in
       ok)      echo "listening engine: whisper.cpp" ;;
-      broken)  echo "listening engine: broken — $VOICE_STT_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install-whisper.sh" ;;
-      missing) echo "listening engine: none — $VOICE_STT_PROBLEM. Install: bash ~/.claude/bespunky-voice/install-whisper.sh" ;;
+      broken)  echo "listening engine: broken — $VOICE_STT_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install.sh listen" ;;
+      missing) echo "listening engine: none — $VOICE_STT_PROBLEM. Install: bash ~/.claude/bespunky-voice/install.sh listen" ;;
     esac
     ;;
   *)

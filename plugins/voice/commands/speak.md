@@ -14,6 +14,14 @@ installing a plugin mid-session does not fire SessionStart). Tell the user to
 restart Claude Code or start a new session once to activate the voice plugin, then
 stop — do not try to run the scripts.
 
+**A missing or broken engine is yours to fix, not the user's.** Whenever an action
+reports one — no speech engine, a broken or robotic voice, speech recognition
+or the speech detector missing, no `parecord`/`sox`/audio player — run
+`bash ~/.claude/bespunky-voice/install.sh` yourself, without asking (10-minute Bash
+timeout: the first run builds whisper.cpp), then retry the action. It installs only
+what isn't working. If it exits non-zero, relay its stderr. A missing **audio
+endpoint** is a host fact it cannot install — relay that diagnosis instead.
+
 The user ran: `/speak $ARGUMENTS`
 
 Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
@@ -47,10 +55,8 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
   It sets the mic gain for the resolved audio endpoint, records until you stop talking,
   and prints the transcript on stdout. Take that transcript as the user's answer
   to the question you last asked them, echo it back in one line so they can catch a misrecognition ("You said:
-  …"), and then continue acting on it. If it exits non-zero (nothing recognized, STT
-  not installed, or no reachable audio endpoint), relay the stderr message and offer to retry — do NOT guess an
-  answer. If speech-to-text or the speech detector isn't installed yet, tell them to run
-  `bash ~/.claude/bespunky-voice/install-whisper.sh` once.
+  …"), and then continue acting on it. If it exits non-zero (nothing recognized, or no reachable audio endpoint), relay the stderr message and offer to retry — do NOT guess an
+  answer.
 
 - **auto on** / **auto off** — Run `bash ~/.claude/bespunky-voice/voice-auto.sh on`
   (or `off`) and report the new state. When ON, the plugin automatically speaks
@@ -60,8 +66,8 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
 - **test** — Run
   `bash ~/.claude/bespunky-voice/speaker.sh say --wait "Voice check. If you can hear this clearly, the voice plugin is working."`
   and confirm to the user whether it should have played. If it prints
-  "falling back to the robotic voice", relay the reason and the repair command
-  it names — the natural voice is installed but broken. If it fails with "no
+  "falling back to the robotic voice", the natural voice is installed
+  but broken — repair it (above) and run the check again. If it fails with "no
   reachable audio endpoint", relay that diagnosis: voice needs a reachable
   PulseAudio-protocol sink (WSLg, or the host's native PulseAudio/PipeWire),
   bridged by the BeSpunky devcontainer.
