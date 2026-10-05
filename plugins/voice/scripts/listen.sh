@@ -150,9 +150,9 @@ esac
 
 voice_stt_verdict
 [ "$VOICE_STT_HEALTH" = ok ] \
-  || { echo "bespunky-voice: speech recognition $VOICE_STT_HEALTH: $VOICE_STT_PROBLEM — run install-whisper.sh" >&2; exit 1; }
-command -v parecord >/dev/null 2>&1 || { echo "bespunky-voice: no recorder (parecord)" >&2; exit 1; }
-command -v sox      >/dev/null 2>&1 || { echo "bespunky-voice: sox required for capture" >&2; exit 1; }
+  || { echo "bespunky-voice: speech recognition $VOICE_STT_HEALTH: $VOICE_STT_PROBLEM — install it: bash ~/.claude/bespunky-voice/install.sh listen" >&2; exit 1; }
+command -v parecord >/dev/null 2>&1 || { echo "bespunky-voice: no recorder (parecord) — install it: bash ~/.claude/bespunky-voice/install.sh listen" >&2; exit 1; }
+command -v sox      >/dev/null 2>&1 || { echo "bespunky-voice: sox required for capture — install it: bash ~/.claude/bespunky-voice/install.sh listen" >&2; exit 1; }
 
 # Resolve the endpoint (exports PULSE_SERVER, sets VOICE_MIC_GAIN). Sourced from
 # this script's own dir, so it works from the plugin and the published copy.
@@ -252,7 +252,7 @@ while :; do
 
   if [ $((TICK % VAD_EVERY)) -eq 0 ] && [ "$OFF" -gt "$VAD_SIZE" ]; then
     VAD_SIZE="$OFF"
-    detect "$VAD_SIZE" || { echo "bespunky-voice: speech detector failed — re-run install-whisper.sh" >&2; exit 1; }
+    detect "$VAD_SIZE" || { echo "bespunky-voice: speech detector failed — repair: bash ~/.claude/bespunky-voice/install.sh listen" >&2; exit 1; }
     case "$DECISION" in
       go) ;;
       *) WHY="$DECISION"; break ;;

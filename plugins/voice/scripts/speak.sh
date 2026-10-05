@@ -102,7 +102,7 @@ if [ -n "$VOICE_PIPER_BIN" ]; then
     # Piper is INSTALLED but broken — the fallback below still speaks, but in the
     # robotic voice, so say why. Never degrade silently: an install that "works"
     # in the wrong voice is invisible from anywhere but the speaker.
-    echo "bespunky-voice: falling back to the robotic voice — $VOICE_PIPER_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install-piper.sh" >&2
+    echo "bespunky-voice: falling back to the robotic voice — $VOICE_PIPER_PROBLEM. Repair: bash ~/.claude/bespunky-voice/install.sh speak" >&2
   fi
 fi
 if [ "$synth_ok" = 0 ] && command -v espeak-ng >/dev/null 2>&1; then
@@ -115,7 +115,7 @@ if [ "$synth_ok" = 0 ] && command -v say >/dev/null 2>&1; then
   printf '%s' "$CLEAN" | say 2>/dev/null && exit 0
 fi
 if [ "$synth_ok" = 0 ]; then
-  echo "bespunky-voice: no working TTS engine. Install espeak-ng (Linux), use macOS 'say', or run install-piper.sh." >&2
+  echo "bespunky-voice: no working TTS engine. Install one: bash ~/.claude/bespunky-voice/install.sh speak" >&2
   exit 1
 fi
 

@@ -1,7 +1,7 @@
 ---
 name: voice-conversation
 description: >-
-  Converse hands-free by voice — Claude asks its questions OUT LOUD and waits for the user's SPOKEN answer, no keyboard. Use when the user asks to "talk by voice", "let's do this hands-free", "I'm away from the keyboard, ask me out loud", "voice chat/mode/conversation", or otherwise wants to answer your questions by speaking rather than typing. Backed by the bespunky-voice plugin's `ask_by_voice` MCP tool (needs installed TTS + STT).
+  Converse hands-free by voice — Claude asks its questions OUT LOUD and waits for the user's SPOKEN answer, no keyboard. Use when the user asks to "talk by voice", "let's do this hands-free", "I'm away from the keyboard, ask me out loud", "voice chat/mode/conversation", or otherwise wants to answer your questions by speaking rather than typing. Backed by the bespunky-voice plugin's `ask_by_voice` MCP tool (sets up its own speech engines on first use).
 ---
 
 # Voice conversation mode
@@ -35,13 +35,31 @@ The user wants to answer your questions by **voice**, hands-free. While in this 
 - Continue using voice for questions until the user says to stop ("back to text",
   "stop voice"), then resume normal questions.
 
-## If it isn't ready
+## If it isn't ready — make it ready, don't ask
 
-If `ask_by_voice` is unavailable, the MCP server likely isn't loaded yet — tell
-the user to restart Claude Code (or `/reload-plugins`). If the tool returns that
-speech-to-text or the speech detector isn't installed, have them run
-`bash ~/.claude/bespunky-voice/install-whisper.sh` once. If it reports no
-reachable audio endpoint, relay that diagnosis — voice needs a reachable
-PulseAudio-protocol sink (WSLg, or the host's native PulseAudio/PipeWire), bridged
-by the BeSpunky devcontainer; `/speak status` shows what was tried. Fall back to text
-questions until it's ready — never guess an answer.
+The user asked to talk by voice, so a missing engine is yours to fix, not theirs.
+**Never tell the user to install something you can install yourself.**
+
+- **A speech or listening engine is missing or broken** (`ask_by_voice` returns an
+  `error` about text-to-speech, speech recognition, the speech detector, `parecord`
+  or `sox`) → run the installer **yourself, right away, without asking**:
+  ```
+  bash ~/.claude/bespunky-voice/install.sh
+  ```
+  Give the Bash call a 10-minute timeout: the first run downloads the natural voice
+  and builds whisper.cpp (about a minute, longer on a slow machine). It installs only
+  what isn't working, so re-running is harmless. Tell the user in one line that you're
+  setting voice up, then call `ask_by_voice` again with the same question. If it
+  exits non-zero, relay its stderr (it names what it could not install and the
+  command to do it by hand) and fall back to typed questions.
+- **`ask_by_voice` is unavailable** → the MCP server isn't loaded yet. Nothing to
+  install: tell the user to restart Claude Code (or `/reload-plugins`).
+- **`~/.claude/bespunky-voice/install.sh` doesn't exist** → the plugin's SessionStart
+  hook hasn't run since it was installed; same fix, a restart.
+- **No reachable audio endpoint** → not installable from inside: relay that
+  diagnosis — voice needs a reachable PulseAudio-protocol sink (WSLg, or the host's
+  native PulseAudio/PipeWire), bridged by the BeSpunky devcontainer; `/speak status`
+  shows what was tried.
+
+Fall back to text questions only once the installer has failed or the problem is
+one it cannot fix — never guess an answer.
