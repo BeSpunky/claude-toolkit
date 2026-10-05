@@ -8,4 +8,4 @@ Missed what the voice said? /speak replay says it again — or just say "repeat 
 Voice talking too long? Start typing — it stops the moment you send. Or say "never mind" while it listens
 While the voice talks or listens, the band above the prompt shows it live — press r to replay, s to stop
 Voice sounding robotic? /speak status names the engine that will speak, and why — the band warns you too
-No voice engine yet? Just ask to talk by voice — Claude installs what's missing itself
+No voice engine yet? Just ask to talk by voice — a side agent installs what's missing, off your session's log
