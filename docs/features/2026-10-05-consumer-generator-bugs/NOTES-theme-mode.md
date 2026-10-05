@@ -25,3 +25,19 @@ The default mode is a DESIGN decision → its home is the design system's seeded
 read by `theme()`; the owned block stays argument-free. Open question: what the setting MEANS —
 the fallback it is today, or "what an unpinned visitor sees" (`'system'` | a fixed mode), which also
 reaches the runtime service.
+
+## Decision (2026-10-05)
+Asked: fallback-only vs "what an unpinned visitor sees". User: "Go with your recommendation" — no explicit
+recommendation had been made, so the model was chosen: **what an unpinned visitor sees**, because the fallback
+reading would fix the overwrite while leaving the setting visually inert (and a dark-first design inexpressible).
+
+- `$default-mode: 'system' | <mode>` in the seeded `_tokens.scss`; `theme()` reads it, emits
+  `--<prefix>-default-mode`, and emits the OS media blocks only for `'system'`. `theme-overrides()` and `mode()` follow it.
+- Runtime reads the custom property back (Angular `ds-default-mode.ts`, neutral `ds-mode.ts`) — the decision is never
+  restated in code. `DsRuntimeTheme.setTokens` places unpinned overrides the same way.
+- The owned block stays `ds.theme()`; its comment points at the token.
+- 0.45.0 migration `carry-default-mode-into-tokens`: carry the effective argument (stock 'light' → 'system'),
+  clear it, replace stock-0.44 mechanism files (fingerprint modulo formatting/prefix), report customised ones.
+- Road not taken: a `defaultMode` generator option persisted in a house fact file (the reporter's suggestion 1).
+  It would put a DESIGN decision in workspace config, away from the tokens the design phase owns, and give the
+  runtime nothing to read.
