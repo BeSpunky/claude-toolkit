@@ -53,8 +53,8 @@ interface DesignSystemStylesSchema {
 
 const USE_START = '/* @bespunky/design-system:use:start — generator-owned. */';
 const USE_END = '/* @bespunky/design-system:use:end */';
-const THEME_START = '/* @bespunky/design-system:theme:start — generator-owned. */';
-const THEME_END = '/* @bespunky/design-system:theme:end */';
+export const THEME_START = '/* @bespunky/design-system:theme:start — generator-owned. */';
+export const THEME_END = '/* @bespunky/design-system:theme:end */';
 
 export default async function designSystemStylesGenerator(
   tree: Tree,
