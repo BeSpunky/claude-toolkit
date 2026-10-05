@@ -22,14 +22,6 @@
 /// The custom-property namespace. `color-surface` -> `--{{tokenPrefix}}-color-surface`.
 $prefix: '{{tokenPrefix}}' !default;
 
-/// What a visitor sees until THEY choose a mode (the runtime's `setMode` / `DsTheme.mode`) — a DESIGN decision,
-/// which is why it lives here, in the one file the design phase owns, and not in an app's stylesheet:
-///   'system'  — follow the OS (`prefers-color-scheme`). The first mode in `$modes` is the fallback for a browser
-///               that states no preference.
-///   a mode    — that mode, whatever the OS says. A dark-first design is `'dark'`.
-/// `theme()` reads it; it is also emitted as `--{{tokenPrefix}}-default-mode`, which is how the runtime knows.
-$default-mode: 'system';
-
 /// Mode-INDEPENDENT tokens — identical in every mode. A space step, a radius, a duration: none of them
 /// change in the dark.
 ///

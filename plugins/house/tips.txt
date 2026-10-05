@@ -10,3 +10,5 @@ Testing a toolkit change before it's published? Add --local to an upgrade to ins
 Pick where projects live and how they link when creating one: --layout=apps-libs|packages --linking=paths|workspaces
 The row above the prompt saying your house tooling is behind has an Upgrade button — it asks Claude, never upgrades by itself
 Adding a layer is its own command: /bespunky-house:add-layer firebase — an upgrade that also creates the layer
+A dark-first design? Set $default-mode: 'dark' in the design system's _tokens.scss — 'system' follows the OS
+After an upgrade, UPGRADE_VERIFY names the one command that builds, lints and tests what it rewrote

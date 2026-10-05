@@ -108,6 +108,35 @@ export function snapshotDiff(before, after) {
 }
 
 /**
+ * The files a run WROTE (changed between two `snapshot`s) that do not even PARSE, each with its first syntax error.
+ *
+ * Every other assertion here reads generated output as TEXT, so a template that renders `'this app's …'` into a
+ * single-quoted literal passes them all and ships a workspace that no longer compiles (it did — firebase.config.ts,
+ * through four upgrades of a real project). Parsing is the floor under every fixture, so it is the HARNESS's job,
+ * like idempotence: checked for every case, for every TypeScript/JavaScript/JSON file the run touched. Only what the
+ * run wrote is checked — a fixture may well set up a broken file on purpose to test a refusal.
+ */
+export function unparseable(before, after) {
+  const ts = requireFromRepo('typescript');
+  const a = JSON.parse(before);
+  const b = JSON.parse(after);
+  const errors = [];
+  for (const [path, text] of Object.entries(b)) {
+    if (a[path] === text) continue;
+    const diagnostics = /\.json$/.test(path)
+      ? ts.parseJsonText(path, text).parseDiagnostics
+      : /\.(m|c)?(t|j)sx?$/.test(path)
+        ? ts.transpileModule(text, { fileName: path, reportDiagnostics: true }).diagnostics
+        : [];
+    const first = diagnostics?.[0];
+    if (!first) continue;
+    const at = first.file && first.start !== undefined ? first.file.getLineAndCharacterOfPosition(first.start) : null;
+    errors.push(`${path}${at ? `:${at.line + 1}:${at.character + 1}` : ''} — ${ts.flattenDiagnosticMessageText(first.messageText, ' ')}`);
+  }
+  return errors;
+}
+
+/**
  * Capture the devkit logger. Generators and migrations report to it, and that reporting is part of what they
  * are FOR — several do nothing but explain what they refused to guess at. So it is captured rather than
  * silenced: invisible while a case passes, printed under one that fails. Patching the shared logger object works

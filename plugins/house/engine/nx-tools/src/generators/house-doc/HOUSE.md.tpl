@@ -53,7 +53,7 @@ Where every visual value lives. Read `{{DS_ROOT}}/STRUCTURE.md` for the full con
 
 An unknown token name is a **compile error**, not a silently-empty `var()` — so a typo can't ship.
 
-`@include ds.theme();` is called **exactly once**, from the app's global stylesheet (the generator put it there). It emits the tokens as custom properties on `:root`, one block per mode, and honours `prefers-color-scheme` unless the user has pinned a mode.
+`@include ds.theme();` is called **exactly once**, from the app's global stylesheet (the generator put it there). It emits the tokens as custom properties on `:root`, one block per mode, and — until the user pins a mode — shows the design system's **`$default-mode`** (`styles/_core/_tokens.scss`): `'system'` follows `prefers-color-scheme`, a mode name (`'dark'`) fixes it. That is where a dark-first design says so; the call itself takes no argument, because the block around it is generator-owned.
 
 **Switching mode at runtime** — a re-binding, not a reload:
 

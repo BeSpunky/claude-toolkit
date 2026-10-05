@@ -161,6 +161,12 @@
       "layer": "agent",
       "description": "Removes every pin in .devcontainer/devcontainer-lock.json whose feature devcontainer.json no longer declares — nothing reads such a pin, and the next build drops it anyway, leaving an uncommitted diff. Cleans up after 0.40.0/0.43.0, which removed the claude-code feature from devcontainer.json but not from the lock. Skipped when devcontainer.json is missing or unreadable.",
       "implementation": "./src/migrations/0.44.0/prune-orphaned-feature-locks"
+    },
+    "carry-default-mode-into-tokens": {
+      "version": "0.45.0",
+      "layer": "design-system",
+      "description": "The design system's default mode becomes the token `$default-mode` in styles/_core/_tokens.scss ('system' follows the OS; a mode name fixes what an unpinned visitor sees), instead of an argument to the generator-owned `ds.theme()` call that every upgrade overwrote. Carries an app's `ds.theme('<mode>')` (or a non-stock mixin default) into the token and clears the argument; reports apps that disagree. Replaces the seeded _theme.scss and runtime theme files (ds-theme.service.ts, ds-runtime-theme.service.ts, or ds-mode.ts) when they are still the stock 0.44 shape, so they read it; a customised one is reported with how to re-seed it.",
+      "implementation": "./src/migrations/0.45.0/carry-default-mode-into-tokens"
     }
   }
 }

@@ -14,9 +14,9 @@ import { DsTheme } from './ds-theme.service';
  * writes the mode attribute) runs from app boot rather than from whenever the first component happens to
  * inject the theme. (This does NOT prevent a first-paint flash for a persisted explicit choice — only an
  * inline <head> script can, because it runs before paint; see `DsTheme`'s doc. For the default `'system'`
- * mode there's no flash to prevent: the CSS resolves the OS preference on its own.)
+ * mode there's no flash to prevent: the CSS resolves the design's `$default-mode` on its own.)
  *
- * It is also the seam for any future DS-wide configuration (a default mode, a brand). Keep that seam
+ * It is also the seam for any future DS-wide runtime configuration (a brand). Keep that seam
  * narrow: the design system is tokens + SASS + components, not a framework.
  */
 export function provideDesignSystem(): EnvironmentProviders {

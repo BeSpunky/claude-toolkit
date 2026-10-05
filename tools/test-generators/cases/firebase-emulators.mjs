@@ -14,6 +14,17 @@ const TEMPLATED = ['tools/emulators.sh', 'tools/push-secrets.sh', 'tools/firebas
 export default {
   name: 'firebase-emulators · the functions app follows the layout',
   cases: [
+    {
+      // Every generator-owned client config is rewritten whole on every upgrade, so a syntax error in a template is
+      // re-shipped to every Firebase app on every run with no local fix possible. The harness's parse check is the
+      // assertion; this case exists so it runs without @nx/angular, which every app-creating case here needs.
+      name: 'the client config set renders to TypeScript that parses',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        ctx.written = ctx.load('generators/firebase-emulators/service-configs').writeFirebaseConfigs(tree, 'apps/web');
+      },
+      expect: (tree, t, ctx) => t.ok(ctx.written?.[0] === 'apps/web/src/app/firebase.config.ts', `written: ${ctx.written}`),
+    },
     ...MATRIX.map((m) => ({
       name: `${m.label}: functions in <appsDir>/functions, every path derived from it`,
       setup: () => workspace(m),

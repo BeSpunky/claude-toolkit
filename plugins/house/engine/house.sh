@@ -2564,4 +2564,13 @@ else
   _voice=0
   grep -qE '"voice"[[:space:]]*:[[:space:]]*true' "$TARGET/.devcontainer/.bespunky-devcontainer.json" 2>/dev/null && _voice=1
   echo "UPGRADE_OK $TARGET ($RUNTIME_DESC layers=${_final_layers:-unknown}${_app_dir:+ app=$_app_dir} voice=$_voice backup=$BACKUP_REF)"
+  # UPGRADE_OK says the run COMPLETED, never that its output builds: the ladder and the generators rewrite source
+  # across the workspace and nothing here compiles, lints or tests it. A template that rendered a syntax error into a
+  # generator-owned file reached UPGRADE_OK in a real project on two separate runs. So the line that reads like a
+  # verdict is followed by the check it is not, scoped to exactly what this run touched (the restore point is the
+  # pre-upgrade HEAD; `affected` with no --head includes the uncommitted generator output). Only where there are
+  # Node projects to run it against.
+  if [ -n "$RESTORE_SHA" ] && printf ',%s,' "${_final_layers:-}" | grep -q ',node,'; then
+    echo "UPGRADE_VERIFY: nothing was built, linted or tested. Before landing it: $NX_RUN affected -t build lint test --base=$RESTORE_SHA"
+  fi
 fi

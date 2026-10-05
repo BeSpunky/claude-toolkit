@@ -34,43 +34,32 @@
 
 /// THE theme emission. Emits, in order:
 ///
-///   :root                              base tokens + the unpinned visitor's mode tokens + its color-scheme,
-///                                      and `--{{tokenPrefix}}-default-mode` for the runtime to read
+///   :root                              base tokens + the default mode's tokens + its color-scheme
 ///   [data-{{tokenPrefix}}-mode='<mode>']             one explicit-opt-in block per mode, each pinning its own color-scheme
-///                                      (the runtime writes this attribute)
+///                                      (the TS DsTheme signal writes this attribute)
 ///   @media (prefers-color-scheme: X)   :root:not([data-{{tokenPrefix}}-mode]) — the OS preference, per OS-named mode,
-///                                      ONLY when `$default-mode` is 'system', and only while no mode is pinned
+///                                      but ONLY while the user has not pinned a mode
 ///
-/// The `:not()` is the resolution chain in one selector: the default until the user chooses, their choice once
-/// they do, and clearing the choice hands control back to the default. The default is `tokens.$default-mode`
-/// (see `_tokens.scss`): `'system'` follows the OS, a mode name fixes it.
-@mixin theme($default-mode: tokens.$default-mode) {
-  @if $default-mode != 'system' and not map.has-key(tokens.$modes, $default-mode) {
-    @error '$default-mode `#{$default-mode}` is neither \'system\' nor a mode declared in `$modes`.';
-  }
-  // The mode an unpinned visitor's :root carries: the fixed default, or — following the OS — the first mode, for a
-  // browser that states no preference (every real one states light or dark, and the media blocks below take over).
-  $unpinned: $default-mode;
-  @if $default-mode == 'system' {
-    $unpinned: list.nth(map.keys(tokens.$modes), 1);
-  }
-
-  // BIDIRECTIONAL COMPILE-TIME PARITY GUARD. Every mode must declare EXACTLY the reference's key set — a
+/// The `:not()` is the resolution chain in one selector: OS preference by default, an explicit user
+/// choice overrides it, and clearing the choice hands control back to the OS. Works for ANY
+/// `$default-mode` — call `theme('dark')` and OS-light users still correctly get light.
+@mixin theme($default-mode: 'light') {
+  // BIDIRECTIONAL COMPILE-TIME PARITY GUARD. Every mode must declare EXACTLY the default's key set — a
   // token in one mode and not another is a broken theme, and that must be a BUILD failure, not invisible
-  // text at 11pm. We check both directions: a mode missing a reference key, AND a mode with an extra key
-  // the reference lacks (which the one-directional check used to let ship, then `ds.color()` would reject
+  // text at 11pm. We check both directions: a mode missing a default key, AND a mode with an extra key
+  // the default lacks (which the one-directional check used to let ship, then `ds.color()` would reject
   // the very token you'd just declared).
-  $reference: map.get(tokens.$modes, $unpinned);
+  $reference: map.get(tokens.$modes, $default-mode);
   @each $mode, $values in tokens.$modes {
     @each $key, $_v in $reference {
       @if not map.has-key($values, $key) {
-        @error 'Mode `#{$mode}` is missing the token `#{$key}` (declared in `#{$unpinned}`). ' +
+        @error 'Mode `#{$mode}` is missing the token `#{$key}` (declared in `#{$default-mode}`). ' +
                'Every mode must declare an identical key set.';
       }
     }
     @each $key, $_v in $values {
       @if not map.has-key($reference, $key) {
-        @error 'Mode `#{$mode}` declares `#{$key}`, which the mode `#{$unpinned}` does not. ' +
+        @error 'Mode `#{$mode}` declares `#{$key}`, which the default mode `#{$default-mode}` does not. ' +
                'Every mode must declare an identical key set — add it to every mode (a colour must exist ' +
                'in light AND dark).';
       }
@@ -79,12 +68,11 @@
 
   :root {
     @include declare(tokens.$base);
-    @include declare($reference);
-    $cs: -color-scheme-for($unpinned);
+    @include declare(map.get(tokens.$modes, $default-mode));
+    $cs: -color-scheme-for($default-mode);
     @if $cs != null {
       color-scheme: $cs;
     }
-    #{fn.var-name('default-mode')}: #{$default-mode};
   }
 
   // The explicit user choice. `DsTheme` writes `data-{{tokenPrefix}}-mode` onto <html>; this is what it binds to.
@@ -100,18 +88,16 @@
     }
   }
 
-  // The OS preference — only when the default IS the OS. One block per OS-named mode, gated on
-  // `:root:not([data-…-mode])` so an explicit choice always wins; a block for EVERY OS-named mode (not just
-  // "dark") is what keeps it right whichever mode is first in `$modes`.
-  @if $default-mode == 'system' {
-    @each $mode, $values in tokens.$modes {
-      $cs: -color-scheme-for($mode);
-      @if $cs != null {
-        @media (prefers-color-scheme: #{$cs}) {
-          :root:not([data-#{tokens.$prefix}-mode]) {
-            @include declare($values);
-            color-scheme: $cs;
-          }
+  // The OS preference — one block per OS-named mode, gated on `:root:not([data-…-mode])` so an explicit
+  // choice always wins. Emitting a block for EVERY OS-named mode (not just "dark") is what makes a
+  // non-light `$default-mode` correct.
+  @each $mode, $values in tokens.$modes {
+    $cs: -color-scheme-for($mode);
+    @if $cs != null {
+      @media (prefers-color-scheme: #{$cs}) {
+        :root:not([data-#{tokens.$prefix}-mode]) {
+          @include declare($values);
+          color-scheme: $cs;
         }
       }
     }
@@ -149,11 +135,10 @@
 /// An unknown token name is a build error, not a value that silently does nothing at 2am.
 ///
 /// It emits the same three-part structure `theme()` does, which is what makes an override survive a mode
-/// switch AND the unpinned (no-attribute) case — the two things a hand-rolled theme always gets wrong:
+/// switch AND the 'system' (no-attribute) case — the two things a hand-rolled theme always gets wrong:
 ///   :root                                                    <- $base
 ///   [data-{{tokenPrefix}}-mode='light' | 'dark']                           <- $light / $dark, when the user PINNED a mode
-///   @media (prefers-color-scheme: …) :root:not([data-…])     <- $light / $dark, unpinned, when `$default-mode` is 'system'
-///   :root:not([data-…])                                      <- the default mode's overrides, unpinned, when it is fixed
+///   @media (prefers-color-scheme: …) :root:not([data-…])     <- $light / $dark, when they're on 'system'
 @mixin theme-overrides($base: (), $light: (), $dark: ()) {
   @include -assert-known($base, '$base');
   @include -assert-known($light, '$light');
@@ -186,15 +171,9 @@
       [data-#{tokens.$prefix}-mode='#{$mode}'] {
         @include declare($values);
       }
-      // Without this block the theme silently does nothing for every user who has not pinned a mode —
-      // i.e. most of them. This is the single most-missed line in runtime theming.
-      @if tokens.$default-mode == 'system' {
-        @media (prefers-color-scheme: #{$mode}) {
-          :root:not([data-#{tokens.$prefix}-mode]) {
-            @include declare($values);
-          }
-        }
-      } @else if tokens.$default-mode == $mode {
+      // Without this block the theme silently does nothing for every user on 'system' — which is the
+      // DEFAULT, i.e. most of them. This is the single most-missed line in runtime theming.
+      @media (prefers-color-scheme: #{$mode}) {
         :root:not([data-#{tokens.$prefix}-mode]) {
           @include declare($values);
         }
@@ -241,17 +220,11 @@
 ///
 /// Uses `:host-context()` so it works inside an Angular component's (Emulated) styles — a bare
 /// `[data-…-mode] &` would be rewritten by Angular's style shim into a selector that can never match
-/// <html>. It fires when the mode is PINNED (an explicit choice), and — when `$default-mode` fixes a mode — for
-/// an unpinned visitor of that mode. An unpinned visitor whose OS drives the mode (`'system'`) has no attribute
-/// to match — for that case pair it with `@media (prefers-color-scheme)`.
+/// <html>. NOTE it fires only when the mode is PINNED (an explicit choice); a `'system'` user whose OS
+/// drives the mode has no attribute to match — for that case pair it with `@media (prefers-color-scheme)`.
 /// And if you're reaching for this to change a COLOUR, stop: that's a missing semantic token.
 @mixin mode($name) {
   :host-context([data-#{tokens.$prefix}-mode='#{$name}']) & {
     @content;
-  }
-  @if tokens.$default-mode == $name {
-    :host-context(:root:not([data-#{tokens.$prefix}-mode])) & {
-      @content;
-    }
   }
 }

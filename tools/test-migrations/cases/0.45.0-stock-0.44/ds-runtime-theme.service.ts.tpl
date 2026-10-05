@@ -1,5 +1,4 @@
 import { DOCUMENT, Injectable, computed, inject, signal } from '@angular/core';
-import { fixedDefaultMode } from './ds-default-mode';
 
 /** Token overrides: token name WITHOUT the `--{{tokenPrefix}}-` prefix (`'color-primary'`), mapped to a CSS value. */
 export type DsTokenOverrides = Record<string, string>;
@@ -70,9 +69,9 @@ export class DsRuntimeTheme {
    *
    * Emits ONE <style> element mirroring the theme's structure — deliberately not inline styles on <html>,
    * which cannot be conditional on `[data-{{tokenPrefix}}-mode]` and so would override BOTH modes with one value,
-   * freezing the theme the moment the user switches mode. Per-mode overrides also get an unpinned block —
-   * under `prefers-color-scheme` while the default follows the OS, bare for the design's fixed default mode —
-   * without which they'd silently do nothing for every user who never chose a mode, i.e. most of them.
+   * freezing the theme the moment the user switches mode. Per-mode overrides also get their
+   * `prefers-color-scheme` block, without which they'd silently do nothing for every user on 'system' —
+   * the default, i.e. most of them.
    *
    * NOTE the trade-off you are accepting: there is no compiler here. An unknown token name resolves to
    * nothing and fails silently. Keep this path small, and prefer a theme file whenever you can.
@@ -85,7 +84,6 @@ export class DsRuntimeTheme {
         .map(([key, value]) => `${PREFIX}${key}: ${value};`)
         .join(' ');
 
-    const fixed = fixedDefaultMode(this.document.documentElement);
     const rules: string[] = [];
     if (overrides.base) rules.push(`:root { ${declare(overrides.base)} }`);
 
@@ -94,9 +92,7 @@ export class DsRuntimeTheme {
       if (!tokens) continue;
       const body = declare(tokens);
       rules.push(`[data-{{tokenPrefix}}-mode='${mode}'] { ${body} }`);
-      const unpinned = `:root:not([data-{{tokenPrefix}}-mode]) { ${body} }`;
-      if (fixed === null) rules.push(`@media (prefers-color-scheme: ${mode}) { ${unpinned} }`);
-      else if (fixed === mode) rules.push(unpinned);
+      rules.push(`@media (prefers-color-scheme: ${mode}) { :root:not([data-{{tokenPrefix}}-mode]) { ${body} } }`);
     }
 
     this.styleElement().textContent = rules.join('\n');
