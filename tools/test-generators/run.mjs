@@ -65,6 +65,7 @@ import {
   resolvable,
   snapshot,
   snapshotDiff,
+  unparseable,
   captureDevkitLogger,
   treeAssertions,
 } from '../test-support/payload.mjs';
@@ -150,8 +151,10 @@ async function main() {
       try {
         const tree = await quiet(testCase.setup)(ctx);
         log.reset(); // ctx.logs is what the operation under test said, not its setup
+        const beforeRun = snapshot(tree);
         await quiet(testCase.run)(tree, ctx);
         ctx.logs = [...log.lines];
+        for (const error of unparseable(beforeRun, snapshot(tree))) failures.push(`wrote a file that does not parse: ${error}`);
         if (!testCase.once) {
           const afterFirst = snapshot(tree);
           await quiet(testCase.run)(tree, ctx); // Idempotence is the harness's job — see the header.

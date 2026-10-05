@@ -41,7 +41,7 @@
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { compilePayload, requireInstalled, requireFromRepo, snapshot, captureDevkitLogger, treeAssertions } from '../test-support/payload.mjs';
+import { compilePayload, requireInstalled, requireFromRepo, snapshot, unparseable, captureDevkitLogger, treeAssertions } from '../test-support/payload.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const only = process.argv[2];
@@ -89,6 +89,7 @@ async function main() {
       const tree = createTreeWithEmptyWorkspace();
       try {
         testCase.setup(tree);
+        const beforeLadder = snapshot(tree);
         for (const rung of testCase.ladder ?? suite.ladder) {
           const migrate = payload.load(`migrations/${rung}`).default;
           await migrate(tree);
@@ -96,6 +97,7 @@ async function main() {
           await migrate(tree); // Idempotence is the harness's job, not each fixture's. See the header.
           if (snapshot(tree) !== afterFirst) failures.push(`rung ${rung} is not idempotent — a second run changed the tree`);
         }
+        for (const error of unparseable(beforeLadder, snapshot(tree))) failures.push(`wrote a file that does not parse: ${error}`);
         testCase.expect(tree, treeAssertions(tree, failures));
       } catch (error) {
         failures.push(`threw: ${error.stack || error.message}`);
