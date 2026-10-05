@@ -1,8 +1,10 @@
 import { DOCUMENT, DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
+import { fixedDefaultMode } from './ds-default-mode';
 
 /**
- * The modes the design system ships. `'system'` means "follow the OS" — it is the ABSENCE of a choice,
- * not a third palette, which is why it maps to REMOVING the attribute rather than setting one.
+ * The modes the design system ships. `'system'` is the ABSENCE of a choice — the design system's default
+ * (`$default-mode` in `styles/_core/_tokens.scss`: the OS, unless the design fixes a mode) — not a third
+ * palette, which is why it maps to REMOVING the attribute rather than setting one.
  *
  * A new MODE (a light/dark-family palette) is added by declaring another map in
  * `styles/_core/_tokens.scss` `$modes` and widening this union — never by branching inside a component.
@@ -25,8 +27,8 @@ const MODE_ATTRIBUTE = 'data-{{tokenPrefix}}-mode';
  *
  * PERSISTENCE AND FIRST-PAINT ARE DELIBERATELY NOT HERE — and cannot be, from a service. This runs after
  * the JS bundle executes, which is after the browser has already painted the initial HTML. So:
- *   - By DEFAULT (mode `'system'`, no persistence) there is no flash: the CSS itself resolves the OS
- *     preference via `@media (prefers-color-scheme)`, before any JS, with no attribute needed.
+ *   - By DEFAULT (mode `'system'`, no persistence) there is no flash: the CSS itself resolves the design
+ *     system's `$default-mode` (and, when that follows the OS, `prefers-color-scheme`), before any JS.
  *   - If you PERSIST an explicit choice (localStorage, the user's server profile — a product decision
  *     with real trade-offs; see `bespunky-engineering:resumable-state`), you must apply it BEFORE first
  *     paint with a tiny inline `<script>` in index.html's <head>, then hydrate `mode` from the same key
@@ -37,14 +39,15 @@ const MODE_ATTRIBUTE = 'data-{{tokenPrefix}}-mode';
 export class DsTheme {
   private readonly document = inject(DOCUMENT);
 
-  /** The user's choice. `'system'` (the default) defers to `prefers-color-scheme`. */
+  /** The user's choice. `'system'` (no choice) defers to the design system's `$default-mode`. */
   readonly mode = signal<DsMode>('system');
 
   /** The OS preference, as a signal. Stays `false` during SSR, where there is no `matchMedia`. */
   private readonly prefersDark = signal(false);
 
   /**
-   * What the user actually SEES right now — `'system'` resolved against the OS preference.
+   * What the user actually SEES right now — `'system'` resolved to the design system's fixed default, or
+   * else against the OS preference.
    * NOTE: during SSR `prefersDark` is always `false`, so this returns `'light'` on the server for a
    * `'system'` user regardless of their real OS. If you branch a TEMPLATE on `resolved()`, an OS-dark
    * user gets a hydration flip — prefer styling on the tokens/`prefers-color-scheme` over reading this in
@@ -53,7 +56,7 @@ export class DsTheme {
   readonly resolved = computed<'light' | 'dark'>(() => {
     const mode = this.mode();
     if (mode !== 'system') return mode;
-    return this.prefersDark() ? 'dark' : 'light';
+    return fixedDefaultMode(this.document.documentElement) ?? (this.prefersDark() ? 'dark' : 'light');
   });
 
   constructor() {
@@ -76,8 +79,8 @@ export class DsTheme {
       const root = this.document.documentElement;
       const mode = this.mode();
 
-      // Removing the attribute is what lets the `:root:not([data-{{tokenPrefix}}-mode])` block — i.e. the OS
-      // preference — take over again. Setting it to 'system' would match nothing and silently pin the default.
+      // Removing the attribute is what lets the `:root:not([data-{{tokenPrefix}}-mode])` blocks — i.e. the
+      // design system's default — take over again. Setting it to 'system' would match nothing and silently pin the default.
       if (mode === 'system') root.removeAttribute(MODE_ATTRIBUTE);
       else root.setAttribute(MODE_ATTRIBUTE, mode);
     });

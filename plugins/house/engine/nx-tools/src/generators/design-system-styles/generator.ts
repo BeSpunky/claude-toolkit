@@ -173,7 +173,8 @@ function wireDesignSystemProvider(
  *     rule, and the app may well have `@use`s of its own further down;
  *   - the `theme()` call is APPENDED at EOF, where it is legal anywhere after the `@use`.
  * Both are upserted between their markers, so a re-run is a no-op and anything the developer wrote
- * outside them survives untouched.
+ * outside them survives untouched. Nothing a PROJECT decides lives inside them: the call takes no argument,
+ * because the default mode is a design decision with its own home — the design system's `$default-mode`.
  */
 function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: string, projectName: string): void {
   if (!stylesPath) {
@@ -192,8 +193,9 @@ function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: 
   const useBlock = `${USE_START}\n@use '${specifier}' as ds;\n${USE_END}`;
   const themeBlock =
     `${THEME_START}\n` +
-    `/* Emits the design tokens as CSS custom properties (:root + [data-*-mode] + the OS preference).\n` +
-    `   Called EXACTLY ONCE, here. Never from a component's SCSS. */\n` +
+    `/* Emits the design tokens as CSS custom properties (:root + [data-*-mode] + the default mode).\n` +
+    `   Called EXACTLY ONCE, here. Never from a component's SCSS. What a visitor sees before choosing a\n` +
+    `   mode is the design system's \$default-mode (styles/_core/_tokens.scss) — set it there, not here. */\n` +
     `@include ds.theme();\n` +
     `${THEME_END}`;
 
