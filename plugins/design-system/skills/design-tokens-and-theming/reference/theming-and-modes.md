@@ -23,6 +23,14 @@ That is the entire resolution chain, and it is expressed **in selectors**, not i
    moment it is set.
 3. **Removing the attribute** → control returns to the OS.
 
+**"No attribute" means *the design's default*, and following the OS is only the usual one.** A dark-first
+product (a cinema app, a night-sky tool) means *dark until the user says otherwise, whatever the OS says* —
+then `:root:not([data-ds-mode])` carries the dark bindings directly and the media blocks are not emitted at
+all. That default is a **design decision**, so it is a token-level fact the design system declares once
+(BeSpunky: `$default-mode` beside `$modes` — `'system'` or a mode name), never an argument passed at a call
+site an app or a generator owns. And the runtime reads it back rather than restating it, or "what does the
+user see" (`resolved()`) quietly answers *the OS* for a design that ignores it.
+
 The `:not()` is doing real work. Without it, an OS-dark user who explicitly chose *light* would get dark
 anyway, because the media query would still match `:root`.
 
@@ -138,9 +146,9 @@ Swapping is then one line (`link.href = 'theme-globex.css'`). The file wins on e
 
 **Emit the same three-part structure the theme itself uses**, or the override will half-apply: `:root` for
 mode-independent tokens, `[data-ds-mode='<mode>']` for a pinned mode, **and** the
-`@media (prefers-color-scheme: …) :root:not([data-ds-mode])` block for the OS-driven case. Miss that last
-one and the theme silently does nothing for every user on `'system'` — which is the default, i.e. **most of
-them**. (Equally: never apply a theme as *inline styles* on `<html>`. An inline value cannot be conditional
+`@media (prefers-color-scheme: …) :root:not([data-ds-mode])` block for the OS-driven case (or, when the
+design fixes its default mode, a bare `:root:not([data-ds-mode])` block for that mode). Miss that last one and
+the theme silently does nothing for every user who never pinned a mode — **most of them**. (Equally: never apply a theme as *inline styles* on `<html>`. An inline value cannot be conditional
 on the mode attribute, so it overrides both modes with one value and the theme freezes the moment the user
 switches.)
 
