@@ -374,7 +374,19 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 ## 6. Report
 
 **The upgrade is finished when it prints `UPGRADE_OK`. It does not need running again** — say so, because two or
-three passes used to be the habit and people still expect it.
+three passes used to be the habit and people still expect it. **But `UPGRADE_OK` means the run completed, not that
+the result builds** — never report it as a verification.
+
+### Verify what it rewrote — `UPGRADE_VERIFY`
+
+If the output carries an `UPGRADE_VERIFY:` line, **run the command it names** in the upgrade's tree (with the
+worktree prefix from step 4) before you report. It builds, lints and tests exactly the projects the run touched,
+measured from the pre-upgrade restore point. A failure is the most important thing in your report: say which
+target failed and in which file. If that file is one the upgrade **wrote** (a generator-owned file, or a file a
+migration named in its log), the fault is the toolkit's, not the project's — say so, and do not patch a
+generator-owned file locally (the next upgrade rewrites it); the fix belongs upstream in `@bespunky/nx-tools`.
+A target that already failed before the upgrade (check it at the restore point if unsure) is not the upgrade's —
+report it as pre-existing.
 
 ### First, close the gap the run left open — `UPGRADE_RELOAD`
 
