@@ -1,0 +1,10 @@
+# This project's own OS (Debian) packages. THIS FILE IS YOURS — created once, never regenerated.
+#
+# One package name per line (or several, space-separated); `#` starts a comment. They are installed with the
+# house's when the container image is built (.devcontainer/house.Dockerfile) — one cached Docker layer, so a rebuild
+# reinstalls nothing unless a list changed. Keep this file even when it lists nothing: the image build copies it.
+#
+# The audio tools the voice-audio-boundary spike records and inspects with (the house list already carries
+# espeak-ng + pulseaudio-utils for the voice intent). Verify the bridge: bash spikes/voice-audio-boundary/probe-audio.sh
+alsa-utils
+sox

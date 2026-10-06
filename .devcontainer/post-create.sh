@@ -2,7 +2,7 @@
 # BeSpunky devcontainer post-create.
 #
 # Runs ONCE after the container is built (or rebuilt). Owns all multi-step setup that doesn't fit cleanly as a
-# devcontainer "feature" — the project's dependencies, the Claude Code plugin pre-install, the OS packages and
+# devcontainer "feature" — the project's dependencies, the Claude Code plugin pre-install, any OS package the image lacks and
 # whatever tooling this project's LAYERS bring.
 #
 # COMPOSED, not static: every section below was contributed by one of this project's layers (nx, agent, node), and an
@@ -59,6 +59,7 @@ reclaim_volume dir "$WS/.nx"
 reclaim_volume tree "$WS/.nx/cache"
 reclaim_volume tree "$WS/.nx/workspace-data"
 reclaim_volume tree "$HOME/.config"
+reclaim_volume tree "$HOME/.local"
 reclaim_volume tree "$WS/node_modules"
 
 # --- Claude Code's account record, kept inside the persisted config dir (agent) ---
@@ -78,48 +79,17 @@ if [ ! -f "$CLAUDE_CONFIG_DIR/.claude.json" ]; then
   fi
 fi
 
-# --- The OS packages (one apt transaction, composed from this project's layers) ---
-# Every active layer's packages, grouped BY CAPABILITY so a reader can tell why any given package is here —
-# and so it leaves with the layer that needs it. Best-effort with retry: apt mirrors are occasionally flaky
-# over Docker DNS, so a transient failure only WARNS — it never aborts post-create (set -e) and leaves the
-# container half-provisioned.
-#
-# The list lives in ONE variable, so the hand-recovery command printed on failure is DERIVED from it rather
-# than retyped. Accumulated across assignments rather than declared as a bash ARRAY so each capability keeps
-# its own comment WITHOUT making the file bash-only: this script may be chained from a project's own `/bin/sh`
-# postCreateCommand (`.devcontainer/post-create.bespunky.sh`), where an array is a PARSE error that kills the
-# run at this line and skips every step below it.
-OS_PACKAGES=""
-# Durable shells. A tmux session outlives the client attached to it — the ONLY way an interactive shell
-# opened into this container from the outside survives its opener restarting (the Docker Engine API cannot
-# re-attach to an exec). No config is written on purpose: presence on PATH is the whole contract.
-OS_PACKAGES="$OS_PACKAGES tmux"
-# General utilities the house tooling shells out to.
-OS_PACKAGES="$OS_PACKAGES curl"
-
-echo "[post-create] installing OS packages:$OS_PACKAGES"
-os_apt_ok=0
-for attempt in 1 2 3; do
-  # $OS_PACKAGES is deliberately UNQUOTED: word-splitting into one argument per package is the point. Safe
-  # because every member is a Debian package name — no whitespace, no glob characters.
-  # shellcheck disable=SC2086
-  if sudo apt-get update && sudo apt-get install -y $OS_PACKAGES; then
-    os_apt_ok=1; break
-  fi
-  if [ "$attempt" -lt 3 ]; then
-    echo "[post-create] OS package install attempt $attempt/3 failed (often transient Docker DNS); retrying in $((attempt * 10))s..."
-    sleep $((attempt * 10))
-  fi
-done
-if [ "$os_apt_ok" = 1 ]; then
-  # `apt-get install -y` exiting 0 IS the check; probing one member and announcing readiness for all of them
-  # would be a false assurance.
+# --- The OS packages (the house's and .devcontainer/os-packages.txt) ---
+# They are installed when the IMAGE is built (.devcontainer/house.Dockerfile) — one cached Docker layer, so a
+# rebuild reinstalls nothing unless a list changed. This step runs the same installer, which installs only what is
+# MISSING: nothing, in a container built from the house Dockerfile; everything, in one built from an image of the
+# project's own. Best-effort: a failure WARNS — it never aborts post-create and leaves the container half-provisioned.
+if sh .devcontainer/os-packages.sh .devcontainer/os-packages.txt; then
   echo "[post-create] OS packages ready"
 else
-  echo "[post-create] WARNING: OS packages failed after 3 attempts — likely a transient network issue."
-  echo "[post-create]          The container is otherwise ready, but EVERYTHING in this one transaction is missing."
-  echo "[post-create]          Finish this one step once the network settles:"
-  echo "[post-create]            sudo apt-get update && sudo apt-get install -y$OS_PACKAGES"
+  echo "[post-create] WARNING: some OS packages could not be installed (often a transient network issue)."
+  echo "[post-create]          The container is otherwise ready. Finish this one step once the network settles:"
+  echo "[post-create]            sh .devcontainer/os-packages.sh .devcontainer/os-packages.txt"
 fi
 
 # --- The Nx wrapper's installation (nx) ---
@@ -244,40 +214,19 @@ else
   echo "[post-create] GitHub CLI not logged in yet — run \`gh auth login\` once; it persists across rebuilds"
 fi
 
-# --- Voice prerequisites (the --voice intent; self-adapts on the host audio bridge) ---
+# --- Voice: enable the plugin when host audio arrived (the --voice intent) ---
 # The bespunky-voice plugin speaks (TTS) and listens (STT) through a PulseAudio-protocol socket.
 # Voice is OPT-IN (scaffold with --voice): only then does the devcontainer carry the host probe
 # (initializeCommand) and the bind mount that lands the host's socket folder at ONE fixed
 # endpoint, /run/bespunky/host/pulse/ — WSLg, native PulseAudio and PipeWire's pulse shim alike.
 # On a host with no audio the probe mounts an empty dir instead, so the container still opens.
-# So this step self-adapts on what actually ARRIVED: a socket in that folder means there is a
-# speaker + mic to reach. When there is, install the free espeak-ng TTS floor (+ pulseaudio-utils
-# for `paplay`) and pre-install the plugin, so `/speak` works the moment the container opens.
-# Piper (the natural-voice upgrade) stays a manual, machine-local opt-in via the plugin's
-# install-piper.sh — same stance as the claude-toolkit repo's own devcontainer. Best-effort +
-# retry: a transient apt blip only warns, never aborts post-create (set -e) and leaves the
-# container half-provisioned (same stance as every other best-effort step here).
-# (`find -type s` rather than one fixed name: WSLg's own socket is called `PulseServer`, the
-# others `native`. pactl isn't installed yet — this step installs it — so it can't be the probe.)
+# Its OS packages (espeak-ng, the free speech floor, and pulseaudio-utils for `paplay`) are in the composed package
+# list — installed with the image, a cached layer — so this step only enables the plugin, and only when a socket
+# actually ARRIVED in that folder: without a speaker and mic to reach, the plugin has nothing to do. Piper (the
+# natural voice) and whisper are the plugin's own machine-local installs, kept in ~/.claude across rebuilds.
+# (`find -type s` rather than one fixed name: WSLg's own socket is called `PulseServer`, the others `native`.)
 if [ -n "$(find /run/bespunky/host/pulse/ -maxdepth 1 -type s 2>/dev/null | head -n 1)" ]; then
-  echo "[post-create] host audio socket detected (--voice) — provisioning bespunky-voice (espeak-ng + pulseaudio-utils)"
-  voice_apt_ok=0
-  for attempt in 1 2 3; do
-    if sudo apt-get update && sudo apt-get install -y pulseaudio-utils espeak-ng; then
-      voice_apt_ok=1; break
-    fi
-    if [ "$attempt" -lt 3 ]; then
-      echo "[post-create] voice apt install attempt $attempt/3 failed (often transient Docker DNS); retrying in $((attempt * 10))s..."
-      sleep $((attempt * 10))
-    fi
-  done
-  if [ "$voice_apt_ok" = 1 ]; then
-    echo "[post-create] voice engine ready (espeak-ng floor; run the plugin's install-piper.sh for the neural-voice upgrade)"
-  else
-    echo "[post-create] WARNING: voice engine install failed after 3 attempts — likely a transient network issue."
-    echo "[post-create]          The container is otherwise ready; finish this one step once the network settles with:"
-    echo "[post-create]            sudo apt-get update && sudo apt-get install -y pulseaudio-utils espeak-ng"
-  fi
+  echo "[post-create] host audio socket detected (--voice) — enabling bespunky-voice"
   # Pre-install the voice plugin at project scope so /speak is live on open. Best-effort:
   # the marketplace was added by the plugin pre-install; if that was offline, .claude/settings.json offers
   # install on first run. (The other house plugins are pre-installed by the plugin step;
