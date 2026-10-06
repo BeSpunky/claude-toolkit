@@ -27,7 +27,7 @@
 #
 # The seven brief gotchas are baked in by construction (see the inline "gotcha #N" markers):
 #   #1 software-GL flags   #2 unset Wayland   #3 Chromium from OUR pinned runtime (runtime.mjs)
-#   #4 own Xvfb not ambient :12   #5 PID-file lifecycle, never `pkill -f`   #6 validated/explicit param passing
+#   #4 own Xvnc not ambient :12   #5 PID-file lifecycle, never `pkill -f`   #6 validated/explicit param passing
 #   #7 loopback CDP
 #
 # NOTE on `set`: -u (catch typos) and pipefail (surface pipeline errors), but deliberately NOT -e —
@@ -817,39 +817,53 @@ NODE
 
 # The shared window's state over CDP. <action>: get | fullscreen | maximized. Prints "<state> <width> <height>"
 # — the window AFTER the action. Maximized or fullscreen, the window IS the desktop, so this is also the size
-# the viewer's tab currently gives it. Same runtime and env-prefix discipline as navigate_cdp (gotcha #6).
+# the viewer's tab currently gives it.
+#
+# RAW CDP on the browser endpoint (Node's built-in fetch + WebSocket), deliberately not Playwright: `status`
+# runs this, and the status line polls `status --json` every few seconds. Window state is a Browser-domain
+# question, so nothing needs to attach to a page — a Playwright connect would attach to every tab (and reset
+# download handling) on each poll, a side effect on the human's browser for the sake of a read.
+# Params travel as a real env prefix (gotcha #6).
 window_cdp() {
-  local pw_module
-  pw_module="$(node "$PW_RUNTIME" module)" || { err "window: the shared-browser Playwright runtime is unavailable"; return 1; }
-  ( cd "$WORKSPACE_ROOT" && SB_WIN_ACTION="$1" SB_CDP_URL="$CDP_URL" SB_PW_MODULE="$pw_module" node - ) <<'NODE'
-const { chromium } = require(process.env.SB_PW_MODULE);
+  ( cd "$WORKSPACE_ROOT" && SB_WIN_ACTION="$1" SB_CDP_URL="$CDP_URL" node - ) <<'NODE'
+const base = process.env.SB_CDP_URL;
 const action = process.env.SB_WIN_ACTION;
+const fail = (e) => { console.error(String((e && e.message) || e)); process.exit(1); };
 (async () => {
-  const browser = await chromium.connectOverCDP(process.env.SB_CDP_URL, { timeout: 10000 });
+  if (typeof WebSocket !== 'function') throw new Error('this Node has no built-in WebSocket (needs Node 22+)');
+  const json = async (path) => (await fetch(base + path, { signal: AbortSignal.timeout(5000) })).json();
+  const page = (await json('/json/list')).find((t) => t.type === 'page');
+  if (!page) throw new Error('the shared browser has no page open');
+  const ws = new WebSocket((await json('/json/version')).webSocketDebuggerUrl);
+  await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = () => ko(new Error('CDP websocket refused')); });
+  let seq = 0;
+  const waiting = new Map();
+  ws.onmessage = (m) => { const r = JSON.parse(m.data); waiting.get(r.id)?.(r); waiting.delete(r.id); };
+  const send = (method, params) => new Promise((ok, ko) => {
+    const id = ++seq;
+    waiting.set(id, (r) => (r.error ? ko(new Error(`${method}: ${r.error.message}`)) : ok(r.result)));
+    ws.send(JSON.stringify({ id, method, params }));
+  });
   try {
-    const ctx = browser.contexts()[0];
-    const page = ctx && ctx.pages()[0];
-    if (!page) throw new Error('the shared browser has no page open');
-    const cdp = await ctx.newCDPSession(page);
-    const { windowId } = await cdp.send('Browser.getWindowForTarget');   // the window holding this page
-    const state = async () => (await cdp.send('Browser.getWindowBounds', { windowId })).bounds;
+    const { windowId } = await send('Browser.getWindowForTarget', { targetId: page.id });   // the window holding this page
+    const bounds = async () => (await send('Browser.getWindowBounds', { windowId })).bounds;
     const set = async (windowState) => {
-      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState } });
+      await send('Browser.setWindowBounds', { windowId, bounds: { windowState } });
       // The WM applies a state change asynchronously; report it only once it has landed.
-      for (let i = 0; i < 30 && (await state()).windowState !== windowState; i++) await new Promise((r) => setTimeout(r, 100));
+      for (let i = 0; i < 30 && (await bounds()).windowState !== windowState; i++) await new Promise((r) => setTimeout(r, 100));
     };
     if (action === 'fullscreen') await set('fullscreen');
     if (action === 'maximized') {
       // Chromium refuses fullscreen → maximized directly ("restore it to normal state first").
-      if ((await state()).windowState === 'fullscreen') await set('normal');
-      if ((await state()).windowState !== 'maximized') await set('maximized');
+      if ((await bounds()).windowState === 'fullscreen') await set('normal');
+      if ((await bounds()).windowState !== 'maximized') await set('maximized');
     }
-    const b = await state();
+    const b = await bounds();
     console.log(`${b.windowState} ${b.width} ${b.height}`);
   } finally {
-    await browser.close();               // detaches only — the shared browser keeps running
+    ws.close();
   }
-})().catch((e) => { console.error(String((e && e.stack) || e)); process.exit(1); });
+})().catch(fail);
 NODE
 }
 

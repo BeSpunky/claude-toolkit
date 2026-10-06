@@ -4,7 +4,8 @@
 // its Node (CDP) helpers into tools/shared-browser/, and registers them as a workspace Nx project
 // (`shared-browser`) exposing the lifecycle verbs as targets (up|down|status|restart|clean|url|logs).
 //
-// The shared browser is ONE headed Chromium on a virtual display (Xvfb), co-driven by a human over
+// The shared browser is ONE headed Chromium on a virtual display (Xvnc, which is also the VNC server and resizes
+// to the viewer's tab), co-driven by a human over
 // noVNC (the one host-facing port — ALLOCATED per container, see the script header) and by an agent
 // over CDP (:9223, loopback), so a change
 // can be verified live in the same browser both watch. Full design: docs/shared-browser-DESIGN.md.

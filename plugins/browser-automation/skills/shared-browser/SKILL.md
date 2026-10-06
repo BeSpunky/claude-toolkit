@@ -67,6 +67,7 @@ If nobody is watching and you just need a screenshot or a scrape from a script, 
 
 - `up` is **idempotent** and **readiness-gated** — it blocks until VNC / noVNC / CDP are listening, auto-starts the recorder, and prints the noVNC URL. Never attach to a half-up stack; `status --json` is the machine-readable preflight.
 - **`withPage(fn)` is the default** — it attaches, runs `fn(page)`, and **detaches even on throw** (leak-proof). Raw `attach()` is the escape hatch for long-lived sessions; if you use it you own the `browser.close()`.
+- **The desktop follows the human's tab.** noVNC connects with `resize=remote`, so the desktop (TigerVNC `Xvnc`) is resized to exactly the viewer tab and Chromium, kept maximized by the WM, fills it: no letterboxing, no scaling blur. So the page's viewport is *whatever the human's tab is* — read it (`status --json` → `window`, or `innerWidth` in the page) rather than assuming a size, and use `viewport()` from verify.mjs when you need a specific responsive size (it emulates, independent of the desktop). For presenting, `fullscreen on` gives the page the tab's full height; `fullscreen off` before co-driving that needs the omnibox. There is no HiDPI scale option: noVNC requests the desktop in CSS pixels, so a device scale factor would only magnify (Chromium's own zoom does that).
 - `attach({ pageUrl })` selects a tab by URL pattern; `pages()` lists open tabs. **Default is the *first* open tab, which may not be the one the human is looking at** — in a multi-tab co-drive, call `pages()` and target the right one with `pageUrl` rather than assuming. Each worktree serves under its own pretty **`<slug>.localhost`** host, so address a specific worktree's tab by that hostname — `attach({ pageUrl: 'feature-x.localhost' })` — not by port (offset ports aren't forwarded, and several tabs may share bare `localhost`).
 
 ## The verify loop (the headline use)
@@ -126,11 +127,12 @@ tools/dev/dev serve [app] --worktree=<branch|slug>     # the same engine, no Nx 
 
 | Verb | Does |
 |---|---|
-| `up` | Start missing components (Xvfb→fluxbox→Chromium→x11vnc→websockify), **allocate the noVNC port**, readiness-gate all three ports, auto-start recorder, print the noVNC URL. Idempotent, `flock`-serialized, reaps stale-by-PID+cmdline before starting. |
+| `up` | Start missing components (Xvnc→fluxbox→Chromium→websockify), **allocate the noVNC port**, readiness-gate all three ports, auto-start recorder, print the noVNC URL. Idempotent, `flock`-serialized, reaps stale-by-PID+cmdline before starting. |
 | `navigate --url=<u> [--wait]` | Ensure up; with `--wait`, poll `<u>` until it answers; navigate the shared browser via CDP. (The single primitive the house dev loop composes when it brings the browser up — there is no `codrive` verb.) |
 | `observe` | Enter **observe-only** — attach/verify/recorder refuse to navigate/click/type and log "observe-only — human is driving". Use before handing the human an interactive step (OAuth / captcha). Flag persists in `SB_RUNTIME`. |
 | `resume` | Clear observe-only — Claude may drive again. |
-| `status [--json]` | Per-component up/down + ports + URL, **and the observe-only mode**. `--json` = machine-readable preflight. |
+| `fullscreen on\|off` | `on` hides Chromium's tabs + omnibox so the page gets the whole desktop (presenting); `off` brings them back, maximized (co-driving). Window-only, so it works in observe-only too. |
+| `status [--json]` | Per-component up/down + ports + URL, **the observe-only mode**, and the live **window** (`{state, width, height}` — maximized/fullscreen, it is the viewer tab's size). `--json` = machine-readable preflight. |
 | `url` | Print the noVNC URL — **the single source of truth**; hand this to the human rather than composing a URL. |
 | `logs [component] [--since=<ts>] [--level=<lvl>]` | Tail a component log, or the filtered recorder JSONL. |
 | `down` | Graceful `SIGTERM`→`SIGKILL` via PID files; verify ports freed. **Never pattern-kills.** |
@@ -174,9 +176,9 @@ These seven cost a debug cycle each in the prototype. The CLI bakes in every fix
 | # | Symptom | Cause | Already fixed by |
 |---|---|---|---|
 | 1 | `page.screenshot` → `Unable to capture screenshot` (headed launch OK) | Headed Chromium composites via the GPU process; container has no GPU | `--disable-gpu --use-gl=swiftshader --in-process-gpu` |
-| 2 | `x11vnc` exits immediately, log says *"Wayland sessions … Exiting"* | Devcontainer exports a VS Code `WAYLAND_DISPLAY`; x11vnc refuses to serve the X11 Xvfb | `unset WAYLAND_DISPLAY XDG_SESSION_TYPE` for the whole stack |
-| 3 | `xvfb-run` → `xauth command not found` | `xauth` not in the base image | Start `Xvfb` manually (no auth cookie), or `apt-get install xauth` |
-| 4 | A pre-existing `DISPLAY=:12` exists; browsers launch on it but screenshots fail | It's an off-screen/unmapped compositor surface, not a real framebuffer | Always run our **own** `Xvfb`; don't rely on the ambient `:12` |
+| 2 | (prototype, on x11vnc) the VNC server exits immediately, log says *"Wayland sessions … Exiting"* | Devcontainer exports a VS Code `WAYLAND_DISPLAY`; X11 clients may pick the editor's Wayland socket | `unset WAYLAND_DISPLAY XDG_SESSION_TYPE` for the whole stack |
+| 3 | `xvfb-run` → `xauth command not found` | `xauth` not in the base image | Start the X server (`Xvnc`) directly, no auth cookie — never through a `*-run` wrapper |
+| 4 | A pre-existing `DISPLAY=:12` exists; browsers launch on it but screenshots fail | It's an off-screen/unmapped compositor surface, not a real framebuffer | Always run our **own** `Xvnc` display; don't rely on the ambient `:12` |
 | 5 | `pkill -f "Xvfb :99"` killed the shell running it (exit 144) | `pkill -f` matches the killer's own command line | **PID-file lifecycle, never pattern-kill** (bracket trick if forced) |
 | 6 | Screenshot written to `…/undefined/…` | `NAME=val` after `node -e '…'` is a positional arg, not an env var | Pass params via `argv` or a real env prefix; validate output paths |
 | 7 | (Approach A only) CDP connect from container rejected | Chrome DevTools Host-header guard + loopback-only bind | Non-issue for approach B (loopback CDP); documented so nobody re-hits it |

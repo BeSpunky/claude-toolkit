@@ -171,10 +171,11 @@ export const web: LayerDescriptor = {
     ],
     osPackages: [
       {
-        packages: ['xvfb', 'x11vnc', 'novnc', 'websockify', 'fluxbox', 'fonts-liberation', 'fonts-noto-color-emoji'],
+        packages: ['tigervnc-standalone-server', 'novnc', 'websockify', 'fluxbox', 'fonts-liberation', 'fonts-noto-color-emoji'],
         why:
-          'The shared browser: a headed Chromium on a virtual X display, streamed over noVNC. xvfb = the display;\n' +
-          'x11vnc = the VNC server; novnc + websockify = the web client and its bridge; fluxbox = a minimal WM;\n' +
+          'The shared browser: a headed Chromium on a virtual X display, streamed over noVNC.\n' +
+          'tigervnc-standalone-server = Xvnc, the display AND its VNC server, so the viewer can resize it;\n' +
+          'novnc + websockify = the web client and its bridge; fluxbox = a minimal WM that keeps Chromium maximized;\n' +
           'fonts so rendered pages and screenshots look right.',
       },
       {
