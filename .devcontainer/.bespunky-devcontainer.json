@@ -29,6 +29,12 @@
           "mounts"
         ],
         "member": "source=${localWorkspaceFolderBasename}-local,target=/home/node/.local,type=volume"
+      },
+      {
+        "path": [
+          "mounts"
+        ],
+        "member": "source=${localWorkspaceFolderBasename}-cache,target=/home/node/.cache,type=volume"
       }
     ]
   }

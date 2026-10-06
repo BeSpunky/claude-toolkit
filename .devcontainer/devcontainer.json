@@ -96,7 +96,8 @@
     "source=${localWorkspaceFolderBasename}-nx-cache,target=${containerWorkspaceFolder}/.nx/cache,type=volume",
     "source=${localWorkspaceFolderBasename}-nx-workspace-data,target=${containerWorkspaceFolder}/.nx/workspace-data,type=volume",
     "source=${localWorkspaceFolderBasename}-config,target=/home/node/.config,type=volume",
-    "source=${localWorkspaceFolderBasename}-local,target=/home/node/.local,type=volume"
+    "source=${localWorkspaceFolderBasename}-local,target=/home/node/.local,type=volume",
+    "source=${localWorkspaceFolderBasename}-cache,target=/home/node/.cache,type=volume"
   ],
   "otherPortsAttributes": {
     "onAutoForward": "silent"

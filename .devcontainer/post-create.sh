@@ -60,6 +60,7 @@ reclaim_volume tree "$WS/.nx/cache"
 reclaim_volume tree "$WS/.nx/workspace-data"
 reclaim_volume tree "$HOME/.config"
 reclaim_volume tree "$HOME/.local"
+reclaim_volume tree "$HOME/.cache"
 reclaim_volume tree "$WS/node_modules"
 
 # --- Claude Code's account record, kept inside the persisted config dir (agent) ---
