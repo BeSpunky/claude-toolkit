@@ -26,10 +26,19 @@
 #   success (0): PULSE_SERVER exported to the winner; VOICE_ENDPOINT (the server
 #                string), VOICE_ENDPOINT_VIA (which candidate won),
 #                VOICE_MIC_GAIN, VOICE_MIC_GAIN_WHY set.
-#   failure (1): VOICE_ENDPOINT_DIAGNOSIS holds a multi-line explanation — every
-#                candidate tried, why it failed, and what to do. Nothing is
-#                printed; the caller decides whether the failure matters (macOS
-#                `say`/afplay need no PulseAudio at all).
+#   failure (1): VOICE_ENDPOINT_DIAGNOSIS holds a multi-line explanation — the
+#                CAUSE and its fix first, then every candidate tried and why it
+#                failed. Nothing is printed; the caller decides whether the
+#                failure matters (macOS `say`/afplay need no PulseAudio at all).
+#
+#   voice_audio_verdict → can this machine PLAY and HEAR at all, as one word in
+#                VOICE_AUDIO_HEALTH (VOICE_AUDIO_PROBLEM says why, one line):
+#                  ok           a PulseAudio-protocol endpoint answered
+#                  native       none, but macOS plays natively (speaks; cannot listen)
+#                  unreachable  nothing will reach a speaker — and no engine
+#                               install can change that: it is a fact about the
+#                               host and the container, so it is judged BEFORE any
+#                               engine, and reported beside the engines' health.
 #
 # Run directly (not sourced) it prints the resolution — a one-line diagnostic.
 
@@ -57,6 +66,42 @@ _voice_probe_server() {
   return 0
 }
 
+# The devcontainer bridge: where a BeSpunky devcontainer with voice turned on
+# mounts the host's audio socket folder (the house devcontainer generator's voice
+# fragment). Absent = this container was built without voice.
+_VOICE_BRIDGE=/run/bespunky/host/pulse
+
+_voice_in_container() { [ -f /.dockerenv ] || [ -f /run/.containerenv ] || [ -n "${REMOTE_CONTAINERS:-}${CODESPACES:-}" ]; }
+
+# WHY no endpoint answered, as the one sentence a person acts on — most specific
+# first. Engines are never the answer here: this runs only when there is nowhere
+# to send sound, which no install can fix.
+#
+# Inside a container the cause is almost always the project's devcontainer, and
+# the house records its voice INTENT in the committed ownership marker
+# (.devcontainer/.bespunky-devcontainer.json, "voice": true — the record the
+# house engine itself reads back on every upgrade). So "voice is off for this
+# project" is a fact we can read, not a guess.
+_voice_audio_cause() {
+  local root marker intent=""
+  root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+  marker="${root:+$root/.devcontainer/.bespunky-devcontainer.json}"
+  if [ -n "$marker" ] && [ -f "$marker" ]; then
+    if grep -qE '"voice"[[:space:]]*:[[:space:]]*true' "$marker"; then intent=on; else intent=off; fi
+  fi
+  if _voice_in_container && [ "$intent" = off ]; then
+    echo "voice is turned off for this project's devcontainer, so the container has no link to this computer's audio. Turn it on with /bespunky-house:upgrade --voice, then rebuild the container"
+  elif [ -d "$_VOICE_BRIDGE" ]; then
+    echo "the devcontainer's audio link is in place, but this computer had no audio server for it when the container opened. Make sure sound works on the host (WSLg on Windows, PulseAudio or PipeWire on Linux), then reopen the container"
+  elif _voice_in_container && [ "$intent" = on ]; then
+    echo "voice is turned on for this project, but this container was built before that. Rebuild the container"
+  elif _voice_in_container; then
+    echo "this container has no link to this computer's audio. In a BeSpunky devcontainer, turn voice on with /bespunky-house:upgrade --voice and rebuild; otherwise bridge a PulseAudio socket in and point PULSE_SERVER at it"
+  else
+    echo "no PulseAudio or PipeWire server is answering for this user. Start one (pactl info should answer), or point PULSE_SERVER at a reachable server"
+  fi
+}
+
 voice_resolve_endpoint() {
   local runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u 2>/dev/null || echo 0)}"
   local -a labels=() servers=()
@@ -64,13 +109,13 @@ voice_resolve_endpoint() {
     labels+=("\$PULSE_SERVER"); servers+=("$PULSE_SERVER")
   fi
   labels+=("devcontainer bridge" "devcontainer bridge (WSLg socket)" "WSLg (container not rebuilt)" "host session")
-  servers+=("unix:/run/bespunky/host/pulse/native" \
-            "unix:/run/bespunky/host/pulse/PulseServer" \
+  servers+=("unix:$_VOICE_BRIDGE/native" \
+            "unix:$_VOICE_BRIDGE/PulseServer" \
             "unix:/mnt/wslg/PulseServer" \
             "unix:$runtime/pulse/native")
 
   local tried="" seen=" " i server reason
-  VOICE_ENDPOINT="" VOICE_ENDPOINT_VIA="" VOICE_ENDPOINT_DIAGNOSIS=""
+  VOICE_ENDPOINT="" VOICE_ENDPOINT_VIA="" VOICE_ENDPOINT_DIAGNOSIS="" VOICE_AUDIO_CAUSE=""
   for i in "${!servers[@]}"; do
     server="${servers[$i]}"
     # Normalize a bare path to the unix: form so duplicates collapse.
@@ -87,12 +132,9 @@ voice_resolve_endpoint() {
   done
 
   if [ -z "$VOICE_ENDPOINT" ]; then
-    VOICE_ENDPOINT_DIAGNOSIS="bespunky-voice: no reachable audio endpoint (a PulseAudio-protocol server). Tried, in order:$tried
-To fix:
-  - In a BeSpunky devcontainer: enable voice (house.sh upgrade --voice <project>) and rebuild the
-    container, so the host's PulseAudio socket is bridged to /run/bespunky/host/pulse.
-  - On a Linux host: make sure PulseAudio or PipeWire-pulse is running for your user (pactl info).
-  - Elsewhere: point PULSE_SERVER at a reachable server (unix:/path/to/native, or tcp:host:port)."
+    VOICE_AUDIO_CAUSE="$(_voice_audio_cause)"
+    VOICE_ENDPOINT_DIAGNOSIS="bespunky-voice: no audio connection — $VOICE_AUDIO_CAUSE.
+No installed engine can change this. Audio servers tried, in order:$tried"
     return 1
   fi
   export PULSE_SERVER="$VOICE_ENDPOINT"
@@ -108,6 +150,15 @@ To fix:
     VOICE_MIC_GAIN="$BESPUNKY_VOICE_MIC_GAIN"; VOICE_MIC_GAIN_WHY="BESPUNKY_VOICE_MIC_GAIN"
   else
     VOICE_MIC_GAIN="$default_gain"; VOICE_MIC_GAIN_WHY="$why"
+  fi
+  return 0
+}
+
+voice_audio_verdict() {
+  VOICE_AUDIO_PROBLEM=""
+  if voice_resolve_endpoint; then VOICE_AUDIO_HEALTH=ok
+  elif command -v afplay >/dev/null 2>&1; then VOICE_AUDIO_HEALTH=native
+  else VOICE_AUDIO_HEALTH=unreachable VOICE_AUDIO_PROBLEM="no audio connection — $VOICE_AUDIO_CAUSE"
   fi
   return 0
 }

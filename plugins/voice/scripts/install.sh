@@ -18,12 +18,19 @@
 # OS packages come from apt-get, through `sudo -n` — never a password prompt
 # nobody can answer. Where that is unavailable the missing package is NAMED.
 #
-# Output: progress on stdout; last, the two health lines voice-health.sh prints.
-# Exit 0 when every requested half works afterwards, 1 otherwise (stderr says why).
+# Output: progress on stdout; last, the health lines voice-health.sh prints.
+# Exit (stderr says why):
+#   0  every requested half works — voice is READY
+#   1  an engine still does not work after the install
+#   3  the engines work, but there is no audio connection — NOT ready, and no
+#      install can make it so (see below). Never reported as ready: working
+#      engines with nowhere to send sound are not a working voice.
 # A whisper build takes a few minutes the first time.
 #
 # What it cannot install: an audio endpoint. Voice needs a reachable
 # PulseAudio-protocol sink — a fact about the host, bridged by the devcontainer.
+# The engines are still installed when it is missing (they are what the voice
+# needs once the connection exists), but the verdict says what is in the way.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,6 +96,7 @@ done
 # The verdict after the work — the same one the band and /speak status show.
 health="$(bash "$HERE/voice-health.sh")"
 echo "$health"
+audio="$(awk -F'\t' '$1=="audio"{print $2}' <<<"$health")"
 tts="$(awk -F'\t' '$1=="tts"{print $2}' <<<"$health")"
 stt="$(awk -F'\t' '$1=="stt"{print $2}' <<<"$health")"
 rc=0
@@ -101,4 +109,10 @@ for t in "${targets[@]}"; do
               || { echo "bespunky-voice: still missing parecord or sox" >&2; rc=1; } ;;
   esac
 done
+# Only once the engines are settled: an engine failure is the more actionable news.
+if [ "$rc" = 0 ] && [ "$audio" = unreachable ]; then
+  voice_audio_verdict
+  echo "bespunky-voice: the speech engines are installed, but voice is not ready — $VOICE_AUDIO_PROBLEM" >&2
+  rc=3
+fi
 exit "$rc"

@@ -182,7 +182,7 @@ export async function askByVoice({ question, options }, ask) {
 
     if (!transcript && heard.code === STOPPED) return stoppedResult;
     if (!transcript) {
-      // listen.sh explains its own failures on stderr (no reachable audio endpoint,
+      // listen.sh explains its own failures on stderr (no audio connection,
       // STT not installed, nothing recognized) — pass that through verbatim.
       return {
         transcript: '',

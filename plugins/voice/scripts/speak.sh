@@ -61,11 +61,14 @@ CLEAN="$(printf '%s' "$TEXT" | tr '\n\t' '  ' | sed -E \
 VOICE_HOME="${HOME}/.claude/bespunky-voice"
 
 # Sourced from this script's own dir, so it works from the plugin and from the
-# published copy in $VOICE_HOME alike. A miss is NOT fatal here: macOS say/afplay
-# need no PulseAudio — the diagnosis is only printed if playback then fails.
+# published copy in $VOICE_HOME alike. Judged FIRST, before any engine: with
+# nowhere to send sound, the true answer is the missing audio connection — never
+# "no speech engine", which would send someone to install engines that cannot
+# help. (macOS plays without PulseAudio, so a miss there is not fatal.)
 # shellcheck source=audio-endpoint.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/audio-endpoint.sh"
-voice_resolve_endpoint || true
+voice_audio_verdict
+[ "$VOICE_AUDIO_HEALTH" != unreachable ] || { echo "$VOICE_ENDPOINT_DIAGNOSIS" >&2; exit 1; }
 
 # Where Piper lives, and which voice — resolved by the helper that also knows
 # how to tell a working install from a merely present one.
