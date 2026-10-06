@@ -10,6 +10,20 @@
   "adopted": {
     "note": "This devcontainer.json was written by the project, not by this generator, so house settings are only ADDED, never changed. The keys below already had project values and were left alone — apply any of them by hand if you want the house behaviour. `houseAdded` is what the house ADDED here — the record that lets a later migration clean up after the house without guessing (an entry counts only while the file still holds it exactly; change or remove one and it is yours).",
     "skipped": [],
-    "houseAdded": []
+    "houseAdded": [
+      {
+        "path": [
+          "containerEnv",
+          "CLAUDE_CONFIG_DIR"
+        ],
+        "value": "/home/node/.claude"
+      },
+      {
+        "path": [
+          "mounts"
+        ],
+        "member": "source=${localWorkspaceFolderBasename}-config,target=/home/node/.config,type=volume"
+      }
+    ]
   }
 }
