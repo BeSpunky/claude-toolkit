@@ -373,15 +373,32 @@ spawn() {
   say "started $comp (pid $(cat "$pidf" 2>/dev/null || echo '?')) → $logf"
 }
 
-# Stop one component by its PID file: SIGTERM, grace-poll, then SIGKILL. Only ever touches a process
-# that is STILL ours (alive + matching cmdline) — a stale/recycled pid is simply forgotten, never killed.
+# A component's OWN way of exiting, tried before any signal. Only Chromium has one, and it is what keeps a
+# login: Chromium reads SIGTERM as the OS session ending and exits WITHOUT flushing its cookie store, which
+# it otherwise writes only every ~30 s — so a sign-in completed in the last half-minute before `down` was
+# lost (observed: a cookie set 1 s before a SIGTERM was gone on the next `up`; after Browser.close it was
+# kept). Browser.close is a user quit: cookies, storage and the profile are written out. Returns non-zero
+# when it could not ask, so the caller falls through to the signals.
+stop_gracefully() {
+  case "$1" in
+    chrome) window_cdp close 5000 >/dev/null 2>&1 ;;
+    *)      return 1 ;;
+  esac
+}
+
+# Stop one component by its PID file: its own exit (stop_gracefully), else SIGTERM, grace-poll, then SIGKILL.
+# Only ever touches a process that is STILL ours (alive + matching cmdline) — a stale/recycled pid is simply
+# forgotten, never killed.
 kill_component() {
   local comp="$1" pidf pid t
   pidf="$(pid_file "$comp")"
   [ -f "$pidf" ] || return 0
   pid="$(cat "$pidf" 2>/dev/null || true)"
   if [ -n "$pid" ] && proc_alive "$pid" && proc_matches "$pid" "$(component_sig "$comp")"; then
-    kill -TERM "$pid" 2>/dev/null || true
+    if stop_gracefully "$comp"; then
+      for ((t=0; t<SB_KILL_GRACE_TICKS; t++)); do proc_alive "$pid" || break; sleep 0.1; done
+    fi
+    proc_alive "$pid" && kill -TERM "$pid" 2>/dev/null
     for ((t=0; t<SB_KILL_GRACE_TICKS; t++)); do proc_alive "$pid" || break; sleep 0.1; done
     if proc_alive "$pid"; then
       kill -KILL "$pid" 2>/dev/null || true
@@ -506,6 +523,27 @@ FLUXBOX
   : > "$dir/menu"
 }
 
+# What Chromium opens at start, stated in the profile rather than left to its default — because its default,
+# in the builds this runs, is "continue where you left off": every start restored the previous session AND
+# opened the about:blank it is launched with, so each down/up cycle added a tab (1, 2, 3 …), however cleanly
+# it was closed. session.restore_on_startup = 5 is "open the given URLs / a new tab", so a start opens exactly
+# the one tab. Only that key is touched — cookies, logins and storage live elsewhere in the profile and
+# persist. Written while Chromium is down (it rewrites the file on exit), merged into whatever is there.
+write_browser_prefs() {
+  SB_PREFS="$PROFILE/Default/Preferences" node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const file = process.env.SB_PREFS;
+let prefs = {};
+try { prefs = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* fresh profile (or unreadable): start from {} */ }
+if (prefs.session?.restore_on_startup === 5) process.exit(0);
+prefs.session = { ...prefs.session, restore_on_startup: 5 };
+fs.mkdirSync(path.dirname(file), { recursive: true });
+fs.writeFileSync(file + '.sb-tmp', JSON.stringify(prefs));
+fs.renameSync(file + '.sb-tmp', file);
+NODE
+}
+
 # Before starting a ported component that isn't running-as-ours, make sure its port is either free or
 # an OUR orphan we can reclaim. A foreign holder aborts `up` (we neither start over it nor kill it).
 preflight_ports() {
@@ -619,6 +657,7 @@ up_locked() {
   #    a "only for automated testing" bar over every page, 56 px of the human's view. (Not --enable-automation:
   #    that sets navigator.webdriver, which real sign-in providers refuse.)
   if ! component_running chrome; then
+    write_browser_prefs || err "warning: could not set the profile's startup behaviour — tabs may be restored"
     spawn chrome "$chrome_bin" \
       --remote-debugging-port="$SB_CDP" --remote-debugging-address=127.0.0.1 \
       --user-data-dir="$PROFILE" --no-sandbox --no-first-run --no-default-browser-check \
@@ -815,9 +854,9 @@ const timeout = Number(process.env.SB_NAV_TIMEOUT_MS) || 30000;
 NODE
 }
 
-# The shared window's state over CDP. <action>: get | fullscreen | maximized. Prints "<state> <width> <height>"
-# — the window AFTER the action. Maximized or fullscreen, the window IS the desktop, so this is also the size
-# the viewer's tab currently gives it.
+# The shared window over CDP. <action>: get | fullscreen | maximized → prints "<state> <width> <height>", the
+# window AFTER the action (maximized or fullscreen, the window IS the desktop, so this is also the size the
+# viewer's tab currently gives it); close → Browser.close, the quit `down` uses (see stop_gracefully).
 #
 # RAW CDP on the browser endpoint (Node's built-in fetch + WebSocket), deliberately not Playwright: `status`
 # runs this, and the status line polls `status --json` every few seconds. Window state is a Browser-domain
@@ -839,6 +878,13 @@ setTimeout(() => fail(`no answer from Chromium over CDP (${base}) within ${deadl
 (async () => {
   if (typeof WebSocket !== 'function') throw new Error('this Node has no built-in WebSocket (needs Node 22+)');
   const json = async (path) => (await fetch(base + path)).json();
+  if (action === 'close') {
+    const ws = new WebSocket((await json('/json/version')).webSocketDebuggerUrl);
+    await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = () => ko(new Error('CDP websocket refused')); });
+    // Chromium may drop the socket before it replies; either one means the quit was accepted.
+    await new Promise((ok) => { ws.onclose = ok; ws.onmessage = ok; ws.send(JSON.stringify({ id: 1, method: 'Browser.close' })); });
+    process.exit(0);
+  }
   const page = (await json('/json/list')).find((t) => t.type === 'page');
   if (!page) throw new Error('the shared browser has no page open');
   const ws = new WebSocket((await json('/json/version')).webSocketDebuggerUrl);

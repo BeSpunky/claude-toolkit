@@ -176,3 +176,37 @@ own fix (e.g. `--restore-last-session` off / no URL argument), outside this effo
 `up` prints `started <comp> (pid ?)` for most components.
 
 Still not covered: a real devcontainer REBUILD on the bookworm image (Xvnc 1.12) — no Docker here.
+
+## 2026-10-06 — tabs pile up one per restart (dogfood finding; pre-existing in 0.45.1)
+
+**Reproduced** on an own instance (display `:61`, random ports, own runtime; the live dogfood stack on :99 /
+:6094 untouched): `up`/`down` cycles gave `pages=1`, `2`, `3` `about:blank` (CDP `/json/list`).
+
+**Root cause: Chromium's startup preference, not the exit type.** The profile's `sessions.event_log` showed
+`{"restore_browser":true,"type":5}` with `"crashed":false` on EVERY start. A first fix (quit with
+`Browser.close` so `exit_type` becomes `"Normal"` instead of `"SessionEnded"`) changed the exit type and still
+piled up (`C1..C3: 1, 2, 3` on a fresh profile). So this build's default `session.restore_on_startup` is
+"continue where you left off": each start restores the last session and ALSO opens the `about:blank` argument.
+Seeding `{"session":{"restore_on_startup":5}}` into a fresh profile gave `1, 1, 1`, and on an EXISTING profile
+(with Chrome's pref MACs) it held as well.
+
+**Fix:** `write_browser_prefs` merges `session.restore_on_startup = 5` into `Default/Preferences` before each
+Chromium launch (only that key; atomic rename; no-op when already 5). Not a wipe — cookies and storage are
+elsewhere in the profile. A profile already carrying piled-up tabs drops to one on its next `up` (rt2, 8 saved
+tabs → `1`).
+
+**Crash path:** after a SIGKILL the next `up` showed one tab and NO "Restore pages?" bubble (screenshot through
+noVNC), so `--hide-crash-restore-bubble` was tried and left out — nothing to hide.
+
+**Found on the way, and fixed: logins made just before `down` were lost.** A persistent cookie set 1 s before
+`down` was gone on the next `up` (`none`) when Chromium stopped by SIGTERM — it treats SIGTERM as the OS session
+ending and skips flushing the cookie store (written otherwise every ~30 s; after a 35 s wait the cookie survived
+SIGTERM). With `Browser.close` the same 1 s case gave `sb_login=kept`. So `down` now asks Chromium to quit over
+CDP first (`stop_gracefully` → `window_cdp close`, 5 s deadline) and falls through to SIGTERM/SIGKILL as before.
+
+**Proof (final template):**
+
+    rt2 (8 restored tabs on record), pref fix:  P1 1 · P2 1 · P3 1 (then SIGKILL) · P4 1
+    fresh profile, pref fix:                    F1 1 · F2 1 (then SIGKILL) · F3 1 · F4 1
+    with Browser.close quit as well:            G1 1 · G2 1 · G3 1 (then SIGKILL) · G4 1 · exit_type "Normal"
+    cookie set 1 s before down → after up:      sb_login=kept, pages 1
