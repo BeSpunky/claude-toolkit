@@ -5,3 +5,4 @@
 Ask Claude to "verify in the browser" and it checks the running app, not just the source
 Debugging CSS live? The shared browser gives measured proof (computed styles, bounding boxes)
 While the shared browser is up, its noVNC URL sits in the status line under the prompt
+The shared browser fills its tab: resize it and the page follows; "shared-browser fullscreen on" hides the tabs to present
