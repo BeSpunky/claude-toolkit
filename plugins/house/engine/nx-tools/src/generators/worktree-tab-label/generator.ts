@@ -20,12 +20,13 @@ import { join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
 import { wireProvider } from '../_utils/wire-provider';
 import { workspaceIdentity } from '../_utils/workspace-identity';
+import { toDnsLabel } from '../_utils/dns-label';
 
 interface WorktreeTabLabelSchema {
   project: string;
   /** Wire provideWorktreeTabLabel() into app.config.ts — a BASELINE act, never a sync-time one. */
   wireProviders?: boolean;
-  /** The base-host sentinel (`<workspaceName>.localhost` is the main tree). Defaults to the workspace identity. */
+  /** The workspace's name; the main tree is served at `<toDnsLabel(workspaceName)>.localhost`. Defaults to the workspace identity. */
   workspaceName?: string;
 }
 
@@ -38,7 +39,7 @@ export default async function worktreeTabLabelGenerator(tree: Tree, options: Wor
 
   tree.write(
     `${appRoot}/src/app/worktree-tab-label.ts`,
-    readFileSync(join(__dirname, 'files', 'worktree-tab-label.ts.tpl'), 'utf8').split('{{workspaceName}}').join(workspaceName),
+    readFileSync(join(__dirname, 'files', 'worktree-tab-label.ts.tpl'), 'utf8').split('{{mainTreeSlug}}').join(toDnsLabel(workspaceName)),
   );
 
   const current = tree.read(appConfigPath, 'utf8') ?? '';

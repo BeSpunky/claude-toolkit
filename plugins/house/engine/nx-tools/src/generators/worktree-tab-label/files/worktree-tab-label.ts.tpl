@@ -3,7 +3,7 @@
 // When several worktrees are served at once they share the noVNC viewer and open as look-alike tabs.
 // This makes each one recognisable AT A GLANCE: on a `<slug>.localhost` worktree domain it prefixes the
 // document title with `[slug]` and repaints the favicon as a colored dot (hue hashed from the slug, plus
-// the slug's initial). The MAIN tree's base host (`<workspaceName>.localhost` or plain localhost) is left
+// the slug's initial). The MAIN tree's base host (`<main-tree slug>.localhost` or plain localhost) is left
 // untouched.
 //
 // Purely runtime — it derives everything from `location.hostname`, so there is NO build-time coupling to
@@ -12,9 +12,10 @@
 // Generator-owned (nx-tools worktree-tab-label generator) — do not edit by hand.
 import { makeEnvironmentProviders, provideEnvironmentInitializer, type EnvironmentProviders } from '@angular/core';
 
-// The workspace identity, baked in as the base-host sentinel: a hostname whose sub-label equals this is
-// the MAIN tree, not a worktree, so it gets no label.
-const WORKSPACE_NAME = '{{workspaceName}}';
+// The MAIN tree's slug, baked in as the base-host sentinel: a hostname whose sub-label equals this is the main
+// tree, not a worktree, so it gets no label. Already a DNS label — exactly the host the dev engine serves the main
+// tree at (`toDnsLabel(<workspace name>)`), so `My_App` is matched as `my-app`, never compared raw.
+const MAIN_TREE_SLUG = '{{mainTreeSlug}}';
 
 // Angular's dev-mode flag. The optimizer folds it to a literal `false` in production builds, which is what
 // makes this whole initializer tree-shakeable out of prod. Declared locally — apps don't get a global type.
@@ -40,9 +41,9 @@ function applyWorktreeTabLabel(): void {
   if (!match) return; // not a `<x>.localhost` domain (plain localhost, an IP, a real host) → no-op.
 
   const label = match[1].toLowerCase();
-  if (!label || label === WORKSPACE_NAME.toLowerCase()) return; // the base host → no-op.
+  if (!label || label === MAIN_TREE_SLUG) return; // the base host → no-op.
 
-  const base = (document.title || WORKSPACE_NAME).replace(/^\[[^\]]+\]\s+/, ''); // strip any prior prefix (idempotent)
+  const base = (document.title || MAIN_TREE_SLUG).replace(/^\[[^\]]+\]\s+/, ''); // strip any prior prefix (idempotent)
   document.title = `[${label}] ${base}`;
   tintFavicon(label);
 }

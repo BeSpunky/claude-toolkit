@@ -55,3 +55,15 @@ inference change no on-disk shape.
 **Noticed, not fixed (separate defect):** the tab label compares the hostname label to `WORKSPACE_NAME`
 lowercased, while the dev loop serves the main tree at `toDnsLabel(name)` — a project named with `_` or `.`
 (`my_app` → `my-app.localhost`) would still get its main tree labelled.
+
+## 3. The main-tree sentinel, as a DNS label — 2026-10-06
+
+The user, on reading the report above: "Fix the bug".
+
+**Decision:** the generator bakes `MAIN_TREE_SLUG = toDnsLabel(workspaceName)` — exactly the host the dev engine
+serves the main tree at — and the template compares to it directly (no raw name, no lowercasing at runtime). The
+rule lives in two places by necessity: the dev engine (`dev/files/lib/worktrees.mjs.tpl`) runs on Node built-ins in
+the consumer's repo and cannot import the payload, so the generator side has `_utils/dns-label.ts`, each
+cross-referencing the other, and a test-generators case asserts the two agree over the inputs that normalise.
+Nothing to migrate: `worktree-tab-label.ts` is generator-owned and rewritten on the next upgrade. Folded into the
+unpublished 0.45.1.

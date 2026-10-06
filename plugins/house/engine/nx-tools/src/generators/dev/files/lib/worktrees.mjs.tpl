@@ -94,7 +94,10 @@ export function worktreeLabel(w) {
   return `${ref}${suffix}  ·  ${w.path}`;
 }
 
-/** Coerce a string into a valid DNS label (lowercase `[a-z0-9-]`, no edge hyphens, ≤ 63 chars). */
+/**
+ * Coerce a string into a valid DNS label (lowercase `[a-z0-9-]`, no edge hyphens, ≤ 63 chars). Mirrored by the
+ * payload's `_utils/dns-label.ts` (the worktree tab label bakes the main tree's slug with it) — keep them in step.
+ */
 export function toDnsLabel(input) {
   const label = input
     .toLowerCase()
