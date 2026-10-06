@@ -148,17 +148,19 @@ esac
 
 # --- preconditions -------------------------------------------------------------
 
+# The audio endpoint FIRST (exports PULSE_SERVER, sets VOICE_MIC_GAIN): it is the
+# one precondition no install can satisfy, so a missing engine must never be
+# reported in its place. Sourced from this script's own dir, so it works from the
+# plugin and the published copy.
+# shellcheck source=audio-endpoint.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/audio-endpoint.sh"
+voice_resolve_endpoint || { echo "$VOICE_ENDPOINT_DIAGNOSIS" >&2; exit 1; }
+
 voice_stt_verdict
 [ "$VOICE_STT_HEALTH" = ok ] \
   || { echo "bespunky-voice: speech recognition $VOICE_STT_HEALTH: $VOICE_STT_PROBLEM — install it: bash ~/.claude/bespunky-voice/install.sh listen" >&2; exit 1; }
 command -v parecord >/dev/null 2>&1 || { echo "bespunky-voice: no recorder (parecord) — install it: bash ~/.claude/bespunky-voice/install.sh listen" >&2; exit 1; }
 command -v sox      >/dev/null 2>&1 || { echo "bespunky-voice: sox required for capture — install it: bash ~/.claude/bespunky-voice/install.sh listen" >&2; exit 1; }
-
-# Resolve the endpoint (exports PULSE_SERVER, sets VOICE_MIC_GAIN). Sourced from
-# this script's own dir, so it works from the plugin and the published copy.
-# shellcheck source=audio-endpoint.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/audio-endpoint.sh"
-voice_resolve_endpoint || { echo "$VOICE_ENDPOINT_DIAGNOSIS" >&2; exit 1; }
 
 # Unmute the default mic and set the endpoint's gain (the gain choice — and why
 # WSLg gets a boost — lives in audio-endpoint.sh, not here).

@@ -18,6 +18,8 @@ You set up the bespunky-voice runtime on this machine. You do one thing, then re
    It installs only what isn't working, so it is safe to run as is. Never edit it,
    never install anything by another route, never ask the user anything.
 3. Return **one line**, nothing else — no transcript of the output:
-   - exit 0 → `ready: ` + its two final health lines joined as `speech <tts verdict>, listening <stt verdict>`
-   - exit non-zero → `failed: ` + its `bespunky-voice:` / `[voice-install]` error lines verbatim,
+   - exit 0 → `ready: ` + its final health lines joined as `audio <audio verdict>, speech <tts verdict>, listening <stt verdict>`
+   - exit 3 → `not ready: ` + its `bespunky-voice:` line verbatim — the engines are installed, but
+     this machine has no audio connection, which no install fixes (the line names the cause and the fix)
+   - any other non-zero exit → `failed: ` + its `bespunky-voice:` / `[voice-install]` error lines verbatim,
      joined with ` · ` (they name what could not be installed and the command to do it by hand)

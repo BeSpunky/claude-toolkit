@@ -18,10 +18,10 @@
 // build without them) those remain the floor and nothing here is missed but
 // the view. Never put behaviour here that the floor needs.
 //
-// ENGINE HEALTH. When nothing is said or heard, the band warns about an engine
-// that will let the person down — a broken Piper about to speak in the robotic
-// voice, no speech recognition for ask_by_voice — so the robotic voice is never
-// a surprise. The verdict is the runtime's (`voice-health.sh`, the same probe
+// VOICE HEALTH. When nothing is said or heard, the band warns about anything
+// that will let the person down — no audio connection to this computer, a
+// broken Piper about to speak in the robotic voice, no speech recognition for
+// ask_by_voice — so neither silence nor the robotic voice is ever a surprise. The verdict is the runtime's (`voice-health.sh`, the same probe
 // /speak status runs); the band only reads it, once at the start and again when
 // an engine's install moves or the verdict ages — never on the 300ms tick.
 
@@ -52,7 +52,7 @@ const LINGER_MS = 20_000
 /** A health verdict is re-taken this often even when nothing on disk moved. */
 const HEALTH_TTL_MS = 600_000
 /** The runtime entries whose change means the verdict may have changed. */
-const HEALTH_INPUTS = ['voice-health.sh', 'tts-engine.sh', 'stt-engine.sh', 'piper', 'voices', 'whisper']
+const HEALTH_INPUTS = ['voice-health.sh', 'audio-endpoint.sh', 'tts-engine.sh', 'stt-engine.sh', 'piper', 'voices', 'whisper']
 
 type Verb = 'stop' | 'replay'
 
@@ -101,6 +101,11 @@ export function decide(previous: VoiceBand, files: Snapshot, now: number): Voice
 
 /** What a healthy-enough voice says: nothing. Otherwise one short line. */
 export function healthWarning(health: VoiceHealth): string | undefined {
+  const audio = {
+    ok: undefined,
+    native: undefined,
+    unreachable: 'no audio connection',
+  }[health.audio]
   const tts = {
     natural: undefined,
     system: undefined,
@@ -113,20 +118,22 @@ export function healthWarning(health: VoiceHealth): string | undefined {
     broken: 'speech recognition broken',
     missing: 'no speech recognition',
   }[health.stt]
-  const problems = [tts, stt].filter(Boolean)
+  const problems = [audio, tts, stt].filter(Boolean)
 
   return problems.length === 0 ? undefined : `voice: ${problems.join('; ')} · /speak status`
 }
 
-/** `voice-health.sh`'s two lines, or undefined when they aren't its output. */
+/** `voice-health.sh`'s three lines, or undefined when they aren't its output. */
 export function parseHealth(stdout: string): VoiceHealth | undefined {
   const verdicts = new Map(stdout.split('\n').map(line => line.split('\t', 2) as [string, string?]))
+  const audio = verdicts.get('audio')
   const tts = verdicts.get('tts')
   const stt = verdicts.get('stt')
+  const isAudio = (v?: string): v is VoiceHealth['audio'] => ['ok', 'native', 'unreachable'].includes(v ?? '')
   const isTts = (v?: string): v is VoiceHealth['tts'] => ['natural', 'broken', 'robotic', 'system', 'none'].includes(v ?? '')
   const isStt = (v?: string): v is VoiceHealth['stt'] => ['ok', 'broken', 'missing'].includes(v ?? '')
 
-  return isTts(tts) && isStt(stt) ? { tts, stt } : undefined
+  return isAudio(audio) && isTts(tts) && isStt(stt) ? { audio, tts, stt } : undefined
 }
 
 /**

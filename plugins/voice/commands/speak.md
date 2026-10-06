@@ -22,8 +22,12 @@ or the speech detector missing, no `parecord`/`sox`/audio player — dispatch th
 this session. Tell the user in one line, wait for its one-line result, and on
 `ready: …` retry the action; on `failed: …` / `not ready: …` relay it. (Only if you
 cannot dispatch an agent, run `bash ~/.claude/bespunky-voice/install.sh` yourself,
-10-minute timeout.) A missing **audio endpoint** is a host fact no install fixes —
-relay that diagnosis instead.
+10-minute timeout.) **`bespunky-voice: no audio connection`** is the one problem no
+install fixes — it is checked before any engine, so it is never an engine problem.
+Never dispatch the installer for it: relay the cause and fix its first line names
+(usually: voice is turned off for this project's devcontainer → offer
+`/bespunky-house:upgrade --voice`, then a container rebuild). The installer's
+`not ready: …` means the same thing.
 
 The user ran: `/speak $ARGUMENTS`
 
@@ -58,7 +62,7 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
   It sets the mic gain for the resolved audio endpoint, records until you stop talking,
   and prints the transcript on stdout. Take that transcript as the user's answer
   to the question you last asked them, echo it back in one line so they can catch a misrecognition ("You said:
-  …"), and then continue acting on it. If it exits non-zero (nothing recognized, or no reachable audio endpoint), relay the stderr message and offer to retry — do NOT guess an
+  …"), and then continue acting on it. If it exits non-zero (nothing recognized, or no audio connection), relay the stderr message and offer to retry — do NOT guess an
   answer.
 
 - **auto on** / **auto off** — Run `bash ~/.claude/bespunky-voice/voice-auto.sh on`
@@ -71,14 +75,12 @@ Do **exactly one** of the following, chosen by the first word of "$ARGUMENTS"
   and confirm to the user whether it should have played. If it prints
   "falling back to the robotic voice", the natural voice is installed
   but broken — repair it (above) and run the check again. If it fails with "no
-  reachable audio endpoint", relay that diagnosis: voice needs a reachable
-  PulseAudio-protocol sink (WSLg, or the host's native PulseAudio/PipeWire),
-  bridged by the BeSpunky devcontainer.
+  audio connection", relay the cause and fix it names (above).
 
 - **status** — Run `bash ~/.claude/bespunky-voice/voice-auto.sh status` and tell
   the user whether auto-speak is currently on or off, which audio endpoint was
   resolved (and the mic gain it implies) — or, if none was reachable, relay the
-  diagnosis it printed (every endpoint tried, why each failed, and the fix) —
+  cause and fix the diagnosis leads with (and, if asked, every server tried) —
   and which speech engine will actually speak (natural Piper voice or the
   robotic fallback, with the reason and the repair command when it's the
   fallback), and whether the listening engine (whisper.cpp) can hear — with the

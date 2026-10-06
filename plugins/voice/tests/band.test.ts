@@ -31,8 +31,8 @@ const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, 
 
 type Files = Record<string, { text: string; mtimeMs: number }>
 
-const HEALTHY = 'tts\tnatural\t\nstt\tok\t\n'
-const PIPER_BROKEN = 'tts\tbroken\tpiper failed: libpiper_phonemize.so.1: cannot open\nstt\tok\t\n'
+const HEALTHY = 'audio\tok\t\ntts\tnatural\t\nstt\tok\t\n'
+const PIPER_BROKEN = 'audio\tok\t\ntts\tbroken\tpiper failed: libpiper_phonemize.so.1: cannot open\nstt\tok\t\n'
 
 /**
  * The runtime's directory as the band sees it, and every command it runs;
@@ -314,19 +314,24 @@ describe('voice band', () => {
       expect(w.probes()).toBe(0)
     })
 
-    test('the warning names every engine at fault, and only those', () => {
-      expect(healthWarning({ tts: 'natural', stt: 'ok' })).toBeUndefined()
-      expect(healthWarning({ tts: 'system', stt: 'ok' })).toBeUndefined()
-      expect(healthWarning({ tts: 'robotic', stt: 'missing' })).toBe(
+    test('the warning names everything at fault, and only those', () => {
+      expect(healthWarning({ audio: 'ok', tts: 'natural', stt: 'ok' })).toBeUndefined()
+      expect(healthWarning({ audio: 'native', tts: 'system', stt: 'ok' })).toBeUndefined()
+      expect(healthWarning({ audio: 'ok', tts: 'robotic', stt: 'missing' })).toBe(
         'voice: robotic voice (no Piper); no speech recognition · /speak status',
       )
-      expect(healthWarning({ tts: 'natural', stt: 'broken' })).toBe('voice: speech recognition broken · /speak status')
+      expect(healthWarning({ audio: 'ok', tts: 'natural', stt: 'broken' })).toBe('voice: speech recognition broken · /speak status')
+    })
+
+    test('working engines with no audio connection are not a working voice', () => {
+      expect(healthWarning({ audio: 'unreachable', tts: 'natural', stt: 'ok' })).toBe('voice: no audio connection · /speak status')
     })
 
     test('only the runtime script\'s own output is a verdict', () => {
-      expect(parseHealth(PIPER_BROKEN)).toEqual({ tts: 'broken', stt: 'ok' })
+      expect(parseHealth(PIPER_BROKEN)).toEqual({ audio: 'ok', tts: 'broken', stt: 'ok' })
       expect(parseHealth('')).toBeUndefined()
-      expect(parseHealth('tts\tfine\t\nstt\tok\t\n')).toBeUndefined()
+      expect(parseHealth('audio\tok\t\ntts\tfine\t\nstt\tok\t\n')).toBeUndefined()
+      expect(parseHealth('tts\tnatural\t\nstt\tok\t\n')).toBeUndefined()
       expect(parseHealth('bash: voice-health.sh: No such file')).toBeUndefined()
     })
   })

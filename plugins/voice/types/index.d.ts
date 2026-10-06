@@ -37,6 +37,7 @@ export type VoiceBand =
  *   but cannot run), `missing`.
  */
 export type VoiceHealth = {
+  audio: 'ok' | 'native' | 'unreachable'
   tts: 'natural' | 'broken' | 'robotic' | 'system' | 'none'
   stt: 'ok' | 'broken' | 'missing'
 }

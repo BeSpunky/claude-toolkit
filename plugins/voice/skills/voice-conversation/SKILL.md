@@ -38,8 +38,18 @@ The user wants to answer your questions by **voice**, hands-free. While in this 
 ## If it isn't ready — make it ready, don't ask
 
 The user asked to talk by voice, so a missing engine is yours to fix, not theirs.
-**Never tell the user to install something you can install yourself.**
+**Never tell the user to install something you can install yourself** — and never
+send the installer at a problem it cannot fix.
 
+- **`error` starts with `bespunky-voice: no audio connection`** → this machine has
+  nowhere to send sound, and **no engine install can change that**: do NOT dispatch
+  the installer. The error's first line names the cause and its fix — relay that, in
+  plain words, and stop asking by voice. The usual cause in a BeSpunky devcontainer
+  is *"voice is turned off for this project's devcontainer"*: offer to turn it on
+  (`/bespunky-house:upgrade --voice`, which opens its own branch), and say a
+  container rebuild follows. *"Built before that"* means voice is already on and
+  only a rebuild is missing. This check comes first in every voice tool, so it is
+  the first thing you hear about — never after an install.
 - **A speech or listening engine is missing or broken** (`ask_by_voice` returns an
   `error` about text-to-speech, speech recognition, the speech detector, `parecord`
   or `sox`) → **delegate the install, right away, without asking**: dispatch the
@@ -49,7 +59,9 @@ The user asked to talk by voice, so a missing engine is yours to fix, not theirs
   Tell the user in one line that you're setting voice up, then wait for its
   one-line result (it takes about a minute; don't poll, don't run it yourself too):
   - `ready: …` → call `ask_by_voice` again with the same question.
-  - `failed: …` / `not ready: …` → relay it and fall back to typed questions.
+  - `not ready: …` → the engines are in, but there is no audio connection — handle
+    it as above (relay the cause and its fix), never as a success.
+  - `failed: …` → relay it and fall back to typed questions.
 
   Only where you cannot dispatch an agent (you are a subagent yourself) run
   `bash ~/.claude/bespunky-voice/install.sh` directly, with a 10-minute timeout.
@@ -57,10 +69,8 @@ The user asked to talk by voice, so a missing engine is yours to fix, not theirs
   install: tell the user to restart Claude Code (or `/reload-plugins`).
 - **`~/.claude/bespunky-voice/install.sh` doesn't exist** → the plugin's SessionStart
   hook hasn't run since it was installed; same fix, a restart.
-- **No reachable audio endpoint** → not installable from inside: relay that
-  diagnosis — voice needs a reachable PulseAudio-protocol sink (WSLg, or the host's
-  native PulseAudio/PipeWire), bridged by the BeSpunky devcontainer; `/speak status`
-  shows what was tried.
+- `/speak status` shows every audio server tried and each engine's verdict, when
+  you need the detail.
 
 Fall back to text questions only once the installer has failed or the problem is
 one it cannot fix — never guess an answer.

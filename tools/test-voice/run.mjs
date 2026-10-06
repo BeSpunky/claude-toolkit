@@ -371,7 +371,10 @@ test('install-runtime publishes scripts, prunes retired ones, and never prunes a
 // ---- install.sh: installs exactly what isn't working -----------------------------
 // The plugin's scripts, with the two real installers replaced by stubs that record
 // being called and lay down a working fake engine — so no network, no build.
-function installRig() {
+// `audio`: 'reachable' — PULSE_SERVER names a server the stub pactl answers for;
+// 'off' — no server answers anywhere, inside a house devcontainer whose committed
+// marker says voice is off (the case that used to read as "no speech engine").
+function installRig({ audio = 'reachable' } = {}) {
   const root = tmp('install');
   const scripts = path.join(root, 'scripts');
   const home = path.join(root, 'home');
@@ -380,7 +383,16 @@ function installRig() {
   fs.cpSync(path.join(PLUGIN, 'scripts'), scripts, { recursive: true });
   fs.mkdirSync(bin, { recursive: true });
   const exe = (p, body) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 }); };
-  for (const c of ['paplay', 'parecord', 'pactl', 'sox']) exe(path.join(bin, c), 'exit 0');
+  for (const c of ['paplay', 'parecord', 'sox']) exe(path.join(bin, c), 'exit 0');
+  exe(path.join(bin, 'pactl'), audio === 'reachable' ? 'exit 0' : 'exit 1');
+  const project = path.join(root, 'project');
+  fs.mkdirSync(path.join(project, '.devcontainer'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.devcontainer', '.bespunky-devcontainer.json'), JSON.stringify({ voice: audio === 'reachable' }));
+  const env = {
+    ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin`, CLAUDE_PROJECT_DIR: project, REMOTE_CONTAINERS: 'true',
+    ...(audio === 'reachable' ? { PULSE_SERVER: 'tcp:127.0.0.1:4713' } : {}),
+  };
+  if (audio !== 'reachable') delete env.PULSE_SERVER;
   const fakePiper = () => {
     exe(path.join(voice, 'piper', 'piper'), 'while [ $# -gt 0 ]; do [ "$1" = --output_file ] && echo wav > "$2"; shift; done; exit 0');
     fs.mkdirSync(path.join(voice, 'voices'), { recursive: true });
@@ -393,13 +405,14 @@ function installRig() {
   };
   exe(path.join(scripts, 'install-piper.sh'), `echo piper >> "${root}/called"`);
   exe(path.join(scripts, 'install-whisper.sh'), `echo whisper >> "${root}/called"`);
+  const script = (name, ...args) => spawnSync('bash', [path.join(scripts, name), ...args], { encoding: 'utf8', env });
   const run = (...args) => {
-    const r = spawnSync('bash', [path.join(scripts, 'install.sh'), ...args], { encoding: 'utf8', env: { ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
+    const r = script('install.sh', ...args);
     const called = fs.existsSync(path.join(root, 'called')) ? fs.readFileSync(path.join(root, 'called'), 'utf8').trim().split('\n') : [];
     fs.rmSync(path.join(root, 'called'), { force: true });
     return { ...r, called };
   };
-  return { run, fakePiper, fakeWhisper };
+  return { run, script, fakePiper, fakeWhisper };
 }
 test('install.sh leaves a working voice alone', () => {
   const rig = installRig();
@@ -421,6 +434,39 @@ test('install.sh installs only the missing half, and fails when it still does no
   r = rig.run('speak');
   assert.deepEqual(r.called, []);
   assert.equal(r.status, 0, r.stderr);
+});
+
+// ---- the audio connection: judged first, never mistaken for an engine ------------
+const VOICE_OFF = /^bespunky-voice: no audio connection — voice is turned off for this project's devcontainer.*\/bespunky-house:upgrade --voice/m;
+test('with voice off for the project, speaking names the missing audio connection — not a missing engine', () => {
+  const rig = installRig({ audio: 'off' });              // and no engine installed either
+  const r = rig.script('speak.sh', 'hello');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, VOICE_OFF);
+  assert.doesNotMatch(r.stderr, /TTS engine|install\.sh/);
+});
+test('with voice off for the project, listening names the missing audio connection — not a missing engine', () => {
+  const rig = installRig({ audio: 'off' });
+  const r = rig.script('listen.sh', '--stream');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, VOICE_OFF);
+  assert.doesNotMatch(r.stderr, /speech recognition|install\.sh/);
+});
+test('health reports the audio connection beside the engines', () => {
+  const rig = installRig({ audio: 'off' });
+  rig.fakePiper(); rig.fakeWhisper();
+  const r = rig.script('voice-health.sh');
+  assert.match(r.stdout, /^audio\tunreachable\tno audio connection — voice is turned off/m);
+  assert.match(r.stdout, /^tts\tnatural/m);
+  assert.match(rig.script('voice-health.sh').stdout, /^stt\tok/m);
+  assert.match(installRig().script('voice-health.sh').stdout, /^audio\tok\t$/m);
+});
+test('install.sh never calls working engines with no audio connection "ready"', () => {
+  const rig = installRig({ audio: 'off' });
+  rig.fakePiper(); rig.fakeWhisper();
+  const r = rig.run();
+  assert.equal(r.status, 3, r.stderr);
+  assert.match(r.stderr, /^bespunky-voice: the speech engines are installed, but voice is not ready — no audio connection — voice is turned off/m);
 });
 
 // ---- run ------------------------------------------------------------------------
