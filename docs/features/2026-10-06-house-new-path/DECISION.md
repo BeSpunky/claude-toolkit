@@ -19,7 +19,8 @@ of its own, and then tried `gh repo create` — which failed only because of the
   a slash) is taken as written; the project and app are named after its last segment; a missing parent is refused.
 - **The private GitHub repository is opt-in (`--github`)**. Creating it was the default — publishing to an outside
   service without being asked. The `new` skill now ASKS (step 0, input 6) and passes `--github` only on a yes.
-  `--no-github` is retired (an unknown flag now).
+  `--no-github` is retired (an unknown flag now) — asked first, as its own question: "Does anything you run still
+  pass `--no-github` …?" — "No" — the user. No alias kept.
 - HOUSE.md's Firebase section no longer promises the repo exists; it says how to create one.
 
 ## Verified
