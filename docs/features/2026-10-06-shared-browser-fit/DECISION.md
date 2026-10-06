@@ -1,6 +1,9 @@
 ---
 effort: shared-browser-fit
-summary: The shared browser's desktop follows the viewer's tab size (no letterboxing, no blur) and the browser window gives the page all of it.
+status: concluded
+concluded: 2026-10-06
+summary: The shared browser runs on TigerVNC Xvnc with noVNC resize=remote, so its desktop is exactly the viewer's tab; borderless WM, maximized Chromium, `fullscreen on|off`, one tab per start, logins kept across down. HiDPI scaling dropped (noVNC sends CSS px). Dogfooded on the consumer path; nothing to migrate.
+tags: [shared-browser, novnc, xvnc, house, nx-tools-0.46.0]
 ---
 
 # Decisions and findings (appended as they happen)
