@@ -28,18 +28,19 @@
 #                  because it records the project's INTENT ("this project wants audio"); where the
 #                  socket is stays a per-machine fact, resolved on the host at open time.
 #                  NEVER enabled by default.
-# GitHub repo    : full scaffold creates a PRIVATE GitHub repo via `gh` and pushes to it. This runs
-#                  host-side AFTER the Docker scaffold (gh auth lives on the host, not in the bare base
-#                  image). Skipped gracefully (local repo only) when gh is missing/unauthenticated.
-#                  Opt out with --no-github. Upgrade mode never touches the remote.
-#                  Why a repo always: Firebase App Hosting deploys are GitHub-driven — linking the repo
+# GitHub repo    : ONLY with --github, the scaffold creates a PRIVATE GitHub repo via `gh` and pushes to
+#                  it — publishing to an outside service is never a default (it was, and a scaffold could
+#                  create a repository nobody asked for). This runs host-side AFTER the Docker scaffold
+#                  (gh auth lives on the host, not in the bare base image). Skipped gracefully (local repo
+#                  only) when gh is missing/unauthenticated. Upgrade mode never touches the remote.
+#                  Why offer it at all: Firebase App Hosting deploys are GitHub-driven — linking the repo
 #                  at `firebase apphosting:backends:create` is what makes Firebase provision its own
-#                  Cloud Build CI/CD. We generate NO deploy workflow; the repo existing from minute one
+#                  Cloud Build CI/CD. We generate NO deploy workflow; a repo existing from minute one
 #                  is what lets Firebase's native mechanism take over (so we never track its evolving
 #                  deploy methodology). Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
-#   house.sh new       [--preset=<id>] [--add-layer=<layers>] [--layout=<id>] [--linking=<id>] [--firebase] [--staging] [--voice] [--no-github] [--docker] [--local] <project-name> [app-name]
+#   house.sh new       [--preset=<id>] [--add-layer=<layers>] [--layout=<id>] [--linking=<id>] [--firebase] [--staging] [--voice] [--github] [--docker] [--local] <project-name|path> [app-name]
 #   house.sh upgrade   [--staging] [--voice] [--no-backup] [--yes] [--docker] [--local] <project-path|project-name> [app-name]
 #   house.sh add-layer [--preset=<id>] [--firebase] [--staging] [--voice] [--no-backup] [--yes] [--docker] [--local] <layers> <project-path|project-name> [app-name]
 #   house.sh help
@@ -121,7 +122,7 @@ usage() {
   cat <<'USAGE'
 house.sh — create a BeSpunky-standard project, or bring an existing one up to the house standard.
 
-  house.sh new       [flags] <project-name> [app-name]                # CREATE a new project
+  house.sh new       [flags] <project-name|path> [app-name]           # CREATE a new project
   house.sh upgrade   [flags] <project-path|name> [app-name]           # UPGRADE an existing one (adds no layer)
   house.sh add-layer [flags] <layers> <project-path|name> [app-name]  # UPGRADE it and add <layers>
   house.sh help                                                       # this message
@@ -182,7 +183,7 @@ USAGE
   --no-backup       upgrade, add-layer: upgrade a directory that is NOT a git repository, with no
                     restore point at all. Migrations are ONE-WAY; there is no undo without one. (In a
                     git repository the restore point is the clean HEAD preflight requires.)
-  --no-github       new only: do not create a private GitHub repo.
+  --github          new only: also create a PRIVATE GitHub repo (gh) and push the scaffold to it. Off by default.
   --docker          Force the container even when the local Node would do.
   --print-inner     Render the command sequence this run would execute, print it, and exit without
                     running anything. For debugging the engine itself.
@@ -218,7 +219,7 @@ A_RUN="an upgrade"; [ "$MODE" = "new" ] && A_RUN="a scaffold"
 FIREBASE=0
 VOICE=0    # --voice: bridge the host's audio (WSLg or PulseAudio/PipeWire) into the devcontainer + provision bespunky-voice (opt-in).
 STAGING=0  # --staging: also scaffold a first-class staging environment (requires the firebase layer).
-GITHUB=1   # `new` creates a private GitHub repo by default; --no-github opts out.
+GITHUB=0   # `new` creates a private GitHub repo only when asked: --github.
 BACKUP=1   # an upgrade refuses a non-git directory (no restore point); --no-backup accepts that.
 CONSENT=0  # --yes: asserts a human explicitly agreed to this upgrade (see the consent gate above).
 FORCE_DOCKER=0  # --docker: use the base image even when the local Node would do (escape hatch).
@@ -234,7 +235,7 @@ while [ "${1:-}" != "" ]; do
     --firebase)   FIREBASE=1;    LAYER_FLAGS="$LAYER_FLAGS --firebase"; shift;;
     --voice)      VOICE=1;       shift;;
     --staging)    STAGING=1;     shift;;
-    --no-github)  GITHUB=0;      shift;;
+    --github)     GITHUB=1;      shift;;
     --no-backup)  BACKUP=0;      shift;;
     --yes|-y)     CONSENT=1;     shift;;
     --docker)     FORCE_DOCKER=1; shift;;
@@ -466,10 +467,23 @@ _project_identity() {   # <absolute target dir>
 }
 
 if [ "$MODE" = "new" ]; then
-  PROJECT="$1"
+  # A bare NAME lands in PROJECTS_DIR; a PATH (absolute, or relative with a slash) is taken as written — the same
+  # split `upgrade` makes. Joining PROJECTS_DIR onto a path produced `~/projects//abs/path`, an app named after the
+  # whole path, and no git repo; the project's identity is the last segment, whichever way it was given.
+  case "$1" in
+    */*)
+      _parent="$(dirname "$1")"
+      [ -d "$_parent" ] || { echo "ERROR: '$_parent' does not exist — create it first, or pass a bare name to use PROJECTS_DIR." >&2; exit 1; }
+      PROJECTS_DIR="$(cd "$_parent" && pwd)"
+      PROJECT="$(basename "$1")"
+      ;;
+    *)
+      PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
+      PROJECT="$1"
+      ;;
+  esac
   PROJECT_DIR_NAME="$PROJECT"
   APP="${2:-$PROJECT}"
-  PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
   TARGET="$PROJECTS_DIR/$PROJECT"
   [ -e "$TARGET" ] && { echo "ERROR: '$TARGET' already exists. Choose another name (or upgrade it: house.sh upgrade <path>)." >&2; exit 1; }
 else
@@ -2397,7 +2411,7 @@ if [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ]; then
     fi
   fi
 elif [ "$MODE" = "new" ]; then
-  GITHUB_RESULT="GITHUB_SKIP: --no-github"
+  GITHUB_RESULT="GITHUB_SKIP: not requested — local repo only (--github creates a private GitHub repo and pushes)"
 fi
 
 # --- the run died somewhere: say where, and what that means for the project ------------------------------------

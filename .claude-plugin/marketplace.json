@@ -16,7 +16,7 @@
       "name": "bespunky-house",
       "source": "./plugins/house",
       "description": "The BeSpunky house standard for any repo, as a stack of detected layers on an Nx floor: the agent DX (composed devcontainer, Claude settings, window identity, HOUSE docs) by default; Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. /bespunky-house:new creates a project, /bespunky-house:upgrade migrates one to the current standard, /bespunky-house:add-layer adds a layer. Generator-first; consented, never automatic.",
-      "version": "0.47.0"
+      "version": "0.47.1"
     },
     {
       "name": "bespunky-workflow",
