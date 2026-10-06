@@ -304,7 +304,15 @@ export interface DevcontainerFragment {
   /** Named `initializeCommand` entries (object form — they run side by side, on the HOST). */
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
   /** Debian packages — composed into the one installer (house.packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
-  osPackages?: readonly ({ packages: readonly string[] } & Explained)[];
+  osPackages?: readonly ({
+    packages: readonly string[];
+    /**
+     * Names that are right only for the HOUSE images' distro (a projection for Debian 13, like Chromium's libraries):
+     * left out on an adopted devcontainer's foreign image, whose distro the house cannot know — one wrong name fails
+     * the whole apt transaction. Such a group's post-create counterpart installs them by the tool's own means there.
+     */
+    onHouseImageOnly?: true;
+  } & Explained)[];
   /** Post-create pieces. */
   postCreate?: readonly PostCreatePiece[];
 }

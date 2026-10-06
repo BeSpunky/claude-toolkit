@@ -1,6 +1,6 @@
 # --- Volume ownership (DERIVED from this devcontainer's volume mounts) ---
 # Docker creates a fresh named volume — and every directory missing on the way to its mount point (`.nx/` on a
-# fresh clone, `~/.cache` under the Playwright cache) — owned by ROOT. Everything below runs as the remote user,
+# fresh clone, on the way to its two volumes) — owned by ROOT. Everything below runs as the remote user,
 # so the first install would hit EACCES (`mkdir node_modules/…`). This section is generated from the mounts in
 # devcontainer.json, one line per volume, so a layer that adds a volume gets its reclaim by declaring it — never
 # by remembering to script one. It runs FIRST, before anything installs.

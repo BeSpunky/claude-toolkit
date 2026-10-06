@@ -15,6 +15,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { runInNewContext } from 'node:vm';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -42,7 +43,8 @@ function table(version) {
         if (source[at] === '{') depth += 1;
         if (source[at] === '}' && --depth === 0) break;
       }
-      return new Function(`return ${source.slice(start + key.length - 1, at + 1)}`)();
+      // Evaluated in an EMPTY context: it is text from a downloaded tarball, so it gets no globals, no process.
+      return runInNewContext(`(${source.slice(start + key.length - 1, at + 1)})`, Object.create(null), { timeout: 1000 });
     };
     const x64 = entry('-x64');
     // arm64 is declared as a copy of x64 for these two lists; anything else means the projection needs an arch axis.

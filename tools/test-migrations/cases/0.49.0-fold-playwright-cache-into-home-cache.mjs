@@ -32,6 +32,7 @@ const OWNED_AFTER = `{
   ]
 }
 `;
+const SHARED = `{\n  "mounts": [\n    "source=team-pw-cache,target=/home/node/.cache/ms-playwright,type=volume"\n  ]\n}\n`;
 const LAST = `{\n  "mounts": [\n    "source=mydata,target=/data,type=volume",\n    "${OLD}"\n  ]\n}\n`;
 
 export default {
@@ -63,17 +64,25 @@ export default {
       expect: (tree, t) => t.hasNot(DC, 'playwright-cache'),
     },
     {
-      name: "adopted, the project's own (no record): left exactly as it is (reported)",
+      name: 'adopted, the same per-project mount with NO record (pre-0.41, or hand-written): superseded — removed too',
       setup: (tree) => {
         tree.write(DC, LAST);
         tree.write(MARKER, marker(false, []));
       },
-      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === LAST, 'a project mount was removed'),
+      expect: (tree, t) => t.hasNot(DC, 'playwright-cache'),
     },
     {
-      name: 'no agent layer: untouched',
-      setup: (tree) => tree.write(DC, OWNED),
-      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === OWNED, 'the file was changed'),
+      name: "a ms-playwright mount with the project's OWN source (shared between projects): its design — kept",
+      setup: (tree) => {
+        tree.write(DC, SHARED);
+        tree.write(MARKER, marker(false, []));
+      },
+      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === SHARED, 'a project-designed mount was removed'),
+    },
+    {
+      name: 'no agent layer (no house devcontainer marker, a project-only devcontainer): untouched',
+      setup: (tree) => tree.write(DC, LAST),
+      expect: (tree, t) => t.ok(tree.read(DC, 'utf8') === LAST, 'the file was changed without the agent layer'),
     },
     {
       name: 'unparseable devcontainer.json: left exactly as it is (reported)',

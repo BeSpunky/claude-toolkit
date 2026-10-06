@@ -14,6 +14,8 @@ import { CHROMIUM_OS_PACKAGES, CHROMIUM_OS_PACKAGES_VERSION } from './playwright
  */
 export const CHROMIUM_OS_PACKAGE_GROUP = {
   packages: CHROMIUM_OS_PACKAGES,
+  // A Debian 13 projection: on a foreign image the post-create browser installs use Playwright's own --with-deps.
+  onHouseImageOnly: true as const,
   why:
     `Chromium's system libraries, Xvfb and fonts — exactly what \`playwright install-deps chromium\` installs for the\n` +
     `pinned Playwright (${CHROMIUM_OS_PACKAGES_VERSION}), projected from its own table (tools/playwright-deps). Built into the\n` +

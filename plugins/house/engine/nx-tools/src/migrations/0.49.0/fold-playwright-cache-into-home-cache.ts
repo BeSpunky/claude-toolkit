@@ -6,15 +6,18 @@
 // covers both. The devcontainer merge never removes a key, so without this rung the old mount would stay, nested
 // inside the new one: a second volume holding the same browsers, invisible to anything that reads ~/.cache.
 //
-// WHAT IT TAKES: that mount member — only where the HOUSE wrote it (`houseWrote`) — and the house's `//` line that
-// explained it. A mount the project wrote stays and is reported. What it CANNOT take is the Docker volume itself,
-// which lives on the host: it is reported by name (`docker volume rm <folder>-playwright-cache`) — a cache, so nothing
-// is lost: the browsers download once into ~/.cache on the next create.
+// WHAT IT TAKES: that mount member, and the `//` line above it — WHOEVER wrote it. Not a guess about intent: this exact
+// mount (a per-project volume named after the folder, at ~/.cache/ms-playwright) is SUPERSEDED by the persisted ~/.cache
+// the agent layer now guarantees, so nothing can depend on it any more (the 0.43.0 precedent); left, it would sit
+// nested inside the new volume, still in use, holding a second copy of the browsers. A mount at that path with any
+// OTHER source (a volume deliberately shared between projects, say) is the project's design: kept and reported. What
+// the rung CANNOT take is the Docker volume itself, which lives on the host: it is reported by name — a cache, so
+// nothing is lost: the browsers download once into ~/.cache on the next create.
 import { type Tree, logger } from '@nx/devkit';
 import { findNodeAtLocation } from 'jsonc-parser';
 import { removeMemberWithLeadingComment } from '../../generators/_utils/jsonc-remove-member';
 import { parseJsoncStrict } from '../../generators/_utils/jsonc-strict';
-import { houseWrote } from '../../generators/_utils/devcontainer-provenance';
+import { basename } from 'node:path';
 import { isPresent } from '../../layers/registry';
 
 const TAG = '[0.49.0 fold-playwright-cache-into-home-cache]';
@@ -32,13 +35,14 @@ export default async function foldPlaywrightCacheIntoHomeCache(tree: Tree): Prom
     }
     return;
   }
+  for (const other of mounts.children) {
+    if (typeof other.value === 'string' && /target=[^,]+\/\.cache\/ms-playwright[,]/.test(`${other.value},`) && !OLD.test(other.value)) {
+      logger.info(`${TAG} Left in place — the mount "${other.value}" in ${DEVCONTAINER} is the project's own design (not the per-project cache the house wrote). ~/.cache is now one persisted volume; this one stays nested inside it.`);
+    }
+  }
   const index = mounts.children.findIndex((item) => typeof item.value === 'string' && OLD.test(item.value));
   if (index === -1) return;
   const member = mounts.children[index].value as string;
-  if (!houseWrote(tree, { path: ['mounts'], member })) {
-    logger.info(`${TAG} Left in place — the mount "${member}" in ${DEVCONTAINER} is not recorded as house-written. ~/.cache is now one persisted volume, which already covers ~/.cache/ms-playwright; remove it if nothing else of yours relies on it.`);
-    return;
-  }
   // Cut as TEXT (the member, its comma, the house's `//` line above it) — jsonc's own removal also took the comment
   // of the NEXT mount with it, which may be the project's.
   const next = removeMemberWithLeadingComment(text, mounts.children[index]);
@@ -51,7 +55,8 @@ export default async function foldPlaywrightCacheIntoHomeCache(tree: Tree): Prom
   logger.info(
     `${TAG} removed the mount "${member}" from ${DEVCONTAINER} — ~/.cache is now ONE persisted volume (<folder>-cache), ` +
       `which covers the Playwright browsers and the shared browser's runtime alike. The old Docker volume is now unused; ` +
-      `remove it on the host when convenient: docker volume rm <this folder's name>-playwright-cache (a cache — the ` +
-      `browsers download once into ~/.cache on the next create). Rebuild the container.`,
+      `remove it on the host when convenient: docker volume rm ${basename(tree.root) || '<folder>'}-playwright-cache ` +
+      `(and the same for each git worktree folder this project was ever opened from — each has its own). A cache: the ` +
+      `browsers download once into ~/.cache on the next create. Rebuild the container.`,
   );
 }

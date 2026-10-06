@@ -231,10 +231,12 @@ export function compose(
       all('initializeCommand').map(({ item }) => ({ ...(item as { name: string; command: string; why?: string }) })),
       (entry) => entry.name,
     ),
-    osPackages: all('osPackages').map(({ item }) => {
-      const entry = item as { packages: readonly string[]; why?: string };
-      return { packages: [...entry.packages], why: entry.why };
-    }),
+    osPackages: all('osPackages')
+      .filter(({ item }) => !(source.kind === 'foreign' && (item as { onHouseImageOnly?: boolean }).onHouseImageOnly))
+      .map(({ item }) => {
+        const entry = item as { packages: readonly string[]; why?: string };
+        return { packages: [...entry.packages], why: entry.why };
+      }),
     postCreate: unique(
       all('postCreate').map(({ item, from }) => ({ ...(item as PostCreatePiece), from })),
       (entry) => entry.piece,
@@ -486,7 +488,7 @@ export function renderPostCreate(layers: readonly string[], c: Composition, plug
   const sections: string[] = [piece('header').split('{{LAYERS}}').join(layers.join(', '))];
 
   const inPhase = (phase: PostCreatePhase) =>
-    c.postCreate.filter((entry) => entry.phase === phase).map((entry) => renderPiece(piece(entry.piece), plugins));
+    c.postCreate.filter((entry) => entry.phase === phase).map((entry) => renderPiece(piece(entry.piece), plugins, c.imageSource));
 
   if (c.volumes.length) sections.push(renderVolumeOwnership(piece('volume-ownership'), c.volumes));
   sections.push(...inPhase('prepare'));
@@ -499,8 +501,15 @@ export function renderPostCreate(layers: readonly string[], c: Composition, plug
   return script;
 }
 
-function renderPiece(text: string, plugins: ClaudePlugins): string {
+/**
+ * `{{CHROMIUM_DEPS_FLAG}}`: on an image the house knows, Chromium's system libraries are image packages, so a browser
+ * install needs no apt step (''); on a foreign image the house cannot know the distro, so Playwright installs them
+ * from its OWN table for whatever runs there (' --with-deps').
+ */
+function renderPiece(text: string, plugins: ClaudePlugins, imageSource: ImageSource): string {
   return text
+    .split('{{CHROMIUM_DEPS_FLAG}}')
+    .join(imageSource.kind === 'foreign' ? ' --with-deps' : '')
     .split('{{PM_DETECT}}')
     .join(packageManagerShellDetection().replace(/^/gm, '  '))
     .split('{{MARKETPLACES}}')

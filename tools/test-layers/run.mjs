@@ -855,6 +855,66 @@ checkAsync('image: LF in every checkout, CRLF lists still read, a quote in a why
   ok(parked.exists('.devcontainer/post-create.sh') && !parked.exists('.devcontainer/post-create.bespunky.sh'), 'the superseded parked script was left (the chain feature would run its stale body first)');
 });
 
+checkAsync('chromium: a foreign image keeps Playwright\'s own --with-deps (its distro is unknown); the house image needs none', async (ok) => {
+  const foreign = createTreeWithEmptyWorkspace();
+  foreign.write('.devcontainer/devcontainer.json', '{ "image": "python:3.12-bookworm", "remoteUser": "pyuser" }\n');
+  const f = await artifacts(foreign, ['nx', 'agent', 'node', 'js', 'web']);
+  ok(!/(^| )libnss3( |$)/m.test(f.osScript), 'a foreign image got the Debian 13 Chromium names (one wrong name fails the whole apt transaction)');
+  ok(f.osScript.includes('tigervnc-standalone-server'), 'the distro-neutral web packages must stay on a foreign image');
+  ok(f.post.includes('shared-browser" install --with-deps;') && f.post.includes('playwright install --with-deps chromium'), 'a foreign image lost Playwright\'s own --with-deps');
+  const house = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js', 'web']);
+  ok(!house.post.includes('--with-deps'), 'a house image still runs an apt step for Chromium');
+});
+
+checkAsync('installer: a failed batch falls back to one by one, names the culprit, still exits non-zero', async (ok) => {
+  const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
+  const dir = mkdtempSync(join(tmpdir(), 'os-fallback-'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  const log = join(dir, 'apt.log');
+  writeFileSync(join(dir, 'house.packages.sh'), a.osScript);
+  writeFileSync(join(dir, 'os-packages.txt'), 'sox nosuchpkg\n');
+  writeFileSync(join(bin, 'dpkg-query'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  // A real apt refuses the whole transaction when ONE name is unknown; alone, every other name installs.
+  writeFileSync(join(bin, 'apt-get'), `#!/bin/sh\necho "$*" >> '${log}'\ncase "$*" in *nosuchpkg*) exit 100 ;; esac\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'sleep'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  let status = 0;
+  let out = '';
+  try {
+    execFileSync('sh', ['-c', 'sh "$0" "$1" 2>&1', join(dir, 'house.packages.sh'), join(dir, 'os-packages.txt')], { env: { PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+  } catch (error) {
+    status = error.status;
+    out = `${error.stdout}`;
+  }
+  const calls = readFileSync(log, 'utf8').trim().split('\n');
+  rmSync(dir, { recursive: true, force: true });
+  ok(status !== 0 && /FAILED: nosuchpkg$/m.test(out), `the culprit was not named (status ${status}): ${out}`);
+  for (const name of ['tmux', 'curl', 'sox']) ok(calls.includes(`install -y ${name}`), `${name} was not installed on its own after the batch failed`);
+});
+
+checkAsync('runtime: an earlier pin\'s playwright-core is removed before the new one installs (its browsers would be kept forever)', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  await generator('shared-browser')(tree, {});
+  const dir = mkdtempSync(join(tmpdir(), 'sb-runtime-'));
+  const bin = join(dir, 'bin');
+  const cache = join(dir, 'cache');
+  mkdirSync(bin);
+  mkdirSync(join(cache, 'bespunky', 'playwright-core@0.0.1', 'node_modules'), { recursive: true });
+  mkdirSync(join(cache, 'bespunky', 'unrelated'), { recursive: true });
+  writeFileSync(join(dir, 'runtime.mjs'), tree.read('tools/shared-browser/runtime.mjs', 'utf8'));
+  // A fake npm: `npm install --prefix <dir> …` lays down the package the runtime checks for.
+  writeFileSync(join(bin, 'npm'), '#!/bin/sh\nwhile [ "$1" != "--prefix" ]; do shift; done\nmkdir -p "$2/node_modules/playwright-core" && echo "{}" > "$2/node_modules/playwright-core/package.json"\n', { mode: 0o755 });
+  try {
+    execFileSync('node', [join(dir, 'runtime.mjs'), 'module'], { env: { PATH: `${bin}:${process.env.PATH}`, XDG_CACHE_HOME: cache, HOME: dir }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch {
+    // `module` may print or exit oddly with a fake package; the filesystem is what is checked.
+  }
+  const left = readdirSync(join(cache, 'bespunky')).sort();
+  rmSync(dir, { recursive: true, force: true });
+  ok(!left.includes('playwright-core@0.0.1') && left.includes('unrelated') && left.some((name) => name.startsWith('playwright-core@') && name !== 'playwright-core@0.0.1'), `after installing the pin: ${JSON.stringify(left)}`);
+});
+
 checkAsync('adopted devcontainer on its own image: only the active layers merged in, no remoteUser imposed, mounts follow its user', async (ok) => {
   const tree = wrapperRepo();
   tree.write('.devcontainer/devcontainer.json', '{\n  // Our Python image.\n  "image": "python:3.12",\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n');

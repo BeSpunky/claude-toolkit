@@ -50,6 +50,12 @@ jobs:
       - name: Run layer registry tests
         run: node tools/test-layers/run.mjs
 
+      # Chromium's OS packages are a PROJECTION of Playwright's own install-deps table for the pinned version
+      # (generators/_utils/playwright-deps.ts). test-layers only checks the recorded version offline; this re-projects
+      # it from the real playwright-core tarball (needs the npm registry, which CI has) and fails on any drift.
+      - name: Check the Chromium OS package projection
+        run: node tools/playwright-deps/project.mjs
+
       # The GENERATORS against fixture workspaces in every layout × linking cell (tools/test-generators): where a
       # project lands, how a library is linked, idempotence of every re-run. Same install, same reason. Cases that
       # delegate to @nx/js / @nx/angular (optional peers, not devDependencies here) are SKIPPED and counted; the
