@@ -1,6 +1,9 @@
 ---
 effort: upgrade-app-and-identity
-summary: Upgrade infers the app to refresh from .bespunky/dev.json and stamps the worktree tab label with the real project identity, not the worktree folder name
+status: concluded
+concluded: 2026-10-06
+summary: Upgrade picks its app from .bespunky/dev.json; generators name the project by its main worktree, not a linked worktree's folder; the tab label's main-tree sentinel is the dev engine's DNS slug (nx-tools 0.45.1, bespunky-house 0.43.1).
+tags: [house, upgrade, worktree, nx-tools]
 ---
 
 # Upgrade: the app to refresh, and who the project is — decision
@@ -67,3 +70,9 @@ the consumer's repo and cannot import the payload, so the generator side has `_u
 cross-referencing the other, and a test-generators case asserts the two agree over the inputs that normalise.
 Nothing to migrate: `worktree-tab-label.ts` is generator-owned and rewritten on the next upgrade. Folded into the
 unpublished 0.45.1.
+
+## Conclusion — 2026-10-06
+
+Shipped as `@bespunky/nx-tools` 0.45.1 and `bespunky-house` 0.43.1. Verified end to end on a backitup-shaped
+fixture upgraded from a linked worktree (`[app] … ui`, `UPGRADE_OK`, sentinel `backitup`) and by dogfooding the
+upgrade on this repo. Landed and promoted on the user's "Land & promote".
