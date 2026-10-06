@@ -1,6 +1,9 @@
 ---
 effort: voice-audio-readiness
-summary: Voice readiness must check the audio link to the host, not just the engines — and say "voice is off for this project" instead of "no speech engine"
+status: concluded
+concluded: 2026-10-06
+summary: Voice judges the audio connection before any engine, reports it in health, never calls engines-without-audio "ready", and names the cause (voice off for the project → upgrade --voice + rebuild) — bespunky-voice 0.11.0
+tags: [voice, health, diagnostics, devcontainer]
 ---
 
 # Voice: the audio connection is judged first
