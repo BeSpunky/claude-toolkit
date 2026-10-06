@@ -56,8 +56,18 @@
     : [{ label: 'Phone', width: 390, height: 844 }, { label: 'Desktop', width: 1280, height: 800 }];
 
   $('#question').textContent = manifest.question ?? 'Which one — and what would you change?';
-  $('#question').title = manifest.question ?? '';   // the row truncates to one line; full text on hover
-  $('#question-full').textContent = $('#question').textContent;   // … and in full atop "What's faked"
+  // The question is what the reviewer must answer: it clamps to two lines and a real button expands it
+  // (never a hover-only tooltip). The button exists only while the clamp actually hides something.
+  const ask = $('#ask'), askMore = $('#ask-more'), questionEl = $('#question');
+  const paintAsk = () => {
+    const expanded = ask.classList.contains('expanded');
+    askMore.hidden = !expanded && questionEl.scrollHeight <= questionEl.clientHeight + 1;
+    askMore.textContent = expanded ? 'less' : 'more';
+    askMore.setAttribute('aria-expanded', String(expanded));
+    askMore.setAttribute('aria-label', expanded ? 'Show less of the question' : 'Show the whole question');
+  };
+  askMore.addEventListener('click', () => { ask.classList.toggle('expanded'); paintAsk(); });
+  new ResizeObserver(paintAsk).observe(ask);
   const honesty = manifest.honesty?.length ? manifest.honesty : ['Nothing faked.'];
   $('#honesty').replaceChildren(...honesty.map((h) => el('li', { textContent: h })));
   $('#faked-count').textContent = manifest.honesty?.length ? `(${manifest.honesty.length})` : '';   // surfaced up front
@@ -119,14 +129,15 @@
       if (mode === 'focus' && vm) state.hist = Number(vm[1]);   // #focus/x/vp/v2 = view that past round
     } else { state.mode = 'compare'; if (a) state.vp = vpByLabel(a); }
   };
-  let lastWritten = null;
+  // Our own writes go through pushState, which fires NO event — so the popstate listener (boot) hears only
+  // real navigations (Back, Forward, an edited URL) and needs no "was that me?" guard.
   const writeHash = () => {
     const vp = slug(viewports[state.vp]?.label || '');
     const nm = slug(variants[state.focus]?.name || '');
     let h = `#compare/${vp}`;
     if (state.mode === 'focus') h = `#focus/${nm}/${vp}${state.hist != null ? `/v${state.hist}` : ''}`;
     if (state.mode === 'evolution') h = `#evolution/${nm}/${vp}`;
-    if (location.hash !== h) { lastWritten = h; location.hash = h; }
+    if (location.hash !== h) history.pushState(null, '', h);
   };
 
   // ---- announcements (one polite live region for state changes a sighted user SEES happen) ----
@@ -151,7 +162,10 @@
     // keyboard/SR users shouldn't tab INTO a mock document that isn't the one being reviewed
     if (kind !== 'focus') { f.inert = true; f.tabIndex = -1; f.setAttribute('aria-hidden', 'true'); }
     // every frame learns the viewer's pin visibility as it loads (a reload or a new round included)
-    f.addEventListener('load', () => post(f, { type: 'mk:set-pins', visible: ui.pins }));
+    f.addEventListener('load', () => {
+      post(f, { type: 'mk:set-pins', visible: ui.pins });
+      if (kind === 'focus') post(f, { type: 'mk:host-keys', keys: hostKeys() });
+    });
     box.append(f);
     container.append(box);
     frames.push({ iframe: f, w: vp.width, h: vp.height, box, kind });
@@ -191,7 +205,8 @@
   const paintScale = (scale, f) => {
     ui.scale = Math.round(scale * 1000) / 1000;
     scaleOut.textContent = `${Math.round(scale * 100)}%`;
-    scaleOut.title = `Shown at ${Math.round(scale * 100)}% of its ${f.w}×${f.h} design size`;
+    $('#view-toggle').title = `Shown at ${Math.round(scale * 100)}% of its ${f.w}×${f.h} design size`;
+    $('#view-toggle').setAttribute('aria-label', `View — ${FITS.find((x) => x.id === ui.fit).title}, shown at ${Math.round(scale * 100)}%`);
   };
   // Fit follows the boxes it fits into — the window, the rail opening, presentation mode — not just `resize`.
   const sizeWatch = new ResizeObserver(() => fit());
@@ -207,7 +222,33 @@
   const toggle = $('#comment-toggle');
   const inLiveFocus = () => state.mode === 'focus' && state.hist == null;
 
+  // Every control the harness REBUILDS carries a stable, page-unique data-ctl. A rebuild keeps keyboard
+  // focus on that same control — or, if it is gone, on the place its region names — never on <body>.
+  const captureFocus = () => {
+    const a = document.activeElement;
+    const row = a?.closest?.('.clist li');
+    return {
+      ctl: a?.dataset?.ctl,
+      rowIndex: row ? [...row.parentElement.children].indexOf(row) : -1,
+      region: row ? 'row' : a?.closest?.('#drawer') ? 'drawer' : a?.closest?.('.concept-rail') ? 'rail' : null,
+    };
+  };
+  const restoreFocus = ({ ctl, rowIndex, region }) => {
+    if (!ctl && !region) return;
+    const now = document.activeElement;
+    if (now && now !== document.body && now.isConnected) return;   // focus survived (or moved on purpose)
+    const rows = [...document.querySelectorAll('#drawer .clist li')];
+    const fallback = {
+      row: () => (rows.length ? $('[data-ctl^="reveal-"]', rows[Math.min(rowIndex, rows.length - 1)]) : $('[data-ctl="drawer-close"]')),
+      drawer: () => $('[data-ctl="drawer-close"]'),
+      rail: () => $('[data-ctl="rail-current"]'),
+    }[region];
+    const target = (ctl ? document.querySelector(`[data-ctl="${CSS.escape(ctl)}"]`) : null) ?? fallback?.() ?? null;
+    target?.focus();
+  };
+
   const render = () => {
+    const focused = captureFocus();
     frames.length = 0;
     sizeWatch.disconnect();
     stage.replaceChildren();
@@ -238,6 +279,7 @@
     const viewer = $('.viewer');
     if (viewer) sizeWatch.observe(viewer);
     requestAnimationFrame(fit);
+    restoreFocus(focused);
     flushReload();                       // a full reload deferred while the user was mid-input, now that they've moved on
   };
 
@@ -245,35 +287,34 @@
   const renderTools = () => {
     $('#viewport-seg').replaceChildren(...viewports.map((vp, i) =>
       el('button', {
-        type: 'button', textContent: vp.label, title: `${vp.label} · ${vp.width}×${vp.height}`,
+        type: 'button', textContent: vp.label, title: `${vp.label} · ${vp.width}×${vp.height}`, 'data-ctl': `vp-${slug(vp.label)}`,
         'aria-pressed': String(i === state.vp),
         onclick: () => { state.vp = i; apply(); },
       })));
     const focus = state.mode === 'focus';
-    $('#fit-seg').hidden = !focus;
-    $('#fit-seg').replaceChildren(...FITS.map((f) => el('button', {
-      type: 'button', textContent: f.label, title: f.title, 'aria-pressed': String(ui.fit === f.id),
-      onclick: () => setFit(f.id),
-    })));
     scaleOut.hidden = !focus;
+    if (!focus) { $('#view-toggle').removeAttribute('title'); $('#view-toggle').setAttribute('aria-label', 'View'); }
+    document.querySelectorAll('#view-menu [data-fit], #fit-label, #fit-sep').forEach((n) => { n.hidden = !focus; });
     $('#rail-toggle').hidden = !(focus && variants.length > 1);
     $('#drawer-toggle').hidden = !focus;
     paintToggles();
   };
   const paintToggles = () => {
-    $('#rail-toggle').setAttribute('aria-expanded', String(ui.rail));
+    document.querySelectorAll('#view-menu [data-fit]').forEach((n) => n.setAttribute('aria-checked', String(n.dataset.fit === ui.fit)));
+    $('#rail-toggle').setAttribute('aria-checked', String(ui.rail));
+    $('#pins-toggle').setAttribute('aria-checked', String(ui.pins));
     $('#drawer-toggle').setAttribute('aria-expanded', String(ui.drawer));
-    $('#pins-toggle').hidden = false;
-    $('#pins-toggle').setAttribute('aria-pressed', String(ui.pins));
-    $('#pins-toggle').textContent = ui.pins ? 'Pins' : 'Pins hidden';
   };
 
   const renderCompare = () => {
     const wall = el('div', { className: 'wall' });
     variants.forEach((v, i) => {
-      const card = el('div', { className: 'card', role: 'button', tabIndex: 0, 'aria-label': `Open ${v.name}` },
+      const go = () => { state.mode = 'focus'; state.focus = i; state.hist = null; apply(); };
+      // The open action is a real button (its hit area stretched over the whole card by CSS); Choose sits
+      // beside it as its own control — never a button nested inside a button.
+      const card = el('div', { className: 'card' },
         el('span', { className: 'open-hint', 'aria-hidden': 'true' }, 'Open ▸'),
-        el('h2', {}, v.name),
+        el('h2', {}, el('button', { type: 'button', className: 'card-open', 'data-ctl': `open-${variantKey(v)}`, title: `Open ${v.name}`, onclick: go }, v.name)),
         el('p', { className: 'pitch' }, v.pitch || ''));
       card.dataset.key = variantKey(v);
       const holder = el('div');
@@ -282,11 +323,8 @@
       // Actions row: the comment tally (badge) and a direct "Choose" — a verdict can be cast from the wall.
       card.append(el('div', { className: 'card-actions' },
         el('div', { className: 'badge' }),
-        el('button', { className: 'chip card-choose', type: 'button', title: `Choose ${v.name} as the direction`,
-          onclick: (e) => { e.stopPropagation(); chooseVariant(v); } }, 'Choose ✓')));
-      const go = () => { state.mode = 'focus'; state.focus = i; state.hist = null; apply(); };
-      card.addEventListener('click', go);
-      card.addEventListener('keydown', (e) => { if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); go(); } });
+        el('button', { className: 'chip card-choose', type: 'button', 'data-ctl': `choose-${variantKey(v)}`, title: `Choose ${v.name} as the direction`,
+          'aria-label': `Choose ${v.name}`, onclick: () => chooseVariant(v) }, 'Choose ✓')));
       wall.append(card);
     });
     stage.append(wall);
@@ -305,12 +343,12 @@
 
     const many = variants.length > 1;
     nav.append(
-      el('button', { type: 'button', className: 'chip', title: 'Back to every concept side by side', onclick: () => { state.mode = 'compare'; state.hist = null; apply(); } }, '← All'),
-      many ? el('button', { type: 'button', className: 'icon', 'aria-label': 'Previous concept', title: 'Previous concept (←)', onclick: () => goConcept(state.focus - 1) }, '‹') : null,
+      el('button', { type: 'button', className: 'chip', 'data-ctl': 'nav-all', title: 'Back to every concept side by side', onclick: () => { state.mode = 'compare'; state.hist = null; apply(); } }, '← All'),
+      many ? el('button', { type: 'button', className: 'icon', 'data-ctl': 'nav-prev', 'aria-label': 'Previous concept', title: 'Previous concept (←)', onclick: () => goConcept(state.focus - 1) }, '‹') : null,
       el('span', { className: 'whoami', title: v.pitch || v.name }, v.name),
-      el('button', { type: 'button', className: `chip vchip ${viewingHistory ? 'hist' : ''}`, title: viewingHistory ? 'Back to the current round' : 'Current round',
+      el('button', { type: 'button', className: `chip vchip ${viewingHistory ? 'hist' : ''}`, 'data-ctl': 'nav-version', title: viewingHistory ? 'Back to the current round' : 'Current round',
         onclick: () => { if (viewingHistory) { state.hist = null; apply(); } } }, `v${ver}${viewingHistory ? ' · history' : ''}`),
-      many ? el('button', { type: 'button', className: 'icon', 'aria-label': 'Next concept', title: 'Next concept (→)', onclick: () => goConcept(state.focus + 1) }, '›') : null);
+      many ? el('button', { type: 'button', className: 'icon', 'data-ctl': 'nav-next', 'aria-label': 'Next concept', title: 'Next concept (→)', onclick: () => goConcept(state.focus + 1) }, '›') : null);
 
     const focusEl = el('div', { className: `focus${many && ui.rail ? ' rail-open' : ''}` });
 
@@ -332,12 +370,13 @@
         frameFor(cv, state.vp, thumb, { kind: 'rail' });
         const current = i === state.focus;
         const item = el('div', { className: `rail-item ${current ? 'current' : ''}`, role: 'tab',
-          tabIndex: current ? 0 : -1, title: cv.name, 'aria-selected': String(current), onclick: () => { if (!current) goConcept(i); } },
+          'data-ctl': current ? 'rail-current' : `rail-${i}`, tabIndex: current ? 0 : -1, title: cv.name, 'aria-selected': String(current), onclick: () => { if (!current) goConcept(i); } },
           thumb, el('span', { className: 'rail-name' }, cv.name));
         item.addEventListener('keydown', (e) => {
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!current) goConcept(i); }
-          // a vertical tablist: ↑/↓ moves between concepts (← / → do too, globally)
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); goConcept(i + (e.key === 'ArrowDown' ? 1 : -1)); requestAnimationFrame(() => $('.rail-item.current')?.focus()); }
+          // a vertical tablist: ↑/↓ moves between concepts (← / → do too, through the global keys);
+          // render's restoreFocus lands focus on the new current item
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); goConcept(i + (e.key === 'ArrowDown' ? 1 : -1)); }
         });
         rail.append(item);
       });
@@ -349,7 +388,7 @@
     const drawer = el('aside', { className: `drawer${ui.drawer ? ' open' : ''}`, id: 'drawer', 'aria-label': 'Comments and history' });
     drawer.append(el('div', { className: 'drawer-head' },
       el('div', {}, el('h2', {}, v.name), v.pitch ? el('p', { className: 'pitch' }, v.pitch) : null),
-      el('button', { type: 'button', className: 'icon', 'aria-label': 'Close comments', title: 'Close (Esc)', onclick: () => setDrawer(false, { returnFocus: true }) }, '×')),
+      el('button', { type: 'button', className: 'icon', 'data-ctl': 'drawer-close', 'aria-label': 'Close comments', title: 'Close (Esc)', onclick: () => setDrawer(false, { returnFocus: true }) }, '×')),
     el('div', { id: 'drawer-body' }));
     focusEl.append(drawer);
     stage.append(focusEl);
@@ -364,7 +403,7 @@
     const v = variants[state.focus];
     const cur = curVersion(v);
     nav.append(
-      el('button', { type: 'button', className: 'chip', onclick: () => { state.mode = 'focus'; state.hist = null; apply(); } }, '← Back to Focus'),
+      el('button', { type: 'button', className: 'chip', 'data-ctl': 'nav-back-focus', onclick: () => { state.mode = 'focus'; state.hist = null; apply(); } }, '← Back to Focus'),
       el('span', { className: 'whoami' }, `${v.name} — evolution, v1 to now`));
 
     const steps = roundsOf(v).map((r) => ({ version: r.v, snapshot: r.snapshot, note: r.note, current: false }));
@@ -404,17 +443,23 @@
 
   // ---- the drawer body: current round comments + management + history ----
   const renderSide = (side, v, ver, viewingHistory) => {
+    paintDrawerCount(v, ver);
+    // Rebuild only when what the drawer shows changed — a poll or SSE tick with nothing new is a no-op,
+    // so it can never disturb focus, an open row, or the reader's place.
+    const sig = JSON.stringify([variantKey(v), ver, viewingHistory, roundsOf(v),
+      comments.filter((c) => c.variant === variantKey(v)).map((c) => [c.n, c.status, c.handled, c.text, c.reply, c.version, c.element, c.viewport])]);
+    if (side.dataset.sig === sig) return;
+    side.dataset.sig = sig;
     side.replaceChildren();
     if (viewingHistory) {
       side.append(el('div', { className: 'histbanner' },
         `Viewing v${ver} — read-only`,
-        el('button', { type: 'button', className: 'linklike', onclick: () => { state.hist = null; apply(); } }, 'back to current')));
+        el('button', { type: 'button', className: 'linklike', 'data-ctl': 'back-current', onclick: () => { state.hist = null; apply(); } }, 'back to current')));
     } else {
       side.append(el('h3', {}, `This round · v${ver}`));
     }
     side.append(commentList(v, ver, viewingHistory));
     if (!viewingHistory) side.append(historySection(v));
-    paintDrawerCount(v, ver);
   };
   const paintDrawerCount = (v, ver) => {
     const open = comments.filter((c) => inRound(c, v, ver) && !c.handled).length;
@@ -440,19 +485,19 @@
       li.addEventListener('mouseleave', unlit);
       li.addEventListener('focusin', lit);
       li.addEventListener('focusout', unlit);
-      const reveal = el('button', { type: 'button', className: 'reveal', 'data-ctl': 'reveal', title: 'Show this comment on the mock',
+      const reveal = el('button', { type: 'button', className: 'reveal', 'data-ctl': `reveal-${c.n}`, title: 'Show this comment on the mock',
         onclick: () => msgFrame({ type: 'mk:reveal', n: c.n }) },
         el('span', { className: 'num', 'aria-hidden': 'true' }, c.handled ? '✓' : String(c.n)),
-        el('span', { className: 'txt' }, el('span', { className: 'sr-only' }, `Comment ${c.n}: `), c.text));
+        el('span', { className: 'txt' }, el('span', { className: 'mk-sr' }, `Comment ${c.n}: `), c.text));
       li.append(el('span', { className: 'chead' }, reveal));
       li.append(el('div', { className: 'meta' },
         el('span', { className: `pill pill-${s}` }, STATUS_PILL[s]),
         ` ${c.element || ''} · ${c.viewport || ''}px${c.reply ? ` · ${c.reply}` : ''}`));
       if (!readonly) {
         const acts = el('div', { className: 'acts' });
-        acts.append(el('button', { type: 'button', className: 'act', 'data-ctl': 'edit', 'aria-label': `Edit comment ${c.n}`, onclick: () => beginEdit(li, c) }, 'Edit'));
-        if (s === 'draft') acts.append(el('button', { type: 'button', className: 'act send', 'data-ctl': 'send', 'aria-label': `Send comment ${c.n} to Claude`, onclick: () => sendOne(c.n) }, 'Send'));
-        acts.append(el('button', { type: 'button', className: 'act rm', 'data-ctl': 'rm', 'aria-label': `Remove comment ${c.n}`, onclick: () => removeWithUndo(c) }, 'Remove'));
+        acts.append(el('button', { type: 'button', className: 'act', 'data-ctl': `edit-${c.n}`, 'aria-label': `Edit comment ${c.n}`, onclick: () => beginEdit(li, c) }, 'Edit'));
+        if (s === 'draft') acts.append(el('button', { type: 'button', className: 'act send', 'data-ctl': `send-${c.n}`, 'aria-label': `Send comment ${c.n} to Claude`, onclick: () => sendOne(c.n) }, 'Send'));
+        acts.append(el('button', { type: 'button', className: 'act rm', 'data-ctl': `rm-${c.n}`, 'aria-label': `Remove comment ${c.n}`, onclick: () => removeWithUndo(c) }, 'Remove'));
         li.append(acts);
       }
       ul.append(li);
@@ -471,8 +516,10 @@
       settled = true;
       editingN = null;
       // Persist (or refresh) FIRST, then flush any full reload deferred during the edit.
+      const body = $('#drawer-body');
+      if (body) body.dataset.sig = '';   // the row's DOM was swapped for the input: the drawer must rebuild
       const p = (save && input.value.trim() && input.value !== c.text) ? editComment(c.n, input.value.trim()) : pullAll();
-      p.then(() => { $(`.clist li[data-n="${c.n}"] .reveal`)?.focus(); flushReload(); }).catch(() => {});
+      p.then(() => { $(`[data-ctl="reveal-${c.n}"]`)?.focus(); flushReload(); }).catch(() => {});
     };
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); commit(true); }
@@ -489,12 +536,12 @@
     wrap.append(el('div', { className: 'history-head' },
       el('h4', {}, rounds.length ? 'History' : 'History — none yet'),
       rounds.length
-        ? el('button', { type: 'button', className: 'linklike', title: 'See the whole evolution over time', onclick: () => { state.mode = 'evolution'; apply(); } }, 'See the evolution →')
+        ? el('button', { type: 'button', className: 'linklike', 'data-ctl': 'evolution', title: 'See the whole evolution over time', onclick: () => { state.mode = 'evolution'; apply(); } }, 'See the evolution →')
         : null));
     rounds.slice().reverse().forEach((r) => {
       const count = comments.filter((c) => c.variant === variantKey(v) && Number(c.version) === Number(r.v)).length;
       wrap.append(el('div', { className: 'hround' },
-        el('button', { type: 'button', className: 'linklike', title: 'Open this version (read-only)', onclick: () => { state.hist = r.v; apply(); } }, `v${r.v}`),
+        el('button', { type: 'button', className: 'linklike', 'data-ctl': `hist-v${r.v}`, title: 'Open this version (read-only)', onclick: () => { state.hist = r.v; apply(); } }, `v${r.v}`),
         el('span', { className: 'hmeta' }, ` · ${count} comment${count === 1 ? '' : 's'}${r.note ? ` · ${esc(r.note)}` : ''}`)));
     });
     return wrap;
@@ -505,7 +552,7 @@
   // ---- viewer state: fit · rail · drawer · pins · presentation ----
   const setFit = (id) => {
     ui.fit = id; pref.set('fit', id);
-    renderTools(); fit();
+    paintToggles(); fit();
     announce(`${FITS.find((f) => f.id === id).title} — ${scaleOut.textContent}`);
   };
   const setRail = (open) => {
@@ -529,20 +576,28 @@
     announce(visible ? 'Pins shown' : 'Pins hidden — press h to show them');
   };
   const presentExit = $('#present-exit');
+  // Presentation hides every piece of chrome, so focus resting in that chrome moves to the exit button (the
+  // one control left) and comes back to where it was on the way out. Focus in the mock stays in the mock.
+  const HIDDEN_WHILE_PRESENTING = '.topbar, .bar, .drawer, .concept-rail, .popover';
+  let presentReturn = null;
   const setPresenting = (on) => {
-    const wasOnChrome = document.activeElement === $('#present-toggle');
-    const wasOnExit = document.activeElement === presentExit;
+    if (on === ui.presenting) return;
+    popovers.forEach((p) => p.close());
+    const active = document.activeElement;
     ui.presenting = on;
     document.body.classList.toggle('presenting', on);
     presentExit.hidden = !on;
-    if (on && wasOnChrome) presentExit.focus();
-    if (!on && wasOnExit) $('#present-toggle').focus();
+    if (on) {
+      presentReturn = active?.closest?.(HIDDEN_WHILE_PRESENTING) ? active : null;
+      if (presentReturn || active === document.body) presentExit.focus();
+    } else if (document.activeElement === presentExit || document.activeElement === document.body || !document.activeElement) {
+      const back = presentReturn?.isConnected && presentReturn.checkVisibility() ? presentReturn : $('#view-toggle');
+      back.focus();
+    }
+    if (!on) presentReturn = null;
     announce(on ? 'Presentation mode — press f or Escape to leave' : 'Presentation mode off');
   };
-  $('#rail-toggle').addEventListener('click', () => setRail(!ui.rail));
   $('#drawer-toggle').addEventListener('click', (e) => setDrawer(!ui.drawer, { moveFocus: e.detail === 0 }));
-  $('#pins-toggle').addEventListener('click', () => setPins(!ui.pins));
-  $('#present-toggle').addEventListener('click', () => setPresenting(true));
   presentExit.addEventListener('click', () => setPresenting(false));
 
   // ---- anchored popovers: "What's faked" (top row) and the ⋯ menu (bottom bar) ----
@@ -575,18 +630,27 @@
     return p;
   };
   const info = anchoredPopover($('#info-toggle'), $('#info-panel'), { side: 'below' });
-  const moreMenu = $('#more-menu');
-  const menuItems = () => [...moreMenu.querySelectorAll('[role^="menuitem"]')];
-  const more = anchoredPopover($('#more-toggle'), moreMenu, { side: 'above', onOpen: () => menuItems()[0].focus() });
-  moreMenu.addEventListener('keydown', (e) => {
-    const items = menuItems(), i = items.indexOf(document.activeElement);
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+  // A role=menu: focus starts on its first (or checked) item; ↑ ↓ Home End move among the visible items.
+  const menuPopover = (trigger, panel, side) => {
+    const items = () => [...panel.querySelectorAll('[role^="menuitem"]')].filter((n) => !n.hidden);
+    panel.addEventListener('keydown', (e) => {
+      const list = items(), i = list.indexOf(document.activeElement);
+      const to = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: list.length - 1 }[e.key];
+      if (to == null) return;
       e.preventDefault();
-      items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
-    }
-    if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
-    if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
-  });
+      list[(to + list.length) % list.length].focus();
+    });
+    return anchoredPopover(trigger, panel, { side, onOpen: () => (items().find((n) => n.getAttribute('aria-checked') === 'true' && n.dataset.fit) || items()[0]).focus() });
+  };
+  const more = menuPopover($('#more-toggle'), $('#more-menu'), 'above');
+  const view = menuPopover($('#view-toggle'), $('#view-menu'), 'below');
+  // a View item acts after the menu has closed and handed focus back to its trigger
+  const viewItem = (node, act) => node.addEventListener('click', () => { view.close({ returnFocus: true }); act(); });
+  document.querySelectorAll('#view-menu [data-fit]').forEach((n) => viewItem(n, () => setFit(n.dataset.fit)));
+  viewItem($('#rail-toggle'), () => setRail(!ui.rail));
+  viewItem($('#pins-toggle'), () => setPins(!ui.pins));
+  viewItem($('#present-toggle'), () => setPresenting(true));
+  viewItem($('#keys-toggle'), () => openKeys());
   document.addEventListener('click', (e) => { popovers.forEach((p) => { if (!p.panel.contains(e.target)) p.close(); }); });
   addEventListener('resize', () => popovers.forEach((p) => p.isOpen() && p.place()));
 
@@ -597,12 +661,17 @@
   };
   const focusFrame = () => (state.mode === 'focus' ? frames.find((f) => f.kind === 'focus')?.iframe : null);
   const msgFrame = (m) => { const f = focusFrame(); if (f) post(f, m); };
+  let modeReturn = null;              // the control that sent focus into the frame for keyboard placement
   // via 'keyboard': the frame takes focus and raises its crosshair (arrows move it, Enter comments).
   const setMode = (on, via = 'pointer') => {
     if (!inLiveFocus()) { commentOn = false; setCommentButton(); return; }
     commentOn = !!on;
     setCommentButton();
-    if (commentOn && via === 'keyboard') focusFrame()?.focus();
+    if (commentOn && via === 'keyboard') {
+      const a = document.activeElement;
+      modeReturn = a && a !== document.body && a.tagName !== 'IFRAME' ? a : null;
+      focusFrame()?.focus();
+    }
     msgFrame({ type: 'mk:set-mode', on: commentOn, via });
   };
   toggle.addEventListener('click', (e) => setMode(!commentOn, e.detail === 0 ? 'keyboard' : 'pointer'));
@@ -631,6 +700,8 @@
     if (ui.presenting) { setPresenting(false); return; }
     if (ui.drawer && state.mode === 'focus') setDrawer(false, { returnFocus: $('#drawer')?.contains(document.activeElement) });
   };
+  // the keys this page acts on right now — the mock frame forwards (and claims) only these
+  const hostKeys = () => KEYS.filter((k) => k.key !== 'c' && (!k.when || k.when())).map((k) => k.key);
   const isTyping = (t) => t instanceof HTMLElement && (/^(input|textarea|select)$/i.test(t.tagName) || t.isContentEditable);
   const modalOpen = () => !$('#confirm-backdrop').hidden || !$('#keys-backdrop').hidden;
   const runKey = (key, e) => {
@@ -642,14 +713,14 @@
     if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
     if (isTyping(e.target) || modalOpen() || userBusy()) return;
     // arrows inside a control that owns them (a segmented group, the menu, the rail tablist) stay theirs
-    if (/^Arrow/.test(e.key) && e.target.closest?.('.seg, .menu, .concept-rail, .drawer')) return;
+    if (/^Arrow/.test(e.key) && e.target.closest?.('.seg, .menu, .drawer')) return;
     if (runKey(e.key, e)) e.preventDefault();
   });
 
   // ---- the `?` sheet ----
   const keysBackdrop = $('#keys-backdrop');
   let keysReturn = null;
-  $('#keys-list').replaceChildren(...[...KEYS, ...FRAME_KEYS].flatMap((k) => [el('dt', {}, el('kbd', {}, k.show)), el('dd', {}, k.does)]));
+  $('#keys-list').replaceChildren(...[...KEYS, ...FRAME_KEYS].flatMap((k) => [el('dt', {}, el('kbd', { className: 'mk-kbd' }, k.show)), el('dd', {}, k.does)]));
   const openKeys = () => {
     keysReturn = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     keysBackdrop.hidden = false; $('#keys-close').focus();
@@ -665,7 +736,15 @@
 
   addEventListener('message', (e) => {
     const d = e.data || {};
-    if (d.type === 'mk:mode') { commentOn = d.on; setCommentButton(); }
+    if (d.type === 'mk:mode') {
+      commentOn = d.on; setCommentButton();
+      // the frame hid its focused crosshair and had nothing of its own to give focus to → we take it back
+      if (d.returnFocus) {
+        const back = modeReturn?.isConnected && modeReturn.checkVisibility() ? modeReturn : (ui.presenting ? focusFrame() : toggle);
+        back?.focus();
+      }
+      if (!d.on) modeReturn = null;
+    }
     // The composer opened/closed. While open, hot-reloads are deferred (userBusy); on close, resync then
     // apply whatever was deferred.
     if (d.type === 'mk:composer') { composerOpen = d.open; if (!d.open) pullAll().then(flushReload); }
@@ -771,17 +850,19 @@
 
   // Paint the decision everywhere it shows — bar status + button, compare ribbons, rail markers, focus tag.
   const paintDecision = () => {
-    const d = $('#decision'), choose = $('#choose');
-    if (!verdict) { d.textContent = 'no decision yet'; d.className = 'decision'; d.disabled = true; d.onclick = null; }
-    else if (verdict.kind === 'none') { d.textContent = '✗ Rejected all — reconceiving'; d.className = 'decision rejected'; d.disabled = true; d.onclick = null; }
+    const d = $('#decision'), view = $('#decision-view'), choose = $('#choose');
+    view.hidden = true; view.onclick = null;
+    if (!verdict) { setText(d, 'no decision yet'); d.className = 'decision'; }
+    else if (verdict.kind === 'none') { setText(d, '✗ Rejected all — reconceiving'); d.className = 'decision rejected'; }
     else {
       const cv = variants.find((v) => variantKey(v) === verdict.choice);
       const cur = cv ? curVersion(cv) : null;
       const behind = cur != null && verdict.version != null && verdict.version < cur;   // approved an OLDER round
-      d.textContent = `✓ Chosen: ${nameOfKey(verdict.choice)}${verdict.version ? ` · v${verdict.version}` : ''}${behind ? ` (now v${cur})` : ''}`;
-      d.className = 'decision chosen'; d.disabled = false;
-      d.title = behind ? `Chosen on v${verdict.version}; the mock is now on v${cur}. Click to view the approved round.` : 'Click to view the chosen concept';
-      d.onclick = () => {
+      setText(d, `✓ Chosen: ${nameOfKey(verdict.choice)}${verdict.version ? ` · v${verdict.version}` : ''}${behind ? ` (now v${cur})` : ''}`);
+      d.className = 'decision chosen';
+      view.hidden = false;
+      view.title = behind ? `Chosen on v${verdict.version}; the mock is now on v${cur}. Open the approved round.` : 'Open the chosen concept';
+      view.onclick = () => {
         state.mode = 'focus'; state.focus = variantByName(verdict.choice);
         state.hist = behind ? verdict.version : null;   // open exactly the round the user approved
         apply();
@@ -859,20 +940,9 @@
       if (frames.length && String(wantV) !== String(loadedV)) { render(); return; }
       const body = $('#drawer-body');
       if (body) {
-        // keep keyboard focus on the same row's control across the list rebuild
-        // Keep keyboard focus on the same row's control across the list rebuild; if that row is gone
-        // (removed), land on the row now in its place, else the drawer's close button — never on <body>.
-        const row = document.activeElement?.closest?.('.clist li');
-        const focusedCtl = document.activeElement?.dataset?.ctl;
-        const rowIndex = row ? [...row.parentElement.children].indexOf(row) : -1;
-        renderSide(body, v, wantV, state.hist != null);
-        if (row && focusedCtl) {
-          const rows = [...body.querySelectorAll('.clist li')];
-          const same = rows.find((li) => li.dataset.n === row.dataset.n);
-          const target = same ? $(`[data-ctl="${focusedCtl}"]`, same) || $('[data-ctl="reveal"]', same)
-            : rows.length ? $('[data-ctl="reveal"]', rows[Math.min(rowIndex, rows.length - 1)]) : $('#drawer .drawer-head button');
-          target?.focus();
-        }
+        const focused = captureFocus();
+        renderSide(body, v, wantV, state.hist != null);   // a no-op when nothing it shows changed
+        restoreFocus(focused);
       }
     } else if (state.mode === 'compare') {
       paintBadges();
@@ -883,13 +953,30 @@
   // ---- toast (undo) ----
   const toast = el('div', { className: 'toast', id: 'toast', 'aria-live': 'polite', role: 'status' });
   document.body.append(toast);
+  // Hidden, it is out of the tab order (visibility: hidden). It waits while pointed at or focused, and
+  // hiding it while it has focus gives focus back to where it came from.
+  const TOAST_MS = 6000;
   let toastTimer = null;
-  const showToast = (msg, actionLabel, onAction) => {
+  let toastReturn = null;
+  let toastHeld = 0;                     // pointer over it + focus in it
+  const hideToast = () => {
     clearTimeout(toastTimer);
+    const had = toast.contains(document.activeElement);
+    toast.classList.remove('show');
+    if (had && toastReturn?.isConnected) toastReturn.focus();
+    toastReturn = null;
+  };
+  const armToast = () => { clearTimeout(toastTimer); if (!toastHeld) toastTimer = setTimeout(hideToast, TOAST_MS); };
+  const hold = (d) => () => { toastHeld = Math.max(0, toastHeld + d); if (toastHeld) clearTimeout(toastTimer); else if (toast.classList.contains('show')) armToast(); };
+  toast.addEventListener('mouseenter', hold(1));
+  toast.addEventListener('mouseleave', hold(-1));
+  toast.addEventListener('focusin', (e) => { if (!toast.contains(e.relatedTarget)) { toastReturn = e.relatedTarget; hold(1)(); } });
+  toast.addEventListener('focusout', (e) => { if (!toast.contains(e.relatedTarget)) hold(-1)(); });
+  const showToast = (msg, actionLabel, onAction) => {
     toast.replaceChildren(el('span', {}, msg),
-      el('button', { type: 'button', className: 'toast-act', onclick: () => { clearTimeout(toastTimer); toast.classList.remove('show'); onAction(); } }, actionLabel));
+      el('button', { type: 'button', className: 'toast-act', onclick: () => { hideToast(); onAction(); } }, actionLabel));
     toast.classList.add('show');
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 6000);
+    armToast();
   };
 
   // A handled comment's pin VANISHES from the mock (declutter) — so acknowledge it, or it reads as "deleted".
@@ -1021,10 +1108,7 @@
   window.mockClearVerdict = () => clearVerdict();
 
   // ---- boot ----
-  addEventListener('hashchange', () => {
-    if (location.hash === lastWritten) return;
-    readHash(); render(); pullAll();
-  });
+  addEventListener('popstate', () => { readHash(); render(); pullAll(); });
   readHash();
   await pullAll();      // load versions before first render so the version chip is right
   render();

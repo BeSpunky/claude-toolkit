@@ -31,28 +31,34 @@
       color: var(--mk-ink);
       font: 400 var(--mk-text-md)/1.5 var(--mk-font);
     }
-    .sr-only { position: absolute; inset-block-start: 0; inset-inline-start: 0; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    :where(button, [role="button"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [tabindex]):focus-visible {
+    :where(button, [role="button"], [role="tab"], [role^="menuitem"], [tabindex]):focus-visible {
       outline: 2px solid var(--mk-focus); outline-offset: 2px;
     }
-    kbd { padding: 0 var(--sp-1); border-radius: var(--r-sm); background: var(--mk-panel-2); border: 1px solid var(--mk-line);
-          font: inherit; font-size: var(--mk-text-xs); color: var(--mk-ink); white-space: nowrap; }
 
     /* ---- the app: slim row · stage · slim bar ---- */
     /* the app is exactly the window: its one column can never grow past it (no sideways page shift) */
     .app { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; block-size: 100dvh; }
 
-    /* ---- the ONE slim top row: question · nav · viewport · fit · scale · toggles ---- */
+    /* ---- the top row: THE QUESTION (the row's flexible space) · concept nav · viewport · View · comments · faked ----
+       The question is what the reviewer must answer, so it is never reduced to an ellipsis: it gets every
+       spare pixel, clamps to two lines, and expands in place (a real button, not a hover tooltip). Secondary
+       view controls live in ONE "View" menu; when even the controls no longer fit, they wrap below it. */
     .topbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3);
               min-block-size: calc(var(--control-h) + 2 * var(--sp-1)); flex-wrap: wrap; row-gap: var(--sp-1);
               border-block-end: 1px solid var(--mk-line); background: color-mix(in srgb, var(--mk-bg) 88%, transparent);
               position: relative; z-index: var(--z-chrome); }
     .eyebrow-dot { flex: none; inline-size: 8px; block-size: 8px; border-radius: 50%;
                    background: var(--mk-comment); box-shadow: 0 0 10px var(--mk-comment); }
-    #question { flex: 1 1 0; min-inline-size: 0; margin: 0; font-size: var(--mk-text-md); font-weight: 650; line-height: 1.3;
-                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .nav { display: contents; }
-    /* the question has no basis, so the row wraps only when the CONTROLS alone no longer fit */
+    .ask { flex: 1 1 18rem; min-inline-size: 0; display: flex; align-items: center; gap: var(--sp-2); }
+    #question { min-inline-size: 0; margin: 0; font-size: var(--mk-text-md); font-weight: 650; line-height: 1.3;
+                display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+    .ask.expanded #question { display: block; -webkit-line-clamp: unset; line-clamp: none; }
+    .ask-more { flex: none; align-self: end; border: 0; background: none; padding: 0 var(--sp-1); color: var(--mk-intent-ink);
+                font: 600 var(--mk-text-xs)/1.6 var(--mk-font); cursor: pointer; border-radius: var(--r-sm); }
+    .ask-more:hover { text-decoration: underline; }
+    .ask-more[hidden] { display: none; }
+    .nav { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+    .nav:empty { display: none; }
     .tools { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); flex-wrap: wrap; margin-inline-start: auto; }
     .tools [hidden] { display: none; }
 
@@ -75,7 +81,7 @@
     .seg button { border: 0; border-radius: var(--r-pill); padding: 0 var(--sp-3); min-block-size: calc(var(--control-h) - 6px);
                   background: transparent; color: var(--mk-muted); white-space: nowrap; }
     .seg button[aria-pressed="true"] { background: var(--mk-intent); color: var(--mk-on-intent); font-weight: 600; }
-    .scale { min-inline-size: 3.5ch; font-size: var(--mk-text-sm); font-variant-numeric: tabular-nums; color: var(--mk-muted); text-align: end; }
+    .scale { font-variant-numeric: tabular-nums; color: var(--mk-muted); }
 
     .whoami { font-size: var(--mk-text-sm); font-weight: 650; white-space: nowrap; max-inline-size: 16rem; overflow: hidden; text-overflow: ellipsis; }
     .vchip { color: var(--mk-muted); font-weight: 600; font-size: var(--mk-text-xs); }
@@ -105,6 +111,12 @@
                                               border: 1px solid var(--mk-line-strong); }
     .menu [role="menuitemcheckbox"][aria-checked="true"]::before { content: "✓"; display: grid; place-items: center; font-size: var(--mk-text-xs);
                                                                     background: var(--mk-comment); color: var(--mk-on-comment); border-color: var(--mk-comment); }
+    .menu [role="menuitemradio"]::before { content: ""; inline-size: 1rem; block-size: 1rem; border-radius: 50%; flex: none;
+                                           border: 1px solid var(--mk-line-strong); }
+    .menu [role="menuitemradio"][aria-checked="true"]::before { border: 5px solid var(--mk-intent); }
+    .menu [role^="menuitem"][hidden], .menu hr[hidden], .menu .group-label[hidden] { display: none; }
+    .menu .group-label { margin: var(--sp-1) var(--sp-3) 0; font-size: var(--mk-text-xs); color: var(--mk-muted); }
+    .menu .key { margin-inline-start: auto; }
     .menu .sub { display: block; color: var(--mk-muted); font-size: var(--mk-text-xs); }
     .menu hr { border: 0; border-block-start: 1px solid var(--mk-line); margin: var(--sp-1) 0; }
 
@@ -120,8 +132,14 @@
     .wall { display: grid; gap: var(--sp-5); align-items: start; padding: var(--sp-5) var(--sp-4) var(--sp-4);
             grid-template-columns: repeat(auto-fit, minmax(clamp(220px, 26vw, 300px), 1fr)); }
     .card { position: relative; border: 1px solid var(--mk-line); border-radius: var(--r-lg); background: var(--mk-panel);
-            padding: var(--sp-3); cursor: pointer; transition: border-color var(--mk-dur-fast) var(--mk-ease), transform var(--mk-dur-fast) var(--mk-ease); }
-    .card:hover { border-color: var(--mk-intent); transform: translateY(-2px); }
+            padding: var(--sp-3); transition: border-color var(--mk-dur-fast) var(--mk-ease), transform var(--mk-dur-fast) var(--mk-ease); }
+    .card:has(.card-open:hover) { border-color: var(--mk-intent); transform: translateY(-2px); }
+    .card:has(.card-open:focus-visible) { outline: 2px solid var(--mk-focus); outline-offset: 2px; }
+    /* the card's open action: a real button whose hit area is stretched over the whole card */
+    .card-open { border: 0; background: none; padding: 0; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+    .card-open::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+    .card-open:focus-visible { outline: none; }
+    .card-actions .card-choose { position: relative; z-index: 1; }   /* above the stretched open area */
     .card h2 { margin: 0 0 2px; font-size: var(--mk-text-md); }
     .card .pitch { margin: 0 0 var(--sp-3); font-size: var(--mk-text-sm); color: var(--mk-muted); min-block-size: 2.6em; }
     .card .badge { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--mk-text-xs); color: var(--mk-muted); }
@@ -252,10 +270,11 @@
     .verdict-group { gap: var(--sp-2); padding: 2px var(--sp-1) 2px var(--sp-3); border-radius: var(--r-pill);
                      border: 1px solid color-mix(in srgb, var(--mk-go) 30%, var(--mk-line));
                      background: color-mix(in srgb, var(--mk-go) 8%, var(--mk-panel)); }
-    .bar #decision { color: var(--mk-muted); font-size: var(--mk-text-xs); white-space: nowrap; background: none; border: 0; padding: 0 var(--sp-1); cursor: default; }
-    .bar #decision.chosen { color: var(--mk-go-ink); font-weight: 600; cursor: pointer; }
-    .bar #decision.chosen:hover { text-decoration: underline; }
-    .bar #decision.rejected { color: var(--mk-comment-ink); font-weight: 600; }
+    #decision { color: var(--mk-muted); font-size: var(--mk-text-xs); white-space: nowrap; padding: 0 var(--sp-1); }
+    #decision.chosen { color: var(--mk-go-ink); font-weight: 600; }
+    #decision.rejected { color: var(--mk-comment-ink); font-weight: 600; }
+    .bar #decision-view { border: 0; background: none; padding: 0 var(--sp-1); min-block-size: auto; color: var(--mk-go-ink);
+                          font-size: var(--mk-text-xs); font-weight: 600; text-decoration: underline; }
     .bar button.verdict:not(:disabled) { background: var(--mk-go); border-color: var(--mk-go); color: var(--mk-on-go); font-weight: 700; }
     .bar button.verdict.is-chosen:not(:disabled) { background: transparent; color: var(--mk-go-ink); border-color: var(--mk-go); font-weight: 600; }
     .bar button.reject:not(:disabled):hover { border-color: var(--mk-danger); color: var(--mk-danger-ink); }
@@ -263,18 +282,18 @@
     /* ---- presentation mode (`f`): no harness chrome at all — only the mock and one quiet way out ---- */
     body.presenting .topbar, body.presenting .bar, body.presenting .drawer { display: none; }
     body.presenting { --viewer-pad: 0px; }
+    /* full opacity on a solid panel: it sits over an arbitrary mock, so it may not borrow the mock's contrast */
     .present-exit { position: fixed; inset-block-start: var(--sp-2); inset-inline-end: var(--sp-2); z-index: var(--z-bar);
-                    opacity: .55; transition: opacity var(--mk-dur-fast) var(--mk-ease); }
-    .present-exit:hover, .present-exit:focus-visible { opacity: 1; }
+                    border-color: var(--mk-line-strong); box-shadow: 0 4px 16px var(--mk-shadow); }
     .present-exit[hidden] { display: none; }
 
     /* ---- toast ---- */
     .toast { position: fixed; inset-block-end: 4rem; inset-inline: 0; margin-inline: auto; inline-size: max-content; max-inline-size: 90vw;
              z-index: var(--z-toast); display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-md);
              background: var(--mk-panel-2); border: 1px solid var(--mk-line); box-shadow: 0 12px 40px var(--mk-shadow);
-             font-size: var(--mk-text-sm); opacity: 0; transform: translateY(8px); pointer-events: none;
-             transition: opacity var(--mk-dur) var(--mk-ease), transform var(--mk-dur) var(--mk-ease); }
-    .toast.show { opacity: 1; transform: none; pointer-events: auto; }
+             font-size: var(--mk-text-sm); opacity: 0; transform: translateY(8px); visibility: hidden;
+             transition: opacity var(--mk-dur) var(--mk-ease), transform var(--mk-dur) var(--mk-ease), visibility 0s linear var(--mk-dur); }
+    .toast.show { opacity: 1; transform: none; visibility: visible; transition: opacity var(--mk-dur) var(--mk-ease), transform var(--mk-dur) var(--mk-ease); }
     .toast-act { border: 0; background: none; color: var(--mk-comment-ink); font: 600 var(--mk-text-sm)/1 var(--mk-font); cursor: pointer; }
 
     /* ---- modal dialogs (the verdict confirm, the shortcut sheet) — one component ---- */
@@ -298,26 +317,24 @@
 
     @media (max-width: 900px) {
       :root { --rail-w: 76px; }
-      #question { display: none; }   /* it is in full atop "What's faked" */
+      .ask { flex-basis: 100%; }      /* narrow: the question takes a whole line of its own */
     }
   </style>
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <span class="eyebrow-dot" title="Mock review — nothing here works" aria-hidden="true"></span>
-      <h1 id="question"></h1>
+      <div class="ask" id="ask">
+        <span class="eyebrow-dot" title="Mock review — nothing here works" aria-hidden="true"></span>
+        <h1 id="question"></h1>
+        <button type="button" id="ask-more" class="ask-more" aria-controls="question" aria-expanded="false" hidden>more</button>
+      </div>
       <nav id="nav" class="nav" aria-label="Concepts"></nav>
       <div class="tools">
         <div class="seg" id="viewport-seg" role="group" aria-label="Viewport"></div>
-        <div class="seg" id="fit-seg" role="group" aria-label="Fit" hidden></div>
-        <span id="scale" class="scale" hidden></span>
-        <button type="button" id="rail-toggle" class="chip" aria-controls="rail" aria-expanded="true" hidden>Concepts</button>
-        <button type="button" id="pins-toggle" class="chip" aria-pressed="true" title="Show or hide every pin on the mock (h)" hidden>Pins</button>
+        <button type="button" id="view-toggle" class="chip" aria-haspopup="menu" aria-controls="view-menu" aria-expanded="false">View <span id="scale" class="scale" hidden></span> ▾</button>
         <button type="button" id="drawer-toggle" class="chip" aria-controls="drawer" aria-expanded="false" hidden>Comments <span class="n" id="drawer-count"></span></button>
         <button type="button" id="info-toggle" class="chip" aria-controls="info-panel" aria-expanded="false" title="What's faked, and how to review">Faked <span id="faked-count"></span></button>
-        <button type="button" id="keys-toggle" class="icon" aria-haspopup="dialog" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-        <button type="button" id="present-toggle" class="icon" title="Presentation mode — hide all harness chrome (f)" aria-label="Presentation mode">⛶</button>
       </div>
     </header>
 
@@ -332,7 +349,8 @@
         <button type="button" id="more-toggle" aria-haspopup="menu" aria-controls="more-menu" aria-expanded="false" aria-label="More comment actions" title="More comment actions">⋯</button>
       </div>
       <div class="bar-group verdict-group" role="group" aria-label="Decision">
-        <button type="button" id="decision" class="decision" disabled title="The review's decision — what Claude will proceed with">no decision yet</button>
+        <span id="decision" class="decision" role="status" title="The review's decision — what Claude will proceed with">no decision yet</span>
+        <button type="button" id="decision-view" hidden>View it</button>
         <button type="button" id="choose" class="verdict" disabled title="Choose the concept you're viewing as the direction to build">✓ Choose this concept</button>
         <button type="button" id="reject" class="reject" title="Reject all concepts — send them back to be reconceived">None of these</button>
       </div>
@@ -340,18 +358,30 @@
   </div>
 
   <div id="info-panel" class="popover" role="dialog" aria-label="What's faked, and how to review" hidden>
-    <p class="how" id="question-full"></p>
     <strong>What's faked (and why)</strong>
     <ul id="honesty"></ul>
     <p class="how">
       <span class="t-intent">Purple pins</span> are the design intent — hover or focus one to see what a low-fidelity
-      thing will become. Open a concept, press <kbd>c</kbd>, and click the <b>exact spot</b> (or move the crosshair with the
-      arrow keys and press <kbd>Enter</kbd>) to leave an <span class="t-comment">orange comment</span> right where you point.
+      thing will become. Open a concept, press <kbd class="mk-kbd">c</kbd>, and click the <b>exact spot</b> (or move the crosshair with the
+      arrow keys and press <kbd class="mk-kbd">Enter</kbd>) to leave an <span class="t-comment">orange comment</span> right where you point.
     </p>
     <p class="how">
       <span class="t-go">Deciding:</span> when one concept wins, press <span class="t-go">Choose this concept</span>
       to lock the direction to build — or <b>None of these</b> to send them all back to be reconceived.
     </p>
+  </div>
+
+  <div id="view-menu" class="popover menu" role="menu" aria-label="View" hidden>
+    <p class="group-label" id="fit-label" aria-hidden="true">Fit the mock</p>
+    <button type="button" role="menuitemradio" data-fit="screen" data-ctl="fit-screen">Fit to screen<span class="key">width + height</span></button>
+    <button type="button" role="menuitemradio" data-fit="width" data-ctl="fit-width">Fit width<span class="key">scroll the height</span></button>
+    <button type="button" role="menuitemradio" data-fit="actual" data-ctl="fit-actual">1:1<span class="key">actual pixels</span></button>
+    <hr id="fit-sep">
+    <button type="button" role="menuitemcheckbox" id="rail-toggle" aria-controls="rail" aria-checked="true">Concept rail</button>
+    <button type="button" role="menuitemcheckbox" id="pins-toggle" aria-checked="true" aria-keyshortcuts="h">Pins<span class="key mk-kbd">h</span></button>
+    <button type="button" role="menuitem" id="present-toggle" aria-keyshortcuts="f">Presentation mode<span class="key mk-kbd">f</span></button>
+    <hr>
+    <button type="button" role="menuitem" id="keys-toggle" aria-haspopup="dialog" aria-keyshortcuts="?">Keyboard shortcuts<span class="key mk-kbd">?</span></button>
   </div>
 
   <div id="more-menu" class="popover menu" role="menu" aria-label="More comment actions" hidden>
@@ -362,9 +392,9 @@
     <button type="button" role="menuitem" id="clear">Clear all comments</button>
   </div>
 
-  <button type="button" id="present-exit" class="chip present-exit" hidden>Exit presentation · <kbd>f</kbd></button>
+  <button type="button" id="present-exit" class="chip present-exit" hidden>Exit presentation <kbd class="mk-kbd">f</kbd></button>
 
-  <div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
+  <div id="sr-status" class="mk-sr" role="status" aria-live="polite"></div>
 
   <div id="keys-backdrop" class="dialog-backdrop" hidden>
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="keys-title">
