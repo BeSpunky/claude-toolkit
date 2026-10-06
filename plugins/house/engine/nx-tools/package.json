@@ -1,6 +1,6 @@
 {
   "name": "@bespunky/nx-tools",
-  "version": "0.46.0",
+  "version": "0.47.0",
   "description": "BeSpunky house Nx generators and executors. Generators cover workspace and app scaffolding (app, devcontainer, Claude settings, Playwright, Firebase emulators), the dev loop (serve, shared browser, worktree domains), the design system (tokens, themes, themed components), library authoring (publishable libs, secondary entrypoints, reusable-tool extraction), and app code (navigation, docs). Plus the `serve` executor — `nx serve <app>` as a thin wrapper over the stack-free dev engine (tools/dev/dev serve), which runs every process an app declares in .bespunky/dev.json (dev-server, Firebase emulator suite, anything hand-declared) under one graceful Ctrl+C, for the current or any chosen git worktree, with whole-stack --port-offset isolation sized from the declared ports, a pretty <slug>.localhost domain and the shared co-driven browser.",
   "license": "MIT",
   "repository": {
