@@ -22,7 +22,8 @@ bash spikes/voice-audio-boundary/probe-audio.sh --install  # first apt-get audio
 ```
 
 On a **stock devcontainer it will say FAIL** — that's correct. The container
-ships with no audio socket, no `/dev/snd`, and no audio tools (verified). The
+ships with no audio socket and no `/dev/snd` (verified); a stock one has no audio tools either, while this repo's
+image carries them (`.devcontainer/os-packages.txt`). The
 fix is at the devcontainer layer, below.
 
 ## The fix to try — bridge WSLg audio into the container
@@ -64,12 +65,10 @@ so once *any* of them is reachable it will find it and flip to PASS/PARTIAL.
 
 ### To make it stick across rebuilds
 
-Once a variant passes, add the tool install to `.devcontainer/post-create.sh` so
-you don't need `--install` every rebuild:
-
-```bash
-sudo apt-get update -qq && sudo apt-get install -y -qq pulseaudio-utils espeak-ng alsa-utils sox
-```
+Once a variant passes, list the tools in `.devcontainer/os-packages.txt` (one package per line) so you
+don't need `--install` every rebuild — they are built into the container image as one cached layer. In this repo
+that is already done: `alsa-utils` and `sox` are listed there, and the house list carries `pulseaudio-utils` and
+`espeak-ng` for the voice intent.
 
 ## Reading the verdict
 

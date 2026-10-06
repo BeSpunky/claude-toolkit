@@ -97,6 +97,15 @@ export const agent: LayerDescriptor = {
           'there (gh, firebase, gcloud, …) is logged in once per project, not once per rebuild. ONE mount for the\n' +
           'whole directory, never one per tool. git rides on the gh login (the `gh-git-credentials` piece).',
       },
+      {
+        mount: 'source=${localWorkspaceFolderBasename}-local,target={{home}}/.local,type=volume',
+        onHouseImageOnly: true,
+        why:
+          "The user's local install home (XDG data, state and bin), persisted across container rebuilds — so the native\n" +
+          'Claude Code (~/.local/bin, kept current by its own updater) and anything else installed per user is not\n' +
+          'downloaded again on every rebuild. Deliberately NOT baked into the image: a cached layer would hand back the\n' +
+          'build-day version.',
+      },
     ],
     // Claude Code keeps its account record (login, onboarding) in `.claude.json` BESIDE its config dir — in $HOME,
     // outside the persisted mount above — unless CLAUDE_CONFIG_DIR is set, which moves it INSIDE. Without this every
@@ -122,6 +131,7 @@ export const agent: LayerDescriptor = {
       { packages: ['curl'], why: 'General utilities the house tooling shells out to.' },
     ],
     // Claude Code installs in `install` — after the OS packages (it needs curl), before `plugins` (which runs it).
+    // With ~/.local persisted, only the FIRST create of a project downloads it; every rebuild finds it installed.
     postCreate: [
       { phase: 'prepare', piece: 'claude-account' },
       { phase: 'install', piece: 'claude-code' },

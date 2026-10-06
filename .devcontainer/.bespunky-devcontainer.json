@@ -23,6 +23,12 @@
           "mounts"
         ],
         "member": "source=${localWorkspaceFolderBasename}-config,target=/home/node/.config,type=volume"
+      },
+      {
+        "path": [
+          "mounts"
+        ],
+        "member": "source=${localWorkspaceFolderBasename}-local,target=/home/node/.local,type=volume"
       }
     ]
   }

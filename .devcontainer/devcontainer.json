@@ -6,7 +6,9 @@
 // from THIS working tree (see .devcontainer/post-create.sh).
 {
   "name": "claude-toolkit",
-  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+  // BUILT, not pulled: house.Dockerfile (generated) starts FROM typescript-node:22 and installs the OS packages —
+  // the house's and os-packages.txt (ours) — as ONE cached Docker layer, so a rebuild reinstalls nothing unchanged.
+  "build": { "dockerfile": "house.Dockerfile", "context": "." },
 
   "features": {
     "ghcr.io/devcontainers/features/github-cli": {},
@@ -93,7 +95,8 @@
     "source=${localWorkspaceFolderBasename}-node_modules,target=${containerWorkspaceFolder}/node_modules,type=volume",
     "source=${localWorkspaceFolderBasename}-nx-cache,target=${containerWorkspaceFolder}/.nx/cache,type=volume",
     "source=${localWorkspaceFolderBasename}-nx-workspace-data,target=${containerWorkspaceFolder}/.nx/workspace-data,type=volume",
-    "source=${localWorkspaceFolderBasename}-config,target=/home/node/.config,type=volume"
+    "source=${localWorkspaceFolderBasename}-config,target=/home/node/.config,type=volume",
+    "source=${localWorkspaceFolderBasename}-local,target=/home/node/.local,type=volume"
   ],
   "otherPortsAttributes": {
     "onAutoForward": "silent"

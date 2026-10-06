@@ -22,20 +22,6 @@ if [ -d /home/node/.claude ] && [ "$(stat -c %U /home/node/.claude)" != "node" ]
   sudo chown node:node /home/node/.claude
 fi
 
-# --- Audio toolset (voice-plugin spike + bespunky-voice) ---
-# Host audio is bridged in via devcontainer.json (the host probe + the /run/bespunky/host/pulse mount). The
-# house script installs espeak-ng + pulseaudio-utils when a socket arrives there; this adds the two tools it doesn't —
-# `alsa-utils` and `sox` — which the audio-boundary spike uses to record and inspect, not merely to speak.
-# Best-effort: an offline rebuild must not fail the build. Verify the bridge with:
-#   bash spikes/voice-audio-boundary/probe-audio.sh
-echo "[post-create.local] installing the extra audio tools (alsa-utils sox)"
-if sudo apt-get update -qq && sudo apt-get install -y -qq alsa-utils sox; then
-  echo "[post-create.local] audio toolset complete"
-else
-  echo "[post-create.local] NOTE: audio tools skipped (offline?). Install later with:"
-  echo "[post-create.local]   bash spikes/voice-audio-boundary/probe-audio.sh --install"
-fi
-
 # --- Release guard: point git at the repo's committed hooks --------------------------------------------------
 # `tools/git-hooks/pre-push` refuses a push whose plugin/payload changes carry no version bump — the failure
 # that is otherwise SILENT (the marketplace advertises the old version and consumers simply never get the

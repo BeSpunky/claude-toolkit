@@ -22,9 +22,9 @@
 #                  the `node` layer (Cloud Functions are a Node app). NEVER enabled by default.
 # Voice opt-in   : when --voice is passed, the devcontainer bridges the HOST's audio server — WSLg, or a
 #                  native PulseAudio/PipeWire socket — (a host probe on every open + one bind mount +
-#                  remoteEnv PULSE_SERVER) and post-create.sh self-adapts to a socket being present
-#                  to install the espeak-ng TTS floor + pulseaudio-utils and pre-install the
-#                  bespunky-voice plugin — so /speak works the moment the container opens. Opt-in
+#                  remoteEnv PULSE_SERVER), the espeak-ng TTS floor + pulseaudio-utils join the
+#                  image's cached package layer, and post-create.sh self-adapts to a socket being
+#                  present to pre-install the bespunky-voice plugin — so /speak works the moment the container opens. Opt-in
 #                  because it records the project's INTENT ("this project wants audio"); where the
 #                  socket is stays a per-machine fact, resolved on the host at open time.
 #                  NEVER enabled by default.
@@ -1029,7 +1029,7 @@ INNER_ENV=(
 )
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
-[ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (host audio bridge — WSLg or PulseAudio/PipeWire — + espeak-ng + bespunky-voice plugin)"
+[ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (host audio bridge — WSLg or PulseAudio/PipeWire — + espeak-ng in the image + bespunky-voice plugin)"
 
 # --- devcontainer generator args ---
 # The devcontainer's layer flags have exactly ONE author: the `agent` layer's plan step
@@ -2526,8 +2526,9 @@ if [ "$MODE" = "upgrade" ]; then
   echo "UPGRADE_NEXT: $UPGRADE_NEXT"
   case "$UPGRADE_NEXT" in
     rebuild-container)
-      echo "  .devcontainer/ changed, and mounts, runArgs, containerEnv and features only apply when the"
-      echo "  container is created. Run 'Dev Containers: Rebuild Container' when it suits you — that also"
+      echo "  .devcontainer/ changed, and the image (house.Dockerfile, the package lists), mounts, runArgs,"
+      echo "  containerEnv and features only apply when the container is created. Run"
+      echo "  'Dev Containers: Rebuild Container' when it suits you — that also"
       echo "  delivers the session-scoped config below, so no separate restart is needed." ;;
     restart-session)
       echo "  Session-scoped config changed (.claude/settings.json and/or .mcp.json). Claude Code reads those"
