@@ -915,6 +915,28 @@ checkAsync('runtime: an earlier pin\'s playwright-core is removed before the new
   ok(!left.includes('playwright-core@0.0.1') && left.includes('unrelated') && left.some((name) => name.startsWith('playwright-core@') && name !== 'playwright-core@0.0.1'), `after installing the pin: ${JSON.stringify(left)}`);
 });
 
+checkAsync('post-create is UNATTENDED: no input attached, and yarn 1 fails instead of prompting (yarn 2+ untouched)', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  tree.write('yarn.lock', '');
+  const a = await artifacts(tree, ['nx', 'agent', 'node']);
+  const at = (needle) => a.post.indexOf(needle);
+  ok(at('exec < /dev/null') !== -1 && at('exec < /dev/null') < at('$PM_INSTALL'), 'post-create does not detach input before the first install');
+  const start = a.post.indexOf('if [ -f "$WS/package.json" ]; then');
+  const piece = a.post.slice(start, a.post.indexOf('\nfi\n', start) + 4);
+  for (const [version, expected] of [['1.22.22', 'yarn install --non-interactive'], ['4.5.0', 'yarn install']]) {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-'));
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(dir, 'package.json'), '{}');
+    writeFileSync(join(dir, 'yarn.lock'), '');
+    writeFileSync(join(bin, 'yarn'), `#!/bin/sh\n[ "$1" = --version ] && { echo ${version}; exit 0; }\necho "RAN yarn $*" >> '${join(dir, 'log')}'\n`, { mode: 0o755 });
+    execFileSync('bash', ['-c', `set -euo pipefail\nWS='${dir}'\n${piece}`], { env: { PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+    const ran = readFileSync(join(dir, 'log'), 'utf8').trim();
+    rmSync(dir, { recursive: true, force: true });
+    ok(ran === `RAN ${expected}`, `yarn ${version}: ran "${ran}", expected "${expected}"`);
+  }
+});
+
 checkAsync('adopted devcontainer on its own image: only the active layers merged in, no remoteUser imposed, mounts follow its user', async (ok) => {
   const tree = wrapperRepo();
   tree.write('.devcontainer/devcontainer.json', '{\n  // Our Python image.\n  "image": "python:3.12",\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n');

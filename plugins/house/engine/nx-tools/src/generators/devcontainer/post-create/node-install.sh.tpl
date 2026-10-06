@@ -12,6 +12,10 @@
 if [ -f "$WS/package.json" ]; then
 {{PM_DETECT}}
   echo "[post-create] package manager: $PM"
+  # Unattended: yarn 1 PROMPTS when a pinned version cannot be resolved — and with no input attached (this script
+  # runs with stdin at /dev/null) it draws the prompt, reads nothing and exits 0 with nothing installed. Its own flag
+  # makes it fail instead. Only yarn 1 has (and needs) the flag: yarn 2+ refuses it; npm and pnpm never wait on input.
+  case "$PM:$($PM --version 2>/dev/null)" in yarn:1.*) PM_INSTALL="$PM_INSTALL --non-interactive" ;; esac
   echo "[post-create] $PM_INSTALL"
   $PM_INSTALL
 else
