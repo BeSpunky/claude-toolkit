@@ -25,11 +25,11 @@
 
 ## Units / status
 - [x] U1 map generator internals (Explore agent) — done; distillation below
-- [ ] U2 implement composer/generator/fragments
-- [ ] U3 tests (test-layers, test-generators)
-- [ ] U4 migration question (owned file keeps a stale `image`?)
-- [ ] U5 docs sweep (CLAUDE.md, README, HOUSE.md.tpl, skills, tips)
-- [ ] U6 dogfood: upgrade --local on this repo + hand switch; read whole diff
+- [x] U2 implement composer/generator/fragments
+- [x] U3 tests (test-layers, test-generators)
+- [x] U4 migration question (owned file keeps a stale `image`?)
+- [x] U5 docs sweep (CLAUDE.md, README, HOUSE.md.tpl, skills, tips)
+- [x] U6 dogfood: upgrade --local on this repo + hand switch; read whole diff
 - [ ] U7 bump nx-tools + bespunky-house; invariants
 - [ ] U8 user rebuild from development BEFORE promoting to main; observe
 
