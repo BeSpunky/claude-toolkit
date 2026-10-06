@@ -1,5 +1,5 @@
 # --- Firebase: the welcome banner (firebase) ---
-# The emulator suite's JDK arrived with the OS packages above (Firestore / RTDB / Storage run on the JVM; apt
+# The emulator suite's JDK arrived with the OS packages (built into the image) (Firestore / RTDB / Storage run on the JVM; apt
 # rather than the SDKMAN-based java feature, whose build-time github.com fetch fails intermittently). This
 # installs a /etc/profile.d sourcer for the self-extinguishing Firebase welcome banner
 # (tools/firebase-welcome.sh), so every login shell nudges toward the cloud-linkage steps until setup is done.

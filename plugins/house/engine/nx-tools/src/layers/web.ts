@@ -114,7 +114,7 @@ export const web: LayerDescriptor = {
           'each worktree gets a pretty http://<slug>.localhost/ domain, with no runtime sudo.\n' +
           '`--add-host`: a name for the host, so the shared-browser port allocator can probe the host side (a bonus\n' +
           'that can only REJECT a port; the cross-container registry volume below carries the guarantee).\n' +
-          'NOTE: `runArgs` is image-only. Converting to `dockerComposeFile` must move `--add-host` to `extra_hosts`.',
+          'NOTE: `runArgs` is for image/Dockerfile builds only. Converting to `dockerComposeFile` must move `--add-host` to `extra_hosts`.',
       },
     ],
     ports: [

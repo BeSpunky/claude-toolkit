@@ -12,8 +12,9 @@
 //   features …     concatenated, first occurrence of a key wins (de-duplicated)
 //   ports          merged by number: `forward` OR-ed, label/behaviour/why from the first contributor
 //   path           ONE `remoteEnv.PATH`: every layer's directories, registry order, ahead of the image's PATH
-//   osPackages     ONE apt transaction, de-duplicated, each group commented with its `why`
-//   postCreate     pieces run by phase (prepare → OS packages → install → plugins → provision), registry order,
+//   osPackages     ONE list, de-duplicated, each group commented with its `why`, embedded in the one installer
+//                  (os-packages.sh) the image build runs as a cached layer — and post-create, for what is missing
+//   postCreate     pieces run by phase (prepare → OS packages (missing only) → install → plugins → provision), registry order,
 //                  after ONE derived section that reclaims every volume's ownership (see `volumeOwnership`)
 //
 // It is pure: no Tree, no filesystem writes. The generator decides ownership and merging; this decides content.
@@ -89,7 +90,7 @@ export interface ComposedVolume {
   ownership: VolumeOwnership;
 }
 
-/** The order the composed post-create runs its phases in; the OS packages run between `prepare` and `install`. */
+/** The order the composed post-create runs its phases in; the OS packages step (missing only) runs between `prepare` and `install`. */
 const PHASES: readonly PostCreatePhase[] = ['prepare', 'install', 'plugins', 'provision'];
 
 /**

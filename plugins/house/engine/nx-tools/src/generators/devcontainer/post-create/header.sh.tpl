@@ -2,7 +2,7 @@
 # BeSpunky devcontainer post-create.
 #
 # Runs ONCE after the container is built (or rebuilt). Owns all multi-step setup that doesn't fit cleanly as a
-# devcontainer "feature" — the project's dependencies, the Claude Code plugin pre-install, the OS packages and
+# devcontainer "feature" — the project's dependencies, the Claude Code plugin pre-install, any OS package the image lacks and
 # whatever tooling this project's LAYERS bring.
 #
 # COMPOSED, not static: every section below was contributed by one of this project's layers ({{LAYERS}}), and an

@@ -216,7 +216,8 @@ export interface DevcontainerPort extends Explained {
  * pieces in registry order:
  *   (the volume-ownership reclaim — DERIVED from the composed mounts, see `VolumeOwnership` — runs first)
  *   prepare   — fix-ups the rest relies on; before anything installs
- *   (the OS packages — every active layer's `osPackages`, as ONE retried apt transaction — run here)
+ *   (the OS packages — every active layer's `osPackages` — are built into the IMAGE as one cached layer; here the
+ *    same installer installs only what is missing: nothing in a house-built image)
  *   install   — the project's own dependencies (the Nx wrapper's installation, the package-manager install)
  *   plugins   — the Claude Code plugin pre-install
  *   provision — layer tooling that needs the above (browsers, agent skills, banners)
@@ -287,13 +288,13 @@ export interface DevcontainerFragment {
   remoteEnv?: readonly ({ name: string; value: string } & Explained)[];
   /** Environment for EVERY process in the container. */
   containerEnv?: readonly ({ name: string; value: string } & Explained)[];
-  /** `docker run` arguments (image-based devcontainers only). */
+  /** `docker run` arguments (image- or Dockerfile-based devcontainers; not Compose). */
   runArgs?: readonly ({ args: readonly string[] } & Explained)[];
   /** Ports this layer serves — `forwardPorts` and `portsAttributes` are both derived from ONE list. */
   ports?: readonly DevcontainerPort[];
   /** Named `initializeCommand` entries (object form — they run side by side, on the HOST). */
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
-  /** Debian packages, installed in the composed script's single apt transaction. */
+  /** Debian packages — composed into the one installer (os-packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
   osPackages?: readonly ({ packages: readonly string[] } & Explained)[];
   /** Post-create pieces. */
   postCreate?: readonly PostCreatePiece[];

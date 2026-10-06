@@ -6,7 +6,9 @@
 //
 // COMPOSED FROM THE ACTIVE LAYERS. Each layer states its share of the container as data (`descriptor.devcontainer`
 // — image, features, extensions, settings, mounts, env, run args, ports, OS packages, post-create pieces), and
-// `compose.ts` assembles the shares of the layers this project has. There is no flag per layer here any more:
+// `compose.ts` assembles the shares of the layers this project has — into devcontainer.json, post-create.sh, and the
+// image the container BUILDS (house.Dockerfile + the one package installer os-packages.sh: the OS packages as a
+// cached Docker layer). There is no flag per layer here any more:
 // a Python repo gets a neutral Debian base with Node as a feature (the Nx floor and the house tooling run on
 // it) and nothing Node-, web- or Angular-shaped; a Node repo gets the typescript-node image, node_modules and
 // its package-manager install; the shared browser's X stack arrives only with `web`. `voice` is not a layer but
