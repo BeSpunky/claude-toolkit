@@ -99,6 +99,7 @@ export const agent: LayerDescriptor = {
       },
       {
         mount: 'source=${localWorkspaceFolderBasename}-local,target={{home}}/.local,type=volume',
+        onHouseImageOnly: true,
         why:
           "The user's local install home (XDG data, state and bin), persisted across container rebuilds — so the native\n" +
           'Claude Code (~/.local/bin, kept current by its own updater) and anything else installed per user is not\n' +

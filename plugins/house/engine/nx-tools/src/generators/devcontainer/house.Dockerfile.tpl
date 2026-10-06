@@ -5,13 +5,14 @@
 # post-create.local.sh.
 #
 # WHY A DOCKERFILE: Docker caches every layer, so a rebuild reuses each one whose inputs have not changed. The OS
-# packages used to be apt-installed by post-create on EVERY rebuild; here they are one layer, rebuilt only when a
-# package list changes (or on "Rebuild Without Cache"). Devcontainer features are applied on top of this image.
+# packages are one layer here, rebuilt only when a package list changes (or on "Rebuild Without Cache" — which is
+# also how to pick up their security updates). Devcontainer features are applied on top of this image.
 #
 # Claude Code is deliberately NOT installed here: its auto-updater updates it inside the running container, so a
 # cached layer would hand back the build-day version on every rebuild. It lives in ~/.local, a persisted volume.
 FROM {{IMAGE}}
 
-COPY os-packages.sh os-packages.txt /tmp/bespunky-os-packages/
-RUN sh /tmp/bespunky-os-packages/os-packages.sh /tmp/bespunky-os-packages/os-packages.txt \
+# `os-packages.tx[t]`: a pattern, so a deleted list cannot fail the build (the installer skips a list that is not there).
+COPY house.packages.sh os-packages.tx[t] /tmp/bespunky-os-packages/
+RUN sh /tmp/bespunky-os-packages/house.packages.sh /tmp/bespunky-os-packages/os-packages.txt \
     && rm -rf /tmp/bespunky-os-packages /var/lib/apt/lists/*

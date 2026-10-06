@@ -18,17 +18,19 @@
 # POSIX sh, not bash: it runs in the image build before any layer has added bash to a minimal base.
 set -u
 
-# The house's packages, composed from this project's layers ({{LAYERS}}) and grouped BY CAPABILITY — so a reader
-# can tell why each one is here, and it leaves with the layer that needs it.
+# The house's packages, composed from this project's layers and grouped BY CAPABILITY — so a reader can tell why each
+# one is here, and it leaves with the layer that needs it. (No layer list or version is stamped in this file on
+# purpose: the image build's cached layer is keyed on its content, so only a real package change may move it.)
 HOUSE_PACKAGES='
 {{HOUSE_PACKAGES}}
 '
 
 # Every list: the house's, then each file given (the project's own). Comments and blanks dropped, de-duplicated in
-# order. A token that is not a Debian package NAME is refused here, before it can reach a root apt-get command line.
+# order; CR stripped, so a list saved with Windows line endings still reads. A token that is not a Debian package NAME
+# is refused here, before it can reach a root apt-get command line.
 wanted() {
   { printf '%s\n' "$HOUSE_PACKAGES"; for list in "$@"; do [ -f "$list" ] && cat "$list"; done; } |
-    sed 's/#.*//' | tr -s ' \t' '\n\n' | sed '/^$/d' | awk '!seen[$0]++' |
+    tr -d '\r' | sed 's/#.*//' | tr -s ' \t' '\n\n' | sed '/^$/d' | awk '!seen[$0]++' |
     while read -r name; do
       case "$name" in
         *[!a-z0-9.+-]* | [!a-z0-9]*) echo "[os-packages] ignoring '$name' — not a Debian package name" >&2 ;;

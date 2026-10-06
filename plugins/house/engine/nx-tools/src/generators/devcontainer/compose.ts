@@ -13,7 +13,7 @@
 //   ports          merged by number: `forward` OR-ed, label/behaviour/why from the first contributor
 //   path           ONE `remoteEnv.PATH`: every layer's directories, registry order, ahead of the image's PATH
 //   osPackages     ONE list, de-duplicated, each group commented with its `why`, embedded in the one installer
-//                  (os-packages.sh) the image build runs as a cached layer — and post-create, for what is missing
+//                  (house.packages.sh) the image build runs as a cached layer — and post-create, for what is missing
 //   postCreate     pieces run by phase (prepare → OS packages (missing only) → install → plugins → provision), registry order,
 //                  after ONE derived section that reclaims every volume's ownership (see `volumeOwnership`)
 //
@@ -49,17 +49,8 @@ type ComposedPort = Pick<DevcontainerPort, 'port' | 'label' | 'onAutoForward' | 
 /** The active fragments, resolved into one devcontainer — tokens substituted, collections merged. */
 export interface Composition {
   image: { ref: string; remoteUser: string } & Why;
-  /**
-   * Does this devcontainer run on the HOUSE image? False when an adopted devcontainer keeps an image of its own:
-   * the user (and so `{{home}}`) is then that image's, and the house must not declare a `remoteUser` the
-   * project's image may not even have.
-   */
-  houseImage: boolean;
-  /**
-   * Is the container BUILT from the house Dockerfile (`HOUSE_DOCKERFILE`)? False only when an adopted devcontainer
-   * declares an image source of its own (`image`, `build`, …) — the house never adds a second one beside it.
-   */
-  buildsHouseImage: boolean;
+  /** What the container runs on — see `ImageSource`. */
+  imageSource: ImageSource;
   home: string;
   /** The image's own features (installed first — the runtime the rest of the features may need). */
   imageFeatures: ({ id: string; options: Record<string, DevcontainerJson> } & Why)[];
@@ -94,20 +85,30 @@ export interface ComposedVolume {
 const PHASES: readonly PostCreatePhase[] = ['prepare', 'install', 'plugins', 'provision'];
 
 /**
- * `runsAs` — set when an ADOPTED devcontainer keeps its own image: the user that image runs as, which every
- * `{{home}}`/`{{remoteUser}}` token must follow instead of the house image's.
+ * What the container runs on, as the house sees it — ONE value, so a state like "built from the house Dockerfile but
+ * running as a foreign image's user" cannot be expressed:
+ *   build      — BUILT from `HOUSE_DOCKERFILE` (a devcontainer the house owns or creates, or an adopted one switched
+ *                to it). The house emits `build` and its `remoteUser`.
+ *   house-ref  — an ADOPTED devcontainer whose own image source names the house's image: the house adds no second
+ *                source beside it, but knows the image — its user, and that nothing lives in its home.
+ *   foreign    — an ADOPTED devcontainer's own image (or build, or Compose): no `build`, no `remoteUser` (the image
+ *                may not have the house's user), every `{{home}}` token follows `runsAs`, and no mount that would
+ *                overlay what that image may ship in its home (`onHouseImageOnly`).
  */
+export type ImageSource = { kind: 'build' } | { kind: 'house-ref' } | { kind: 'foreign'; runsAs: string };
+
 export function compose(
   contributors: readonly Contributor[],
-  tokens: { nodeMajor: string; runsAs?: string; projectImage?: boolean },
+  tokens: { nodeMajor: string; imageSource?: ImageSource },
 ): Composition {
+  const source: ImageSource = tokens.imageSource ?? { kind: 'build' };
   // The image first, because `{{home}}` — which other fragments use — follows its user.
   const imageSource = [...contributors].reverse().find((entry) => entry.fragment.image);
   if (!imageSource) {
     throw new Error('[devcontainer] No active layer declares a base image — the `agent` layer always should.');
   }
   const { features: imageFeatureList, ...image } = imageSource.fragment.image!;
-  const remoteUser = tokens.runsAs ?? image.remoteUser;
+  const remoteUser = source.kind === 'foreign' ? source.runsAs : image.remoteUser;
   const home = homeOf(remoteUser);
   const sub = (value: string) =>
     value.split('{{home}}').join(home).split('{{remoteUser}}').join(remoteUser).split('{{nodeMajor}}').join(tokens.nodeMajor);
@@ -185,17 +186,18 @@ export function compose(
     : [];
 
   const mounts = unique(
-    all('mounts').map(({ item }) => {
-      const entry = item as { mount: string; ownership?: VolumeOwnership; why?: string };
-      return { mount: sub(entry.mount), ...(entry.ownership ? { ownership: entry.ownership } : {}), why: entry.why };
-    }),
+    all('mounts')
+      .filter(({ item }) => !(source.kind === 'foreign' && (item as { onHouseImageOnly?: boolean }).onHouseImageOnly))
+      .map(({ item }) => {
+        const entry = item as { mount: string; ownership?: VolumeOwnership; why?: string };
+        return { mount: sub(entry.mount), ...(entry.ownership ? { ownership: entry.ownership } : {}), why: entry.why };
+      }),
     (entry) => mountField(entry.mount, 'target') ?? entry.mount,
   );
 
   return {
     image: { ref: sub(image.ref), remoteUser, why: image.why },
-    houseImage: tokens.runsAs === undefined,
-    buildsHouseImage: !tokens.projectImage,
+    imageSource: source,
     home,
     imageFeatures,
     features,
@@ -324,7 +326,7 @@ export function renderDevcontainerJson(name: string, layers: readonly string[], 
     entries.length ? { items: entries.map(item) } : undefined;
 
   add('name', value(name));
-  if (c.buildsHouseImage) {
+  if (c.imageSource.kind === 'build') {
     add(
       'build',
       { members: [{ key: 'dockerfile', node: value(HOUSE_DOCKERFILE) }, { key: 'context', node: value('.') }] },
@@ -390,7 +392,7 @@ export function renderDevcontainerJson(name: string, layers: readonly string[], 
     map(c.initializeCommand, (entry) => ({ key: entry.name, node: value(entry.command), why: entry.why })),
     'Runs ON THE HOST before the container is created. The OBJECT form on purpose: its entries are named and run\nside by side, so a project with its own initializeCommand keeps it under its own key.',
   );
-  if (c.houseImage) add('remoteUser', value(c.image.remoteUser));
+  if (c.imageSource.kind !== 'foreign') add('remoteUser', value(c.image.remoteUser));
   add(
     'runArgs',
     list(
@@ -493,7 +495,7 @@ export function renderPostCreate(layers: readonly string[], c: Composition, plug
   sections.push(piece('footer'));
 
   const script = `${sections.join('\n\n')}\n`;
-  proveBash(script);
+  proveShell(script, 'bash', 'post-create.sh');
   return script;
 }
 
@@ -532,11 +534,11 @@ function renderVolumeOwnership(template: string, volumes: readonly ComposedVolum
 }
 
 /**
- * `.devcontainer/os-packages.sh` — the ONE installer the image build and post-create both run (see the template).
+ * `.devcontainer/house.packages.sh` — the ONE installer the image build and post-create both run (see the template).
  * The house's packages are embedded, grouped by capability with each group's `why` as a comment, de-duplicated
  * across groups; the project's own list is the file it is handed.
  */
-export function renderOsPackagesScript(layers: readonly string[], groups: Composition['osPackages']): string {
+export function renderOsPackagesScript(groups: Composition['osPackages']): string {
   const seen = new Set<string>();
   const lines: string[] = [];
   for (const group of groups) {
@@ -546,13 +548,11 @@ export function renderOsPackagesScript(layers: readonly string[], groups: Compos
     if (group.why) lines.push(...group.why.split('\n').map((line) => `# ${line}`.trimEnd()));
     lines.push(fresh.join(' '));
   }
-  const script = readFileSync(join(__dirname, 'os-packages.sh.tpl'), 'utf8')
-    .split('{{LAYERS}}')
-    .join(layers.join(', '))
+  const script = readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8')
     .split('{{HOUSE_PACKAGES}}')
     // The list is one single-quoted shell string: a `'` in a why would end it early, so it is closed, escaped, reopened.
     .join(lines.join('\n').split("'").join("'\\''"));
-  proveBash(script);
+  proveShell(script, 'sh', 'house.packages.sh');
   return script;
 }
 
@@ -565,10 +565,11 @@ export function renderHouseDockerfile(c: Composition): string {
  * `bash -n` the composed script — the shell counterpart of parsing devcontainer.json. Skipped (not failed) only
  * when no bash is reachable from the generator's own process, which says nothing about the script.
  */
-function proveBash(script: string): void {
-  const result = spawnSync('bash', ['-n'], { input: script, encoding: 'utf8' });
+/** Refuse to write a generated script its own shell cannot parse (when that shell is available to ask). */
+function proveShell(script: string, shell: 'bash' | 'sh', name: string): void {
+  const result = spawnSync(shell, ['-n'], { input: script, encoding: 'utf8' });
   if (result.error) return;
   if (result.status !== 0) {
-    throw new Error(`[devcontainer] The composed post-create.sh does not parse:\n${result.stderr}`);
+    throw new Error(`[devcontainer] The composed ${name} does not parse under ${shell}:\n${result.stderr}`);
   }
 }

@@ -29,7 +29,7 @@
     },
     "voice": {
       "type": "boolean",
-      "description": "Bridge the host's PulseAudio-protocol socket (WSLg, or native PulseAudio/PipeWire) into the container so the bespunky-voice plugin can reach the host speaker + mic. Adds .devcontainer/host-probe.sh (run as initializeCommand on every open: it points the gitignored .devcontainer/.host/pulse at this machine's socket folder, or leaves an empty dir when the host has no audio, so the container always starts), the bind mount of that path to /run/bespunky/host/pulse, and remoteEnv PULSE_SERVER + BESPUNKY_HOST_WSL_DISTRO. The companion post-create.sh self-adapts on a socket actually arriving: it installs the espeak-ng TTS floor + pulseaudio-utils and pre-installs the voice plugin only then. Opt-in only - never enabled by default.",
+      "description": "Bridge the host's PulseAudio-protocol socket (WSLg, or native PulseAudio/PipeWire) into the container so the bespunky-voice plugin can reach the host speaker + mic. Adds .devcontainer/host-probe.sh (run as initializeCommand on every open: it points the gitignored .devcontainer/.host/pulse at this machine's socket folder, or leaves an empty dir when the host has no audio, so the container always starts), the bind mount of that path to /run/bespunky/host/pulse, and remoteEnv PULSE_SERVER + BESPUNKY_HOST_WSL_DISTRO. The espeak-ng TTS floor + pulseaudio-utils join the composed OS packages (built into the image as one cached layer), and the companion post-create.sh self-adapts on a socket actually arriving: it pre-installs the voice plugin only then. Opt-in only - never enabled by default.",
       "default": false
     }
   },

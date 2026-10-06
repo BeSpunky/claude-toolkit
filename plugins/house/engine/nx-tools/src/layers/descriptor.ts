@@ -274,7 +274,16 @@ export interface DevcontainerFragment {
    * Docker creates a fresh named volume — and every missing directory on the way to its mount point — owned by
    * root, so the composed post-create reclaims each one before anything installs (see `VolumeOwnership`).
    */
-  mounts?: readonly ({ mount: string; ownership?: VolumeOwnership } & Explained)[];
+  mounts?: readonly ({
+    mount: string;
+    ownership?: VolumeOwnership;
+    /**
+     * The target is a directory an image may itself populate (a home's `~/.local`): a named volume mounted over it
+     * freezes the image's copy at the first create. Safe on an image the house knows ships nothing there; left out
+     * on an adopted devcontainer's foreign image.
+     */
+    onHouseImageOnly?: true;
+  } & Explained)[];
   /**
    * Directories this layer puts IN FRONT of the image's PATH. Never a `remoteEnv` `PATH` of a layer's own: two
    * layers each setting `PATH` would collide (first wins, the other's directory silently gone), so the composer
@@ -294,7 +303,7 @@ export interface DevcontainerFragment {
   ports?: readonly DevcontainerPort[];
   /** Named `initializeCommand` entries (object form — they run side by side, on the HOST). */
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
-  /** Debian packages — composed into the one installer (os-packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
+  /** Debian packages — composed into the one installer (house.packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
   osPackages?: readonly ({ packages: readonly string[] } & Explained)[];
   /** Post-create pieces. */
   postCreate?: readonly PostCreatePiece[];

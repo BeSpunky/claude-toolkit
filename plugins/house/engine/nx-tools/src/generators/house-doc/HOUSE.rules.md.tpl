@@ -101,7 +101,9 @@ For anything this workspace can **generate** — projects, apps, libraries, modu
 
 Nx is this workspace's floor: every house generator and migration runs through it, invoked here as **`{{NX}}`** — `{{NX}} g <plugin>:<generator> --help` before a first use, and the `nx-generate` skill (the Nx plugin) for discovery.
 
-## Local servers — never clobber a running server (non-negotiable)
+{{#agent}}**System packages go in `.devcontainer/os-packages.txt`** (one Debian package name per line) — the image build installs them as one cached layer. Never `sudo apt-get install` one by hand (gone at the next rebuild) or in a post-create step (reinstalled on every rebuild).
+
+{{/agent}}## Local servers — never clobber a running server (non-negotiable)
 
 **When you start a server to test a change, you MUST bind it to a random free port — never the project's default port{{#angular}} (`4200`){{/angular}}{{#firebase}}, the emulator ports (`8080`/`9099`/…){{/firebase}}, or any container-forwarded port.** Those belong to whatever server the developer launched manually; grabbing them fails, silently attaches, or forces a disruptive restart. {{#web}}You verify **headless** (Playwright reaches any `localhost:<port>` directly), so you never need the forwarded ports — a random port costs nothing.{{/web}}{{^web}}A random port costs nothing, and anything you need to check can reach it directly.{{/web}} Read the bound URL from the server's own startup output and point your browser there; tear the server down when done, and **never kill a server you didn't start** to free a port. Full rules — invoke the **`bespunky-workflow:local-server-isolation`** skill.
 {{#firebase}}

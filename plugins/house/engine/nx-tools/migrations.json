@@ -171,7 +171,7 @@
     "build-from-house-dockerfile": {
       "version": "0.48.0",
       "layer": "agent",
-      "description": "A house-written devcontainer.json stops pulling its image and builds it from .devcontainer/house.Dockerfile (FROM the same image, with the OS packages as one cached Docker layer, so a rebuild reinstalls nothing that has not changed). Removes the house-written `image` (and the comment above it) so it does not linger beside the `build` the generator now composes; an adopted devcontainer's own image is left in place and reported with the one-line switch.",
+      "description": "A house-written devcontainer.json stops pulling its image and builds it from .devcontainer/house.Dockerfile (FROM the same image, with the OS packages as one cached Docker layer, so a rebuild reinstalls nothing that has not changed). Removes the house-written `image` (and the comment above it) so it does not linger beside the `build` the generator now composes — refusing, and reporting, if the removal would not leave the file intact; an `image` not recorded as house-written is left and reported. Reports any apt install in the project's own post-create.local.sh (or a post-create.sh the house did not write): it now reinstalls on every rebuild and no longer gets the house's per-create `apt-get update` — move it into .devcontainer/os-packages.txt. Refreshes a post-create.local.sh that is still the untouched 0.47 stub.",
       "implementation": "./src/migrations/0.48.0/build-from-house-dockerfile"
     }
   }
