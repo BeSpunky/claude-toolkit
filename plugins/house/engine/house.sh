@@ -2526,8 +2526,9 @@ if [ "$MODE" = "upgrade" ]; then
   echo "UPGRADE_NEXT: $UPGRADE_NEXT"
   case "$UPGRADE_NEXT" in
     rebuild-container)
-      echo "  .devcontainer/ changed, and mounts, runArgs, containerEnv and features only apply when the"
-      echo "  container is created. Run 'Dev Containers: Rebuild Container' when it suits you — that also"
+      echo "  .devcontainer/ changed, and the image (house.Dockerfile, the package lists), mounts, runArgs,"
+      echo "  containerEnv and features only apply when the container is created. Run"
+      echo "  'Dev Containers: Rebuild Container' when it suits you — that also"
       echo "  delivers the session-scoped config below, so no separate restart is needed." ;;
     restart-session)
       echo "  Session-scoped config changed (.claude/settings.json and/or .mcp.json). Claude Code reads those"
