@@ -100,3 +100,22 @@ dogfood rule (a rebuild must be observed before the release).
 
 Package availability for the images the web layer uses: `tigervnc-standalone-server` is `1.12.0+dfsg-8` in
 bookworm and `1.15.0+dfsg-2.1~deb13u1` in trixie (packages.debian.org). Verified here on 1.15 only.
+
+## 2026-10-06 — review fixes (orchestrator's adversarial review: no blockers, two fixes)
+
+**`window_cdp` had no deadline** on the websocket open or on command replies, so a Chromium that answers HTTP
+but stalls on CDP would hang `status` / `status --json` / `fullscreen` forever (and the status line would drop
+its entry after its 8 s budget, silently). Now one overall deadline per call (a timer that exits non-zero with
+"no answer from Chromium over CDP (<url>) within <n> ms"): 3 s from `status`, 10 s from `fullscreen` (whose
+`off` may wait out two WM state changes). `status` reports `"window":{"state":"unknown","width":null,"height":null}`
+(text: "unknown — Chromium did not answer over CDP within 3s") when Chromium is up but silent; `null` still means
+Chromium is down. Proved with a fake endpoint (serves `/json/list` + `/json/version`, swallows the websocket
+upgrade, runs with `--user-data-dir=<profile>` so the CLI counts it as our chrome):
+
+    status --json → "window":{"state":"unknown",...}   real 0m3.298s
+    fullscreen on → "no answer from Chromium over CDP (http://127.0.0.1:35009) within 10000 ms", rc=1, real 0m10.030s
+
+**`clean` now also removes `$WM_HOME` and the noVNC webroot** (both rewritten by the next `up`). Real cycle after
+both fixes: up → status (`maximized 1440x900`, 0.198 s) → fullscreen on → off → down (ports free) → clean: runtime
+left with only `host-verified logs profile up.lock` (`fluxbox`, `novnc-web`, `web.port` gone; `logs`/`profile`
+are re-created empty by `ensure_dirs`, as before). bash -n, test-layers 87/0, test-scaffold, check-script-modes pass.

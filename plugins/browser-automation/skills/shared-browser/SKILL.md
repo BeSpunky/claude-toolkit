@@ -132,7 +132,7 @@ tools/dev/dev serve [app] --worktree=<branch|slug>     # the same engine, no Nx 
 | `observe` | Enter **observe-only** — attach/verify/recorder refuse to navigate/click/type and log "observe-only — human is driving". Use before handing the human an interactive step (OAuth / captcha). Flag persists in `SB_RUNTIME`. |
 | `resume` | Clear observe-only — Claude may drive again. |
 | `fullscreen on\|off` | `on` hides Chromium's tabs + omnibox so the page gets the whole desktop (presenting); `off` brings them back, maximized (co-driving). Window-only, so it works in observe-only too. |
-| `status [--json]` | Per-component up/down + ports + URL, **the observe-only mode**, and the live **window** (`{state, width, height}` — maximized/fullscreen, it is the viewer tab's size). `--json` = machine-readable preflight. |
+| `status [--json]` | Per-component up/down + ports + URL, **the observe-only mode**, and the live **window** (`{state, width, height}` — maximized/fullscreen, it is the viewer tab's size; `state: "unknown"` if Chromium does not answer CDP within 3 s, `null` when it is down). `--json` = machine-readable preflight. |
 | `url` | Print the noVNC URL — **the single source of truth**; hand this to the human rather than composing a URL. |
 | `logs [component] [--since=<ts>] [--level=<lvl>]` | Tail a component log, or the filtered recorder JSONL. |
 | `down` | Graceful `SIGTERM`→`SIGKILL` via PID files; verify ports freed. **Never pattern-kills.** |

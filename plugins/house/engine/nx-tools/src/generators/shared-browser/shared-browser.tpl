@@ -824,14 +824,21 @@ NODE
 # question, so nothing needs to attach to a page — a Playwright connect would attach to every tab (and reset
 # download handling) on each poll, a side effect on the human's browser for the sake of a read.
 # Params travel as a real env prefix (gotcha #6).
+#
+# ONE DEADLINE for the whole exchange (<deadline-ms>, the second argument): a Chromium that accepts the HTTP
+# request but stalls on the websocket — or never replies to a command — would otherwise hang `status` forever,
+# and with it the status line, which gives up after 8 s and silently drops its entry. Past the deadline this
+# exits non-zero with a message saying so; callers decide what that means (status: "unknown").
 window_cdp() {
-  ( cd "$WORKSPACE_ROOT" && SB_WIN_ACTION="$1" SB_CDP_URL="$CDP_URL" node - ) <<'NODE'
+  ( cd "$WORKSPACE_ROOT" && SB_WIN_ACTION="$1" SB_WIN_DEADLINE_MS="$2" SB_CDP_URL="$CDP_URL" node - ) <<'NODE'
 const base = process.env.SB_CDP_URL;
 const action = process.env.SB_WIN_ACTION;
+const deadlineMs = Number(process.env.SB_WIN_DEADLINE_MS) || 5000;
 const fail = (e) => { console.error(String((e && e.message) || e)); process.exit(1); };
+setTimeout(() => fail(`no answer from Chromium over CDP (${base}) within ${deadlineMs} ms`), deadlineMs);
 (async () => {
   if (typeof WebSocket !== 'function') throw new Error('this Node has no built-in WebSocket (needs Node 22+)');
-  const json = async (path) => (await fetch(base + path, { signal: AbortSignal.timeout(5000) })).json();
+  const json = async (path) => (await fetch(base + path)).json();
   const page = (await json('/json/list')).find((t) => t.type === 'page');
   if (!page) throw new Error('the shared browser has no page open');
   const ws = new WebSocket((await json('/json/version')).webSocketDebuggerUrl);
@@ -863,6 +870,7 @@ const fail = (e) => { console.error(String((e && e.message) || e)); process.exit
   } finally {
     ws.close();
   }
+  process.exit(0);                       // done — don't wait out the deadline timer
 })().catch(fail);
 NODE
 }
@@ -879,7 +887,7 @@ cmd_fullscreen() {
   esac
   component_running chrome || die "the shared browser is not up — run: shared-browser up"
   local out
-  out="$(window_cdp "$target")" || die "fullscreen: could not reach the shared browser over CDP ($CDP_URL)"
+  out="$(window_cdp "$target" 10000)" || die "fullscreen: could not reach the shared browser over CDP ($CDP_URL)"
   ok "window: $out  (state width height)"
 }
 
@@ -895,10 +903,13 @@ cmd_status() {
   { [ "$vnc" = true ] && [ "$web" = true ] && [ "$cdp" = true ]; } && up=true
   observe_active && observe=true || observe=false
   # The window's live state (asked of Chromium itself — never a remembered flag, since the human can change
-  # it too). Empty when Chromium is down or unreachable.
+  # it too). Chromium down → no window (null). Chromium up but not answering within 3 s → "unknown", never a
+  # hang: the status line polls this with an 8 s budget.
   local win="" win_state="" win_w="" win_h=""
-  component_running chrome && win="$(window_cdp get 2>/dev/null || true)"
-  [ -n "$win" ] && read -r win_state win_w win_h <<<"$win"
+  if component_running chrome; then
+    win="$(window_cdp get 3000 2>/dev/null || true)"
+    if [ -n "$win" ]; then read -r win_state win_w win_h <<<"$win"; else win_state=unknown; fi
+  fi
 
   if [ "$json" -eq 1 ]; then
     printf '{'
@@ -923,7 +934,8 @@ cmd_status() {
     done
     printf '},'
     printf '"cdp":"%s",' "$CDP_URL"
-    if [ -n "$win_state" ]; then printf '"window":{"state":"%s","width":%s,"height":%s},' "$win_state" "$win_w" "$win_h"
+    if [ "$win_state" = unknown ]; then printf '"window":{"state":"unknown","width":null,"height":null},'
+    elif [ -n "$win_state" ]; then printf '"window":{"state":"%s","width":%s,"height":%s},' "$win_state" "$win_w" "$win_h"
     else printf '"window":null,'; fi
     # null, not a string: `url` refuses to print a speculative URL, so the machine surface must not hand
     # one over either. A caller reading .url gets a falsy value in exactly the state cmd_url errors in.
@@ -941,7 +953,11 @@ cmd_status() {
     printf '  %-11s %s (port %s)\n' 'cdp'  "$([ "$cdp" = true ] && echo listening || echo -)" "$SB_CDP"
     printf '  %-11s %s\n' 'url' "$([ "$SB_WEB_ALLOCATED" = true ] && printf '%s' "$NOVNC_URL" || printf 'none yet — run `up` to allocate one')"
     printf '  %-11s %s\n' 'cdp-url' "$CDP_URL"
-    printf '  %-11s %s\n' 'window' "$([ -n "$win_state" ] && printf '%s %sx%s (follows the viewer tab)' "$win_state" "$win_w" "$win_h" || printf -- '-')"
+    case "$win_state" in
+      '')      printf '  %-11s %s\n' 'window' '-' ;;
+      unknown) printf '  %-11s %s\n' 'window' 'unknown — Chromium did not answer over CDP within 3s' ;;
+      *)       printf '  %-11s %s %sx%s (follows the viewer tab)\n' 'window' "$win_state" "$win_w" "$win_h" ;;
+    esac
     printf '  %-11s registry=%s host-probe=%s (band %s..%s)\n' 'allocation' \
       "$(registry_ok && echo yes || echo 'NO — parallel containers are invisible to each other')" \
       "$([ -n "$(host_gateway)" ] && echo yes || echo no)" \
@@ -1045,11 +1061,11 @@ NODE
 
 cmd_clean() {
   cmd_down || true                                        # stop the stack first, so we don't wipe a live profile
-  rm -rf "$PROFILE" "$LOGS"
+  rm -rf "$PROFILE" "$LOGS" "$WM_HOME" "$WEBROOT"         # WM config + noVNC webroot are rewritten by the next `up`
   rm -f "$SB_RUNTIME"/*.pid
   release_web_port                                        # a full reset gives the port back; the next `up` re-allocates
   ensure_dirs
-  ok "cleaned: profile + logs + screenshots wiped, noVNC port released ($SB_RUNTIME)."
+  ok "cleaned: profile + logs + screenshots + WM config + noVNC webroot wiped, noVNC port released ($SB_RUNTIME)."
 }
 
 usage() {
@@ -1070,7 +1086,7 @@ USAGE
                                                  or the recorder events.jsonl (default; filter by --since/--level)
   shared-browser down                            stop exactly this stack (PID files), verify ports freed
   shared-browser restart                         down + up
-  shared-browser clean                           wipe profile + logs + screenshots
+  shared-browser clean                           wipe profile + logs + screenshots + WM config + noVNC webroot, release the noVNC port
 
 Human opens:  the URL from \`shared-browser url\` (allocated at \`up\` — never compose it)
 Claude drives (loopback, never forward):  $CDP_URL
