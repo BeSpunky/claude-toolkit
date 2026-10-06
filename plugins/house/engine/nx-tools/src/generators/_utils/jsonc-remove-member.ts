@@ -1,4 +1,4 @@
-// Remove one object member from JSONC TEXT — the member, its comma, and the `//` lines that explain it — while
+// Remove one object member (or array item) from JSONC TEXT — the member, its comma, and the `//` lines that explain it — while
 // touching nothing else in the file. Shared by the migrations that retire a devcontainer.json member.
 import { type Node, SyntaxKind, createScanner } from 'jsonc-parser';
 
@@ -9,7 +9,8 @@ import { type Node, SyntaxKind, createScanner } from 'jsonc-parser';
  * `{ "version": "22" }` comes back spread over three), and this rung must touch nothing but what it removes.
  */
 export function removeMemberWithLeadingComment(text: string, valueNode: Node): string {
-  const property = valueNode.parent!;
+  // An object member is its PROPERTY (key + value); an array item is the value itself — the same cut serves both.
+  const property = valueNode.parent?.type === 'property' ? valueNode.parent : valueNode;
   const siblings = property.parent!.children!;
   const index = siblings.indexOf(property);
   const end = property.offset + property.length;

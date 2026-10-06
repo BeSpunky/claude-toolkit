@@ -71,5 +71,13 @@ for attempt in 1 2 3; do
     sleep $((attempt * 10))
   fi
 done
-echo "[os-packages] FAILED after 3 attempts:$missing" >&2
+# One unknown or broken name fails the whole transaction above — and with it every package that was fine. So install
+# what CAN be installed, one by one, and name exactly what could not: a typo in os-packages.txt must not take the
+# house's packages (or the rest of the project's) down with it. Still non-zero: the image build fails loudly.
+echo "[os-packages] the batch failed 3 times — installing one by one to find the package at fault"
+failed=""
+for name in $missing; do
+  $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$name" > /dev/null 2>&1 || failed="$failed $name"
+done
+echo "[os-packages] FAILED:$failed" >&2
 exit 1

@@ -13,6 +13,7 @@
 import { type Tree, getProjects } from '@nx/devkit';
 import type { LayerDescriptor } from './descriptor';
 import { adapter, adapterOf } from '../adapters/registry';
+import { CHROMIUM_OS_PACKAGE_GROUP } from '../generators/_utils/playwright';
 
 /** Does the `js` stack own any project here? (Precedence respected: an Angular-built library is Angular's.) */
 const ownsAnyProject = (tree: Tree): boolean =>
@@ -37,6 +38,7 @@ export const js: LayerDescriptor = {
   // substring check sees an existing house workspace as covered; `nx init` on an existing repo does not ignore it).
   // A layer that brings a build owns ignoring its output — or the first build leaves an untracked tree behind.
   gitignore: [{ heading: 'Build output (Nx writes builds to dist/)', entries: ['dist'] }],
-  // The project's OWN browser tests: Chromium for @playwright/test, when it is declared (self-adapting piece).
-  devcontainer: { postCreate: [{ phase: 'provision', piece: 'playwright' }] },
+  // The project's OWN browser tests: Chromium for @playwright/test, when it is declared (self-adapting piece) — its
+  // OS libraries in the image (the `playwright` generator pins @playwright/test in every js workspace).
+  devcontainer: { osPackages: [CHROMIUM_OS_PACKAGE_GROUP], postCreate: [{ phase: 'provision', piece: 'playwright' }] },
 };

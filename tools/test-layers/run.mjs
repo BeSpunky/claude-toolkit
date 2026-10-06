@@ -654,7 +654,8 @@ checkAsync('full house shape (angular+firebase+design system, web): the 0.34 con
   ok(a.dc.mounts.length === 9, `mounts ${a.dc.mounts.length}`);
   ok(bashParses(a.post), 'post-create.sh does not parse');
   for (const name of ['tigervnc-standalone-server', 'default-jdk-headless']) ok(new RegExp(`(^| )${name}( |$)`, 'm').test(a.osScript), `the package list lacks ${name}`);
-  for (const piece of ['angular/skills', 'playwright install --with-deps', 'zz-firebase-welcome', '/var/opt/bespunky/ports']) {
+  ok(!a.post.includes('--with-deps'), 'post-create still apt-installs Chromium\'s libraries (--with-deps) — they are image packages');
+  for (const piece of ['angular/skills', 'playwright install chromium', 'zz-firebase-welcome', '/var/opt/bespunky/ports']) {
     ok(a.post.includes(piece), `post-create lacks ${piece}`);
   }
   const enabled = Object.keys(a.settings.enabledPlugins);
@@ -854,6 +855,88 @@ checkAsync('image: LF in every checkout, CRLF lists still read, a quote in a why
   ok(parked.exists('.devcontainer/post-create.sh') && !parked.exists('.devcontainer/post-create.bespunky.sh'), 'the superseded parked script was left (the chain feature would run its stale body first)');
 });
 
+checkAsync('chromium: a foreign image keeps Playwright\'s own --with-deps (its distro is unknown); the house image needs none', async (ok) => {
+  const foreign = createTreeWithEmptyWorkspace();
+  foreign.write('.devcontainer/devcontainer.json', '{ "image": "python:3.12-bookworm", "remoteUser": "pyuser" }\n');
+  const f = await artifacts(foreign, ['nx', 'agent', 'node', 'js', 'web']);
+  ok(!/(^| )libnss3( |$)/m.test(f.osScript), 'a foreign image got the Debian 13 Chromium names (one wrong name fails the whole apt transaction)');
+  ok(f.osScript.includes('tigervnc-standalone-server'), 'the distro-neutral web packages must stay on a foreign image');
+  ok(f.post.includes('shared-browser" install --with-deps;') && f.post.includes('playwright install --with-deps chromium'), 'a foreign image lost Playwright\'s own --with-deps');
+  const house = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js', 'web']);
+  ok(!house.post.includes('--with-deps'), 'a house image still runs an apt step for Chromium');
+});
+
+checkAsync('installer: a failed batch falls back to one by one, names the culprit, still exits non-zero', async (ok) => {
+  const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
+  const dir = mkdtempSync(join(tmpdir(), 'os-fallback-'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  const log = join(dir, 'apt.log');
+  writeFileSync(join(dir, 'house.packages.sh'), a.osScript);
+  writeFileSync(join(dir, 'os-packages.txt'), 'sox nosuchpkg\n');
+  writeFileSync(join(bin, 'dpkg-query'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  // A real apt refuses the whole transaction when ONE name is unknown; alone, every other name installs.
+  writeFileSync(join(bin, 'apt-get'), `#!/bin/sh\necho "$*" >> '${log}'\ncase "$*" in *nosuchpkg*) exit 100 ;; esac\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'sleep'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  let status = 0;
+  let out = '';
+  try {
+    execFileSync('sh', ['-c', 'sh "$0" "$1" 2>&1', join(dir, 'house.packages.sh'), join(dir, 'os-packages.txt')], { env: { PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+  } catch (error) {
+    status = error.status;
+    out = `${error.stdout}`;
+  }
+  const calls = readFileSync(log, 'utf8').trim().split('\n');
+  rmSync(dir, { recursive: true, force: true });
+  ok(status !== 0 && /FAILED: nosuchpkg$/m.test(out), `the culprit was not named (status ${status}): ${out}`);
+  for (const name of ['tmux', 'curl', 'sox']) ok(calls.includes(`install -y ${name}`), `${name} was not installed on its own after the batch failed`);
+});
+
+checkAsync('runtime: an earlier pin\'s playwright-core is removed before the new one installs (its browsers would be kept forever)', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  await generator('shared-browser')(tree, {});
+  const dir = mkdtempSync(join(tmpdir(), 'sb-runtime-'));
+  const bin = join(dir, 'bin');
+  const cache = join(dir, 'cache');
+  mkdirSync(bin);
+  mkdirSync(join(cache, 'bespunky', 'playwright-core@0.0.1', 'node_modules'), { recursive: true });
+  mkdirSync(join(cache, 'bespunky', 'unrelated'), { recursive: true });
+  writeFileSync(join(dir, 'runtime.mjs'), tree.read('tools/shared-browser/runtime.mjs', 'utf8'));
+  // A fake npm: `npm install --prefix <dir> …` lays down the package the runtime checks for.
+  writeFileSync(join(bin, 'npm'), '#!/bin/sh\nwhile [ "$1" != "--prefix" ]; do shift; done\nmkdir -p "$2/node_modules/playwright-core" && echo "{}" > "$2/node_modules/playwright-core/package.json"\n', { mode: 0o755 });
+  try {
+    execFileSync('node', [join(dir, 'runtime.mjs'), 'module'], { env: { PATH: `${bin}:${process.env.PATH}`, XDG_CACHE_HOME: cache, HOME: dir }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch {
+    // `module` may print or exit oddly with a fake package; the filesystem is what is checked.
+  }
+  const left = readdirSync(join(cache, 'bespunky')).sort();
+  rmSync(dir, { recursive: true, force: true });
+  ok(!left.includes('playwright-core@0.0.1') && left.includes('unrelated') && left.some((name) => name.startsWith('playwright-core@') && name !== 'playwright-core@0.0.1'), `after installing the pin: ${JSON.stringify(left)}`);
+});
+
+checkAsync('post-create is UNATTENDED: no input attached, and yarn 1 fails instead of prompting (yarn 2+ untouched)', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  tree.write('yarn.lock', '');
+  const a = await artifacts(tree, ['nx', 'agent', 'node']);
+  const at = (needle) => a.post.indexOf(needle);
+  ok(at('exec < /dev/null') !== -1 && at('exec < /dev/null') < at('$PM_INSTALL'), 'post-create does not detach input before the first install');
+  const start = a.post.indexOf('if [ -f "$WS/package.json" ]; then');
+  const piece = a.post.slice(start, a.post.indexOf('\nfi\n', start) + 4);
+  for (const [version, expected] of [['1.22.22', 'yarn install --non-interactive'], ['4.5.0', 'yarn install']]) {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-'));
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(dir, 'package.json'), '{}');
+    writeFileSync(join(dir, 'yarn.lock'), '');
+    writeFileSync(join(bin, 'yarn'), `#!/bin/sh\n[ "$1" = --version ] && { echo ${version}; exit 0; }\necho "RAN yarn $*" >> '${join(dir, 'log')}'\n`, { mode: 0o755 });
+    execFileSync('bash', ['-c', `set -euo pipefail\nWS='${dir}'\n${piece}`], { env: { PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+    const ran = readFileSync(join(dir, 'log'), 'utf8').trim();
+    rmSync(dir, { recursive: true, force: true });
+    ok(ran === `RAN ${expected}`, `yarn ${version}: ran "${ran}", expected "${expected}"`);
+  }
+});
+
 checkAsync('adopted devcontainer on its own image: only the active layers merged in, no remoteUser imposed, mounts follow its user', async (ok) => {
   const tree = wrapperRepo();
   tree.write('.devcontainer/devcontainer.json', '{\n  // Our Python image.\n  "image": "python:3.12",\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n');
@@ -915,12 +998,19 @@ checkAsync('owned devcontainer: no provenance record — ownership already answe
 
 checkAsync('post-create: web provisions the shared browser through its own runtime; @playwright/test is the js layer\'s', async (ok) => {
   const web = await artifacts(wrapperRepo(), ['nx', 'agent', 'web']);
-  ok(web.post.includes('shared-browser" install --with-deps'), 'web: no `shared-browser install --with-deps`');
+  ok(web.post.includes('shared-browser" install;') && !web.post.includes('--with-deps'), 'web: the runtime install is not the plain (no apt) `shared-browser install`');
+  for (const name of ['xvfb', 'libnss3', 'libgbm1', 'fonts-unifont']) ok(new RegExp(`(^| )${name.replace(/[.+]/g, '\\$&')}( |$)`, 'm').test(web.osScript), `web: Chromium's ${name} is not an image package`);
   ok(!web.post.includes('@playwright/test'), 'web (no js): still keyed on @playwright/test');
   ok(bashParses(web.post), 'web post-create does not parse');
   const tree = createTreeWithEmptyWorkspace();
   const both = await artifacts(tree, ['nx', 'agent', 'node', 'js', 'web']);
-  ok(both.post.includes('"@playwright/test"') && both.post.includes('install --with-deps'), 'js+web: both pieces');
+  ok(both.post.includes('"@playwright/test"') && both.post.includes('playwright install chromium') && !both.post.includes('--with-deps'), 'js+web: both pieces, neither with an apt step');
+  ok((both.osScript.match(/(^| )libnss3( |$)/gm) ?? []).length === 1, 'js+web: Chromium\'s libraries listed twice (the composer must de-duplicate)');
+  const js = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js']);
+  ok(/(^| )libnss3( |$)/m.test(js.osScript), 'js (no web): @playwright/test\'s Chromium libraries are not image packages');
+  const { PLAYWRIGHT_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright'));
+  const { CHROMIUM_OS_PACKAGES_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright-deps'));
+  ok(CHROMIUM_OS_PACKAGES_VERSION === PLAYWRIGHT_VERSION, `Chromium's OS packages were projected from playwright-core@${CHROMIUM_OS_PACKAGES_VERSION}, the pin is ${PLAYWRIGHT_VERSION} — run: node tools/playwright-deps/project.mjs --write`);
   ok(bashParses(both.post), 'js+web post-create does not parse');
 });
 
@@ -970,13 +1060,14 @@ checkAsync('volume ownership: a node-hosted repo reclaims node_modules (and the 
     'chown -R ME $WS/.nx/workspace-data',
     'chown -R ME $HOME/.config',
     'chown -R ME $HOME/.local',
+    'chown -R ME $HOME/.cache',
     'chown -R ME $WS/node_modules',
   ]);
   ok(a.post.indexOf('reclaim_volume tree "$WS/node_modules"') < a.post.indexOf('$PM_INSTALL'), 'node_modules is reclaimed AFTER the install');
   ok(bashParses(a.post) && shParses(a.post), 'node post-create does not parse under bash -n and sh -n');
 });
 
-checkAsync('volume ownership: web reclaims ~/.cache + ~/.cache/ms-playwright and opens the shared port registry (1777)', async (ok) => {
+checkAsync('volume ownership: web reclaims ~/.cache (one volume, the Playwright browsers inside it) and opens the shared port registry (1777)', async (ok) => {
   const a = await artifacts(wrapperRepo(), ['nx', 'agent', 'web']);
   const { calls, opening } = reclaimed(a.post);
   expectCalls(ok, 'web', calls, [
@@ -985,8 +1076,7 @@ checkAsync('volume ownership: web reclaims ~/.cache + ~/.cache/ms-playwright and
     'chown -R ME $WS/.nx/workspace-data',
     'chown -R ME $HOME/.config',
     'chown -R ME $HOME/.local',
-    'chown ME $HOME/.cache',
-    'chown -R ME $HOME/.cache/ms-playwright',
+    'chown -R ME $HOME/.cache',
   ]);
   ok(opening.includes('share_volume "/var/opt/bespunky/ports"') && /share_volume\(\) \{[\s\S]*sudo chmod 1777 "\$1"/.test(opening), 'the port registry is not prepared with chmod 1777');
   ok(!/reclaim_volume \w+ "\/var\/opt/.test(opening), 'the SHARED registry is chowned to one container\'s user');
@@ -1003,6 +1093,7 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.claude,`) && m.includes('type=bind')), 'the config dir is the persisted bind');
   ok(a.dc.mounts.filter((m) => m.includes(`target=${home}/.config`)).length === 1, 'not exactly ONE mount for ~/.config (one per tool crept back?)');
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.config,type=volume`)), '~/.config is not a persisted volume');
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.cache,type=volume`)) && !a.dc.mounts.some((m) => m.includes('/.cache/')), '~/.cache is not ONE persisted volume (or a per-tool cache volume crept back)');
   ok(a.post.includes('gh auth setup-git'), 'git is not wired to the gh login');
   const start = a.post.indexOf("# --- Claude Code's account record");
   const piece = a.post.slice(start, a.post.indexOf('\n# --- ', start + 1));
@@ -1026,7 +1117,7 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   rmSync(dir, { recursive: true, force: true });
 });
 
-checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes, ~/.config and ~/.local; a rebuild reclaims nothing', async (ok) => {
+checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes, ~/.config, ~/.local and ~/.cache; a rebuild reclaims nothing', async (ok) => {
   const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
   expectCalls(ok, 'wrapper', reclaimed(a.post).calls, [
     'chown ME $WS/.nx',
@@ -1034,6 +1125,7 @@ checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the 
     'chown -R ME $WS/.nx/workspace-data',
     'chown -R ME $HOME/.config',
     'chown -R ME $HOME/.local',
+    'chown -R ME $HOME/.cache',
   ]);
   const me = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
   expectCalls(ok, 'already owned (a rebuild)', reclaimed(a.post, { owner: me }).calls, []);

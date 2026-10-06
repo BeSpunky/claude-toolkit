@@ -616,6 +616,11 @@ up_locked() {
   local chrome_bin
   chrome_bin="$(resolve_chromium || true)"
   { [ -n "$chrome_bin" ] && [ -x "$chrome_bin" ]; } || die "Chromium unavailable from the shared-browser runtime — run: bash tools/shared-browser/shared-browser install"
+  # Chromium's system libraries come from the image (or, on a foreign image, `install --with-deps`). When one is
+  # missing, Chromium dies later with a loader error that names neither the cause nor the fix — so name both now.
+  local missing_libs
+  missing_libs="$(ldd "$chrome_bin" 2>/dev/null | awk '/not found/ {print $1}' | tr '\n' ' ')"
+  [ -z "$missing_libs" ] || die "Chromium is missing system libraries: ${missing_libs}— install them with: sh .devcontainer/house.packages.sh .devcontainer/os-packages.txt (or: bash tools/shared-browser/shared-browser install --with-deps)"
 
   reap_stale
   retire_previous_stack

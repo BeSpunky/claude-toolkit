@@ -106,6 +106,13 @@ export const agent: LayerDescriptor = {
           'downloaded again on every rebuild. Deliberately NOT baked into the image: a cached layer would hand back the\n' +
           'build-day version.',
       },
+      {
+        mount: 'source=${localWorkspaceFolderBasename}-cache,target={{home}}/.cache,type=volume',
+        why:
+          "The user's cache home (XDG), persisted across container rebuilds — ONE mount for every tool's cache: the\n" +
+          "Playwright browsers (~/.cache/ms-playwright), the shared browser's own runtime, the package managers'.\n" +
+          'A cache is self-validating, so keeping it whole is safe; what is not a cache never lives here.',
+      },
     ],
     // Claude Code keeps its account record (login, onboarding) in `.claude.json` BESIDE its config dir — in $HOME,
     // outside the persisted mount above — unless CLAUDE_CONFIG_DIR is set, which moves it INSIDE. Without this every

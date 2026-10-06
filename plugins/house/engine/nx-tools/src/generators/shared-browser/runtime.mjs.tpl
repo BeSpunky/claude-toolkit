@@ -16,10 +16,10 @@
 //
 // Progress goes to stderr: stdout carries only the answer, so the bash CLI can capture it.
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const PLAYWRIGHT_VERSION = '{{playwrightVersion}}';
@@ -43,6 +43,7 @@ const toStderr = { stdio: ['ignore', 2, 2] };
 /** Install the pinned playwright-core into the runtime dir, if it isn't there yet. */
 export function ensureModule() {
   if (existsSync(join(MODULE_DIR, 'package.json'))) return MODULE_DIR;
+  pruneOtherPins();
   console.error(`[shared-browser] installing playwright-core@${PLAYWRIGHT_VERSION} into ${RUNTIME_DIR} (once per machine)…`);
   execFileSync(
     'npm',
@@ -50,6 +51,25 @@ export function ensureModule() {
     toStderr,
   );
   return MODULE_DIR;
+}
+
+/**
+ * Remove the runtimes of OTHER pins beside this one. ~/.cache is persisted, so a previous pin's playwright-core would
+ * survive every rebuild — and Playwright keeps any browser whose install still links to an existing runtime, so each
+ * pin bump would strand a full Chromium download forever. With the old runtime gone, the `install chromium` that
+ * follows lets Playwright's own cleanup delete those browsers. Only in the house's default location: an explicit
+ * SB_PLAYWRIGHT_RUNTIME is the caller's to manage.
+ */
+function pruneOtherPins() {
+  if (process.env.SB_PLAYWRIGHT_RUNTIME) return;
+  const parent = dirname(RUNTIME_DIR);
+  if (!existsSync(parent)) return;
+  for (const entry of readdirSync(parent)) {
+    if (entry.startsWith('playwright-core@') && join(parent, entry) !== RUNTIME_DIR) {
+      console.error(`[shared-browser] removing the runtime of an earlier pin: ${join(parent, entry)}`);
+      rmSync(join(parent, entry), { recursive: true, force: true });
+    }
+  }
 }
 
 /** The pinned Playwright (`{ chromium, … }`), installed on demand. */
