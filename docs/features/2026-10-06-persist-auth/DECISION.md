@@ -1,6 +1,9 @@
 ---
 effort: persist-auth
-summary: House containers keep Claude, gh and git logins across rebuilds, so a rebuild never asks you to log in again.
+status: concluded
+concluded: 2026-10-06
+summary: House containers keep logins across rebuilds through two entrypoints — Claude's .claude/data (account record moved in via CLAUDE_CONFIG_DIR) and one ~/.config volume; git is re-wired to gh on every create. Plus a standing CLAUDE.md rule to audit every new container tool for rebuild-surviving state. nx-tools 0.47.0, bespunky-house 0.45.0.
+tags: [house, devcontainer, auth, persistence, agent-layer]
 ---
 
 # Logins survive a container rebuild
