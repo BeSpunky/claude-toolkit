@@ -19,3 +19,12 @@ volumes are the user's to `docker volume rm house-web-verify-*`.
 
 **Found on the way (separate, NOT this effort):** `house.sh new <absolute path>` joins the path under ~/projects/
 (the app came out as `apps//workspaces/...`) and tries `gh repo create` for the project (failed here — nothing created).
+
+## Update — first attempt hung (my fixture), and found a real bug
+> "The first rebuild reaches yarn install and nx-tools installation is stuck. Looks like it's waiting for input I
+> can't give it." — the user
+
+Fixture: the test project pinned the unpublished 0.49.0; fixed by vendoring the local build
+(`vendor/bespunky-nx-tools-0.49.0.tgz`, `file:` dependency). Engine bug, fixed in this release: post-create now runs
+with stdin at /dev/null, and yarn 1's install gets --non-interactive (verified: without it yarn 1 draws the prompt,
+reads nothing and exits 0 with nothing installed). The test project was recreated from the fixed branch.
