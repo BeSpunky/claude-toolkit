@@ -51,3 +51,13 @@ folder that survives a Docker volume prune), and there are exactly two persisted
 - The `gh` login itself cannot carry over this one time: the new `~/.config` volume starts from the image's, so `gh auth login` once after
   the first rebuild. (Copying the current token into the persisted dir was declined by the permission guard.)
 - `publish.sh --dry-run` was blocked by the permission guard in-session; CI runs the real publish on `main`.
+
+## Made a standing rule
+
+> "Add an internal directive that will ensure each new tool we introduce is analyzed for anything we need to maintain
+> between rebuilds and we give it a solution right away" — the user
+
+Added to this repo's `CLAUDE.md` → *Conventions*: every tool a layer brings into the container is audited for
+rebuild-surviving state in the same change, solved through the fewest entrypoints (`~/.config` → an env var → a
+post-create re-derivation → a directory mount, last), and "nothing to keep" is stated in the commit, never assumed.
+Internal (toolkit authors), not a consumer `HOUSE.rules.md` directive: consumers don't add tools to the house container.
