@@ -90,6 +90,26 @@ export const agent: LayerDescriptor = {
         mount: 'source=${localWorkspaceFolder}/.claude/data,target={{home}}/.claude,type=bind,consistency=cached',
         why: "Claude Code's state, persisted across container rebuilds (the target follows the image's user).",
       },
+      {
+        mount: 'source=${localWorkspaceFolderBasename}-config,target={{home}}/.config,type=volume',
+        why:
+          "The user's config home (XDG), persisted across container rebuilds — so every tool that keeps its login\n" +
+          'there (gh, firebase, gcloud, …) is logged in once per project, not once per rebuild. ONE mount for the\n' +
+          'whole directory, never one per tool. git rides on the gh login (the `gh-git-credentials` piece).',
+      },
+    ],
+    // Claude Code keeps its account record (login, onboarding) in `.claude.json` BESIDE its config dir — in $HOME,
+    // outside the persisted mount above — unless CLAUDE_CONFIG_DIR is set, which moves it INSIDE. Without this every
+    // rebuild kept the credentials but lost the account, and asked to log in again. containerEnv, not remoteEnv: a
+    // shell opened from outside (`docker exec`, the durable tmux sessions) never sees remoteEnv.
+    containerEnv: [
+      {
+        name: 'CLAUDE_CONFIG_DIR',
+        value: '{{home}}/.claude',
+        why:
+          "Claude Code's config dir — the persisted mount above. Set explicitly so its account file (`.claude.json`)\n" +
+          'lives INSIDE it and survives a rebuild, instead of beside it in the container-local $HOME.',
+      },
     ],
     osPackages: [
       {
@@ -103,8 +123,10 @@ export const agent: LayerDescriptor = {
     ],
     // Claude Code installs in `install` — after the OS packages (it needs curl), before `plugins` (which runs it).
     postCreate: [
+      { phase: 'prepare', piece: 'claude-account' },
       { phase: 'install', piece: 'claude-code' },
       { phase: 'plugins', piece: 'claude-plugins' },
+      { phase: 'provision', piece: 'gh-git-credentials' },
     ],
   },
   // The house plugins every agent-DX project carries. The stack-specific ones arrive with their layers

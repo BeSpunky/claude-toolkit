@@ -11,7 +11,7 @@
 {{#angular}}- **Framework**: Angular (clean `--minimal` app; no demo content).
 {{/angular}}{{#design-system}}- **Design system**: `{{DS_ROOT}}` — the single source of visual truth (see below).
 {{/design-system}}{{#node}}- **Package manager**: {{PM}}.
-{{/node}}{{#agent}}- **Dev environment**: a devcontainer COMPOSED from this project's layers — {{#node}}on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the image){{/node}}{{^node}}on `mcr.microsoft.com/devcontainers/base:debian`, with Node as a devcontainer feature (the Nx floor and the house tooling run on it; this repo is not a Node project){{/node}}, with the Claude CLI and Claude VS Code extension. `.claude` is persisted across container rebuilds. `.devcontainer/post-create.local.sh` is yours for project-specific setup.
+{{/node}}{{#agent}}- **Dev environment**: a devcontainer COMPOSED from this project's layers — {{#node}}on `mcr.microsoft.com/devcontainers/typescript-node` (Node from the image){{/node}}{{^node}}on `mcr.microsoft.com/devcontainers/base:debian`, with Node as a devcontainer feature (the Nx floor and the house tooling run on it; this repo is not a Node project){{/node}}, with the Claude CLI and Claude VS Code extension. **Logins survive a container rebuild** — log in once per project: Claude Code (`.claude`, its account record included via `CLAUDE_CONFIG_DIR`) and every tool that keeps its login in `~/.config`, which is persisted whole (`gh` — git is wired to it on every rebuild{{#firebase}}, `firebase`, `gcloud`{{/firebase}}). `.devcontainer/post-create.local.sh` is yours for project-specific setup.
 {{/agent}}
 
 {{#monorepo}}
