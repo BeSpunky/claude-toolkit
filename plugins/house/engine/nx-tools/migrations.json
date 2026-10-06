@@ -167,6 +167,12 @@
       "layer": "design-system",
       "description": "The design system's default mode becomes the token `$default-mode` in styles/_core/_tokens.scss ('system' follows the OS; a mode name fixes what an unpinned visitor sees), instead of an argument to the generator-owned `ds.theme()` call that every upgrade overwrote. Carries an app's `ds.theme('<mode>')` (or a non-stock mixin default) into the token and clears the argument; reports apps that disagree. Replaces the seeded _theme.scss and runtime theme files (ds-theme.service.ts, ds-runtime-theme.service.ts, or ds-mode.ts) when they are still the stock 0.44 shape, so they read it; a customised one is reported with how to re-seed it.",
       "implementation": "./src/migrations/0.45.0/carry-default-mode-into-tokens"
+    },
+    "build-from-house-dockerfile": {
+      "version": "0.48.0",
+      "layer": "agent",
+      "description": "A house-written devcontainer.json stops pulling its image and builds it from .devcontainer/house.Dockerfile (FROM the same image, with the OS packages as one cached Docker layer, so a rebuild reinstalls nothing that has not changed). Removes the house-written `image` (and the comment above it) so it does not linger beside the `build` the generator now composes; an adopted devcontainer's own image is left in place and reported with the one-line switch.",
+      "implementation": "./src/migrations/0.48.0/build-from-house-dockerfile"
     }
   }
 }
