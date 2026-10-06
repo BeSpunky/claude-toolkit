@@ -5,10 +5,16 @@
 #   Claude → http://127.0.0.1:${SB_CDP}   (CDP, loopback ONLY — full remote control, never forward)
 #
 # The stack (each a black box over the one below):
-#   Xvfb :99  ─ fluxbox WM ─ Chromium (persistent, CDP loopback) ─ x11vnc (:5900) ─ websockify/noVNC (allocated)
+#   Xvnc :99 (X server AND VNC server, :5900 loopback) ─ fluxbox WM ─ Chromium (persistent, CDP loopback)
+#     ─ websockify/noVNC (allocated)
 # A persistent recorder attaches over CDP and streams console/network/nav to logs/events.jsonl.
 #
-# This is the single public seam. Callers say up/down/navigate/status — never touch Xvfb/x11vnc directly.
+# THE DESKTOP FOLLOWS THE VIEWER. noVNC opens with resize=remote: it asks the VNC server (RFB SetDesktopSize)
+# for a desktop exactly the size of the host tab, and Xvnc resizes its screen through RandR. fluxbox keeps
+# Chromium maximized (no toolbar, no decorations), so every resize of the tab is a resize of the page — no
+# letterboxing, no scaling blur. SB_GEOM is only the size the desktop STARTS at, before a viewer connects.
+#
+# This is the single public seam. Callers say up/down/navigate/status/fullscreen — never touch Xvnc directly.
 #
 # ROBUSTNESS (why this file is long): a long-lived, multi-process, human+agent-shared stack is a leak
 # magnet. Every lifecycle failure is designed OUT, not left to discipline:
@@ -31,8 +37,8 @@ set -uo pipefail
 
 # ── Constants (env-overridable; these exact CONTRACT defaults) ─────────────────────────────────────
 SB_DISPLAY="${SB_DISPLAY:-:99}"
-SB_GEOM="${SB_GEOM:-1440x900x24}"
-SB_VNC="${SB_VNC:-5900}"                                   # x11vnc RFB port (loopback)
+SB_GEOM="${SB_GEOM:-1440x900x24}"                          # the INITIAL desktop (WxHxDepth) — a viewer resizes it
+SB_VNC="${SB_VNC:-5900}"                                   # Xvnc RFB port (loopback)
 SB_CDP="${SB_CDP:-9223}"                                   # Chromium DevTools port (loopback ONLY)
 export SB_CDP                                              # so the recorder and attach.mjs (runtime.mjs CDP_URL) reach the SAME port
 
@@ -69,10 +75,16 @@ SB_KILL_GRACE_TICKS="${SB_KILL_GRACE_TICKS:-30}"          # 0.1s ticks of SIGTER
 SB_LOG_TAIL="${SB_LOG_TAIL:-200}"                          # default lines for `logs`
 
 # ── Derived values ─────────────────────────────────────────────────────────────────────────────────
-# Window size from GEOM: "1440x900x24" → W=1440, H=900 (drop the depth).
-WIN_W="${SB_GEOM%%x*}"
+# GEOM "1440x900x24" → Xvnc's -geometry 1440x900 and -depth 24 (a bare "WxH" keeps depth 24).
+DESKTOP_W="${SB_GEOM%%x*}"
 _geom_rest="${SB_GEOM#*x}"
-WIN_H="${_geom_rest%%x*}"
+DESKTOP_H="${_geom_rest%%x*}"
+DESKTOP_DEPTH=24
+[ "$_geom_rest" != "$DESKTOP_H" ] && DESKTOP_DEPTH="${_geom_rest#*x}"
+
+# The noVNC client parameters — ONE definition for the printed URL and the index.html redirect.
+#   resize=remote: the desktop is resized to the viewer's tab (see the header) instead of scaled into it.
+NOVNC_PARAMS="autoconnect=true&resize=remote&reconnect=true&show_dot=true"
 
 # X socket path for readiness: ":99" (or ":99.0") → display number 99 → /tmp/.X11-unix/X99.
 _disp_num="${SB_DISPLAY#:}"; _disp_num="${_disp_num%%.*}"
@@ -88,6 +100,7 @@ SHOTS="$LOGS/screenshots"                                  # verify.mjs writes b
 EVENTS="$LOGS/events.jsonl"                                # recorder stream
 LOCK="$SB_RUNTIME/up.lock"
 WEBROOT="$SB_RUNTIME/novnc-web"                             # noVNC static client + our identity token
+WM_HOME="$SB_RUNTIME/fluxbox"                              # fluxbox's private HOME — its config lives at $WM_HOME/.fluxbox
 HOST_VERIFIED_FILE="$SB_RUNTIME/host-verified"             # result of the last host round-trip check
 OBSERVE="$SB_RUNTIME/observe-only"                         # presence = observe-only (human is driving; attach/verify/navigate refuse to drive)
 PORT_FILE="$SB_RUNTIME/web.port"                           # the allocated noVNC port — so every later verb agrees with the RUNNING stack
@@ -106,8 +119,13 @@ WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd || echo "$SCRIPT_DIR
 SB_DESKTOP_NAME="${SB_DESKTOP_NAME:-$(basename "$WORKSPACE_ROOT") (shared browser)}"
 
 # Start order (dependencies first) and its reverse for teardown (recorder torn down first).
-START_ORDER=(xvfb fluxbox chrome x11vnc websockify)
-TEARDOWN_ORDER=(recorder websockify x11vnc chrome fluxbox xvfb)
+START_ORDER=(xvnc fluxbox chrome websockify)
+TEARDOWN_ORDER=(recorder websockify chrome fluxbox xvnc)
+# Components an EARLIER version of this script ran, which no current one does: a separate Xvfb display mirrored
+# by x11vnc. Regenerating this file does not stop a stack that is already up, so after an upgrade those two can
+# still be alive, holding :99 and the VNC port — and Xvnc cannot start over them. They are known only so that
+# `up` can retire that whole previous stack and `down` can stop it; nothing ever starts them.
+RETIRED=(x11vnc xvfb)
 
 STARTED=()                                                 # what THIS `up` invocation started (for self-teardown)
 
@@ -136,17 +154,18 @@ observe_active() { [ -f "$OBSERVE" ]; }
 component_port() {
   case "$1" in
     chrome)     printf '%s' "$SB_CDP" ;;
-    x11vnc)     printf '%s' "$SB_VNC" ;;
+    xvnc)       printf '%s' "$SB_VNC" ;;
     websockify) printf '%s' "$SB_WEB" ;;
     *)          printf '' ;;
   esac
 }
 component_sig() {
   case "$1" in
-    xvfb)       printf 'Xvfb %s' "$SB_DISPLAY" ;;
+    xvnc)       printf 'Xvnc %s' "$SB_DISPLAY" ;;
     fluxbox)    printf 'fluxbox' ;;
     chrome)     printf -- '--user-data-dir=%s' "$PROFILE" ;;   # unique to our profile path
-    x11vnc)     printf -- '-rfbport %s' "$SB_VNC" ;;
+    xvfb)       printf 'Xvfb %s' "$SB_DISPLAY" ;;               # RETIRED — see RETIRED above
+    x11vnc)     printf 'x11vnc -display %s' "$SB_DISPLAY" ;;     # RETIRED — see RETIRED above
     websockify) printf 'websockify' ;;
     recorder)   printf 'recorder.mjs' ;;
     *)          printf '' ;;
@@ -327,7 +346,7 @@ resolve_web_port() {
 
   SB_WEB="$port"
   if [ "$SB_WEB_ALLOCATED" = true ]; then
-    NOVNC_URL="http://localhost:${SB_WEB}/vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true"
+    NOVNC_URL="http://localhost:${SB_WEB}/vnc.html?${NOVNC_PARAMS}"
   else
     NOVNC_URL=""
   fi
@@ -404,22 +423,24 @@ reclaim_port_if_ours() {
 
 # ── up support ────────────────────────────────────────────────────────────────────────────────────────
 prepare_env() {
-  # gotcha #2: the devcontainer exports a VS Code WAYLAND_DISPLAY; x11vnc auto-detects "Wayland" and
-  # refuses to serve our X11 Xvfb. Unset it (and XDG_SESSION_TYPE) for the whole stack — everything
-  # here is deliberately the X11 path. gotcha #4: pin DISPLAY to OUR Xvfb, never the ambient :12.
+  # gotcha #2: the devcontainer exports a VS Code WAYLAND_DISPLAY; with it set, X11 clients (Chromium's
+  # ozone platform pick among them) may go to the editor's Wayland socket instead of our display. Unset it
+  # (and XDG_SESSION_TYPE) for the whole stack — everything here is deliberately the X11 path.
+  # gotcha #4: pin DISPLAY to OUR Xvnc, never the ambient :12.
   export DISPLAY="$SB_DISPLAY"
   unset WAYLAND_DISPLAY XDG_SESSION_TYPE
 }
 
 preflight_deps() {
   local bin missing=()
-  for bin in Xvfb fluxbox x11vnc websockify node ss curl setsid flock timeout; do
+  for bin in Xvnc fluxbox websockify node ss curl setsid flock timeout; do
     command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
   done
   if [ "${#missing[@]}" -ne 0 ]; then
     err "missing dependencies: ${missing[*]}"
-    err "install via the devcontainer post-create (apt): xvfb x11vnc novnc websockify fluxbox iproute2 curl util-linux"
-    err "  (xvfb→Xvfb, iproute2→ss, util-linux→flock/setsid, curl→curl; node comes from the base image)"
+    err "install via the devcontainer post-create (apt): tigervnc-standalone-server novnc websockify fluxbox iproute2 curl util-linux"
+    err "  (tigervnc-standalone-server→Xvnc, iproute2→ss, util-linux→flock/setsid, curl→curl; node comes from the base image)"
+    err "  a container built before the switch to Xvnc gets it from a rebuild"
     return 1
   fi
 }
@@ -435,7 +456,7 @@ resolve_chromium() {
 # was recycled to a foreign process). Genuinely-ours-and-alive components are left running (idempotency).
 reap_stale() {
   local comp pidf
-  for comp in "${TEARDOWN_ORDER[@]}"; do
+  for comp in "${TEARDOWN_ORDER[@]}" "${RETIRED[@]}"; do
     pidf="$(pid_file "$comp")"
     [ -f "$pidf" ] || continue
     component_running "$comp" && continue
@@ -443,11 +464,53 @@ reap_stale() {
   done
 }
 
+# A stack from before the switch to Xvnc is still up (this file was regenerated under it): its Xvfb holds the
+# display and its x11vnc the VNC port, so Xvnc could not start — and since neither is a CURRENT component,
+# preflight_ports would call x11vnc a foreign process and refuse. It is ours, by PID file and cmdline, so stop
+# the whole previous stack (its Chromium and fluxbox are clients of that Xvfb) and let `up` start the new one.
+retire_previous_stack() {
+  local comp
+  for comp in "${RETIRED[@]}"; do
+    component_running "$comp" || continue
+    say "retiring the previous Xvfb + x11vnc stack (this version runs Xvnc) — the shared browser restarts once"
+    for comp in "${TEARDOWN_ORDER[@]}" "${RETIRED[@]}"; do kill_component "$comp"; done
+    return 0
+  done
+}
+
+# fluxbox's configuration, owned by this script and rewritten on every start. It lives under a PRIVATE HOME
+# because fluxbox insists on ~/.fluxbox: on a first run it creates that directory and copies the distro's
+# default init over whatever `-rc` file it was given, so a config passed any other way is silently replaced
+# (toolbar and four workspaces back). A private HOME also keeps the user's real home free of a ~/.fluxbox.
+#   configVersion 13  the current schema — an older or missing one makes fluxbox run its upgrader, which rewrites the file
+#   apps              every window: no decorations, maximized (so Chromium fills the desktop and follows its resizes)
+#   keys / menu       empty — no WM shortcut may swallow a keystroke meant for the page, and there is no desktop to click
+write_wm_config() {
+  local dir="$WM_HOME/.fluxbox"
+  mkdir -p "$dir"
+  cat > "$dir/init" <<'FLUXBOX'
+session.configVersion: 13
+session.screen0.workspaces: 1
+session.screen0.toolbar.visible: false
+session.screen0.defaultDeco: NONE
+session.screen0.fullMaximization: true
+session.screen0.rootCommand:
+FLUXBOX
+  cat > "$dir/apps" <<'FLUXBOX'
+[app] (name=.*)
+  [Deco]      {NONE}
+  [Maximized] {yes}
+[end]
+FLUXBOX
+  : > "$dir/keys"
+  : > "$dir/menu"
+}
+
 # Before starting a ported component that isn't running-as-ours, make sure its port is either free or
 # an OUR orphan we can reclaim. A foreign holder aborts `up` (we neither start over it nor kill it).
 preflight_ports() {
   local comp port
-  for comp in chrome x11vnc websockify; do
+  for comp in chrome xvnc websockify; do
     component_running "$comp" && continue
     port="$(component_port "$comp")"
     port_listening "$port" || continue
@@ -517,45 +580,54 @@ up_locked() {
   { [ -n "$chrome_bin" ] && [ -x "$chrome_bin" ]; } || die "Chromium unavailable from the shared-browser runtime — run: bash tools/shared-browser/shared-browser install"
 
   reap_stale
+  retire_previous_stack
   preflight_ports || die "refusing to start: a foreign process holds one of our ports (see message above)"
 
   STARTED=()
 
-  # 1. Xvfb — OUR own framebuffer (gotcha #4). -nolisten tcp: no network X, local socket only.
-  if ! component_running xvfb; then
-    spawn xvfb Xvfb "$SB_DISPLAY" -screen 0 "$SB_GEOM" -nolisten tcp
-    STARTED+=(xvfb)
-    wait_for_x || err "warning: Xvfb socket $X_SOCKET not visible yet — the readiness gate will decide"
-  else say "xvfb already running"; fi
+  # 1. Xvnc — OUR own X server (gotcha #4) that is ALSO the VNC server, so the desktop the human sees is the
+  #    display itself, not a mirror of it. That is what lets the viewer resize it: noVNC's resize=remote sends
+  #    SetDesktopSize and Xvnc applies it through RandR (a mirroring x11vnc cannot resize an Xvfb screen).
+  #    -localhost: the RFB port binds loopback only (never exposed directly). -SecurityTypes None: no VNC
+  #    password — acceptable ONLY because it is loopback + reached solely via the user's own forwarded
+  #    localhost. -AlwaysShared: the human's input and Claude's automation act on the SAME screen at once.
+  #    -nolisten tcp: no network X, local socket only. Xvnc outlives client disconnects by itself, so the
+  #    human can always reconnect.
+  #    -desktop: the RFB desktop name, which noVNC turns into the browser tab's title — see SB_DESKTOP_NAME
+  #    above for why that matters more than it looks.
+  if ! component_running xvnc; then
+    spawn xvnc Xvnc "$SB_DISPLAY" -geometry "${DESKTOP_W}x${DESKTOP_H}" -depth "$DESKTOP_DEPTH" \
+      -rfbport "$SB_VNC" -localhost -SecurityTypes None -AlwaysShared -nolisten tcp \
+      -desktop "$SB_DESKTOP_NAME"
+    STARTED+=(xvnc)
+    wait_for_x || err "warning: Xvnc socket $X_SOCKET not visible yet — the readiness gate will decide"
+  else say "xvnc already running"; fi
 
-  # 2. fluxbox — a minimal WM so Chromium gets a mapped, managed window (screenshots then composite).
-  if ! component_running fluxbox; then spawn fluxbox fluxbox; STARTED+=(fluxbox); else say "fluxbox already running"; fi
+  # 2. fluxbox — the window manager that gives the page the whole desktop: Chromium maximized, no toolbar,
+  #    no slit, no decorations, one workspace. Maximized is a WM state, so the window follows every desktop
+  #    resize (and a fullscreen one does too — see `fullscreen`). Its config is written by write_wm_config.
+  if ! component_running fluxbox; then
+    write_wm_config
+    spawn fluxbox env HOME="$WM_HOME" fluxbox -no-toolbar -no-slit
+    STARTED+=(fluxbox)
+  else say "fluxbox already running"; fi
 
   # 3. Chromium — headed, persistent, software-GL (gotcha #1), loopback CDP (gotcha #7).
   #    --disable-gpu --use-gl=swiftshader --in-process-gpu: no GPU in the container → software compositing,
   #    without which `page.screenshot` fails. --disable-dev-shm-usage: tiny /dev/shm in containers.
+  #    --start-maximized: fill the desktop (fluxbox keeps it so). --disable-infobars: Chrome for Testing pins
+  #    a "only for automated testing" bar over every page, 56 px of the human's view. (Not --enable-automation:
+  #    that sets navigator.webdriver, which real sign-in providers refuse.)
   if ! component_running chrome; then
     spawn chrome "$chrome_bin" \
       --remote-debugging-port="$SB_CDP" --remote-debugging-address=127.0.0.1 \
       --user-data-dir="$PROFILE" --no-sandbox --no-first-run --no-default-browser-check \
       --disable-gpu --use-gl=swiftshader --in-process-gpu --disable-dev-shm-usage \
-      --window-position=0,0 --window-size="$WIN_W,$WIN_H" about:blank
+      --start-maximized --disable-infobars about:blank
     STARTED+=(chrome)
   else say "chrome already running"; fi
 
-  # 4. x11vnc — mirror the Xvfb display over VNC. -localhost: loopback bind (never exposed directly).
-  #    -shared: the human's input and Claude's automation act on the SAME screen at once. -forever:
-  #    survives client disconnects so the human can reconnect. -nopw acceptable ONLY because it is
-  #    loopback + reached solely via the user's own forwarded localhost.
-  if ! component_running x11vnc; then
-    #    -desktop: the RFB desktop name, which noVNC turns into the browser tab's title — see
-    #    SB_DESKTOP_NAME above for why that matters more than it looks.
-    spawn x11vnc x11vnc -display "$SB_DISPLAY" -rfbport "$SB_VNC" -desktop "$SB_DESKTOP_NAME" \
-      -localhost -forever -shared -nopw -noxdamage -quiet
-    STARTED+=(x11vnc)
-  else say "x11vnc already running"; fi
-
-  # 5. websockify + noVNC static client — the ONE host-facing port, on the ALLOCATED number. Bind
+  # 4. websockify + noVNC static client — the ONE host-facing port, on the ALLOCATED number. Bind
   #    loopback (127.0.0.1:$SB_WEB); the editor auto-forwards it. Because allocation already proved the
   #    number free on the host, the forward lands on the SAME number — which is what makes the URL we
   #    print below true on the host rather than a guess. Target the loopback VNC port.
@@ -568,8 +640,8 @@ up_locked() {
       mkdir -p "$WEBROOT"
       cp -r "$SB_NOVNC_WEB"/. "$WEBROOT"/ 2>/dev/null || true
     fi
-    printf '<!doctype html><title>%s</title><meta http-equiv="refresh" content="0; url=vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true">\n' \
-      "$SB_DESKTOP_NAME" > "$WEBROOT/index.html"
+    printf '<!doctype html><title>%s</title><meta http-equiv="refresh" content="0; url=vnc.html?%s">\n' \
+      "$SB_DESKTOP_NAME" "$NOVNC_PARAMS" > "$WEBROOT/index.html"
     spawn websockify websockify --web="$WEBROOT" "127.0.0.1:$SB_WEB" "127.0.0.1:$SB_VNC"
     STARTED+=(websockify)
   else say "websockify already running"; fi
@@ -582,7 +654,7 @@ up_locked() {
     die "shared-browser up failed — torn down what this run started (clean slate for the next up)"
   fi
 
-  # 6. Recorder — auto-start once CDP is live (so connectOverCDP succeeds). Streams events to JSONL.
+  # 5. Recorder — auto-start once CDP is live (so connectOverCDP succeeds). Streams events to JSONL.
   if ! component_running recorder; then spawn recorder node "$RECORDER" --cdp="$CDP_URL"; STARTED+=(recorder); else say "recorder already running"; fi
 
   ok "shared-browser is UP."
@@ -624,11 +696,11 @@ cmd_down() {
   local comp entry port rc=0 still=()
 
   # Kill exactly this stack, by PID file, in reverse dependency order. Never pattern-kill.
-  for comp in "${TEARDOWN_ORDER[@]}"; do kill_component "$comp"; done
+  for comp in "${TEARDOWN_ORDER[@]}" "${RETIRED[@]}"; do kill_component "$comp"; done
 
   # VERIFY the ports are actually free (a kill is async; freed ≠ signalled). Reclaim any OUR leftover
   # still on a port (e.g. a prior instance whose PID file was lost); a FOREIGN holder is reported, not killed.
-  for entry in "chrome:$SB_CDP" "x11vnc:$SB_VNC" "websockify:$SB_WEB"; do
+  for entry in "chrome:$SB_CDP" "xvnc:$SB_VNC" "websockify:$SB_WEB"; do
     comp="${entry%%:*}"; port="${entry##*:}"
     if port_listening "$port"; then reclaim_port_if_ours "$port" "$(component_sig "$comp")" || rc=1; fi
   done
@@ -743,6 +815,60 @@ const timeout = Number(process.env.SB_NAV_TIMEOUT_MS) || 30000;
 NODE
 }
 
+# The shared window's state over CDP. <action>: get | fullscreen | maximized. Prints "<state> <width> <height>"
+# — the window AFTER the action. Maximized or fullscreen, the window IS the desktop, so this is also the size
+# the viewer's tab currently gives it. Same runtime and env-prefix discipline as navigate_cdp (gotcha #6).
+window_cdp() {
+  local pw_module
+  pw_module="$(node "$PW_RUNTIME" module)" || { err "window: the shared-browser Playwright runtime is unavailable"; return 1; }
+  ( cd "$WORKSPACE_ROOT" && SB_WIN_ACTION="$1" SB_CDP_URL="$CDP_URL" SB_PW_MODULE="$pw_module" node - ) <<'NODE'
+const { chromium } = require(process.env.SB_PW_MODULE);
+const action = process.env.SB_WIN_ACTION;
+(async () => {
+  const browser = await chromium.connectOverCDP(process.env.SB_CDP_URL, { timeout: 10000 });
+  try {
+    const ctx = browser.contexts()[0];
+    const page = ctx && ctx.pages()[0];
+    if (!page) throw new Error('the shared browser has no page open');
+    const cdp = await ctx.newCDPSession(page);
+    const { windowId } = await cdp.send('Browser.getWindowForTarget');   // the window holding this page
+    const state = async () => (await cdp.send('Browser.getWindowBounds', { windowId })).bounds;
+    const set = async (windowState) => {
+      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState } });
+      // The WM applies a state change asynchronously; report it only once it has landed.
+      for (let i = 0; i < 30 && (await state()).windowState !== windowState; i++) await new Promise((r) => setTimeout(r, 100));
+    };
+    if (action === 'fullscreen') await set('fullscreen');
+    if (action === 'maximized') {
+      // Chromium refuses fullscreen → maximized directly ("restore it to normal state first").
+      if ((await state()).windowState === 'fullscreen') await set('normal');
+      if ((await state()).windowState !== 'maximized') await set('maximized');
+    }
+    const b = await state();
+    console.log(`${b.windowState} ${b.width} ${b.height}`);
+  } finally {
+    await browser.close();               // detaches only — the shared browser keeps running
+  }
+})().catch((e) => { console.error(String((e && e.stack) || e)); process.exit(1); });
+NODE
+}
+
+# Present or co-drive. `on` hides Chromium's tabs and omnibox (window fullscreen — the page gets every pixel of
+# the desktop, and still follows the viewer's resizes); `off` brings them back, maximized. It changes the
+# WINDOW, never the page, so it is allowed in observe-only mode: the human asking for it is the usual case.
+cmd_fullscreen() {
+  local target
+  case "${1:-}" in
+    on)  target=fullscreen ;;
+    off) target=maximized ;;
+    *)   die "fullscreen: say on or off (usage: fullscreen on|off)" ;;
+  esac
+  component_running chrome || die "the shared browser is not up — run: shared-browser up"
+  local out
+  out="$(window_cdp "$target")" || die "fullscreen: could not reach the shared browser over CDP ($CDP_URL)"
+  ok "window: $out  (state width height)"
+}
+
 cmd_status() {
   local json=0
   [ "${1:-}" = "--json" ] && json=1
@@ -754,6 +880,11 @@ cmd_status() {
   up=false
   { [ "$vnc" = true ] && [ "$web" = true ] && [ "$cdp" = true ]; } && up=true
   observe_active && observe=true || observe=false
+  # The window's live state (asked of Chromium itself — never a remembered flag, since the human can change
+  # it too). Empty when Chromium is down or unreachable.
+  local win="" win_state="" win_w="" win_h=""
+  component_running chrome && win="$(window_cdp get 2>/dev/null || true)"
+  [ -n "$win" ] && read -r win_state win_w win_h <<<"$win"
 
   if [ "$json" -eq 1 ]; then
     printf '{'
@@ -778,6 +909,8 @@ cmd_status() {
     done
     printf '},'
     printf '"cdp":"%s",' "$CDP_URL"
+    if [ -n "$win_state" ]; then printf '"window":{"state":"%s","width":%s,"height":%s},' "$win_state" "$win_w" "$win_h"
+    else printf '"window":null,'; fi
     # null, not a string: `url` refuses to print a speculative URL, so the machine surface must not hand
     # one over either. A caller reading .url gets a falsy value in exactly the state cmd_url errors in.
     if [ "$SB_WEB_ALLOCATED" = true ]; then printf '"url":"%s"' "$NOVNC_URL"; else printf '"url":null'; fi
@@ -794,6 +927,7 @@ cmd_status() {
     printf '  %-11s %s (port %s)\n' 'cdp'  "$([ "$cdp" = true ] && echo listening || echo -)" "$SB_CDP"
     printf '  %-11s %s\n' 'url' "$([ "$SB_WEB_ALLOCATED" = true ] && printf '%s' "$NOVNC_URL" || printf 'none yet — run `up` to allocate one')"
     printf '  %-11s %s\n' 'cdp-url' "$CDP_URL"
+    printf '  %-11s %s\n' 'window' "$([ -n "$win_state" ] && printf '%s %sx%s (follows the viewer tab)' "$win_state" "$win_w" "$win_h" || printf -- '-')"
     printf '  %-11s registry=%s host-probe=%s (band %s..%s)\n' 'allocation' \
       "$(registry_ok && echo yes || echo 'NO — parallel containers are invisible to each other')" \
       "$([ -n "$(host_gateway)" ] && echo yes || echo no)" \
@@ -842,13 +976,13 @@ cmd_logs() {
       [ -f "$EVENTS" ] || die "no recorder events yet ($EVENTS) — is the stack up?"
       filter_events "$since" "$level"
       ;;
-    xvfb|fluxbox|chrome|x11vnc|websockify)
+    xvnc|fluxbox|chrome|websockify)
       local lf; lf="$(log_file "$comp")"
       [ -f "$lf" ] || die "no log for '$comp' ($lf)"
       tail -n "$SB_LOG_TAIL" "$lf"
       ;;
     *)
-      die "logs: unknown component '$comp' (choose: xvfb|fluxbox|chrome|x11vnc|websockify|recorder)"
+      die "logs: unknown component '$comp' (choose: xvnc|fluxbox|chrome|websockify|recorder)"
       ;;
   esac
 }
@@ -914,10 +1048,11 @@ USAGE
   shared-browser navigate --url=<u> [--wait]     ensure up; (optionally wait for <u>); drive the shared browser to it via CDP
   shared-browser observe                         hand the shared window to the human — automation stands down (no navigate/click/type)
   shared-browser resume                          take the window back — automation may drive again
-  shared-browser status [--json]                 per-component up/down + ports + observe-only mode + URL (machine-readable with --json)
+  shared-browser fullscreen on|off               hide Chromium's tabs + omnibox to present (on), bring them back to co-drive (off)
+  shared-browser status [--json]                 per-component up/down + ports + observe-only mode + window + URL (machine-readable with --json)
   shared-browser url                             print the noVNC URL (for scripting) — the ONE source of truth for it
   shared-browser logs [component] [--since=<ts>] [--level=<lvl>]
-                                                 tail a component log (xvfb|fluxbox|chrome|x11vnc|websockify),
+                                                 tail a component log (xvnc|fluxbox|chrome|websockify),
                                                  or the recorder events.jsonl (default; filter by --since/--level)
   shared-browser down                            stop exactly this stack (PID files), verify ports freed
   shared-browser restart                         down + up
@@ -928,6 +1063,9 @@ Claude drives (loopback, never forward):  $CDP_URL
 
 The noVNC port is ALLOCATED (band ${SB_WEB_BAND_START}..$(( SB_WEB_BAND_START + SB_WEB_BAND_SIZE - 1 )), claimed in $SB_REGISTRY), so parallel
 devcontainers never contend for one host port. Never hardcode it — read it from \`url\` / \`status --json\`.
+
+The desktop FOLLOWS the viewer's tab (noVNC resize=remote): resize the tab and the page resizes with it.
+SB_GEOM is only the size it starts at, before a viewer connects.
 
 Env overrides: SB_DISPLAY SB_GEOM SB_VNC SB_CDP SB_RUNTIME SB_REGISTRY SB_WEB_BAND_START SB_WEB_BAND_SIZE
                SB_WEB (an explicit PIN — skips allocation; only for debugging a specific port).
@@ -946,6 +1084,7 @@ main() {
     navigate)           cmd_navigate "$@" ;;
     observe)            cmd_observe ;;
     resume)             cmd_resume ;;
+    fullscreen)         cmd_fullscreen "$@" ;;
     status)             cmd_status "$@" ;;
     url)                cmd_url ;;
     logs)               cmd_logs "$@" ;;
