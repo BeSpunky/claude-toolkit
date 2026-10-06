@@ -1,0 +1,3 @@
+# BeSpunky house — LF in every checkout: the image build runs these with /bin/sh, which a CRLF line breaks.
+*.sh text eol=lf
+os-packages.txt text eol=lf
