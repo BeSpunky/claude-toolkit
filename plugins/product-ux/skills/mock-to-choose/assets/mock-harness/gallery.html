@@ -39,11 +39,12 @@
           font: inherit; font-size: var(--mk-text-xs); color: var(--mk-ink); white-space: nowrap; }
 
     /* ---- the app: slim row · stage · slim bar ---- */
-    .app { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; block-size: 100dvh; }
+    /* the app is exactly the window: its one column can never grow past it (no sideways page shift) */
+    .app { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; block-size: 100dvh; }
 
     /* ---- the ONE slim top row: question · nav · viewport · fit · scale · toggles ---- */
     .topbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3);
-              min-block-size: calc(var(--control-h) + 2 * var(--sp-1)); flex-wrap: nowrap;
+              min-block-size: calc(var(--control-h) + 2 * var(--sp-1)); flex-wrap: wrap; row-gap: var(--sp-1);
               border-block-end: 1px solid var(--mk-line); background: color-mix(in srgb, var(--mk-bg) 88%, transparent);
               position: relative; z-index: var(--z-chrome); }
     .eyebrow-dot { flex: none; inline-size: 8px; block-size: 8px; border-radius: 50%;
@@ -51,7 +52,8 @@
     #question { flex: 1 1 0; min-inline-size: 0; margin: 0; font-size: var(--mk-text-md); font-weight: 650; line-height: 1.3;
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .nav { display: contents; }
-    .tools { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+    /* the question has no basis, so the row wraps only when the CONTROLS alone no longer fit */
+    .tools { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); flex-wrap: wrap; margin-inline-start: auto; }
     .tools [hidden] { display: none; }
 
     /* one control vocabulary: a pill button (.chip), a segmented group (.seg), a round icon button (.icon) */
@@ -111,6 +113,7 @@
     #stage { grid-row: 2; min-block-size: 0; overflow: auto; position: relative; }
     #stage:has(> .focus) { overflow: hidden; }   /* Focus scrolls inside its viewer, never the page */
     .empty { margin: var(--sp-5); color: var(--mk-muted); font-size: var(--mk-text-sm); }
+    .drawer .empty { margin: 0; }
 
     /* ---- compare wall ---- */
     /* top padding leaves room for the "✓ Chosen" ribbon, which straddles a card's top edge */
@@ -293,11 +296,9 @@
     .keys dt { text-align: end; }
     .keys dd { margin: 0; color: var(--mk-muted); }
 
-    /* narrow windows: the row may wrap rather than clip a control */
     @media (max-width: 900px) {
       :root { --rail-w: 76px; }
-      .topbar, .tools { flex-wrap: wrap; }
-      #question { flex-basis: 100%; }
+      #question { display: none; }   /* it is in full atop "What's faked" */
     }
   </style>
 </head>
@@ -314,7 +315,7 @@
         <button type="button" id="rail-toggle" class="chip" aria-controls="rail" aria-expanded="true" hidden>Concepts</button>
         <button type="button" id="pins-toggle" class="chip" aria-pressed="true" title="Show or hide every pin on the mock (h)" hidden>Pins</button>
         <button type="button" id="drawer-toggle" class="chip" aria-controls="drawer" aria-expanded="false" hidden>Comments <span class="n" id="drawer-count"></span></button>
-        <button type="button" id="info-toggle" class="chip" aria-controls="info-panel" aria-expanded="false">What's faked <span id="faked-count"></span></button>
+        <button type="button" id="info-toggle" class="chip" aria-controls="info-panel" aria-expanded="false" title="What's faked, and how to review">Faked <span id="faked-count"></span></button>
         <button type="button" id="keys-toggle" class="icon" aria-haspopup="dialog" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
         <button type="button" id="present-toggle" class="icon" title="Presentation mode — hide all harness chrome (f)" aria-label="Presentation mode">⛶</button>
       </div>
