@@ -25,7 +25,15 @@ import { join } from 'node:path';
 
 import type { DevcontainerFragment } from '../../layers/descriptor';
 import { activeLayers, claudePlugins, devcontainerFragments } from '../_utils/layer-contributions';
-import { type Contributor, compose, renderDevcontainerJson, renderPostCreate } from './compose';
+import {
+  type Contributor,
+  HOUSE_DOCKERFILE,
+  compose,
+  renderDevcontainerJson,
+  renderHouseDockerfile,
+  renderOsPackagesScript,
+  renderPostCreate,
+} from './compose';
 import {
   DEVCONTAINER,
   DEVCONTAINER_MARKER as MARKER,
@@ -90,6 +98,14 @@ const VOICE: DevcontainerFragment = {
         'socket folder — or an empty dir when the host has no audio — so the mount is valid on every host.',
     },
   ],
+  osPackages: [
+    {
+      packages: ['pulseaudio-utils', 'espeak-ng'],
+      why:
+        'Voice (bespunky-voice): `paplay` reaches the host audio socket, espeak-ng is the free speech floor. Installed\n' +
+        'on the voice INTENT, not on a socket being present: a host fact cannot key a cached image layer, and both are small.',
+    },
+  ],
   postCreate: [{ phase: 'provision', piece: 'voice' }],
 };
 
@@ -114,8 +130,9 @@ export default async function devcontainerGenerator(
   // An ADOPTED devcontainer that keeps an image of its own runs as THAT image's user: the house's mount targets
   // (`{{home}}/.claude`, …) must follow it, and no house `remoteUser` may be added to an image that may not have
   // that user at all — a container that cannot start is the worst thing an additive merge could produce.
-  const runsAs = adoptedImageUser(tree, houseComposition.image.ref);
-  const composition = runsAs === undefined ? houseComposition : compose(contributors, { nodeMajor, runsAs });
+  const { runsAs, projectImage } = adoptedImage(tree, houseComposition.image.ref);
+  const composition =
+    runsAs === undefined && !projectImage ? houseComposition : compose(contributors, { nodeMajor, runsAs, projectImage });
   const rendered = renderDevcontainerJson(options.name, layerIds, composition);
 
   // OWNERSHIP. The marker separates "regenerate the file we maintain" from "adopt somebody else's" — and it
@@ -157,6 +174,20 @@ export default async function devcontainerGenerator(
   } else {
     ({ skipped, houseAdded } = mergeIntoExisting(tree, rendered, ours ? 'assert' : 'adopt'));
   }
+  if (projectImage) {
+    // Recorded with the other keys the project kept: the house's `build` was NOT added beside its image source.
+    skipped.push('build');
+    logger.info(
+      `[devcontainer] This devcontainer builds from an image source of its own, so the house's cached package layer ` +
+        `(.devcontainer/${HOUSE_DOCKERFILE}) is not used: its OS packages are installed by post-create on every ` +
+        `container create instead. To build from it — FROM ${composition.image.ref}, the packages one cached layer — ` +
+        `replace that key in ${DEVCONTAINER} with "build": { "dockerfile": "${HOUSE_DOCKERFILE}", "context": "." }.`,
+    );
+  }
+
+  // The image's files — written on BOTH paths, like the feature folder: inert unless devcontainer.json builds from
+  // them, and always current, so an adopted project that switches to the house build finds them ready.
+  writeImageFiles(tree, composition, layerIds);
 
   // The LOCAL feature — the thing that makes the house script run in a project whose devcontainer we do
   // not own. Written on BOTH paths (see the function), and after the merge, which is what may have just
@@ -205,25 +236,55 @@ export default async function devcontainerGenerator(
 }
 
 /**
- * The user an ADOPTED devcontainer runs as, when it keeps an image of its own (`undefined` when we own the file,
- * there is none yet, or it already runs the house image). Its declared `remoteUser`, else `containerUser`, else
- * `root` — the user a plain language image (python, golang, …) runs as when it declares none — with a note,
- * because that last one is an assumption about an image this generator cannot inspect.
+ * What an ADOPTED devcontainer's own image source means for the house (both empty when we own the file or there is
+ * none yet):
+ *   - `projectImage` — it declares an image source of its own (`image`, `build`, `dockerFile`, `dockerComposeFile`)
+ *     that is not the house's build, so the house must not add its `build` beside it (two image sources);
+ *   - `runsAs` — the user it runs as, when that image is not the house's: its declared `remoteUser`, else
+ *     `containerUser`, else `root` (what a plain language image — python, golang, … — runs as), with a note, since
+ *     that last one is an assumption about an image this generator cannot inspect. `undefined` = the house's user.
  */
-function adoptedImageUser(tree: Tree, houseImage: string): string | undefined {
-  if (!tree.exists(DEVCONTAINER) || readMarker(tree)?.owned === true) return undefined;
+function adoptedImage(tree: Tree, houseImage: string): { runsAs?: string; projectImage: boolean } {
+  if (!tree.exists(DEVCONTAINER) || readMarker(tree)?.owned === true) return { projectImage: false };
   const existing = tryParse(tree.read(DEVCONTAINER, 'utf8') ?? '');
-  if (!existing) return undefined;
-  const ownImage = ['image', 'build', 'dockerFile', 'dockerComposeFile'].some((key) => key in existing);
-  if (!ownImage || existing.image === houseImage) return undefined;
+  if (!existing) return { projectImage: false };
+  const build = existing.build as Json | undefined;
+  if (build && typeof build === 'object' && build.dockerfile === HOUSE_DOCKERFILE) return { projectImage: false };
+  const projectImage = ['image', 'build', 'dockerFile', 'dockerComposeFile'].some((key) => key in existing);
+  if (!projectImage || existing.image === houseImage) return { projectImage };
   const declared = [existing.remoteUser, existing.containerUser].find((user) => typeof user === 'string');
-  if (typeof declared === 'string') return declared;
+  if (typeof declared === 'string') return { runsAs: declared, projectImage };
   logger.info(
     `[devcontainer] This devcontainer keeps its own image and declares no remoteUser/containerUser, so the house ` +
       `mounts assume it runs as root (e.g. the .claude mount targets /root/.claude). If the image runs as ` +
       `another user, declare "remoteUser" in ${DEVCONTAINER} and re-run the sync.`,
   );
-  return 'root';
+  return { runsAs: 'root', projectImage };
+}
+
+const OS_PACKAGES_SCRIPT = '.devcontainer/os-packages.sh';
+const OS_PACKAGES_LIST = '.devcontainer/os-packages.txt';
+
+/** The project's own package list — SEEDED once (class C), never regenerated: it is the project's to fill. */
+const OS_PACKAGES_STUB = `# This project's own OS (Debian) packages. THIS FILE IS YOURS — created once, never regenerated.
+#
+# One package name per line (or several, space-separated); \`#\` starts a comment. They are installed with the
+# house's when the container image is built (.devcontainer/house.Dockerfile) — one cached Docker layer, so a rebuild
+# reinstalls nothing unless a list changed. Keep this file even when it lists nothing: the image build copies it.
+#
+# Example:
+# postgresql-client
+`;
+
+/**
+ * The image's three files beside devcontainer.json: the house Dockerfile and the one package installer (both OWNED,
+ * regenerated every run), and the project's package list (SEEDED, never touched again).
+ */
+function writeImageFiles(tree: Tree, composition: ReturnType<typeof compose>, layerIds: readonly string[]): void {
+  tree.write(`.devcontainer/${HOUSE_DOCKERFILE}`, renderHouseDockerfile(composition));
+  // 0o755 so the shebang/mode rule holds in the output; it is invoked as `sh <path>`, so the mode is not load-bearing.
+  tree.write(OS_PACKAGES_SCRIPT, renderOsPackagesScript(layerIds, composition.osPackages), { mode: 0o755 });
+  if (!tree.exists(OS_PACKAGES_LIST)) tree.write(OS_PACKAGES_LIST, OS_PACKAGES_STUB);
 }
 
 interface Marker {
@@ -317,8 +378,8 @@ const LOCAL_STUB = `#!/usr/bin/env bash
 # Runs in a subshell; a non-zero exit warns rather than failing the container build.
 set -euo pipefail
 
-# Example — install a project-specific tool:
-# sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends postgresql-client
+# OS packages do NOT go here — list them in .devcontainer/os-packages.txt, which the image build installs as a
+# cached layer. This file is for everything else: a CLI fetched by script, a login check, a seed step.
 `;
 
 const HOST_PROBE_PATH = '.devcontainer/host-probe.sh';

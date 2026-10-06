@@ -54,6 +54,11 @@ export interface Composition {
    * project's image may not even have.
    */
   houseImage: boolean;
+  /**
+   * Is the container BUILT from the house Dockerfile (`HOUSE_DOCKERFILE`)? False only when an adopted devcontainer
+   * declares an image source of its own (`image`, `build`, …) — the house never adds a second one beside it.
+   */
+  buildsHouseImage: boolean;
   home: string;
   /** The image's own features (installed first — the runtime the rest of the features may need). */
   imageFeatures: ({ id: string; options: Record<string, DevcontainerJson> } & Why)[];
@@ -93,7 +98,7 @@ const PHASES: readonly PostCreatePhase[] = ['prepare', 'install', 'plugins', 'pr
  */
 export function compose(
   contributors: readonly Contributor[],
-  tokens: { nodeMajor: string; runsAs?: string },
+  tokens: { nodeMajor: string; runsAs?: string; projectImage?: boolean },
 ): Composition {
   // The image first, because `{{home}}` — which other fragments use — follows its user.
   const imageSource = [...contributors].reverse().find((entry) => entry.fragment.image);
@@ -189,6 +194,7 @@ export function compose(
   return {
     image: { ref: sub(image.ref), remoteUser, why: image.why },
     houseImage: tokens.runsAs === undefined,
+    buildsHouseImage: !tokens.projectImage,
     home,
     imageFeatures,
     features,
@@ -284,6 +290,12 @@ interface Item {
   why?: string;
 }
 
+/**
+ * The house Dockerfile, beside devcontainer.json (the build context is that folder). Named so it can never collide
+ * with a project's own `Dockerfile`: the house writes it unconditionally, and a project's file is never the house's.
+ */
+export const HOUSE_DOCKERFILE = 'house.Dockerfile';
+
 /** The id of the one LOCAL feature — see the generator's `writeHouseSetupFeature`. */
 export const HOUSE_FEATURE_ID = './features/bespunky-house-setup';
 
@@ -311,7 +323,20 @@ export function renderDevcontainerJson(name: string, layers: readonly string[], 
     entries.length ? { items: entries.map(item) } : undefined;
 
   add('name', value(name));
-  add('image', value(c.image.ref), c.image.why);
+  if (c.buildsHouseImage) {
+    add(
+      'build',
+      { members: [{ key: 'dockerfile', node: value(HOUSE_DOCKERFILE) }, { key: 'context', node: value('.') }] },
+      [
+        c.image.why,
+        `BUILT, not pulled: ${HOUSE_DOCKERFILE} starts FROM ${c.image.ref} and installs the OS packages (the house's,`,
+        'composed from the layers, and .devcontainer/os-packages.txt, yours) as ONE Docker layer — cached, so a rebuild',
+        'reinstalls nothing unless a list changed.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+  }
 
   const featureMember = (entry: Composition['features'][number]): Member => ({ key: entry.id, node: value(entry.options), why: entry.why });
   add('features', {
@@ -462,7 +487,7 @@ export function renderPostCreate(layers: readonly string[], c: Composition, plug
 
   if (c.volumes.length) sections.push(renderVolumeOwnership(piece('volume-ownership'), c.volumes));
   sections.push(...inPhase('prepare'));
-  if (c.osPackages.length) sections.push(renderOsPackages(piece('os-packages'), c.osPackages));
+  sections.push(piece('os-packages'));
   for (const phase of PHASES.slice(1)) sections.push(...inPhase(phase));
   sections.push(piece('footer'));
 
@@ -505,7 +530,12 @@ function renderVolumeOwnership(template: string, volumes: readonly ComposedVolum
   return template.split('{{VOLUMES}}').join(lines.join('\n'));
 }
 
-function renderOsPackages(template: string, groups: Composition['osPackages']): string {
+/**
+ * `.devcontainer/os-packages.sh` — the ONE installer the image build and post-create both run (see the template).
+ * The house's packages are embedded, grouped by capability with each group's `why` as a comment, de-duplicated
+ * across groups; the project's own list is the file it is handed.
+ */
+export function renderOsPackagesScript(layers: readonly string[], groups: Composition['osPackages']): string {
   const seen = new Set<string>();
   const lines: string[] = [];
   for (const group of groups) {
@@ -513,9 +543,21 @@ function renderOsPackages(template: string, groups: Composition['osPackages']): 
     fresh.forEach((name) => seen.add(name));
     if (!fresh.length) continue;
     if (group.why) lines.push(...group.why.split('\n').map((line) => `# ${line}`.trimEnd()));
-    lines.push(`OS_PACKAGES="$OS_PACKAGES ${fresh.join(' ')}"`);
+    lines.push(fresh.join(' '));
   }
-  return template.split('{{OS_PACKAGES}}').join(lines.join('\n'));
+  const script = readFileSync(join(__dirname, 'os-packages.sh.tpl'), 'utf8')
+    .split('{{LAYERS}}')
+    .join(layers.join(', '))
+    .split('{{HOUSE_PACKAGES}}')
+    // The list is one single-quoted shell string: a `'` in a why would end it early, so it is closed, escaped, reopened.
+    .join(lines.join('\n').split("'").join("'\\''"));
+  proveBash(script);
+  return script;
+}
+
+/** `.devcontainer/house.Dockerfile` — FROM the composed image, then the OS packages as one cached layer. */
+export function renderHouseDockerfile(c: Composition): string {
+  return readFileSync(join(__dirname, 'house.Dockerfile.tpl'), 'utf8').split('{{IMAGE}}').join(c.image.ref);
 }
 
 /**
