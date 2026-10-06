@@ -1,6 +1,9 @@
 ---
 effort: mock-harness-space
-summary: The mock-to-choose harness gives the mock the screen (collapsible chrome, fit modes, presentation mode) and becomes properly accessible.
+status: concluded
+concluded: 2026-10-06
+summary: The mock harness now gives the mock the screen — a collapsed comment drawer, one slim top row, fit-to-screen/1:1/width, presentation mode (f), hide pins (h), arrows, a shortcut sheet — and passes a real accessibility bar (rem type, AA tokens, light theme, reduced motion, keyboard comment placement). Desktop mock at 1280×800: 0.60 → 0.85 scale.
+tags: [mock-to-choose, harness, accessibility, layout]
 ---
 
 # Decisions (recorded as made, 2026-10-06)
