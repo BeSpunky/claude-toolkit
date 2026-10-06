@@ -2,10 +2,10 @@
 # yarn lockfile v1
 
 
-"@bespunky/nx-tools@0.47.0":
-  version "0.47.0"
-  resolved "https://registry.yarnpkg.com/@bespunky/nx-tools/-/nx-tools-0.47.0.tgz#8543a0122eaa56a076d349baa2c0183801a14664"
-  integrity sha512-HIk/CGnK4PAgcnnltYOPOJ/6pzJXbdR9m33uI2vGknV+LGKrLLNn0L9XzaaPPP4y4Jg5q+mBcjp9UeS7eHeoJg==
+"@bespunky/nx-tools@0.49.0":
+  version "0.49.0"
+  resolved "https://registry.yarnpkg.com/@bespunky/nx-tools/-/nx-tools-0.49.0.tgz#d6cd24865313cc477b5282153822820a7034fb0d"
+  integrity sha512-PmZx0nrdtLIX8di8Fx0K9rTia7uzBG99qLWxNxBJSnqj3zFoTV9QBXeDSW+SGj1c7bPAM4ut1OPaNcLgUCXelw==
   dependencies:
     enquirer "^2.3.6"
     jsonc-parser "^3.3.1"
