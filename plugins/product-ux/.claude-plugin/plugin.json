@@ -1,7 +1,7 @@
 {
   "name": "bespunky-product-ux",
   "description": "BeSpunky product & UX design — a pipeline from messy request to built UI: distill-the-brief (the real problem), envision-the-experience (the felt world), stage-the-vision (bold web-native art), mock-to-choose (concepts judged by eye), realize-the-vision (the researched build). Beside it: astonishing-to-use (the co-equal UX force), redesign-means-rethink (redesign from a blank canvas), keep-users-oriented (waits and steps), model-intent-not-data (intent in, decisions out).",
-  "version": "0.11.7",
+  "version": "0.12.0",
   "author": {
     "name": "BeSpunky",
     "url": "https://github.com/BeSpunky"

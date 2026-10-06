@@ -7,3 +7,4 @@ Designing a screen? Start with envision-the-experience, then stage-the-vision, t
 Got a messy brief or a pile of docs? distill-the-brief extracts the actual design problem first
 Building a form or dashboard? model-intent-not-data asks what the user means, not what the schema holds
 Anything users wait on gets loading, progress and done states from keep-users-oriented
+Reviewing mocks over noVNC? Press f in the mock gallery to hide every pixel of harness chrome — ? lists the keys

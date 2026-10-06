@@ -29,7 +29,7 @@ A comment's lifecycle: DRAFT → SUBMITTED → HANDLED.
   · draft      — pinned, not yet sent (the user is still collecting them)
   · submitted  — sent to Claude (via POST /submit, or POST /comments {submitted:true} in live mode)
   · handled    — Claude addressed it (PATCH); its pin VANISHES from the live mock and shows resolved
-                 (green ✓ + reply) in the gallery's side-list and the round's history snapshot
+                 (green ✓ + reply) in the gallery's comment drawer and the round's history snapshot
 Claude acts on SUBMITTED-and-not-handled comments (see /state → `pending`). Each comment also carries
 a `dom` blob (tag, id, classes, text, rect, styles, ancestor path) so Claude gets full context, not
 just the words.
