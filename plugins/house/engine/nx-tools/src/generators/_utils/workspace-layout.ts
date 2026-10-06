@@ -23,6 +23,7 @@
 // same detect/ensure split the layers keep.
 import { type Tree, type ProjectConfiguration, getProjects, readJson, readNxJson, updateNxJson, logger } from '@nx/devkit';
 import { projectRole, type ProjectRole } from '../../adapters/registry';
+import { workspaceIdentity } from './workspace-identity';
 
 /** Where a workspace keeps its projects. Workspace-relative directories, no trailing slash, no project name. */
 export interface WorkspaceLayout {
@@ -154,7 +155,8 @@ function clean(dir: string | undefined): string | undefined {
  * The WORKSPACE'S npm scope, WITHOUT the leading `@` — what a library created here is published under when the
  * caller names no import path. Derived from the root package.json `name` (which `create-nx-workspace` sets to
  * the workspace name): an already-scoped name (`@acme/monorepo`) yields `acme`; otherwise the name itself.
- * Without a package.json (the Nx wrapper host) or a name, the workspace directory's name.
+ * Without a package.json (the Nx wrapper host) or a name, the workspace's identity (`workspaceIdentity` — its
+ * directory's name in the main worktree, so a run from a linked worktree does not scope by the worktree's slug).
  *
  * Normalized to a VALID npm scope (lowercase, URL-safe): `create-nx-workspace` seeds the name from the project
  * dir, which a user may have called `My_App` — and `@My_App/x` is an illegal package name `npm publish` rejects.
@@ -168,7 +170,7 @@ export function resolveWorkspaceScope(tree: Tree): string {
     ? rootName.startsWith('@')
       ? rootName.slice(1).split('/')[0]
       : rootName
-    : tree.root.replace(/\/+$/, '').split('/').pop() ?? '';
+    : workspaceIdentity(tree);
   return normalizeNpmScope(raw);
 }
 

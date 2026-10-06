@@ -359,7 +359,7 @@ check('full house sync: per-app steps first, then workspace steps in registry or
   const want = ['serve', 'serve-options', 'worktree-tab-label', 'design-system-styles', 'firebase-client', 'gitignore', 'devcontainer', 'claude-settings', 'window-identity', 'playwright', 'port-claim', 'shared-browser', 'worktree-domains', 'dev', 'angular-ai', 'design-system', 'firebase-emulators', 'house-doc'];
   ok(JSON.stringify(order) === JSON.stringify(want), `order ${order.join(',')}`);
   ok(got.includes('serve --project=shop'), 'serve takes only the project');
-  ok(got.includes('worktree-tab-label --project=shop'), 'the tab label gets no --wireProviders on a detect-only angular');
+  ok(got.includes('worktree-tab-label --project=shop --workspaceName=shop'), 'the tab label gets no --wireProviders on a detect-only angular');
   ok(got.includes('design-system --scope=shop'), 'design-system gets no --wireProviders on a detect-only sync');
   // Phase 4: the Firebase CLIENT attaches per app (through the app's stack adapter), the neutral CORE is a
   // workspace step that runs after it and follows the client app.
@@ -1180,6 +1180,65 @@ check('cli.js apps: layout- and linking-agnostic — a package.json-only app is 
     ok(out === '@acme/web\tpackages/web\nshop\tclients/shop\n', `got ${JSON.stringify(out)}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+check('the worktree tab label is told the ENGINE\'s project identity, never the app\'s name or its own guess', (ok) => {
+  // An upgrade runs in a linked worktree; the generator's fallback would read that worktree's directory name and
+  // invert which tree gets labelled. The sentinel is ctx.project — the name the engine resolved from git.
+  const got = render(plan({ ...ctxFor(FIXTURES['angular web app with firebase and a design system']()), project: 'backitup' }, STAMP));
+  ok(got.includes('worktree-tab-label --project=shop --workspaceName=backitup'), `got ${got.find((l) => l.startsWith('worktree-tab-label')) ?? '(no step)'}`);
+});
+
+check('cli.js apps: the apps .bespunky/dev.json declares outrank the graph\'s guess (several untagged applications)', (ok) => {
+  // The shape that made inference decline in a real project: a client app beside a Windows service, an HTTP API
+  // and a fixture tool — all applications, none tagged server-side. The project declares the one it serves.
+  const shaped = (declaration) => {
+    const tree = createTreeWithEmptyWorkspace();
+    for (const name of ['daemon', 'issuance-service', 'ui']) addProjectConfiguration(tree, name, { root: `packages/${name}`, projectType: 'application', targets: {} });
+    addProjectConfiguration(tree, 'linux-fixtures', { root: 'tools/linux-fixtures', projectType: 'application', targets: {} });
+    if (declaration) writeJson(tree, '.bespunky/dev.json', declaration);
+    return tree;
+  };
+  const apps = (tree) => {
+    const dir = flush(tree);
+    try {
+      return execFileSync(process.execPath, [join(BUILD, 'src/layers/cli.js'), 'apps'], { cwd: dir }).toString();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const process_ = { id: 'app', cmd: 'x' };
+  ok(apps(shaped({ apps: { ui: { processes: [process_] } } })) === 'ui\tpackages/ui\n', 'declared: only ui');
+  const all = 'daemon\tpackages/daemon\nissuance-service\tpackages/issuance-service\nlinux-fixtures\ttools/linux-fixtures\nui\tpackages/ui\n';
+  ok(apps(shaped(null)) === all, 'undeclared: the graph\'s candidates, unchanged');
+  ok(apps(shaped({ apps: { docs: { processes: [process_] } } })) === all, 'a declaration naming no Nx app leaves the graph\'s answer standing');
+});
+
+check('workspace identity: the generators\' default and the engine\'s _project_identity agree — the main worktree\'s name', (ok) => {
+  const { workspaceIdentity } = require_(join(BUILD, 'src/generators/_utils/workspace-identity'));
+  const tmp = mkdtempSync(join(tmpdir(), 'layers-identity-'));
+  const git = (...args) => execFileSync('git', args, { stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  try {
+    const repo = join(tmp, 'backitup');
+    mkdirSync(join(repo, 'web'), { recursive: true });
+    writeFileSync(join(repo, 'web', 'nx.json'), '{}');
+    git('-C', repo, 'init', '-q', '-b', 'main');
+    git('-C', repo, 'add', '-A');
+    git('-C', repo, 'commit', '-qm', 'init');
+    const wt = join(tmp, 'worktrees', 'house-upgrade-2026-10-05');
+    git('-C', repo, 'worktree', 'add', '-q', '-b', 'chore/house-upgrade-2026-10-05', wt);
+    const plain = join(tmp, 'plain-dir');
+    mkdirSync(plain);
+    const house = readFileSync(join(ASSETS, 'house.sh'), 'utf8');
+    const fn = house.slice(house.indexOf('_project_identity() {'), house.indexOf('\n}\n', house.indexOf('_project_identity() {')) + 3);
+    for (const [label, dir, want] of [['the main worktree', repo, 'backitup'], ['a linked worktree', wt, 'backitup'], ['a subdirectory workspace (linked)', join(wt, 'web'), 'web'], ['a directory outside git', plain, 'plain-dir']]) {
+      const ts = workspaceIdentity({ root: dir });
+      const sh = execFileSync('bash', ['-c', `${fn}\n_project_identity "$1"`, '_', dir]).toString().trim();
+      ok(ts === want && sh === want, `${label}: want ${want}, generators ${ts}, engine ${sh}`);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
   }
 });
 

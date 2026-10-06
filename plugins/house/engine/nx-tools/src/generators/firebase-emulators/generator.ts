@@ -78,6 +78,7 @@ import firebaseClientGenerator from '../firebase-client/generator';
 import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
 import { resolveAppsDir } from '../_utils/workspace-layout';
 import { rootTsconfig } from '../_utils/linking';
+import { workspaceIdentity } from '../_utils/workspace-identity';
 
 interface FirebaseEmulatorsSchema {
   /** Also attach the Firebase client to this app (composes `firebase-client`), and make it the client app. */
@@ -164,7 +165,7 @@ export default async function firebaseEmulatorsGenerator(
   tree: Tree,
   options: FirebaseEmulatorsSchema = {}
 ): Promise<GeneratorCallback> {
-  const workspaceName = options.workspaceName ?? options.project ?? basenameOf(tree.root);
+  const workspaceName = options.workspaceName ?? options.project ?? workspaceIdentity(tree);
   const template = (name: string) => readFileSync(join(__dirname, name), 'utf8');
   const substitute = (tpl: string) => tpl.split('{{workspaceName}}').join(workspaceName);
 
@@ -351,10 +352,6 @@ function resolvable(tree: Tree, pkg: string): boolean {
   } catch {
     return false;
   }
-}
-
-function basenameOf(path: string): string {
-  return path.replace(/\/+$/, '').split('/').pop() || 'workspace';
 }
 
 /**

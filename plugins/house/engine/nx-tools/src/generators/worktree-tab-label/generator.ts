@@ -16,21 +16,22 @@
 // No app.config.ts (not an Angular application) → nothing to do.
 import { type Tree, formatFiles, logger, readProjectConfiguration } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
 import { wireProvider } from '../_utils/wire-provider';
+import { workspaceIdentity } from '../_utils/workspace-identity';
 
 interface WorktreeTabLabelSchema {
   project: string;
   /** Wire provideWorktreeTabLabel() into app.config.ts — a BASELINE act, never a sync-time one. */
   wireProviders?: boolean;
-  /** The base-host sentinel (`<workspaceName>.localhost` is the main tree). Defaults to the root dir name. */
+  /** The base-host sentinel (`<workspaceName>.localhost` is the main tree). Defaults to the workspace identity. */
   workspaceName?: string;
 }
 
 export default async function worktreeTabLabelGenerator(tree: Tree, options: WorktreeTabLabelSchema): Promise<void> {
   requireLayer(tree, 'angular', 'worktree-tab-label');
-  const workspaceName = options.workspaceName ?? basename(tree.root);
+  const workspaceName = options.workspaceName ?? workspaceIdentity(tree);
   const appRoot = readProjectConfiguration(tree, options.project).root;
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (!tree.exists(appConfigPath)) return;

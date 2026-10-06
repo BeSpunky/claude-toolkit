@@ -543,9 +543,10 @@ _check_name project "$PROJECT"
 [ -z "$APP" ] || _check_name app "$APP"
 
 # The app an UPGRADE refreshes when none was given — resolved INSIDE the program (rendered there with `declare -f`),
-# after the install, by asking the installed package for the workspace's client apps (`layers/cli.js apps`: the
-# project graph, project.json and package.json projects alike, classified by projectRole; the server-side app —
-# Cloud Functions — excluded by its `platform:server` tag, not by its name). Exactly one → that app. More than one
+# after the install, by asking the installed package for the apps to refresh (`layers/cli.js apps`: the project
+# graph, project.json and package.json projects alike, classified by projectRole; the server-side app — Cloud
+# Functions — excluded by its `platform:server` tag, not by its name; narrowed to the apps the project declares it
+# serves in .bespunky/dev.json when that names any of them). Exactly one → that app. More than one
 # → inference declines and says so (the correct answer rather than a guess). None → the project name, as before.
 # Sets APP and APP_ROOT (empty when the app is not one of the workspace's client apps), and hands APP_ROOT to the
 # outer summary through the upgrade lock's state file — the summary runs on the host, which may have no Node.
@@ -562,7 +563,7 @@ _resolve_upgrade_app() {   # <nx-tools dir> <app as given, or ''> <fallback name
       APP="${_apps%%"$_tab"*}"
     elif [ "$_n" -gt 1 ]; then
       echo "NOTE: this workspace has more than one app ($(printf '%s\n' "$_apps" | cut -f1 | paste -sd' ' -)), so the app to refresh can't be inferred."
-      echo "      Defaulting to '$3'. Pass one explicitly to target a different app:"
+      echo "      Defaulting to '$3'. Declare the app you serve in .bespunky/dev.json, or pass one explicitly:"
       echo "        house.sh upgrade <project> <app-name>"
     fi
   fi

@@ -37,7 +37,9 @@ export const angular: LayerDescriptor = {
     app: [
       {
         generator: 'worktree-tab-label',
-        args: (ctx) => [`--project=${ctx.app}`, ...(ctx.ensured.has('angular') ? ['--wireProviders'] : [])],
+        // The main-tree sentinel is the ENGINE's project identity, never the generator's own guess: an upgrade runs
+        // in a linked worktree, and the sentinel must name the tree the dev loop serves at `<project>.localhost`.
+        args: (ctx) => [`--project=${ctx.app}`, `--workspaceName=${ctx.project}`, ...(ctx.ensured.has('angular') ? ['--wireProviders'] : [])],
         skip: (ctx) => (projectExists(ctx.tree, ctx.app) ? null : { reason: `no project named '${ctx.app}' — no worktree tab label to refresh.`, partial: false }),
       },
     ],
