@@ -28,3 +28,5 @@ Fixture: the test project pinned the unpublished 0.49.0; fixed by vendoring the 
 (`vendor/bespunky-nx-tools-0.49.0.tgz`, `file:` dependency). Engine bug, fixed in this release: post-create now runs
 with stdin at /dev/null, and yarn 1's install gets --non-interactive (verified: without it yarn 1 draws the prompt,
 reads nothing and exits 0 with nothing installed). The test project was recreated from the fixed branch.
+
+## Resolved 2026-10-06T21:05:16Z — 21/21 on both rebuilds, nothing reinstalled; the throwaway project removed.
