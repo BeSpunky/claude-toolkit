@@ -1,6 +1,9 @@
 ---
 effort: dockerfile-layers
-summary: House containers build from a generated Dockerfile so OS packages are cached Docker layers, and ~/.local is persisted, so a rebuild reinstalls nothing that has not changed.
+status: concluded
+concluded: 2026-10-06
+summary: House containers are built from a generated house.Dockerfile — OS packages (the layers' and the project's os-packages.txt) one cached Docker layer through one installer, ~/.local persisted — so a rebuild reinstalls nothing unchanged; reviewed by five agents for data loss and residue before landing. nx-tools 0.48.0, bespunky-house 0.46.0.
+tags: [house, devcontainer, docker, rebuild, persistence, migration]
 ---
 
 # Rebuilds reinstall nothing that has not changed
