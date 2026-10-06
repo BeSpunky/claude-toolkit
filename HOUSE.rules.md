@@ -78,6 +78,8 @@ For anything this workspace can **generate** — projects, apps, libraries, modu
 
 Nx is this workspace's floor: every house generator and migration runs through it, invoked here as **`yarn nx`** — `yarn nx g <plugin>:<generator> --help` before a first use, and the `nx-generate` skill (the Nx plugin) for discovery.
 
+**System packages go in `.devcontainer/os-packages.txt`** (one Debian package name per line) — the image build installs them as one cached layer. Never `sudo apt-get install` one by hand (gone at the next rebuild) or in a post-create step (reinstalled on every rebuild).
+
 ## Local servers — never clobber a running server (non-negotiable)
 
 **When you start a server to test a change, you MUST bind it to a random free port — never the project's default port, or any container-forwarded port.** Those belong to whatever server the developer launched manually; grabbing them fails, silently attaches, or forces a disruptive restart. A random port costs nothing, and anything you need to check can reach it directly. Read the bound URL from the server's own startup output and point your browser there; tear the server down when done, and **never kill a server you didn't start** to free a port. Full rules — invoke the **`bespunky-workflow:local-server-isolation`** skill.
