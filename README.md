@@ -623,7 +623,8 @@ Claude Code has **no plugin-update hook event**, so `/plugin marketplace update`
 The `bespunky-house:new` skill then fills in the project-specific half of the seeded `CLAUDE.md` (the one piece that stays contextual, not a template).
 
 The generated `.devcontainer/devcontainer.json` **pre-installs this marketplace on build** via its
-`postCreateCommand` (`claude plugin marketplace add BeSpunky/claude-toolkit`, then `claude plugin install
+`postCreateCommand` (`claude plugin marketplace add BeSpunky/claude-toolkit` — or from the source your user or
+managed settings already declare for it, since Claude Code refuses any other — then `claude plugin install
 … --scope project` for each plugin the project's layers name — always `bespunky`, `bespunky-house`,
 `bespunky-engineering`, `bespunky-workflow`, `bespunky-product-ux`, `bespunky-vscode-identity`,
 `bespunky-communication`; plus `bespunky-browser-automation` with `web`, `bespunky-design-system` with `design-system`, `bespunky-angular` with

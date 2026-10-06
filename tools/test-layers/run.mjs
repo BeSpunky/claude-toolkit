@@ -937,6 +937,35 @@ checkAsync('post-create is UNATTENDED: no input attached, and yarn 1 fails inste
   }
 });
 
+checkAsync('plugins: a marketplace source the user or organisation DECLARED wins; one failure never skips the rest', async (ok) => {
+  const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
+  const start = a.post.indexOf('# --- Pre-install the Claude Code plugins');
+  const piece = a.post.slice(start, a.post.indexOf('\n# --- ', start + 1));
+  const run = (settings, { addFails = false } = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), 'plugins-'));
+    const bin = join(dir, 'bin');
+    const cfg = join(dir, 'cfg');
+    mkdirSync(bin);
+    mkdirSync(cfg);
+    if (settings) writeFileSync(join(cfg, 'settings.json'), JSON.stringify(settings));
+    const log = join(dir, 'claude.log');
+    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> '${log}'\n${addFails ? 'case "$*" in *"marketplace add"*) exit 1 ;; esac\n' : ''}exit 0\n`, { mode: 0o755 });
+    const out = execFileSync('bash', ['-c', `set -euo pipefail\nWS='${dir}'\n${piece}`], { cwd: dir, env: { PATH: `${bin}:${process.env.PATH}`, CLAUDE_CONFIG_DIR: cfg, HOME: dir }, encoding: 'utf8' });
+    const calls = readFileSync(log, 'utf8').trim().split('\n');
+    rmSync(dir, { recursive: true, force: true });
+    return { calls, out };
+  };
+  const adds = (calls) => calls.filter((c) => c.startsWith('plugin marketplace add')).map((c) => c.replace('plugin marketplace add ', ''));
+  ok(adds(run(undefined).calls).includes('BeSpunky/claude-toolkit'), 'nothing declared: the house default source is not used');
+  const declaredDir = run({ extraKnownMarketplaces: { 'claude-toolkit': { source: { source: 'directory', path: '/src/claude-toolkit' } } } });
+  ok(adds(declaredDir.calls).includes('/src/claude-toolkit') && !adds(declaredDir.calls).includes('BeSpunky/claude-toolkit'), `a declared directory source was not used: ${JSON.stringify(declaredDir.calls)}`);
+  const declaredRef = run({ extraKnownMarketplaces: { 'claude-toolkit': { source: { source: 'github', repo: 'BeSpunky/claude-toolkit', ref: 'development' } } } });
+  ok(adds(declaredRef.calls).includes('BeSpunky/claude-toolkit#development'), `a declared GitHub ref was not spelled owner/repo#ref: ${JSON.stringify(declaredRef.calls)}`);
+  const failing = run(undefined, { addFails: true });
+  const installs = failing.calls.filter((c) => c.startsWith('plugin install'));
+  ok(installs.length >= 2 && /not pre-installed:.*claude-toolkit\(marketplace\)/.test(failing.out), `a failed marketplace skipped the installs or went unreported: ${JSON.stringify(failing)}`);
+});
+
 checkAsync('adopted devcontainer on its own image: only the active layers merged in, no remoteUser imposed, mounts follow its user', async (ok) => {
   const tree = wrapperRepo();
   tree.write('.devcontainer/devcontainer.json', '{\n  // Our Python image.\n  "image": "python:3.12",\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n');
