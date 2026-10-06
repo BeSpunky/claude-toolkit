@@ -30,7 +30,7 @@
 - [x] U4 migration question (owned file keeps a stale `image`?)
 - [x] U5 docs sweep (CLAUDE.md, README, HOUSE.md.tpl, skills, tips)
 - [x] U6 dogfood: upgrade --local on this repo + hand switch; read whole diff
-- [ ] U7 bump nx-tools + bespunky-house; invariants
+- [x] U7 bump nx-tools + bespunky-house; invariants
 - [ ] U8 user rebuild from development BEFORE promoting to main; observe
 
 ## U1 distillation (Explore agent) — and what it changed in the design

@@ -46,3 +46,22 @@ alsa-utils + sox from post-create.local.sh) and Claude Code's native install (~/
 - The `web` layer's `playwright install --with-deps` / `shared-browser install --with-deps` still apt-install
   Chromium's system libraries in post-create on every rebuild (the browser binary itself is already a cached volume).
   Moving them into the image needs Playwright's own dependency list at image-build time — a design choice.
+
+## Pre-landing review (five read-only agents; ledger in handoffs/)
+
+> "Send agents to sanity check, verify, critic and ensure the next project that upgrades gets the changes without a
+> problem, and without losing any data" · "Send an agent to ensure there will be no residues on the next project
+> upgrading. For example, an old devcontainer file, an old script, etc." — the user
+
+Found and fixed before landing: a one-line/minified devcontainer.json emptied by the line-based member removal; the
+house build missed under `./house.Dockerfile` / `dockerFile` (state silently retargeted to /root); a project's own
+`house.Dockerfile` / `os-packages.sh` overwritten (→ marked-file freeness; the installer renamed `house.packages.sh`);
+unsafe switch advice for a foreign image (→ only for the house-ref image; no house.Dockerfile or ~/.local over a
+foreign image); CRLF lists dropped / a CRLF script failing the build (→ CR stripped, `.gitattributes` eol=lf); a
+deleted list failing COPY (→ glob); a stale parked `post-create.bespunky.sh` running old apt first (→ removed);
+project apt steps silently defeating the cache and losing their `apt-get update` (→ reported by the rung); an
+always-on rule so agents put packages in os-packages.txt. Confirmed safe: no volume renamed — no saved data orphaned;
+project keys, comments and files untouched in every shape; idempotent.
+Left, with reasons: no `.dockerignore` (would break a project using .devcontainer/ as its own build context); comments
+for keys an owned merge appends (pre-existing); Claude version pruning in ~/.local (unverified need); Playwright
+`--with-deps` (open decision).
