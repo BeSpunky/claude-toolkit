@@ -646,7 +646,7 @@ checkAsync('full house shape (angular+firebase+design system, web): the 0.34 con
     ok(a.dc.customizations.vscode.extensions.includes(ext), `extension ${ext}`);
   }
   ok(a.dc.runArgs.includes('--sysctl') && a.dc.containerEnv.BESPUNKY_DEVCONTAINER_ID, 'web run args + container env');
-  ok(a.dc.mounts.length === 7, `mounts ${a.dc.mounts.length}`);
+  ok(a.dc.mounts.length === 8, `mounts ${a.dc.mounts.length}`);
   ok(bashParses(a.post), 'post-create.sh does not parse');
   for (const piece of ['tigervnc-standalone-server', 'default-jdk-headless', 'angular/skills', 'playwright install --with-deps', 'zz-firebase-welcome', '/var/opt/bespunky/ports']) {
     ok(a.post.includes(piece), `post-create lacks ${piece}`);
@@ -785,7 +785,7 @@ const reclaimed = (post, { owner = 'root' } = {}) => {
   const dir = mkdtempSync(join(tmpdir(), 'reclaim-'));
   const [ws, home, bin] = ['ws', 'home', 'bin'].map((name) => join(dir, name));
   for (const path of ['.nx/cache', '.nx/workspace-data', 'node_modules', '.angular']) mkdirSync(join(ws, path), { recursive: true });
-  mkdirSync(join(home, '.cache/ms-playwright'), { recursive: true });
+  for (const path of ['.cache/ms-playwright', '.config']) mkdirSync(join(home, path), { recursive: true });
   mkdirSync(bin);
   const log = join(dir, 'sudo.log');
   writeFileSync(join(bin, 'stat'), `#!/bin/sh\ncase "$2" in %U) echo ${owner} ;; %a) echo 755 ;; esac\n`, { mode: 0o755 });
@@ -818,6 +818,7 @@ checkAsync('volume ownership: a node-hosted repo reclaims node_modules (and the 
     'chown ME $WS/.nx',
     'chown -R ME $WS/.nx/cache',
     'chown -R ME $WS/.nx/workspace-data',
+    'chown -R ME $HOME/.config',
     'chown -R ME $WS/node_modules',
   ]);
   ok(a.post.indexOf('reclaim_volume tree "$WS/node_modules"') < a.post.indexOf('$PM_INSTALL'), 'node_modules is reclaimed AFTER the install');
@@ -831,6 +832,7 @@ checkAsync('volume ownership: web reclaims ~/.cache + ~/.cache/ms-playwright and
     'chown ME $WS/.nx',
     'chown -R ME $WS/.nx/cache',
     'chown -R ME $WS/.nx/workspace-data',
+    'chown -R ME $HOME/.config',
     'chown ME $HOME/.cache',
     'chown -R ME $HOME/.cache/ms-playwright',
   ]);
@@ -839,9 +841,47 @@ checkAsync('volume ownership: web reclaims ~/.cache + ~/.cache/ms-playwright and
   ok(bashParses(a.post) && shParses(a.post), 'web post-create does not parse under bash -n and sh -n');
 });
 
-checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes; a rebuild reclaims nothing', async (ok) => {
+// Logins survive a rebuild: Claude Code's account record moves INSIDE the persisted config dir, the gh login gets a
+// volume, and git is re-wired to it on every create. The account piece is RUN, against a fake config dir: it restores
+// the newest of Claude Code's own backups when the record is missing — and never touches a record that exists.
+checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring — and the account record is restored, never clobbered', async (ok) => {
   const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
-  expectCalls(ok, 'wrapper', reclaimed(a.post).calls, ['chown ME $WS/.nx', 'chown -R ME $WS/.nx/cache', 'chown -R ME $WS/.nx/workspace-data']);
+  const home = a.dc.remoteUser ? `/home/${a.dc.remoteUser}` : '/home/vscode';
+  ok(a.dc.containerEnv.CLAUDE_CONFIG_DIR === `${home}/.claude`, `CLAUDE_CONFIG_DIR is ${a.dc.containerEnv.CLAUDE_CONFIG_DIR}`);
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.claude,`) && m.includes('type=bind')), 'the config dir is the persisted bind');
+  ok(a.dc.mounts.filter((m) => m.includes(`target=${home}/.config`)).length === 1, 'not exactly ONE mount for ~/.config (one per tool crept back?)');
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.config,type=volume`)), '~/.config is not a persisted volume');
+  ok(a.post.includes('gh auth setup-git'), 'git is not wired to the gh login');
+  const start = a.post.indexOf("# --- Claude Code's account record");
+  const piece = a.post.slice(start, a.post.indexOf('\n# --- ', start + 1));
+  ok(start !== -1 && a.post.indexOf('# --- Claude Code, installed') > start, 'the account piece runs before Claude Code is installed or run');
+  const dir = mkdtempSync(join(tmpdir(), 'claude-account-'));
+  const config = join(dir, '.claude');
+  mkdirSync(join(config, 'backups'), { recursive: true });
+  writeFileSync(join(config, 'backups/.claude.json.backup.1'), 'old');
+  writeFileSync(join(config, 'backups/.claude.json.backup.2'), 'newest');
+  execFileSync('touch', ['-d', '2000-01-01', join(config, 'backups/.claude.json.backup.1')]);
+  const run = () => execFileSync('bash', ['-c', `set -euo pipefail\n${piece}`], { env: { PATH: process.env.PATH, HOME: dir }, encoding: 'utf8' });
+  run();
+  ok(readFileSync(join(config, '.claude.json'), 'utf8') === 'newest', 'a missing account record is not restored from the NEWEST backup');
+  writeFileSync(join(config, '.claude.json'), 'live');
+  run();
+  ok(readFileSync(join(config, '.claude.json'), 'utf8') === 'live', 'an existing account record was overwritten');
+  rmSync(join(config, '.claude.json'));
+  rmSync(join(config, 'backups'), { recursive: true });
+  run();
+  ok(!existsSync(join(config, '.claude.json')), 'with no backups, nothing is invented');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes and ~/.config; a rebuild reclaims nothing', async (ok) => {
+  const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
+  expectCalls(ok, 'wrapper', reclaimed(a.post).calls, [
+    'chown ME $WS/.nx',
+    'chown -R ME $WS/.nx/cache',
+    'chown -R ME $WS/.nx/workspace-data',
+    'chown -R ME $HOME/.config',
+  ]);
   const me = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
   expectCalls(ok, 'already owned (a rebuild)', reclaimed(a.post, { owner: me }).calls, []);
   ok(bashParses(a.post) && shParses(a.post), 'wrapper post-create does not parse under bash -n and sh -n');

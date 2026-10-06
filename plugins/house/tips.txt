@@ -12,3 +12,4 @@ The row above the prompt saying your house tooling is behind has an Upgrade butt
 Adding a layer is its own command: /bespunky-house:add-layer firebase — an upgrade that also creates the layer
 A dark-first design? Set $default-mode: 'dark' in the design system's _tokens.scss — 'system' follows the OS
 After an upgrade, UPGRADE_VERIFY names the one command that builds, lints and tests what it rewrote
+House containers keep your logins across rebuilds — Claude, and every tool that logs in under ~/.config (gh, git through it, firebase)
