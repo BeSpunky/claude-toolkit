@@ -654,7 +654,8 @@ checkAsync('full house shape (angular+firebase+design system, web): the 0.34 con
   ok(a.dc.mounts.length === 9, `mounts ${a.dc.mounts.length}`);
   ok(bashParses(a.post), 'post-create.sh does not parse');
   for (const name of ['tigervnc-standalone-server', 'default-jdk-headless']) ok(new RegExp(`(^| )${name}( |$)`, 'm').test(a.osScript), `the package list lacks ${name}`);
-  for (const piece of ['angular/skills', 'playwright install --with-deps', 'zz-firebase-welcome', '/var/opt/bespunky/ports']) {
+  ok(!a.post.includes('--with-deps'), 'post-create still apt-installs Chromium\'s libraries (--with-deps) — they are image packages');
+  for (const piece of ['angular/skills', 'playwright install chromium', 'zz-firebase-welcome', '/var/opt/bespunky/ports']) {
     ok(a.post.includes(piece), `post-create lacks ${piece}`);
   }
   const enabled = Object.keys(a.settings.enabledPlugins);
@@ -915,12 +916,19 @@ checkAsync('owned devcontainer: no provenance record — ownership already answe
 
 checkAsync('post-create: web provisions the shared browser through its own runtime; @playwright/test is the js layer\'s', async (ok) => {
   const web = await artifacts(wrapperRepo(), ['nx', 'agent', 'web']);
-  ok(web.post.includes('shared-browser" install --with-deps'), 'web: no `shared-browser install --with-deps`');
+  ok(web.post.includes('shared-browser" install;') && !web.post.includes('--with-deps'), 'web: the runtime install is not the plain (no apt) `shared-browser install`');
+  for (const name of ['xvfb', 'libnss3', 'libgbm1', 'fonts-unifont']) ok(new RegExp(`(^| )${name.replace(/[.+]/g, '\\$&')}( |$)`, 'm').test(web.osScript), `web: Chromium's ${name} is not an image package`);
   ok(!web.post.includes('@playwright/test'), 'web (no js): still keyed on @playwright/test');
   ok(bashParses(web.post), 'web post-create does not parse');
   const tree = createTreeWithEmptyWorkspace();
   const both = await artifacts(tree, ['nx', 'agent', 'node', 'js', 'web']);
-  ok(both.post.includes('"@playwright/test"') && both.post.includes('install --with-deps'), 'js+web: both pieces');
+  ok(both.post.includes('"@playwright/test"') && both.post.includes('playwright install chromium') && !both.post.includes('--with-deps'), 'js+web: both pieces, neither with an apt step');
+  ok((both.osScript.match(/(^| )libnss3( |$)/gm) ?? []).length === 1, 'js+web: Chromium\'s libraries listed twice (the composer must de-duplicate)');
+  const js = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js']);
+  ok(/(^| )libnss3( |$)/m.test(js.osScript), 'js (no web): @playwright/test\'s Chromium libraries are not image packages');
+  const { PLAYWRIGHT_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright'));
+  const { CHROMIUM_OS_PACKAGES_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright-deps'));
+  ok(CHROMIUM_OS_PACKAGES_VERSION === PLAYWRIGHT_VERSION, `Chromium's OS packages were projected from playwright-core@${CHROMIUM_OS_PACKAGES_VERSION}, the pin is ${PLAYWRIGHT_VERSION} — run: node tools/playwright-deps/project.mjs --write`);
   ok(bashParses(both.post), 'js+web post-create does not parse');
 });
 
@@ -970,13 +978,14 @@ checkAsync('volume ownership: a node-hosted repo reclaims node_modules (and the 
     'chown -R ME $WS/.nx/workspace-data',
     'chown -R ME $HOME/.config',
     'chown -R ME $HOME/.local',
+    'chown -R ME $HOME/.cache',
     'chown -R ME $WS/node_modules',
   ]);
   ok(a.post.indexOf('reclaim_volume tree "$WS/node_modules"') < a.post.indexOf('$PM_INSTALL'), 'node_modules is reclaimed AFTER the install');
   ok(bashParses(a.post) && shParses(a.post), 'node post-create does not parse under bash -n and sh -n');
 });
 
-checkAsync('volume ownership: web reclaims ~/.cache + ~/.cache/ms-playwright and opens the shared port registry (1777)', async (ok) => {
+checkAsync('volume ownership: web reclaims ~/.cache (one volume, the Playwright browsers inside it) and opens the shared port registry (1777)', async (ok) => {
   const a = await artifacts(wrapperRepo(), ['nx', 'agent', 'web']);
   const { calls, opening } = reclaimed(a.post);
   expectCalls(ok, 'web', calls, [
@@ -985,8 +994,7 @@ checkAsync('volume ownership: web reclaims ~/.cache + ~/.cache/ms-playwright and
     'chown -R ME $WS/.nx/workspace-data',
     'chown -R ME $HOME/.config',
     'chown -R ME $HOME/.local',
-    'chown ME $HOME/.cache',
-    'chown -R ME $HOME/.cache/ms-playwright',
+    'chown -R ME $HOME/.cache',
   ]);
   ok(opening.includes('share_volume "/var/opt/bespunky/ports"') && /share_volume\(\) \{[\s\S]*sudo chmod 1777 "\$1"/.test(opening), 'the port registry is not prepared with chmod 1777');
   ok(!/reclaim_volume \w+ "\/var\/opt/.test(opening), 'the SHARED registry is chowned to one container\'s user');
@@ -1003,6 +1011,7 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.claude,`) && m.includes('type=bind')), 'the config dir is the persisted bind');
   ok(a.dc.mounts.filter((m) => m.includes(`target=${home}/.config`)).length === 1, 'not exactly ONE mount for ~/.config (one per tool crept back?)');
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.config,type=volume`)), '~/.config is not a persisted volume');
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.cache,type=volume`)) && !a.dc.mounts.some((m) => m.includes('/.cache/')), '~/.cache is not ONE persisted volume (or a per-tool cache volume crept back)');
   ok(a.post.includes('gh auth setup-git'), 'git is not wired to the gh login');
   const start = a.post.indexOf("# --- Claude Code's account record");
   const piece = a.post.slice(start, a.post.indexOf('\n# --- ', start + 1));
@@ -1026,7 +1035,7 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   rmSync(dir, { recursive: true, force: true });
 });
 
-checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes, ~/.config and ~/.local; a rebuild reclaims nothing', async (ok) => {
+checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes, ~/.config, ~/.local and ~/.cache; a rebuild reclaims nothing', async (ok) => {
   const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
   expectCalls(ok, 'wrapper', reclaimed(a.post).calls, [
     'chown ME $WS/.nx',
@@ -1034,6 +1043,7 @@ checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the 
     'chown -R ME $WS/.nx/workspace-data',
     'chown -R ME $HOME/.config',
     'chown -R ME $HOME/.local',
+    'chown -R ME $HOME/.cache',
   ]);
   const me = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
   expectCalls(ok, 'already owned (a rebuild)', reclaimed(a.post, { owner: me }).calls, []);

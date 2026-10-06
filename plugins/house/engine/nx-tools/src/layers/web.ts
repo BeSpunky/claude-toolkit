@@ -17,6 +17,7 @@ import { matchesEvidence, projectExists } from './evidence';
 import { type Tree, getProjects } from '@nx/devkit';
 import { NOVNC_BAND_LABEL, novncBandPorts } from '../generators/shared-browser/novnc-band';
 import { SERVE_EXECUTOR } from '../generators/_utils/dev-server';
+import { CHROMIUM_OS_PACKAGE_GROUP } from '../generators/_utils/playwright';
 import { ADAPTERS, adapterOf } from '../adapters/registry';
 
 /**
@@ -157,10 +158,6 @@ export const web: LayerDescriptor = {
     ],
     mounts: [
       {
-        mount: 'source=${localWorkspaceFolderBasename}-playwright-cache,target={{home}}/.cache/ms-playwright,type=volume',
-        why: 'Playwright browser binaries (~150 MB Chromium) on a per-workspace volume, so rebuilds reuse them.',
-      },
-      {
         mount: 'source=bespunky-shared-ports,target=/var/opt/bespunky/ports,type=volume',
         // Every container on the engine writes its own claim here, under whatever UID its remote user has.
         ownership: 'shared',
@@ -178,6 +175,7 @@ export const web: LayerDescriptor = {
           'novnc + websockify = the web client and its bridge; fluxbox = a minimal WM that keeps Chromium maximized;\n' +
           'fonts so rendered pages and screenshots look right.',
       },
+      CHROMIUM_OS_PACKAGE_GROUP,
       {
         packages: ['iproute2', 'procps'],
         why: '`sysctl` (procps) for the worktree-domains :80 proxy, `ss` (iproute2) for the port probes.',
