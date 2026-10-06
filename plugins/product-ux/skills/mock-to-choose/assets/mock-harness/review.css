@@ -354,7 +354,7 @@
 }
 
 /* Themed scrollbars for the WHOLE review system. review.css loads in the gallery AND inside every mock
-   frame, so this one block themes every scrollbar consistently — the page, the side-list, popovers, the
+   frame, so this one block themes every scrollbar consistently — the page, the comment drawer, popovers, the
    composer, the mock-in-Focus scroll, and the version frames. A rounded thumb inset by a 3px border in
    the TRACK colour (opaque — the padding reads as a groove; see the track note below for why it can't be
    transparent), quiet at rest, intent-tinted on hover; the evolution strip gets the accent thumb.
