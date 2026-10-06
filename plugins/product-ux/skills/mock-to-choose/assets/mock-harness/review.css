@@ -1,11 +1,101 @@
 /**
- * review.css — the review chrome of the mock harness (pins, popovers, comment mode).
- * Loaded by every variant AND by the gallery. Never edit per-project: it is harness, not mock.
- * Deliberately namespaced under .mk-* so it can never collide with the mock's own styles.
+ * review.css — the review chrome of the mock harness (pins, popovers, comment mode) AND the harness
+ * palette. Loaded by every variant AND by the gallery. Never edit per-project: it is harness, not mock.
+ * Deliberately namespaced under .mk-* / --mk-* so it can never collide with the mock's own styles.
+ *
+ * THE TOKENS BELOW ARE THE HARNESS'S SINGLE SOURCE OF VISUAL TRUTH. The gallery consumes these exact
+ * names; no rule in this file (or the gallery) may use a raw colour. Every text/background pair meets
+ * WCAG AA 4.5:1 in both themes (ratios recorded in the feature package). Chrome text never goes below
+ * --mk-text-xs (.8125rem).
  */
 
-/* An overlay above the mock — pins live here, not inside the mock's elements, so they are
-   never clipped by the mock's overflow and never mutate the mock's layout. */
+/* ---- tokens: dark (default) ---- */
+:root {
+  --mk-bg: #0d0b14;
+  --mk-bg-glow: rgb(112 80 245 / .16);
+  --mk-panel: #14121c;
+  --mk-panel-2: #1c1927;
+  --mk-line: #2a2637;
+  --mk-line-strong: #4a4560;
+  --mk-ink: #f2f0ff;
+  --mk-muted: #b9b2d6;
+  --mk-faint: #8c85a8;
+  --mk-intent: #7050f5;
+  --mk-intent-ink: #b6a6ff;
+  --mk-on-intent: #ffffff;
+  --mk-comment: #ff8a3d;
+  --mk-comment-ink: #ffb27f;
+  --mk-on-comment: #14121c;
+  --mk-go: #3aa76a;
+  --mk-go-ink: #8fe3b3;
+  --mk-on-go: #0d0b14;
+  --mk-warn-ink: #ffd17a;
+  --mk-danger: #e0576b;
+  --mk-danger-ink: #ff9aa8;
+  --mk-on-danger: #0d0b14;
+  --mk-handled: #3aa76a;
+  --mk-focus: #b6a6ff;
+  --mk-pin-ring: #ffffff;
+  --mk-scrim: rgb(8 6 14 / .45);
+  --mk-shadow: rgb(0 0 0 / .5);
+  --mk-track: #14121c;
+  --mk-thumb: #37324a;
+
+  --mk-font: ui-sans-serif, system-ui, sans-serif;
+  --mk-text-xs: .8125rem;
+  --mk-text-sm: .875rem;
+  --mk-text-md: 1rem;
+  --mk-text-lg: 1.0625rem;
+
+  --mk-dur-fast: .12s;
+  --mk-dur: .16s;
+  --mk-ease: cubic-bezier(.2, .7, .3, 1);
+  --mk-ease-pop: cubic-bezier(.2, .9, .3, 1.25);   /* the composer's slight overshoot */
+}
+
+/* ---- tokens: light ---- */
+@media (prefers-color-scheme: light) {
+  :root {
+    --mk-bg: #f6f4fb;
+    --mk-bg-glow: rgb(102 67 238 / .10);
+    --mk-panel: #ffffff;
+    --mk-panel-2: #efecf7;
+    --mk-line: #dcd7ea;
+    --mk-line-strong: #b4acd0;
+    --mk-ink: #1a1726;
+    --mk-muted: #4a4463;
+    --mk-faint: #625b7e;
+    --mk-intent: #6643ee;
+    --mk-intent-ink: #5230d4;
+    --mk-on-intent: #ffffff;
+    --mk-comment: #ff8a3d;
+    --mk-comment-ink: #9e4300;
+    --mk-on-comment: #1a1726;
+    --mk-go: #237a4b;
+    --mk-go-ink: #1d6b41;
+    --mk-on-go: #ffffff;
+    --mk-warn-ink: #835400;
+    --mk-danger: #c9364c;
+    --mk-danger-ink: #ad2a3f;
+    --mk-on-danger: #ffffff;
+    --mk-handled: #237a4b;
+    --mk-focus: #5230d4;
+    --mk-pin-ring: #ffffff;
+    --mk-scrim: rgb(26 23 38 / .28);
+    --mk-shadow: rgb(30 20 60 / .22);
+    --mk-track: #efecf7;
+    --mk-thumb: #c5bfd9;
+  }
+}
+
+/* ---- motion: reduced ---- */
+@media (prefers-reduced-motion: reduce) {
+  :root { --mk-dur-fast: 0s; --mk-dur: 0s; }
+  .mk-pin.mk-flash, .mk-dlg-dot, .mk-dlg-backdrop { animation: none; }
+}
+
+/* An overlay above the mock — pins and their popovers live here, not inside the mock's elements, so
+   they are never clipped by the mock's overflow and never mutate the mock's layout. */
 .mk-layer {
   position: absolute;
   inset-block-start: 0;
@@ -16,188 +106,289 @@
   pointer-events: none;
 }
 .mk-layer .mk-pin { pointer-events: auto; }
+/* The gallery's "hide pins" (h): every pin and popover, intent and comment alike. */
+.mk-pins-hidden .mk-layer { display: none; }
 
 .mk-pin {
   position: absolute;
-  margin-block-start: -11px;
-  margin-inline-start: -11px;
+  margin-block-start: -12px;
+  margin-inline-start: -12px;
   z-index: 2147483000;
-  inline-size: 22px;
-  block-size: 22px;
+  inline-size: 24px;
+  block-size: 24px;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  font: 600 12px/22px ui-sans-serif, system-ui, sans-serif;
+  font: 600 var(--mk-text-xs)/24px var(--mk-font);
   text-align: center;
-  color: #fff;
-  background: #7c5cff;                      /* intent — Claude's narration */
-  box-shadow: 0 0 0 2px #fff, 0 2px 8px rgb(0 0 0 / .45);
+  color: var(--mk-on-intent);
+  background: var(--mk-intent);                       /* intent — Claude's narration */
+  box-shadow: 0 0 0 2px var(--mk-pin-ring), 0 2px 8px var(--mk-shadow);
   cursor: help;
-  transition: box-shadow .1s ease;
+  transition: box-shadow var(--mk-dur-fast) var(--mk-ease);
 }
-/* Emphasis on hover uses box-shadow, NEVER transform/filter: a transform on the pin would make it
-   the containing block for its own position:fixed popover and silently break the viewport clamp. */
-.mk-pin:hover, .mk-pin:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px #fff, 0 0 0 6px #7c5cff55, 0 2px 10px rgb(0 0 0 / .5);
+/* Emphasis uses box-shadow / outline, NEVER transform/filter: a transform on a pin would make it a
+   containing block and break the position:fixed popover's viewport clamp. */
+.mk-pin:hover, .mk-pin[aria-expanded="true"] {
+  box-shadow: 0 0 0 3px var(--mk-pin-ring), 0 0 0 6px color-mix(in srgb, var(--mk-intent) 35%, transparent),
+              0 2px 10px var(--mk-shadow);
+  z-index: 2147483002;
+}
+.mk-pin:focus { outline: none; }
+.mk-pin:focus-visible {
+  outline: 2px solid var(--mk-focus);
+  outline-offset: 4px;
   z-index: 2147483002;
 }
 
-.mk-pin[data-kind="comment"] {             /* the user's words — a filled marker on the exact spot */
-  background: #ff8a3d;
+.mk-pin[data-kind="comment"] {                        /* the user's words — a filled marker on the exact spot */
+  color: var(--mk-on-comment);
+  background: var(--mk-comment);
   cursor: pointer;
 }
-.mk-pin.mk-draft {                         /* pinned but NOT yet sent — hollow, so "unsent" reads at a glance */
-  background: #201b2b;
-  color: #ff8a3d;
-  box-shadow: 0 0 0 2px #ff8a3d, 0 2px 8px rgb(0 0 0 / .45);
+.mk-pin[data-kind="comment"]:hover, .mk-pin[data-kind="comment"][aria-expanded="true"] {
+  box-shadow: 0 0 0 3px var(--mk-pin-ring), 0 0 0 6px color-mix(in srgb, var(--mk-comment) 30%, transparent),
+              0 2px 10px var(--mk-shadow);
 }
-.mk-pin.mk-draft:hover, .mk-pin.mk-draft:focus-visible {
-  box-shadow: 0 0 0 3px #ff8a3d, 0 0 0 6px #ff8a3d44, 0 2px 10px rgb(0 0 0 / .5);
+.mk-pin.mk-draft {                                    /* pinned but NOT yet sent — hollow, so "unsent" reads at a glance */
+  background: var(--mk-panel-2);
+  color: var(--mk-comment-ink);
+  box-shadow: 0 0 0 2px var(--mk-comment), 0 2px 8px var(--mk-shadow);
 }
-.mk-pin.mk-handled {                       /* Claude checked it off while re-mocking — visibly resolved */
-  background: #3aa76a;
-  opacity: .82;
+.mk-pin.mk-draft:hover, .mk-pin.mk-draft[aria-expanded="true"] {
+  box-shadow: 0 0 0 3px var(--mk-comment), 0 0 0 6px color-mix(in srgb, var(--mk-comment) 27%, transparent),
+              0 2px 10px var(--mk-shadow);
+}
+.mk-pin.mk-handled {                                  /* Claude checked it off while re-mocking — visibly resolved */
+  background: var(--mk-handled);
+  color: var(--mk-on-go);
 }
 /* Row-hover in the gallery's list highlights the matching pin (recognition, not recall). */
 .mk-pin.mk-focus {
-  box-shadow: 0 0 0 3px #fff, 0 0 0 7px #ffffff66, 0 4px 14px rgb(0 0 0 / .55);
+  box-shadow: 0 0 0 3px var(--mk-pin-ring), 0 0 0 7px color-mix(in srgb, var(--mk-pin-ring) 40%, transparent),
+              0 4px 14px var(--mk-shadow);
   z-index: 2147483003;
 }
 /* Row-click reveals the pin: a brief attention flash. */
-.mk-pin.mk-flash { animation: mk-flash 1s ease; }
+.mk-pin.mk-flash { animation: mk-flash 1s var(--mk-ease); }
 @keyframes mk-flash {
-  0%, 100% { box-shadow: 0 0 0 2px #fff, 0 2px 8px rgb(0 0 0 / .45); }
-  20% { box-shadow: 0 0 0 4px #fff, 0 0 0 12px #ffd17a, 0 4px 18px rgb(0 0 0 / .6); }
-  60% { box-shadow: 0 0 0 4px #fff, 0 0 0 18px #ffd17a00, 0 4px 18px rgb(0 0 0 / .3); }
+  0%, 100% { box-shadow: 0 0 0 2px var(--mk-pin-ring), 0 2px 8px var(--mk-shadow); }
+  20% { box-shadow: 0 0 0 4px var(--mk-pin-ring), 0 0 0 12px var(--mk-warn-ink), 0 4px 18px var(--mk-shadow); }
+  60% { box-shadow: 0 0 0 4px var(--mk-pin-ring), 0 0 0 18px transparent, 0 4px 18px var(--mk-shadow); }
 }
 
-.mk-reply {
-  display: block;
-  margin-block-start: 8px;
-  padding-block-start: 8px;
-  border-block-start: 1px solid #ffffff1a;
-  color: #8fe3b3;
-  font-size: 12px;
-}
-
-/* Popover — JS-positioned as `fixed` and clamped to the frame, so it NEVER leaves the viewport
-   (the old harness pinned it below-right with no flip, and it slid off the right/bottom edge). */
+/* Popover — the pin's SIBLING (never its child: it holds a Remove button, and a button may not nest
+   in a button). JS-positioned as `fixed` and clamped to the frame, so it NEVER leaves the viewport.
+   Closed = visibility:hidden, so its Remove is only Tab-reachable while it is open (right after its pin). */
 .mk-pop {
   position: fixed;
   inset-block-start: 0;
   inset-inline-start: 0;
   z-index: 2147483001;
+  box-sizing: border-box;
   inline-size: max-content;
-  max-inline-size: min(280px, 78vw);
-  max-block-size: min(240px, 60vh);        /* a wordy comment on a short frame scrolls, never overflows */
+  max-inline-size: min(300px, 78vw);
+  max-block-size: min(260px, 60vh);                   /* a wordy comment on a short frame scrolls, never overflows */
   overflow-y: auto;
-  padding: 9px 11px;
-  border-radius: 9px;
-  background: #14121c;
-  color: #f2f0ff;
-  font: 400 12.5px/1.45 ui-sans-serif, system-ui, sans-serif;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--mk-panel);
+  color: var(--mk-ink);
+  font: 400 var(--mk-text-sm)/1.45 var(--mk-font);
   text-align: start;
-  box-shadow: 0 10px 30px rgb(0 0 0 / .5);
-  border: 1px solid #ffffff1a;
+  box-shadow: 0 10px 30px var(--mk-shadow);
+  border: 1px solid var(--mk-line);
   opacity: 0;
+  visibility: hidden;
   transform: translateY(2px);
   pointer-events: none;
-  transition: opacity .12s ease, transform .12s ease;
+  transition: opacity var(--mk-dur-fast) var(--mk-ease), transform var(--mk-dur-fast) var(--mk-ease),
+              visibility 0s linear var(--mk-dur-fast);
 }
-.mk-pop.mk-open { opacity: 1; transform: none; pointer-events: auto; }
+.mk-pop.mk-open {
+  opacity: 1; visibility: visible; transform: none; pointer-events: auto;
+  transition: opacity var(--mk-dur-fast) var(--mk-ease), transform var(--mk-dur-fast) var(--mk-ease), visibility 0s;
+}
 .mk-pop.mk-measuring { opacity: 0; pointer-events: none; transform: none; transition: none; }
+.mk-pop[data-kind="comment"] { border-color: color-mix(in srgb, var(--mk-comment) 45%, var(--mk-line)); }
+.mk-pop-text { display: block; }
 
-.mk-pin[data-kind="comment"] .mk-pop { border-color: #ff8a3d55; }
+.mk-reply {
+  display: block;
+  margin-block-start: 8px;
+  padding-block-start: 8px;
+  border-block-start: 1px solid var(--mk-line);
+  color: var(--mk-go-ink);
+  font-size: var(--mk-text-xs);
+}
 
 .mk-del {
   display: inline-block;
   margin-block-start: 8px;
-  padding: 3px 9px;
-  border: 0;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--mk-danger) 55%, transparent);
   border-radius: 999px;
-  background: #ff8a3d22;
-  color: #ffb27f;
-  font: 600 11px/1 ui-sans-serif, system-ui, sans-serif;
+  background: transparent;
+  color: var(--mk-danger-ink);
+  font: 600 var(--mk-text-xs)/1.2 var(--mk-font);
   cursor: pointer;
+  transition: background var(--mk-dur-fast) var(--mk-ease), color var(--mk-dur-fast) var(--mk-ease);
 }
-.mk-del:hover { background: #ff8a3d; color: #14121c; }
+.mk-del:hover { background: var(--mk-danger); color: var(--mk-on-danger); }
+.mk-del:focus { outline: none; }
+.mk-del:focus-visible { outline: 2px solid var(--mk-focus); outline-offset: 2px; }
+.mk-del kbd { font: inherit; opacity: .8; }
+
+/* ---- keyboard comment placement: the crosshair, the target outline, the announcer ---- */
+.mk-xhair {
+  position: fixed;
+  z-index: 2147483005;
+  inline-size: 28px;
+  block-size: 28px;
+  margin-block-start: -14px;
+  margin-inline-start: -14px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 2px solid var(--mk-comment);
+  box-shadow: 0 0 0 2px var(--mk-pin-ring), 0 2px 10px var(--mk-shadow);
+  pointer-events: none;                               /* never the hit-test target — the mock under it is */
+  background:
+    linear-gradient(var(--mk-comment), var(--mk-comment)) center / 2px 100% no-repeat,
+    linear-gradient(var(--mk-comment), var(--mk-comment)) center / 100% 2px no-repeat;
+}
+.mk-xhair:focus { outline: none; }
+.mk-xhair:focus-visible { outline: 2px solid var(--mk-focus); outline-offset: 4px; }
+.mk-xtarget {
+  position: fixed;
+  z-index: 2147483004;
+  box-sizing: border-box;
+  border: 2px dashed var(--mk-comment);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mk-comment) 8%, transparent);
+  pointer-events: none;
+  transition: inset var(--mk-dur-fast) var(--mk-ease), inline-size var(--mk-dur-fast) var(--mk-ease),
+              block-size var(--mk-dur-fast) var(--mk-ease);
+}
+.mk-xtarget-label {
+  position: absolute;
+  inset-block-end: 100%;
+  inset-inline-start: -2px;
+  max-inline-size: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 4px 4px 0 0;
+  background: var(--mk-comment);
+  color: var(--mk-on-comment);
+  font: 600 var(--mk-text-xs)/1.4 var(--mk-font);
+}
+.mk-xtarget.mk-label-below .mk-xtarget-label { inset-block-end: auto; inset-block-start: 100%; border-radius: 0 0 4px 4px; }
+.mk-sr {
+  position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 
 /* ---- the comment composer (replaces the native prompt) ---- */
 .mk-dlg-backdrop {
   position: fixed; inset: 0; z-index: 2147483008;
-  background: rgb(8 6 14 / .34); backdrop-filter: blur(2px);
-  animation: mk-dlg-fade .14s ease;
+  background: var(--mk-scrim); backdrop-filter: blur(2px);
+  animation: mk-dlg-fade var(--mk-dur) var(--mk-ease);
 }
 .mk-dlg-dot {
   position: fixed; z-index: 2147483009; inline-size: 12px; block-size: 12px;
   margin-block-start: -6px; margin-inline-start: -6px; border-radius: 50%;
-  background: #ff8a3d; box-shadow: 0 0 0 4px #ff8a3d40; animation: mk-dlg-pulse 1.2s ease-in-out infinite;
+  background: var(--mk-comment);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--mk-comment) 25%, transparent);
+  animation: mk-dlg-pulse 1.2s ease-in-out infinite;
 }
 .mk-dlg {
-  position: fixed; z-index: 2147483010; inline-size: min(320px, 86vw);
-  padding: 14px; border-radius: 14px; background: #17131f; color: #f2f0ff;
-  border: 1px solid #ffffff1f; box-shadow: 0 22px 64px rgb(0 0 0 / .6);
-  font: 400 13px/1.4 ui-sans-serif, system-ui, sans-serif;
+  position: fixed; z-index: 2147483010; inline-size: min(340px, 86vw); box-sizing: border-box;
+  padding: 14px; border-radius: 14px; background: var(--mk-panel); color: var(--mk-ink);
+  border: 1px solid var(--mk-line); box-shadow: 0 22px 64px var(--mk-shadow);
+  font: 400 var(--mk-text-sm)/1.4 var(--mk-font);
   opacity: 0; transform: scale(.94) translateY(6px);
-  transition: opacity .16s ease, transform .18s cubic-bezier(.2, .9, .3, 1.25);
+  transition: opacity var(--mk-dur) var(--mk-ease), transform var(--mk-dur) var(--mk-ease-pop);
 }
 .mk-dlg.mk-dlg-in { opacity: 1; transform: none; }
-.mk-dlg-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
-.mk-dlg-dotmark { inline-size: 9px; block-size: 9px; border-radius: 50%; background: #ff8a3d; box-shadow: 0 0 8px #ff8a3d; }
-.mk-dlg-on { margin: 5px 0 10px; font-size: 12px; color: #8f88ad; }
-.mk-dlg-input {
-  inline-size: 100%; box-sizing: border-box; resize: vertical; min-block-size: 62px;
-  padding: 9px 11px; border-radius: 9px; border: 1px solid #2a2637; background: #0f0d16; color: #f2f0ff;
-  font: 400 14px/1.45 ui-sans-serif, system-ui, sans-serif;
+.mk-dlg-head { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; font-size: var(--mk-text-md); }
+.mk-dlg-dotmark {
+  inline-size: 9px; block-size: 9px; border-radius: 50%; background: var(--mk-comment);
+  box-shadow: 0 0 8px var(--mk-comment);
 }
-.mk-dlg-input:focus { outline: none; border-color: #ff8a3d; box-shadow: 0 0 0 3px #ff8a3d33; }
-.mk-dlg-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
-.mk-dlg-hint { font-size: 11px; color: #6f688a; }
-.mk-dlg-hint kbd { padding: 1px 5px; border-radius: 4px; background: #2a2637; font: inherit; font-size: 10px; }
+.mk-dlg-on { margin: 5px 0 10px; font-size: var(--mk-text-xs); color: var(--mk-muted); }
+.mk-dlg-input {
+  inline-size: 100%; box-sizing: border-box; resize: vertical; min-block-size: 64px;
+  padding: 9px 11px; border-radius: 9px; border: 1px solid var(--mk-line-strong);
+  background: var(--mk-panel-2); color: var(--mk-ink);
+  font: 400 var(--mk-text-md)/1.45 var(--mk-font);
+}
+.mk-dlg-input::placeholder { color: var(--mk-faint); }
+.mk-dlg-input:focus {
+  outline: none; border-color: var(--mk-comment);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mk-comment) 20%, transparent);
+}
+.mk-dlg-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-block-start: 10px; }
+.mk-dlg-hint { font-size: var(--mk-text-xs); color: var(--mk-faint); }
+.mk-dlg-hint kbd {
+  padding: 1px 5px; border-radius: 4px; background: var(--mk-panel-2); color: var(--mk-muted);
+  border: 1px solid var(--mk-line); font: inherit; font-size: var(--mk-text-xs);
+}
 .mk-dlg-btns { display: flex; gap: 8px; flex: none; }
-.mk-dlg-cancel { border: 1px solid #2a2637; background: transparent; color: #b9b2d6; cursor: pointer;
-                 border-radius: 8px; padding: 7px 12px; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; }
-.mk-dlg-cancel:hover { border-color: #4a4560; color: #f2f0ff; }
-.mk-dlg-pin { border: 0; background: #ff8a3d; color: #14121c; cursor: pointer;
-              border-radius: 8px; padding: 7px 14px; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; }
-.mk-dlg-pin:hover { background: #ffa25c; }
+.mk-dlg-cancel, .mk-dlg-pin {
+  border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  font: 600 var(--mk-text-sm)/1 var(--mk-font);
+  transition: background var(--mk-dur-fast) var(--mk-ease), border-color var(--mk-dur-fast) var(--mk-ease),
+              color var(--mk-dur-fast) var(--mk-ease);
+}
+.mk-dlg-cancel { border: 1px solid var(--mk-line-strong); background: transparent; color: var(--mk-muted); }
+.mk-dlg-cancel:hover { border-color: var(--mk-muted); color: var(--mk-ink); }
+.mk-dlg-pin { border: 0; background: var(--mk-comment); color: var(--mk-on-comment); }
+.mk-dlg-pin:hover { background: color-mix(in srgb, var(--mk-comment) 85%, var(--mk-pin-ring)); }
+.mk-dlg-cancel:focus, .mk-dlg-pin:focus { outline: none; }
+.mk-dlg-cancel:focus-visible, .mk-dlg-pin:focus-visible { outline: 2px solid var(--mk-focus); outline-offset: 2px; }
 @keyframes mk-dlg-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes mk-dlg-pulse { 0%, 100% { box-shadow: 0 0 0 4px #ff8a3d40; } 50% { box-shadow: 0 0 0 10px #ff8a3d14; } }
+@keyframes mk-dlg-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--mk-comment) 25%, transparent); }
+  50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--mk-comment) 8%, transparent); }
+}
 
 /* Themed scrollbars for the WHOLE review system. review.css loads in the gallery AND inside every mock
    frame, so this one block themes every scrollbar consistently — the page, the side-list, popovers, the
    composer, the mock-in-Focus scroll, and the version frames. A rounded thumb inset by a 3px border in
-   the TRACK colour (opaque dark — the padding reads as a groove; see the track note below for why it
-   can't be transparent), quiet at rest, purple on hover; the evolution strip gets the accent thumb.
-   Trade-off: on a rare LIGHT mock this reads as dark chrome — acceptable; a mock that styles
-   its own scrollbar still wins (its inline <style> comes after this file). (Scrollbars can't be .mk-*
-   namespaced; this is the deliberate exception.) WebKit pseudos are primary; the standard scrollbar-*
-   props are gated to Firefox via @supports so they don't disable the pseudos in Chrome. */
+   the TRACK colour (opaque — the padding reads as a groove; see the track note below for why it can't be
+   transparent), quiet at rest, intent-tinted on hover; the evolution strip gets the accent thumb.
+   A mock that styles its own scrollbar still wins (its inline <style> comes after this file).
+   (Scrollbars can't be .mk-* namespaced; this is the deliberate exception.) WebKit pseudos are primary;
+   the standard scrollbar-* props are gated to Firefox via @supports so they don't disable the pseudos
+   in Chrome. */
 ::-webkit-scrollbar { width: 12px; height: 12px; }
-/* Track is an OPAQUE dark, NOT transparent: a mock is color-scheme:normal, so a transparent track shows
-   the browser's light-mode default scrollbar backing (white). Opaque dark masks it in every frame. */
-::-webkit-scrollbar-track { background: #14121c; }
-::-webkit-scrollbar-thumb { background: #37324a; border-radius: 999px; border: 3px solid #14121c; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, #7c5cff 65%, #37324a); }
-::-webkit-scrollbar-corner { background: #14121c; }
-.evolution::-webkit-scrollbar-thumb { background: color-mix(in srgb, #7c5cff 55%, #37324a); }
+/* Track is OPAQUE, NOT transparent: a mock is color-scheme:normal, so a transparent track shows the
+   browser's default scrollbar backing. An opaque track in the harness theme masks it in every frame. */
+::-webkit-scrollbar-track { background: var(--mk-track); }
+::-webkit-scrollbar-thumb {
+  background: var(--mk-thumb); border-radius: 999px; border: 3px solid var(--mk-track); background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--mk-intent) 65%, var(--mk-thumb)); }
+::-webkit-scrollbar-corner { background: var(--mk-track); }
+.evolution::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--mk-intent) 55%, var(--mk-thumb)); }
 @supports not selector(::-webkit-scrollbar-thumb) {
-  * { scrollbar-width: thin; scrollbar-color: #2a2637 transparent; }
-  .evolution { scrollbar-color: color-mix(in srgb, #7c5cff 55%, #2a2637) transparent; }
+  * { scrollbar-width: thin; scrollbar-color: var(--mk-thumb) transparent; }
+  .evolution { scrollbar-color: color-mix(in srgb, var(--mk-intent) 55%, var(--mk-thumb)) transparent; }
 }
 
 body.mk-commenting { cursor: crosshair; }
 body.mk-commenting::after {
-  content: "comment mode — click the exact spot";
+  content: "comment mode — click a spot, or arrows + Enter";
   position: fixed;
   inset-block-start: 8px;
   inset-inline-start: 8px;
   z-index: 2147483002;
   padding: 5px 11px;
   border-radius: 999px;
-  background: #ff8a3d;
-  color: #14121c;
-  font: 600 11px/1 ui-sans-serif, system-ui, sans-serif;
-  box-shadow: 0 2px 10px rgb(0 0 0 / .35);
+  background: var(--mk-comment);
+  color: var(--mk-on-comment);
+  font: 600 var(--mk-text-xs)/1.2 var(--mk-font);
+  box-shadow: 0 2px 10px var(--mk-shadow);
+  pointer-events: none;
 }
