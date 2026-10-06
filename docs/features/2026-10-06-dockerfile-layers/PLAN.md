@@ -24,7 +24,7 @@
 6. This repo (adopted): switch devcontainer.json to `build` by hand; move alsa-utils/sox into os-packages.txt.
 
 ## Units / status
-- [ ] U1 map generator internals (Explore agent, read-only) — running
+- [x] U1 map generator internals (Explore agent) — done; distillation below
 - [ ] U2 implement composer/generator/fragments
 - [ ] U3 tests (test-layers, test-generators)
 - [ ] U4 migration question (owned file keeps a stale `image`?)
@@ -32,3 +32,24 @@
 - [ ] U6 dogfood: upgrade --local on this repo + hand switch; read whole diff
 - [ ] U7 bump nx-tools + bespunky-house; invariants
 - [ ] U8 user rebuild from development BEFORE promoting to main; observe
+
+## U1 distillation (Explore agent) — and what it changed in the design
+- The merge (owned 'assert' AND adopted 'adopt') NEVER removes a key: an owned devcontainer.json would keep a stale
+  `image` next to the new `build` → **a migration (0.48.0) is owed**: drop the house-written `image` (houseWrote).
+- Adopt mode ADDS any key the project lacks: a project with its own `image` would get `build` beside it → the composer
+  must not emit `build` when the project declares its own image source (image/build/dockerFile/dockerComposeFile);
+  report the one-line switch instead.
+- A project may own `.devcontainer/Dockerfile` → the house file is `house.Dockerfile` (no collision, no parking logic).
+- `adoptedImageUser` (generator.ts) treats `image === houseImage` as house → must also treat `build.dockerfile ===
+  'house.Dockerfile'` as house.
+- Voice has no osPackages; its piece runs its own socket-gated apt → packages move to the composed list (installed on
+  voice INTENT, not on a socket — small, and a host fact can't key a cached build layer).
+- Tests depending on post-create apt text: test-layers :541 :632 :651 :667, the `reclaimed` helper's cut marker
+  ('\n# --- The OS packages' — keep that header so the cut stays meaningful), plus negative regexes :540 :613 :718.
+- No test-generators devcontainer case; all coverage in test-layers.
+- Docs to sweep: CLAUDE.md:61,63,152 · README.md:478,554,563,565 · skills/new/SKILL.md:27,66,152 · house.sh:25-27,1032 ·
+  HOUSE.md.tpl:14 · header.sh.tpl:5 · firebase-banner.sh.tpl:2 · generator.ts:8,403 · descriptor.ts:290 · web.ts:117 ·
+  this repo's post-create.local.sh:27,32.
+- ONE installer, used by both the image build and post-create: `.devcontainer/os-packages.sh` (owned; the house list
+  embedded, the project list `.devcontainer/os-packages.txt` seeded) installs only what is MISSING. Image build:
+  everything (cached layer). post-create: a no-op in a house-built image; the install for an adopted image.
