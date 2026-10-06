@@ -20,13 +20,13 @@
 // project id and the tab label's base host, so it is resolved ONCE from the workspace root — never from the new
 // app's name (which corrupted the workspace-level scripts the moment a second app was added).
 import { type Tree, type GeneratorCallback, formatFiles } from '@nx/devkit';
-import { basename } from 'node:path';
 import { detectLayers, inRegistryOrder, isPresent, layer } from '../../layers/registry';
 import { ADAPTERS, adapter } from '../../adapters/registry';
 import { workspaceStackWith } from '../../adapters/workspace';
 import { attachCapabilities } from './attach';
 import { resolveAppsDir } from '../_utils/workspace-layout';
 import { joinWorkspace } from '../_utils/project-files';
+import { workspaceIdentity } from '../_utils/workspace-identity';
 
 interface AppGeneratorSchema {
   // Workspace-relative directory for the app (positional arg 0). Default: `<appsDir>/<name>`.
@@ -89,7 +89,7 @@ export default async function appGenerator(tree: Tree, options: AppGeneratorSche
   if (options.firebase === false) active.delete('firebase');
   const attached = await attachCapabilities(tree, {
     app: project,
-    workspaceName: options.workspaceName ?? basename(tree.root),
+    workspaceName: options.workspaceName ?? workspaceIdentity(tree),
     active,
     staging: options.staging === true,
   });

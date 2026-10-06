@@ -14,7 +14,7 @@
     },
     "workspaceName": {
       "type": "string",
-      "description": "Workspace name used to build the FALLBACK offline emulator project id (`demo-<name>`). Defaults to the workspace root directory name. (Not written to .firebaserc — that's the Firebase CLI's responsibility.)"
+      "description": "Workspace name used to build the FALLBACK offline emulator project id (`demo-<name>`). Defaults to --project, else the workspace's identity — its directory's name in the repository's main worktree, even when run from a linked worktree. (Not written to .firebaserc — that's the Firebase CLI's responsibility.)"
     },
     "staging": {
       "type": "boolean",

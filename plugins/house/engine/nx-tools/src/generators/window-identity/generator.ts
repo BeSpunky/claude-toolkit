@@ -20,7 +20,6 @@
 //    byte-identical output and a name-hashed colour is stable across machines and clones.
 import { type Tree, logger, parseJson } from '@nx/devkit';
 import { applyEdits, modify } from 'jsonc-parser';
-import { basename } from 'node:path';
 import {
   colorCustomizations,
   deriveShades,
@@ -31,6 +30,7 @@ import {
   type Surface,
 } from './color';
 import { type WindowIdentitySchema } from './schema';
+import { workspaceIdentity } from '../_utils/workspace-identity';
 
 type Json = Record<string, unknown>;
 type Source = 'name-hash' | 'design-system' | 'manual';
@@ -154,17 +154,18 @@ export default async function windowIdentityGenerator(
 
 /**
  * The workspace's name, which seeds the name hash: the root package.json `name` (scope stripped) when there
- * is one, else the workspace DIRECTORY name.
+ * is one, else the workspace's IDENTITY — its directory's name in the main worktree (`workspaceIdentity`).
  *
  * The directory fallback is what keeps a package.json-less repo (Python, Go, a docs repo on the Nx floor)
  * distinct. Without it every such repo fell through to the same literal placeholder, so they all hashed to
- * ONE colour — the exact sameness this generator exists to remove. The directory is also what VSCode's own
- * `${rootName}` shows in the title, so the colour and the label agree on what the project is called.
+ * ONE colour — the exact sameness this generator exists to remove. In the main worktree that directory is also
+ * what VSCode's own `${rootName}` shows in the title, so the colour and the label agree on what the project is
+ * called; from a linked worktree it is still the project's colour, never one hashed from the worktree's slug.
  */
 function workspaceName(tree: Tree): string | null {
   const raw = readJson(tree, 'package.json')?.['name'];
   if (typeof raw === 'string' && raw) return raw.replace(/^@[^/]+\//, '');
-  return basename(tree.root) || null;
+  return workspaceIdentity(tree) || null;
 }
 
 /**

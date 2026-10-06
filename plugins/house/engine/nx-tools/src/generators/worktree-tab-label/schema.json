@@ -18,7 +18,7 @@
     },
     "workspaceName": {
       "type": "string",
-      "description": "Override the base-host sentinel. Defaults to the workspace root directory name.",
+      "description": "Override the base-host sentinel. Defaults to the workspace's identity — its directory's name in the repository's main worktree, even when run from a linked worktree — which is what the dev loop serves the main tree at.",
       "x-priority": "internal"
     }
   },

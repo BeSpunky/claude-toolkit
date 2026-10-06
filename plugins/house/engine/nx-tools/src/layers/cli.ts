@@ -10,9 +10,10 @@
 //         warn<TAB><sentence>
 //         partial
 //   node <nx-tools>/src/layers/cli.js apps
-//       The workspace's CLIENT applications — the apps an upgrade's per-app steps are for — one per line as
-//       `<project name><TAB><project root>`. Layout- and linking-agnostic: read from the project graph (project.json
-//       and package.json projects alike) and classified by `projectRole`, never by where a directory sits.
+//       The apps an upgrade's per-app steps are for — one per line as `<project name><TAB><project root>`: the
+//       client applications the project DECLARES it serves (`.bespunky/dev.json`), else every client application
+//       in the graph. Layout- and linking-agnostic: read from the project graph (project.json and package.json
+//       projects alike) and classified by `projectRole`, never by where a directory sits.
 //   node <nx-tools>/src/layers/cli.js shell
 //       The SHELL PROJECTION of the registry (engine/layers.sh): data + pure-bash functions for the two
 //       consumers that cannot load this package — house.sh's outer shell (it validates the layers to add BEFORE
@@ -31,6 +32,7 @@ import { ADAPTERS, projectRole } from '../adapters/registry';
 import { getProjects, type Tree } from '@nx/devkit';
 import { DEFAULT_LAYOUT, LAYOUTS, type LayoutId } from '../generators/_utils/workspace-layout';
 import type { LinkingKind } from '../generators/_utils/linking';
+import { readDeclaration } from '../generators/dev/declaration';
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
@@ -68,7 +70,7 @@ function main(argv: string[]): void {
       return;
     }
     case 'apps':
-      for (const app of clientApps(workspace())) process.stdout.write(`${app.name}\t${app.root}\n`);
+      for (const app of appsToRefresh(workspace())) process.stdout.write(`${app.name}\t${app.root}\n`);
       return;
     case 'shell':
       process.stdout.write(shellProjection());
@@ -109,9 +111,18 @@ function required(flags: Record<string, string>, key: string): string {
 // ── the workspace's apps ──────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The apps a sync refreshes when none is named: every APPLICATION (`projectRole` — a stack recognising its own
- * build, the declared `projectType`, Nx's tsconfig convention; so a package.json-defined project counts too) that
- * is not SERVER-side.
+ * The apps an upgrade refreshes when none is named.
+ *
+ * The CANDIDATES are every APPLICATION (`projectRole` — a stack recognising its own build, the declared
+ * `projectType`, Nx's tsconfig convention; so a package.json-defined project counts too) that is not SERVER-side.
+ * The graph cannot say more than that: a Windows service, an HTTP API or a test-fixture tool is an application
+ * no stack recognises as server-side unless someone tagged it, and a workspace with four of them made inference
+ * decline and every per-app step skip. The project, though, has already SAID which of its apps it serves — its
+ * `.bespunky/dev.json` names them — and the per-app steps (the dev-server, the worktree tab label, the design
+ * system's sass channel, the Firebase client) are about exactly that. So a declaration that names any candidate
+ * narrows the candidates to those it names; a declaration that names none of them (a dev.json serving only
+ * non-Nx processes) or no declaration at all leaves the graph's answer standing. A declared FACT outranks an
+ * inferred one, and the inference still covers the projects that have not declared anything.
  *
  * Why the server exclusion, and why by tag: the per-app steps a sync runs (the dev-server, the design system's
  * sass channel, the Firebase client) are all for something a browser loads. The house's own server app — Cloud
@@ -122,7 +133,7 @@ function required(flags: Record<string, string>, key: string): string {
  * project lives and whatever it is called; a renamed or relocated functions app is still excluded, and an
  * untagged app (no Firebase in the workspace at all) is a candidate, exactly as before.
  */
-export function clientApps(tree: Tree): Array<{ name: string; root: string }> {
+export function appsToRefresh(tree: Tree): Array<{ name: string; root: string }> {
   if (!tree.exists('nx.json')) return [];
   const apps: Array<{ name: string; root: string }> = [];
   for (const [name, project] of getProjects(tree)) {
@@ -130,7 +141,9 @@ export function clientApps(tree: Tree): Array<{ name: string; root: string }> {
     if (project.tags?.includes(SERVER_PLATFORM_TAG)) continue;
     apps.push({ name, root: project.root });
   }
-  return apps.sort((a, b) => a.name.localeCompare(b.name));
+  const served = new Set(Object.keys(readDeclaration(tree)?.apps ?? {}));
+  const declared = apps.filter((app) => served.has(app.name));
+  return (declared.length > 0 ? declared : apps).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** The house's tag for a server-side deployable (firebase-emulators sets it on Cloud Functions). */

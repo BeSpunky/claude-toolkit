@@ -13,7 +13,7 @@
     },
     "scope": {
       "type": "string",
-      "description": "The npm scope for the import path, WITHOUT the leading `@` (e.g. `acme` -> `@acme/design-system`). Defaults to the workspace's scope (the root package.json name, else the workspace directory name).",
+      "description": "The npm scope for the import path, WITHOUT the leading `@` (e.g. `acme` -> `@acme/design-system`). Defaults to the workspace's scope (the root package.json name, else the workspace's identity — its directory's name in the repository's main worktree, even when run from a linked worktree).",
       "x-priority": "important"
     },
     "importPath": {

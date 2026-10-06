@@ -47,7 +47,7 @@
     },
     "workspaceName": {
       "type": "string",
-      "description": "Override the workspace identity that seeds the emulators' offline `demo-<workspaceName>` project id. Defaults to the workspace root directory name — correct in every normal case; do not pass it unless retargeting.",
+      "description": "Override the workspace identity that seeds the emulators' offline `demo-<workspaceName>` project id. Defaults to the workspace's identity — its directory's name in the repository's main worktree, even when run from a linked worktree — correct in every normal case; do not pass it unless retargeting.",
       "x-priority": "internal"
     },
     "skipFormat": {

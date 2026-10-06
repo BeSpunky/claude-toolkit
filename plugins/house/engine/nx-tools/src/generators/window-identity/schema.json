@@ -7,7 +7,7 @@
   "properties": {
     "name": {
       "type": "string",
-      "description": "The name that seeds the name-hash placeholder colour. Defaults to the workspace package.json name (scope stripped), else the workspace directory name. The window.title label itself uses VSCode's ${rootName}, so it tracks the folder regardless.",
+      "description": "The name that seeds the name-hash placeholder colour. Defaults to the workspace package.json name (scope stripped), else the workspace's identity — its directory's name in the repository's main worktree, even when run from a linked worktree. The window.title label itself uses VSCode's ${rootName}, so it tracks the folder regardless.",
       "x-priority": "important"
     },
     "primary": {
