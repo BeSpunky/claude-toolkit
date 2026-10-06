@@ -16,7 +16,7 @@
   --mk-panel: #14121c;
   --mk-panel-2: #1c1927;
   --mk-line: #2a2637;
-  --mk-line-strong: #4a4560;
+  --mk-line-strong: #716b8f;     /* UI boundaries (inputs, checkboxes): ≥ 3:1 on bg / panel / panel-2 */
   --mk-ink: #f2f0ff;
   --mk-muted: #b9b2d6;
   --mk-faint: #8c85a8;
@@ -61,16 +61,16 @@
     --mk-panel: #ffffff;
     --mk-panel-2: #efecf7;
     --mk-line: #dcd7ea;
-    --mk-line-strong: #b4acd0;
+    --mk-line-strong: #857da3;   /* ≥ 3:1 on bg / panel / panel-2 */
     --mk-ink: #1a1726;
     --mk-muted: #4a4463;
     --mk-faint: #625b7e;
     --mk-intent: #6643ee;
     --mk-intent-ink: #5230d4;
     --mk-on-intent: #ffffff;
-    --mk-comment: #ff8a3d;
+    --mk-comment: #b84f0c;       /* ≥ 4.3:1 on every light surface — a pin or outline must read as a boundary */
     --mk-comment-ink: #9e4300;
-    --mk-on-comment: #1a1726;
+    --mk-on-comment: #ffffff;    /* 5.05:1 on --mk-comment */
     --mk-go: #237a4b;
     --mk-go-ink: #1d6b41;
     --mk-on-go: #ffffff;
@@ -237,7 +237,6 @@
 .mk-del:hover { background: var(--mk-danger); color: var(--mk-on-danger); }
 .mk-del:focus { outline: none; }
 .mk-del:focus-visible { outline: 2px solid var(--mk-focus); outline-offset: 2px; }
-.mk-del kbd { font: inherit; opacity: .8; }
 
 /* ---- keyboard comment placement: the crosshair, the target outline, the announcer ---- */
 .mk-xhair {
@@ -284,8 +283,8 @@
   font: 600 var(--mk-text-xs)/1.4 var(--mk-font);
 }
 .mk-xtarget.mk-label-below .mk-xtarget-label { inset-block-end: auto; inset-block-start: 100%; border-radius: 0 0 4px 4px; }
-.mk-sr {
-  position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0;
+.mk-sr {                                    /* THE visually-hidden utility — the gallery uses it too */
+  position: absolute; inset-block-start: 0; inset-inline-start: 0; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 
@@ -330,9 +329,9 @@
 }
 .mk-dlg-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-block-start: 10px; }
 .mk-dlg-hint { font-size: var(--mk-text-xs); color: var(--mk-faint); }
-.mk-dlg-hint kbd {
-  padding: 1px 5px; border-radius: 4px; background: var(--mk-panel-2); color: var(--mk-muted);
-  border: 1px solid var(--mk-line); font: inherit; font-size: var(--mk-text-xs);
+.mk-kbd {                                   /* THE key-cap — the gallery's kbds wear it too */
+  padding: 0 5px; border-radius: 4px; background: var(--mk-panel-2); color: var(--mk-ink);
+  border: 1px solid var(--mk-line-strong); font: inherit; font-size: var(--mk-text-xs); white-space: nowrap;
 }
 .mk-dlg-btns { display: flex; gap: 8px; flex: none; }
 .mk-dlg-cancel, .mk-dlg-pin {

@@ -356,9 +356,9 @@
   const setMode = (v, via) => {
     on = READONLY ? false : !!v;             // a history snapshot is a record; you can't comment on the past
     document.body.classList.toggle('mk-commenting', on);
-    if (!on) xhair.hide();
-    else if (via === 'keyboard') xhair.show();   // entered by keyboard → place by keyboard; by pointer → just click
-    toGallery({ type: 'mk:mode', on });
+    const returnFocus = !on && xhair.hide();
+    if (on && via === 'keyboard') xhair.show();  // entered by keyboard → place by keyboard; by pointer → just click
+    toGallery({ type: 'mk:mode', on, returnFocus });
   };
 
   // ---- the keyboard crosshair: comment placement without a pointer ----
@@ -412,19 +412,32 @@
       clearTimeout(announceTimer);
       announceTimer = setTimeout(() => { live.textContent = `Comment target: ${label(el)}`; }, 300);
     };
+    let before = null;          // what had focus in this frame before the crosshair took it
     const show = () => {
       if (!on) return;
+      const active = document.activeElement;
+      if (active !== node && active !== document.body) before = active;
       if (x == null) { x = vw() / 2; y = vh() / 2; }
       node.hidden = false;
       box.hidden = false;
       update();
       node.focus({ preventScroll: true });
     };
+    // Hiding the focused crosshair must not drop focus on <body>: give it back to what had it in this
+    // frame, or — when focus came from the host (its Comment button, its `c`) — report that the host
+    // should take it back. Returns whether the host must restore focus.
     const hide = () => {
+      const hadFocus = document.activeElement === node;
       node.hidden = true;
       box.hidden = true;
       target = null;
       clearTimeout(announceTimer);
+      const back = before?.isConnected ? before : null;
+      before = null;
+      if (!hadFocus) return false;
+      if (back) { back.focus({ preventScroll: true }); return false; }
+      node.blur();
+      return HOSTED;
     };
     const move = (dx, dy) => {
       const nx = clampX(x + dx);
@@ -454,7 +467,9 @@
   // The frame owns: `c` (comment mode), Escape for its own things (a held/pinned popover, comment mode),
   // arrows in comment mode (they bring up the crosshair). Hosted, the gallery-level keys are FORWARDED —
   // an iframe's keydown never reaches the parent document on its own.
-  const FORWARDED = new Set(['f', 'h', '?', 'ArrowLeft', 'ArrowRight', 'Escape']);
+  // The HOST says which keys it acts on right now (mk:host-keys, sent as this frame loads), so a key is
+  // forwarded — and an arrow's default (scrolling the mock) suppressed — only when the host will use it.
+  let hostKeys = new Set();
   const ARROWS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
   addEventListener('keydown', (e) => {
     if (dialogOpen || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return;
@@ -469,8 +484,8 @@
       if (e.key === 'h') setPins(!pinsVisible);   // standalone, the frame is the whole review
       return;
     }
-    if (!FORWARDED.has(e.key) || e.defaultPrevented) return;   // a mock that handled the key keeps it
-    if (e.key.startsWith('Arrow')) e.preventDefault();         // it navigates concepts; don't also scroll
+    if (!hostKeys.has(e.key) || e.defaultPrevented) return;    // a mock that handled the key keeps it
+    if (e.key.startsWith('Arrow')) e.preventDefault();         // the host navigates with it; don't also scroll
     toGallery({ type: 'mk:key', key: e.key, shiftKey: e.shiftKey });
   });
 
@@ -478,6 +493,7 @@
 
   addEventListener('message', (e) => {
     if (e.data?.type === 'mk:set-mode') setMode(e.data.on, e.data.via);
+    if (e.data?.type === 'mk:host-keys') hostKeys = new Set(e.data.keys || []);
     if (e.data?.type === 'mk:set-pins') setPins(e.data.visible);
     if (e.data?.type === 'mk:refresh') pull();
     // The gallery's list drives these: highlight a pin on row-hover; reveal (scroll to + flash) on row-click.
@@ -519,7 +535,7 @@
     dlg.innerHTML = `<div class="mk-dlg-head" id="${headId}"><span class="mk-dlg-dotmark" aria-hidden="true"></span> Add a comment</div>`
       + `<div class="mk-dlg-on" id="${onId}"></div>`
       + '<textarea class="mk-dlg-input" rows="3" placeholder="What about this?" aria-label="Comment"></textarea>'
-      + '<div class="mk-dlg-foot"><span class="mk-dlg-hint"><kbd>Enter</kbd> to pin · <kbd>Esc</kbd> to cancel</span>'
+      + '<div class="mk-dlg-foot"><span class="mk-dlg-hint"><kbd class="mk-kbd">Enter</kbd> to pin · <kbd class="mk-kbd">Esc</kbd> to cancel</span>'
       + '<span class="mk-dlg-btns"><button type="button" class="mk-dlg-cancel">Cancel</button>'
       + '<button type="button" class="mk-dlg-pin">Pin comment</button></span></div>';
     dlg.querySelector('.mk-dlg-on').textContent = `on ${labelText}`;   // textContent → no HTML injection
