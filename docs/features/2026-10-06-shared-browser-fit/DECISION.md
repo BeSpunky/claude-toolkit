@@ -119,3 +119,60 @@ upgrade, runs with `--user-data-dir=<profile>` so the CLI counts it as our chrom
 both fixes: up → status (`maximized 1440x900`, 0.198 s) → fullscreen on → off → down (ports free) → clean: runtime
 left with only `host-verified logs profile up.lock` (`fluxbox`, `novnc-web`, `web.port` gone; `logs`/`profile`
 are re-created empty by `ensure_dirs`, as before). bash -n, test-layers 87/0, test-scaffold, check-script-modes pass.
+
+## 2026-10-06 — Dogfood — consumer path
+
+Run in this container (Debian 13 trixie, `typescript-node:22`), scratch project outside the repo
+(`<scratchpad>/dogfood/sbdog`), default ports (`:99`, VNC 5900, CDP 9223 — checked free with `ss -ltnp` first;
+noVNC allocated 6094 from the band).
+
+**Before (current release, nx-tools 0.45.1 from npm).** `house.sh new --add-layer=web` is refused ("a scaffold can
+ensure the 'web' layer only together with 'angular'"), so the scaffold was `new --preset=angular --no-github sbdog web`
+from the development checkout. `xvfb x11vnc` installed by hand; `shared-browser up` → `Xvfb :99 -screen 0 1440x900x24`
++ `x11vnc -display :99 -rfbport 5900 …`, URL `…&resize=scale…`. The old stack.
+
+**Upgrade with the old stack live** — `house.sh upgrade --local --yes <scratch>` from this worktree. Two gates first, both
+correct: no `--yes` → refused (no TTY); on `main` with no branch model → `UPGRADE_REFUSED: protected-branch`, so it ran on a
+scratch branch. Preflight: "would have migrated 0.45.1 -> 0.45.1" (the payload is not bumped yet — expected; the release
+owes the bump). The WHOLE diff: `tools/shared-browser/shared-browser` (the template), `.devcontainer/post-create.sh`
+(only the shared-browser package line + its comment: `xvfb x11vnc` → `tigervnc-standalone-server`), `HOUSE.md` (the
+one shared-browser paragraph), and `yarn.lock` — the `@bespunky/nx-tools@0.45.1` registry entry is DELETED (8 lines).
+That last one is the known `--local` artifact (the engine itself warns "Do not commit the lockfile from this run"),
+not a branch defect. Nothing else: no `devcontainer.json`, `HOUSE.rules.md`, `verify.mjs`/`attach.mjs` change.
+`sudo apt-get install -y tmux curl tigervnc-standalone-server novnc websockify fluxbox fonts-liberation
+fonts-noto-color-emoji iproute2 procps` (exactly the composed list) → rc 0.
+
+**The upgraded CLI, as a consumer.** `up` over the live old stack: "retiring the previous Xvfb + x11vnc stack (this
+version runs Xvnc) — the shared browser restarts once", then UP in 2.06 s; no `Xvfb`/`x11vnc` left; `Xvnc :99
+-geometry 1440x900 -depth 24 …` + `fluxbox -no-toolbar -no-slit`. `status` all up, `window maximized 1440x900`;
+`status --json` 0.19 s with `components` `xvnc fluxbox chrome websockify recorder` and `window`; `url` →
+`http://localhost:6094/vnc.html?autoconnect=true&resize=remote&reconnect=true&show_dot=true`. noVNC tab title
+`"sbdog (shared browser) - noVNC"`. Headless Playwright on that URL; X screen from `xdpyinfo -display :99`, window
+from CDP `Browser.getWindowForTarget`, page from the active tab's `innerWidth/innerHeight`:
+
+    viewer 2560x1440 → X 2560x1440 → maximized 2560x1440 → page 2560x1353
+    viewer 1920x1080 → X 1920x1080 → maximized 1920x1080 → page 1920x993
+    viewer 1280x800  → X 1280x800  → maximized 1280x800  → page 1280x713   (87 px of tab strip + omnibox)
+    fullscreen on:
+    viewer 2560x1440 → X 2560x1440 → fullscreen 2560x1440 → page 2560x1440
+    viewer 1920x1080 → X 1920x1080 → fullscreen 1920x1080 → page 1920x1080
+    viewer 1280x800  → X 1280x800  → fullscreen 1280x800  → page 1280x800
+    fullscreen off   → maximized 1280x800, page 1280x713
+
+Screenshot (borderless, no infobar): `<scratchpad>/dogfood/novnc-1920x1080.png` (+ `-fullscreen.png`).
+
+**Serve path.** `yarn nx serve web --port-offset=1717` → `tools/dev/dev serve` brought the browser up (already up),
+printed the `resize=remote` viewer URL, registered `sbdog.localhost`, and navigated the shared browser to it
+(tab title `web`, page 1280x713 in a 1280x800 desktop). **Attach.** `attach.mjs` `pages()` / `withPage()` and
+`verify.mjs` `measure()` / `injectStyle()` / `screenshotPair()` all worked over CDP 9223 and detached cleanly.
+
+**Defects in this branch: none found.**
+
+**Pre-existing, NOT from this branch (reproduced with the 0.45.1 script too):** Chromium's tabs accumulate across
+restarts — every `up` of an existing profile restores the previous session's tabs AND opens the `about:blank`
+argument (1 → 2 → 3 tabs after two `restart`s, identically with the old script on a separate display/runtime).
+Background tabs keep a stale size (1042x789) until activated, so a measurement must pick the active tab. Worth its
+own fix (e.g. `--restore-last-session` off / no URL argument), outside this effort. Also cosmetic and pre-existing:
+`up` prints `started <comp> (pid ?)` for most components.
+
+Still not covered: a real devcontainer REBUILD on the bookworm image (Xvnc 1.12) — no Docker here.
