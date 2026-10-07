@@ -29,7 +29,21 @@ export default {
         t.hasNot(LOCAL, 'scaffold.sh');
         t.has(LOCAL, 'os-packages.txt');
       },
-      historicalShapes: [{ name: 'the 0.15.0 seed (2ace14b)', setup: (tree) => tree.write(LOCAL, stub('scaffold.sh --repair')) }],
+      // Every stub the devcontainer generator ever seeded (its LOCAL_STUB at each commit on origin/development):
+      //   git show 2ace14b:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/devcontainer/generator.ts
+      //     — `scaffold.sh --repair` (0.15.0; 5812cb1 identical)
+      //   git show 2c58e20:<same path> — `scaffold.sh --sync` (0.16.0–0.38.x, unchanged through 8ec2259) — the canonical setup
+      //   git show 6a23e4e:plugins/house/engine/nx-tools/src/generators/devcontainer/generator.ts — `house.sh upgrade` (0.39.0–0.47.x)
+      //   git show f0d6905:<same path> — the current stub (0.48.0; 0484236's draft never shipped alone)
+      historicalShapes: [
+        { name: 'the 0.15.0 seed (2ace14b)', setup: (tree) => tree.write(LOCAL, stub('scaffold.sh --repair')) },
+        {
+          name: 'the 0.39–0.47 seed (6a23e4e)',
+          diverges: "it is 0.48.0's input (build-from-house-dockerfile refreshes it, and runs first on every ladder that meets it) — this rung alone leaves it",
+          setup: (tree) => tree.write(LOCAL, stub('house.sh upgrade')),
+          expect: (tree, t) => t.equal(t.read(LOCAL), stub('house.sh upgrade'), 'post-create.local.sh'),
+        },
+      ],
     },
     {
       name: 'a seed the project added to: theirs, untouched',

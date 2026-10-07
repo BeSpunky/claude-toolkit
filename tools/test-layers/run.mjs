@@ -307,6 +307,7 @@ const ctxFor = (tree, overrides = {}) => {
     mode: 'upgrade',
     active: ordered([...detected, ...ensured]),
     ensured: new Set(ensured),
+    detected: new Set(detected),
     project: 'shop',
     app: 'shop',
     voice: false,
@@ -381,10 +382,18 @@ check('full house sync: per-app steps first, then workspace steps in registry or
   // Phase 4: the Firebase CLIENT attaches per app (through the app's stack adapter), the neutral CORE is a
   // workspace step that runs after it and follows the client app.
   ok(got.includes('firebase-client --project=shop --workspaceName=shop --staging=true --wireProviders'), 'firebase client args');
-  ok(got.includes('firebase-emulators --workspaceName=shop --staging=true --clientApp=shop --seedRules'), 'firebase core args (ensured: seeds rules)');
-  // Seeding rules is a baseline act: an upgrade that merely DETECTS firebase never seeds (the console may hold the live rules).
+  // R5-3: seeding rules is a CREATION act. This workspace already has Firebase (detected), so ensuring it again
+  // (`add-layer firebase` on it) must not seed: its emulators run open today, and deny-all would break them.
+  ok(got.includes('firebase-emulators --workspaceName=shop --staging=true --clientApp=shop'), 'firebase core args');
+  ok(!got.some((l) => l.startsWith('firebase-emulators ') && l.includes('--seedRules')), `a re-ensure of a detected layer seeds no rules: ${got.find((l) => l.startsWith('firebase-emulators '))}`);
+  // An upgrade that merely DETECTS firebase never seeds either (the console may hold the live rules).
   const detected = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { ensured: ['nx'] }), STAMP));
   ok(detected.some((l) => l.startsWith('firebase-emulators ') && !l.includes('--seedRules')), `a detect-only sync seeds no rules: ${detected.find((l) => l.startsWith('firebase-emulators '))}`);
+  // The run that CREATES it — ensured, not detected — seeds.
+  const fresh = FIXTURES['angular web app with firebase and a design system']();
+  fresh.delete('firebase.json');
+  const created = render(plan(ctxFor(fresh, { ensured: ['nx', 'firebase'] }), STAMP));
+  ok(created.some((l) => l.startsWith('firebase-emulators ') && l.includes('--seedRules')), `creating the layer seeds rules: ${created.find((l) => l.startsWith('firebase-emulators '))}`);
   const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';
   ok(devcontainer.endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${devcontainer}`);
 });

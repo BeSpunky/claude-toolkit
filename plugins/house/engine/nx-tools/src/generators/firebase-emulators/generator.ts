@@ -32,12 +32,17 @@
 //                        block — the BeSpunky default is Firebase App Hosting, configured in apphosting.yaml.
 //                        The `firestore` / `storage` keys (the RULES) are the project's: written only by
 //                        --seedRules (below), never re-asserted.
-//   - firebase/{firestore.rules,firestore.indexes.json,storage.rules} — SEEDED (never owned) and only with
-//                        --seedRules, which the planner passes only when the layer is ENSURED (`new`,
-//                        `add-layer firebase`) — never on a plain upgrade: a project with no rules in the repo
-//                        keeps them in the Firebase console, and a seed plus a deploy target would overwrite the
-//                        live rules on the first deploy. Deny-all, and MARKED as a seed: the deploy skips a file
-//                        that still carries the marker, so nothing the house wrote reaches production unreviewed.
+//   - firebase/{firestore.rules,storage.rules} — SEEDED (never owned) and only with --seedRules, which the
+//                        planner passes only when this run CREATES the layer (ensured, and not already in the
+//                        workspace: `new`, or `add-layer firebase` on a project without it) — never on an upgrade,
+//                        and never on a re-ensure: a project with no rules in the repo keeps them in the Firebase
+//                        console (a seed plus a deploy target would overwrite the live rules), and its local
+//                        emulators run open (a deny-all seed would break every local read and write). Deny-all, and
+//                        MARKED as a seed: the deploy skips a file that still carries the marker, so nothing the
+//                        house wrote reaches production unreviewed. NO indexes file: JSON cannot carry the marker,
+//                        so a seeded one would be indistinguishable from the project's own — and a deploy with
+//                        `--force` DELETES every live index the file does not list. The emulator needs none; an
+//                        indexes file the project declares (`firebase init firestore` pulls the live one) is its own.
 //   - apphosting.yaml (+ apphosting.staging.yaml with --staging) — only with a client app, and only if absent, in the
 //                        directory App Hosting already reads for it (else the workspace root; apphosting-config.ts);
 //                        a nearer apphosting*.yaml shadowing a farther one is warned about on every run:
@@ -52,12 +57,20 @@
 //   - firebase/         — the emulator suite as its own workspace-level Nx project: `emulators`,
 //                        `emulators:<svc>`, `seed:build`, `reset`, and `deploy` (the rules and indexes
 //                        firebase.json declares — tools/firebase-deploy-rules.mjs). User-added targets are preserved.
+//   - tools/firebase-deploy.mjs, tools/firebase-deploy-rules.mjs — the deploy runners (owned, rewritten every run).
 //   THE DEPLOY CONTRACT (what `nx affected -t deploy` — by hand or the `ci` layer — relies on): every deployable
 //   house project has a target named exactly `deploy` that runs non-interactively when given `--non-interactive`,
 //   forwards every extra argument to the Firebase CLI (`--project=<alias>` under run-many/affected, `-P <alias>`
-//   under `nx run`), never caches, never runs beside another task (`parallelism: false` — two deploys must not race
-//   one Firebase project), builds what it ships through Nx (`dependsOn`), and declares the root Firebase files as
-//   `{workspaceRoot}/…` inputs, so a change to firebase.json, .firebaserc or a root rules file marks it affected.
+//   under `nx run`, or a named configuration's `args`) — through a SHELL, as Nx run-commands does (each argument
+//   double-quoted: `$` and backticks are still expanded — escape them with a backslash) — never caches, never runs beside another task
+//   (`parallelism: false` — two deploys must not race one Firebase project), builds what it ships through Nx
+//   (`dependsOn: build`), and declares as `{workspaceRoot}/…` inputs exactly the root files whose change changes
+//   what ships: firebase.json, .firebaserc and the rules files it declares outside the suite project. Never the
+//   deploy RUNNERS: a toolkit release that only rewrites tools/firebase-deploy*.mjs ships nothing new, so it must
+//   not mark a deploy affected. `cache`, `parallelism` and `dependsOn: build` are re-asserted on every upgrade
+//   (DEPLOY_CONTRACT — a project value that differed is reported); `lint` in `dependsOn` is a quality gate the
+//   project may drop. The rules deploy refuses a declared rules file its inputs do not watch, so what affected
+//   sees and what the deploy ships cannot drift apart.
 //   Both projects are HOUSE PROJECTS (_utils/project-files): found by project, created the way this workspace
 //   defines projects (a project.json, or a package.json workspace member under TS-solution linking).
 //   - tools/{emulators,emulator-data,push-secrets,firebase-welcome}.sh, tools/emulator-ports.mjs,
@@ -92,7 +105,8 @@ import { hasDependency } from '../../layers/evidence';
 import { HOUSE_EMULATORS, defaultPort, renderEmulatorPortsModule } from './emulator-ports';
 import { describeShadow, effectiveAppHostingDir, shadowedAppHostingConfigs } from './apphosting-config';
 import firebaseClientGenerator from '../firebase-client/generator';
-import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
+import { ensureHouseProject, type HouseProjectHome } from '../_utils/project-files';
+import { firebaseHomes } from './homes';
 import { houseLintTarget } from '../_utils/lint-inference';
 import { applyJsonChanges } from '../_utils/json-edits';
 import { resolveAppsDir } from '../_utils/workspace-layout';
@@ -168,6 +182,14 @@ function canonicalFunctionsBlock(functions: HouseProjectHome) {
     },
   ];
 }
+
+/**
+ * THE DEPLOY CONTRACT's re-asserted values (header): what `nx affected -t deploy` relies on in every `deploy` target.
+ * A cached deploy is a skipped deploy; two deploys at once race one Firebase project; a deploy that does not build
+ * first ships yesterday's bundle. (`functions:deploy` builds; the rules deploy has nothing to build.)
+ */
+const DEPLOY_CONTRACT = { cache: false, parallelism: false };
+const BUILDS_WHAT_IT_SHIPS = { ...DEPLOY_CONTRACT, dependsOn: ['build'] };
 
 /** The root files every Firebase deploy reads — inputs of every deploy target, so `affected` sees them. */
 const FIREBASE_ROOT_INPUTS = ['{workspaceRoot}/firebase.json', '{workspaceRoot}/.firebaserc'];
@@ -284,8 +306,7 @@ export default async function firebaseEmulatorsGenerator(
   // (firebase.json's source, the gitignore entry, the scripts' secrets file) follows the functions project's
   // actual root, and every `nx` command its actual name. A new workspace puts it in its apps directory.
   const appsDir = resolveAppsDir(tree);
-  const functions = houseProjectHome(tree, 'functions', `${appsDir}/functions`);
-  const suite = houseProjectHome(tree, 'firebase', 'firebase');
+  const { functions, suite } = firebaseHomes(tree);
   const functionsPaths = (tpl: string) =>
     tpl.split('{{functionsRoot}}').join(functions.root).split('{{functionsDist}}').join(distOf(functions)).split('{{functionsProject}}').join(functions.name);
 
@@ -355,7 +376,10 @@ export default async function firebaseEmulatorsGenerator(
   );
   tree.write('tools/seed/build-seeds.sh', substitute(template('seed-build-seeds.sh.tpl')));
   tree.write('tools/firebase-deploy.mjs', functionsPaths(template('firebase-deploy.mjs.tpl')));
-  tree.write('tools/firebase-deploy-rules.mjs', template('firebase-deploy-rules.mjs.tpl').split('{{seedMarker}}').join(RULES_SEED_MARKER));
+  tree.write(
+    'tools/firebase-deploy-rules.mjs',
+    template('firebase-deploy-rules.mjs.tpl').split('{{seedMarker}}').join(RULES_SEED_MARKER).split('{{suiteRoot}}').join(suite.root),
+  );
   writeSeedTooling(tree, workspaceName);
   if (!tree.exists('tools/seed/world.mjs')) tree.write('tools/seed/world.mjs', substitute(template('seed-world.mjs.tpl')));
   if (!tree.exists('tools/emulator-seeds/README.md')) {
@@ -558,6 +582,7 @@ function ensureFunctionsProject(
       projectType: 'application',
       sourceRoot: `${root}/src`,
       tags: ['platform:server'],
+      contract: { deploy: BUILDS_WHAT_IT_SHIPS },
       targets: {
         // esbuild-bundle to dist/<root> with a generated package.json (merging the manifest's deps + the built
         // `main` entry) — that dist output is what firebase.json's `functions.source` points at, for both the
@@ -587,7 +612,7 @@ function ensureFunctionsProject(
         deploy: {
           executor: 'nx:run-commands',
           dependsOn: ['build', ...(lint ? [lint.name] : [])],
-          inputs: ['default', '^default', ...FIREBASE_ROOT_INPUTS, '{workspaceRoot}/tools/firebase-deploy.mjs'],
+          inputs: ['default', '^default', ...FIREBASE_ROOT_INPUTS],
           cache: false,
           parallelism: false,
           // `firebase deploy --only functions` through the deploy runner: on a failure it prints the road to a first
@@ -664,13 +689,14 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
     logger.info(
       '[firebase-emulators] `nx run firebase:deploy` now ships the Firestore / Storage rules firebase.json declares — ' +
         'none yet, so it deploys nothing and the console keeps its rules. To keep them in the repo, pull the live ones ' +
-        'in once (a human, in a terminal): `npx firebase init firestore storage -P <alias>`.',
+        'in once (a human, in a terminal): `npx firebase init firestore -P <alias>`, then `npx firebase init storage -P <alias>`.',
     );
   }
 
   ensureHouseProject(tree, 'firebase-emulators', suite, {
     projectType: 'application',
     tags: ['platform:server'],
+    contract: { deploy: DEPLOY_CONTRACT },
     targets: {
       // The full suite. Depends on the functions build: firebase.json points the functions
       // emulator at the functions bundle in dist/, so the backend must exist before the suite boots.
@@ -695,7 +721,7 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
       // does not declare: a project whose rules live only in the console gets a no-op that says how to adopt them.
       deploy: {
         executor: 'nx:run-commands',
-        inputs: ['default', ...FIREBASE_ROOT_INPUTS, ...rootRulesInputs(suite, rulesFiles), '{workspaceRoot}/tools/firebase-deploy-rules.mjs', '{workspaceRoot}/tools/firebase-deploy.mjs'],
+        inputs: ['default', ...FIREBASE_ROOT_INPUTS, ...rootRulesInputs(suite, rulesFiles)],
         cache: false,
         parallelism: false,
         options: { command: 'node tools/firebase-deploy-rules.mjs', cwd: '{workspaceRoot}' },
@@ -725,7 +751,8 @@ function rootRulesInputs(suite: HouseProjectHome, declared: string[]): string[] 
 /**
  * Seed deny-all, MARKED rules for each service firebase.json declares none for, inside the suite's project (so its
  * own files mark it affected), and declare them. Never over a file that exists, never for a service the project
- * already declares — and never on a plain upgrade (the caller passes --seedRules only when ENSURING the layer).
+ * already declares — and only when this run CREATES the layer (the caller passes --seedRules then, never on an
+ * upgrade or a re-ensure). Never an indexes file (the header says why).
  * A conventional root rules file firebase.json does not name yet is the project's (a `firebase init` leftover, or
  * rules copied in by hand): reported, never shadowed by a seed.
  */
@@ -733,7 +760,9 @@ function seedRules(tree: Tree, firebaseJson: Record<string, unknown>, root: stri
   const at = (file: string) => (root === '.' ? file : `${root}/${file}`);
   const marked = (name: string) => template(name).split('{{seedMarker}}').join(RULES_SEED_MARKER);
   const services: Array<{ key: 'firestore' | 'storage'; conventional: string[]; files: Array<[string, string, string]> }> = [
-    { key: 'firestore', conventional: ['firestore.rules', 'firestore.indexes.json'], files: [['rules', 'firestore.rules', 'firestore.rules.tpl'], ['indexes', 'firestore.indexes.json', 'firestore.indexes.json.tpl']] },
+    // Rules only — never an indexes file (the header: a seeded one cannot be told from the project's, and a forced
+    // deploy deletes every live index it does not list).
+    { key: 'firestore', conventional: ['firestore.rules', 'firestore.indexes.json'], files: [['rules', 'firestore.rules', 'firestore.rules.tpl']] },
     { key: 'storage', conventional: ['storage.rules'], files: [['rules', 'storage.rules', 'storage.rules.tpl']] },
   ];
   for (const service of services) {

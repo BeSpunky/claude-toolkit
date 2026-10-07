@@ -14,7 +14,7 @@ import { type Tree, type GeneratorCallback, logger } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LayerId, PlanContext } from '../../layers/descriptor';
-import { LAYERS } from '../../layers/registry';
+import { LAYERS, detectLayers } from '../../layers/registry';
 
 type Factory = (tree: Tree, options: Record<string, unknown>) => Promise<GeneratorCallback | void> | GeneratorCallback | void;
 
@@ -35,6 +35,7 @@ export async function attachCapabilities(tree: Tree, context: AttachContext): Pr
     mode: 'upgrade',
     active: context.active,
     ensured: context.active,
+    detected: new Set(detectLayers(tree)),
     project: context.workspaceName,
     app: context.app,
     voice: false,

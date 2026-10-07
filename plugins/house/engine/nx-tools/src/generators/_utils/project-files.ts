@@ -18,9 +18,9 @@ import { type Tree, type ProjectConfiguration, addProjectConfiguration, getProje
 import { detectLinking, ensureWorkspaceMember, referenceFromSolution } from './linking';
 import { workspacePath } from './linking/shared';
 import { resolveWorkspaceScope } from './workspace-layout';
-import { describeOverride, mergeHouseTargets, recordHouseTargets, recordedHouseTargets } from './house-targets';
+import { type TargetContract, describeFinding, houseTargetsProvenance, mergeHouseTargets, recordHouseTargets } from './house-targets';
 import { applyJsonChanges, updateJsonInPlace } from './json-edits';
-import { HOUSE_TARGETS_AS_OF_0_49_2 } from './house-targets-0.49.2';
+import { reportToUpgrade } from './upgrade-report';
 
 export type ProjectFileKind = 'project.json' | 'package.json';
 
@@ -135,8 +135,10 @@ export function joinWorkspace(tree: Tree, root: string): string | null {
 //                  project (`projectDefinitionFile`). Re-asserted by a THREE-WAY MERGE against a record of what the
 //                  house last wrote (_utils/house-targets.ts): the project's own targets, and its own edits and
 //                  additions INSIDE a house target (an input, an option, a configuration), survive an upgrade unless
-//                  the house changed the same key — and then the upgrade says what it replaced. Removing a target
-//                  the house no longer ships is a migration's job, never a generator's (project state).
+//                  the house changed the same key — and then the upgrade's summary says what it replaced. A target
+//                  the house introduces that the project already defines stays the project's, whole. The few values
+//                  other machinery relies on (`contract`) are re-asserted. Removing a target the house no longer
+//                  ships is a migration's job, never a generator's (project state).
 //
 // A house project created as a PACKAGE is named under the workspace's npm scope (`@acme/firebase`) while its Nx
 // name stays the bare one — `createProject`'s rule, which every creator gets.
@@ -152,8 +154,13 @@ export interface HouseProjectHome {
   canonical: { name: string; root: string };
 }
 
-/** What the house owns in a house project: its targets and tags (plus what a NEW project is created with). */
-export type HouseProjectConfig = Omit<ProjectConfiguration, 'name' | 'root'> & { tags: string[] };
+/**
+ * What the house owns in a house project: its targets and tags (plus what a NEW project is created with) — and its
+ * CONTRACT: per target, the values other machinery relies on (`nx affected -t deploy` relies on a deploy never being
+ * cached, never running beside another task, and building what it ships), re-asserted on every run and reported
+ * when the project's differed. Never written into the project as a key of its own.
+ */
+export type HouseProjectConfig = Omit<ProjectConfiguration, 'name' | 'root'> & { tags: string[]; contract?: TargetContract };
 
 /**
  * Where house project `name` lives (see WHERE IS IT? above) — a pure LOOKUP: it reads, never writes, and says
@@ -193,13 +200,14 @@ export function ensureHouseProject(
   owned: HouseProjectConfig,
   manifest: Record<string, unknown> = {},
 ): void {
-  const ownedTargets = owned.targets ?? {};
+  const { contract, ...config } = owned;
+  const ownedTargets = config.targets ?? {};
   if (!home.exists) {
     // The package's name is never the seed's: a house project is always named the way `createProject` scopes
     // one (a template manifest's bare `"name": "functions"` is exactly the shadowing that rule prevents).
     const { name: _seedName, ...seed } = manifest;
-    createProject(tree, home.name, { root: home.root, ...owned }, { private: true, ...seed });
-    recordHouseTargets(tree, home.name, ownedTargets);
+    createProject(tree, home.name, { root: home.root, ...config }, { private: true, ...seed });
+    recordHouseTargets(tree, home.canonical.name, { project: home.name, root: home.root }, ownedTargets);
     return;
   }
   if (home.root !== home.canonical.root || home.name !== home.canonical.name) {
@@ -208,13 +216,15 @@ export function ensureHouseProject(
         `there instead of into a new project at ${home.canonical.root} — two projects under one name break every \`nx\` command.`,
     );
   }
-  const recorded = recordedHouseTargets(tree, home.name);
+  const provenance = houseTargetsProvenance(tree, home.canonical.name);
+  let recorded = ownedTargets;
   // In place: only what the merge changed is written — the project's formatting and key order stay.
-  updateProjectConfigInPlace(tree, home.root, (config) => {
-    config.tags = [...new Set([...(config.tags ?? []), ...owned.tags])];
-    const { targets, overrides } = mergeHouseTargets(config.targets, ownedTargets, recorded, HOUSE_TARGETS_AS_OF_0_49_2[home.canonical.name]);
-    config.targets = targets;
-    for (const override of overrides) logger.warn(`[${who}] ${describeOverride(home.name, override)}`);
+  updateProjectConfigInPlace(tree, home.root, (onDisk) => {
+    onDisk.tags = [...new Set([...(onDisk.tags ?? []), ...config.tags])];
+    const merged = mergeHouseTargets(onDisk.targets, ownedTargets, provenance, contract);
+    onDisk.targets = merged.targets;
+    recorded = merged.recorded;
+    for (const finding of merged.findings) reportToUpgrade(who, describeFinding(home.name, finding));
   });
-  recordHouseTargets(tree, home.name, ownedTargets);
+  recordHouseTargets(tree, home.canonical.name, { project: home.name, root: home.root }, recorded);
 }

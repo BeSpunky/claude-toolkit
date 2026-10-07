@@ -3,6 +3,14 @@
 // Shapes from git: e76c12a (`serve` IS the dev-server, continuous, dependsOn ['emulators'], emulators* on the app) and
 // 703ca41 (`serve-no-emulators` defaulting to the `no-emulators` configuration). Each is run through the REAL ladder
 // (0.24.0 → 0.24.1 → this rung) and also from the sealed state those two rungs left behind.
+//
+// Historical shapes: the rung keys on a `serve` dependsOn naming an `emulators*` target the project lacks. The only
+// releases that wrote that dependsOn are e76c12a and 2c421f9 (`git log -G"dependsOn.*emulators"` over the generators;
+// from 0d09453 on, the firebase-emulators generator STRIPS it and composes `serve` as an nx:run-commands orchestrator,
+// and from 60bd79f (0.3.0) `serve` is the composer beside a `dev-server` — both outside the guard). The
+// `{ projects: ['firebase'], target: 'emulators' }` form 0d09453's stripper mentions came from another repo, never
+// from a toolkit release. The other marker, `defaultConfiguration: 'no-emulators'`, was written only by 703ca41
+// (b65399d, two hours later, pinned each dev-server by `options.buildTarget` with no configurations).
 import { createRequire } from 'node:module';
 
 const { addProjectConfiguration, readProjectConfiguration, readJson } = createRequire(import.meta.url)('@nx/devkit');
@@ -22,7 +30,7 @@ const EMULATORS = {
 };
 
 /** e76c12a: the Nx Angular app's own `serve`, made continuous and pointed at the app-level suite. */
-const e76c12a = (tree) => {
+const e76c12a = (tree, emulators = EMULATORS) => {
   tree.write('firebase.json', '{ "emulators": { "auth": { "port": 9099 } } }\n');
   addProjectConfiguration(tree, 'web', {
     root: 'apps/web',
@@ -36,10 +44,20 @@ const e76c12a = (tree) => {
         configurations: { production: { buildTarget: 'web:build:production' }, development: { buildTarget: 'web:build:development' } },
         defaultConfiguration: 'development',
       },
-      ...EMULATORS,
+      ...emulators,
     },
   });
 };
+
+/**
+ * 2c421f9 (2026-06-03 → 06-10): the only other release that wrote the marker this rung keys on. Its `serve` wiring is
+ * e76c12a's, verbatim (`continuous`, `dependsOn: ['emulators']`); what changed is every `emulators*` command, now
+ * prefixed with the port reaper — which 0.24.1 relocates to `firebase` as it finds it.
+ *   git show 2c421f9:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/generator.ts
+ */
+const REAP = 'bash tools/reap-emulators.sh &&';
+const c2c421f9 = (tree) =>
+  e76c12a(tree, Object.fromEntries(Object.entries(EMULATORS).map(([name, target]) => [name, { ...target, options: { ...target.options, command: `${REAP} ${target.options.command}` } }])));
 
 /** What 0.24.0 + 0.24.1 left of e76c12a: the suite moved to `firebase`, the app's `serve` still depending on it. */
 const sealedE76c12a = (tree) => {
@@ -96,6 +114,17 @@ export default {
       ladder: FULL,
       setup: e76c12a,
       expect: composed,
+      historicalShapes: [
+        {
+          name: '2c421f9 (reaper-prefixed emulators, same serve wiring)',
+          diverges: 'its emulators commands carry the reap prefix, which 0.24.1 moves onto `firebase` verbatim; apps/web lands byte-identical',
+          setup: c2c421f9,
+          expect: (tree, t) => {
+            composed(tree, t);
+            t.ok(readProjectConfiguration(tree, 'firebase').targets.emulators.options.command.startsWith(REAP), 'the reaper moved with the suite');
+          },
+        },
+      ],
     },
     { name: 'e76c12a, sealed by 0.24.1 (dangling dependsOn): recomposed', setup: sealedE76c12a, expect: composed },
     { name: '703ca41, sealed (the no-emulators default): recomposed, development by default', setup: sealed703ca41, expect: composed },

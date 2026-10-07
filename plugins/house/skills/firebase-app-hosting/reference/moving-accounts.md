@@ -14,14 +14,23 @@ pending state, so a project that has been fought with often has many.
 ```bash
 gcloud auth list                     # which Google account gcloud acts as
 firebase login:list                  # which one the Firebase CLI acts as
-gcloud developer-connect connections list --project <projectId> --location <region>
+gcloud developer-connect connections list --project <projectId> --location <region> \
+  --format='table(name.basename(), installationState.stage)'
 ```
 
-States you will see: `COMPLETE` (usable), `PENDING_USER_OAUTH` (the GitHub sign-in never finished),
-`PENDING_INSTALL_APP` (signed in, but the Firebase GitHub app was never installed on the repo's owner). The
-backend's own connection is the one in its repository path:
-`firebase apphosting:backends:get <backendId> --project <projectId>` (Repository column) or the console
-(**Settings → Deployment**).
+The state is each connection's `installationState.stage` (the `--format` above puts it beside the name):
+`COMPLETE` (usable), `PENDING_USER_OAUTH` (the GitHub sign-in never finished), `PENDING_INSTALL_APP` (signed in,
+but the Firebase GitHub app was never installed on the repo's owner), `PENDING_CREATE_APP`.
+
+**Which connection the backend uses** is in its `codebase.repository` — a path of the form
+`projects/<p>/locations/<region>/connections/<connectionName>/gitRepositoryLinks/<linkId>`:
+
+```bash
+firebase apphosting:backends:get <backendId> --project <projectId> --json   # → result.codebase.repository
+```
+
+The *Repository* column of the plain table is only that path's last segment — the git repository link id, never
+the connection name — so don't read the connection from it. (The console shows it too: **Settings → Deployment**.)
 
 ## The recipe
 

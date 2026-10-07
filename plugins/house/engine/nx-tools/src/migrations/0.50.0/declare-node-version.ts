@@ -22,7 +22,9 @@ const TAG = '[0.50.0 declare-node-version]';
 const NVMRC = '.nvmrc';
 const DOCKERFILE = '.devcontainer/house.Dockerfile';
 const DEVCONTAINER = '.devcontainer/devcontainer.json';
-const TYPESCRIPT_NODE = /mcr\.microsoft\.com\/devcontainers\/typescript-node:(\d+)/;
+// The Node major in a typescript-node tag: `24`, `24-bookworm`, and the image-versioned `1-24-bookworm` / `1.1-24`
+// (the leading `1` is the IMAGE's version — read as the major, it would declare Node 1).
+const TYPESCRIPT_NODE = /mcr\.microsoft\.com\/devcontainers\/typescript-node:(?:\d+(?:\.\d+)*-(?=\d))?(\d+)(?![\d.])/;
 const NODE_FEATURE = /^ghcr\.io\/devcontainers\/features\/node(?::\d+)?$/;
 
 export default function declareNodeVersion(tree: Tree): void {
@@ -33,13 +35,14 @@ export default function declareNodeVersion(tree: Tree): void {
     if (!declared) {
       logger.warn(
         `${TAG} ${NVMRC} says "${(tree.read(NVMRC, 'utf8') ?? '').trim()}", which names no Node major — the house now tags the ` +
-          `devcontainer image${running ? ` (today Node ${running.major})` : ''} and the Cloud Functions runtime with it, so the next ` +
-          `upgrade will refuse it. Write the major alone (e.g. "${running?.major ?? '24'}").`,
+          `devcontainer image${running ? ` (today Node ${running.major})` : ''} and the Cloud Functions runtime with it, so THIS upgrade ` +
+          `will stop at the generators (after these migrations are committed). Write the major alone (e.g. "${running?.major ?? '24'}").`,
       );
     } else if (running && running.major !== declared) {
       logger.warn(
         `${TAG} ${NVMRC} declares Node ${declared}, but the devcontainer runs Node ${running.major} (${running.from}). ${NVMRC} is now the ` +
-          `one source: the next upgrade moves the container to Node ${declared}. If ${running.major} is right, write it into ${NVMRC} first.`,
+          `one source: this upgrade's generators move the container to Node ${declared} (it takes effect on the next rebuild). If ` +
+          `${running.major} is right, write it into ${NVMRC} and re-run the upgrade.`,
       );
     }
   } else if (running) {
