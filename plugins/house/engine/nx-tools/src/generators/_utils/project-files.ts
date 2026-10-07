@@ -19,6 +19,7 @@ import { workspacePath } from './linking/shared';
 import { resolveWorkspaceScope } from './workspace-layout';
 import { describeOverride, mergeHouseTargets, recordHouseTargets, recordedHouseTargets } from './house-targets';
 import { updateJsonInPlace } from './json-edits';
+import { HOUSE_TARGETS_AS_OF_0_49_2 } from './house-targets-0.49.2';
 
 export type ProjectFileKind = 'project.json' | 'package.json';
 
@@ -194,7 +195,7 @@ export function ensureHouseProject(
   // In place: only what the merge changed is written — the project's formatting and key order stay.
   updateProjectConfigInPlace(tree, home.root, (config) => {
     config.tags = [...new Set([...(config.tags ?? []), ...owned.tags])];
-    const { targets, overrides } = mergeHouseTargets(config.targets, ownedTargets, recorded);
+    const { targets, overrides } = mergeHouseTargets(config.targets, ownedTargets, recorded, HOUSE_TARGETS_AS_OF_0_49_2[home.canonical.name]);
     config.targets = targets;
     for (const override of overrides) logger.warn(`[${who}] ${describeOverride(home.name, override)}`);
   });

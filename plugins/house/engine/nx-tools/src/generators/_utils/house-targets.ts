@@ -100,6 +100,11 @@ export function mergeHouseTargets(
   current: Targets | undefined,
   owned: Targets,
   recorded: Targets | undefined,
+  /**
+   * With no record: what the last record-less release wrote (./house-targets-0.49.2.ts). Not a record — it never
+   * decides a removal or a set merge — only proof that a value is the house's own, so replacing it is not news.
+   */
+  before?: Targets,
 ): { targets: Targets; overrides: TargetOverride[] } {
   const overrides: TargetOverride[] = [];
   const targets: Targets = { ...(current ?? {}) };
@@ -110,7 +115,7 @@ export function mergeHouseTargets(
       targets[name] = clone(ours);
       continue;
     }
-    const base = recorded?.[name];
+    const base = recorded ? recorded[name] : before?.[name];
     targets[name] = mergeObject(base, theirs, ours, recorded !== undefined, [], (key, was, now, conflict) =>
       overrides.push({ target: name, key, was, now, conflict }),
     ) as TargetConfiguration;
@@ -159,7 +164,9 @@ function mergeValue(base: Json, theirs: Json, ours: Json, hasRecord: boolean, pa
     report(key, theirs, ours, true); // both changed it — the house's wins, said aloud
     return clone(ours);
   }
-  report(key, theirs, ours, false); // no record: cannot tell an edit from an older house value — said aloud
+  // No record. A value the last record-less release wrote is the house's own: replaced, and nothing to report.
+  if (base !== undefined && same(theirs, base)) return clone(ours);
+  report(key, theirs, ours, false); // otherwise an edit and an older house value look alike — said aloud
   return clone(ours);
 }
 
