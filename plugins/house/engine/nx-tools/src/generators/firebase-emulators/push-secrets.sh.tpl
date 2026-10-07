@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Push the local Functions secrets file into Google Secret Manager — the PRODUCTION counterpart
-# of the emulator's `.secret.local` (tools/emulators.sh injects the same file locally). One
-# command, one source of truth: every `KEY=VALUE` in {{functionsRoot}}/.secret.local becomes a
-# `firebase functions:secrets:set KEY` on the target project, so local and prod can never drift
-# on WHICH secrets exist.
+# Push the local Functions secrets file into Google Secret Manager. {{functionsRoot}}/.secret.local
+# holds PRODUCTION's values and exists for this script alone — the emulator never reads it
+# (tools/emulators.sh gives the emulator inert placeholders, or opt-in sandbox values). One command,
+# one source of truth: every `KEY=VALUE` in it becomes a `firebase functions:secrets:set KEY` on the
+# target project, so what exists locally and in prod can never drift.
 #
 # Values never touch a command line, a log, or this script's output: each one is piped into the
 # CLI on stdin (`--data-file -`). Only key NAMES are printed.
