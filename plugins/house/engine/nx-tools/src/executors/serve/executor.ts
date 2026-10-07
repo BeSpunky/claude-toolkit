@@ -2,7 +2,7 @@ import type { PromiseExecutor } from '@nx/devkit';
 import { logger } from '@nx/devkit';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import type { ServeExecutorSchema } from './schema';
 
@@ -22,12 +22,15 @@ import type { ServeExecutorSchema } from './schema';
  *              it runs `tools/dev/dev with <app> -- <tests>`, told the stack's BASE_URL and emulator hosts in its
  *              environment — `auto` puts the stack on whatever block is free, so no port can be assumed.
  *
- * UNDER AN AI AGENT, `nx serve` is refused unless Nx streams its output. Nx's agent output (`summary`) shows nothing of
- * a non-continuous task while it runs — no URL, no stop handle — and only a log path when it ends: a `nx serve` from
- * an agent blocks, silent, until its tool call times out. Refused at once instead, saying what works: the engine
- * itself (`tools/dev/dev serve <app>`), or `--output-style=stream`. (Nothing in the task can reach the agent's screen
- * past Nx's renderer, so the refusal is the useful thing this executor can do there.) The agent's port rule is the
- * engine's (it never takes the base ports), so it holds however the stack is started.
+ * UNDER AN AI AGENT, `nx serve` is refused when Nx would show nothing of it. From Nx 23.3 an agent's run is rendered
+ * as `summary` (Nx's own default when it detects an agent and no style is named): nothing of a non-continuous task
+ * while it runs — no URL, no stop handle — and only a log path when it ends, so `nx serve` blocks, silent, until the
+ * tool call times out. Refused at once instead, saying what works: the engine itself (`tools/dev/dev serve <app>`), or
+ * NX_DEFAULT_OUTPUT_STYLE=stream. Not `--output-style=stream`: a flag reaches only the Nx process, and the task's own
+ * environment is byte-for-byte the same under every flag (checked on 23.3) — the env default is what a task can see.
+ * Nx 23.1 streams the task to an agent (checked), so there it runs as usual. (Nothing in the task can reach the
+ * agent's screen past Nx's renderer, so the refusal is the useful thing this executor can do.)
+ * The agent's PORT rule is the engine's — it never takes the base ports — so it holds however the stack is started.
  *
  * The dev loop lives in `tools/dev/` (written by the `dev` generator) and reads what the project serves from
  * `.bespunky/dev.json`: worktree selection, one port offset for every declared port, `<slug>.localhost`, the
@@ -75,6 +78,23 @@ export function engineArgs(project: string, options: ServeExecutorSchema & Recor
   return args;
 }
 
+/**
+ * Does Nx render this run as an agent's `summary` — nothing of a task until it ends? Its own rule: an AI agent (Claude
+ * Code here: CLAUDECODE=1), no TUI (NX_TUI), no default style other than summary (NX_DEFAULT_OUTPUT_STYLE), and an Nx
+ * that has the summary renderer at all (23.3 on; 23.1 streams to an agent). An --output-style flag is invisible here.
+ */
+function silentUnderNx(root: string): boolean {
+  if (process.env.CLAUDECODE !== '1' || process.env.NX_STREAM_OUTPUT === 'true' || process.env.NX_TUI === 'true') return false;
+  const style = process.env.NX_DEFAULT_OUTPUT_STYLE;
+  if (style && style !== 'summary') return false;
+  try {
+    const nx = dirname(require.resolve('nx/package.json', { paths: [root] }));
+    return ['dist/src', 'src'].some((at) => existsSync(join(nx, at, 'tasks-runner/life-cycles/summary-terminal-output-life-cycle.js')));
+  } catch {
+    return false;
+  }
+}
+
 const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, context) => {
   const project = options.project ?? context.projectName;
   if (!project) {
@@ -91,11 +111,11 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
     return { success: false };
   }
   const continuous = context.target?.continuous === true;
-  if (!continuous && !options.dryRun && process.env.CLAUDECODE === '1' && process.env.NX_STREAM_OUTPUT !== 'true') {
+  if (!continuous && !options.dryRun && silentUnderNx(context.root)) {
     logger.error(
       `[serve] Refused: under an AI agent Nx shows nothing of \`nx serve\` while it runs (no URL, no stop handle) — it would block silently until the tool call times out.\n` +
         `  Serve with the engine itself, which prints both:  tools/dev/dev serve ${project}\n` +
-        `  or make Nx stream it:  nx serve ${project} --output-style=stream`,
+        `  or make Nx stream it:  NX_DEFAULT_OUTPUT_STYLE=stream nx serve ${project}`,
     );
     return { success: false };
   }

@@ -221,6 +221,14 @@ function dropTmp(dir) {
   if (typeof dir === 'string' && dir.startsWith(`${TMP_ROOT}/`) && OUR_TMP.test(dir.slice(TMP_ROOT.length + 1))) rmSync(dir, { recursive: true, force: true });
 }
 
+const sameDir = (a, b) => {
+  try {
+    return typeof a === 'string' && realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
+};
+
 // ── RECORDS ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Create `.bespunky/run/` (self-ignoring). */
@@ -481,7 +489,9 @@ function records(trees) {
       } catch {
         continue; // mid-write, or not ours
       }
-      if (!record || typeof record.key !== 'string' || `${record.key}.json` !== f) continue;
+      // A record speaks for the tree it sits in, and only that one: a copied or moved run dir names another tree, and
+      // acting on it (a prune) would reach into that tree.
+      if (!record || typeof record.key !== 'string' || `${record.key}.json` !== f || !sameDir(record.tree, tree)) continue;
       out.push(record);
     }
   }
