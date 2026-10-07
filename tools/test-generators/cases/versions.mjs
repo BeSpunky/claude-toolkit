@@ -28,10 +28,10 @@ function freshAngularWorkspace(manifest) {
   const nx = join(dir, 'node_modules/@nx/angular');
   mkdirSync(join(nx, 'dist/src/utils'), { recursive: true });
   writeFileSync(join(nx, 'package.json'), JSON.stringify({ name: '@nx/angular', version: '23.3.0' }));
-  writeFileSync(join(nx, 'dist/src/utils/versions.js'), "exports.angularVersion = '~22.1.0'; exports.angularDevkitVersion = '~22.1.0';\n");
+  writeFileSync(join(nx, 'dist/src/utils/versions.js'), "exports.angularVersion = '~22.1.0'; exports.angularDevkitVersion = '~22.1.0'; exports.rxjsVersion = '~7.8.0'; exports.tsLibVersion = '^2.3.0'; exports.zoneJsVersion = '~0.16.0';\n");
   writeFileSync(
     join(nx, 'dist/src/utils/backward-compatible-versions.js'),
-    "exports.supportedVersions = [22, 21, 20];\nexports.backwardCompatibleVersions = { 21: { angularVersion: '~21.2.0', angularDevkitVersion: '~21.2.0' }, 20: { angularVersion: '~20.3.0', angularDevkitVersion: '~20.3.0' } };\n",
+    "exports.supportedVersions = [22, 21, 20];\nexports.backwardCompatibleVersions = { 21: { angularVersion: '~21.2.0', angularDevkitVersion: '~21.2.0', rxjsVersion: '~7.8.0', tsLibVersion: '^2.3.0', zoneJsVersion: '~0.16.0' }, 20: { angularVersion: '~20.3.0', angularDevkitVersion: '~20.3.0', rxjsVersion: '~7.8.0', tsLibVersion: '^2.3.0', zoneJsVersion: '~0.15.0' } };\n",
   );
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest));
   writeFileSync(join(dir, 'nx.json'), '{}');
@@ -191,7 +191,7 @@ export default {
     })),
     {
       name: 'new + firebase: a fresh workspace is created at the newest Angular @angular/fire supports, and says why',
-      setup: () => freshAngularWorkspace({ name: 'shop', devDependencies: { '@angular-devkit/core': '~22.1.0', '@nx/angular': '23.3.0' } }),
+      setup: () => freshAngularWorkspace({ name: 'shop', devDependencies: { '@angular-devkit/core': '~22.1.0', '@nx/angular': '23.3.0', typescript: '~6.0.3' } }),
       run: (tree, ctx) => ctx.load('adapters/angular/angularfire').pinAngularForFirebase(tree),
       expect: (tree, t, ctx) => {
         const { ANGULARFIRE_BY_ANGULAR_MAJOR } = ctx.load('generators/_utils/firebase-compat');
@@ -199,6 +199,13 @@ export default {
         t.equal(newest, 20, 'the fixture\'s @nx/angular table is keyed to today\'s answer');
         t.equal(readJson(tree, 'package.json').dependencies?.['@angular/core'], '~20.3.0', '@nx/angular\'s own range for Angular 20');
         t.equal(readJson(tree, 'package.json').devDependencies['@angular-devkit/core'], '~20.3.0', 'the devkit init added is realigned');
+        // The WHOLE runtime: @nx/angular adds it only when @angular/core is undeclared (the R1-0 follow-on: a workspace
+        // with no @angular/compiler, router or zone.js), so the pin declares what it would have.
+        const dependencies = readJson(tree, 'package.json').dependencies;
+        for (const name of ['@angular/common', '@angular/compiler', '@angular/forms', '@angular/platform-browser', '@angular/router']) t.equal(dependencies[name], '~20.3.0', name);
+        t.equal(dependencies['zone.js'], '~0.15.0', 'zone.js (Angular 20 apps are not zoneless)');
+        t.equal(dependencies.rxjs, '~7.8.0', 'rxjs');
+        t.equal(readJson(tree, 'package.json').devDependencies.typescript, ctx.load('generators/_utils/firebase-compat').ANGULAR_TYPESCRIPT_BY_MAJOR[20].pin, 'TypeScript inside what Angular 20\'s compiler accepts');
         t.ok(ctx.logs.some((line) => /Angular 20 — the newest major @angular\/fire supports; upgrade when AngularFire ships 21\+/.test(line)), `said: ${ctx.logs}`);
       },
     },

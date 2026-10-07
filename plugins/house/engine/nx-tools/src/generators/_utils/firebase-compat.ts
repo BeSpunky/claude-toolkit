@@ -96,6 +96,37 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
 /** The newest Angular major npm knew when this was projected — a newer one is a major this table has never seen. */
 export const ANGULARFIRE_TABLE_NEWEST_ANGULAR = 22;
 
+/**
+ * Per Angular major: the TypeScript range its newest compiler-cli peers, and the TypeScript the house declares when it
+ * CREATES a workspace on that major (create-nx-workspace installs Nx's newest, which an older compiler refuses).
+ */
+export const ANGULAR_TYPESCRIPT_BY_MAJOR: Readonly<Record<number, { range: string; pin: string }>> = {
+  17: {
+    "range": ">=5.2 <5.5",
+    "pin": "~5.4.5"
+  },
+  18: {
+    "range": ">=5.4 <5.6",
+    "pin": "~5.5.4"
+  },
+  19: {
+    "range": ">=5.5 <5.9",
+    "pin": "~5.8.3"
+  },
+  20: {
+    "range": ">=5.8 <6.0",
+    "pin": "~5.9.3"
+  },
+  21: {
+    "range": ">=5.9 <6.1",
+    "pin": "~6.0.3"
+  },
+  22: {
+    "range": ">=6.0 <6.1",
+    "pin": "~6.0.3"
+  }
+};
+
 /** The firebase-tools these runtimes were read from (must equal FIREBASE_TOOLS_VERSION). */
 export const FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS = '15.32.1';
 /** The Node majors Cloud Functions runs as GA runtimes, oldest first. */

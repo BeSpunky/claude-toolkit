@@ -18,6 +18,7 @@
 import { type GeneratorCallback, type Tree, logger, readJson } from '@nx/devkit';
 import { dirname, join } from 'node:path';
 import * as FIREBASE_COMPAT from '../../generators/_utils/firebase-compat';
+import { ANGULAR_TYPESCRIPT_BY_MAJOR } from '../../generators/_utils/firebase-compat';
 import { FIREBASE_TOOLS_VERSION } from '../../generators/_utils/versions';
 import { isFloatingSpec } from '../../generators/_utils/version-spec';
 import {
@@ -185,11 +186,34 @@ export function pinAngularForFirebase(tree: Tree): void {
         `${Object.entries(LIVE_ANGULARFIRE_TABLE.byMajor).filter(([, r]) => r.stable).map(([m]) => m).join('/')} and re-run.`,
     );
   }
+  // ALL of Angular's runtime, not @angular/core alone: @nx/angular's ensureAngularDependencies adds the runtime set ONLY
+  // when @angular/core is undeclared ("assume the workspace was already initialized") — so declaring core alone left a
+  // workspace without @angular/common, compiler, router, rxjs, zone.js (verified against @nx/angular 23.3,
+  // generators/utils/ensure-angular-dependencies.js). The set and its versions are that function's, for this major,
+  // from @nx/angular's own table; zone.js as its application generator decides it (zoneless from Angular 21 on).
   const versions = nx.versionsFor(major);
-  updateManifest(tree, 'package.json', 'firebase-client', (pkg) => withDependency(pkg, '@angular/core', versions.angularVersion));
-  if (declaredSpec(tree, '@angular-devkit/core')) {
-    updateManifest(tree, 'package.json', 'firebase-client', (pkg) => withDependency(pkg, '@angular-devkit/core', versions.angularDevkitVersion));
-  }
+  const runtime: Record<string, string | undefined> = {
+    '@angular/common': versions.angularVersion,
+    '@angular/compiler': versions.angularVersion,
+    '@angular/core': versions.angularVersion,
+    '@angular/forms': versions.angularVersion,
+    '@angular/platform-browser': versions.angularVersion,
+    '@angular/router': versions.angularVersion,
+    rxjs: versions.rxjsVersion,
+    tslib: versions.tsLibVersion,
+    ...(major < 21 ? { 'zone.js': versions.zoneJsVersion } : {}),
+  };
+  const missing = Object.entries(runtime).filter(([, version]) => !version).map(([name]) => name);
+  if (missing.length) throw new Error(`${TAG} @nx/angular's version table names no version for ${missing.join(', ')} on Angular ${major} — this Nx changed it; declare them by hand.`);
+  updateManifest(tree, 'package.json', 'firebase-client', (pkg) => {
+    let next = pkg;
+    for (const [name, version] of Object.entries(runtime)) if (!declaredIn(next, name)) next = withDependency(next, name, version!);
+    if (declaredIn(next, '@angular-devkit/core')) next = withDependency(next, '@angular-devkit/core', versions.angularDevkitVersion);
+    // TypeScript: create-nx-workspace installs Nx's newest, which an older Angular compiler refuses outright.
+    const typescript = ANGULAR_TYPESCRIPT_BY_MAJOR[major];
+    if (typescript && declaredIn(next, 'typescript') && declaredIn(next, 'typescript') !== typescript.pin) next = withDependency(next, 'typescript', typescript.pin);
+    return next;
+  });
   if (major < nx.latest) {
     logger.info(
       `${TAG} Angular ${major} — the newest major @angular/fire supports; upgrade when AngularFire ships ${major + 1}+ ` +
@@ -198,11 +222,18 @@ export function pinAngularForFirebase(tree: Tree): void {
   }
 }
 
+function declaredIn(pkg: Record<string, any>, name: string): string | undefined {
+  return pkg.dependencies?.[name] ?? pkg.devDependencies?.[name];
+}
+
 /** `pkg` with `name` set to `spec` in the block that already declares it (else `dependencies`). */
 function withDependency(pkg: Record<string, any>, name: string, spec: string): Record<string, any> {
   const block = pkg.devDependencies?.[name] !== undefined ? 'devDependencies' : 'dependencies';
   return { ...pkg, [block]: placeDependency(pkg[block], name, spec) };
 }
+
+/** The entries of @nx/angular's version table the creation-time pin reads. */
+type NxAngularVersions = { angularVersion: string; angularDevkitVersion: string; rxjsVersion?: string; tsLibVersion?: string; zoneJsVersion?: string };
 
 /**
  * The installed @nx/angular's own Angular version table: which majors it can create, and the package versions it
@@ -212,7 +243,7 @@ function withDependency(pkg: Record<string, any>, name: string, spec: string): R
 function nxAngularVersionTable(tree: Tree): {
   supported: number[];
   latest: number;
-  versionsFor: (major: number) => { angularVersion: string; angularDevkitVersion: string };
+  versionsFor: (major: number) => NxAngularVersions;
 } {
   let root: string;
   try {
@@ -224,10 +255,10 @@ function nxAngularVersionTable(tree: Tree): {
   let cause = '';
   for (const dir of candidates) {
     try {
-      const latest = require(join(dir, 'versions.js')) as { angularVersion: string; angularDevkitVersion: string };
+      const latest = require(join(dir, 'versions.js')) as NxAngularVersions;
       const compat = require(join(dir, 'backward-compatible-versions.js')) as {
         supportedVersions: number[];
-        backwardCompatibleVersions: Record<number, { angularVersion: string; angularDevkitVersion: string }>;
+        backwardCompatibleVersions: Record<number, NxAngularVersions>;
       };
       const latestMajor = Number(/\d+/.exec(latest.angularVersion)?.[0]);
       return {
