@@ -18,3 +18,9 @@ summary: Triage and plan the gaps a consumer Firebase + Angular SSR house projec
   - **Proxy becomes composable** (a project seam), with anchored routes; SSR gets the emulate decision from the dev engine's env.
   - **The release gate gains a scripted consumer dogfood** that includes a real `new` with the change (R1-0 slipped through because the consumer was created with the released toolkit).
   - Every fixer reproduces a finding before fixing it, and rejects it with evidence if it doesn't hold.
+- **2026-10-07 — second review: decisions.**
+  - **Stack lock: a kernel-released primitive** (flock or an abstract unix socket), replacing the hand-built takeover/heartbeat/prune; a workspace shared by two containers is detected and refused, not modelled. Agent runs never take the default ports (the local-server rule, in code).
+  - **The suite's project id comes from evaluating `environment.ts`** — the same decision the browser makes — never a regex; unloadable → exit 2.
+  - **push-secrets refuses ambiguity instead of reinterpreting:** a value whose parsed form differs from its raw text (an unquoted `#`, quotes, `export`) is refused with the exact quoted form to write. Nothing is pushed with a meaning the developer didn't write; no old behaviour is kept, so no compat question arises.
+  - **The firewall goes back to ONE rule instance:** platform constraints spliced into the project's own `@nx/enforce-module-boundaries`, SSR/test scoping by ESLint file overrides — never a second instance that re-runs generic checks.
+  - **e2e gets an address contract:** the stack it depends on exports its base URL to the e2e task.
