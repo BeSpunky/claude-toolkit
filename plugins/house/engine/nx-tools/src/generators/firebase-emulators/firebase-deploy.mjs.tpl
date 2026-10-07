@@ -148,7 +148,7 @@ export function deploy(only, args, label) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
   if (args[0] === '--check') {
-    for (const line of road(readiness(args.slice(1)))) console.log(line);
+    for (const line of road(readiness(args.slice(1)))) process.stdout.write(`${line}\n`);
     process.exit(0);
   }
   if (args[0] !== '--only' || !args[1]) {
