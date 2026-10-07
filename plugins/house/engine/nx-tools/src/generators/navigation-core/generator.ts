@@ -52,7 +52,8 @@ export default async function navigationCoreGenerator(
       importPath: options.importPath ?? `@${resolveWorkspaceScope(tree)}/${name}`,
       publishable: false,
       style: 'none',
-      tags: `${NAVIGATION_TAG},platform:web`,
+      tags: NAVIGATION_TAG,
+      platform: 'web', // Angular source: inject(), signals, the Router
     });
     // The base generator's demo component is not part of the kernel.
     if (tree.exists(`${root}/src/lib`)) tree.delete(`${root}/src/lib`);

@@ -209,6 +209,24 @@
       "layer": "web",
       "description": "The processes a dev stack composes stop being `continuous` Nx tasks: the house `dev-server` leaf of every app served by the house composer, and every `firebase` target that launches tools/emulators.sh. Nx shares one instance of a continuous task per workspace, so a second stack of the same tree (another port offset) waited on the first stack's dev-server and emulators instead of starting its own. The `serve` composer stays continuous (an e2e target may depend on it). A continuous dev-server of the project's own, and any target that depends on one of the changed targets, are reported.",
       "implementation": "./src/migrations/0.50.0/stack-owned-dev-processes"
+    },
+    "close-the-platform-firewall": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "Close the platform firewall: each platform constraint gains onlyDependOnLibsWithTags (web/server → own + shared, shared → shared), a platform:shared constraint is added, and every untagged project is classified from evidence (reported, with the command for the ones it cannot classify) — an untagged library no longer slips firebase-admin into a web app.",
+      "implementation": "./src/migrations/0.50.0/close-the-platform-firewall"
+    },
+    "state-analog-spec-tsconfig": {
+      "version": "0.50.0",
+      "layer": "angular",
+      "description": "Name tsconfig.spec.json in every Angular library's Analog test config (`angular()` → `angular({ tsconfig: './tsconfig.spec.json' })`), ending the \"Unable to resolve tsconfig at …/tsconfig.app.json\" warning Nx's graph inference triggers outside test runs.",
+      "implementation": "./src/migrations/0.50.0/state-analog-spec-tsconfig"
+    },
+    "add-design-system-a11y": {
+      "version": "0.50.0",
+      "layer": "design-system",
+      "description": "Give an existing design system its accessibility mechanisms — seed styles/_utils/_a11y.scss and forward ds.visually-hidden($focusable) and ds.skip-link() from the public SASS API (never over a mixin of the same name) — and report how an existing app adopts the skip link and <main> landmark new apps are born with.",
+      "implementation": "./src/migrations/0.50.0/add-design-system-a11y"
     }
   }
 }

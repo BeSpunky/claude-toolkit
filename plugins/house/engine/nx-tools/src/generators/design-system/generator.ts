@@ -63,6 +63,7 @@ import { workspaceLinking, rootTsconfig } from '../_utils/linking';
 import { adapterOf, applicationsWith, projectRole } from '../../adapters/registry';
 import { workspaceStackWith } from '../../adapters/workspace';
 import type { StackAdapter } from '../../adapters/stack-adapter';
+import { platformTag } from '../../platform/platform';
 
 interface DesignSystemSchema {
   /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
@@ -112,7 +113,8 @@ export default async function designSystemGenerator(
     warnIfDesignSystemMayAlreadyExist(tree);
     const directory = options.directory ?? `${resolveLibsDir(tree)}/${name}`;
     // The tag is the detection key — NOT the path (overridable) and NOT a marker file (a second source of truth).
-    const tags = `${DESIGN_SYSTEM_TAG},platform:web`;
+    // `platform:web`: the runtime writes the mode attribute on the DOM, whichever binding carries it.
+    const tags = `${DESIGN_SYSTEM_TAG},${platformTag('web')}`;
     if (stack && binding) {
       installTask =
         (await publishableLibGenerator(tree, { name, directory, importPath, prefix, style: 'scss', tags, stack: stack.id, skipFormat: true })) ??

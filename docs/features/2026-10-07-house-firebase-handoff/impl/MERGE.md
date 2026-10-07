@@ -51,3 +51,15 @@ Test-generators skips (18+) are the cases needing `@nx/angular` / `@nx/js`, whic
   `continuous`" comment.
 - `tips.txt`: union. `local-server-isolation/SKILL.md`: W4's `?portOffset=`-free example line + W3's Teardown section.
 - test-generators 132 ok / 18 skip · test-migrations 143 ok.
+
+### w6 (ci layer, setup-gcp.sh, structured deploys)
+- `skills/new/SKILL.md` GitHub bullet: W7 rewrote the "why offer it" reason (App Hosting's GitHub mode is recommended,
+  local source needs no remote); W6 appended "unless the project wears the opt-in `ci` layer". Applied W6's tail to W7's
+  text.
+- `skills/new/SKILL.md` Firebase deploy bullet: **judgement.** Both rewrote the old "CI/deploy is Firebase's" bullet —
+  W6 into "Deploys — two halves" (App Hosting is Firebase's; functions/rules go through `deploy` targets and the `ci`
+  layer), W7 into the App Hosting facts (both modes, `--root-dir`, walk-up/shadowing, the new skill). Composed one
+  bullet: W6's two-halves frame, W7's App Hosting detail in the first half, W6's second half verbatim. Follow-up
+  commit: "(next bullet)" → "(the `ci` bullet below)" — a sub-bullet sits between them.
+- `house/tips.txt`, `workflow/tips.txt`: union.
+- test-generators 142 ok / 18 skip · test-migrations 143 ok.

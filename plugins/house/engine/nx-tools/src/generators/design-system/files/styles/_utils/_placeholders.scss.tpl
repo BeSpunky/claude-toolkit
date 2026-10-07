@@ -8,19 +8,12 @@
 // when extended from many places. For anything parameterized, reach for a MIXIN instead. A placeholder is
 // only correct for a fixed, argument-less rule body.
 @use '../_core/functions' as fn;
+@use 'a11y';
 
-/// Visually hidden, but still announced by a screen reader. The correct way to label an icon-only
-/// control — `display: none` and `visibility: hidden` remove it from the accessibility tree too.
+/// Visually hidden, but still announced by a screen reader — `a11y.visually-hidden()` as a placeholder, for
+/// the many-uses-in-one-stylesheet case. Across stylesheets (or revealed on focus), `ds.visually-hidden()`.
 %visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
+  @include a11y.visually-hidden();
 }
 
 /// Strip the browser's default button chrome, keeping the SEMANTICS. Reach for this whenever you are

@@ -55,6 +55,7 @@ import { adapter, ADAPTERS } from '../../adapters/registry';
 import { workspaceStackWith } from '../../adapters/workspace';
 import { resolveLibsDir, resolveWorkspaceScope } from '../_utils/workspace-layout';
 import { workspaceLinking } from '../_utils/linking';
+import { type Platform, csvTags, platformOf } from '../../platform/platform';
 
 // Test-only peers the base @nx generators declare as HARD peerDependencies (the chosen unitTestRunner pulls these
 // in). A consumer of the published library never runs its tests, so each is marked `{ optional: true }`.
@@ -86,6 +87,7 @@ export default async function publishableLibGenerator(
   const scope      = `@${resolveWorkspaceScope(tree)}`;
   const importPath = options.importPath ?? `${scope}/${name}`;
   const directory  = options.directory ?? `${resolveLibsDir(tree)}/${name}`;
+  const platform   = libraryPlatform(options, stack.platform);
 
   // 1) Delegate. skipFormat on the delegate; one formatFiles at the end over base output + our mutations.
   await stack.libs.create(tree, {
@@ -96,6 +98,7 @@ export default async function publishableLibGenerator(
     prefix: options.prefix ?? 'bs',
     style: options.style ?? 'scss',
     tags: options.tags,
+    platform,
   });
 
   // 2) The stack's packaging shape — FIRST, because it may decide where the package is published from.
@@ -122,6 +125,18 @@ export default async function publishableLibGenerator(
 
   // 6) Re-install (always — the new lib's runtime deps must resolve into node_modules).
   return () => installPackagesTask(tree, true);
+}
+
+/**
+ * The library's ONE platform: `--platform`, else a `platform:` tag passed in `--tags`, else the stack's own. Both
+ * given and different is a contradiction, refused rather than resolved by a precedence nobody would guess.
+ */
+function libraryPlatform(options: { platform?: Platform; tags?: string }, stackPlatform: Platform): Platform {
+  const tagged = platformOf(csvTags(options.tags));
+  if (options.platform && tagged && options.platform !== tagged) {
+    throw new Error(`[publishable-lib] --platform=${options.platform} contradicts the platform:${tagged} tag in --tags. A library has one platform — pass one.`);
+  }
+  return options.platform ?? tagged ?? stackPlatform;
 }
 
 /**

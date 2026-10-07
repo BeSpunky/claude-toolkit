@@ -65,9 +65,9 @@
 //                        both read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
 //                        the seed applier (tools/seed/apply.mjs), and the declarative seed worlds
 //                        (world.mjs and the seeds README are user-owned once written).
-//   - root eslint.config.mjs — best-effort insertion of the `platform:` dependency-constraint firewall:
-//                        `platform:web` bans firebase-admin/firebase-functions; `platform:server` bans the
-//                        browser SDK and every present client framework (each adapter names its own).
+//   - root eslint.config.mjs — best-effort insertion of the fail-closed `platform:` firewall (src/platform):
+//                        web/server depend only on their own + shared projects, shared only on shared, each
+//                        banning the packages bound to another platform; untagged projects are classified then.
 //
 // No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (a continuous multi-process serve),
 // not of Firebase, and belongs to the generator that owns that loop.
@@ -80,9 +80,6 @@ import {
   offsetFromRoot,
   addDependenciesToPackageJson,
   installPackagesTask,
-  applyChangesToString,
-  type StringChange,
-  ChangeType,
   readJson,
   readProjectConfiguration,
   writeJson,
@@ -90,9 +87,7 @@ import {
 } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadTypeScript, type TsArrayLiteralExpression, type TsNode } from '../_utils/typescript-api';
 import { adapterOf, applicationsWith } from '../../adapters/registry';
-import { workspaceStacksWith } from '../../adapters/workspace';
 import { hasDependency } from '../../layers/evidence';
 import { HOUSE_EMULATORS, defaultPort, renderEmulatorPortsModule } from './emulator-ports';
 import { describeShadow, effectiveAppHostingDir, shadowedAppHostingConfigs } from './apphosting-config';
@@ -101,6 +96,14 @@ import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../
 import { resolveAppsDir } from '../_utils/workspace-layout';
 import { rootTsconfig } from '../_utils/linking';
 import { workspaceIdentity } from '../_utils/workspace-identity';
+import { nxInvocation } from '../_utils/nx-host';
+import {
+  classifyUntaggedProjects,
+  firewallBlock,
+  insertPlatformFirewall,
+  platformCommand,
+  platformExternals,
+} from '../../platform';
 
 interface FirebaseEmulatorsSchema {
   /** Also attach the Firebase client to this app (composes `firebase-client`), and make it the client app. */
@@ -356,24 +359,26 @@ export default async function firebaseEmulatorsGenerator(
   // not declared yet). The web layer's own seeding ran before this step on a first scaffold.
   seedServedApps(tree, 'firebase-emulators');
 
-  // 4) Best-effort: the `platform:` firewall in the root flat ESLint config.
-  const serverBanned = [
-    'firebase',
-    'firebase/*',
-    ...workspaceStacksWith(tree, 'firebase').flatMap((stack) => stack.firebase.serverBannedImports),
-  ];
+  // 4) Best-effort: the `platform:` firewall in the root flat ESLint config (src/platform/firewall — fail closed:
+  //    each platform depends only on its own and shared projects). Firebase is what brings a second platform, so it
+  //    is what brings the firewall — and the firewall arrives over projects nobody classified. Classify them in the
+  //    same act (evidence only, every inference reported), or the first lint would fail on every untagged library.
+  //    An EXISTING firewall is project state: the old shape is migration 0.50.0's to upgrade, never re-written here.
+  const externals = platformExternals(tree);
+  const nx = nxInvocation(tree).command;
   const eslintConfigPath = 'eslint.config.mjs';
   if (tree.exists(eslintConfigPath)) {
     const current = tree.read(eslintConfigPath, 'utf8') ?? '';
-    const patched = addPlatformBoundaries(current, eslintConfigPath, serverBanned);
+    const patched = insertPlatformFirewall(current, eslintConfigPath, externals, nx);
     if (patched && patched !== current) {
       tree.write(eslintConfigPath, patched);
+      classifyUntaggedProjects(tree, { who: 'firebase-emulators', nx, externals });
     } else if (!patched) {
       logger.warn(
-        `[firebase-emulators] Could not auto-insert the platform: dependency constraints into ${eslintConfigPath}. ` +
-        `Add these entries to the @nx/enforce-module-boundaries depConstraints array manually:\n` +
-        `  { sourceTag: 'platform:web', bannedExternalImports: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*'] },\n` +
-        `  { sourceTag: 'platform:server', bannedExternalImports: ${JSON.stringify(serverBanned).replace(/"/g, "'")} }`
+        `[firebase-emulators] Could not auto-insert the platform firewall into ${eslintConfigPath}. ` +
+          `Add these entries to the @nx/enforce-module-boundaries depConstraints array, then classify every project ` +
+          `(${platformCommand(nx, '<project>')}):\n` +
+          firewallBlock(externals, nx).map((line) => `  ${line}`).join('\n'),
       );
     }
   }
@@ -668,87 +673,4 @@ function seedRules(tree: Tree, firebaseJson: Record<string, unknown>, root: stri
     }
     firebaseJson[service.key] = declaration;
   }
-}
-
-/**
- * Insert the `platform:` dependency constraints into the root flat ESLint config's
- * `depConstraints` array (the `@nx/enforce-module-boundaries` rule).
- *
- * Uses the TypeScript compiler API to locate the array (no regex on source — source code
- * is a tree, not text), then applies a text insert via `applyChangesToString` so the
- * surrounding formatting is preserved and `formatFiles` polishes the result.
- *
- * Returns:
- *   - the updated source when the constraints are inserted,
- *   - the original `source` when they're already present (idempotent no-op),
- *   - `null` when no `depConstraints` array literal is found — the caller logs an
- *     actionable warning with the manual snippet.
- */
-function addPlatformBoundaries(source: string, sourcePath: string, serverBanned: readonly string[]): string | null {
-  // Idempotency: the tag literal anywhere in the file means the firewall is already declared.
-  if (source.includes('platform:web') || source.includes('platform:server')) {
-    return source;
-  }
-
-  const ts = loadTypeScript();
-  if (!ts) return null;
-
-  const sf = ts.createSourceFile(
-    sourcePath,
-    source,
-    ts.ScriptTarget.Latest,
-    /* setParentNodes */ true,
-    ts.ScriptKind.JS
-  );
-
-  let constraintsArray: TsArrayLiteralExpression | null = null;
-  const findConstraints = (node: TsNode): void => {
-    if (constraintsArray) return;
-    if (
-      ts.isPropertyAssignment(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === 'depConstraints' &&
-      ts.isArrayLiteralExpression(node.initializer)
-    ) {
-      constraintsArray = node.initializer;
-      return;
-    }
-    ts.forEachChild(node, findConstraints);
-  };
-  findConstraints(sf);
-  if (!constraintsArray) return null;
-
-  const found: TsArrayLiteralExpression = constraintsArray;
-  const elements = found.elements;
-  // THE SPLICE IS SHAPED BY ITS NEIGHBOURS, not dropped before the closing bracket. Inserting at `]` put the
-  // comma and the snippet AFTER whatever whitespace preceded the bracket — valid JS, but an ugly `}\n   ,\n// …`
-  // that lands as-is wherever prettier is absent (formatFiles only formats when it is installed), and on a
-  // project that never asked for it. So: after the last element (and its trailing comma, if any), at that
-  // element's own indentation; into an empty array, one level inside the property's indentation.
-  const indentOfLineAt = (pos: number): string => /^[ \t]*/.exec(source.slice(source.lastIndexOf('\n', pos - 1) + 1))![0];
-  const last = elements.length ? elements[elements.length - 1] : null;
-  const indent = last ? indentOfLineAt(last.getStart(sf)) : `${indentOfLineAt(found.getStart(sf))}  `;
-  const lines = [
-    `// by platform: the server-only Firebase Admin/Functions SDKs belong to Cloud`,
-    `// Functions alone — they must never reach browser/SSR code (they pull in`,
-    `// Node-native modules and admin credentials). Symmetrically, the browser Firebase`,
-    `// SDK and the client framework have no place in the functions runtime.`,
-    `{`,
-    `  sourceTag: 'platform:web',`,
-    `  bannedExternalImports: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*'],`,
-    `},`,
-    `{`,
-    `  sourceTag: 'platform:server',`,
-    `  bannedExternalImports: [${serverBanned.map((pkg) => `'${pkg}'`).join(', ')}],`,
-    `}`,
-  ];
-  const block = lines.map((line) => `${indent}${line}`).join('\n');
-  // Where the last element ends — past its trailing comma when it has one.
-  const afterLast = last ? (elements.hasTrailingComma ? source.indexOf(',', last.getEnd()) + 1 : last.getEnd()) : -1;
-  const changes: StringChange[] = [
-    last
-      ? { type: ChangeType.Insert, index: afterLast, text: `${elements.hasTrailingComma ? '' : ','}\n${block}${elements.hasTrailingComma ? ',' : ''}` }
-      : { type: ChangeType.Insert, index: found.getStart(sf) + 1, text: `\n${block},\n${indentOfLineAt(found.getStart(sf))}` },
-  ];
-  return applyChangesToString(source, changes);
 }

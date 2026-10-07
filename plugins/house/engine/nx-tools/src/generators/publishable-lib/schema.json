@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "BeSpunkyPublishableLib",
   "title": "Create a house-standard publishable library",
-  "description": "Scaffold a publishable library through a stack adapter — `--stack=angular` (ng-packagr/FESM, standalone, Vitest) or `--stack=js` (plain TS, @nx/js with bundler tsc); the default is the workspace's most specific stack — that builds to dist/<directory>, is linked in-repo the way the workspace links (a tsconfig path alias, or — in a TS-solution workspace — a workspace package), declares any cross-lib deps (real caret ranges under path aliases; the package manager's workspace range for in-workspace siblings in a TS-solution workspace), and is independently releasable via `nx release` with a git-tag version baseline. The directory defaults to where this workspace keeps libraries, the import path to the workspace's own npm scope.",
+  "description": "Scaffold a publishable library through a stack adapter — `--stack=angular` (ng-packagr/FESM, standalone, Vitest) or `--stack=js` (plain TS, @nx/js with bundler tsc); the default is the workspace's most specific stack — that builds to dist/<directory>, is linked in-repo the way the workspace links (a tsconfig path alias, or — in a TS-solution workspace — a workspace package), declares any cross-lib deps (real caret ranges under path aliases; the package manager's workspace range for in-workspace siblings in a TS-solution workspace), and is independently releasable via `nx release` with a git-tag version baseline. Every library is classified for the platform firewall (`--platform`; default the stack's: angular → web, js → shared). The directory defaults to where this workspace keeps libraries, the import path to the workspace's own npm scope.",
   "type": "object",
   "properties": {
     "name": {
@@ -56,6 +56,16 @@
     "tags": {
       "type": "string",
       "description": "Comma-separated tags applied to the library (used for module-boundary linting)."
+    },
+    "platform": {
+      "type": "string",
+      "description": "Where the library's code runs — its one `platform:` tag, which the ESLint platform firewall keys on: `web` (browser/SSR), `server` (Cloud Functions/Node) or `shared` (isomorphic — imports nothing bound to one platform). Defaults to a `platform:` tag given in --tags, else the stack's own: `angular` → web, `js` → shared.",
+      "enum": [
+        "web",
+        "server",
+        "shared"
+      ],
+      "x-priority": "important"
     },
     "workspaceDeps": {
       "type": "array",

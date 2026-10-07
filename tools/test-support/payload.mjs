@@ -125,9 +125,12 @@ export function unparseable(before, after) {
     if (a[path] === text) continue;
     const diagnostics = /\.json$/.test(path)
       ? ts.parseJsonText(path, text).parseDiagnostics
-      : /\.(m|c)?(t|j)sx?$/.test(path)
-        ? ts.transpileModule(text, { fileName: path, reportDiagnostics: true }).diagnostics
-        : [];
+      : /\.d\.(m|c)?ts$/.test(path)
+        ? // A declaration file has no output, and transpileModule asserts on that ("Output generation failed") — parse it.
+          ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS).parseDiagnostics
+        : /\.(m|c)?(t|j)sx?$/.test(path)
+          ? ts.transpileModule(text, { fileName: path, reportDiagnostics: true }).diagnostics
+          : [];
     const first = diagnostics?.[0];
     if (!first) continue;
     const at = first.file && first.start !== undefined ? first.file.getLineAndCharacterOfPosition(first.start) : null;

@@ -1347,8 +1347,8 @@ checkAsync('firebase core on an old-shaped eslint.config.mjs (no trailing comma)
   const sf = ts_.createSourceFile('eslint.config.mjs', out, ts_.ScriptTarget.Latest, true, ts_.ScriptKind.JS);
   ok(sf.parseDiagnostics.length === 0, `does not parse: ${sf.parseDiagnostics.map((d) => d.messageText).join('; ')}`);
   ok(!/^\s*,\s*$/m.test(out) && !/},\]/.test(out), `malformed splice:\n${out}`);
-  ok(/\n {24}},\n {24}\/\/ by platform:/.test(out), `not at the neighbours' indentation:\n${out}`);
-  ok(/sourceTag: 'platform:server'[\s\S]*\n {24}}\n {20}\]/.test(out), `closing bracket not on its own line:\n${out}`);
+  ok(/\n {24}},\n {24}\/\/ THE PLATFORM FIREWALL/.test(out), `not at the neighbours' indentation:\n${out}`);
+  ok(/sourceTag: 'platform:shared'[\s\S]*\n {24}}\n {20}\]/.test(out), `closing bracket not on its own line:\n${out}`);
   await generator('firebase-emulators')(tree, {});
   ok(tree.read('eslint.config.mjs', 'utf8') === out, 'a re-run changed eslint.config.mjs');
 });

@@ -25,7 +25,8 @@
 //      OVERRIDES the inferred/targetDefault inputs wholesale, and a hardcoded named input hard-fails
 //      `nx build` on any workspace whose nx.json doesn't define it. A graph edge also keeps `nx affected` right.
 //   3. the two marker blocks in the app's global stylesheet: the `@use` (prepended) and `@include ds.theme()`
-//      (appended). TWO blocks because sass requires every `@use` to precede any other rule.
+//      (appended). TWO blocks because sass requires every `@use` to precede any other rule. On the app's FIRST
+//      wiring only, a seeded `.skip-link { @include ds.skip-link(); }` rule for the shell's skip link.
 //   4. the design system's runtime provider (its binding's, e.g. provideDesignSystem()) — only into an app of
 //      the SAME stack as the binding: a framework's provider is that framework's code.
 //
@@ -55,6 +56,15 @@ const USE_START = '/* @bespunky/design-system:use:start — generator-owned. */'
 const USE_END = '/* @bespunky/design-system:use:end */';
 export const THEME_START = '/* @bespunky/design-system:theme:start — generator-owned. */';
 export const THEME_END = '/* @bespunky/design-system:theme:end */';
+
+/**
+ * The app shell's skip link (adapters/<stack> seeds the markup: `<a class="skip-link" href="#main">` before
+ * `<main id="main">`), styled by the design system's mechanism. Seeded, not owned — no markers to re-assert.
+ */
+const SKIP_LINK_BLOCK =
+  `/* The skip link — the shell's first focusable element, hidden until a keyboard user reaches it, then shown over\n` +
+  `   the page on the surface colours. Its look is the design system's (ds.skip-link()); keep the class on the link. */\n` +
+  `.skip-link {\n  @include ds.skip-link();\n}`;
 
 export default async function designSystemStylesGenerator(
   tree: Tree,
@@ -199,8 +209,14 @@ function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: 
     `@include ds.theme();\n` +
     `${THEME_END}`;
 
+  // The FIRST wiring of this app (no `@use` block yet: a new app, or an existing one meeting the design system) is
+  // also when its shell's skip link gets its look — seeded once after the theme, then the app's to keep or edit.
+  // Never on a later sync: an app wired before carries its own shell, which a rule it never asked for could clash with.
+  const firstWiring = !current.includes(USE_START) && !current.includes(USE_END);
+
   let next = upsert(current, USE_START, USE_END, useBlock, 'prepend');
   next = upsert(next, THEME_START, THEME_END, themeBlock, 'append');
+  if (firstWiring && !/\.skip-link\b/.test(next)) next = `${next.trimEnd()}\n\n${SKIP_LINK_BLOCK}\n`;
 
   if (next !== current) tree.write(stylesPath, next);
 }
