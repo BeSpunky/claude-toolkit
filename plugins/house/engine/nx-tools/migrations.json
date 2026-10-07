@@ -257,6 +257,12 @@
       "layer": "firebase",
       "description": "The Cloud Functions build stops copying .env into the bundle: firebase.json \u2192 functions.configDir now points the emulator and deploy at the functions source, where .env, .env.<projectId> and the emulator-only .env.local are read in place. Removes exactly the house's `{ glob: '.env', input: <functions root>, output: '.' }` asset from functions:build (and the `assets` key when that empties it) \u2014 owed as a migration because the first 0.50 upgrade has no house-targets record, so the regenerated target would otherwise keep the dropped key as the project's own. A .env asset of another shape is the project's: kept and reported.",
       "implementation": "./src/migrations/0.50.0/read-functions-params-in-place"
+    },
+    "deploys-object-form": {
+      "version": "0.50.0",
+      "layer": "nx",
+      "description": "A branch model's `deploys` is an object only: every bare-string note in .bespunky/branches.json (integration, a stage, releases, hotfixes, a tag series) becomes { \"note\": <the same text> }, edited in place so every other byte is kept. Format only, as decided for 0.50.0 \u2014 a note binds nothing, so no binding changes and the projection is left as it is. The branch-and-release engine reports the string form as outdated (describe, verify, validate and write refuse it). A declaration that is not JSON is left and reported.",
+      "implementation": "./src/migrations/0.50.0/deploys-object-form"
     }
   }
 }
