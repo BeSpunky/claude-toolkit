@@ -69,5 +69,21 @@ export default {
         t.ok(ctx.preflight('web', { worktree: 'feat/x' }, [holder]).refuse, 'another worktree is refused');
       },
     },
+    {
+      // D6: an agent's `nx serve` got only "✖ nx run web:serve-preflight" and a log path — the refusal itself never
+      // reached it. The verdict is also said to the invoking nx exactly when Nx's renderer would hide it.
+      name: 'serve-preflight: the verdict reaches the invoker in the one Nx renderer that hides task output',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        ctx.hides = ctx.load('executors/serve-preflight/executor').nxHidesTaskOutput;
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(ctx.hides({ invokerIsTty: false, aiAgent: true }), 'an agent without a terminal (summary): said to the invoker');
+        t.ok(!ctx.hides({ invokerIsTty: true, aiAgent: true }), 'an agent WITH a terminal (TUI shows it): not duplicated');
+        t.ok(!ctx.hides({ invokerIsTty: false, aiAgent: false }), 'CI / a pipe (static-failures-only shows it): not duplicated');
+        t.ok(ctx.hides({ style: 'summary', invokerIsTty: true, aiAgent: false }), '--output-style=summary named: said to the invoker');
+        t.ok(!ctx.hides({ style: 'static', invokerIsTty: false, aiAgent: true }), '--output-style=static named: Nx prints it itself');
+      },
+    },
   ],
 };
