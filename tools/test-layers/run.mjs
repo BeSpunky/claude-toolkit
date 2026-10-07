@@ -456,6 +456,8 @@ check('firebase and the design system on the Nx floor alone: core steps run, not
   ok(!got.some((l) => l.startsWith('firebase-client ')), 'no client attached — there is no app');
   ok(got.includes('firebase-emulators --workspaceName=shop'), `core without a client app: ${got.join(' | ')}`);
   ok(got.includes('design-system --scope=shop'), 'the design-system core runs without a framework');
+  // Every emulator suite claims its ports through the dev engine (tools/dev/lib/stacks.mjs) — with or without `web`.
+  ok(got.includes('dev') && got.indexOf('dev') > got.indexOf('firebase-emulators --workspaceName=shop'), `the dev engine is written for a backend-only Firebase too: ${got.join(' | ')}`);
 });
 check('firebase with apps the client could go into, but the named app missing: partial', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { app: 'nope' }), STAMP));

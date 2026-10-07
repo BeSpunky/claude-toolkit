@@ -60,9 +60,9 @@
 //   `{workspaceRoot}/…` inputs, so a change to firebase.json, .firebaserc or a root rules file marks it affected.
 //   Both projects are HOUSE PROJECTS (_utils/project-files): found by project, created the way this workspace
 //   defines projects (a project.json, or a package.json workspace member under TS-solution linking).
-//   - tools/{emulators,emulator-data,reap-emulators,push-secrets,firebase-welcome}.sh, tools/emulator-ports.mjs,
-//                        tools/seed/* — the launch path, data lifecycle, port reclaim (and the one port table
-//                        both read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
+//   - tools/{emulators,emulator-data,push-secrets,firebase-welcome}.sh, tools/emulator-ports.mjs,
+//                        tools/seed/* — the launch path, data lifecycle (and the one port table
+//                        the scripts read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
 //                        the seed applier (tools/seed/apply.mjs), and the declarative seed worlds
 //                        (world.mjs and the seeds README are user-owned once written).
 //   - root eslint.config.mjs — best-effort insertion of the fail-closed `platform:` firewall (src/platform):
@@ -343,7 +343,6 @@ export default async function firebaseEmulatorsGenerator(
   //    app added later (`nx g @bespunky/nx-tools:app`) gets its env files from firebase-client without this
   //    workspace step re-running, and the banner must still see them.
   tree.write('tools/firebase-welcome.sh', template('firebase-welcome.sh.tpl').split('{{appsDir}}').join(appsDir));
-  tree.write('tools/reap-emulators.sh', template('reap-emulators.sh.tpl'));
   tree.write('tools/emulator-ports.mjs', renderEmulatorPortsModule(template('emulator-ports.mjs.tpl')));
   tree.write(
     'tools/emulators.sh',

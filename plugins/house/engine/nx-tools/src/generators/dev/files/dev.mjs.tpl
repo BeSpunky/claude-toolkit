@@ -124,10 +124,12 @@ async function abandonDetached(tree, key, say) {
  * `{ ok, finished, pending }`: `finished` the entries that ended (with their `result`), `pending` what still runs
  * when the wait ran out. `ok` is false when work is still pending or any of it ended in failure (`code` non-zero).
  */
-async function awaitDetached(tree, key, { say, timeoutMs = DETACHED_TIMEOUT_MS, every = 5000 } = {}) {
+async function awaitDetached(tree, key, { say, timeoutMs = DETACHED_TIMEOUT_MS, every = 5000, known = [] } = {}) {
   const start = Date.now();
   let next = start + every;
+  const seen = new Map(known.map((w) => [w.id, w]));
   for (;;) {
+    for (const w of detachedWork(stackDirOf(tree, key))) seen.set(w.id, w);
     const running = unfinished(tree, key);
     if (!running.length) break;
     if (Date.now() - start >= timeoutMs) {
@@ -144,8 +146,25 @@ async function awaitDetached(tree, key, { say, timeoutMs = DETACHED_TIMEOUT_MS, 
   }
   // Every entry of this stack has ended — including work that finished before we started waiting (an export that
   // beat its supervisor's grace). Each owner writes its result as its last act; that is what is reported.
-  const finished = detachedWork(stackDirOf(tree, key)).filter((w) => w.status === 'exited' || !w.alive);
+  for (const w of detachedWork(stackDirOf(tree, key))) seen.set(w.id, w);
+  const finished = [...seen.values()].map(lastWord).filter((w) => w.status === 'exited' || !isSameProcess(w.pid, w.procStart));
   return { ok: finished.every((w) => !w.code), finished, pending: [] };
+}
+
+/**
+ * A piece of detached work as it ENDED. Its owner may release the stack's state dir as its very last act (the keeper
+ * does, when nobody else is left), taking the entry with it — so an entry last seen before its end is completed from
+ * the work's log, where the owner also writes its result (`[…] result (code N): …`).
+ */
+function lastWord(w) {
+  if (w.status === 'exited' || !w.log) return w;
+  try {
+    const m = [...readFileSync(w.log, 'utf8').matchAll(/^\[[^\]]+\] result \(code (\d+)\): (.*)$/gm)].pop();
+    if (m) return { ...w, status: 'exited', code: Number(m[1]), result: m[2] };
+  } catch {
+    /* no log — what was seen is all there is */
+  }
+  return w;
 }
 
 const USAGE = `Usage:
@@ -586,6 +605,8 @@ async function ps(opts) {
  */
 async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_MS + 60000 } = {}) {
   const say = (m) => console.log(`[stop] ${record.key}: ${m}`);
+  // What it detached, as of now — its entries may be gone with the state dir by the time it ends (see lastWord).
+  const known = detachedWork(stackDirOf(record.tree, record.key));
   // Who asked — read by the serve as it ends, and said there (see stoppedBy).
   if (record.state === 'live') {
     try {
@@ -617,6 +638,7 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   let next = start + 5000;
   let abandoned = false;
   while (running().length && Date.now() - start < timeoutMs) {
+    for (const w of detachedWork(stackDirOf(record.tree, record.key))) known.push(w);
     if (abandon && !abandoned && unfinished(record.tree, record.key).some((w) => w.status === 'stopping')) {
       abandoned = true;
       await abandonDetached(record.tree, record.key, say);
@@ -633,7 +655,7 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   }
   if (abandon && unfinished(record.tree, record.key).length) await abandonDetached(record.tree, record.key, say);
   // The claimer reported its own detached work; one that died without waiting for it (or a finishing stack) has not.
-  const detached = await awaitDetached(record.tree, record.key, { say });
+  const detached = await awaitDetached(record.tree, record.key, { say, known });
   for (const w of detached.finished) say(w.result ?? `${w.id} ended (code ${w.code ?? 0})`);
   if (detached.pending.length) return { ok: false, why: `stopped, but its detached work is still finishing (above) — or end it now: ${stopCommandFor(record, { abandon: true })}` };
   if (!detached.ok) return { ok: false, why: `stopped, but ${detached.finished.filter((w) => w.code).map((w) => w.id).join(', ')} did not finish cleanly (above)` };

@@ -19,7 +19,7 @@
 # ROBUSTNESS (why this file is long): a long-lived, multi-process, human+agent-shared stack is a leak
 # magnet. Every lifecycle failure is designed OUT, not left to discipline:
 #   • idempotent `up` that REAPS stale leftovers before starting — validated by PID *and* cmdline, so a
-#     reused PID owned by something else is NEVER killed (mirrors tools/reap-emulators.sh discipline);
+#     reused PID owned by something else is NEVER killed (the house's stop-by-handle discipline, tools/dev);
 #   • an flock so two `up`s can't half-start the stack;
 #   • a readiness gate on all three ports, with a diagnostic dump + self-teardown on timeout (no half-up);
 #   • a `down` that kills exactly this stack by PID file and VERIFIES the ports are actually free;
@@ -410,7 +410,7 @@ kill_component() {
 
 # Reclaim a port ONLY if every holder is provably ours (cmdline matches the signature). A FOREIGN
 # holder → clear error, return non-zero, and we do NOT kill it. When ours: SIGTERM → poll → SIGKILL,
-# and (like reap-emulators.sh) do not return until the port is actually FREE — "sent a kill" ≠ "freed".
+# and do not return until the port is actually FREE — "sent a kill" ≠ "freed".
 reclaim_port_if_ours() {
   local port="$1" sig="$2" pid holders t
   holders="$(port_holders "$port")"

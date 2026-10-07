@@ -4,7 +4,7 @@
 # THE RULE. A generated tool whose stdout a script parses writes STRINGS. console.log formats a non-string the way
 # util.inspect does, and under FORCE_COLOR (which Nx's run-commands sets for every task it runs) a number comes out
 # as `\e[33m9099\e[39m`. That shipped once: every `nx run firebase:seed:build` died in 80 ms on "usage:
-# emulator-ports.mjs shift", and reap-emulators.sh's port reclaim matched nothing — SILENTLY — under
+# emulator-ports.mjs shift", and the old reaper's port reclaim matched nothing — SILENTLY — under
 # `nx run firebase:emulators`. Run directly (no FORCE_COLOR), every tool looked fine.
 #
 # Two halves: the behaviour (each parsed command, run under FORCE_COLOR=1 the way Nx runs it), and a static guard
@@ -28,15 +28,24 @@ ports="$(node "$TMP/tools/emulator-ports.mjs" ports "$TMP/firebase.json")"
 ok "ports: one plain number per line (FORCE_COLOR=1)" "$(grep -qvE '^[0-9]+$' <<<"$ports" && echo 0 || echo 1)"
 ok "ports: lists the declared ports" "$(grep -qx 9099 <<<"$ports" && grep -qx 9150 <<<"$ports" && echo 1 || echo 0)"
 
-offset="$(node "$TMP/tools/emulator-ports.mjs" free-offset "$TMP/firebase.json")"
-ok "free-offset: a plain number (FORCE_COLOR=1) — got '$(printf '%q' "$offset")'" "$(grep -qxE '[0-9]+' <<<"$offset" && echo 1 || echo 0)"
-
-# The consumer exactly as tools/seed/build-seeds.sh is: the free offset straight into `shift`.
-if node "$TMP/tools/emulator-ports.mjs" shift "$TMP/firebase.json" "$offset" "$TMP/shifted.json" 2>"$TMP/shift.err"; then
-  shifted="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).emulators.auth.port))' "$TMP/shifted.json")"
-  ok "shift <free-offset>: accepted and applied (auth $((9099 + offset)))" "$([ "$shifted" = "$((9099 + offset))" ] && echo 1 || echo 0)"
+# The consumer exactly as tools/seed/build-seeds.sh is: the suite's ports → the dev engine's claim → its offset
+# straight into `shift`. Every hop is parsed by a shell.
+node "$ROOT/tools/test-scaffold/render-engine.mjs" "$TMP"
+claimports="$(node "$TMP/tools/emulator-ports.mjs" claim "$TMP/firebase.json")"
+ok "claim: name=port pairs, plain (FORCE_COLOR=1) — got '$(printf '%q' "$claimports")'" "$(grep -qxE '([a-z-]+=[0-9]+,)*[a-z-]+=[0-9]+' <<<"$claimports" && echo 1 || echo 0)"
+if CLAIM="$(cd "$TMP" && node tools/dev/dev.mjs claim seed-build --pid=$$ --shifted --ports="$claimports" 2>"$TMP/claim.err")"; then
+  eval "$CLAIM"
+  offset="$STACK_OFFSET"
+  ok "dev claim: a plain shifted offset (FORCE_COLOR=1) — got '$(printf '%q' "$offset")'" "$(grep -qxE '[1-9][0-9]*' <<<"$offset" && echo 1 || echo 0)"
+  if node "$TMP/tools/emulator-ports.mjs" shift "$TMP/firebase.json" "$offset" "$TMP/shifted.json" 2>"$TMP/shift.err"; then
+    shifted="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).emulators.auth.port))' "$TMP/shifted.json")"
+    ok "shift <claimed offset>: accepted and applied (auth $((9099 + offset)))" "$([ "$shifted" = "$((9099 + offset))" ] && echo 1 || echo 0)"
+  else
+    ok "shift <claimed offset>: accepted ($(cat "$TMP/shift.err"))" 0
+  fi
+  (cd "$TMP" && node tools/dev/dev.mjs release "$STACK_KEY" --pid=$$)
 else
-  ok "shift <free-offset>: accepted ($(cat "$TMP/shift.err"))" 0
+  ok "dev claim: succeeded ($(cat "$TMP/claim.err"))" 0
 fi
 
 # ── Static guard: no generator template hands a bare value to console.log/console.info ──────────────

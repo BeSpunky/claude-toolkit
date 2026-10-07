@@ -1,6 +1,6 @@
 // Render tools/emulator-ports.mjs into a fixture workspace exactly as the firebase-emulators generator does:
 // the owned template with the one port table (suite-ports.json) projected in. The scripts under test
-// (emulators.sh, reap-emulators.sh) read their ports from it, so a fixture without it tests nothing real.
+// (emulators.sh, build-seeds.sh) read their ports from it, so a fixture without it tests nothing real.
 //
 //   node tools/test-scaffold/emulator-ports.mjs <workspace dir>
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

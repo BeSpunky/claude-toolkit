@@ -25,6 +25,13 @@
 //   - any target that `dependsOn` one of the targets it changed: it would now wait for a server to FINISH, so it
 //     must depend on `dev-stack` (the continuous stack — see serve-runs-its-own-stack) instead.
 //
+// THE HOUSE-TARGETS RECORD (`.bespunky/house-targets.json`, written first by 0.50.0 record-house-targets from the
+// 0.49.2 baseline) is not touched here, and need not be, in either rung order: the record holds what the house LAST
+// WROTE (`continuous: true` for the emulator targets, as of 0.49.2), and the generator's three-way merge compares the
+// project's value with it and with what the house writes NOW (`false`). The value this rung leaves IS the house's new
+// one, so the merge finds the project already where the house is going and reports nothing — it is a hand edit only
+// when it differs from both. Writing `false` into the record here would claim the house wrote it before it had.
+//
 // SELF-CONTAINED by the migration contract: the executor list and target names are frozen here.
 import { type Tree, getProjects, logger } from '@nx/devkit';
 import { updateProjectConfigInPlace } from '../../generators/_utils/project-files';

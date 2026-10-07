@@ -8,9 +8,13 @@
 # foreground group. Both lost every stack's data (`tools/dev/dev stop`, Ctrl+C on `nx serve`) while a lone
 # `kill <pid>` of the script exported fine — so a test that only sends one polite signal proves nothing.
 #
-# HOW. The shipped template, rendered with stub reaper/data scripts and a fake `firebase` that behaves like the
-# real one where it matters: it spawns a child "JVM"; a signal to that child is FATAL (exit 1, no export); a
-# SIGTERM to firebase itself exports (slowly) and exits. Each stop below is delivered the way its real sender
+# And a stop never waits FOREVER: the keeper owns a deadline (EMULATORS_STOP_TIMEOUT) past which it ends its own
+# process group and says so, and `tools/dev/dev stop --abandon` does the same at once (R3-3: a hung export once
+# wedged the stack — FINISHING forever, every restart refused).
+#
+# HOW. The shipped template, rendered with the dev engine (the stack claim), a stub data script and a fake
+# `firebase` that behaves like the real one where it matters: it spawns a child "JVM"; a signal to that child is
+# FATAL (exit 1, no export); a SIGTERM to firebase itself exports (slowly) and exits — or, with FAKE_HANG, never. Each stop below is delivered the way its real sender
 # delivers it, including Nx's: every leaf of the script's tree first, then the parents, then SIGKILL after 1 s.
 set -uo pipefail
 
@@ -30,7 +34,7 @@ cleanup() {
     pid="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$entry" 2>/dev/null)"
     [ -n "$pid" ] && kill -KILL -- "-$pid" 2>/dev/null
   done
-  rm -rf "$TMP"
+  [ -n "${KEEP:-}" ] && echo "kept $TMP" || rm -rf "$TMP"
 }
 trap cleanup EXIT
 
@@ -45,6 +49,7 @@ EXPORT=''
 while [ "$#" -gt 0 ]; do [ "$1" = --export-on-exit ] && EXPORT="$2"; shift; done
 REC="$PWD/.fake-firebase-signals"
 : > "$REC"
+printf '%s' "$TMPDIR" > "$PWD/.fake-firebase-tmpdir"
 # The "JVM": a signal that reaches it before firebase-tools has finished its export is the bug — it records that.
 DONE="$PWD/.fake-firebase-exported"
 rm -f "$DONE"
@@ -54,6 +59,7 @@ stop() {
   echo "$1" >> "$REC"
   [ "$(wc -l < "$REC")" -gt 1 ] && return   # firebase-tools: a second signal means force quit — keep exporting here
   echo "Received $1 — exporting…"
+  if [ -n "${FAKE_HANG:-}" ]; then while :; do sleep 0.1; done; fi   # an export that never ends
   sleep 1.5
   if [ -n "$EXPORT" ]; then mkdir -p "$EXPORT"; echo '{}' > "$EXPORT/firebase-export-metadata.json"; fi
   : > "$DONE"
@@ -76,7 +82,7 @@ mkws() {   # mkws <name> — a workspace with the rendered script, stubs and a f
   local d="$TMP/$1"
   mkdir -p "$d/tools" "$d/node_modules"
   sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}||g' -e 's|{{functionsRoot}}|apps/fn|g' -e 's|{{functionsDist}}|dist/apps/fn|g' "$TPL" > "$d/tools/emulators.sh"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/reap-emulators.sh"
+  node "$ROOT/tools/test-scaffold/render-engine.mjs" "$d"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/emulator-data.sh"
   node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$d"
   printf '{ "emulators": { "auth": { "port": 9099 }, "firestore": { "port": 8080 } } }\n' > "$d/firebase.json"
@@ -87,7 +93,7 @@ start() {   # start <ws> — in its own session under a shell, as Nx's run-comma
   # `env --default-signal`: a background job of a non-interactive shell (this test) starts with SIGINT IGNORED, and
   # an ignored-on-entry signal cannot be trapped — no real launcher (Nx, a terminal) does that to it.
   ( cd "$1" || exit 1
-    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT=20 NX_INVOCATION_ROOT_PID="${INVOKER:-}" env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
+    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT="${STOP_TIMEOUT:-20}" DEV_OWNER=test env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
     echo $! )
 }
 rc() { cat "$1/rc" 2>/dev/null; }
@@ -97,6 +103,7 @@ descendants() { local c; for c in $(pgrep -P "$1"); do descendants "$c"; echo "$
 gone() { for _ in $(seq 1 "${2:-100}"); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done; return 1; }
 exported() { [ -f "$1/.emulator-data/firebase-export-metadata.json" ]; }
 signals() { grep -vx JVM-KILLED "$1/.fake-firebase-signals" | tr '\n' ' ' | sed 's/ $//'; }
+gone_dir() { for _ in $(seq 1 100); do [ -d "$1" ] || return 0; sleep 0.1; done; return 1; }
 keeper_gone() {   # the detached keeper finished on its own — it records its result, and (run directly, with no script
   # left to read it) releases the state dir
   for _ in $(seq 1 100); do
@@ -108,9 +115,6 @@ keeper_gone() {   # the detached keeper finished on its own — it records its r
 }
 
 # ── 1. Nx's stop: leaf-first tree kill, then SIGKILL after a 1 s grace ─────────────────────────────
-# The invoking nx (NX_INVOCATION_ROOT_PID) — a stand-in whose stderr is a file it APPENDS to (`>>`, a terminal or a
-# pipe behave the same): the line is written at once.
-sleep 300 2>>"$TMP/invoker.err" & INVOKER=$!
 W="$(mkws nx)"; P="$(start "$W")"; STARTED+=("$P")
 ok "nx: the suite came up" "$(ready "$W" && echo 1 || echo 0)"
 mapfile -t TREE < <(descendants "$P"; echo "$P")
@@ -120,21 +124,10 @@ for pid in "${TREE[@]}"; do kill -KILL "$pid" 2>/dev/null; done
 ok "nx: no emulator child was in the script's tree to be signalled" "$(grep -q JVM-KILLED "$W/.fake-firebase-signals" && echo 0 || echo 1)"
 ok "nx: the suite finished its save after its supervisor was SIGKILLed" "$(keeper_gone "$W" && exported "$W" && echo 1 || echo 0)"
 ok "nx: firebase-tools got exactly ONE SIGTERM (got: $(signals "$W"))" "$([ "$(signals "$W")" = TERM ] && echo 1 || echo 0)"
-ok "nx: run directly, its state dir is released once the save is done" "$([ ! -d "$W/.bespunky/run/firebase@0" ] && echo 1 || echo 0)"
+TMPD="$(cat "$W/.fake-firebase-tmpdir")"
+ok "nx: run directly, its stack (record, state dir, TMPDIR) is released once the save is done" "$(gone_dir "$W/.bespunky/run/firebase@0" && [ ! -f "$W/.bespunky/run/firebase@0.json" ] && [ ! -d "$TMPD" ] && echo 1 || echo 0)"
 ok "nx: the stop was announced while it ran" "$(grep -q 'stopping — exporting emulator data' "$W/out.log" && echo 1 || echo 0)"
-ok "nx: the invoker's terminal got 'saving emulator data in the background' at once" "$(grep -q 'saving emulator data in the background' "$TMP/invoker.err" && echo 1 || echo 0)"
-kill "$INVOKER" 2>/dev/null; INVOKER=''
-
-# ── 1b. The invoker's stderr is a file it did NOT open for appending (`nx serve > log 2>&1`): Nx writes at its own
-# offset, over anything appended — the line is queued and appended once the invoker has exited.
-sleep 300 2>"$TMP/invoker-trunc.err" & INVOKER=$!
-W="$(mkws capture)"; P="$(start "$W")"; STARTED+=("$P")
-ready "$W" >/dev/null
-kill -INT -- "-$P"; gone "$P" 100
-ok "> file: nothing is appended while the invoker still writes" "$(grep -q 'saving emulator data' "$TMP/invoker-trunc.err" && echo 0 || echo 1)"
-kill "$INVOKER" 2>/dev/null; INVOKER=''
-for _ in $(seq 1 50); do grep -q 'saving emulator data' "$TMP/invoker-trunc.err" && break; sleep 0.1; done
-ok "> file: the line follows the invoker's last write" "$(grep -q 'saving emulator data in the background' "$TMP/invoker-trunc.err" && echo 1 || echo 0)"
+ok "the suite's TMPDIR is the stack's own, and SHORT (a Functions worker socket must fit 107 bytes): $TMPD" "$(printf '%s' "$TMPD" | grep -qE '^/tmp/bespunky-[0-9a-f]{12}$' && echo 1 || echo 0)"
 
 # ── 2. A terminal's Ctrl+C: SIGINT to the whole process group ──────────────────────────────────────
 W="$(mkws ctrlc)"; P="$(start "$W")"; STARTED+=("$P")
@@ -166,8 +159,13 @@ kill -KILL -- "-$P"          # the supervisor gave up at once; the save is still
 sleep 0.3
 mv "$W/out.log" "$W/out1.log"
 P2="$(start "$W")"; STARTED+=("$P2")
-ok "restart: the new start waited for the previous suite's save" "$(ready "$W" && grep -q 'previous suite of this stack is still saving' "$W/out.log" && grep -q 'previous suite finished: exported to' "$W/out.log" && echo 1 || echo 0)"
-ok "restart: the previous keeper, finishing, left the state dir the waiting start had claimed" "$([ -d "$W/.bespunky/run/firebase@0/tmp" ] && [ -f "$W/.bespunky/run/firebase@0/detached/emulators.json" ] && echo 1 || echo 0)"
+ok "restart: the new start's claim waited for the previous suite's save" "$(ready "$W" && grep -q "firebase@0 — this stack's previous run — is still finishing" "$W/out.log" && exported "$W" && echo 1 || echo 0)"
+ok "restart: then it holds the stack itself (a live record, its own keeper)" "$(grep -q '"status": "running"' "$W/.bespunky/run/firebase@0/detached/emulators.json" && [ -f "$W/.bespunky/run/firebase@0.json" ] && echo 1 || echo 0)"
+# A second start while the first RUNS is the same stack twice: refused by the claim, naming the running one.
+mv "$W/out.log" "$W/out2.log"
+P3="$(start "$W")"; STARTED+=("$P3"); gone "$P3" 100
+ok "twice: a second direct run while the first runs is refused (exit $(rc "$W")), naming it" "$([ "$(rc "$W")" = 1 ] && grep -q 'offset 0 is held — firebase@0 (live' "$W/out.log" && echo 1 || echo 0)"
+mv "$W/out2.log" "$W/out.log"
 kill -TERM "$(script "$P2")"; gone "$P2" 100
 
 # ── 6. The suite dies on its own: the script fails, naming the log ─────────────────────────────────
@@ -181,14 +179,19 @@ ok "crash: the script exits non-zero (got $CODE) and names the suite's log" "$([
 
 # ── 7. Its stack's serve was killed first (Nx's force-kill after a Ctrl+C mid-export): the keeper, last one out, ──
 # removes the stack's run record and state dir — through the engine's own rule, so never a stack that is live.
-DEVLIB="$ROOT/plugins/house/engine/nx-tools/src/generators/dev/files/lib/stacks.mjs.tpl"
 under_engine() {   # under_engine <ws> <record-pid> — a dev-engine stack app@0 whose serve is <record-pid>; echoes the session
   local d="$1"
-  mkdir -p "$d/tools/dev/lib" "$d/.bespunky/run/app@0"
-  cp "$DEVLIB" "$d/tools/dev/lib/stacks.mjs"
-  printf '{ "version": 1, "key": "app@0", "app": "app", "tree": "%s", "offset": 0, "pid": %s, "host": "%s", "processes": [] }\n' "$d" "$2" "$(hostname)" > "$d/.bespunky/run/app@0.json"
+  mkdir -p "$d/.bespunky/run/app@0" /tmp/bespunky-0123456789ab
+  # The record the engine's claim writes — its claimer named by PID, kernel start time, command line and process table.
+  node --input-type=module -e '
+    const [lib, d, pid] = process.argv.slice(1);
+    const { machineId, processStart, commandLine } = await import(lib);
+    const p = Number(pid);
+    const rec = { version: 2, key: "app@0", app: "app", tree: d, offset: 0, pid: p, procStart: processStart(p), command: commandLine(p), machine: machineId(), ports: {}, tmp: "/tmp/bespunky-0123456789ab", processes: [] };
+    (await import("node:fs")).writeFileSync(d + "/.bespunky/run/app@0.json", JSON.stringify(rec));
+  ' "file://$d/tools/dev/lib/stacks.mjs" "$d" "$2"
   ( cd "$d" || exit 1
-    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT=20 DEV_STACK_DIR="$d/.bespunky/run/app@0" env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
+    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT=20 DEV_STACK_DIR="$d/.bespunky/run/app@0" DEV_STACK_TMP=/tmp/bespunky-0123456789ab env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
     echo $! )
 }
 entry_gone() { for _ in $(seq 1 100); do [ -d "$1" ] || return 0; sleep 0.1; done; return 1; }
@@ -206,5 +209,24 @@ for _ in $(seq 1 100); do exported "$W" && grep -q '"status": "exited"' "$W/.bes
 sleep 1
 ok "serve live (or a new stack on the key): the keeper leaves its record and state dir" "$([ -f "$W/.bespunky/run/app@0.json" ] && [ -d "$W/.bespunky/run/app@0" ] && echo 1 || echo 0)"
 kill "$LIVE" 2>/dev/null
+
+# ── 8. A hung export (R3-3): past its deadline the keeper ends its own group, records ABANDONED, and says so ─────
+W="$(mkws hang)"; P="$(FAKE_HANG=1 STOP_TIMEOUT=2 start "$W")"; STARTED+=("$P")
+ready "$W" >/dev/null
+kill -TERM "$(script "$P")"
+gone "$P" 150; CODE="$(rc "$W")"
+ok "hung export: the script ends within the deadline, non-zero (got $CODE), saying ABANDONED" "$([ -n "$CODE" ] && [ "$CODE" -ne 0 ] && grep -q 'ABANDONED after .*deadline passed' "$W/out.log" && echo 1 || echo 0)"
+ok "hung export: nothing of the suite is left running, and the stack is released" "$(! pgrep -f "$TMP/bin/firebase" >/dev/null 2>&1 || ! for fb in $(pgrep -f "$TMP/bin/firebase"); do [ "$(readlink "/proc/$fb/cwd")" = "$W" ] && exit 0; done; gone_dir "$W/.bespunky/run/firebase@0" && echo 1 || echo 0)"
+
+# ── 9. `tools/dev/dev stop --abandon` ends a FINISHING suite at once, by its handle ────────────────────────────
+W="$(mkws abandon)"; P="$(FAKE_HANG=1 STOP_TIMEOUT=600 start "$W")"; STARTED+=("$P")
+ready "$W" >/dev/null
+kill -KILL -- "-$P"   # the supervisor is gone; the keeper is "saving" — forever
+for _ in $(seq 1 50); do grep -q '"status": "stopping"' "$W/.bespunky/run/firebase@0/detached/emulators.json" 2>/dev/null && break; sleep 0.1; done
+PS="$(cd "$W" && DEV_OWNER=test node tools/dev/dev.mjs ps 2>&1)"
+ok "abandon: dev ps shows the stack FINISHING, with the --abandon command" "$(grep -q 'firebase@0 .*FINISHING.*--abandon' <<<"$PS" && echo 1 || echo 0)"
+OUT="$(cd "$W" && DEV_OWNER=test timeout 30 node tools/dev/dev.mjs stop firebase --offset=0 --abandon 2>&1)"; CODE=$?
+[ -n "${KEEP:-}" ] && printf "%s\n" "$OUT"
+ok "abandon: dev stop --abandon returns at once, the keeper's ABANDONED result reported" "$(grep -q 'ABANDONED' <<<"$OUT" && gone_dir "$W/.bespunky/run/firebase@0" && echo 1 || echo 0)"
 
 exit "$FAILED"

@@ -6,7 +6,7 @@
 //
 // ORDER (unchanged from the hand-written sequence it replaces):
 //   1. per-app steps, sync only, in registry order — a scaffold's `app` generator composes them itself;
-//   2. workspace steps, in registry order;
+//   2. workspace steps, in registry order (one two layers share runs once, at its first place);
 //   3. the STAMP — `house-doc`, layer-independent and LAST, because it records the layer set this run applied
 //      and must see every layer above have its turn.
 //
@@ -83,7 +83,17 @@ export function plan(ctx: PlanContext, stamp: StampOptions): PlanLine[] {
   if (ctx.mode === 'upgrade') {
     for (const id of eligible) for (const step of layer(id).generators?.app ?? []) emit(step);
   }
-  for (const id of eligible) for (const step of layer(id).generators?.workspace ?? []) emit(step);
+  // A workspace step two layers both bring (the dev engine: `web`'s dev loop, `firebase`'s stack identity) runs ONCE,
+  // at its first place: it is a function of the workspace, not of the layer that asked for it.
+  const once = new Set<string>();
+  for (const id of eligible) {
+    for (const step of layer(id).generators?.workspace ?? []) {
+      const key = `${step.generator} ${JSON.stringify(step.args?.(run) ?? [])}`;
+      if (once.has(key)) continue;
+      once.add(key);
+      emit(step);
+    }
+  }
 
   // THE STAMP. Ungated: HOUSE.rules.md is how the house directives reach a session at all (CLAUDE.md
   // `@`-imports it), and that must not be contingent on wanting the agent tooling. Section-level gating inside

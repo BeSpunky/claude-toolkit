@@ -17,7 +17,7 @@
 #      output but not the status, and under `set -euo pipefail` that killed the script one line before it
 #      would have launched the suite — no message, exit 128. Keep the fixtures non-git; the coverage is free.
 #
-# HOW. The template is rendered into a temp workspace with stub `reap-emulators.sh` / `emulator-data.sh`, and a
+# HOW. The template is rendered into a temp workspace with the dev engine (the stack claim), a stub `emulator-data.sh`, and a
 # fake `firebase` on PATH that records its arguments instead of starting anything. So this asserts the real
 # shipped script's real command line, without Java, firebase-tools, or a network.
 set -uo pipefail
@@ -57,10 +57,10 @@ mkworkspace() {   # mkworkspace <name> <emulators json>
   local d="$TMP/$1"
   mkdir -p "$d/tools"
   printf '{ "emulators": %s }\n' "$2" > "$d/firebase.json"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/reap-emulators.sh"
+  node "$ROOT/tools/test-scaffold/render-engine.mjs" "$d"   # the stack claim (tools/dev) every suite goes through
   node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$d"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/emulator-data.sh"
-  chmod +x "$d/tools/reap-emulators.sh" "$d/tools/emulator-data.sh"
+  chmod +x "$d/tools/emulator-data.sh"
   render "$d"
   echo "$d"
 }

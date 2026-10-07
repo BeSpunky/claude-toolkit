@@ -287,6 +287,12 @@
       "layer": "web",
       "description": "`nx serve <app>` is its own stack and ends with its exit status. Nx completes a continuous task that ends while nothing depends on it as succeeded whatever its exit code, and shares a continuous task between invocations \u2014 so `serve` (the continuous composer) exited 0 for a dead stack, and a second `nx serve` only waited on the first. `serve` keeps its executor, options and configurations but becomes explicitly `continuous: false` (`cache: false`); its continuous twin `dev-stack` is what an e2e target depends on. Every unambiguous reference to a house app's `serve` is retargeted to `dev-stack` (dependsOn in every project.json, and option values such as devServerTarget \"web:serve\"), because a dependent of `serve` would now wait for the stack to end. `^serve`, project patterns, nx.json targetDefaults and a project's own `dev-stack` target are reported and left.",
       "implementation": "./src/migrations/0.50.0/serve-runs-its-own-stack"
+    },
+    "retire-reap-emulators": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev claim) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
+      "implementation": "./src/migrations/0.50.0/retire-reap-emulators"
     }
   }
 }

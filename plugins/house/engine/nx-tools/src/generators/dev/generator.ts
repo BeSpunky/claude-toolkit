@@ -13,7 +13,7 @@
 import { type Tree, formatFiles, getProjects, logger } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { requireLayer } from '../../layers/registry';
+import { detectLayers, requireLayer } from '../../layers/registry';
 import { seedFromAdapters } from './fragments';
 import { SERVE_EXECUTOR } from '../_utils/dev-server';
 
@@ -61,7 +61,8 @@ export function seedServedApps(tree: Tree, tag: string): void {
 }
 
 export default async function devGenerator(tree: Tree, _options: DevSchema = {}): Promise<void> {
-  requireLayer(tree, 'web', 'dev');
+  // The web layer's dev loop — and the firebase layer's stack identity: its emulator suites claim their ports here.
+  if (!detectLayers(tree).includes('firebase')) requireLayer(tree, 'web', 'dev');
   writeEngine(tree);
   seedServedApps(tree, 'dev');
   await formatFiles(tree);

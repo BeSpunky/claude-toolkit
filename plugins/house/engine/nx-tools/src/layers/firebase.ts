@@ -61,7 +61,9 @@ export const firebase: LayerDescriptor = {
         },
       },
     ],
-    // The core, after the per-app client (planner order), so the scripts it writes follow the client app.
+    // The core, after the per-app client (planner order), so the scripts it writes follow the client app. Then the
+    // dev engine (tools/dev): every emulator suite — run by a serve, run on its own, a seed build's — claims its ports
+    // through it, the one stack identity (lib/stacks.mjs). A backend-only workspace has no `web` layer to bring it.
     workspace: [
       {
         generator: 'firebase-emulators',
@@ -74,6 +76,7 @@ export const firebase: LayerDescriptor = {
           ...(ctx.ensured.has('firebase') ? ['--seedRules'] : []),
         ],
       },
+      { generator: 'dev' },
     ],
   },
   docSections: ['firebase'],
