@@ -108,10 +108,10 @@ export const FIREBASE_ROOT_CONFIG = {
  * Write the WHOLE generated Firebase config set under `<appRoot>/src/app/` — `firebase.config.ts` and
  * every per-service sibling.
  *
- * ALL FIVE OR NONE, and that is the point rather than a convenience. The siblings import
- * `emulatorFor` / `portOffset` / `offsetUrl` from `firebase.config.ts`, and those symbols are only
- * EXPORTED from 0.33.0 onwards — before that they were module-private. So writing the siblings beside an
- * older root file produces four files importing symbols that do not exist: the project stops compiling,
+ * ALL FIVE OR NONE, and that is the point rather than a convenience. The siblings import their shared
+ * helpers from `firebase.config.ts` (today `emulatorEndpoint`; in 0.33.0–0.49 `emulatorFor` / `portOffset` /
+ * `offsetUrl`, which were module-private before 0.33.0). So writing the siblings beside an older root file
+ * produces four files importing symbols that do not exist: the project stops compiling,
  * at `tsc`, nowhere near whatever wrote them. The migration hits exactly that if it writes only the
  * siblings — on a bare `nx migrate`, on an `UPGRADE_PARTIAL` run where the per-app generators are skipped,
  * and in any multi-app workspace, since the sync runs the generator against ONE app while the migration

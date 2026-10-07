@@ -39,7 +39,7 @@ export function provideAppAuth(): EnvironmentProviders {
   return makeEnvironmentProviders([
     provideAuth(() => {
       const auth = getAuth();
-      // `if (ngDevMode)` folds to `if (false)` in prod → this block (and emulatorFor) is stripped.
+      // `if (ngDevMode)` folds to `if (false)` in prod → this block (and emulatorEndpoint) is stripped.
       if (ngDevMode && !emulatorConnected.has(auth)) {
         // In the browser: the app's own origin (proxy.conf.mjs relays the Auth emulator's API prefixes);
         // server-side: the container address, shifted by the stack's offset. See emulatorEndpoint().

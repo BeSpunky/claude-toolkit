@@ -197,7 +197,7 @@ firebase-debug.*.log
 # machine-local; the committed seed worlds live in tools/emulator-seeds/ (see its README).
 /.emulator-data
 
-# Isolated port-offset stacks (\`<app>:serve --portOffset\`): each gets its own data dir
+# Isolated port-offset stacks (\`nx serve <app> --port-offset=N\`): each gets its own data dir
 # and a generated offset firebase.json. Ephemeral and machine-local.
 /.emulator-data-*
 /.firebase.offset-*.json

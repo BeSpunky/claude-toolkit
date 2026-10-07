@@ -14,7 +14,7 @@
 //           "env": { "KEY": "value" },                      // optional; values substitute like cmd
 //           "primary": true,                                // optional; the process the app URL points at
 //           "ready": { "http": "/" },                       // optional; what "up" means for the primary
-//           "url": [{ "param": "portOffset", "value": "${OFFSET}", "when": "offset" }],   // optional
+//           "url": [{ "param": "emulate", "value": "none", "when": "skipped" }],          // optional
 //           "advice": [{ "when": "contended", "text": "…" }]                               // optional
 //         }
 //       ]
