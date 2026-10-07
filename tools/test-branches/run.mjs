@@ -835,6 +835,39 @@ const cases = {
     assert.equal(r.run(['describe']).code, 0);
   },
 
+  'deploys outdated on the integration line: "lands" only for a branch carrying the exact rewrite at every outdated path, otherwise clean'() {
+    const r = repo();
+    r.branch('development');
+    r.declare('two-line');
+    const base = r.model();
+    const legacy = structuredClone(base);
+    legacy.integration.deploys = 'preview channel';
+    legacy.stages[0].deploys = 'App Hosting auto-rollout';
+    r.write('.bespunky/branches.json', `${JSON.stringify(legacy, null, 2)}\n`);
+    r.git('commit', '-qam', 'legacy notes'); // on development: two outdated paths in force
+    const remedy = (branch, edit) => {
+      r.git('switch', '-q', '-c', branch, 'development');
+      const m = structuredClone(legacy);
+      edit(m);
+      r.write('.bespunky/branches.json', `${JSON.stringify(m, null, 2)}\n`);
+      r.git('commit', '-qam', branch);
+      const st = r.json(['status', '--json']);
+      assert.equal(st.code, 0, st.err);
+      return st.data.outdated.resolution;
+    };
+    const rewritten = (m) => {
+      m.integration.deploys = { note: 'preview channel' };
+      m.stages[0].deploys = { note: 'App Hosting auto-rollout' };
+    };
+
+    assert.equal(remedy('feat/predates', (m) => { delete m.integration.deploys; delete m.stages[0].deploys; }), 'rewrite', 'no deploys at all is not the rewrite');
+    assert.equal(remedy('feat/other-note', (m) => { rewritten(m); m.stages[0].deploys = { note: 'something else' }; }), 'rewrite', 'a different note is not the rewrite');
+    assert.equal(remedy('feat/bound', (m) => { rewritten(m); m.stages[0].deploys.ci = { environment: 'production', providers: {} }; }), 'rewrite', 'more than the rewrite is not the rewrite');
+    assert.equal(remedy('feat/half', (m) => { m.stages[0].deploys = { note: 'App Hosting auto-rollout' }; }), 'rewrite', 'one of two outdated paths rewritten');
+    assert.equal(remedy('feat/broken', (m) => { rewritten(m); m.stages[0].bogus = 1; }), 'rewrite', 'a copy with other errors does not land clean');
+    assert.equal(remedy('feat/upgraded', rewritten), 'lands', 'the exact rewrite at every path, otherwise clean');
+  },
+
   'evidence --app-hosting: backends, live branches and drift against the declared bindings; opt-in and degrading'() {
     const r = repo();
     r.write('.firebaserc', JSON.stringify({ projects: { default: 'acme-prod' } }));
