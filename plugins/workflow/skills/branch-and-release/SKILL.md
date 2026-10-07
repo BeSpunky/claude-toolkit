@@ -39,7 +39,7 @@ node "<base>/scripts/branches.mjs" verify        # the invariants: direct commit
 | **hotfix lines** | a pattern (`hotfix/{line}/{slug}`), forked from a production line | a work branch with a different base; lands back on its line, then is **carried** |
 | **work branches** | a pattern (`{type}/{slug}`), single-owner, one per effort | your commits |
 
-**Protected** lines — integration, every stage, every release line — **only advance by their declared move, never by a direct commit.** When conversation says "master" or "prod", it means the production line, whatever it is named. **Deploy bindings** (`deploys` in the model) are documentation of what a push triggers, never verified by the engine — the project's CI and `HOUSE.md` say what actually fires.
+**Protected** lines — integration, every stage, every release line — **only advance by their declared move, never by a direct commit.** When conversation says "master" or "prod", it means the production line, whatever it is named. **Deploy bindings** (`deploys` on a line, pattern or tag) say what a push there deploys: a **note** (free text, for humans) or a **binding** — `ci` (the project's own CI deploys into a named environment, with each provider's target: `{"environment": "production", "providers": {"firebase": "prod"}}`) and/or `appHosting` (Firebase App Hosting backends that roll out from that line). A binding is read by tooling — a house project's `ci` layer renders its deploy workflow from it, so **a CI deploy changes only through the model** ([`reference/changing-the-model.md`](reference/changing-the-model.md)) — and `evidence --app-hosting` checks the declared backends against Firebase.
 
 ## Step 0 of every request — the relevance check runs BEFORE anything else
 

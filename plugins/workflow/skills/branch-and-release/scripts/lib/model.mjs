@@ -127,6 +127,64 @@ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isName = (v) => typeof v === 'string' && /^[A-Za-z0-9._\-/]+$/.test(v) && !v.startsWith('/') && !v.endsWith('/') && !v.includes('..') && !v.includes('//');
 const isSha = (v) => v === null || v === undefined || (typeof v === 'string' && /^[0-9a-f]{7,64}$/.test(v));
 
+// ---- deploy bindings -------------------------------------------------------------------------------------
+//
+// `deploys` says what a push to a line (or a line pattern, or a tag series) DEPLOYS. Two forms:
+//   - a NOTE (a string): documentation only — read by humans, never by a machine (the form `deploys` always had);
+//   - a BINDING (an object): the same note, plus structured facts tooling may READ —
+//       { "note"?: "…",
+//         "ci"?: { "environment": "production", "providers": { "firebase": "prod" } },
+//         "appHosting"?: [{ "project": "my-project-id", "backend": "web" }] }
+//     `ci`         — the project's own CI deploys on a push here, into this ENVIRONMENT (a deployment environment:
+//                    the GitHub environment the house `ci` layer's workflow runs in), with one parameter per deploy
+//                    PROVIDER (provider id → its target there: for `firebase`, the `.firebaserc` alias or project id).
+//                    The engine knows no provider; the layer that contributes one gives its value its meaning.
+//     `appHosting` — Firebase App Hosting backends that roll out on a push here (GitHub-linked). Not CI: Firebase's
+//                    own integration deploys them, and `evidence --app-hosting` can observe them, so a declared one
+//                    can be checked against the cloud.
+// A binding is a FACT the model declares, like every other line in it — written only by `write`, after a human
+// decision. Nothing reads the note; tooling reads the projection's `deploys` (`project` below).
+export const DEPLOY_KEYS = ['note', 'ci', 'appHosting'];
+const ENVIRONMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
+const PROVIDER = /^[a-z][a-z0-9-]*$/;
+const TARGET = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const BACKEND = /^[a-z0-9][a-z0-9-]*$/;
+
+/** Problems with one `deploys` value (`field` names it in the messages). */
+function deploysErrors(field, d, err) {
+  if (d === undefined || d === null || typeof d === 'string') return;
+  if (!isObj(d)) return err(field, 'must be null, a note (string), or a binding { note, ci, appHosting }');
+  for (const k of Object.keys(d)) if (!DEPLOY_KEYS.includes(k)) err(`${field}.${k}`, `unknown field (a binding has ${DEPLOY_KEYS.join(', ')})`);
+  if (d.note !== undefined && typeof d.note !== 'string') err(`${field}.note`, 'must be a string');
+  if (d.ci !== undefined) {
+    if (!isObj(d.ci)) err(`${field}.ci`, 'must be { environment, providers }');
+    else {
+      for (const k of Object.keys(d.ci)) if (!['environment', 'providers'].includes(k)) err(`${field}.ci.${k}`, 'unknown field');
+      if (typeof d.ci.environment !== 'string' || !ENVIRONMENT.test(d.ci.environment)) err(`${field}.ci.environment`, 'must name a deployment environment (letters, digits, . _ -), e.g. "production"');
+      if (d.ci.providers !== undefined) {
+        if (!isObj(d.ci.providers)) err(`${field}.ci.providers`, 'must map a deploy provider id to its target, e.g. { "firebase": "prod" }');
+        else
+          for (const [id, target] of Object.entries(d.ci.providers)) {
+            if (!PROVIDER.test(id)) err(`${field}.ci.providers.${id}`, 'a provider id is lowercase (e.g. "firebase")');
+            if (typeof target !== 'string' || !TARGET.test(target)) err(`${field}.ci.providers.${id}`, 'must be the provider\'s target there (an alias or project id)');
+          }
+      }
+    }
+  }
+  if (d.appHosting !== undefined) {
+    if (!Array.isArray(d.appHosting) || !d.appHosting.length) err(`${field}.appHosting`, 'must be a non-empty array of { project, backend }');
+    else
+      d.appHosting.forEach((b, i) => {
+        const f = `${field}.appHosting[${i}]`;
+        if (!isObj(b)) return err(f, 'must be { project, backend }');
+        for (const k of Object.keys(b)) if (!['project', 'backend'].includes(k)) err(`${f}.${k}`, 'unknown field');
+        if (typeof b.project !== 'string' || !TARGET.test(b.project)) err(`${f}.project`, 'must be a Firebase project id or .firebaserc alias');
+        if (typeof b.backend !== 'string' || !BACKEND.test(b.backend)) err(`${f}.backend`, 'must be an App Hosting backend id');
+      });
+  }
+  if (d.note === undefined && d.ci === undefined && d.appHosting === undefined) err(field, 'binds nothing — give it a note, a ci binding or appHosting backends (or make it null)');
+}
+
 /** Every problem with a declaration, as `field: message` strings. Empty = valid. */
 export function validate(m) {
   const errors = [];
@@ -144,6 +202,7 @@ export function validate(m) {
   else {
     if (!isName(m.integration.branch)) err('integration.branch', 'must be a branch name');
     if (!isSha(m.integration.baseline)) err('integration.baseline', 'must be a commit SHA or null');
+    deploysErrors('integration.deploys', m.integration.deploys, err);
   }
   const integration = m.integration?.branch;
 
@@ -161,7 +220,7 @@ export function validate(m) {
       if (!PROMOTE.includes(s.promote)) err(`${f}.promote`, `must be one of ${PROMOTE.join(' | ')}`);
       if (s.promote === 'pr' && !PR_STYLES.includes(m.landing?.prStyle)) err(`${f}.promote`, '"pr" promotion needs landing.prStyle (the style the PR merges with)');
       if (!isSha(s.baseline)) err(`${f}.baseline`, 'must be a commit SHA or null');
-      if (s.deploys !== undefined && s.deploys !== null && typeof s.deploys !== 'string') err(`${f}.deploys`, 'must be a string or null');
+      deploysErrors(`${f}.deploys`, s.deploys, err);
     });
   const named = [integration, ...stageNames].filter(Boolean);
 
@@ -205,6 +264,7 @@ export function validate(m) {
       } else if (!stageNames.includes(r.shipsTo)) err('releases.shipsTo', `must name a stage (${stageNames.join(', ') || 'none declared'}) or be null`);
       if (r.allowDirect !== undefined && (!Array.isArray(r.allowDirect) || r.allowDirect.some((a) => !ALLOW_DIRECT.includes(a)))) err('releases.allowDirect', `may only contain ${ALLOW_DIRECT.join(', ')}`);
       if (r.baselines !== undefined && (!isObj(r.baselines) || Object.values(r.baselines).some((v) => !isSha(v)))) err('releases.baselines', 'must map release-line names to SHAs or null');
+      deploysErrors('releases.deploys', r.deploys, err);
     }
   }
 
@@ -220,6 +280,7 @@ export function validate(m) {
         if (!ph.includes('line') || !ph.includes('slug')) err('hotfixes.pattern', 'must contain {line} (the production line it targets) and {slug}');
         patterns.push(['hotfixes.pattern', h.pattern, {}]);
       }
+      deploysErrors('hotfixes.deploys', h.deploys, err);
     }
   }
 
@@ -237,6 +298,7 @@ export function validate(m) {
       if (!isWellFormed(t.pattern)) err(`${f}.pattern`, 'must be a tag pattern like "v{version}"');
       const lines = [...named, ...(isObj(r) && r.pattern ? [r.pattern] : [])];
       if (!lines.includes(t.on)) err(`${f}.on`, `must name a declared line or the release pattern (${lines.join(', ')})`);
+      deploysErrors(`${f}.deploys`, t.deploys, err);
     });
 
   // patterns: no overlap with each other, never match a named line
@@ -271,6 +333,7 @@ export function project(m) {
   let summary = m.stages.length ? chain.join(' → ') : `${chain[0]} (trunk)`;
   if (r) summary += r.maintained ? ` · maintained ${toGlob(r.pattern)} cut from ${r.cutFrom}` : ` · ${toGlob(r.pattern)} cut from ${r.cutFrom}, shipped to ${r.shipsTo}`;
   if (m.hotfixes) summary += ` · hotfixes ${toGlob(m.hotfixes.pattern)}`;
+  const deploys = deployBindings(m);
   return {
     schema: PROJECTION_SCHEMA,
     remote: m.remote || 'origin',
@@ -282,7 +345,48 @@ export function project(m) {
     protectedPatterns: r ? [toGlob(r.pattern)] : [],
     workBase: chain[0],
     summary,
+    // Present only when something is bound: a model with notes alone (or none) projects exactly as it always did,
+    // so no existing declaration reads as drifted (verify, invariant 5) the day this field appeared.
+    ...(deploys.length ? { deploys } : {}),
   };
+}
+
+/**
+ * The structured deploy bindings, flat — what readers (the house `ci` layer) may parse: one entry per line, line
+ * pattern or tag series whose `deploys` is a binding with `ci` or `appHosting`. `kind`: `line` (a named branch),
+ * `pattern` (a branch glob — release or hotfix lines) or `tag` (a tag glob). The note stays in the declaration.
+ */
+export function deployBindings(m) {
+  const out = [];
+  const add = (kind, line, d) => {
+    if (!isObj(d) || (d.ci === undefined && d.appHosting === undefined)) return;
+    out.push({
+      kind,
+      line,
+      ...(d.ci ? { ci: { environment: d.ci.environment, providers: { ...(d.ci.providers ?? {}) } } } : {}),
+      ...(d.appHosting ? { appHosting: d.appHosting.map(({ project, backend }) => ({ project, backend })) } : {}),
+    });
+  };
+  add('line', m.integration.branch, m.integration.deploys);
+  for (const s of m.stages) add('line', s.branch, s.deploys);
+  if (m.releases) add('pattern', toGlob(m.releases.pattern), m.releases.deploys);
+  if (m.hotfixes) add('pattern', toGlob(m.hotfixes.pattern), m.hotfixes.deploys);
+  for (const t of m.tags) add('tag', toGlob(t.pattern), t.deploys);
+  return out;
+}
+
+/** A `deploys` value in words — the note, then what is bound. */
+export function deploysText(d) {
+  if (d === undefined || d === null) return null;
+  if (typeof d === 'string') return d;
+  const parts = [];
+  if (d.note) parts.push(d.note);
+  if (d.ci) {
+    const providers = Object.entries(d.ci.providers ?? {}).map(([id, target]) => `${id}: ${target}`);
+    parts.push(`CI → ${d.ci.environment}${providers.length ? ` (${providers.join(', ')})` : ''}`);
+  }
+  if (d.appHosting) parts.push(`App Hosting: ${d.appHosting.map((b) => `${b.project}/${b.backend}`).join(', ')}`);
+  return parts.join('; ');
 }
 
 /** Canonical JSON (sorted keys) for comparisons that must ignore key order. */

@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { verify } from './verify.mjs';
-import { SCHEMA } from './model.mjs';
+import { SCHEMA, deployBindings } from './model.mjs';
 import { detectLongLived } from './long-lived.mjs';
 import { WORKFLOW, triggerScope, deploySignals, workflowTriggers } from './workflows.mjs';
 
@@ -17,7 +17,7 @@ const HISTORY = 400; // first-parent commits examined per line
 const RECENT_DAYS = 90; // direct commits older than this are history, not a live practice
 const DAY = 86400;
 
-export function evidence(git, top, resolved) {
+export function evidence(git, top, resolved, { appHosting = false } = {}) {
   const facts = [];
   const fact = (area, subject, value, tag) => facts.push({ area, subject, value, tag });
   const model = resolved.declared ? resolved.model : null;
@@ -148,7 +148,8 @@ export function evidence(git, top, resolved) {
   }
   for (const f of files.filter((x) => ENV_FILE.test(x) && /(staging|production|prod)/i.test(path.basename(x)))) fact('bindings', f, 'environment file', 'observed');
   if (skipped.length) fact('bindings', '(shipped templates skipped)', { count: skipped.length, examples: skipped.slice(0, 3), rule: SHIPPED_RULE }, 'observed');
-  fact('bindings', 'App Hosting backends / console-only deploy targets', 'live in the cloud console — ask', 'unobservable');
+  if (appHosting) appHostingFacts(fact, top, files, model);
+  else fact('bindings', 'App Hosting backends / console-only deploy targets', 'live in the cloud console — re-run with `evidence --app-hosting` (a logged-in firebase CLI) to observe them, or ask', 'unobservable');
 
   // ---- remote side ---------------------------------------------------------------------------------------
   remoteFacts(fact, longLived);
@@ -234,4 +235,130 @@ function remoteFacts(fact, longLived) {
     fact('remote', 'GitHub environments', 'not visible to this token', 'unobservable');
   }
   fact('remote', 'who pushes to protected lines', 'not in git history — ask', 'unobservable');
+}
+
+// ---- App Hosting (opt-in: `evidence --app-hosting`) ----------------------------------------------------------
+//
+// The one binding the repo cannot show: a GitHub-linked App Hosting backend rolls out on a push to its live branch,
+// and that link lives in Firebase. Asked the same way `remoteFacts` asks GitHub — an authenticated CLI, read-only,
+// degrading to `unobservable` (→ a question) when it cannot see. OPT-IN, because every call is a network round trip
+// of seconds and needs a login; the investigation turns it on when the repo has Firebase.
+//
+// What it reports per backend: id, region, linked repository (none → it deploys from local source,
+// `firebase deploy --only apphosting`), root directory, environment name — `apphosting:backends:list --json`. The
+// LIVE BRANCH is not on the backend: it is the backend's traffic `rolloutPolicy.codebaseBranch`, which no firebase
+// command prints, so it is read from the App Hosting API with a gcloud access token when one is available, and is
+// otherwise its own `unobservable` fact. With a declared model, each declared `appHosting` binding is checked against
+// what was observed (`drift`) — the case that once went stale silently: auto-rollout switched on, `deploys` unchanged.
+const APPHOSTING_API = 'https://firebaseapphosting.googleapis.com/v1beta';
+
+function appHostingFacts(fact, top, files, model) {
+  let projects = [];
+  if (files.includes('.firebaserc')) {
+    try {
+      projects = [...new Set(Object.values(JSON.parse(fs.readFileSync(path.join(top, '.firebaserc'), 'utf8')).projects ?? {}))].filter((p) => typeof p === 'string' && p);
+    } catch {
+      /* reported as unparseable above */
+    }
+  }
+  if (!projects.length) return fact('app hosting', 'backends', 'no project in .firebaserc to ask — name the Firebase project, or ask', 'unobservable');
+
+  const firebase = firebaseCli(top);
+  const token = accessToken();
+  const observed = []; // { project, backend, branch|undefined }
+  for (const project of projects) {
+    let backends;
+    try {
+      const out = JSON.parse(run(firebase[0], [...firebase.slice(1), 'apphosting:backends:list', '--project', project, '--json', '--non-interactive'], 90000));
+      backends = Array.isArray(out.result) ? out.result : (out.result?.backends ?? []);
+      if (out.status && out.status !== 'success') throw new Error(out.error ?? out.status);
+    } catch {
+      fact('app hosting', project, 'the firebase CLI is not installed or not logged in (`firebase login`), or cannot see this project — ask', 'unobservable');
+      continue;
+    }
+    if (!backends.length) fact('app hosting', project, 'no App Hosting backends', 'observed');
+    for (const b of backends) {
+      const m = /^projects\/([^/]+)\/locations\/([^/]+)\/backends\/([^/]+)$/.exec(b.name ?? '');
+      if (!m) continue;
+      const [, , region, id] = m;
+      const repository = b.codebase?.repository ? b.codebase.repository.split('/').pop() : null;
+      fact(
+        'app hosting',
+        `${project}/${id}`,
+        {
+          region,
+          repository: repository ?? 'none — deploys from local source (`firebase deploy --only apphosting`)',
+          rootDirectory: b.codebase?.rootDirectory ?? '/',
+          environment: b.environment || '(none — reads only apphosting.yaml)',
+        },
+        'observed',
+      );
+      let branch;
+      if (repository) {
+        branch = liveBranch(token, project, region, id);
+        if (branch === undefined) fact('app hosting', `${project}/${id} live branch`, 'not printed by the firebase CLI, and no gcloud token to read it from the API — ask (backend settings → Deployment)', 'unobservable');
+        else fact('app hosting', `${project}/${id} live branch`, branch ?? 'none — automatic rollouts are off', 'observed');
+      }
+      observed.push({ project, backend: id, linked: Boolean(repository), branch });
+    }
+  }
+
+  // Declared vs observed — only for the projects that were actually observed.
+  if (!model) return;
+  const seen = new Set(observed.map((o) => o.project));
+  const aliases = firebaseAliases(top);
+  for (const binding of deployBindings(model)) {
+    for (const want of binding.appHosting ?? []) {
+      const project = aliases[want.project] ?? want.project;
+      if (!seen.has(project)) continue;
+      const got = observed.find((o) => o.project === project && o.backend === want.backend);
+      const subject = `${binding.line} → ${want.project}/${want.backend}`;
+      if (!got) fact('drift', subject, 'declared, but no such backend exists', 'observed');
+      else if (!got.linked) fact('drift', subject, 'declared as rolling out from this line, but the backend has no linked repository (local-source deploys)', 'observed');
+      else if (got.branch !== undefined && got.branch !== binding.line) fact('drift', subject, `declared on ${binding.line}, but it rolls out from ${got.branch ?? 'no branch (automatic rollouts off)'}`, 'observed');
+    }
+  }
+  for (const o of observed.filter((x) => x.linked && typeof x.branch === 'string')) {
+    const declared = deployBindings(model).some((b) => (b.appHosting ?? []).some((w) => (aliases[w.project] ?? w.project) === o.project && w.backend === o.backend));
+    if (!declared) fact('drift', `${o.project}/${o.backend}`, `rolls out from ${o.branch}, but no line's deploys declares it — propose an appHosting binding`, 'observed');
+  }
+}
+
+/** The project's pinned firebase CLI when it has one (house projects do), else whatever is on PATH. */
+function firebaseCli(top) {
+  const local = path.join(top, 'node_modules', '.bin', 'firebase');
+  return [fs.existsSync(local) ? local : 'firebase'];
+}
+
+function firebaseAliases(top) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(top, '.firebaserc'), 'utf8')).projects ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function accessToken() {
+  try {
+    return run('gcloud', ['auth', 'print-access-token', '--quiet'], 20000) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The backend's live branch: a string, `null` (rollouts off), or `undefined` (could not read it). */
+function liveBranch(token, project, region, backend) {
+  if (!token) return undefined;
+  try {
+    const traffic = JSON.parse(run('curl', ['-sSf', '--max-time', '20', '-H', `Authorization: Bearer ${token}`, `${APPHOSTING_API}/projects/${project}/locations/${region}/backends/${backend}/traffic`], 25000));
+    const policy = traffic.rolloutPolicy;
+    if (!policy || policy.disabled || !policy.codebaseBranch) return null;
+    return policy.codebaseBranch;
+  } catch {
+    return undefined;
+  }
+}
+
+function run(cmd, args, timeout) {
+  return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout, env: { ...process.env, NO_UPDATE_NOTIFIER: '1', CI: process.env.CI ?? '1' } }).trim();
 }
