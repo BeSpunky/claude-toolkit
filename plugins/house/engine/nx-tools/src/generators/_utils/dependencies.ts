@@ -16,21 +16,11 @@
 //
 // Versions come from ./versions.ts (the house's pins) or ./firebase-compat.ts (derived from npm) — or, for an
 // Nx-family package, from the version of Nx the workspace itself declares (they move in lockstep).
-import { type GeneratorCallback, type Tree, addDependenciesToPackageJson, readJson } from '@nx/devkit';
-import { applyJsonChanges } from './json-edits';
+import { type GeneratorCallback, type Tree, addDependenciesToPackageJson, getProjects, readJson } from '@nx/devkit';
+import { applyJsonChanges, updateJsonInPlace } from './json-edits';
+import { isFloatingSpec, isPinnedSpec } from './version-spec';
 
 type Manifest = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-
-/**
- * A spec that names a version (or a bounded line of one): `1.2.3`, `1.2.3-rc.1`, `^1.2.3`, `~1.2.3`. Anything
- * else — a dist-tag, `*`, `x`, a bare major, an open `>=` — floats. (A workspace link spec is not a version at all;
- * the linking port writes those, never this seam.)
- */
-const PINNED = /^[~^]?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-
-export function isPinnedSpec(spec: string): boolean {
-  return PINNED.test(spec.trim());
-}
 
 /** The package's declared spec in the root manifest (either block), or undefined. */
 export function declaredSpec(tree: Tree, name: string): string | undefined {
@@ -93,4 +83,59 @@ function keepOrder(before: Record<string, string> | undefined, after: Record<str
   let block = Object.fromEntries(Object.keys(before ?? {}).filter((key) => key in after).map((key) => [key, after[key]]));
   for (const [name, spec] of Object.entries(after)) if (!(name in block)) block = placeDependency(block, name, spec);
   return block;
+}
+
+const DEPENDENCY_BLOCKS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const;
+
+/**
+ * THE ONE WAY A GENERATOR EDITS A package.json — the root's or a project's — in place (./json-edits), REFUSING an edit
+ * that adds or changes a dependency to a floating spec. `declareDependencies` above is for the common case (add what
+ * is missing to the root); this is for every other manifest write (a library's own deps, a workspace link, a pinned
+ * framework version), so rule 2 holds at every write, not only at the one helper. A workspace LINK (`*`, `workspace:*`
+ * to a package of this workspace) is not a version and passes. Returns whether the file changed.
+ */
+export function updateManifest(tree: Tree, path: string, by: string, update: (json: any) => any): boolean {
+  const text = tree.read(path, 'utf8') ?? '';
+  const before = JSON.parse(text || '{}');
+  const changed = updateJsonInPlace(tree, path, update);
+  if (!changed) return false;
+  const after = readJson(tree, path);
+  const floating = floatingAdditions(tree, before, after);
+  if (floating.length) {
+    tree.write(path, text);
+    throw new Error(
+      `[${by}] refusing to write a floating dependency version into ${path}: ${floating.join(', ')}. A house generator ` +
+        'writes only pinned versions (exact, ^x.y.z or ~x.y.z) — take it from generators/_utils/versions.ts.',
+    );
+  }
+  return true;
+}
+
+/** The dependency entries `after` adds or changes to a floating spec (workspace links excepted), as `name@"spec"`. */
+export function floatingAdditions(tree: Tree, before: Record<string, any>, after: Record<string, any>): string[] {
+  let local: Set<string> | undefined;
+  const isWorkspacePackage = (name: string) => (local ??= workspacePackageNames(tree)).has(name);
+  const found: string[] = [];
+  for (const block of DEPENDENCY_BLOCKS) {
+    for (const [name, spec] of Object.entries((after?.[block] ?? {}) as Record<string, unknown>)) {
+      if (typeof spec !== 'string' || before?.[block]?.[name] === spec || !isFloatingSpec(spec)) continue;
+      if ((spec === '*' || spec.startsWith('workspace:')) && isWorkspacePackage(name)) continue;
+      found.push(`${name}@"${spec}"`);
+    }
+  }
+  return found;
+}
+
+/** The package names this workspace's own projects carry (their package.json `name`). */
+function workspacePackageNames(tree: Tree): Set<string> {
+  const names = new Set<string>();
+  for (const [, project] of getProjects(tree)) {
+    try {
+      const name = readJson<{ name?: unknown }>(tree, `${project.root}/package.json`).name;
+      if (typeof name === 'string') names.add(name);
+    } catch {
+      /* a project with no manifest has no package name */
+    }
+  }
+  return names;
 }

@@ -1477,7 +1477,18 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            skill's change procedure: verify, risks, confirm), then re-run.\"
     fi
   fi
-fi"
+fi
+# PROJECT FACTS the generators would otherwise trip on mid-run, after the migrations committed: a Node the house cannot
+# resolve or build an image for, an Angular the firebase client cannot pair @angular/fire with. house-probe.mts reads
+# them with the payload's OWN pure modules (the same code the generators throw from), so the two cannot disagree. It
+# only reads; each line it prints is one refusal: <code><TAB><text, \\n-escaped>.
+_probe_out=\"\$(node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"\$HOUSE_ENGINE_ROOT/house-probe.mts\" --ensure='$ENSURE_LAYERS' --evident='$EVIDENT')\" \\
+  || _refuse probe-failed \"[preflight] probe-failed: the project-facts probe (house-probe.mts) did not run — see its error above.\"
+while IFS=\"\$(printf '\\t')\" read -r _probe_code _probe_text; do
+  [ -n \"\$_probe_code\" ] && _refuse \"\$_probe_code\" \"\$(printf '%b' \"\$_probe_text\")\"
+done <<_HOUSE_PROBE_
+\$_probe_out
+_HOUSE_PROBE_"
 
 # The single verdict. Runs AFTER MIGRATE_PROBE so the report can name the ladder that would have run — the
 # probe writes nothing, it only reads node_modules and HOUSE.md, so composing the full picture first costs

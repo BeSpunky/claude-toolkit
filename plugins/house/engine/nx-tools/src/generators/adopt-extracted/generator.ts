@@ -35,8 +35,7 @@ import {
 } from '@nx/devkit';
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking } from '../_utils/linking';
-import { declareDependencies, declaredSpec } from '../_utils/dependencies';
-import { updateJsonInPlace } from '../_utils/json-edits';
+import { declareDependencies, declaredSpec, updateManifest } from '../_utils/dependencies';
 
 interface AdoptExtractedSchema {
   lib: string;
@@ -115,7 +114,7 @@ export default async function adoptExtractedGenerator(
     return typeof range === 'string' && linking.isLinkRange(tree, range);
   });
   if (linkedFields.length) {
-    updateJsonInPlace(tree, 'package.json', (manifest) => {
+    updateManifest(tree, 'package.json', 'adopt-extracted', (manifest) => {
       for (const field of linkedFields) delete manifest[field][packageName];
     });
   }

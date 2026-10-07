@@ -17,43 +17,27 @@
 // after following the latter, a floating `@angular/fire: latest` stood with nothing left reporting it.
 import { type GeneratorCallback, type Tree, logger, readJson } from '@nx/devkit';
 import { dirname, join } from 'node:path';
-import { ANGULARFIRE_BY_ANGULAR_MAJOR, ANGULARFIRE_TABLE_NEWEST_ANGULAR } from '../../generators/_utils/firebase-compat';
+import * as FIREBASE_COMPAT from '../../generators/_utils/firebase-compat';
 import { FIREBASE_TOOLS_VERSION } from '../../generators/_utils/versions';
-import { declareDependencies, declaredSpec, isPinnedSpec, placeDependency } from '../../generators/_utils/dependencies';
-import { updateJsonInPlace } from '../../generators/_utils/json-edits';
+import { isFloatingSpec } from '../../generators/_utils/version-spec';
+import {
+  type AngularFireTable,
+  type BrowserSdkFacts,
+  type Pair,
+  type SdkAdvice,
+  coherentPair,
+  firebaseToolsAdvice,
+  majorOf,
+  renderAdvice,
+  tableOf,
+} from './angularfire-judge';
+import { declareDependencies, declaredSpec, placeDependency, updateManifest } from '../../generators/_utils/dependencies';
+import { installedManifest, workspaceAngular } from './workspace-angular';
+
+/** The live compatibility table (the 0.50.0 migration judges with its own frozen copy). */
+export const LIVE_ANGULARFIRE_TABLE: AngularFireTable = tableOf(FIREBASE_COMPAT, FIREBASE_TOOLS_VERSION);
 
 const TAG = '[firebase-client]';
-
-/** The workspace's Angular version: the one installed, else the lowest the declared range allows. */
-export function workspaceAngular(tree: Tree, declared: (name: string) => string | undefined = (name) => declaredSpec(tree, name)):
-  { version: string; from: 'installed' | 'declared' } | null {
-  const installed = installedVersion(tree, '@angular/core');
-  if (installed) return { version: installed, from: 'installed' };
-  const range = declared('@angular/core')?.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
-  return range ? { version: `${range[1]}.${range[2] ?? 0}.${range[3] ?? 0}`, from: 'declared' } : null;
-}
-
-/** The version of `name` resolved in the workspace's node_modules, or null. */
-export function installedVersion(tree: Tree, name: string): string | null {
-  const manifest = installedManifest(tree, name);
-  return typeof manifest?.version === 'string' ? manifest.version : null;
-}
-
-function installedManifest(tree: Tree, name: string): { version?: unknown; dependencies?: Record<string, string> } | null {
-  try {
-    return JSON.parse(tree.read(`node_modules/${name}/package.json`, 'utf8') ?? '');
-  } catch {
-    return null;
-  }
-}
-
-/** Everything the pair is judged on — read once, from the tree (or from a manifest a caller is still editing). */
-export interface BrowserSdkFacts {
-  angular: { version: string; major: number; from: 'installed' | 'declared' } | null;
-  declared: { fire?: string; firebase?: string };
-  /** The @angular/fire in node_modules, with the firebase range it carries (its own `dependencies.firebase`). */
-  installedFire: { version: string; major: number; firebase: string | null } | null;
-}
 
 export function readBrowserSdkFacts(
   tree: Tree,
@@ -62,7 +46,7 @@ export function readBrowserSdkFacts(
   const angular = workspaceAngular(tree, declared);
   const fire = installedManifest(tree, '@angular/fire');
   return {
-    angular: angular && { ...angular, major: majorOf(angular.version) },
+    angular,
     declared: { fire: declared('@angular/fire'), firebase: declared('firebase') },
     installedFire:
       typeof fire?.version === 'string'
@@ -71,110 +55,21 @@ export function readBrowserSdkFacts(
   };
 }
 
-/** A problem (or a plain fact) about the pair, with what to do — `choices` in the order the house recommends them. */
-export interface SdkAdvice {
-  level: 'warn' | 'info';
-  what: string;
-  choices: string[];
-}
-
-/** The one rendering both voices use. */
-export function renderAdvice(tag: string, advice: SdkAdvice): string {
-  if (!advice.choices.length) return `${tag} ${advice.what}`;
-  const many = advice.choices.length > 1;
-  return (
-    `${tag} ${advice.what}${many ? ' Choose one (most recommended first), then reinstall:' : ' To fix it, then reinstall:'}` +
-    advice.choices.map((choice, i) => `\n  ${many ? `${i + 1}.` : '•'} ${choice}`).join('')
-  );
-}
-
-export type Pair = { angularfire: string; firebase: string; why: string };
-
-/**
- * The coherent pair for this workspace's Angular — the installed @angular/fire when it is THIS major's release line
- * (no surprise upgrade; firebase = its own range), else the house's release for the major — or, when there is none,
- * the refusal: what is true, and the choices.
- */
-export function coherentPair(facts: BrowserSdkFacts): { pair: Pair } | { refusal: SdkAdvice } {
-  const { angular, installedFire } = facts;
-  if (!angular) {
-    return {
-      refusal: {
-        level: 'warn',
-        what: '@angular/core is neither installed nor declared in the root package.json, so there is no Angular major to choose @angular/fire for.',
-        choices: ['Install the workspace\'s dependencies (or add Angular), then re-run the house upgrade.'],
-      },
-    };
-  }
-  const { major } = angular;
-  if (installedFire?.firebase && installedFire.major === major && isPinnedSpec(installedFire.version)) {
-    return { pair: { angularfire: installedFire.version, firebase: installedFire.firebase, why: `the installed release for Angular ${major}` } };
-  }
-  const where = `this workspace has @angular/core ${angular.version} (${angular.from})`;
-  const row = ANGULARFIRE_BY_ANGULAR_MAJOR[major];
-  const stable = row?.stable;
-  if (stable && compare(angular.version, stable.minAngular) >= 0) {
-    return { pair: { angularfire: stable.angularfire, firebase: stable.firebase, why: `the house's release for Angular ${major}` } };
-  }
-
-  const choices: string[] = [];
-  let what: string;
-  if (stable) {
-    what = `@angular/fire ${stable.angularfire} (the release for Angular ${major}) needs @angular/core >= ${stable.minAngular}; ${where}.`;
-    choices.push(`Update Angular within ${major}.x to ${stable.minAngular} or later, then re-run the house upgrade — it pins the pair.`);
-  } else if (!row && major > ANGULARFIRE_TABLE_NEWEST_ANGULAR) {
-    what = `Angular ${major} is newer than this toolkit's @angular/fire table (it knows Angular up to ${ANGULARFIRE_TABLE_NEWEST_ANGULAR}); ${where}.`;
-    choices.push('Update the toolkit and run /bespunky-house:upgrade — a newer table may have the release.');
-  } else if (!row) {
-    what = `Angular ${major} is older than any @angular/fire the house supports; ${where}.`;
-    choices.push('Upgrade Angular (`nx migrate`), then re-run the house upgrade.');
-  } else {
-    what =
-      `No stable @angular/fire supports Angular ${major} yet; ${where}. The house will not guess a version: @angular/fire ` +
-      `peers exactly one Angular major, and firebase must be the range that release declares.`;
-    if (row.prerelease) {
-      choices.push(
-        `Use the prerelease built for Angular ${major}, deliberately: "@angular/fire": "${row.prerelease.angularfire}", ` +
-          `"firebase": "${row.prerelease.firebase}" (its own range; it needs @angular/core >= ${row.prerelease.minAngular}).`,
-      );
-    }
-  }
-  if (installedFire?.firebase && installedFire.major !== major && !stable) {
-    choices.push(
-      `Pin what is installed and runs today: "@angular/fire": "${installedFire.version}", "firebase": "${installedFire.firebase}" — ` +
-        `one SDK, nothing floats. It is built for Angular ${installedFire.major}, so the install warns about its Angular peer ` +
-        `(npm refuses without --legacy-peer-deps); every house upgrade says when a stable @angular/fire for Angular ${major} ships.`,
-    );
-  }
-  const supported = newestStable();
-  if (supported && supported.major !== major && !stable) {
-    choices.push(
-      `Move to Angular ${supported.major}, the newest with a stable @angular/fire: "@angular/fire": "${supported.release.angularfire}", ` +
-        `"firebase": "${supported.release.firebase}" — fully supported, but a framework downgrade.`,
-    );
-  }
-  choices.push(
-    'Declare another @angular/fire release yourself, with "firebase" EXACTLY the range it lists in its own dependencies ' +
-      '(`npm view @angular/fire@<version> dependencies.firebase`) — the house keeps what the project declares.',
-  );
-  return { refusal: { level: 'warn', what, choices } };
-}
-
 /**
  * What is wrong (or worth knowing) about the pair AS DECLARED — a floating spec, a firebase that is not the range the
  * @angular/fire carries (two SDKs), an @angular/fire built for another Angular major. Empty for a coherent pair.
  */
-export function browserSdkFindings(facts: BrowserSdkFacts): SdkAdvice[] {
+export function browserSdkFindings(facts: BrowserSdkFacts, table: AngularFireTable = LIVE_ANGULARFIRE_TABLE): SdkAdvice[] {
   const { declared, installedFire, angular } = facts;
   const findings: SdkAdvice[] = [];
-  const verdict = coherentPair(facts);
+  const verdict = coherentPair(facts, table);
   const fix: string[] =
     'pair' in verdict
       ? [`Declare "@angular/fire": "${verdict.pair.angularfire}" and "firebase": "${verdict.pair.firebase}" (${verdict.pair.why}).`]
       : verdict.refusal.choices;
 
   const floating = (['fire', 'firebase'] as const)
-    .filter((key) => declared[key] !== undefined && !isPinnedSpec(declared[key]!))
+    .filter((key) => declared[key] !== undefined && isFloatingSpec(declared[key]!))
     .map((key) => `"${key === 'fire' ? '@angular/fire' : 'firebase'}": "${declared[key]}"`);
   if (floating.length) {
     findings.push({
@@ -205,7 +100,8 @@ export function browserSdkFindings(facts: BrowserSdkFacts): SdkAdvice[] {
             level: 'info',
             what:
               `@angular/fire ${fireVersion} (built for Angular ${fireMajor}) runs on Angular ${angular.version}: no stable ` +
-              `@angular/fire for Angular ${angular.major} exists yet. Every house upgrade checks again and names the release when it ships.`,
+              `@angular/fire for Angular ${angular.major} existed as of ${table.asOf} (this toolkit's table). Update the toolkit and ` +
+              `run the house upgrade to check against a newer table — it names the release once one exists.`,
             choices: [],
           },
     );
@@ -228,16 +124,11 @@ export function browserSdkFindings(facts: BrowserSdkFacts): SdkAdvice[] {
  * do about it.
  */
 export function angularFireFor(tree: Tree): Pair {
-  const verdict = coherentPair(readBrowserSdkFacts(tree));
+  const verdict = coherentPair(readBrowserSdkFacts(tree), LIVE_ANGULARFIRE_TABLE);
   if ('refusal' in verdict) throw new Error(renderAdvice(TAG, verdict.refusal));
-  const row = ANGULARFIRE_BY_ANGULAR_MAJOR[majorOf(verdict.pair.angularfire)]?.stable;
-  if (row && row.angularfire === verdict.pair.angularfire && !row.firebaseToolsOk) {
-    logger.warn(
-      `${TAG} @angular/fire ${row.angularfire} declares an optional peer firebase-tools@"${row.firebaseTools}", but ` +
-        `the house pins firebase-tools ${FIREBASE_TOOLS_VERSION}. yarn only warns; npm refuses the install (ERESOLVE). ` +
-        `Moving to Angular 20+ resolves it; otherwise pin firebase-tools to a version in that range in package.json.`,
-    );
-  }
+  // house.sh's probe refuses this before an add-layer writes anything; here it is said on every run it still holds.
+  const tools = firebaseToolsAdvice(verdict.pair, LIVE_ANGULARFIRE_TABLE, declaredSpec(tree, 'firebase-tools'));
+  if (tools) logger.warn(renderAdvice(TAG, tools));
   return verdict.pair;
 }
 
@@ -265,16 +156,7 @@ export function declareBrowserSdk(tree: Tree): GeneratorCallback {
   return install;
 }
 
-function newestStable() {
-  return Object.entries(ANGULARFIRE_BY_ANGULAR_MAJOR)
-    .filter(([, { stable }]) => stable)
-    .map(([m, { stable }]) => ({ major: Number(m), release: stable! }))
-    .sort((a, b) => b.major - a.major)[0];
-}
 
-function majorOf(version: string): number {
-  return Number(/\d+/.exec(version)?.[0]);
-}
 
 /**
  * CREATION TIME ONLY: a workspace that will wear Firebase and has not chosen its Angular yet is created at the NEWEST
@@ -290,7 +172,7 @@ function majorOf(version: string): number {
 export function pinAngularForFirebase(tree: Tree): void {
   if (declaredSpec(tree, '@angular/core') || !tree.exists('package.json')) return;
   const nx = nxAngularVersionTable(tree);
-  const candidates = Object.entries(ANGULARFIRE_BY_ANGULAR_MAJOR)
+  const candidates = Object.entries(LIVE_ANGULARFIRE_TABLE.byMajor)
     .filter(([, { stable }]) => stable)
     .map(([major]) => Number(major))
     .filter((major) => nx.supported.includes(major))
@@ -300,13 +182,13 @@ export function pinAngularForFirebase(tree: Tree): void {
     throw new Error(
       `${TAG} No Angular major has both a stable @angular/fire and support in the installed @nx/angular ` +
         `(it supports ${nx.supported.join(', ')}). Install an @nx/angular that supports Angular ` +
-        `${Object.entries(ANGULARFIRE_BY_ANGULAR_MAJOR).filter(([, r]) => r.stable).map(([m]) => m).join('/')} and re-run.`,
+        `${Object.entries(LIVE_ANGULARFIRE_TABLE.byMajor).filter(([, r]) => r.stable).map(([m]) => m).join('/')} and re-run.`,
     );
   }
   const versions = nx.versionsFor(major);
-  updateJsonInPlace(tree, 'package.json', (pkg) => withDependency(pkg, '@angular/core', versions.angularVersion));
+  updateManifest(tree, 'package.json', 'firebase-client', (pkg) => withDependency(pkg, '@angular/core', versions.angularVersion));
   if (declaredSpec(tree, '@angular-devkit/core')) {
-    updateJsonInPlace(tree, 'package.json', (pkg) => withDependency(pkg, '@angular-devkit/core', versions.angularDevkitVersion));
+    updateManifest(tree, 'package.json', 'firebase-client', (pkg) => withDependency(pkg, '@angular-devkit/core', versions.angularDevkitVersion));
   }
   if (major < nx.latest) {
     logger.info(
@@ -361,12 +243,4 @@ function nxAngularVersionTable(tree: Tree): {
     `${TAG} Could not read @nx/angular's Angular version table (looked in ${candidates.join(', ')}: ${cause}) — this Nx moved it. ` +
       `Declare "@angular/core" in package.json at the Angular major you want (one with a stable @angular/fire) and re-run.`,
   );
-}
-
-/** Numeric x.y.z comparison (prerelease tails ignored — the table's minimums are releases). */
-function compare(a: string, b: string): number {
-  const parts = (v: string) => v.split('-')[0].split('.').map((n) => Number(n) || 0);
-  const [x, y] = [parts(a), parts(b)];
-  for (let i = 0; i < 3; i += 1) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0) ? -1 : 1;
-  return 0;
 }

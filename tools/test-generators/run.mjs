@@ -66,6 +66,7 @@ import {
   snapshot,
   snapshotDiff,
   unparseable,
+  floatingWrites,
   captureDevkitLogger,
   treeAssertions,
 } from '../test-support/payload.mjs';
@@ -158,6 +159,10 @@ async function main() {
         await quiet(testCase.run)(tree, ctx);
         ctx.logs = [...log.lines];
         for (const error of unparseable(beforeRun, snapshot(tree))) failures.push(`wrote a file that does not parse: ${error}`);
+        // No generator writes a version nobody chose — through ANY write path (0.50.0; see cases/versions.mjs).
+        for (const entry of floatingWrites(beforeRun, snapshot(tree), payload.load('generators/_utils/version-spec').isFloatingSpec)) {
+          failures.push(`wrote a floating dependency version: ${entry}`);
+        }
         if (!testCase.once) {
           const afterFirst = snapshot(tree);
           log.reset();

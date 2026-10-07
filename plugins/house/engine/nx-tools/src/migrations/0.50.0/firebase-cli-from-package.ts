@@ -13,12 +13,18 @@
 // firebase-cli feature the project added itself may be what a script OUTSIDE the workspace relies on (no
 // node_modules/.bin there), so it is left and reported: it is now a second, unpinned `firebase`, shadowed in the workspace.
 //
+// WHICH firebase-tools: 0.50.0's pin — unless the project's @angular/fire peers (optionally) a firebase-tools range the pin
+// is outside of (@angular/fire 17–19 peer ^13): npm then refuses the install outright (ERESOLVE), so the rung declares the
+// newest firebase-tools INSIDE that peer instead (from 0.50.0's frozen table) and says why, and how to get the house's.
+//
 // THE LOGIN SURVIVES: firebase-tools keeps it in ~/.config/configstore, the agent layer's persisted volume — the same
 // file the feature's copy wrote, so nobody logs in again.
 import { type Tree, logger } from '@nx/devkit';
 import { retireHouseFeature } from '../../generators/_utils/devcontainer-feature';
 import { placeDependency } from '../../generators/_utils/dependencies';
 import { applyJsonChanges } from '../../generators/_utils/json-edits';
+import { majorOf } from '../../adapters/angular/angularfire-judge';
+import { ANGULARFIRE_TABLE_0_50_0 } from './firebase-compat-0.50.0';
 
 const TAG = '[0.50.0 firebase-cli-from-package]';
 const FEATURE = /^ghcr\.io\/devcontainers-extra\/features\/firebase-cli(?::[\w.-]+)?$/;
@@ -55,6 +61,15 @@ function declareFirebaseTools(tree: Tree): string | undefined {
   const block = (['dependencies', 'devDependencies'] as const).find((b) => pkg[b]?.['firebase-tools'] !== undefined);
   if (block && pkg[block]!['firebase-tools'] !== 'latest') return undefined; // the project's own pin
   let version = FIREBASE_TOOLS_AS_OF_0_50_0;
+  const peer = angularFirePeer(tree, pkg);
+  if (peer && peer.pin !== version) {
+    version = peer.pin;
+    logger.warn(
+      `${TAG} @angular/fire ${peer.angularfire} peers firebase-tools "${peer.range}", which ${FIREBASE_TOOLS_AS_OF_0_50_0} (the house's) is ` +
+        `outside of — npm would refuse the install (ERESOLVE). Declaring ${version}, the newest inside it. The house's emulator and ` +
+        `deploy tooling is verified on ${FIREBASE_TOOLS_AS_OF_0_50_0}: moving to Angular 20+ (its @angular/fire accepts it) gets you there.`,
+    );
+  }
   if (block) {
     // A `latest` the project wrote: pin what it already runs, the 0.35.0 rule (nothing upgraded or downgraded).
     try {
@@ -70,4 +85,24 @@ function declareFirebaseTools(tree: Tree): string | undefined {
   tree.write('package.json', applyJsonChanges(text, JSON.parse(text), pkg));
   logger.info(`${TAG} package.json ${target}["firebase-tools"] = "${version}"${block ? ' (was "latest")' : ''}.`);
   return version;
+}
+
+/**
+ * The @angular/fire this project runs (installed, else declared exactly), when 0.50.0's table knows it and its
+ * firebase-tools peer leads to a pin — what firebase-tools must satisfy.
+ */
+function angularFirePeer(
+  tree: Tree,
+  pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> },
+): { angularfire: string; range: string; pin: string } | undefined {
+  let version: string | undefined;
+  try {
+    version = (JSON.parse(tree.read('node_modules/@angular/fire/package.json', 'utf8') ?? '') as { version?: string }).version;
+  } catch {
+    version = (pkg.dependencies?.['@angular/fire'] ?? pkg.devDependencies?.['@angular/fire'])?.replace(/^[~^]/, '');
+  }
+  if (!version || !/^\d/.test(version)) return undefined;
+  const row = ANGULARFIRE_TABLE_0_50_0.byMajor[majorOf(version)];
+  const release = [row?.stable, row?.prerelease].find((r) => r?.angularfire === version);
+  return release?.firebaseTools && release.firebaseToolsPin ? { angularfire: version, range: release.firebaseTools, pin: release.firebaseToolsPin } : undefined;
 }
