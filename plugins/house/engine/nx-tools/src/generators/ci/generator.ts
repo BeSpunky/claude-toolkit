@@ -27,6 +27,7 @@ import { type CiDeployProvider, type CiEnvironment } from '../../layers/descript
 import { detectLayers, layer } from '../../layers/registry';
 import { branchModelFromOption, readBranchModel, type BranchModel, type BranchProjection } from '../_utils/branch-model';
 import { nxInvocation } from '../_utils/nx-host';
+import { nodeVersionFile, projectNode } from '../_utils/node-version';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, type WiredLine } from './workflow';
 
@@ -106,9 +107,10 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
         nx: nx.command,
         packageManager: nx.packageManager,
         yarnBerry: tree.exists('.yarnrc.yml') || /"packageManager"\s*:\s*"yarn@[2-9]/.test(tree.read('package.json', 'utf8') ?? ''),
+        nodeVersionFile: nodeVersionFile(tree),
       }),
     });
-    if (!tree.exists('.nvmrc')) notes.push(`the workflow reads Node from .nvmrc, which this repo does not have — add it (one line: the Node major) or the deploy job fails at setup-node.`);
+    if (projectNode(tree).state !== 'declared') notes.push(`the workflow reads Node from ${nodeVersionFile(tree)}, which declares none here — add .nvmrc (one line: the Node major) or the deploy job fails at setup-node.`);
   }
   // The providers' human-run setup is useful whoever runs the pipeline, so it follows the bindings (and the
   // retired environments still to roll back), not the workflow.

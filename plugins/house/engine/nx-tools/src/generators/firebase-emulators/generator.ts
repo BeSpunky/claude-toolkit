@@ -122,8 +122,9 @@ import {
   platformExternals,
   registerPlatformSync,
 } from '../../platform';
-import { declareDependencies, declaredSpec, isPinnedSpec } from '../_utils/dependencies';
-import { projectNodeMajor } from '../_utils/node-version';
+import { declareDependencies, declaredSpec, floatingAdditions } from '../_utils/dependencies';
+import { isPinnedSpec } from '../_utils/version-spec';
+import { nodeVersionFile, projectNodeMajor } from '../_utils/node-version';
 import { FIREBASE_ADMIN_VERSION, FIREBASE_FUNCTIONS_VERSION, FIREBASE_TOOLS_VERSION } from '../_utils/versions';
 import { FUNCTIONS_NODE_RUNTIMES } from '../_utils/firebase-compat';
 
@@ -475,14 +476,16 @@ function nxVersion(tree: Tree, rootPkg: { dependencies?: Record<string, string>;
 }
 
 /**
- * The Node major Cloud Functions runs: the project's own (.nvmrc) when Cloud Functions offers it as a GA runtime
- * (projected from the pinned firebase-tools — _utils/firebase-compat.ts), else the newest runtime below it.
+ * The Node major Cloud Functions runs: the project's own when Cloud Functions offers it as a GA runtime (projected from
+ * the pinned firebase-tools — _utils/firebase-compat.ts), else the NEAREST one — the newest below it (code written
+ * for Node N runs on an older runtime only as far as it avoids newer APIs, so the closest), else, for a project older
+ * than every runtime, the oldest (the closest above).
  */
 function functionsRuntimeMajor(tree: Tree): { major: string; project: string } {
   const project = projectNodeMajor(tree);
   if (FUNCTIONS_NODE_RUNTIMES.includes(project)) return { major: project, project };
   const below = [...FUNCTIONS_NODE_RUNTIMES].reverse().find((major) => Number(major) < Number(project));
-  return { major: below ?? FUNCTIONS_NODE_RUNTIMES[FUNCTIONS_NODE_RUNTIMES.length - 1], project };
+  return { major: below ?? FUNCTIONS_NODE_RUNTIMES[0], project };
 }
 
 /**
@@ -636,10 +639,15 @@ function ensureFunctionsProject(
   if (!tree.exists(`${root}/package.json`) && runtime.major !== runtime.project) {
     logger.warn(
       `[firebase-emulators] Cloud Functions has no Node ${runtime.project} runtime (GA: ${FUNCTIONS_NODE_RUNTIMES.join(', ')}), ` +
-        `so ${root}/package.json declares engines.node "${runtime.major}" while the project (.nvmrc) runs ${runtime.project}.`,
+        `so ${root}/package.json declares engines.node "${runtime.major}" while the project runs Node ${runtime.project} (${nodeVersionFile(tree)}).`,
     );
   }
-  ifAbsent(`${root}/package.json`, 'functions-package.json.tpl');
+  if (!tree.exists(`${root}/package.json`)) {
+    // A rendered manifest is a manifest write like any other: no floating version through a template either.
+    const floating = floatingAdditions(tree, {}, JSON.parse(template('functions-package.json.tpl')));
+    if (floating.length) throw new Error(`[firebase-emulators] functions-package.json.tpl renders a floating version: ${floating.join(', ')}.`);
+    ifAbsent(`${root}/package.json`, 'functions-package.json.tpl');
+  }
   reportRuntimeMismatch(tree, `${root}/package.json`, runtime);
   ifAbsent(`${root}/src/main.ts`, 'functions-main.ts.tpl');
   // The committed shape doc for local Functions secrets (.secret.local itself is gitignored).
@@ -661,9 +669,9 @@ function reportRuntimeMismatch(tree: Tree, manifest: string, runtime: { major: s
   }
   if (engines === undefined || engines === runtime.major) return;
   logger.warn(
-    `[firebase-emulators] ${manifest} deploys Cloud Functions on Node "${engines}", but the project's Node (.nvmrc) is ` +
+    `[firebase-emulators] ${manifest} deploys Cloud Functions on Node "${engines}", but the project's Node (${nodeVersionFile(tree)}) is ` +
       `${runtime.project}${runtime.major !== runtime.project ? ` (nearest Cloud Functions runtime: ${runtime.major})` : ''}. ` +
-      `Set engines.node to "${runtime.major}" there — or .nvmrc to ${engines} — so the code you run locally is the code ` +
+      `Set engines.node to "${runtime.major}" there — or the project's Node to ${engines} — so the code you run locally is the code ` +
       `that is deployed.`,
   );
 }

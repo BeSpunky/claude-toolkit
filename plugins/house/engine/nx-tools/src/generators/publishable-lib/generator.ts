@@ -47,8 +47,8 @@ import {
   formatFiles,
   logger,
 } from '@nx/devkit';
-import { updateJsonInPlace } from '../_utils/json-edits';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
+import { updateManifest } from '../_utils/dependencies';
 import type { PublishableLibGeneratorSchema } from './schema';
 import { requireLayer } from '../../layers/registry';
 import { adapter, ADAPTERS } from '../../adapters/registry';
@@ -199,7 +199,7 @@ function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[], scope
   for (const { scoped, root } of siblings) {
     if (root && root !== projectRoot) linking.link(tree, { importPath: scoped, libRoot: root, consumerRoot: projectRoot });
   }
-  updateJsonInPlace(tree, pkgPath, (json: Record<string, unknown>) => {
+  updateManifest(tree, pkgPath, 'publishable-lib', (json: Record<string, unknown>) => {
     const dependencies = { ...((json.dependencies as Record<string, string>) ?? {}) };
     for (const { scoped, version } of siblings) dependencies[scoped] ??= `^${version}`;
     json.dependencies = dependencies;
@@ -251,7 +251,7 @@ function markTestPeersOptional(tree: Tree, projectRoot: string): void {
     return;
   }
 
-  updateJsonInPlace(tree, pkgPath, (json: Record<string, unknown>) => {
+  updateManifest(tree, pkgPath, 'publishable-lib', (json: Record<string, unknown>) => {
     const peerDependencies = (json.peerDependencies as Record<string, string>) ?? {};
     const declaredTestPeers = TEST_ONLY_PEERS.filter((peer) => peer in peerDependencies);
     if (declaredTestPeers.length === 0) {

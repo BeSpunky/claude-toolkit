@@ -1,6 +1,8 @@
 // 0.50.0 — `.nvmrc` is written from the Node the devcontainer ALREADY runs, so the next upgrade moves nothing. The
-// shapes: a house.Dockerfile (0.48+), a pre-0.48 `image`, an agent-only Node feature, a project's own .nvmrc (kept, a
-// disagreement reported), an alias in it, no devcontainer at all, and a functions runtime that disagrees (reported).
+// shapes: a house.Dockerfile build (0.48+), a pre-0.48 `image`, an agent-only Node feature, the stock VS Code template's
+// `typescript-node:1-22-bookworm` (image 1, Node 22), a feature `lts` / `22.11`, a project Dockerfile on a non-Node base
+// (never guessed), a project's own .nvmrc (kept, a disagreement reported), an alias in it (resolved, dated), a
+// .node-version (the declaration — no second file), no devcontainer at all, and a functions runtime that disagrees.
 import { createRequire } from 'node:module';
 
 const { writeJson, logger } = createRequire(import.meta.url)('@nx/devkit');
@@ -15,6 +17,11 @@ const listen = () => {
   };
 };
 const nvmrc = (tree) => (tree.exists('.nvmrc') ? tree.read('.nvmrc', 'utf8') : undefined);
+const houseBuilt = (tree, dockerfile) => {
+  writeJson(tree, '.devcontainer/devcontainer.json', { build: { dockerfile: 'house.Dockerfile' } });
+  tree.write('.devcontainer/house.Dockerfile', dockerfile);
+};
+const imaged = (image, extra = {}) => (tree) => writeJson(tree, '.devcontainer/devcontainer.json', { image, ...extra });
 
 // ── The Node sources as earlier releases really shipped them (the rung READS these, never rewrites them — so a
 //    shipped shape's own text stays in the tree and the shape "diverges" from the canonical fixture only there;
@@ -134,18 +141,18 @@ export default {
   cases: [
     {
       name: 'house.Dockerfile FROM typescript-node:22 → .nvmrc 22',
-      setup: (tree) => tree.write('.devcontainer/house.Dockerfile', '# GENERATED\nFROM mcr.microsoft.com/devcontainers/typescript-node:22\n'),
+      setup: (tree) => houseBuilt(tree, '# GENERATED\nFROM mcr.microsoft.com/devcontainers/typescript-node:22\n'),
       expect: (tree, t) => t.ok(nvmrc(tree) === '22\n', `.nvmrc: ${nvmrc(tree)}`),
       historicalShapes: [
         {
           name: '0.48.0 house.Dockerfile (0484236)',
-          setup: (tree) => tree.write('.devcontainer/house.Dockerfile', DOCKERFILE_0_48_0('mcr.microsoft.com/devcontainers/typescript-node:22')),
+          setup: (tree) => houseBuilt(tree, DOCKERFILE_0_48_0('mcr.microsoft.com/devcontainers/typescript-node:22')),
           diverges: READS_ONLY,
           expect: seeded(22),
         },
         {
           name: '0.48.1 … 0.49.x house.Dockerfile (f0d6905)',
-          setup: (tree) => tree.write('.devcontainer/house.Dockerfile', DOCKERFILE_0_49('mcr.microsoft.com/devcontainers/typescript-node:22')),
+          setup: (tree) => houseBuilt(tree, DOCKERFILE_0_49('mcr.microsoft.com/devcontainers/typescript-node:22')),
           diverges: READS_ONLY,
           expect: seeded(22),
         },
@@ -214,7 +221,7 @@ export default {
       setup: (tree) => {
         listen();
         tree.write('.nvmrc', 'v24.3.0\n');
-        tree.write('.devcontainer/house.Dockerfile', 'FROM mcr.microsoft.com/devcontainers/typescript-node:22\n');
+        houseBuilt(tree, 'FROM mcr.microsoft.com/devcontainers/typescript-node:22\n');
       },
       expect: (tree, t) => {
         t.ok(nvmrc(tree) === 'v24.3.0\n', 'kept byte for byte');
@@ -222,15 +229,78 @@ export default {
       },
     },
     {
-      name: 'an alias in .nvmrc is kept and reported (the house now refuses it)',
+      name: 'an alias in .nvmrc is kept — the house reads it (lts/* resolves, dated); a disagreement with the container is reported',
       setup: (tree) => {
         listen();
-        tree.write('.nvmrc', 'lts/*\n');
+        tree.write('.nvmrc', '# team default\nlts/*\n');
+        houseBuilt(tree, 'FROM mcr.microsoft.com/devcontainers/typescript-node:22\n');
       },
       expect: (tree, t) => {
-        t.ok(nvmrc(tree) === 'lts/*\n', 'kept');
-        t.ok(said.some((line) => /names no Node major/.test(line)), `reported: ${said}`);
+        t.ok(nvmrc(tree) === '# team default\nlts/*\n', 'kept byte for byte');
+        t.ok(said.some((line) => /declares Node 24, but the devcontainer runs Node 22/.test(line)), `reported: ${said}`);
       },
+    },
+    {
+      name: 'a personal nvm alias in .nvmrc is kept and reported (it means something else on every machine)',
+      setup: (tree) => {
+        listen();
+        tree.write('.nvmrc', 'system\n');
+      },
+      expect: (tree, t) => {
+        t.ok(nvmrc(tree) === 'system\n', 'kept');
+        t.ok(said.some((line) => /names no Node the house can resolve/.test(line)), `reported: ${said}`);
+      },
+    },
+    {
+      name: 'the stock VS Code template (typescript-node:1-22-bookworm) → 22, never the image version 1',
+      setup: imaged('mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm'),
+      expect: (tree, t) => t.ok(nvmrc(tree) === '22\n', `.nvmrc: ${nvmrc(tree)}`),
+    },
+    {
+      name: 'typescript-node:22-bookworm → 22',
+      setup: imaged('mcr.microsoft.com/devcontainers/typescript-node:22-bookworm'),
+      expect: (tree, t) => t.ok(nvmrc(tree) === '22\n', `.nvmrc: ${nvmrc(tree)}`),
+    },
+    {
+      name: 'a Node feature at "22.11" → 22',
+      setup: imaged('mcr.microsoft.com/devcontainers/base:debian', { features: { 'ghcr.io/devcontainers/features/node:1': { version: '22.11' } } }),
+      expect: (tree, t) => t.ok(nvmrc(tree) === '22\n', `.nvmrc: ${nvmrc(tree)}`),
+    },
+    {
+      name: 'a Node feature at "lts" (its default) → the LTS major as of 0.50.0, pinned and said',
+      setup: (tree) => {
+        listen();
+        const info = logger.info;
+        logger.info = (...args) => {
+          said.push(args.join(' '));
+          info(...args);
+        };
+        imaged('mcr.microsoft.com/devcontainers/base:debian', { features: { 'ghcr.io/devcontainers/features/node:1': {} } })(tree);
+      },
+      expect: (tree, t) => {
+        t.ok(nvmrc(tree) === '24\n', `.nvmrc: ${nvmrc(tree)}`);
+        t.ok(said.some((line) => /lts \(its default\)[\s\S]*as of 2026-10-07[\s\S]*now pinned/.test(line)), `said: ${said}`);
+      },
+    },
+    {
+      name: "a project Dockerfile on a non-Node base: nothing written, never guessed — reported",
+      setup: (tree) => {
+        listen();
+        writeJson(tree, '.devcontainer/devcontainer.json', { build: { dockerfile: 'Dockerfile' } });
+        tree.write('.devcontainer/Dockerfile', 'FROM ubuntu:24.04\nRUN apt-get install -y nodejs\n');
+      },
+      expect: (tree, t) => {
+        t.missing('.nvmrc');
+        t.ok(said.some((line) => /cannot be read[\s\S]*will not guess/.test(line)), `reported: ${said}`);
+      },
+    },
+    {
+      name: '.node-version is the declaration: no .nvmrc written beside it',
+      setup: (tree) => {
+        tree.write('.node-version', '22.11.0\n');
+        houseBuilt(tree, 'FROM mcr.microsoft.com/devcontainers/typescript-node:22\n');
+      },
+      expect: (tree, t) => t.missing('.nvmrc'),
     },
     {
       name: 'no devcontainer Node anywhere: nothing written (nothing reads it here yet)',
@@ -241,7 +311,7 @@ export default {
       name: 'a Cloud Functions runtime that disagrees is reported, never rewritten',
       setup: (tree) => {
         listen();
-        tree.write('.devcontainer/house.Dockerfile', 'FROM mcr.microsoft.com/devcontainers/typescript-node:24\n');
+        houseBuilt(tree, 'FROM mcr.microsoft.com/devcontainers/typescript-node:24\n');
         writeJson(tree, 'firebase.json', {});
         writeJson(tree, 'apps/functions/project.json', { name: 'functions', root: 'apps/functions', projectType: 'application' });
         writeJson(tree, 'apps/functions/package.json', { name: 'functions', engines: { node: '22' } });

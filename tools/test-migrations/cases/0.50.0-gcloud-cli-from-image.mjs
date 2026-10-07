@@ -1,4 +1,4 @@
-// 0.50.0 — gcloud moves from the unpinned jajera feature into the image's pinned package layer. The shapes: OWNED
+// 0.50.0 — gcloud moves from the unpinned jajera feature into a pinned archive in the image's package layer. The shapes: OWNED
 // (the feature, its comment and its lock pin go), ADOPTED with the merge's record (goes), ADOPTED by the project's own
 // hand (stays, reported), and a workspace without Firebase (nothing).
 import { createRequire } from 'node:module';
