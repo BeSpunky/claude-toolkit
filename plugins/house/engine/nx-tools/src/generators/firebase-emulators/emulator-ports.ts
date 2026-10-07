@@ -74,8 +74,10 @@ export function emulatorPorts(tree: Tree): Record<string, number> {
  */
 export function hostDialledPorts(tree: Tree): { name: string; port: number; label: string }[] {
   const out: { name: string; port: number; label: string }[] = [];
-  // The UI first — the one a person opens; then the services in firebase.json's order.
+  // The UI first — the one a person opens; then the services in firebase.json's order. No UI, no person dialling
+  // anything: the app needs none of these.
   const suite = configured(tree).sort((a, b) => Number(b.name === 'ui') - Number(a.name === 'ui'));
+  if (!suite.some(({ name }) => name === 'ui')) return out;
   for (const { name, port, entry } of suite) {
     if (name === 'hub') continue;
     if (name === 'logging') continue; // added once, below, whether or not firebase.json names it
@@ -85,9 +87,7 @@ export function hostDialledPorts(tree: Tree): { name: string; port: number; labe
       if (Number.isInteger(ws) && ws > 0) out.push({ name: 'firestore-websocket', port: ws, label: 'Firestore WebSocket' });
     }
   }
-  if (suite.some(({ name }) => name === 'ui')) {
-    out.push({ name: 'logging', port: emulatorPorts(tree).logging, label: 'Emulator Logs (Emulator UI)' });
-  }
+  out.push({ name: 'logging', port: emulatorPorts(tree).logging, label: 'Emulator Logs (Emulator UI)' });
   return out;
 }
 

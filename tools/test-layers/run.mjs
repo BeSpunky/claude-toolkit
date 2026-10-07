@@ -644,7 +644,7 @@ checkAsync('full house shape (angular+firebase+design system, web): the 0.34 con
   const layers = registry.detectLayers(tree);
   const a = await artifacts(tree, layers);
   ok(/^FROM mcr\.microsoft\.com\/devcontainers\/typescript-node:22$/m.test(a.dockerfile), 'house.Dockerfile is not FROM typescript-node:22');
-  ok(JSON.stringify(a.dc.forwardPorts) === '[80,4200,4000,9099,8080,9150,9199,5001]', `forwardPorts ${JSON.stringify(a.dc.forwardPorts)}`);
+  ok(JSON.stringify(a.dc.forwardPorts) === '[80,4200,4000,9099,8080,9150,9199,5001,4500]', `forwardPorts ${JSON.stringify(a.dc.forwardPorts)}`);
   ok(a.dc.portsAttributes['4200'].label === 'Angular Dev Server', '4200 label');
   ok(a.dc.portsAttributes['6080'].requireLocalPort === true && a.dc.portsAttributes['6119'], 'the noVNC band');
   for (const ext of ['nrwl.angular-console', 'Angular.ng-template', 'toba.vsfire', 'dbaeumer.vscode-eslint', 'formulahendry.auto-rename-tag']) {
@@ -1333,11 +1333,16 @@ checkAsync('firebase devcontainer ports come from firebase.json and the client a
   const backend = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
   const a = await artifacts(backend, [...registry.detectLayers(backend), 'agent']);
   ok(!(a.dc.forwardPorts ?? []).includes(4200), `a backend-only Firebase forwards a dev-server port: ${JSON.stringify(a.dc.forwardPorts)}`);
-  ok(JSON.stringify(a.dc.forwardPorts) === '[4000,9099,8080,9150,9199,5001]', `no firebase.json suite yet → the house suite: ${JSON.stringify(a.dc.forwardPorts)}`);
+  ok(JSON.stringify(a.dc.forwardPorts) === '[4000,9099,8080,9150,9199,5001,4500]', `no firebase.json suite yet → the house suite: ${JSON.stringify(a.dc.forwardPorts)}`);
   const custom = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
   writeJson(custom, 'firebase.json', { emulators: { auth: { port: 19099 }, firestore: { port: 18080, websocketPort: 19150 }, ui: { enabled: false }, singleProjectMode: true } });
   const b = await artifacts(custom, [...registry.detectLayers(custom), 'agent']);
-  ok(JSON.stringify(b.dc.forwardPorts) === '[19099,18080,19150]', `firebase.json's own ports: ${JSON.stringify(b.dc.forwardPorts)}`);
+  // The forwarded emulator ports serve a PERSON — the Emulator UI's page dials them; the app reaches every emulator
+  // through its own origin. So no UI, no emulator forward at all.
+  ok((b.dc.forwardPorts ?? []).length === 0, `the UI is disabled, so no emulator port is forwarded: ${JSON.stringify(b.dc.forwardPorts)}`);
+  writeJson(custom, 'firebase.json', { emulators: { auth: { port: 19099 }, firestore: { port: 18080, websocketPort: 19150 }, ui: { port: 14000 }, logging: { port: 14500 }, singleProjectMode: true } });
+  const c = await artifacts(custom, [...registry.detectLayers(custom), 'agent']);
+  ok(JSON.stringify(c.dc.forwardPorts) === '[14000,19099,18080,19150,14500]', `firebase.json's own ports, for the UI: ${JSON.stringify(c.dc.forwardPorts)}`);
 });
 
 // A6 — the package-manager rule is rendered into post-create from the one table, and behaves like the TS rule.
