@@ -16,7 +16,7 @@
 // The engine ships as .tpl files in the payload; this copies them into a temp tools/dev/ as .mjs — exactly
 // what the `dev` generator writes — and imports them.
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -210,6 +210,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
   const freePort = () => new Promise((res) => { const s = createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => res(port)); }); });
   const listening = (port) => new Promise((res) => { const c = connect(port, '127.0.0.1'); c.on('connect', () => { c.destroy(); res(true); }); c.on('error', () => res(false)); });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const isAliveHere = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const until = async (cond, ms) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) if (await cond()) return true; return cond(); };
 
   /** Serve `server.mjs` (as an argv or a `sh -c` child), deliver `stop`, report what the engine and child saw. */
@@ -247,7 +248,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
   const hup = await scenario('SIGHUP to the engine alone', { shell: false, stop: (pid) => process.kill(pid, 'SIGHUP') });
   ok('SIGHUP to the engine alone: child got ONE SIGTERM, nothing listening', hup && hup.result && hup.got === 'SIGTERM' && !hup.stillUp);
   const ctrlC = await scenario('Ctrl+C', { shell: false, stop: (pid) => process.kill(-pid, 'SIGINT') });
-  ok('Ctrl+C (SIGINT to the group): child got exactly ONE SIGINT — nothing forwarded — engine exits 0', ctrlC && ctrlC.result?.code === 0 && ctrlC.got === 'SIGINT' && !ctrlC.stillUp);
+  ok('Ctrl+C (SIGINT to the group): child got exactly ONE SIGINT — nothing forwarded — engine exits 130 (interrupted)', ctrlC && ctrlC.result?.code === 130 && ctrlC.got === 'SIGINT' && !ctrlC.stillUp);
   const both = await scenario('Ctrl+C then a supervisor SIGTERM', {
     shell: false,
     stop: async (pid) => {
@@ -290,13 +291,14 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
     const server = join(repo, 'server.mjs');
     writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd: ['node', server, '${PORT:app}', join(repo, 'got-h')], ports: { app: port } }] } } }));
     const human = { DEV_OWNER: 'user:dev', CLAUDE_CODE_SESSION_ID: '' };
-    // As under Nx: the engine leaves an exit record for the invocation (this process stands in for the invoking nx).
-    const underNx = { DEV_NX_ROOT: repo, NX_INVOCATION_ROOT_PID: String(process.pid) };
-    const eng = spawn('sh', [join(engine, 'dev'), 'serve', 'site', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...human, ...underNx } });
+    const eng = spawn('sh', [join(engine, 'dev'), 'serve', 'site', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...human } });
     try {
       ok('the stack came up', await until(() => listening(port), 10000));
       const rec = JSON.parse(readFileSync(join(repo, '.bespunky', 'run', 'site@0.json'), 'utf8'));
       ok('the run record names the serve, its owner, its ports and its child', rec.pid === eng.pid && rec.owner === 'user:dev' && rec.ports.app === port && rec.processes.length === 1);
+      // R3-2: a Functions worker listens on <TMPDIR>/fire_emu_<16 hex>.sock, and a socket path is cut at 107 bytes.
+      ok(`the stack's TMPDIR is short whatever the tree (${rec.tmp}: ${rec.tmp.length} ≤ 60) and exists`, rec.tmp.length <= 60 && existsSync(rec.tmp));
+      ok('…and is the stack\'s own (keyed by tree and stack)', /^\/tmp\/bespunky-[0-9a-f]{12}$/.test(rec.tmp));
       ok('.bespunky/run ignores itself', readFileSync(join(repo, '.bespunky', 'run', '.gitignore'), 'utf8').includes('*'));
       const ps = JSON.parse((await dev({}, 'ps', '--json')).out);
       ok('ps lists it as live and listening', ps.length === 1 && ps[0].state === 'live' && ps[0].portStates[0].listening === true);
@@ -307,10 +309,8 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
       const mine = await dev(human, 'stop');
       ok('the owner stops it by handle: exit 0, ports confirmed free', mine.code === 0 && /ports free/.test(mine.out) && !(await listening(port)));
       ok('…the child got ONE SIGTERM (the graceful path)', readFileSync(join(repo, 'got-h'), 'utf8') === 'SIGTERM');
-      ok('…and the record and state dir are gone', !existsSync(join(repo, '.bespunky', 'run', 'site@0.json')) && !existsSync(join(repo, '.bespunky', 'run', 'site@0')));
-      // NB2: a run attached to this stack says who stopped it — from the exit record.
-      const exit = JSON.parse(readFileSync(join(repo, '.bespunky', 'run', 'exits', `${process.pid}@site.json`), 'utf8'));
-      ok(`…and the exit record says it ended cleanly, and who stopped it (${exit.stoppedBy})`, exit.code === 0 && exit.stoppedBy === 'user:dev, with tools/dev/dev stop' && exit.pid === eng.pid);
+      ok('…and the record, state dir and TMPDIR are gone', !existsSync(join(repo, '.bespunky', 'run', 'site@0.json')) && !existsSync(join(repo, '.bespunky', 'run', 'site@0')) && !existsSync(rec.tmp));
+      ok('…and the engine exited 0 (a clean stop)', await until(() => eng.exitCode !== null, 3000) && eng.exitCode === 0);
       // A record whose PID now belongs to someone else (the kernel reuses PIDs) is stale, never a handle.
       writeFileSync(join(repo, '.bespunky', 'run', 'site@9000.json'), JSON.stringify({ ...rec, key: 'site@9000', offset: 9000, pid: process.pid, procStart: 'not-this-one', processes: [] }));
       const stale = JSON.parse((await dev({}, 'ps', '--json')).out);
@@ -320,6 +320,83 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
         process.kill(-eng.pid, 'SIGKILL');
       } catch {
         /* already down — the point of the test */
+      }
+    }
+  }
+
+  console.log('claims: one identity for everything that binds this project\'s ports (R3-1, R3-7, R3-9, D4)');
+  {
+    const { machineId, readStacks } = await load('lib/stacks.mjs');
+    const port = await freePort();
+    const server = join(repo, 'slow.mjs');
+    // Binds only after a second — a probe of the ports alone sees nothing during the window two serves race in.
+    writeFileSync(server, `import { createServer } from 'node:http';
+const port = Number(process.argv[2]);
+setTimeout(() => createServer((_, r) => r.end('ok')).listen(port, '127.0.0.1').on('error', () => process.exit(1)), 1000);
+process.on('SIGTERM', () => process.exit(0));
+`);
+    writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd: ['node', server, '${PORT:app}'], ports: { app: port } }] } } }));
+    const dev = (env, ...args) =>
+      new Promise((res) => {
+        const p = spawn('sh', [join(engine, 'dev'), ...args], { cwd: repo, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        p.stdout.on('data', (d) => (out += d));
+        p.stderr.on('data', (d) => (out += d));
+        p.on('exit', (code) => res({ code, out }));
+      });
+    const owner = { DEV_OWNER: 'agent:claims', CLAUDE_CODE_SESSION_ID: 'shared' };
+    const serves = Array.from({ length: 5 }, () =>
+      spawn('sh', [join(engine, 'dev'), 'serve', 'site', '--no-shared-browser'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...owner } }),
+    );
+    try {
+      await until(async () => JSON.parse((await dev({}, 'ps', '--json')).out).length === 5, 8000);
+      const stacks = JSON.parse((await dev({}, 'ps', '--json')).out);
+      const offsets = new Set(stacks.map((s) => s.offset));
+      ok(`five concurrent auto serves: five stacks, five blocks, every one with its handle (${[...offsets].join(', ')})`, stacks.length === 5 && offsets.size === 5 && serves.every((e) => stacks.some((s) => s.pid === e.pid)));
+      ok('…the main tree\'s base block went to exactly one of them', stacks.filter((s) => s.offset === 0).length === 1);
+      const pinned = await dev(owner, 'serve', 'site', '--no-shared-browser', '--port-offset=0');
+      ok('an explicit offset someone holds is refused, naming the holder and its stop command', pinned.code !== 0 && /offset 0 is held — site@0 \(live/.test(pinned.out) && /tools\/dev\/dev stop site --offset=0/.test(pinned.out));
+
+      // R3-9: the session is ONE owner for itself and every subagent — selecting by it is refused; naming works.
+      const session = { DEV_OWNER: '', CLAUDE_CODE_SESSION_ID: 'shared' };
+      const all = await dev(session, 'stop', '--all-mine');
+      ok('--all-mine under a shared session owner is refused (a subagent would stop its siblings)', all.code !== 0 && /subagents share/.test(all.out));
+      const implicit = await dev(session, 'stop', 'site');
+      ok('…so is "my stack here" without naming it', implicit.code !== 0 && /subagents share/.test(implicit.out));
+      const labelled = await dev(owner, 'stop', '--all-mine');
+      ok('an owner label of its own may stop all of its stacks', labelled.code === 0 && (await until(async () => JSON.parse((await dev({}, 'ps', '--json')).out).length === 0, 8000)));
+
+      // R3-7: records of another process table. Same boot, another PID namespace (a sibling container) and kept fresh:
+      // foreign, and its ports are held. Gone quiet, or from another boot (a reboot, a rebuilt host): pruned.
+      const run = join(repo, '.bespunky', 'run');
+      const here = machineId();
+      const fake = (key, machine, ports) => writeFileSync(join(run, `${key}.json`), JSON.stringify({ key, app: 'site', tree: repo, offset: 0, pid: 1, procStart: 'x', machine, host: 'elsewhere', owner: 'user:other', ports, processes: [] }));
+      fake('site@0', `${here.split('/')[0]}/pid:[1]`, { app: port });
+      ok('a fresh record of another container on this kernel is FOREIGN, not pruned', readStacks([repo]).some((r) => r.key === 'site@0' && r.state === 'foreign'));
+      const blocked = await dev(owner, 'serve', 'site', '--no-shared-browser', '--port-offset=0');
+      ok('…and its block is held: an explicit claim of it is refused', blocked.code !== 0 && /offset 0 is held — site@0 \(foreign/.test(blocked.out));
+      const old = new Date(Date.now() - 10 * 60_000);
+      utimesSync(join(run, 'site@0.json'), old, old);
+      ok('…until it goes quiet: then it is pruned (a rebuilt container never touches it again)', readStacks([repo]).length === 0 && !existsSync(join(run, 'site@0.json')));
+      fake('site@0', 'another-boot/pid:[1]', { app: port });
+      ok('a record from another boot is pruned at once', readStacks([repo]).length === 0);
+
+      // D4: a script's stack claims the same way — a direct emulator run and a serve see each other.
+      const sh = spawn('sh', ['-c', 'sleep 30'], { detached: true, stdio: 'ignore' });
+      const claimed = await dev(owner, 'claim', 'firebase', `--pid=${sh.pid}`, `--ports=hub=${port}`, '--port-offset=0');
+      ok(`a script claims its stack for ITS pid and gets shell assignments (${claimed.out.trim().split('\n')[0]})`, claimed.code === 0 && /^STACK_KEY='firebase@0'$/m.test(claimed.out) && /^STACK_TMP='\/tmp\/bespunky-[0-9a-f]{12}'$/m.test(claimed.out));
+      const beside = await dev(owner, 'serve', 'site', '--no-shared-browser', '--port-offset=0');
+      ok('…a serve on the same ports is refused, naming the script\'s stack', beside.code !== 0 && /firebase@0 \(live, pid /.test(beside.out));
+      await dev(owner, 'release', 'firebase@0', `--pid=${sh.pid}`);
+      ok('…release gives it up (record, state dir and TMPDIR)', !existsSync(join(run, 'firebase@0.json')) && !existsSync(join(run, 'firebase@0')));
+      process.kill(sh.pid, 'SIGKILL');
+    } finally {
+      for (const e of serves) {
+        try {
+          process.kill(-e.pid, 'SIGKILL');
+        } catch {
+          /* stopped by the test */
+        }
       }
     }
   }
@@ -339,16 +416,20 @@ const dir = path.join(process.env.DEV_STACK_DIR, 'detached'); fs.mkdirSync(dir, 
 const file = path.join(dir, 'saver.json');
 const start = () => { const s = fs.readFileSync('/proc/self/stat', 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' ')[19]; };
 const owner = Number(process.argv[1]);
+const saveMs = Number(process.argv[2]);
+const deaf = process.argv[3] === 'deaf';
+process.on('SIGUSR1', () => { if (deaf) return; write({ status: 'exited', code: 1, result: 'ABANDONED (dev stop --abandon)' }); process.exit(1); });
 const write = (e) => { fs.writeFileSync(file + '.tmp', JSON.stringify({ id: 'saver', pid: process.pid, procStart: start(), log: '/tmp/saver.log', ...e })); fs.renameSync(file + '.tmp', file); };
 write({ status: 'running' });
 const tick = setInterval(() => {
   try { process.kill(owner, 0); return; } catch {}
   clearInterval(tick);
   write({ status: 'stopping', doing: 'saving test data' });
-  setTimeout(() => { write({ status: 'exited', code: 0, result: 'saved to the test dir' }); process.exit(0); }, 1500);
+  setTimeout(() => { write({ status: 'exited', code: 0, result: 'saved to the test dir' }); process.exit(0); }, saveMs);
 }, 100);
 \`;
-spawn(process.execPath, ['-e', work, String(process.pid)], { detached: true, stdio: 'ignore' }).unref();
+const saveMs = mode === 'slow' || mode === 'deaf' ? 60000 : 1500;
+spawn(process.execPath, ['-e', work, String(process.pid), String(saveMs), mode], { detached: true, stdio: 'ignore' }).unref();
 const server = createServer((_, res) => res.end('ok')).listen(Number(port), '127.0.0.1');
 if (mode === 'crash') setTimeout(() => process.exit(3), 600);
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
@@ -392,6 +473,23 @@ process.on('SIGTERM', () => { server.close(); process.exit(0); });
       const waited = await run(['stop']);
       ok('dev stop on a finishing stack signals nothing, waits for the save, reports it', waited.code === 0 && /already stopped and finishing/.test(waited.out) && /saved to the test dir/.test(waited.out));
       ok('…and the record is gone after', JSON.parse((await run(['ps', '--json'])).out).length === 0);
+
+      // R3-3: a save that would take a minute (or never end) is not waited on forever: --abandon ends it now. Work
+      // that honours SIGUSR1 records the abandonment itself; work that ignores it has its process group killed.
+      for (const mode of ['slow', 'deaf']) {
+        declare(mode);
+        eng = spawn('sh', [join(engine, 'dev'), 'serve', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...human } });
+        await until(() => listening(port), 10000);
+        await until(() => existsSync(entry), 5000);
+        process.kill(-eng.pid, 'SIGKILL');
+        await until(async () => JSON.parse((await run(['ps', '--json'])).out)[0]?.state === 'finishing', 5000);
+        const saverPid = JSON.parse(readFileSync(entry, 'utf8')).pid;
+        const t1 = Date.now();
+        const ended = await run(['stop', '--abandon']);
+        const gone = !isAliveHere(saverPid);
+        ok(`--abandon on a finishing stack whose save ${mode === 'deaf' ? 'IGNORES SIGUSR1' : 'honours SIGUSR1'}: ended in ${Math.round((Date.now() - t1) / 1000)}s, not a minute; the work is gone`, Date.now() - t1 < 20000 && gone && /abandoning saver/.test(ended.out));
+        ok(`…${mode === 'deaf' ? 'its process group killed, said so' : 'its own result reported'}, and the record pruned`, (mode === 'deaf' ? /killing its process group/.test(ended.out) : /ABANDONED/.test(ended.out)) && JSON.parse((await run(['ps', '--json'])).out).length === 0);
+      }
 
       // A process that dies on its own fails the stack — and the engine says WHICH, with the command it ran.
       declare('crash');
