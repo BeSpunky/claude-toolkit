@@ -30,7 +30,9 @@
 //                        fatally abort. The generator asserts the `emulators` + `functions` keys
 //                        and preserves any other top-level keys the user added. NO top-level `hosting`
 //                        block — the BeSpunky default is Firebase App Hosting, configured in apphosting.yaml.
-//   - apphosting.yaml (+ apphosting.staging.yaml with --staging) — only with a client app, and only if absent:
+//   - apphosting.yaml (+ apphosting.staging.yaml with --staging) — only with a client app, and only if absent, in the
+//                        directory App Hosting already reads for it (else the workspace root; apphosting-config.ts);
+//                        a nearer apphosting*.yaml shadowing a farther one is warned about on every run:
 //                        App Hosting builds and serves a web app, so a core-only repo (functions + emulators)
 //                        has nothing for it to deploy. A later sync seeds it once a client app is wired.
 //   - .gitignore        — emulator debug logs, the working data dirs, <functions root>/.secret.local.
@@ -66,6 +68,7 @@ import {
   readJson,
   writeJson,
   logger,
+  readProjectConfiguration,
 } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -74,6 +77,7 @@ import { adapterOf, applicationsWith } from '../../adapters/registry';
 import { workspaceStacksWith } from '../../adapters/workspace';
 import { hasDependency } from '../../layers/evidence';
 import { FIREBASE_DEFAULT_PORTS, HOUSE_EMULATORS } from './emulator-ports';
+import { describeShadow, effectiveAppHostingDir, shadowedAppHostingConfigs } from './apphosting-config';
 import firebaseClientGenerator from '../firebase-client/generator';
 import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
 import { resolveAppsDir } from '../_utils/workspace-layout';
@@ -202,14 +206,20 @@ export default async function firebaseEmulatorsGenerator(
   // 1b) App Hosting's deploy config — seeded, never clobbered, and only for a CLIENT APP: App Hosting builds and
   //     serves a web app, so without one there is nothing for it to deploy (and the staging override, which
   //     builds the client app's `staging` configuration, nothing to name). Functions deploy without it.
+  //     WHERE: the directory App Hosting already reads for a backend rooted at the client app (apphosting-config.ts:
+  //     the nearest one with any apphosting*.yaml, walking up), else the workspace root — which that walk reaches.
+  //     Never a second home: a seed beside a file the project moved would be shadowed (or shadow it), silently.
   if (clientApp) {
-    if (!tree.exists('apphosting.yaml')) tree.write('apphosting.yaml', template('apphosting.yaml.tpl'));
-    if (options.staging && !tree.exists('apphosting.staging.yaml')) {
-      tree.write('apphosting.staging.yaml', template('apphosting.staging.yaml.tpl').split('{{projectName}}').join(clientApp));
+    const home = effectiveAppHostingDir(tree, readProjectConfiguration(tree, clientApp).root) ?? '.';
+    const at = (file: string) => (home === '.' ? file : `${home}/${file}`);
+    if (!tree.exists(at('apphosting.yaml'))) tree.write(at('apphosting.yaml'), template('apphosting.yaml.tpl'));
+    if (options.staging && !tree.exists(at('apphosting.staging.yaml'))) {
+      tree.write(at('apphosting.staging.yaml'), template('apphosting.staging.yaml.tpl').split('{{projectName}}').join(clientApp));
     }
   } else if (options.staging) {
     logger.warn('[firebase-emulators] --staging: no client app to build, so apphosting.staging.yaml was not written.');
   }
+  for (const shadow of shadowedAppHostingConfigs(tree)) logger.warn(`[firebase-emulators] ${describeShadow(shadow)}`);
 
   // 1c) .gitignore — the emulator block, then the secrets block under its own marker (so a project already past
   //     the first still gains the second on upgrade).
