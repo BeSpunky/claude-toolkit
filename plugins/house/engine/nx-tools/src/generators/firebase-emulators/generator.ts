@@ -92,7 +92,8 @@ import { hasDependency } from '../../layers/evidence';
 import { HOUSE_EMULATORS, defaultPort, renderEmulatorPortsModule } from './emulator-ports';
 import { describeShadow, effectiveAppHostingDir, shadowedAppHostingConfigs } from './apphosting-config';
 import firebaseClientGenerator from '../firebase-client/generator';
-import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
+import { ensureHouseProject, type HouseProjectHome } from '../_utils/project-files';
+import { firebaseHomes } from './homes';
 import { houseLintTarget } from '../_utils/lint-inference';
 import { applyJsonChanges } from '../_utils/json-edits';
 import { resolveAppsDir } from '../_utils/workspace-layout';
@@ -284,8 +285,7 @@ export default async function firebaseEmulatorsGenerator(
   // (firebase.json's source, the gitignore entry, the scripts' secrets file) follows the functions project's
   // actual root, and every `nx` command its actual name. A new workspace puts it in its apps directory.
   const appsDir = resolveAppsDir(tree);
-  const functions = houseProjectHome(tree, 'functions', `${appsDir}/functions`);
-  const suite = houseProjectHome(tree, 'firebase', 'firebase');
+  const { functions, suite } = firebaseHomes(tree);
   const functionsPaths = (tpl: string) =>
     tpl.split('{{functionsRoot}}').join(functions.root).split('{{functionsDist}}').join(distOf(functions)).split('{{functionsProject}}').join(functions.name);
 

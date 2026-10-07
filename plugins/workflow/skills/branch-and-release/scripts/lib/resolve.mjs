@@ -17,9 +17,11 @@
 // exception is a copy whose only problems are OUTDATED (model.mjs `check`: a format with one exact rewrite that
 // leaves the projection unchanged — a bare-string `deploys`): it is the declared model it always was, and each
 // problem goes into `notes`, remedy included, so every reader of `status` sees what to do. That remedy depends on
-// WHERE the fix stands (model.mjs `outdatedRemedy`): when the working tree's own copy already has no outdated
-// problem but the integration line's still does, this branch carries the rewrite and it resolves on landing —
-// telling such a branch to "run the upgrade" again would be wrong. The resolution rides in `outdated`.
+// WHERE the fix stands (model.mjs `outdatedRemedy`): when the working tree's own copy holds exactly the rewrite at
+// every outdated path of the integration line's copy and otherwise checks clean (`carriesRewrite`), this branch
+// carries the fix and it resolves on landing — telling such a branch to "run the upgrade" again would be wrong. Any
+// other copy (one predating the notes, rewording or extending them, or with errors of its own) gets the rewrite
+// guidance. The resolution rides in `outdated`.
 import fs from 'node:fs';
 import path from 'node:path';
 import { FILE, canonical, UNDECLARED_PROTECTED, isSchemaMajor1, check, outdatedMessage, outdatedRemedy } from './model.mjs';
@@ -45,6 +47,22 @@ function unreadableWhy(model, where) {
 
 const uniq = (xs) => [...new Set(xs)];
 
+/** The value at a problem's `field` path (`stages[0].deploys`, `releases.deploys`) in a declaration. */
+const at = (model, field) => field.match(/[^.[\]]+/g).reduce((v, k) => (v !== null && typeof v === 'object' ? v[k] : undefined), model);
+
+/**
+ * True when `copy` already IS the fix for the in-force `model`'s `outdated` problems: at every outdated path it holds
+ * exactly that path's rewrite — `{ "note": <the same string> }`, nothing more — and it otherwise checks clean. Only
+ * then does landing it resolve them; a copy that predates the notes, drops them, rewords them, binds more, or carries
+ * errors of its own does not, and gets the rewrite guidance like any other.
+ */
+function carriesRewrite(copy, model, outdated) {
+  if (!outdated.length) return false;
+  const own = check(copy);
+  if (own.errors.length || own.outdated.length) return false;
+  return outdated.every((o) => canonical(at(copy, o.field)) === canonical({ note: at(model, o.field) }));
+}
+
 /**
  * @returns {{ state: 'declared'|'undeclared'|'unreadable', declared: boolean, model: object|null,
  *             source: string|null, projection: object|null, protected: string[], protectedPatterns: string[],
@@ -65,13 +83,13 @@ export function resolveModel(git, top) {
     return text === null ? null : { ref, model: parse(text), sha: git.sha(ref) };
   };
 
-  /** `migratedHere`: the integration line a working-tree copy WITHOUT outdated problems would land on, if any. */
-  const declared = (model, source, migratedHere = null) => {
+  /** `here`: `{ line, copy }` — the working tree's copy, which lands on `line` — when the model is read from that line. */
+  const declared = (model, source, here = null) => {
     const why = unreadableWhy(model, source);
     if (why) return unreadable(why, source);
     const { errors, outdated } = check(model);
     if (errors.length) return unreadable(`${source}: ${errors.length} validation error(s): ${[...errors, ...outdated.map((o) => outdatedMessage(o))].join('; ')}`, source, model.projection);
-    const remedy = migratedHere ? outdatedRemedy.lands(migratedHere) : outdatedRemedy.rewrite();
+    const remedy = here && carriesRewrite(here.copy, model, outdated) ? outdatedRemedy.lands(here.line) : outdatedRemedy.rewrite();
     for (const o of outdated) notes.push(`${source}: ${outdatedMessage(o, remedy)}`);
     const p = model.projection;
     return {
@@ -125,10 +143,7 @@ export function resolveModel(git, top) {
     }
     const chosen = pick(copies, I);
     if (chosen.model !== undefined && canonical(chosen.model) !== canonical(local)) notes.push(`this tree's copy of ${FILE} differs from the one on "${I}" — the integration line's copy is the model in force`);
-    // This tree already carries the rewrite (it reads as a model with no outdated problem) → the in-force copy's
-    // outdated format resolves when this branch lands on I.
-    const migratedHere = check(local).outdated.length === 0 ? I : null;
-    return declared(chosen.model, chosen.ref, migratedHere);
+    return declared(chosen.model, chosen.ref, { line: I, copy: local });
   }
 
   for (const name of UNDECLARED_PROTECTED) {
