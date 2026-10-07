@@ -2,7 +2,10 @@
 // relays each one to the suite inside the container. GENERATOR-OWNED (rewritten on every upgrade); don't edit.
 // YOUR OWN ROUTES (an /api relay, say) go in proxy.local.mjs beside this file — seeded once, never rewritten, and
 // merged below — or, if the dev server must keep a proxy config of its own, include `emulatorRoutes` from here
-// in it (see the end of this file).
+// in it (see the end of this file). Which export a dev server reads:
+//   - Angular's dev server (Vite or webpack-dev-server): `proxyConfig` → this file; it reads the default export.
+//   - a bare Vite config: `server: { proxy: viteProxy }` — the same routes and the same proxy.local.mjs, in Vite's
+//     dialect.
 //
 // Why: the browser is the one party that cannot know the emulators' ports. It runs on the HOST, where the editor
 // forwards container ports to whatever host port is free (4200→4201, 8080→8081, …) without telling anything in
@@ -23,6 +26,10 @@
 //   - The emulator hub's list of running emulators, at /__bespunky/emulator-hub/emulators — firebase.config.ts
 //     asks it once at startup, so a dev server that does NOT relay (a proxy config that leaves these routes out)
 //     or a suite that is not running is said out loud in the console instead of hanging Firestore offline.
+//     That one path and NOTHING ELSE of the hub: the rest of it is the suite's control API (/_admin/export writes
+//     an export to whatever path it is sent, /functions/*BackgroundTriggers, /dataconnect/clearData), and the
+//     app's origin is the port that is always forwarded to the host. firebase-tools' own guard does not stop it —
+//     it answers an Origin-bearing export with a 403 and then runs the export anyway.
 //
 // ANCHORED, SO NO APP ROUTE IS TAKEN. Every match ends at a path-segment boundary (`/emulator/` is not
 // `/emulators`, `/v0/b/` is not `/v0/blog`), and nothing keys on the project id: the two routes that carry one
@@ -76,7 +83,10 @@ const rewriteUploadUrl = {
 };
 
 // The hub serves /emulators; the probe's own prefix is stripped on the way (Angular turns `pathRewrite` into Vite's
-// `rewrite`; http-proxy-middleware reads it natively; a bare Vite config reads `rewrite`).
+// `rewrite`; http-proxy-middleware reads it natively; a bare Vite config reads `rewrite`). Its route is EXACT (see
+// the header): a plain key is a prefix to every engine, so it is a glob that matches the one path — `@(emulators)`,
+// the extglob for "exactly this segment", which picomatch (Angular's Vite) and micromatch (http-proxy-middleware)
+// both read — and, for a bare Vite config, a regex anchored at both ends.
 const HUB_PROBE = '/__bespunky/emulator-hub';
 const toHub = { pathRewrite: { [`^${HUB_PROBE}`]: '' }, rewrite: (path) => path.slice(HUB_PROBE.length) };
 
@@ -85,7 +95,7 @@ const AREAS = ['africa', 'asia', 'australia', 'europe', 'me', 'northamerica', 's
 
 /**
  * One row per relayed path family. `prefix` is a plain leading path (every proxy engine reads it alike); `glob`
- * and `regex` are the same match for a path whose middle varies — a glob for Angular's proxy config and
+ * and `regex` are the same match for a path a prefix can't express — a glob for Angular's proxy config and
  * http-proxy-middleware, a `^` regex for a bare Vite config.
  */
 const ROUTES = [
@@ -102,7 +112,7 @@ const ROUTES = [
     glob: `/*/{${AREAS.join(',')}}-*[0-9]/**`,
     regex: `^/[^/]+/(?:${AREAS.join('|')})-[^/]*[0-9]/`,
   },
-  { service: 'hub', port: 4400, prefix: `${HUB_PROBE}/`, extra: toHub },
+  { service: 'hub', port: 4400, glob: `${HUB_PROBE}/@(emulators)`, regex: `^${HUB_PROBE}/emulators$`, extra: toHub },
 ];
 
 const routesBy = (keyOf) =>
@@ -119,16 +129,75 @@ export const emulatorRoutes = routesBy(({ prefix, glob }) => prefix ?? glob);
 /** The same routes in a bare Vite config's dialect (`server.proxy`), where a key starting with `^` is a RegExp. */
 export const viteEmulatorRoutes = routesBy(({ prefix, regex }) => prefix ?? regex);
 
-// The project's own routes — proxy.local.mjs beside this file (object form, or webpack's array form), merged
-// AFTER the house's: a key of its own that repeats one of these replaces it.
+// The project's own routes — proxy.local.mjs beside this file, merged AFTER the house's, in each dialect. Its contract
+// is the one thing every engine reads ALIKE, so the file means the same to Angular's Vite, webpack-dev-server and a
+// bare Vite: each key a PLAIN PATH PREFIX, each entry ordinary http-proxy options (`pathRewrite` as an object, which
+// Angular's Vite turns into `rewrite` and so does viteProxy). A glob is a glob to Angular and http-proxy-middleware
+// but a literal prefix to Vite, a `^` key a RegExp to Vite but a literal path to webpack-dev-server, and a function
+// `context` (webpack's array form) is no path at all — each would be a route that silently never matches somewhere,
+// so each is refused here, at dev-server start, with the reason. Webpack's array form (`context` a path or a list of
+// paths) is read as the same object.
 const localFile = new URL('./proxy.local.mjs', import.meta.url);
 const local = existsSync(localFile) ? ((await import(localFile.href)).default ?? {}) : {};
-const asObject = (config) =>
-  Array.isArray(config)
-    ? Object.fromEntries(config.flatMap(({ context, ...options }) => [context].flat().map((path) => [path, options])))
-    : config;
+const NOT_A_PREFIX = /[*?[\]{}()!+@]|^\^/;
+
+/** One `[path, options]` per route proxy.local.mjs declares — refused with the reason when a key is not a plain prefix. */
+const localEntries = (config) => {
+  const refuse = (what, why) => {
+    throw new Error(
+      `[proxy.conf.mjs] proxy.local.mjs: ${what} ${why}. Key every route by a plain path prefix ending at a segment ` +
+        `boundary ('/api/') — the one match Angular's Vite, webpack-dev-server and a bare Vite all read alike. A ` +
+        `dev server that needs another kind of match keeps a proxy config of its own and includes this file's ` +
+        `emulatorRoutes (or viteEmulatorRoutes) in it.`,
+    );
+  };
+  const entries = Array.isArray(config)
+    ? config.flatMap(({ context, ...options }, at) => {
+        const paths = [context].flat();
+        if (paths.length === 0 || !paths.every((path) => typeof path === 'string')) {
+          refuse(`entry ${at}'s context (${typeof context === 'function' ? 'a function' : String(context)})`, 'is not a path or a list of paths');
+        }
+        return paths.map((path) => [path, options]);
+      })
+    : Object.entries(config);
+  for (const [path] of entries) {
+    if (!path.startsWith('/') || NOT_A_PREFIX.test(path)) refuse(`the route '${path}'`, 'is not a plain path prefix');
+  }
+  return entries;
+};
+const ownRoutes = localEntries(local);
+
+// A route of the project's own may REPLACE one of the house's (same key) — said once, at dev-server start, because
+// the hub probe in the page only ever asks the hub route, so a replaced emulator route would otherwise go unseen.
+const replaced = ownRoutes.map(([path]) => path).filter((path) => path in emulatorRoutes);
+if (replaced.length > 0) {
+  console.warn(
+    `[proxy.conf.mjs] proxy.local.mjs replaces the house's emulator route${replaced.length > 1 ? 's' : ''} ` +
+      `${replaced.join(', ')} — that emulator is no longer relayed by the house.`,
+  );
+}
+
+// `pathRewrite` (object form) → Vite's `rewrite`, exactly as Angular's Vite dev server converts it.
+const asVite = (options) => {
+  const { pathRewrite, ...rest } = options;
+  if (!pathRewrite || typeof pathRewrite !== 'object' || rest.rewrite) return options;
+  const rules = Object.entries(pathRewrite).map(([pattern, value]) => [new RegExp(pattern), value]);
+  return {
+    ...rest,
+    rewrite: (path) => {
+      for (const [pattern, value] of rules) {
+        const updated = path.replace(pattern, value);
+        if (updated !== path) return updated;
+      }
+      return path;
+    },
+  };
+};
+
+/** Everything a bare Vite config relays — `server: { proxy: viteProxy }`: the house's routes, then proxy.local.mjs. */
+export const viteProxy = { ...viteEmulatorRoutes, ...Object.fromEntries(ownRoutes.map(([path, options]) => [path, asVite(options)])) };
 
 // A dev server that must keep a proxy config of its own instead of this file includes the routes there:
 //   import { emulatorRoutes } from './proxy.conf.mjs';      // a path relative to that file
 //   export default { ...emulatorRoutes, '/api': { target: 'http://localhost:3000' } };
-export default { ...emulatorRoutes, ...asObject(local) };
+export default { ...emulatorRoutes, ...Object.fromEntries(ownRoutes) };

@@ -470,7 +470,7 @@ export default {
       },
       expect: (tree, t, log) => {
         t.ok(logged(log, 'runs `@nx/vite:dev-server`'), `reported: ${log.join(' | ')}`);
-        t.ok(logged(log, '`viteEmulatorRoutes`'), 'the Vite export is named');
+        t.ok(logged(log, 'server: { proxy: viteProxy }'), 'the merged Vite export is named');
       },
     },
     {
