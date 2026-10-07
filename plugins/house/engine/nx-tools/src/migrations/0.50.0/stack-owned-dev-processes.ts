@@ -7,20 +7,23 @@
 // of the same tree (Claude testing beside the developer's server, as the house's local-server-isolation rule
 // requires) never started its own processes: it waited on the first stack's, listening on the OTHER ports.
 //
-// A stack's identity now lives at ONE level: the composer stays continuous (the Nx-visible stack, which an
-// e2e target may depend on and share), and the targets the engine drives lose `continuous` — nothing depends on
-// them but the engine. The generators stop writing it; this rung clears it from projects on disk, including those
-// whose per-app steps an upgrade skips (UPGRADE_PARTIAL) — so the fix never depends on a re-assertion.
+// The targets the engine drives are now EXPLICITLY `continuous: false` — nothing depends on them but the engine.
+// Explicit, not merely absent: Nx fills an absent `continuous` from nx.json targetDefaults or the executor's schema
+// (nx target-normalization), and @nx/angular's `update-21-0-0/set-continuous-option` migration sets
+// `continuous: true` on a dev-server target that lacks the key — an absent key is one Nx upgrade from shared again.
+// The generators write `false`; this rung writes it into projects on disk, including those whose per-app steps an
+// upgrade skips (UPGRADE_PARTIAL) — so the fix never depends on a re-assertion.
 //
 // What it touches, exactly:
-//   - the `dev-server` leaf of every project whose `serve` is the house composer, when the leaf is the house's —
-//     an Angular dev-server builder, the only stack whose leaf the house writes;
+//   - the `dev-server` leaf of every house app (its `serve` — or, once serve-runs-its-own-stack has run, its
+//     `dev-stack` — is @bespunky/nx-tools:serve), when the leaf is the house's — an Angular dev-server builder, the
+//     only stack whose leaf the house writes;
 //   - every target of the workspace `firebase` project that launches `tools/emulators.sh`.
 // What it REPORTS and leaves:
-//   - a continuous leaf of another executor (the project's own dev-server): a second stack of that app in one tree
-//     still waits — the line says how to fix it;
+//   - a leaf of another executor (the project's own dev-server) that is not explicitly `continuous: false`: a second
+//     stack of that app in one tree may wait on the first — the line says how to fix it;
 //   - any target that `dependsOn` one of the targets it changed: it would now wait for a server to FINISH, so it
-//     must depend on `dev-stack` (the continuous stack — split from `serve` by split-serve-follower) instead.
+//     must depend on `dev-stack` (the continuous stack — see serve-runs-its-own-stack) instead.
 //
 // SELF-CONTAINED by the migration contract: the executor list and target names are frozen here.
 import { type Tree, getProjects, logger } from '@nx/devkit';
@@ -34,48 +37,60 @@ const FIREBASE_PROJECT = 'firebase';
 const launchesSuite = (target: { executor?: string; options?: { command?: unknown } }) =>
   target.executor === 'nx:run-commands' && typeof target.options?.command === 'string' && target.options.command.includes('tools/emulators.sh');
 
-type Target = { executor?: string; continuous?: boolean; options?: { command?: unknown }; dependsOn?: unknown[] };
+type Target = { executor?: string; continuous?: boolean; options?: { command?: unknown }; dependsOn?: unknown[]; [key: string]: unknown };
 
 export default function update(tree: Tree): void {
   const projects = getProjects(tree);
   /** Every `project:target` this run made non-continuous — checked against every dependsOn below. */
   const changed: { project: string; target: string }[] = [];
+  /** Every `project:target` this run wrote `continuous: false` on. */
+  const written: { project: string; target: string }[] = [];
 
   for (const [name, config] of projects) {
     const targets = (config.targets ?? {}) as Record<string, Target>;
     let touched = false;
 
-    const serve = targets.serve;
     const leaf = targets[LEAF];
-    if (serve && typeof serve === 'object' && serve.executor === SERVE_EXECUTOR && leaf && typeof leaf === 'object' && leaf.continuous) {
+    const houseApp = [targets.serve, targets['dev-stack']].some((t) => t && typeof t === 'object' && t.executor === SERVE_EXECUTOR);
+    if (houseApp && leaf && typeof leaf === 'object' && leaf.continuous !== false) {
       if (HOUSE_LEAF_EXECUTORS.includes(leaf.executor ?? '')) {
-        delete leaf.continuous;
+        const was = leaf.continuous;
+        leaf.continuous = false;
         touched = true;
-        changed.push({ project: name, target: LEAF });
-        logger.info(`${TAG} ${name}:${LEAF} is no longer continuous — the dev engine runs one per stack.`);
+        if (was) changed.push({ project: name, target: LEAF });
+        written.push({ project: name, target: LEAF });
+        logger.info(`${TAG} ${name}:${LEAF} is now explicitly not continuous — the dev engine runs one per stack.`);
       } else {
         logger.warn(
-          `${TAG} ${name}:${LEAF} (${leaf.executor}) is continuous and is your own dev-server, so it was left as is. ` +
-            `While it stays continuous, a second stack of ${name} in the same tree waits on the first instead of starting. ` +
-            `Remove "continuous" from it in ${config.root}/project.json unless something depends on it.`,
+          `${TAG} ${name}:${LEAF} (${leaf.executor}) is your own dev-server, so it was left as is — and it is not ` +
+            `"continuous": false, so Nx may run it as a continuous task (${leaf.continuous ? 'it says so' : 'from its executor schema or nx.json targetDefaults'}). ` +
+            `Then a second stack of ${name} in the same tree waits on the first instead of starting. ` +
+            `Set "continuous": false on it in ${config.root}/project.json unless something depends on it.`,
         );
       }
     }
 
     if (name === FIREBASE_PROJECT) {
       for (const [targetName, target] of Object.entries(targets)) {
-        if (!target || typeof target !== 'object' || !target.continuous || !launchesSuite(target)) continue;
-        delete target.continuous;
+        if (!target || typeof target !== 'object' || target.continuous === false || !launchesSuite(target)) continue;
+        const was = target.continuous;
+        target.continuous = false;
         touched = true;
-        changed.push({ project: name, target: targetName });
-        logger.info(`${TAG} ${name}:${targetName} is no longer continuous — the dev engine runs one suite per stack.`);
+        if (was) changed.push({ project: name, target: targetName });
+        written.push({ project: name, target: targetName });
+        logger.info(`${TAG} ${name}:${targetName} is now explicitly not continuous — the dev engine runs one suite per stack.`);
       }
     }
 
-    // In place: only the `continuous` members go — devkit's updateProjectConfiguration rebuilt each target and
-    // moved its `options` below `dependsOn`.
+    // In place: only the `continuous` members change — devkit's updateProjectConfiguration rebuilt each target and
+    // moved its `options` below `dependsOn`. An existing key keeps its position; a new one leads the target.
     if (touched) updateProjectConfigInPlace(tree, config.root, (onDisk) => {
-      for (const { target } of changed.filter((c) => c.project === name)) delete (onDisk.targets?.[target] as Target | undefined)?.continuous;
+      for (const { target } of written.filter((c) => c.project === name)) {
+        const t = onDisk.targets?.[target] as Target | undefined;
+        if (!t) continue;
+        if ('continuous' in t) t.continuous = false;
+        else onDisk.targets![target] = { continuous: false, ...t } as never;
+      }
     });
   }
 

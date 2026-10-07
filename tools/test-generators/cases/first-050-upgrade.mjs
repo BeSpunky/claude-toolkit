@@ -2,7 +2,7 @@
 // (`.bespunky/house-targets.json`) — and every existing project meets it WITHOUT a record, where a key the house no
 // longer declares cannot be told from one the project added, so it is kept. Every key a 0.50 change DROPPED from a
 // house-owned shape is therefore only gone if the generator's re-assertion removes it or a 0.50.0 rung does:
-//   - `continuous` on firebase:emulators* (and the dev-server leaf)  → rung stack-owned-dev-processes
+//   - `continuous: true` on firebase:emulators* (and the dev-server leaf) → `false`, rung stack-owned-dev-processes
 //   - functions:build's `.env` asset (configDir reads params in place) → rung read-functions-params-in-place
 //   - firebase.json functions[0].predeploy (Nx builds through deploy) → the generator (the block is re-asserted whole)
 // This case builds the 0.49 shape (current output + every retired key, no record), runs the 0.50.0 rungs and then
@@ -40,7 +40,7 @@ export default {
   name: 'the first 0.50 upgrade · retired keys in house-owned shapes',
   cases: [
     {
-      name: 'a 0.49 Firebase project with no record: continuous, the .env asset and predeploy are all gone',
+      name: 'a 0.49 Firebase project with no record: continuous is false, the .env asset and predeploy are gone',
       setup: () => workspace(),
       run: async (tree, ctx) => {
         if (!ctx.aged) {
@@ -68,7 +68,7 @@ export default {
         const suite = readProjectConfiguration(tree, 'firebase').targets;
         const launchers = Object.entries(suite).filter(([, target]) => String(target.options?.command ?? '').includes('tools/emulators.sh'));
         t.ok(launchers.length > 0, 'the suite has launchers');
-        t.ok(launchers.every(([, target]) => target.continuous === undefined), `continuous survived: ${launchers.filter(([, x]) => x.continuous).map(([n]) => n)}`);
+        t.ok(launchers.every(([, target]) => target.continuous === false), `continuous is not explicitly false: ${launchers.filter(([, x]) => x.continuous !== false).map(([n]) => n)}`);
         const build = readProjectConfiguration(tree, 'functions').targets.build;
         t.ok(!('assets' in build.options), `the .env asset survived: ${JSON.stringify(build.options.assets)}`);
         const fn = t.json('firebase.json').functions[0];
