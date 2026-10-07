@@ -43,7 +43,7 @@ import {
 } from '@nx/devkit';
 import { seedFromAdapters } from '../dev/fragments';
 import { adapterOf } from '../../adapters/registry';
-import { composerFor, findExistingDevServer } from '../_utils/dev-server';
+import { SERVE_PREFLIGHT_TARGET, composerFor, findExistingDevServer, preflightTarget } from '../_utils/dev-server';
 
 interface ServeSchema {
   project: string;
@@ -101,6 +101,7 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   // graceful Ctrl+C, the current worktree or any chosen one. Flags (`--worktree`, `--port-offset`, `--skip`,
   // `--no-shared-browser`, `--configuration`) tune it. It MIRRORS the leaf (see _utils/dev-server).
   targets.serve = composerFor(leaf);
+  targets[SERVE_PREFLIGHT_TARGET] = preflightTarget();
 
   updateProjectConfiguration(tree, projectName, project);
   streamedLogs(tree);

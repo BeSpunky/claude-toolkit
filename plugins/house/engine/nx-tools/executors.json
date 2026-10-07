@@ -4,7 +4,12 @@
     "serve": {
       "implementation": "./src/executors/serve/executor",
       "schema": "./src/executors/serve/schema.json",
-      "description": "`nx serve <app>` — a thin wrapper over the stack-free dev engine (`tools/dev/dev serve <app>`): every process the app declares in `.bespunky/dev.json` (the dev-server; the Firebase emulator suite in a Firebase workspace; anything hand-declared) under ONE graceful Ctrl+C, for the current git worktree or any chosen one (--worktree=<branch|slug|path>), on one port offset for every declared port (--port-offset=auto|<n>: the main tree prefers the base ports, each worktree a stable, verified-free block sized from the declaration), reached at `<slug>.localhost` in the shared co-driven browser (--no-shared-browser to serve headless). --skip=<id,…> leaves processes out (--no-emulators is --skip=emulators; the app then opens with ?emulate=none). Options it does not own are forwarded to the app's primary process (buildTarget, host, proxyConfig, ssl, …); --configuration picks the dev-server's build. --dry-run prints the plan."
+      "description": "`nx serve <app>` — a thin wrapper over the stack-free dev engine (`tools/dev/dev serve <app>`): every process the app declares in `.bespunky/dev.json` (the dev-server; the Firebase emulator suite in a Firebase workspace; anything hand-declared) under ONE graceful Ctrl+C, for the current git worktree or any chosen one (--worktree=<branch|slug|path>), on one port offset for every declared port (--port-offset=auto|<n>: the main tree prefers the base ports, each worktree a stable, verified-free block sized from the declaration), reached at `<slug>.localhost` in the shared co-driven browser (--no-shared-browser to serve headless). --skip=<id,\u2026> leaves processes out (--no-emulators is --skip=emulators; the app then opens with ?emulate=none). Options it does not own are forwarded to the app's primary process (buildTarget, host, proxyConfig, ssl, \u2026); --configuration picks the dev-server's build. --dry-run prints the plan."
+    },
+    "serve-preflight": {
+      "implementation": "./src/executors/serve-preflight/executor",
+      "schema": "./src/executors/serve-preflight/schema.json",
+      "description": "Runs before `nx serve <app>` (the `serve` composer depends on it, flags forwarded). When this workspace's Nx already serves the app — where a second `nx serve` would only wait on it and then report a success it never had — it names the running stack, refuses a request for a different stack with the `tools/dev/dev serve` command that starts it beside the running one, or says the run attaches to the running stack (what an e2e target wants)."
     }
   }
 }

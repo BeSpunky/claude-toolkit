@@ -15,6 +15,15 @@ import { type Tree, type TargetConfiguration, readProjectConfiguration, updatePr
 
 export const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
 
+/**
+ * The composer's preflight — a NON-continuous dependency of `serve`, with the serve's flags forwarded, so it runs in
+ * a second `nx serve <app>` BEFORE Nx decides to make that run wait on the first (see executors/serve-preflight).
+ */
+export const SERVE_PREFLIGHT_TARGET = 'serve-preflight';
+export const SERVE_PREFLIGHT_EXECUTOR = '@bespunky/nx-tools:serve-preflight';
+
+export const preflightTarget = (): TargetConfiguration => ({ executor: SERVE_PREFLIGHT_EXECUTOR, cache: false });
+
 // Where the app's dev-server may sit when the `serve` generator runs, in priority order:
 //   - `dev-server` — the canonical leaf, on a re-run or a project that already brought its own.
 //   - `serve`      — where a fresh framework app (e.g. @nx/angular:application) parks its dev-server, before
@@ -49,11 +58,21 @@ export function findExistingDevServer(
   return undefined;
 }
 
-/** The composer for this leaf. */
+/**
+ * The composer for this leaf.
+ *
+ * WHERE A STACK'S IDENTITY LIVES. The composer is CONTINUOUS — the Nx-visible instance of a running stack, which Nx
+ * shares between invocations (that is how an e2e target depending on `serve` reuses the stack the developer has
+ * up). The processes it composes — the `dev-server` leaf, the emulator suite — are NOT: the dev engine runs each one
+ * per stack, on that stack's shifted ports, and Nx sharing them across stacks is exactly what made a second stack
+ * of one tree wait forever on the first's dev-server. So the leaf a stack supplies is never continuous; nothing
+ * depends on it but the engine.
+ */
 export function composerFor(leaf: TargetConfiguration): TargetConfiguration {
   return {
     continuous: true,
     executor: SERVE_EXECUTOR,
+    dependsOn: [{ target: SERVE_PREFLIGHT_TARGET, params: 'forward' }],
     options: { ...(leaf.options ?? {}) },
     ...(leaf.configurations ? { configurations: structuredClone(leaf.configurations) } : {}),
     ...(leaf.defaultConfiguration ? { defaultConfiguration: leaf.defaultConfiguration } : {}),

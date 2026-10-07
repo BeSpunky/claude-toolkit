@@ -8,9 +8,12 @@
 //
 //   node tools/emulator-ports.mjs ports <firebase.json>                 every occupied port, one per line
 //   node tools/emulator-ports.mjs shift <firebase.json> <offset> <out>  write a copy with every port shifted
+//   node tools/emulator-ports.mjs free-offset <firebase.json>           a SHIFTED block whose every port is free
+//                                                                       (a one-off suite's own — tools/seed/build-seeds.sh)
 //
 // Node built-ins only.
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 
 /** { defaults: name → firebase-tools' own port, alwaysOn: [names], nested: name → { key → port name } } */
 export const SUITE = {{SUITE}};
@@ -56,6 +59,37 @@ export function shiftConfig(cfg, offset) {
   return out;
 }
 
+/** Bindable on every address a server could hold it on (the dev engine's probe, tools/dev/lib/ports.mjs). */
+async function isPortFree(port) {
+  for (const host of ['127.0.0.1', '::1', '0.0.0.0', '::']) {
+    const ok = await new Promise((resolve) => {
+      const srv = createServer();
+      srv.once('error', (err) => resolve(err?.code === 'EADDRNOTAVAIL' || err?.code === 'EAFNOSUPPORT'));
+      srv.once('listening', () => srv.close(() => resolve(true)));
+      srv.listen({ port, host, exclusive: true });
+    });
+    if (!ok) return false;
+  }
+  return true;
+}
+
+/**
+ * The first SHIFTED block (never 0 — the base ports are the developer's) on which every port of the suite is free,
+ * stepping by more than the suite's span so a block never overlaps another stack's. null when none is.
+ */
+export async function freeOffset(emulators) {
+  const ports = [...new Set(Object.values(suitePorts(emulators)))];
+  const min = Math.min(...ports);
+  const max = Math.max(...ports);
+  const step = Math.ceil((max - min + 1) / 1000) * 1000;
+  for (let offset = step; max + offset <= 65535; offset += step) {
+    let free = true;
+    for (const port of ports) if (!(free = await isPortFree(port + offset))) break;
+    if (free) return offset;
+  }
+  return null;
+}
+
 const [command, ...args] = process.argv.slice(2);
 if (command) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
@@ -68,8 +102,15 @@ if (command) {
       process.exit(2);
     }
     writeFileSync(args[2], `${JSON.stringify(shiftConfig(read(args[0]), offset), null, 2)}\n`);
+  } else if (command === 'free-offset') {
+    const offset = await freeOffset(read(args[0]).emulators);
+    if (offset === null) {
+      console.error('emulator-ports.mjs: no free port block for the suite — stop a running stack (tools/dev/dev ps) and retry');
+      process.exit(1);
+    }
+    console.log(offset);
   } else {
-    console.error(`emulator-ports.mjs: unknown command ${command} (ports | shift)`);
+    console.error(`emulator-ports.mjs: unknown command ${command} (ports | shift | free-offset)`);
     process.exit(2);
   }
 }

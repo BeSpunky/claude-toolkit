@@ -454,8 +454,10 @@ function ensureFunctionsProject(
 
 /** The emulator suite as its own workspace-level Nx project — a house project (see the header). */
 function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: HouseProjectHome): void {
+  // Not `continuous`: the dev engine runs one suite per STACK (each on its shifted ports, with its own hub), and Nx
+  // shares a continuous task across every invocation in the tree — a second stack's suite would only wait on the
+  // first. A second suite started by hand on the base ports now fails loudly on the bind instead.
   const emulatorsTarget = (only?: string): TargetConfiguration => ({
-    continuous: true,
     executor: 'nx:run-commands',
     options: {
       command: `bash tools/emulators.sh${only ? ` --only ${only},ui` : ''}`,
