@@ -117,6 +117,10 @@ export const angular: StackAdapter = {
           routing: true,
           minimal: true,
           e2eTestRunner: 'none',
+          // Stated, never left to Nx: given no linter, @nx/angular follows the workspace, and a first app in a fresh
+          // workspace has nothing to follow, so it chose `none` — and the platform firewall (an ESLint rule) never
+          // checked the app's imports. Libraries (./libs) and the js stack state it the same way.
+          linter: 'eslint',
           skipFormat: true,
         } as Parameters<typeof applicationGenerator>[1]))) ?? noop;
       const project = emittedProjectName(tree, options.directory, options.name);

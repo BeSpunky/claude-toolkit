@@ -131,6 +131,11 @@ export function classifyWorkspace(tree: Tree, externals: PlatformExternals): Map
 /** Targets whose presence says a project holds code of its own (built, tested, served or linted). */
 const CODE_TARGETS = ['build', 'test', 'serve', 'lint'];
 
+/** Does the project demonstrably hold code of its own — a stack builds it, or it builds, tests, serves or lints? */
+export function holdsCode(tree: Tree, name: string, project: { targets?: Record<string, unknown> }): boolean {
+  return Boolean(adapterOf(tree, name)) || Object.keys(project.targets ?? {}).some((target) => CODE_TARGETS.includes(target));
+}
+
 /** The repo root as a project that is no code project — see the header. */
 export function isWorkspaceShell(
   tree: Tree,
@@ -138,9 +143,7 @@ export function isWorkspaceShell(
   project: { root: string; targets?: Record<string, unknown> },
   imported: Set<string>,
 ): boolean {
-  if (normalizeRoot(project.root) !== '.') return false;
-  if (imported.has(name) || adapterOf(tree, name)) return false;
-  return !Object.keys(project.targets ?? {}).some((target) => CODE_TARGETS.includes(target));
+  return normalizeRoot(project.root) === '.' && !imported.has(name) && !holdsCode(tree, name, project);
 }
 
 export function violations(classified: Map<string, Classification>): Violation[] {

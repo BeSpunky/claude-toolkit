@@ -25,6 +25,8 @@ export default {
         expect: (tree, t, ctx) => {
           const root = `${RESOLVED[layout].appsDir}/shop`;
           t.equal(getProjects(tree).get('shop')?.root, root, 'the app root');
+          // Linted at birth — the platform firewall is an ESLint rule, and an unlinted app is outside it.
+          t.ok(getProjects(tree).get('shop')?.targets?.lint || tree.exists(`${root}/eslint.config.mjs`), 'the app is linted');
           // In a TS-solution workspace the app states its own compiler contract over the tsc-oriented base.
           if (link !== 'paths') {
             const options = JSON.parse(tree.read(`${root}/tsconfig.json`, 'utf8')).compilerOptions;

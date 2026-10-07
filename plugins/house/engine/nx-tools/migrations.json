@@ -222,6 +222,12 @@
       "description": "Name tsconfig.spec.json in every Angular library's Analog test config (`angular()` \u2192 `angular({ tsconfig: './tsconfig.spec.json' })`), ending the \"Unable to resolve tsconfig at \u2026/tsconfig.app.json\" warning Nx's graph inference triggers outside test runs.",
       "implementation": "./src/migrations/0.50.0/state-analog-spec-tsconfig"
     },
+    "lint-house-apps": {
+      "version": "0.50.0",
+      "layer": "angular",
+      "description": "Give every house Angular app a lint target (through @nx/angular's own add-linting), so the platform firewall checks its imports \u2014 house apps were created with none, leaving the web app outside the boundary it exists for. Reports any other platform-tagged project that is not linted.",
+      "implementation": "./src/migrations/0.50.0/lint-house-apps"
+    },
     "add-design-system-a11y": {
       "version": "0.50.0",
       "layer": "design-system",
