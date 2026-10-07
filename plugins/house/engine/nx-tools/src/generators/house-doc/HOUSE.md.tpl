@@ -155,12 +155,14 @@ Every serve is a **stack** — one app, from one tree, on one port offset (`<app
 
 ```bash
 tools/dev/dev ps                         # every running stack, in every worktree: app@offset, owner, pid, ports (listening or not)
-tools/dev/dev stop                       # your one stack in this tree — SIGTERM to the serve, then confirm its ports are free
+tools/dev/dev stop                       # your one stack in this tree — SIGTERM to the serve, wait for it to finish, confirm its ports are free
 tools/dev/dev stop <app> --offset=<n>    # a specific stack (add --worktree=<x> for another tree)
 tools/dev/dev stop --all-mine            # every stack you own, in any tree (Claude's closing sweep)
 ```
 
 `stop` refuses another owner's stack (the developer's, from Claude — and the reverse) unless `--any-owner`; the owner is `--owner=<label>` / `DEV_OWNER` when given, the Claude Code session, else your OS user. A serve whose process was killed too hard to clean up (SIGKILL, OOM) shows as **ORPHANED** with the processes it left, and `stop` stops exactly those. Nothing here ever kills by name.
+
+**A stop is done when the stack's work is done, not when its processes got a signal.** Work a process deliberately runs outside the process tree, because it must outlive whatever stops it{{#firebase}} (the emulator suite saving its data){{/firebase}}, registers in the stack's state dir; `serve` and `stop` wait for it with a progress line every few seconds (bounded by `DEV_STOP_TIMEOUT`, 180 s — past it they say what is still running and kill nothing), and `ps` shows a stack whose serve is gone but whose work is not as **FINISHING**. **A stack that dies** ends the serve non-zero with a block on stderr naming the process, its exit code, the command it ran and the tail of its log.{{#nx-serve}} Read that block, not Nx's summary: Nx lists any end of a continuous task (`<app>:serve` is one) as succeeded or stopped, whatever its exit code.{{/nx-serve}}
 
 **A second stack of the same app in the same tree** (Claude testing beside your server, which the house rule requires): `tools/dev/dev serve <app> --port-offset=auto`.{{#nx-serve}} A second `{{NX}} serve <app>` in the same tree does not start one — Nx runs one `<app>:serve` per workspace (that is how an e2e target reuses your running stack) — so its `serve-preflight` names the running stack and either says the run attaches to it or, when you asked for a different `--port-offset`/`--worktree`, refuses with the `tools/dev/dev serve` command that starts it.{{/nx-serve}}
 
@@ -274,7 +276,9 @@ App Hosting ships the web app; it never deploys Cloud Functions, Firestore rules
 
 ### Emulator seeds, caching & reset (no re-onboarding each serve)
 
-The emulators **persist and seed their data**. The launch path is `tools/emulators.sh` (all `firebase:emulators*` targets funnel through it): it reaps stale processes, primes the **gitignored working dir** `.emulator-data/` from a seed, then starts the suite with `--import .emulator-data` and (full runs only) `--export-on-exit .emulator-data`. So session + data **cache across serves**: onboard once, stay in. Sign in with a seeded email and the Auth emulator matches the existing account by email — you inherit the seeded uid and its docs.
+The emulators **persist and seed their data**. The launch path is `tools/emulators.sh` (all `firebase:emulators*` targets funnel through it): it reaps stale processes, primes the **gitignored working dir** `.emulator-data/` from a seed, then starts the suite with `--import .emulator-data` and (full runs only) `--export-on-exit .emulator-data`. So session + data **cache across serves**: onboard once, stay in.
+
+**A stop always saves.** The export runs inside firebase-tools and only when *it* is told to stop while its emulators are up — a signal that reaches an emulator JVM first is read as a crash and nothing is exported, which is exactly what Nx's stop (leaves of the process tree first, a force-kill ~5 s later) and a terminal's Ctrl+C do. So `tools/emulators.sh` runs the suite under a detached keeper, outside every tree, which stops firebase-tools exactly once however the stop arrives (the script being killed included) and checks that the export was written — a stop that saved nothing says so, loudly. The script prints `stopping — exporting emulator data to …`, progress, and `done … exported to …` (bounded by `EMULATORS_STOP_TIMEOUT`, 120 s). If whoever stopped it stops waiting first (Ctrl+C on `{{NX}} serve` returns after Nx's ~5 s), the save still completes: `tools/dev/dev ps` shows the stack as FINISHING, and the next serve of that stack waits for it. The suite's own log is `.bespunky/run/logs/<stack>.emulators.log`. Sign in with a seeded email and the Auth emulator matches the existing account by email — you inherit the seeded uid and its docs.
 
 - **Seeds** are committed, known-good worlds under `tools/emulator-seeds/` (see its README for the catalog). They are **generated artifacts**, never hand-edited.
 - **Reset (on-call):** `{{NX}} run firebase:reset` — takes effect on the next serve. Add `reset:<seed>` targets in `firebase/project.json` for extra worlds.
