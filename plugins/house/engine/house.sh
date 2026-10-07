@@ -33,11 +33,10 @@
 #                  create a repository nobody asked for). This runs host-side AFTER the Docker scaffold
 #                  (gh auth lives on the host, not in the bare base image). Skipped gracefully (local repo
 #                  only) when gh is missing/unauthenticated. Upgrade mode never touches the remote.
-#                  Why offer it at all: Firebase App Hosting deploys are GitHub-driven — linking the repo
-#                  at `firebase apphosting:backends:create` is what makes Firebase provision its own
-#                  Cloud Build CI/CD. We generate NO deploy workflow; a repo existing from minute one
-#                  is what lets Firebase's native mechanism take over (so we never track its evolving
-#                  deploy methodology). Non-Firebase projects still benefit from having a remote.
+#                  Why offer it at all: App Hosting's recommended mode rolls out every push to a linked
+#                  repo's live branch (linked at `firebase apphosting:backends:create`), so the repo must
+#                  exist; we generate NO deploy workflow. (Local-source `firebase deploy` needs no remote.)
+#                  Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
 #   house.sh new       [--preset=<id>] [--add-layer=<layers>] [--layout=<id>] [--linking=<id>] [--firebase] [--staging] [--voice] [--github] [--docker] [--local] <project-name|path> [app-name]
@@ -1063,7 +1062,8 @@ INNER_ENV=(
 #     set, which --firebase populates) — firebase.json does not exist yet at first-app time to be detected.
 #   Upgrade mode: the app already exists; the `firebase` layer's per-app step re-applies the client to it.
 # --staging (opt-in) requires Firebase; it adds environment.staging.ts + a `staging` build config +
-# apphosting.staging.yaml so the workflow's staging App Hosting backend builds its own config/database.
+# apphosting.staging.yaml, which the App Hosting backend whose Environment name is `staging` merges over
+# apphosting.yaml (set in the console; there is no CLI flag) so it builds its own config/database.
 [ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires the firebase layer (new: --firebase; add-layer: firebase among the layers)." >&2; exit 1; }
 APP_STAGING_FLAG=""
 [ "$STAGING" = "1" ] && APP_STAGING_FLAG=" --staging=true"
@@ -2387,9 +2387,9 @@ fi
 
 # --- create + push a private GitHub repo (scaffold mode only; gh auth lives on the host) ---
 # Runs OUTSIDE Docker: the bare typescript-node base image has neither `gh` nor the host's
-# auth. The repo is what lets Firebase App Hosting take over CI/CD — linking it at
-# `firebase apphosting:backends:create` makes Firebase provision its own Cloud Build deploys
-# (so we generate no workflow files). Non-Firebase projects just get a remote to push to.
+# auth. A linked repo is what App Hosting's GitHub mode rolls out from (linked at
+# `firebase apphosting:backends:create`; we generate no workflow files). Non-Firebase projects
+# just get a remote to push to.
 # Never fail the scaffold over a missing/unauthenticated gh — the local repo already exists.
 GITHUB_RESULT=""
 if [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ]; then

@@ -25,6 +25,35 @@ export default {
       },
       expect: (tree, t, ctx) => t.ok(ctx.written?.[0] === 'apps/web/src/app/firebase.config.ts', `written: ${ctx.written}`),
     },
+    {
+      // App Hosting reads the NEAREST directory holding any apphosting*.yaml, walking up from a backend's Root
+      // Directory. The seed follows that rule (never a second, shadowed home) and a shadow is reported.
+      name: 'apphosting*.yaml: the effective home walks up; a nearer file shadows the root one and is reported',
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'apps/web/project.json', { name: 'web', root: 'apps/web', projectType: 'application' });
+        writeJson(tree, 'apps/admin/project.json', { name: 'admin', root: 'apps/admin', projectType: 'application' });
+        tree.write('apphosting.yaml', '# root\n');
+        tree.write('apphosting.staging.yaml', '# root staging\n');
+        tree.write('apps/admin/apphosting.yaml', '# admin\n');
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        const m = ctx.load('generators/firebase-emulators/apphosting-config');
+        ctx.homes = { web: m.effectiveAppHostingDir(tree, 'apps/web'), admin: m.effectiveAppHostingDir(tree, 'apps/admin'), none: m.effectiveAppHostingDir(tree, 'apps/none') };
+        ctx.shadows = m.shadowedAppHostingConfigs(tree);
+        ctx.text = ctx.shadows.map(m.describeShadow).join('\n');
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(ctx.homes, { web: '.', admin: 'apps/admin', none: '.' }, 'effective homes');
+        t.equal(
+          ctx.shadows.map((s) => [s.by, s.byFiles, s.shadowed, s.shadowedFiles]),
+          [['apps/admin', ['apphosting.yaml'], '.', ['apphosting.staging.yaml', 'apphosting.yaml']]],
+          'exactly one shadow: admin over the root',
+        );
+        t.ok(ctx.text.includes('apps/admin/apphosting.yaml SHADOW apphosting.staging.yaml, apphosting.yaml'), ctx.text);
+      },
+    },
     ...MATRIX.map((m) => ({
       name: `${m.label}: functions in <appsDir>/functions, every path derived from it`,
       setup: () => workspace(m),
