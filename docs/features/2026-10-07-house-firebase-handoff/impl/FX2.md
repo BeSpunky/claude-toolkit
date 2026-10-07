@@ -1,14 +1,31 @@
-# FX2 — dogfood fixes: generators and migrations (D1, D2, root tag, churn, dep order, D7, D8)
+# FX2 — dogfood fixes: generators and migrations (D1, D2, root tag, churn, dep order, D7, D8, house-targets)
 
-Branch `feat/house-firebase-handoff--fx2`, worktree `hfh-fx2`. Written as it happens. Source of the findings:
-`DOGFOOD-CONSUMER.md`. FX1 owns the emulator/dev-loop tools, FX3 the HOUSE.md.tpl wording and branch-engine messages.
+Branch `feat/house-firebase-handoff--fx2`, worktree `hfh-fx2`. Source of the findings: `DOGFOOD-CONSUMER.md`
+(the consumer fixture is `…/scratchpad/df2/coach`, which was read to find the exact writers). FX1 owns the
+emulator/dev-loop tools, FX3 the HOUSE.md.tpl wording and branch-engine messages — neither touched here.
 
-| # | Finding | Status |
+| # | Finding | Fix |
 | --- | --- | --- |
-| 1 | D1 — migration and firebase-client give conflicting @angular/fire advice; `latest` left unreported | in progress |
-| 2 | D2 — house Angular apps have no `lint` target, so the platform firewall never checks them | open |
-| 3 | the root project (`.`) tagged `platform:shared` | open |
-| 4 | formatting churn (`forwardPorts`, firebase targets' key order) | open |
-| 5 | `firebase-tools` appended out of order in devDependencies | open |
-| 6 | D7 — stale `.gitignore` / devcontainer comments after 0.50.0 | open |
-| 7 | D8 — "Rewrote firebase.config.ts" on every no-op upgrade; sweep the pattern | open |
+| 1 | D1: conflicting @angular/fire advice; `latest` left unreported | One voice: `adapters/angular/angularfire.ts` `readBrowserSdkFacts` → `coherentPair` / `browserSdkFindings` → `renderAdvice`, from firebase-compat. The 0.50.0 rung and the firebase client both use it (the rung's own frozen table is gone: the installed Angular major decides, so a newer table only yields a coherent pair). No pair → each floating entry named, choices most-recommended first: prerelease for the major · pin the installed pair (stopgap, peer warning) · move to the newest supported Angular · declare by hand. Reported on every upgrade until fixed; a pinned stopgap gets an info line, a warning once a stable release exists. |
+| 2 | D2: house Angular apps unlinted | Cause read from @nx/angular 23.3: no `linter` → follow the workspace → a first app has nothing to follow → `none` non-interactively (`--minimal` is not involved). Adapter states `linter: 'eslint'`. New rung `0.50.0/lint-house-apps` (layer angular) adds lint to existing house apps via `@nx/angular:add-linting`; without @nx/angular it names the command; reports other platform-tagged code projects with no lint. |
+| 3 | root project tagged `platform:shared` | `platform/classify.ts`: the root (`.`) is classified only when it holds code (a stack builds it, a build/test/serve/lint target) or something imports it. Rule written in the classifier header. |
+| 4 | formatting churn | `_utils/jsonc-insert.ts` (new members in the container's own style), `_utils/json-edits.ts` + `updateProjectConfigInPlace` (edit only what differs; a reorder writes nothing). Used by the devcontainer merge, `ensureHouseProject`, and the 0.50.0 `stack-owned-dev-processes` (the actual cause of the firebase-target key reorder: devkit's `updateProjectConfiguration`) and `read-functions-params-in-place` rungs. The house-targets merge keeps the project's form and set order. |
+| 5 | firebase-tools out of order | Devkit's writer does sort; the culprit was `firebase-cli-from-package` appending by hand. `placeDependency` in `_utils/dependencies.ts` (sorted block → sorted place, hand-ordered → last); `declareDependencies` restores the file's order after devkit. |
+| 6 | D7: stale `.gitignore` / devcontainer text | `route-emulators-through-origin` retells both where still verbatim (the `.gitignore` block is append-once; the devcontainer merge never rewrites comments). The stale devcontainer text was the dev-server port `why` (layers/firebase.ts), not compose.ts's forwardPorts comment, which is still true. |
+| 7 | D8: "Rewrote firebase.config.ts" on no-ops | `_utils/changed-files.ts` `rewrittenBy`. Sweep: devcontainer "Updated … in place", ds-theme "Created", adopt-extracted's summary/zero count fixed. Class guard: both harnesses fail a no-op second run that claims a change. |
+| + | First record-less upgrade cries wolf on house-changed target values (orchestrator) | `_utils/house-targets-0.49.2.ts`: frozen, captured mechanically from the stock 0.49.2 scaffold; with no record, a value equal to it is the house's own (replaced silently). Evidence only, never a record. Fixtures: stock 0.49.2 upgraded once → no overrides; one hand edit → exactly one. |
+
+## Verification
+
+test-generators 174 ok / 22 skip; `--strict` 197/197 (@nx/angular, @nx/js, @nx/eslint 23.1.0 symlinked from the
+scratchpad install, removed after) · test-migrations 216/216 · test-layers 100/100 · test-scaffold pass.
+
+## Left, with reasons
+
+- Nothing bumped (instruction). New rung `lint-house-apps` sits at 0.50.0, inside the unreleased payload version.
+- The devcontainer merge still does not write a NEW port's `why` comment (it never writes comments on merge);
+  the 4500 entry arrives labelled but uncommented.
+- `house-targets-0.49.2.ts` covers projects last generated by 0.49.2; a project jumping from an older release can
+  still see a "no record" report for a value an older house wrote (said honestly as "cannot tell").
+- `lint-house-apps` against @nx/angular 23.3 (where the default actually bites) was verified by reading its source;
+  the strict run used 23.1.
