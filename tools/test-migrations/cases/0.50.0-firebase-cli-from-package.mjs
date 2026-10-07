@@ -71,6 +71,24 @@ export default {
       },
     },
     {
+      name: 'firebase-tools lands at its sorted place in a sorted block; appended (nothing moves) in a hand-ordered one',
+      setup: (tree) => {
+        firebaseWorkspace(tree, { '@nx/js': '23.1.0', nx: '23.1.0', vitest: '3.2.0' });
+      },
+      expect: (tree, t) => {
+        const keys = Object.keys(readJson(tree, 'package.json').devDependencies);
+        t.ok(keys.join() === '@nx/js,firebase-tools,nx,vitest', `sorted: ${keys}`);
+      },
+    },
+    {
+      name: 'a hand-ordered devDependencies keeps its order; firebase-tools goes last',
+      setup: (tree) => firebaseWorkspace(tree, { vitest: '3.2.0', nx: '23.1.0' }),
+      expect: (tree, t) => {
+        const keys = Object.keys(readJson(tree, 'package.json').devDependencies);
+        t.ok(keys.join() === 'vitest,nx,firebase-tools', `order kept: ${keys}`);
+      },
+    },
+    {
       name: "the project's own firebase-tools pin is kept",
       setup: (tree) => firebaseWorkspace(tree, { 'firebase-tools': '^14.20.0' }),
       expect: (tree, t) => t.ok(readJson(tree, 'package.json').devDependencies['firebase-tools'] === '^14.20.0', 'kept'),

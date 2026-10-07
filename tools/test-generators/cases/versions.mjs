@@ -103,6 +103,20 @@ export default {
       },
     },
     {
+      name: 'the seam keeps the file\'s order: sorted place in a sorted block, appended in a hand-ordered one',
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'package.json', { name: 'x', dependencies: { zod: '3.0.0', angular: '1.0.0' }, devDependencies: { a: '1.0.0', c: '1.0.0' } });
+        return tree;
+      },
+      run: (tree, ctx) => ctx.load('generators/_utils/dependencies').declareDependencies(tree, 'test', { m: '1.0.0' }, { b: '1.0.0' }),
+      expect: (tree, t) => {
+        const json = readJson(tree, 'package.json');
+        t.equal(Object.keys(json.dependencies).join(), 'zod,angular,m', 'hand order kept, the new name last');
+        t.equal(Object.keys(json.devDependencies).join(), 'a,b,c', 'sorted block stays sorted');
+      },
+    },
+    {
       name: 'the seam never touches what the project already declares',
       setup: () => {
         const tree = workspace();
