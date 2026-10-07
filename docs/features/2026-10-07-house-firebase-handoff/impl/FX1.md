@@ -88,12 +88,35 @@ path and its last lines, and a note that Nx will still list `serve` as succeeded
 `| Error: Could not spawn \`java -version\`. Please make sure Java is installed …` now reaches an agent's `nx serve`.
 The engine itself exits 1 (direct `tools/dev/dev serve` is correct).
 
-**Not done — needs a design decision (a project-state change, so a migration):** the only way Nx itself fails the run
-is for an INCOMPLETE task to depend on the continuous one (then it is `'crashed'` → failure → exit 1). Proposal:
-`nx serve <app>` runs a non-continuous watcher target that `dependsOn` the continuous stack composer (renamed, e.g.
-`<app>:stack`) and waits on the stack's run record; the composer keeps streaming (continuous) and stays the thing e2e
-targets depend on and Nx shares. Cost: a 0.50.0 rung renaming the composer and retargeting `dependsOn`, preflight
-rewiring, docs. Making `serve` simply non-continuous is worse: the agent renderer then shows nothing while it runs.
+**Decided by the orchestrator (2026-10-07): "build it"** — the design proposed above. Done:
+- `dev-stack` is the composer, unchanged (@bespunky/nx-tools:serve, continuous, depends on serve-preflight, mirrors
+  the leaf) — the running stack Nx shares, what an e2e target depends on.
+- `serve` is `@bespunky/nx-tools:follow-stack`: NOT continuous, depends on `dev-stack` (flags forwarded), mirrors its
+  configuration names. While it runs, a dying stack is a crashed dependency (the run fails). It ends with the stack's
+  own status, from the engine's EXIT RECORD (`<nx root>/.bespunky/run/exits/<invocation>@<app>.json`, written on
+  every end incl. refusals and dry runs; found by NX_INVOCATION_ROOT_PID; records of dead invocations pruned). An
+  attached run (Nx shared another invocation's `dev-stack`) follows that stack.
+- The composer ends a CLEAN stop as 143 (one of Nx's intended-stop codes): exit 0 from a continuous dependency whose
+  dependent still runs is read as a crash, so a `dev stop` would have failed the run.
+- Item 3: the composer's stream already prints the full FAILED block in every mode (agent summary included —
+  observed), so the follower relays a one-line headline to the invoker (shared `executors/_utils/invoker.ts`, the
+  preflight's channel): `[serve] web's dev stack FAILED (exit 1): emulators exited with code 1; emulators: Error:
+  Could not spawn \`java -version\` … (log …)` — printed right above Nx's summary.
+- Migration `0.50.0/split-serve-follower` (last 0.50.0 rung): splits every house composer; retargets every
+  unambiguous reference to a split project's `serve` — `dependsOn` in every project.json (`serve`, `<p>:serve`,
+  `{ target: 'serve' }` with no/own/split projects) and option values (`devServerTarget: "web:serve[:cfg]"`); reports
+  `^serve`, pattern/mixed `projects`, nx.json targetDefaults, and a project's own `dev-stack` (not split). Four
+  fixture cases (stock; own e2e with object/string/devServerTarget forms; the reported ones; the collision).
+- Swept: HOUSE.md (depend on `dev-stack`, never `serve`), the new skill, local-server-isolation, executor/schema
+  docs, comments. The preflight now speaks of `<app>:dev-stack`.
+
+**Observed, real install path.** A clone of DF2's fixture at its 0.49.2 commit plus a project-written `web-e2e:e2e`
+with `dependsOn: [{ projects: ['web'], target: 'serve' }]` → `house.sh upgrade --local`: the rung ran as migration
+17/17, logged `web-e2e:e2e: dependsOn { target: "serve", projects: ["web"] } → "dev-stack"`; `nx show project
+web-e2e` confirms; a second upgrade left project.json unchanged. Then: no Java → `nx serve` **exit 1** (`3 tasks: 1
+succeeded, 2 failed`), the headline above Nx's summary; with Java + `dev stop` → **exit 0**, data exported, `3 tasks:
+3 succeeded`; Ctrl+C → **exit 130**, data exported, and the only line printed after Nx muted itself:
+`[emulators] saving emulator data in the background — \`tools/dev/dev ps\` shows it FINISHING`.
 
 ## D6 — the preflight's refusal is hidden from an agent
 
@@ -109,22 +132,37 @@ open (a redirected stderr file is never truncated), Linux /proc, best effort. **
 --port-offset=35047 …` above Nx's summary; the non-agent run prints it once. Pure decision tested in
 `test-generators` (`stack-identity`).
 
+## D9 — the Firestore websocket stayed on 9150 in shifted suites
+
+**Root cause:** `suite-ports.json` declared nested ports "occupied and shifted only when declared (undeclared,
+firebase-tools lets them float)". False: undeclared, firebase-tools opens its default 9150. W3's shift therefore moved
+`websocketPort` only when firebase.json named it, which the house block never does — and the generator kept a second
+copy of 9150 of its own. **Fix, in the one table:** each nested port carries its default
+(`{ "as": "firestore-websocket", "default": 9150 }`); `suitePorts`/`shiftConfig` list and pin it shifted whether or not
+declared; the generator reads the same default (its constant is gone). Observed: a stack at offset 24067 →
+`Firestore Emulator UI websocket is running on 33217`. (Eventarc/Cloud Tasks, started implicitly with functions, do
+float — "unable to start on port 9299, starting on 9300" — so they are left floating.)
+
+## Ctrl+C (item 4)
+
+On a stop, `emulators.sh` writes one line to the invoking nx's stderr (NX_INVOCATION_ROOT_PID, appended; own stderr
+without one): `saving emulator data in the background — \`tools/dev/dev ps\` shows it FINISHING`. It is written by
+another process, so Nx muting its own output after SIGINT does not swallow it (observed above). Tested in
+`emulators-stop.test.sh` with a stand-in invoker.
+
 ## Release notes for the orchestrator
 
-- **Migrations: nothing to migrate** — deliberately: every file changed is an owned template artifact regenerated by
-  every upgrade (`tools/emulators.sh`, `tools/emulator-ports.mjs`, `tools/dev/**`, `tools/shared-browser/runtime.mjs`,
+- **Migrations:** `0.50.0/split-serve-follower` (D3) is owed and written. Everything else is owned template artifacts
+  regenerated by every upgrade (`tools/emulators.sh`, `tools/emulator-ports.mjs`, `tools/dev/**`, `tools/shared-browser/runtime.mjs`,
   `HOUSE.md`) or the payload's executor; the new `.bespunky/run/logs/` and `<state dir>/detached/` live under the
   self-ignoring `.bespunky/run/`.
 - Bumps owed (not done here, by instruction): `@bespunky/nx-tools` (payload), `bespunky-workflow`
   (`local-server-isolation/SKILL.md`). `check-release-invariants` reports them.
-- Tests: test-generators 164 ok / 22 skip; test-migrations 206 ok; test-layers 100 ok; test-scaffold 22 files ok
+- Tests: test-generators 165 ok / 22 skip; test-migrations 210 ok; test-layers 100 ok; test-scaffold 22 files ok
   (new: `machine-output`, `emulators-stop`; `dev-engine` gained the detached-work cases).
 
 ## Left open
-- D3's Nx exit code (above) — awaits the design decision.
-- Ctrl+C on `nx serve`: the outer Nx returns ~5 s later (its own grace, `NX_PROCESS_KILL_GRACE_PERIOD`) and, on SIGINT
-  without a TUI, mutes its own output — so `done` is not seen there; the save completes regardless (`dev ps` shows
-  FINISHING, the next serve waits). Raising the grace would need a project `.env` entry — not done.
 - In agent mode the inner `nx run firebase:emulators` / `web:dev-server` output is summarised away inside `nx serve`
-  (pre-existing; the engine now reports the export result and failures itself).
-- D9 confirmed in the seed build (`UI websocket is running on 9150` in a shifted suite) — not in this round's scope.
+  (pre-existing; the engine reports the export result and failures itself).
+- `dev-stack` is listed as succeeded in `3 tasks: 2 succeeded, 1 failed` when the follower finished first — the run's
+  exit and the failed `serve` line are what count; cosmetic.
