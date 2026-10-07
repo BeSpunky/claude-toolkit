@@ -101,7 +101,7 @@ export default function routeEmulatorsThroughOrigin(tree: Tree): void {
     // generator, and the 0.49 clients read `proxied` — with it gone they would silently dial :9099/:5001 again.
     const proxy = writeFirebaseClientGlue(tree, root === '.' ? '.' : root);
     const project = projectAt(tree, root);
-    if (project) reportProxyWiring(TAG, project, proxy, angular.devServer!.useProxy(tree, project, proxy));
+    if (project) reportProxyWiring(TAG.slice(1, -1), project, proxy, angular.devServer!.useProxy(tree, project, proxy));
     reportRetiredImports(tree, `${prefix}src`);
   }
   reportHttpsDevServers(tree, apps);

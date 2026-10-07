@@ -69,7 +69,7 @@ export const angularFirebaseClient: FirebaseClientPort = {
     // dev-server yet (no web layer) has nothing to point; a later sync wires it once one exists (this step runs
     // after the web layer's serve step, every sync). A dev server with a proxy config of its own, or one this stack
     // cannot configure, is told exactly what to add — every emulated service depends on the relay.
-    reportProxyWiring('[firebase-emulators]', project, proxy, angular.devServer!.useProxy(tree, project, proxy));
+    reportProxyWiring('firebase-emulators', project, proxy, angular.devServer!.useProxy(tree, project, proxy));
 
     // 3) Per-env build configuration: production (and, opted in, staging) swap the dev env file.
     if (!angular.env!.selectFor(tree, project, 'production', env.dev, env.prod)) {

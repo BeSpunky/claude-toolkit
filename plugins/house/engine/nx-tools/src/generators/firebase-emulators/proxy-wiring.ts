@@ -6,26 +6,30 @@
 // fails with a network error — with nothing pointing at the cause. The dev server's config is the project's, so the
 // house never overrides a proxy config it finds there; it says exactly what to add instead. (In the browser,
 // firebase.config.ts asks the relay at startup and says the same thing in the console — this is the earlier half.)
+// A dev server that does not relay is put on the upgrade's attention list (_utils/upgrade-report), not only logged:
+// it is exactly the line that must not drown in an upgrade's output.
 import { logger } from '@nx/devkit';
+import { reportToUpgrade } from '../_utils/upgrade-report';
 import { posix } from 'node:path';
 import type { ProxyWiring } from '../../adapters/stack-adapter';
 import { PROXY_LOCAL } from './service-configs';
 
-/** Report `wiring` for `project`'s dev server and the house proxy at `houseProxy` (workspace-relative). */
-export function reportProxyWiring(tag: string, project: string, houseProxy: string, wiring: ProxyWiring): void {
+/** Report `wiring` for `project`'s dev server and the house proxy at `houseProxy` (workspace-relative); `who` names the reporter. */
+export function reportProxyWiring(who: string, project: string, houseProxy: string, wiring: ProxyWiring): void {
   const local = posix.join(posix.dirname(houseProxy), PROXY_LOCAL);
   switch (wiring.status) {
     case 'wired':
       return;
     case 'none':
-      logger.info(`${tag} \`${project}\` has no dev-server target yet — ${houseProxy} is wired to one once it exists.`);
+      logger.info(`[${who}] \`${project}\` has no dev-server target yet — ${houseProxy} is wired to one once it exists.`);
       return;
     case 'foreign': {
       const own = wiring.proxyConfig;
       const fromOwn = posix.relative(posix.dirname(own), houseProxy);
       const esm = /\.(mjs|js|mts|ts)$/.test(own);
-      logger.warn(
-        `${tag} \`${project}:${wiring.target}\` uses a proxy config of its own (${wiring.where}.proxyConfig: ${own}), ` +
+      reportToUpgrade(
+        who,
+        `\`${project}:${wiring.target}\` uses a proxy config of its own (${wiring.where}.proxyConfig: ${own}), ` +
           `so it does not relay the Firebase emulators — and every emulated service reaches its emulator through the ` +
           `page's origin: Firestore would hang offline, Auth fail. Either:\n` +
           `  • point ${wiring.where}.proxyConfig at ${houseProxy} and move your routes into ${local} (the house file ` +
@@ -39,8 +43,9 @@ export function reportProxyWiring(tag: string, project: string, houseProxy: stri
       return;
     }
     case 'unconfigurable':
-      logger.warn(
-        `${tag} \`${project}:${wiring.target}\` runs \`${wiring.executor}\`, a dev server the house cannot point at ` +
+      reportToUpgrade(
+        who,
+        `\`${project}:${wiring.target}\` runs \`${wiring.executor}\`, a dev server the house cannot point at ` +
           `${houseProxy} — so it does not relay the Firebase emulators, and every emulated service reaches its emulator ` +
           `through the page's origin. Give it the house's routes: ${houseProxy} exports them as \`emulatorRoutes\` ` +
           `(Angular / webpack-dev-server / http-proxy-middleware form) and \`viteEmulatorRoutes\` (a Vite ` +
