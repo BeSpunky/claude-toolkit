@@ -1485,7 +1485,7 @@ fi
 _probe_out=\"\$(node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"\$HOUSE_ENGINE_ROOT/house-probe.mts\" --ensure='$ENSURE_LAYERS' --evident='$EVIDENT')\" \\
   || _refuse probe-failed \"[preflight] probe-failed: the project-facts probe (house-probe.mts) did not run — see its error above.\"
 while IFS=\"\$(printf '\\t')\" read -r _probe_code _probe_text; do
-  [ -n \"\$_probe_code\" ] && _refuse \"\$_probe_code\" \"\$(printf '%b' \"\$_probe_text\")\"
+  if [ -n \"\$_probe_code\" ]; then _refuse \"\$_probe_code\" \"\$(printf '%b' \"\$_probe_text\")\"; fi
 done <<_HOUSE_PROBE_
 \$_probe_out
 _HOUSE_PROBE_"

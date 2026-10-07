@@ -2,7 +2,7 @@
 //   tools/emulator-ports.mjs    — the owned template with the one port table (suite-ports.json) projected in;
 //   tools/emulator-project.mjs  — which project id the suite runs under (offline demo- twin by default);
 //   tools/emulator-secrets.cjs  — what the Functions emulator is given as secrets.
-// The scripts under test (emulators.sh, reap-emulators.sh) call all three, so a fixture without them tests nothing real.
+// The scripts under test (emulators.sh, build-seeds.sh) call all three, so a fixture without them tests nothing real.
 //
 //   node tools/test-scaffold/emulator-tools.mjs <workspace dir>
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

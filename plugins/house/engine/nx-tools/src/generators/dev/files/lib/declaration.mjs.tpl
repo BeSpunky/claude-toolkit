@@ -25,9 +25,10 @@
 // Substitutions in cmd / env / url values: ${PORT:<name>} (that port, shifted), ${OFFSET}, ${TREE} (the
 // served tree's absolute path), ${APP}, ${STACK_DIR} (this stack's own state dir). Every process also gets
 // PORT_<NAME> for every port of the app, PORT_OFFSET when the stack is shifted, DEV_URL_QUERY when the app is
-// opened with URL switches (the same query, for a server that must resolve what the page resolves), and DEV_STACK_DIR — the
-// directory that is this stack's alone (tree + app + offset), where a process keeps anything a tool would
-// otherwise key by something every stack shares (a TMPDIR, a lock, a locator file). See lib/stacks.mjs. A bare PORT is NOT exported: it is a convention some runtimes act on
+// opened with URL switches (the same query, for a server that must resolve what the page resolves), DEV_STACK_DIR —
+// the directory that is this stack's alone (tree + app + offset), where a process keeps anything a tool would
+// otherwise key by something every stack shares (a lock, a locator file) — and DEV_STACK_TMP, the stack's own SHORT
+// temp dir, for a tool that keys its state by os.tmpdir() (see lib/stacks.mjs stackTmp). A bare PORT is NOT exported: it is a convention some runtimes act on
 // (a Cloud Functions worker, say) — a server that wants it declares `"env": { "PORT": "${PORT:app}" }`.
 //
 // url[].when    always | offset (stack shifted) | running (this process runs) | skipped (--skip'ed)
@@ -163,8 +164,9 @@ const shellQuote = (word) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'$
  *   passthrough  extra argv for the PRIMARY process (`dev serve app -- --flag`)
  *   baseEnv      the environment the children inherit
  *   stackDir     this stack's own state dir (lib/stacks.mjs) — DEV_STACK_DIR / ${STACK_DIR}
+ *   stackTmp     this stack's own short TMPDIR (lib/stacks.mjs stackTmp) — DEV_STACK_TMP
  */
-export function planApp(decl, appName, { offset, tree, skip = [], passthrough = [], baseEnv = {}, stackDir }) {
+export function planApp(decl, appName, { offset, tree, skip = [], passthrough = [], baseEnv = {}, stackDir, stackTmp }) {
   const app = decl.apps[appName];
   const primary = primaryOf(app);
   const ids = app.processes.map((p) => p.id);
@@ -213,6 +215,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
       ...portEnv,
       ...(offset > 0 ? { PORT_OFFSET: String(offset) } : {}),
       ...(stackDir ? { DEV_STACK_DIR: stackDir } : {}),
+      ...(stackTmp ? { DEV_STACK_TMP: stackTmp } : {}),
       ...(query.size ? { DEV_URL_QUERY: query.toString() } : {}),
     };
     const shell = typeof p.cmd === 'string';

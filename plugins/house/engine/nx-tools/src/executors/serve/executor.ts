@@ -1,14 +1,23 @@
-import type { PromiseExecutor, TaskGraph } from '@nx/devkit';
+import type { PromiseExecutor } from '@nx/devkit';
 import { logger } from '@nx/devkit';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { attachedDone, exitRecordPath, readExit, writeExit } from '../_utils/run-records';
 import type { ServeExecutorSchema } from './schema';
 
 /**
- * `<app>:dev-stack` (what `nx serve <app>` runs, through its `serve` follower) — the NX FACE of the stack-free dev engine.
+ * `<app>:serve` and `<app>:dev-stack` — the NX FACE of the stack-free dev engine, on two targets of this one executor:
+ *
+ *   serve      NOT continuous — what `nx serve <app>` runs. Nx shares only CONTINUOUS tasks between invocations, so
+ *              every `nx serve` is its OWN stack (the engine claims its own port block: `auto` skips claimed ones),
+ *              and the run's exit status is the engine's: 0 on a clean stop, non-zero when the stack failed. (A
+ *              continuous task that ends while nothing depends on it is reported as SUCCEEDED whatever its code —
+ *              which is why `serve` must not be one.) Explicitly `continuous: false` in project.json: Nx fills an
+ *              absent key from targetDefaults or this executor's schema, and @nx/angular's set-continuous-option
+ *              migration sets it on any dev-server-looking target that lacks it.
+ *   dev-stack  the same, CONTINUOUS — only so an e2e target can `dependsOn` a running stack (and two e2e runs, or
+ *              an e2e beside a `nx run <app>:dev-stack`, share it — the one level where Nx's sharing is right).
  *
  * The dev loop lives in `tools/dev/` (written by the `dev` generator) and reads what the project serves from
  * `.bespunky/dev.json`: worktree selection, one port offset for every declared port, `<slug>.localhost`, the
@@ -55,13 +64,6 @@ export function engineArgs(project: string, options: ServeExecutorSchema & Recor
   return args;
 }
 
-/** Does anything in THIS run depend on this task (a `serve` follower, an e2e target)? Pure (exported for tests). */
-export function dependedOnHere(taskGraph: TaskGraph | undefined, project: string, target: string): boolean {
-  if (!taskGraph) return false;
-  const mine = new Set(Object.values(taskGraph.tasks).filter((t) => t.target.project === project && t.target.target === target).map((t) => t.id));
-  return Object.values(taskGraph.continuousDependencies ?? {}).some((deps) => deps.some((d) => mine.has(d)));
-}
-
 const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, context) => {
   const project = options.project ?? context.projectName;
   if (!project) {
@@ -84,36 +86,6 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
     );
   }
 
-  // HOW THIS TASK ENDS IS THE RUN'S EXIT STATUS — and Nx reads a continuous task's end by WHEN it comes, not only by
-  // its code (task-orchestrator `handleContinuousTaskExit`):
-  //   - while a task of this run still depends on it: exit 0 → "continuous but exited with code 0" → CRASHED (the run
-  //     fails); 129/130/131/143 → "interrupted" → STOPPED (the run exits 130, "Stopped before finishing").
-  //   - once nothing depends on it, or when Nx itself stops it after its dependents are done: SUCCEEDED, whatever the
-  //     code ("fulfilled").
-  // So a stack that ENDED CLEANLY (`dev stop`) does not end this task while the follower still runs: it stays until Nx
-  // releases it — the follower reads the exit record, succeeds, and Nx then stops this task as fulfilled. Exit 0,
-  // "3 succeeded", whichever of the two noticed first. A FAILED stack ends this task at once, non-zero: the crash Nx
-  // must see while the follower runs (D3). Nothing depending on it here (`nx run <app>:dev-stack` alone): it simply
-  // ends, 0 or 1.
-  const invocation = process.env.NX_INVOCATION_ROOT_PID ?? '';
-  const followed = dependedOnHere(context.taskGraph, project, context.targetName ?? 'dev-stack');
-  let release: (() => void) | undefined;
-  let stopping = false;
-  const released = new Promise<void>((r) => (release = r));
-
-  // A run serve-preflight REFUSED starts no stack: its follower reports the refusal (and fails the run, exit 1).
-  // This task only runs at all when Nx did not share another run's — it waits to be released, starting nothing.
-  const refused = invocation ? readExit(exitRecordPath(context.root, invocation, project)) : null;
-  if (refused?.refused) {
-    if (!followed) {
-      logger.error((refused.report ?? []).join('\n'));
-      return { success: false };
-    }
-    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.once(signal, () => release?.());
-    await released;
-    return { success: true };
-  }
-
   const args = engineArgs(project, options as ServeExecutorSchema & Record<string, unknown>);
   return new Promise((resolve) => {
     // The engine's own signal rule, one level up (tools/dev/lib/stack.mjs states it in full): SIGINT is the
@@ -121,15 +93,13 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
     // it, so this process only waits. SIGTERM/SIGHUP is a stop aimed at THIS process (Nx, a supervisor,
     // `kill`) that the engine never saw — it gets exactly one SIGTERM, and runs its graceful shutdown. The
     // first stop wins; later signals are absorbed, so Ctrl+C followed by Nx's own SIGTERM is not a second one.
-    // Once the engine has ended, any stop is Nx releasing this task.
+    let stopping = false;
     const onGroupStop = () => {
       stopping = true;
-      release?.();
     };
     const onDirectedStop = () => {
       if (!stopping && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
       stopping = true;
-      release?.();
     };
     const handlers = { SIGINT: onGroupStop, SIGTERM: onDirectedStop, SIGHUP: onDirectedStop } as const;
     for (const [signal, handler] of Object.entries(handlers)) process.on(signal, handler);
@@ -137,25 +107,14 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
       for (const [signal, handler] of Object.entries(handlers)) process.off(signal, handler);
       resolve({ success });
     };
-    // DEV_NX_ROOT tells the engine that THIS workspace's Nx holds the stack as its `<app>:dev-stack` task — recorded in
-    // the stack's run record, so a second `nx serve` here is told what it would be waiting on (serve-preflight).
-    const env = { ...process.env, DEV_NX_ROOT: context.root };
-    const child = spawn(process.execPath, [engine, ...args], { cwd: context.root, env, stdio: 'inherit' });
+    const child = spawn(process.execPath, [engine, ...args], { cwd: context.root, stdio: 'inherit' });
     child.on('error', (err) => {
       logger.error(`[serve] Could not start the dev engine: ${err.message}`);
       done(false);
     });
-    child.on('exit', async (code) => {
-      if (code !== 0) return done(false);
-      // The follower ends on the exit record; an engine that ended cleanly without leaving one (it could not write
-      // it) must not leave the follower — and so this task — waiting forever.
-      if (invocation && !readExit(exitRecordPath(context.root, invocation, project))) writeExit(context.root, invocation, project, { code: 0 });
-      // Runs attached to this stack watch THIS task through Nx's shared-task record, which disappears when it ends
-      // (the follower waits for them too, before its return lets Nx stop this task).
-      await attachedDone(context.root, project, child.pid);
-      if (followed && !stopping) await released;
-      done(true);
-    });
+    // The engine's exit status IS this task's: 0 on a clean stop (`dev stop`, the stack's own end), non-zero — with the
+    // engine's own account of which process died, already on the stream — when the stack failed.
+    child.on('exit', (code) => done(code === 0));
   });
 };
 

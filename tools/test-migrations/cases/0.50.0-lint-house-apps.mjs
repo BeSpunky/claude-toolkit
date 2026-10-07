@@ -45,11 +45,11 @@ export default {
       expect: (tree, t, lines) => t.ok(!said(lines, '`web`'), `silent: ${lines}`),
     },
     {
-      name: 'the composer already split onto dev-stack (split-serve-follower ran first): still recognised as a house app',
+      name: 'already on the current shape (serve-runs-its-own-stack ran first): still recognised as a house app',
       setup: (tree) =>
         houseApp(tree, {
           'dev-stack': { executor: '@bespunky/nx-tools:serve', continuous: true },
-          serve: { executor: '@bespunky/nx-tools:follow-stack' },
+          serve: { executor: '@bespunky/nx-tools:serve', continuous: false, cache: false },
         }),
       expect: (tree, t, lines) => t.ok(said(lines, 'g @nx/angular:add-linting --projectName=web'), `reported: ${lines}`),
     },

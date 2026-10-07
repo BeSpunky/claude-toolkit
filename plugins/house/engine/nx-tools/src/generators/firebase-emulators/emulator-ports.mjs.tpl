@@ -2,24 +2,24 @@
 // (@bespunky/nx-tools:firebase-emulators); rewritten every sync — the table below is projected from the payload's
 // emulator-ports.ts, the one table the generator itself reads, so the runtime and the generator cannot disagree.
 //
-// Read by tools/emulators.sh (the offset copy of firebase.json) and tools/reap-emulators.sh (the ports to reclaim).
+// Read by tools/emulators.sh and tools/seed/build-seeds.sh: the ports a suite CLAIMS (through the dev engine's stack
+// claim, tools/dev — the one identity for everything that binds this project's ports) and the offset copy of firebase.json.
 // They used to carry their own inline copies — literal 4400/4500, a shift that never reached a nested port like
 // `firestore.websocketPort` — and a copy is where a port goes missing. (So did "only when declared": an undeclared
 // websocketPort is firebase-tools' 9150, and every shifted suite opened it there.)
 //
 //   node tools/emulator-ports.mjs ports <firebase.json>                 every occupied port, one per line
 //   node tools/emulator-ports.mjs shift <firebase.json> <offset> <out>  write a copy with every port shifted
-//   node tools/emulator-ports.mjs free-offset <firebase.json>           a SHIFTED block whose every port is free
-//                                                                       (a one-off suite's own — tools/seed/build-seeds.sh)
+//   node tools/emulator-ports.mjs claim <firebase.json>                 every occupied port as name=port,… — the
+//                                                                       `--ports` of `tools/dev/dev claim`
 //
 // Node built-ins only.
 //
 // MACHINE OUTPUT IS WRITTEN AS STRINGS, never handed to console.log. The callers are shell scripts that parse stdout,
 // and console.log formats a non-string the way util.inspect does: under FORCE_COLOR (which Nx's run-commands sets for
 // every task) a number comes out as `\e[33m9099\e[39m`. That once made every `nx run firebase:seed:build` die on
-// "usage: emulator-ports.mjs shift" and made reap-emulators.sh's port reclaim silently match nothing.
+// "usage: emulator-ports.mjs shift" and made the old reaper's port reclaim silently match nothing.
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 /** { defaults: name → firebase-tools' own port, alwaysOn: [names], nested: name → { key → { as: port name, default } } } */
@@ -73,37 +73,6 @@ export function shiftConfig(cfg, offset) {
   return out;
 }
 
-/** Bindable on every address a server could hold it on (the dev engine's probe, tools/dev/lib/ports.mjs). */
-async function isPortFree(port) {
-  for (const host of ['127.0.0.1', '::1', '0.0.0.0', '::']) {
-    const ok = await new Promise((resolve) => {
-      const srv = createServer();
-      srv.once('error', (err) => resolve(err?.code === 'EADDRNOTAVAIL' || err?.code === 'EAFNOSUPPORT'));
-      srv.once('listening', () => srv.close(() => resolve(true)));
-      srv.listen({ port, host, exclusive: true });
-    });
-    if (!ok) return false;
-  }
-  return true;
-}
-
-/**
- * The first SHIFTED block (never 0 — the base ports are the developer's) on which every port of the suite is free,
- * stepping by more than the suite's span so a block never overlaps another stack's. null when none is.
- */
-export async function freeOffset(emulators) {
-  const ports = [...new Set(Object.values(suitePorts(emulators)))];
-  const min = Math.min(...ports);
-  const max = Math.max(...ports);
-  const step = Math.ceil((max - min + 1) / 1000) * 1000;
-  for (let offset = step; max + offset <= 65535; offset += step) {
-    let free = true;
-    for (const port of ports) if (!(free = await isPortFree(port + offset))) break;
-    if (free) return offset;
-  }
-  return null;
-}
-
 // Run as a program, never when imported. Compared by REAL path (a symlinked or logical spelling of the same file).
 const isMain = (() => {
   try {
@@ -126,15 +95,10 @@ if (isMain) {
       process.exit(2);
     }
     writeFileSync(args[2], `${JSON.stringify(shiftConfig(read(args[0]), offset), null, 2)}\n`);
-  } else if (command === 'free-offset') {
-    const offset = await freeOffset(read(args[0]).emulators);
-    if (offset === null) {
-      console.error('emulator-ports.mjs: no free port block for the suite — stop a running stack (tools/dev/dev ps) and retry');
-      process.exit(1);
-    }
-    emit([offset]);
+  } else if (command === 'claim') {
+    emit([Object.entries(suitePorts(read(args[0]).emulators)).map(([name, port]) => `${name}=${port}`).join(',')]);
   } else {
-    console.error(`emulator-ports.mjs: unknown command ${command ?? '(none)'} (ports | shift | free-offset)`);
+    console.error(`emulator-ports.mjs: unknown command ${command ?? '(none)'} (ports | shift | claim)`);
     process.exit(2);
   }
 }

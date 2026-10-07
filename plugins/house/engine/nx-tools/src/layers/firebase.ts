@@ -44,7 +44,7 @@ export const firebase: LayerDescriptor = {
   ensurable: { new: true, upgrade: true },
   ensureHint:
     '`house.sh add-layer firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)',
-  brings: 'the emulator wiring, the JDK step, and the forwarded emulator ports',
+  brings: 'the emulator wiring, the dev engine its suites claim their ports through (tools/dev — one generator, shared with web), the JDK step, and the forwarded emulator ports',
   generators: {
     app: [
       {
@@ -72,7 +72,11 @@ export const firebase: LayerDescriptor = {
         },
       },
     ],
-    // The core, after the per-app client (planner order), so the scripts it writes follow the client app.
+    // The core, after the per-app client (planner order), so the scripts it writes follow the client app. Then the
+    // dev engine (tools/dev): every emulator suite — run by a serve, run on its own, a seed build's — claims its ports
+    // through it, the one stack identity (lib/stacks.mjs), and a backend-only workspace has no `web` layer to bring
+    // it. ONE artifact, ONE owner: the `dev` generator writes tools/dev; this layer and `web` both list its STEP, and
+    // the planner runs a step two layers share once.
     workspace: [
       {
         generator: 'firebase-emulators',
@@ -86,6 +90,7 @@ export const firebase: LayerDescriptor = {
           ...(ctx.ensured.has('firebase') && !ctx.detected.has('firebase') ? ['--seedRules'] : []),
         ],
       },
+      { generator: 'dev' },
     ],
   },
   docSections: ['firebase'],

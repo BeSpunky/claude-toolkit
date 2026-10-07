@@ -12,10 +12,10 @@
 //   - recompose-pre-0.3-serve-leftovers → lint-house-apps. An e76c12a app (`serve` IS the Angular dev-server) becomes
 //     a house app — a `dev-stack` composer — only inside recompose, and lint-house-apps lints only house apps. Run
 //     after it, the recomposed app was never linted (nor reported): a real ladder runs once. (R9-2.)
-//   - recompose → stack-owned-dev-processes → split-serve-follower. Recompose writes the CURRENT shape through the
+//   - recompose → stack-owned-dev-processes → serve-runs-its-own-stack. Recompose writes the CURRENT shape through the
 //     serve generator, which both later rungs already accept (a non-continuous leaf, the composer on `dev-stack`);
 //     it sits before them so that every serve rung after it sees one shape. stack-owned keys on the composer being
-//     `serve`, so it must run BEFORE split-serve-follower moves the composer to `dev-stack`.
+//     `serve`, and on `dev-stack` alike, so its place against serve-runs-its-own-stack is free; it sits before it anyway.
 //   - close-the-platform-firewall → lint-house-apps. The firewall tags untagged projects; lint-house-apps then
 //     reports every `platform:`-tagged project nothing lints, which needs those tags in place.
 // Every other 0.50.0 rung reads only state no other 0.50.0 rung writes (its own file or target), so its position is
