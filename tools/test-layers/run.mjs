@@ -1279,6 +1279,8 @@ check('versions: the Firebase table was projected from the pinned firebase-tools
   const { FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS, FUNCTIONS_NODE_RUNTIMES } = require_(join(BUILD, 'src/generators/_utils/firebase-compat'));
   ok(FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS === FIREBASE_TOOLS_VERSION, `projected from firebase-tools@${FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS}, the pin is ${FIREBASE_TOOLS_VERSION} — run: node tools/firebase-compat/project.mjs --write`);
   ok(FUNCTIONS_NODE_RUNTIMES.includes(HOUSE_NODE_MAJOR), `HOUSE_NODE_MAJOR ${HOUSE_NODE_MAJOR} is not a GA Cloud Functions runtime (${FUNCTIONS_NODE_RUNTIMES})`);
+  const { TYPESCRIPT_NODE_IMAGE_MAJORS } = require_(join(BUILD, 'src/generators/_utils/node-facts'));
+  ok(TYPESCRIPT_NODE_IMAGE_MAJORS.includes(Number(HOUSE_NODE_MAJOR)), `HOUSE_NODE_MAJOR ${HOUSE_NODE_MAJOR} has no typescript-node image (${TYPESCRIPT_NODE_IMAGE_MAJORS}) — a new project's container could not be built`);
 });
 
 checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes, ~/.config, ~/.local and ~/.cache; a rebuild reclaims nothing', async (ok) => {

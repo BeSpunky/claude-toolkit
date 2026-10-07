@@ -46,7 +46,8 @@ import {
   reconcileHouseAdded,
   recordedHouseAdded,
 } from '../_utils/devcontainer-provenance';
-import { assertNodeImage, projectNodeMajor } from '../_utils/node-version';
+import { assertNodeImage, nodeVersionFile, projectNodeMajor, LIVE_NODE_FACTS } from '../_utils/node-version';
+import { devcontainerNode } from '../_utils/node-spec';
 
 type Json = Record<string, unknown>;
 
@@ -140,6 +141,8 @@ export default async function devcontainerGenerator(
   // The image is tagged with the project's Node where the house's image is actually USED (built from house.Dockerfile,
   // or referenced as is) — so a major mcr publishes no image for is refused by name here, not at image pull.
   if (imageSource.kind !== 'foreign' && /\/typescript-node:/.test(houseComposition.image.ref)) assertNodeImage(tree, nodeMajor);
+  // An image of the project's own runs ITS Node, which the project's Node file does not set — so a disagreement is named.
+  else if (imageSource.kind === 'foreign') reportForeignNode(tree, nodeMajor);
   const rendered = renderDevcontainerJson(options.name, layerIds, composition);
 
   // OWNERSHIP. The marker separates "regenerate the file we maintain" from "adopt somebody else's" — and it
@@ -893,4 +896,15 @@ function tryParse(source: string): Json | undefined {
 
 function isPlainObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The Node a devcontainer with an image of its own runs, named when it is not the project's declared one. */
+function reportForeignNode(tree: Tree, nodeMajor: string): void {
+  const running = devcontainerNode((path) => (tree.exists(path) ? tree.read(path, 'utf8') ?? '' : undefined), LIVE_NODE_FACTS);
+  if (!running || 'unknown' in running || String(running.major) === nodeMajor) return;
+  logger.warn(
+    `[devcontainer] ${nodeVersionFile(tree)} says Node ${nodeMajor}, but this devcontainer keeps an image of its own that runs ` +
+      `Node ${running.major} (${running.from}) — the project's Node file does not set it. Make them agree, so the container ` +
+      'runs what CI and Cloud Functions are told to.',
+  );
 }

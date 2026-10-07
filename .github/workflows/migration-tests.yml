@@ -56,13 +56,6 @@ jobs:
       - name: Check the Chromium OS package projection
         run: node tools/playwright-deps/project.mjs
 
-      # The Angular → @angular/fire → firebase table and Cloud Functions' Node runtimes (generators/_utils/firebase-compat.ts)
-      # are a PROJECTION of npm. test-layers checks it offline against the pinned firebase-tools; this re-asks npm and
-      # fails when upstream moved (a new @angular/fire — e.g. the first stable one for Angular 21): that is the staleness
-      # alarm, answered with `node tools/firebase-compat/project.mjs --write` and a decision about existing projects.
-      - name: Check the Firebase compatibility projection
-        run: node tools/firebase-compat/project.mjs
-
       # The GENERATORS against fixture workspaces in every layout × linking cell (tools/test-generators): where a
       # project lands, how a library is linked, idempotence of every re-run. Same install, same reason. Cases that
       # delegate to @nx/js / @nx/angular (optional peers, not devDependencies here) are SKIPPED and counted; the

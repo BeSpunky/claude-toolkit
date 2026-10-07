@@ -1,0 +1,46 @@
+# The STALENESS ALARM for what the payload knows about upstream — projections of registries the house does not control:
+#   - tools/firebase-compat/project.mjs → Angular → @angular/fire → firebase, firebase-tools' peers, Cloud Functions'
+#     Node runtimes (from npm), and gcloud's versioned archive (still served, projection for the pin);
+#   - tools/node-facts/project.mjs → Node's LTS lines and the typescript-node image majors (nodejs.org, MCR).
+#
+# ON A SCHEDULE, NOT ON EVERY PUSH. These checks fail when UPSTREAM moves (a new @angular/fire, a new Node LTS), not
+# when a commit is wrong. In the per-push test job they turned every unrelated PR red the day upstream released, and —
+# running before the generator tests in the same job — stopped those tests from running at all. So they run weekly
+# (a red scheduled run is the alarm: re-project with --write, review, decide whether existing projects need a
+# migration), on demand, on a push that touches a projection or its projector, and before every payload publish
+# (tools/publish-nx-tools/publish.sh), which is where a stale table would actually reach consumers.
+name: upstream tables
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [main, development]
+    paths:
+      - 'tools/firebase-compat/**'
+      - 'tools/node-facts/**'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/firebase-compat.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/gcloud-archive.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/node-facts.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - name: Check the Firebase compatibility projection (npm, Google's gcloud archive)
+        run: node tools/firebase-compat/project.mjs
+      - name: Check the Node facts projection (nodejs.org, MCR)
+        if: always()
+        run: node tools/node-facts/project.mjs
