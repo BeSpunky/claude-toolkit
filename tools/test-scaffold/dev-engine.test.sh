@@ -3,6 +3,8 @@
 # imports the stack-free dev engine (tools/dev/*.mjs — kept as .tpl in the payload) the way a project runs it:
 # plain Node, no build step, no node_modules.
 set -uo pipefail
+# A human runs these: under an AI agent (CLAUDECODE=1) the engine never takes the base ports.
+unset CLAUDECODE
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

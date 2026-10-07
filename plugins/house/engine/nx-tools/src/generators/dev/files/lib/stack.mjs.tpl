@@ -67,8 +67,10 @@ export function descendants(pid) {
  * string command); otherwise `command` + `args` are spawned directly. `onSpawn(id, pid)` hears each one start —
  * how the stack's run record learns its processes' PIDs. `onStop(signal)` hears the stop once — with the signal
  * that asked for it, or none when the stack's own processes ended it (how the engine says who stopped the stack).
+ * `lockFd`, the stack's lock (lib/stacks.mjs), is every child's fd 3: each one keeps the stack alive while it runs —
+ * so a serve killed outright leaves an ORPHANED stack `dev stop` can still end, not a dead record over live servers.
  */
-export function runStack({ children, cwd, onStop, onSpawn, log }) {
+export function runStack({ children, cwd, onStop, onSpawn, log, lockFd }) {
   return new Promise((resolve) => {
     if (children.length === 0) {
       resolve({ success: true, failures: [] });
@@ -163,9 +165,10 @@ export function runStack({ children, cwd, onStop, onSpawn, log }) {
     };
 
     children.forEach((child, i) => {
+      const stdio = lockFd === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', lockFd];
       const proc = child.shell
-        ? spawn('sh', ['-c', child.command], { cwd, env: child.env, stdio: 'inherit' })
-        : spawn(child.command, child.args, { cwd, env: child.env, stdio: 'inherit' });
+        ? spawn('sh', ['-c', child.command], { cwd, env: child.env, stdio })
+        : spawn(child.command, child.args, { cwd, env: child.env, stdio });
       procs[i] = proc;
       if (proc.pid) {
         try {

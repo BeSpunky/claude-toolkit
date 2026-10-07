@@ -11,6 +11,8 @@
 # Both halves fail silently if they regress — an empty world looks like a fresh start, and a worktree
 # quietly reading main's seeds looks fine right up until it edits them.
 set -uo pipefail
+# A human runs these: under an AI agent (CLAUDECODE=1) the engine never takes the base ports.
+unset CLAUDECODE
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TPL="$ROOT/plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl"

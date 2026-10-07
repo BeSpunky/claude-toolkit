@@ -10,6 +10,8 @@
 # Two halves: the behaviour (each parsed command, run under FORCE_COLOR=1 the way Nx runs it), and a static guard
 # over every generator template, so the next tool that prints a bare value is caught where it is written.
 set -euo pipefail
+# A human runs these: under an AI agent (CLAUDECODE=1) the engine never takes the base ports.
+unset CLAUDECODE
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GEN="$ROOT/plugins/house/engine/nx-tools/src/generators"
@@ -33,7 +35,9 @@ ok "ports: lists the declared ports" "$(grep -qx 9099 <<<"$ports" && grep -qx 91
 node "$ROOT/tools/test-scaffold/render-engine.mjs" "$TMP"
 claimports="$(node "$TMP/tools/emulator-ports.mjs" claim "$TMP/firebase.json")"
 ok "claim: name=port pairs, plain (FORCE_COLOR=1) — got '$(printf '%q' "$claimports")'" "$(grep -qxE '([a-z-]+=[0-9]+,)*[a-z-]+=[0-9]+' <<<"$claimports" && echo 1 || echo 0)"
-if CLAIM="$(cd "$TMP" && node tools/dev/dev.mjs claim seed-build --pid=$$ --shifted --ports="$claimports" 2>"$TMP/claim.err")"; then
+# The script holds its stack's lock (a shared flock) before it claims, exactly as build-seeds.sh does.
+exec {LOCK_FD}>"$TMP/claim.lock"; flock -s "$LOCK_FD"
+if CLAIM="$(cd "$TMP" && node tools/dev/dev.mjs claim seed-build --pid=$$ --lock="$TMP/claim.lock" --shifted --port-offset=auto --ports="$claimports" 2>"$TMP/claim.err")"; then
   eval "$CLAIM"
   offset="$STACK_OFFSET"
   ok "dev claim: a plain shifted offset (FORCE_COLOR=1) — got '$(printf '%q' "$offset")'" "$(grep -qxE '[1-9][0-9]*' <<<"$offset" && echo 1 || echo 0)"
@@ -43,7 +47,8 @@ if CLAIM="$(cd "$TMP" && node tools/dev/dev.mjs claim seed-build --pid=$$ --shif
   else
     ok "shift <claimed offset>: accepted ($(cat "$TMP/shift.err"))" 0
   fi
-  (cd "$TMP" && node tools/dev/dev.mjs release "$STACK_KEY" --pid=$$)
+  exec {LOCK_FD}>&-
+  (cd "$TMP" && node tools/dev/dev.mjs release "$STACK_KEY" --lock="$TMP/claim.lock")
 else
   ok "dev claim: succeeded ($(cat "$TMP/claim.err"))" 0
 fi
