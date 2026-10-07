@@ -46,7 +46,7 @@ import {
   reconcileHouseAdded,
   recordedHouseAdded,
 } from '../_utils/devcontainer-provenance';
-import { projectNodeMajor } from '../_utils/node-version';
+import { assertNodeImage, projectNodeMajor } from '../_utils/node-version';
 
 type Json = Record<string, unknown>;
 
@@ -121,7 +121,7 @@ export default async function devcontainerGenerator(
   if (!options.name) {
     throw new Error('devcontainer generator requires --name (the devcontainer / project name).');
   }
-  // The image tag / Node feature version: the PROJECT's declared Node (.nvmrc) — never the machine running this.
+  // The image tag / Node feature version: the PROJECT's declared Node (_utils/node-version) — never the machine running this.
   const nodeMajor = projectNodeMajor(tree);
   const voice = !!options.voice;
   const layers = activeLayers(tree, options.layers);
@@ -137,6 +137,9 @@ export default async function devcontainerGenerator(
   // that user at all — a container that cannot start is the worst thing an additive merge could produce.
   const imageSource = adoptedImageSource(tree, houseComposition.image.ref);
   const composition = imageSource.kind === 'build' ? houseComposition : compose(contributors, { nodeMajor, imageSource });
+  // The image is tagged with the project's Node where the house's image is actually USED (built from house.Dockerfile,
+  // or referenced as is) — so a major mcr publishes no image for is refused by name here, not at image pull.
+  if (imageSource.kind !== 'foreign' && /\/typescript-node:/.test(houseComposition.image.ref)) assertNodeImage(tree, nodeMajor);
   const rendered = renderDevcontainerJson(options.name, layerIds, composition);
 
   // OWNERSHIP. The marker separates "regenerate the file we maintain" from "adopt somebody else's" — and it
