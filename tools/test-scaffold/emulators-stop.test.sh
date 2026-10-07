@@ -87,7 +87,7 @@ start() {   # start <ws> — in its own session under a shell, as Nx's run-comma
   # `env --default-signal`: a background job of a non-interactive shell (this test) starts with SIGINT IGNORED, and
   # an ignored-on-entry signal cannot be trapped — no real launcher (Nx, a terminal) does that to it.
   ( cd "$1" || exit 1
-    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT=20 env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
+    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT=20 NX_INVOCATION_ROOT_PID="${INVOKER:-}" env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
     echo $! )
 }
 rc() { cat "$1/rc" 2>/dev/null; }
@@ -102,6 +102,8 @@ keeper_gone() {   # the detached keeper finished on its own — its last act is 
 }
 
 # ── 1. Nx's stop: leaf-first tree kill, then SIGKILL after a 1 s grace ─────────────────────────────
+# The invoking nx (NX_INVOCATION_ROOT_PID) — a stand-in whose stderr is a file, the person's terminal.
+sleep 300 2>"$TMP/invoker.err" & INVOKER=$!
 W="$(mkws nx)"; P="$(start "$W")"; STARTED+=("$P")
 ok "nx: the suite came up" "$(ready "$W" && echo 1 || echo 0)"
 mapfile -t TREE < <(descendants "$P"; echo "$P")
@@ -113,6 +115,8 @@ ok "nx: the suite finished its save after its supervisor was SIGKILLed" "$(keepe
 ok "nx: firebase-tools got exactly ONE SIGTERM (got: $(signals "$W"))" "$([ "$(signals "$W")" = TERM ] && echo 1 || echo 0)"
 ok "nx: the keeper's entry records the result" "$(grep -q '"result": "exported to' "$W/.bespunky/run/firebase@0/detached/emulators.json" && echo 1 || echo 0)"
 ok "nx: the stop was announced while it ran" "$(grep -q 'stopping — exporting emulator data' "$W/out.log" && echo 1 || echo 0)"
+ok "nx: the invoker's terminal got 'saving emulator data in the background' at once" "$(grep -q 'saving emulator data in the background' "$TMP/invoker.err" && echo 1 || echo 0)"
+kill "$INVOKER" 2>/dev/null; INVOKER=''
 
 # ── 2. A terminal's Ctrl+C: SIGINT to the whole process group ──────────────────────────────────────
 W="$(mkws ctrlc)"; P="$(start "$W")"; STARTED+=("$P")

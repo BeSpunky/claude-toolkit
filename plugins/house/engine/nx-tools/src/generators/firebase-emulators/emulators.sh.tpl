@@ -502,6 +502,18 @@ fi
 tail -n +1 -F --pid="$KEEPER_PID" "$LOG" 2>/dev/null &
 TAIL_PID=$!
 
+# ONE LINE, WHERE THE PERSON IS LOOKING, BEFORE ANYONE STOPS LISTENING. A Ctrl+C on `nx serve` makes Nx mute its own
+# output and return ~5 s later — long before an export ends — so everything this script prints from here on lands
+# in a task log nobody reads, and the stop looks like it skipped the save. Nx names the process the person invoked
+# to every task (NX_INVOCATION_ROOT_PID): its stderr is their terminal (or an agent's output). Appended, never
+# truncated (it may be a file). Without an invoker, our own stderr is where they are looking.
+say_to_invoker() {
+  local p="${NX_INVOCATION_ROOT_PID:-}"
+  if [ -n "$p" ] && [ "$p" != "$$" ] && [ -w "/proc/$p/fd/2" ] && { printf '%s\n' "$1" >> "/proc/$p/fd/2"; } 2>/dev/null; then return 0; fi
+  printf '%s\n' "$1" >&2
+}
+if [ -n "${DEV_STACK_DIR:-}" ]; then SAVING_WHERE='`tools/dev/dev ps` shows it FINISHING'; else SAVING_WHERE="the next start of this suite waits for it; its log: $LOG"; fi
+
 STOPPING=0
 STOP_SINCE=0
 LOG_AT_STOP=0
@@ -511,6 +523,7 @@ request_stop() {
   STOP_SINCE="$(date +%s)"
   LOG_AT_STOP="$(stat -c %s "$LOG" 2>/dev/null || echo 0)"
   : > "$STOP_FILE"
+  [ "$PERSIST" -eq 1 ] && say_to_invoker "[emulators] saving emulator data in the background — ${SAVING_WHERE}"
   echo "[emulators] stopping — ${STOP_DOING} (firebase-tools takes about half a minute)…" >&2
   echo "[emulators]   If this returns before \"done\", the save still completes in the background: tools/dev/dev ps shows it, and the next start of this stack waits for it." >&2
 }
