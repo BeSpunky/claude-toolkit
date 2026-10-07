@@ -364,7 +364,10 @@ check('full house sync: per-app steps first, then workspace steps in registry or
   // Phase 4: the Firebase CLIENT attaches per app (through the app's stack adapter), the neutral CORE is a
   // workspace step that runs after it and follows the client app.
   ok(got.includes('firebase-client --project=shop --workspaceName=shop --staging=true --wireProviders'), 'firebase client args');
-  ok(got.includes('firebase-emulators --workspaceName=shop --staging=true --clientApp=shop'), 'firebase core args');
+  ok(got.includes('firebase-emulators --workspaceName=shop --staging=true --clientApp=shop --seedRules'), 'firebase core args (ensured: seeds rules)');
+  // Seeding rules is a baseline act: an upgrade that merely DETECTS firebase never seeds (the console may hold the live rules).
+  const detected = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { ensured: ['nx'] }), STAMP));
+  ok(detected.some((l) => l.startsWith('firebase-emulators ') && !l.includes('--seedRules')), `a detect-only sync seeds no rules: ${detected.find((l) => l.startsWith('firebase-emulators '))}`);
   const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';
   ok(devcontainer.endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${devcontainer}`);
 });
