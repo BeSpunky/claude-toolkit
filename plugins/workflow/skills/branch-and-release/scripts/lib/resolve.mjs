@@ -13,10 +13,13 @@
 //   3. no working-tree copy → self-confirming search over the §3 names, local AND origin/<name>: a copy counts
 //      only if its own projection.integration names that same branch.
 //   4. nothing found → undeclared.
-// A chosen copy must itself be readable AND valid; one that is not is UNREADABLE (never guessed around).
+// A chosen copy must itself be readable AND valid; one that is not is UNREADABLE (never guessed around). The one
+// exception is a copy whose only problems are OUTDATED (model.mjs `check`: a format with one exact rewrite that
+// leaves the projection unchanged — a bare-string `deploys`): it is the declared model it always was, and each
+// problem goes into `notes`, fix included, so every reader of `status` sees what to rewrite.
 import fs from 'node:fs';
 import path from 'node:path';
-import { FILE, canonical, UNDECLARED_PROTECTED, isSchemaMajor1, validate } from './model.mjs';
+import { FILE, canonical, UNDECLARED_PROTECTED, isSchemaMajor1, check } from './model.mjs';
 
 function parse(text) {
   try {
@@ -60,8 +63,9 @@ export function resolveModel(git, top) {
   const declared = (model, source) => {
     const why = unreadableWhy(model, source);
     if (why) return unreadable(why, source);
-    const errors = validate(model);
-    if (errors.length) return unreadable(`${source}: ${errors.length} validation error(s): ${errors.join('; ')}`, source, model.projection);
+    const { errors, outdated } = check(model);
+    if (errors.length) return unreadable(`${source}: ${errors.length} validation error(s): ${[...errors, ...outdated].join('; ')}`, source, model.projection);
+    for (const o of outdated) notes.push(`${source}: ${o}`);
     const p = model.projection;
     return { state: 'declared', declared: true, model, source, projection: p, protected: [...(p.protected ?? [])], protectedPatterns: [...(p.protectedPatterns ?? [])], notes, reason: null };
   };

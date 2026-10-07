@@ -701,7 +701,7 @@ const cases = {
     assert.ok(facts.some((f) => f.area === 'advancement' && f.subject === 'main'));
   },
 
-  'deploys: a note, or a structured binding (ci + appHosting) — validated, projected flat, described'() {
+  'deploys: an object — a note and/or a structured binding (ci + appHosting) — validated, projected flat, described'() {
     const r = repo();
     r.branch('development');
     const bad = r.proposed('two-line', [], (d) => {
@@ -729,13 +729,53 @@ const cases = {
     assert.equal(st.data.projection.deploys.length, 2, 'status --json carries the bindings to readers');
   },
 
-  'deploys: a note alone projects nothing — an existing declaration does not read as drifted'() {
+  'deploys: a note alone projects nothing — a { note } declaration does not read as drifted'() {
     const r = repo();
     r.branch('development');
-    const { decl } = r.declare('two-line', [], (d) => { d.stages[0].deploys = 'App Hosting auto-rollout'; });
+    const { decl } = r.declare('two-line', [], (d) => { d.stages[0].deploys = { note: 'App Hosting auto-rollout' }; });
     assert.equal('deploys' in decl.projection, false);
     assert.match(r.run(['describe']).out, /App Hosting auto-rollout/);
     assert.match(r.run(['verify']).out, /projection matches the model/);
+  },
+
+  'deploys: a bare string is OUTDATED — status and plan still read it, validate/write/verify/describe refuse with the exact rewrite'() {
+    const r = repo();
+    r.branch('development');
+    r.declare('two-line');
+    // What a pre-object engine wrote: a string note, and a projection with no deploys (a note binds nothing).
+    const legacy = r.model();
+    legacy.stages[0].deploys = 'publishes "pkg" to npm';
+    r.write('.bespunky/branches.json', `${JSON.stringify(legacy, null, 2)}\n`);
+    r.git('commit', '-qam', 'legacy note');
+    const fix = /stages\[0\]\.deploys: a bare string .*"deploys": \{ "note": "publishes \\"pkg\\" to npm" \}.*house upgrade.*migrates it automatically/;
+
+    const st = r.json(['status', '--json']);
+    assert.equal(st.code, 0, st.err);
+    assert.equal(st.data.state, 'declared', 'the projection is unaffected by the format, so the model stays in force');
+    assert.equal('deploys' in st.data.projection, false);
+    assert.ok(st.data.notes.some((n) => fix.test(n)), `status notes carry the fix: ${st.data.notes}`);
+    const pl = r.run(['plan', 'start', 'feat', 'x']);
+    assert.equal(pl.code, 0, `plan still reads it: ${pl.err}`);
+    for (const args of [['describe'], ['verify']]) {
+      const res = r.run(args);
+      assert.equal(res.code, 1, `${args} refuses`);
+      assert.match(res.err, fix, `${args} prints the rewrite`);
+    }
+    const file = path.join(SCRATCH, `legacy-${seq}.json`);
+    fs.writeFileSync(file, JSON.stringify(legacy));
+    for (const args of [['validate', file], ['write', file], ['verify', '--proposed', file]]) {
+      const res = r.run(args);
+      assert.equal(res.code, 1, `${args[0]} refuses`);
+      assert.match(res.err, fix, `${args[0]} prints the rewrite`);
+    }
+
+    // The rewrite it prints is the whole fix: same projection, every command green.
+    legacy.stages[0].deploys = { note: legacy.stages[0].deploys };
+    r.write('.bespunky/branches.json', `${JSON.stringify(legacy, null, 2)}\n`);
+    r.git('commit', '-qam', 'object form');
+    assert.equal(r.run(['describe']).code, 0);
+    assert.match(r.run(['verify']).out, /projection matches the model/);
+    assert.deepEqual(r.json(['status', '--json']).data.notes, []);
   },
 
   'evidence --app-hosting: backends, live branches and drift against the declared bindings; opt-in and degrading'() {
