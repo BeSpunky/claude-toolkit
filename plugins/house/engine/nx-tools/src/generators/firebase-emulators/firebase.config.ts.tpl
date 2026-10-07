@@ -79,8 +79,8 @@
 // GENERATOR-OWNED — this file (and every firebase-*.config.ts sibling) is rewritten IN FULL on every
 // an upgrade, so never edit them by hand: a future sync silently reverts it. They carry no per-project
 // values by design, so everything you'd want to change lives elsewhere:
-//   • per-environment CONFIG (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`,
-//     functions `proxied`) → environment.ts / environment.<env>.ts;
+//   • per-environment CONFIG (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`)
+//     → environment.ts / environment.<env>.ts;
 //   • WHICH services are provided, and WHERE → app.config.ts and your lazy routes.
 // Because they hold no config, they are safe to always rewrite — which is exactly what keeps them from
 // silently drifting behind template improvements (there is no "is it customized?" guess to get wrong).
@@ -88,7 +88,7 @@ import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
 
 import { environment } from '../environments/environment';
-import { resolveEmulated, resolvePortOffset, type EmulatorService } from './emulator-overrides';
+import { resolveEmulated, type EmulatorService } from './emulator-overrides';
 
 // Angular's dev-mode flag. The optimizer folds it to a literal `false` in production builds, which
 // is what makes everything emulator-related below tree-shakeable out of prod. Declared locally —
@@ -110,36 +110,61 @@ const emulate: Record<EmulatorService, boolean> = ngDevMode
     })
   : { auth: false, firestore: false, storage: false, functions: false };
 
-/**
- * The emulator endpoint to connect a service to, or `undefined` for the real backend. Called only from
- * inside `if (ngDevMode)` blocks (here and in the per-service siblings), so it — and `emulate` — tree-shake
- * out of production along with the callers.
- */
-export function emulatorFor<S extends EmulatorService>(service: S): EmulatorEndpoints[S] | undefined {
-  return emulate[service] ? environment.emulators?.[service] : undefined;
+/** Where THIS runtime reaches an emulator — what each `connect*Emulator(...)` call is handed. */
+export interface EmulatorEndpoint {
+  host: string;
+  port: number;
+  /** `http://host:port` — Auth is connected by URL, the other services by host + port. */
+  origin: string;
 }
 
 /**
- * Per-session emulator PORT OFFSET (0 unless the app was opened with `?portOffset=`). It shifts every
- * emulator port so the app connects to an ISOLATED stack (started by `<app>:serve --portOffset`) rather
- * than the base ports. DEV ONLY — `ngDevMode` folds to `false` in prod, collapsing this to 0 and
- * tree-shaking `resolvePortOffset` out with the rest.
+ * The endpoint to connect a service's emulator to, or `undefined` for the real backend. Called only from inside
+ * `if (ngDevMode)` blocks (in the per-service siblings), so it — and `emulate` — tree-shake out of production.
+ *
+ * WHERE AN EMULATOR IS REACHED FROM DEPENDS ON WHERE THE CALLER RUNS, not on the service:
+ *   • IN THE BROWSER — through the page's OWN origin. The dev server's proxy.conf.mjs relays every emulator's
+ *     paths to the suite inside the container (shifted for a worktree's stack), so the browser needs no emulator
+ *     port and no offset: only the address the app loaded on, whatever port the editor forwarded it to.
+ *   • ON THE SERVER (SSR) — directly, at the container address in environment.ts, shifted by the stack's
+ *     PORT_OFFSET, which the dev engine exports to every process of a shifted stack.
  */
-export const portOffset: number = ngDevMode ? resolvePortOffset() : 0;
+export function emulatorEndpoint(service: EmulatorService): EmulatorEndpoint | undefined {
+  const entry = emulate[service] ? environment.emulators?.[service] : undefined;
+  if (!entry) return undefined;
+  return typeof window === 'undefined' ? containerEndpoint(entry) : originEndpoint(service, window.location);
+}
 
-/**
- * Shift the port inside an emulator URL (Auth is configured by URL, not host+port). Only reached from
- * inside `if (ngDevMode)` blocks, so it tree-shakes out of prod.
- */
-export function offsetUrl(url: string, offset: number): string {
-  if (!offset) return url;
-  try {
-    const u = new URL(url);
-    if (u.port) u.port = String(Number(u.port) + offset);
-    return u.toString();
-  } catch {
-    return url;
+/** The browser's route to every emulator: the page's own origin, which the dev server relays. */
+function originEndpoint(service: EmulatorService, page: Location): EmulatorEndpoint {
+  // The Firebase SDK dials an emulator over plain http only (connect*Emulator forces http on every host but a
+  // Cloud Workstation), so an emulator relayed through an https origin is unreachable — mixed content at best.
+  // Say so at bootstrap rather than leave every call to fail somewhere else.
+  if (page.protocol !== 'http:') {
+    throw new Error(
+      `[firebase.config.ts] ${service} is emulated, and the browser reaches every emulator through this page's own ` +
+        `origin (the dev server relays it) — but the page is served over ${page.protocol.replace(':', '')}, and the ` +
+        `Firebase SDK can reach an emulator over plain http only.\n` +
+        `  Serve the dev server over http (drop \`ssl\` from its dev-server target), or open the app with ` +
+        `?emulate=none to use the real backend for every service.`
+    );
   }
+  return { host: page.hostname, port: Number(page.port) || 80, origin: page.origin };
+}
+
+/** Server-side code's route: the container address from environment.ts, shifted by the stack's PORT_OFFSET. */
+function containerEndpoint(entry: { url: string } | { host: string; port: number }): EmulatorEndpoint {
+  const base = 'url' in entry ? new URL(entry.url) : { hostname: entry.host, port: String(entry.port) };
+  const host = base.hostname;
+  const port = Number(base.port) + serverPortOffset();
+  return { host, port, origin: `http://${host}:${port}` };
+}
+
+/** The stack's PORT_OFFSET from the server's environment (0 for the base stack, and wherever there is no `process`). */
+function serverPortOffset(): number {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const offset = Number(env?.['PORT_OFFSET'] ?? 0);
+  return Number.isInteger(offset) && offset > 0 ? offset : 0;
 }
 
 /**

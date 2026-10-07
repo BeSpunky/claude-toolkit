@@ -98,7 +98,7 @@ async function main() {
           if (snapshot(tree) !== afterFirst) failures.push(`rung ${rung} is not idempotent — a second run changed the tree`);
         }
         for (const error of unparseable(beforeLadder, snapshot(tree))) failures.push(`wrote a file that does not parse: ${error}`);
-        testCase.expect(tree, treeAssertions(tree, failures));
+        testCase.expect(tree, treeAssertions(tree, failures), log.lines); // log.lines: what the ladder reported
       } catch (error) {
         failures.push(`threw: ${error.stack || error.message}`);
       }

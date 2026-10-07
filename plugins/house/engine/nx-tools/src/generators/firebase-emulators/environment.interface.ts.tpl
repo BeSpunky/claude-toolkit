@@ -47,14 +47,12 @@ export interface Environment {
   // This interface is app-owned after the first scaffold (the generator writes it only if absent):
   // add app-specific top-level fields here freely — e.g. `google?: { oauthClientId: string }` for a
   // Google API (Calendar) OAuth client id. They survive an upgrade.
+  // Each entry is where that emulator listens INSIDE the container (server-side code dials it, shifted by the
+  // stack's PORT_OFFSET); the browser reaches every emulator through the dev server's own origin instead.
   emulators?: {
-    // `proxied` (auth too): reach the emulator through the dev-server's own origin (proxy.conf.mjs relays it).
-    auth?: { url: string; default: boolean; proxied?: boolean };
+    auth?: { url: string; default: boolean };
     firestore?: { host: string; port: number; default: boolean };
     storage?: { host: string; port: number; default: boolean };
-    // `proxied` (functions only): reach the emulator through the dev-server's OWN origin (its
-    // proxy.conf.mjs relays callables, offset-shifted) instead of dialing host:port directly — dodges a
-    // squatted/forwarded :5001 on the host and stays correct under worktree port offsets. Omitted → direct.
-    functions?: { host: string; port: number; default: boolean; proxied?: boolean };
+    functions?: { host: string; port: number; default: boolean };
   };
 }

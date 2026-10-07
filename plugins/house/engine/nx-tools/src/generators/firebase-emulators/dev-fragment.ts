@@ -7,8 +7,9 @@
 //     tools/emulators.sh. That script shifts the WHOLE suite by PORT_OFFSET (which the engine exports when the
 //     stack is shifted), so the process declares its ports for the BLOCK SIZE (every port the suite occupies,
 //     read from firebase.json, plus the hub/logging ports the script pins) rather than passing them as flags;
-//   - the client's two URL switches: `?portOffset=N` on a shifted stack, so the app reaches the shifted
-//     emulators, and `?emulate=none` when the suite is skipped, so every service resolves to the real backend;
+//   - the client's URL switch `?emulate=none` when the suite is skipped, so every service resolves to the real
+//     backend. (A shifted stack needs none: the browser reaches every emulator through the app's own origin, and
+//     the dev server's proxy.conf.mjs relays it with the stack's PORT_OFFSET.)
 //   - the OAuth-origin advice: real Google sign-in is registered for the base origin only, so when another
 //     devcontainer owns that port, its owner is the one signing in there.
 import { type Tree, readProjectConfiguration } from '@nx/devkit';
@@ -34,10 +35,7 @@ export function firebaseFragment(tree: Tree): DevFragment {
         cmd: [nxInvocation(tree).bin, 'run', `${FIREBASE_PROJECT}:${EMULATORS_TARGET}`],
         env: { ...NX_TREE_ENV },
         ports: emulatorPorts(tree),
-        url: [
-          { param: 'portOffset', value: '${OFFSET}', when: 'offset' },
-          { param: 'emulate', value: 'none', when: 'skipped' },
-        ],
+        url: [{ param: 'emulate', value: 'none', when: 'skipped' }],
         advice: [
           {
             when: 'contended',

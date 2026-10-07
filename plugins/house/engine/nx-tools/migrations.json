@@ -185,6 +185,12 @@
       "layer": "firebase",
       "description": "Corrects the App Hosting deploy guidance the house seeded into comments: apphosting.staging.yaml's `backends:create --environment staging` (no such flag — the staging backend's Environment name is a console setting, and until it is set staging builds production's config), and the 'GitHub-driven' / 'apphosting.yaml at the workspace root' claims in apphosting.yaml and environment.prod.ts (App Hosting also deploys from local source; the yaml is found by walking up from the backend's Root Directory, which an Nx app must set to the app). Rewrites only the exact comment blocks the house wrote; an edited one that still says the false thing is reported by name. No configuration changes.",
       "implementation": "./src/migrations/0.50.0/correct-app-hosting-guidance"
+    },
+    "route-emulators-through-origin": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The browser reaches every Firebase emulator (Auth, Firestore, Storage, Functions) through the dev server's own origin, so a host browser needs only the app's port — whatever host port the editor forwarded it to — and a worktree's stack needs no ?portOffset=. Removes the retired per-service `proxied` switch from each Firebase app's src/environments files and its type (surgically, a directory whole or not at all), with the house's comments about it; reports a `proxied: false` service (it is relayed now), project code importing the retired emulatorFor/portOffset/offsetUrl/resolvePortOffset, and an https dev server (the SDK dials emulators over http only). Drops the house-seeded ?portOffset= URL switch from .bespunky/dev.json.",
+      "implementation": "./src/migrations/0.50.0/route-emulators-through-origin"
     }
   }
 }

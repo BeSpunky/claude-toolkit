@@ -12,7 +12,7 @@ import { getApp } from '@angular/fire/app';
 import { connectFunctionsEmulator, getFunctions, provideFunctions } from '@angular/fire/functions';
 
 import { environment } from '../environments/environment';
-import { emulatorFor, portOffset } from './firebase.config';
+import { emulatorEndpoint } from './firebase.config';
 
 declare const ngDevMode: boolean;
 
@@ -35,21 +35,11 @@ export function provideAppFunctions(): EnvironmentProviders {
       const region = (environment.firebase as { functionsRegion?: string }).functionsRegion;
       const functions = region ? getFunctions(getApp(), region) : getFunctions();
       if (ngDevMode && !emulatorConnected.has(functions)) {
-        const e = emulatorFor('functions');
+        // In the browser: the app's own origin (proxy.conf.mjs relays /<projectId>/**, where callables live);
+        // server-side: the container address, shifted by the stack's offset. See emulatorEndpoint().
+        const e = emulatorEndpoint('functions');
         if (e) {
-          // Two ways to reach the Functions emulator (see environment.ts's `proxied`):
-          //   • proxied (default for new scaffolds) — connect to the app's OWN origin; the dev-server's
-          //     proxy.conf.mjs relays /<projectId>/** to the emulator, shifted by the same PORT_OFFSET.
-          //     Dodges a squatted/forwarded :5001 on the host and is inherently port-offset-correct, so it
-          //     needs no `portOffset` math here.
-          //   • direct — dial the emulator host:port, shifted by the session port offset.
-          const proxied = (e as { proxied?: boolean }).proxied;
-          if (proxied && typeof window !== 'undefined') {
-            const port = Number(window.location.port) || (window.location.protocol === 'https:' ? 443 : 80);
-            connectFunctionsEmulator(functions, window.location.hostname, port);
-          } else {
-            connectFunctionsEmulator(functions, e.host, e.port + portOffset);
-          }
+          connectFunctionsEmulator(functions, e.host, e.port);
           emulatorConnected.add(functions);
         }
       }
