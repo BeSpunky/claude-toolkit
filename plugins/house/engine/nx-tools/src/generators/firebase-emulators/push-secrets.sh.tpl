@@ -6,12 +6,14 @@
 # target project, so what exists locally and in prod can never drift.
 #
 # The file is read with Firebase's own dotenv rules (tools/emulator-secrets.cjs — the one parser the emulator side
-# uses too): `KEY="v" # note` pushes `v`, `export KEY=v` pushes KEY, escapes in double quotes are decoded. A line
-# that is not KEY=VALUE, or a key Firebase refuses, stops the push before anything is set.
+# uses too), and a value those rules would REINTERPRET is refused, never pushed: an unquoted `#` (Firebase cuts the
+# value there), quotes Firebase strips, escapes it decodes, `export`. Each refusal names the key and the shape to
+# write instead. So what is set in Secret Manager is exactly what the line says. A line that is not KEY=VALUE, or a
+# key Firebase refuses, stops the push too — all before anything is set.
 #
-# Values never touch a command line, a log, or this script's output: each one is piped into the
-# CLI on stdin (`--data-file -`). Only key NAMES are printed — `--dry-run` adds each value's length,
-# fingerprint and edges, so a stray quote or comment is visible without the value itself.
+# Values never touch a command line, a file, a log, or this script's output: they travel from the parser to this
+# script on a pipe, are held in memory, and each one is piped into the CLI on stdin (`--data-file -`). Only key
+# NAMES are printed — `--dry-run` adds each value's length class and nothing else.
 #
 #   bash tools/push-secrets.sh                        # project from .firebaserc / environment.prod.ts
 #   bash tools/push-secrets.sh --dry-run              # what WOULD be pushed; pushes nothing
@@ -57,13 +59,15 @@ if [ -z "$PROJECT" ]; then
 fi
 echo "[push-secrets] project: $PROJECT"
 
-# Parse first, push after: a file Firebase would misread is refused whole, before any secret is set.
-ENTRIES="$(mktemp)"
-trap 'rm -f "$ENTRIES"' EXIT
-node "$ROOT/tools/emulator-secrets.cjs" push-entries --file="$SECRETS_FILE" > "$ENTRIES" || exit 2
+# Parse first, push after: a file Firebase would misread is refused whole, before any secret is set. The entries
+# come over a pipe into memory (NUL-separated key, value pairs) — never a temp file a SIGKILL would leave behind.
+mapfile -d '' ENTRIES < <(node "$ROOT/tools/emulator-secrets.cjs" push-entries --file="$SECRETS_FILE")
+wait "$!" || exit 2
 
 PUSHED=0
-while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+for ((i = 0; i + 1 < ${#ENTRIES[@]}; i += 2)); do
+  key="${ENTRIES[i]}"
+  value="${ENTRIES[i + 1]}"
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "[push-secrets] would set $key — $(printf '%s' "$value" | node "$ROOT/tools/emulator-secrets.cjs" describe)"
   else
@@ -71,7 +75,7 @@ while IFS= read -r -d '' key && IFS= read -r -d '' value; do
     printf '%s' "$value" | firebase functions:secrets:set "$key" --project "$PROJECT" --data-file -
   fi
   PUSHED=$((PUSHED + 1))
-done < "$ENTRIES"
+done
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[push-secrets] dry run — $PUSHED secret(s) would be pushed to $PROJECT; nothing was set."

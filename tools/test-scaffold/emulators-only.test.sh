@@ -119,6 +119,42 @@ out="$(run "$d" --only auth,ui)"
 expect 'explicit --only is honoured verbatim' '--only auth,ui' "$out"
 refute 'explicit --only does NOT export' '--export-on-exit' "$out"
 
+# ── A service environment.ts commits to the REAL backend is not emulated ─────────────────────────────────────
+# The browser uses the real backend for it; an emulator of it would be a second, empty copy that only emulated code
+# sees (emulated Functions get FIREBASE_AUTH_EMULATOR_HOST and reject a real-Auth user's token).
+commit_real() {   # commit_real <workspace dir> <services csv>
+  mkdir -p "$1/apps/demo/src/environments"
+  node -e '
+    const real = new Set(process.argv[2].split(","));
+    const entry = (s) => `    ${s}: { host: "localhost", port: 1, default: ${!real.has(s)} },`;
+    process.stdout.write(`export const environment = {\n  production: false,\n  firebase: { projectId: "acme-prod", apiKey: "k", appId: "a" },\n  emulators: {\n${["auth", "firestore", "storage", "functions"].map(entry).join("\n")}\n  },\n};\n`);
+  ' "$1" "$2" > "$1/apps/demo/src/environments/environment.ts"
+}
+d="$(mkworkspace committed-real '{ "auth": { "port": 9099 }, "firestore": { "port": 8080 }, "storage": { "port": 9199 }, "ui": { "port": 4000 } }')"
+commit_real "$d" auth
+out="$(run "$d")"
+expect 'committed-real auth: the real project id' '--project=acme-prod' "$out"
+expect 'committed-real auth: not in the derived --only' '--only firestore,storage,ui' "$out"
+out="$(run "$d" --only auth,firestore)"
+expect 'committed-real auth: dropped from an explicit --only too' '--only firestore' "$out"
+refute '…auth is not passed' 'auth' "$out"
+out="$(run "$d" --only auth)"
+expect 'an explicit --only of only real services starts nothing' '<never invoked firebase>' "$out"
+
+# ── FIREBASE_EMULATOR_PROJECT was REMOVED: set, it refuses the launch instead of being silently ignored ─────────
+# It overrode only the suite's id — which the browser cannot see — so whoever still sets it would believe the suite
+# runs under their id while it does not.
+d="$(mkworkspace removed-override '{ "auth": { "port": 9099 } }')"
+export FIREBASE_ARGS_FILE="$d/.firebase-args"; rm -f "$FIREBASE_ARGS_FILE"
+said="$( cd "$d" && PATH="$TMP/bin:$PATH" FIREBASE_EMULATOR_PROJECT=acme-prod bash tools/emulators.sh 2>&1 >/dev/null )"; rc=$?
+expect 'FIREBASE_EMULATOR_PROJECT set: refused (exit 2)' 'rc=2 started=no' "rc=$rc started=$([ -f "$FIREBASE_ARGS_FILE" ] && echo yes || echo no)"
+expect '…saying it was removed' 'FIREBASE_EMULATOR_PROJECT is set ("acme-prod"), but it was REMOVED' "$said"
+expect '…why: one project id, derived from environment.ts' 'must share ONE project id, and both now derive it from environment.ts' "$said"
+expect '…and what to do instead' 'commit the service to the real backend in environment.ts' "$said"
+expect '…or unset it' 'unset FIREBASE_EMULATOR_PROJECT' "$said"
+out="$( cd "$d" && PATH="$TMP/bin:$PATH" FIREBASE_EMULATOR_PROJECT= bash tools/emulators.sh >/dev/null 2>&1; echo "rc=$?" )"
+expect 'set but EMPTY is still set: refused' 'rc=2' "$out"
+
 # ── No emulator block: warn rather than silently fall back into the broken default ──────────────────────────
 d="$(mkworkspace empty '{}')"
 export FIREBASE_ARGS_FILE="$d/.firebase-args"

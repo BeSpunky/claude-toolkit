@@ -39,6 +39,7 @@
 #   bash tools/emulators.sh                  # full suite, cached (import + export)
 #   bash tools/emulators.sh --only auth,ui   # focused, import-only (no export)
 set -euo pipefail
+ORIG_ARGS=("$@")   # how this run was asked for — the restart command repeats it
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -107,21 +108,28 @@ fi
 # REAL id only when environment.ts commits a service to the real backend (EMULATE map), because a real service and
 # the emulated ones must share one id (singleProjectMode) — and the browser follows the same rule from the same file
 # (firebase.config.ts → emulatorProjectId), so the two always agree. The rule, and what it does not cover:
-# tools/emulator-project.mjs. One suite = one project: it follows the PRIMARY app this workspace was wired with.
+# tools/emulator-project.mjs, which EVALUATES environment.ts (never reads it as text): the browser decides from the
+# values the file exports, so the suite does too — and a file that cannot be evaluated is a refusal, never a guess.
+# One suite = one project: it follows the PRIMARY app this workspace was wired with.
 ENV_FILE="$ROOT/{{appEnvPath}}"
-EMU_VARS="$(node "$ROOT/tools/emulator-project.mjs" resolve "$ENV_FILE" demo-{{workspaceName}})" \
-  || { echo "[emulators] could not resolve the emulator project id (tools/emulator-project.mjs) — refusing to guess." >&2; exit 2; }
+resolve_project() { node "$ROOT/tools/emulator-project.mjs" resolve "$ENV_FILE" demo-{{workspaceName}}; }
+EMU_VARS="$(resolve_project)" \
+  || { echo "[emulators] not started: the suite's project id could not be decided (tools/emulator-project.mjs, above)." >&2; exit 2; }
 eval "$EMU_VARS"
 PROJECT="$EMU_PROJECT"
 if [ "$EMU_MODE" = real ]; then
   echo "[emulators] project: $PROJECT — REAL. environment.ts commits ${EMU_REAL_SERVICES//,/, } to the real backend, so the" >&2
   echo "[emulators]   whole suite runs under the real project: anything not emulated, and any code naming the project," >&2
   echo "[emulators]   reaches production with your firebase login. Emulate every service again to run offline (demo-)." >&2
+  echo "[emulators]   ${EMU_REAL_SERVICES//,/, }: NOT emulated — the suite leaves them to the real backend, as the browser does." >&2
+  if [ "$EMU_STORAGE_BUCKET_UNSET" = 1 ]; then
+    echo "[emulators]   environment.ts's firebase block names no storageBucket: under the real id the browser has no default" >&2
+    echo "[emulators]   Storage bucket, and emulated Storage data is not moved to one. Set firebase.storageBucket (firebase apps:sdkconfig WEB)." >&2
+  fi
 else
   echo "[emulators] project: $PROJECT — OFFLINE (demo-): calls to any Google service that is not emulated fail, never reach a real project." >&2
   [ "$PROJECT" = "$EMU_APP_PROJECT" ] || echo "[emulators]   ($EMU_APP_PROJECT, environment.ts's id, is used only when it commits a service to the real backend.)" >&2
 fi
-[ -z "$EMU_UNREAD_SERVICES" ] || echo "[emulators]   could not read environment.ts's default for ${EMU_UNREAD_SERVICES//,/, } (not a literal or EMULATE entry) — taken as emulated." >&2
 
 # Pass through an optional `--only <list>` (the focused targets use it); an EXPLICIT one
 # is also what flips persistence off (see header).
@@ -189,6 +197,26 @@ if [ "$EXPLICIT_ONLY" -eq 0 ]; then
     echo "[emulators] WARNING: no emulators found in firebase.json — starting firebase-tools' own" >&2
     echo "[emulators]   default selection, which may include auto-detected emulators (App Hosting)" >&2
     echo "[emulators]   that can take the whole suite down. Check the 'emulators' block." >&2
+  fi
+fi
+
+# ── A SERVICE COMMITTED TO THE REAL BACKEND IS NOT EMULATED ─────────────────────────────────────────────────────
+# The browser talks to the real backend for it, so an emulator of it would be a second, empty copy that only the
+# emulated code sees: firebase-tools hands emulated Functions FIREBASE_AUTH_EMULATOR_HOST / STORAGE_EMULATOR_HOST
+# whenever those emulators run, and a user signed in with real Auth is then unknown to them. Dropped from every
+# run's list — the derived one and an explicit one alike — so the suite and the browser agree on each service.
+if [ -n "$EMU_REAL_SERVICES" ] && [ "${#ONLY_ARGS[@]}" -gt 0 ]; then
+  KEPT="$(node -e '
+    const real = new Set(process.argv[2].split(","));
+    process.stdout.write(process.argv[1].split(",").filter((n) => n && !real.has(n)).join(","));
+  ' "${ONLY_ARGS[1]}" "$EMU_REAL_SERVICES")"
+  if [ "$KEPT" != "${ONLY_ARGS[1]}" ]; then
+    if [ -z "$KEPT" ]; then
+      echo "[emulators] --only ${ONLY_ARGS[1]}: environment.ts commits all of it to the real backend — nothing is left to emulate." >&2
+      exit 2
+    fi
+    echo "[emulators] not emulating ${EMU_REAL_SERVICES//,/, } (committed to the real backend in environment.ts): starting $KEPT" >&2
+    ONLY_ARGS=(--only "$KEPT")
   fi
 fi
 
@@ -294,7 +322,8 @@ fi
 # (offline: `<demo id>.appspot.com`; real: environment.ts's storageBucket). Data a suite saved under the other mode's
 # bucket — every export from before the offline default — is moved across, so it is never silently out of sight.
 if [ -f "$DATA_DIR/firebase-export-metadata.json" ]; then
-  MOVED="$(node "$ROOT/tools/emulator-project.mjs" align-storage "$DATA_DIR" "$EMU_OTHER_BUCKET" "$EMU_BUCKET")" || MOVED=""
+  # A failure is said by the script itself (and nothing moved); the run goes on, with the data where it was.
+  MOVED="$(node "$ROOT/tools/emulator-project.mjs" align-storage "$DATA_DIR" "$EMU_OTHER_BUCKETS" "$EMU_BUCKET")" || MOVED=""
   [ -z "$MOVED" ] || echo "[emulators] $MOVED" >&2
 fi
 
@@ -520,10 +549,58 @@ request_stop() {
 }
 trap request_stop TERM INT HUP
 
+# ── THE COMMITTED CHOICE MOVED UNDER A RUNNING SUITE ───────────────────────────────────────────────────────────────
+# Flipping a service in environment.ts's EMULATE map hot-reloads the BROWSER at once — onto the real id when a service
+# is now committed real, back onto `demo-` when none is — but this suite's project id (and which services it
+# emulates) were decided at launch, and firebase-tools cannot change them while it runs (singleProjectMode). From that
+# save on, every emulated call the app makes names the other project and fails. So the file is watched, re-evaluated
+# the way launch evaluated it, and a mismatch is said — with the exact command that restarts this stack.
+restart_command() {
+  if [ "$DIRECT" -eq 1 ]; then
+    local args='' a
+    for a in "${ORIG_ARGS[@]}"; do args+=" $(printf '%q' "$a")"; done
+    printf 'cd %q && tools/dev/dev stop firebase --offset=%s && PORT_OFFSET=%s bash tools/emulators.sh%s' "$ROOT" "$OFFSET" "$OFFSET" "$args"
+  else
+    local app
+    app="$(node -e 'try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).app ?? "")); } catch {}' "$RECORD" 2>/dev/null || true)"
+    [ -n "$app" ] || app='<app>'
+    printf 'cd %q && tools/dev/dev stop %s --offset=%s && tools/dev/dev serve %s --port-offset=%s' "$ROOT" "$app" "$OFFSET" "$app" "$OFFSET"
+  fi
+}
+env_stamp() { if [ -f "$ENV_FILE" ]; then stat -c '%y:%s' "$ENV_FILE" 2>/dev/null || echo gone; else echo none; fi; }
+ENV_STAMP="$(env_stamp)"
+ENV_SAID=''
+check_committed_choice() {
+  local stamp vars now said real_now
+  stamp="$(env_stamp)"
+  [ "$stamp" = "$ENV_STAMP" ] && return 0
+  ENV_STAMP="$stamp"
+  if ! vars="$(resolve_project 2>/dev/null)"; then
+    said="environment.ts changed and cannot be evaluated now (run: node tools/emulator-project.mjs resolve $ENV_FILE x) — this suite keeps running under $PROJECT."
+  else
+    now="$(eval "$vars"; printf '%s|%s' "$EMU_PROJECT" "$EMU_REAL_SERVICES")"
+    if [ "$now" = "$PROJECT|$EMU_REAL_SERVICES" ]; then
+      [ -n "$ENV_SAID" ] && echo "[emulators] environment.ts is back in step with this suite ($PROJECT) — no restart needed." >&2
+      ENV_SAID=''
+      return 0
+    fi
+    real_now="${now#*|}"
+    said="environment.ts now commits ${real_now//,/, } to the real backend — the app runs under ${now%%|*}, but this suite was started under $PROJECT${EMU_REAL_SERVICES:+ with ${EMU_REAL_SERVICES//,/, } real}. Until it restarts, the app's emulated calls name the other project and fail."
+    [ -n "$real_now" ] || said="environment.ts now emulates every service — the app runs under ${now%%|*}, but this suite was started under $PROJECT${EMU_REAL_SERVICES:+ with ${EMU_REAL_SERVICES//,/, } real}. Until it restarts, the app's emulated calls name the other project and fail."
+  fi
+  [ "$said" = "$ENV_SAID" ] && return 0
+  ENV_SAID="$said"
+  echo "[emulators] RESTART NEEDED: $said" >&2
+  echo "[emulators]   Ctrl+C here and start it again, or from any terminal: $(restart_command)" >&2
+}
+
 # Waiting for the keeper: past its own deadline it ends the suite itself, so this wait is bounded by it (plus the
 # few seconds the keeper takes to record that).
+TICK=0
 while is_proc "$KEEPER_PID" "$KEEPER_START"; do
   nap 0.5
+  TICK=$((TICK + 1))
+  [ "$STOPPING" -eq 0 ] && [ $((TICK % 4)) -eq 0 ] && check_committed_choice
   if [ "$STOPPING" -eq 1 ]; then
     elapsed=$(( $(date +%s) - STOP_SINCE ))
     if [ "$elapsed" -ge $((STOP_TIMEOUT + 30)) ]; then

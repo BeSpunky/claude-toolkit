@@ -17,7 +17,8 @@
 //      SANDBOX values from `.secret.sandbox.local`. A sandbox value equal to ANY production value — of any key, in
 //      this tree's `.secret.local` or the main worktree's — is refused (the check catches exact copies only).
 //   3. A SINK. tools/emulators.sh points Secret Manager at an address that cannot resolve (CLOUD_SECRET_MANAGER_URL,
-//      firebase-tools' own origin override, undocumented — so `place` checks the INSTALLED firebase-tools honours it).
+//      firebase-tools' own origin override, undocumented — so `place` checks the INSTALLED firebase-tools honours it,
+//      by making the emulator's own Secret Manager call against a local listener: `sinkHonoured`).
 //
 // FIREBASE'S RULES, NOT OURS. Every file is read with firebase-tools' own dotenv semantics (a port of
 // lib/functions/env.js, checked against the real one by tools/test-firebase-tools on every firebase-tools bump):
@@ -111,6 +112,95 @@ function parseStrict(data) {
   if (bad.length) throw new Error(`Validation failed: ${bad.join(', ')}`);
   return envs;
 }
+
+// ── no reinterpretation: a value means what it says ─────────────────────────────────────────────────────────────
+// Firebase's dotenv REINTERPRETS text: it cuts a value at an unquoted `#`, strips quotes, decodes escapes in double
+// quotes, drops `export`. Where that changes what a line says, a reader (a developer, a reviewer, the push that used
+// to send the raw text) can take the line to mean something Firebase does not — and a production secret is then set
+// to a prefix of itself, or to a value with its quotes stripped, with no error anywhere. So a value is accepted only
+// when Firebase's reading of it IS its text: bare when it can be (no `#`, no edge quote, no edge whitespace, one
+// line), quoted only when it must be, and then literally (no escape Firebase would decode, nothing after the closing
+// quote). Anything else is refused by key, with the shape to write instead — never reinterpreted. Values are never
+// printed: a shape shows where the value goes, not the value.
+
+/** A value may be written bare only when Firebase reads exactly that text back, and nothing about it looks quoted. */
+const bareable = (value) => value !== '' && value === value.trim() && !/[#\r\n]/.test(value) && !/^["'`]|["'`]$/.test(value);
+
+/** How `value` can be written so Firebase reads back exactly its text: 'bare', 'single', 'double', or '' (cannot). */
+function spellingOf(value) {
+  if (value === '' || bareable(value)) return 'bare';
+  if (!value.includes("'") && parse(`K='${value}'\n`).envs.K === value) return 'single';
+  if (!/["\\]/.test(value) && parse(`K="${value}"\n`).envs.K === value) return 'double';
+  return '';
+}
+
+/** The line to write for a value, with the value itself elided — or how to set it when no line can carry it. */
+function shapeFor(key, value) {
+  const how = spellingOf(value);
+  if (how === 'bare') return `${key}=<value>`;
+  if (how === 'single') return `${key}='<value>'  (single quotes, nothing after them)`;
+  if (how === 'double') return `${key}="<value>"  (double quotes, nothing after them)`;
+  return `no line can carry this value unambiguously — set it directly: firebase functions:secrets:set ${key}`;
+}
+
+/**
+ * Every entry of a dotenv text whose value Firebase would read as something other than what is written — each with
+ * why, and the shape to write for each thing it may have meant. Empty when the file says exactly what it means.
+ */
+function ambiguities(data) {
+  const re = new RegExp(LINE_SOURCE, 'gms');
+  data = data.replace(/\r\n?/, '\n'); // as parse() does
+  const out = [];
+  let match;
+  while ((match = re.exec(data))) {
+    const [whole, key, raw = ''] = match;
+    const value = parse(whole).envs[key] ?? '';
+    const rawEnd = whole.indexOf(raw, whole.indexOf('=') + 1) + raw.length;
+    const comment = whole.slice(rawEnd).trim(); // what the regex took as a `# …` comment
+    const written = raw.trim();
+    const quoted = /^(["'])([\s\S]*)\1$/.exec(written);
+    const meant = [];
+    let why = '';
+    if (comment.startsWith('#')) {
+      if (!quoted && raw !== '' && !/\s$/.test(raw)) {
+        why = 'an unquoted # — Firebase cuts the value there, and would push only what precedes it';
+        meant.push(['if the # and what follows are part of the value', `${raw}${whole.slice(rawEnd)}`.trim()]);
+      } else {
+        why = 'a # comment on the value line — Firebase drops it, but it reads as part of the value';
+        if (!quoted) meant.push(['if the # and what follows are part of the value', `${raw}${whole.slice(rawEnd)}`.trim()]);
+      }
+      meant.push(['if it is a note, put the note on a line of its own and write', value]);
+    } else if (quoted && quoted[2] !== value) {
+      why = 'escape sequences Firebase decodes (\\n, \\", \\\\ …) — the pushed value would differ from the text';
+      meant.push(['for the decoded value', value], ['if the backslashes are part of the value', quoted[2]]);
+    } else if (quoted && value.includes(quoted[1])) {
+      why = `an escaped ${quoted[1]} inside ${quoted[1]}-quotes — Firebase keeps the backslash`;
+      meant.push(['for the value as Firebase reads it', value], ['without the backslash', value.split(`\\${quoted[1]}`).join(quoted[1])]);
+    } else if (quoted && spellingOf(value) === 'bare') {
+      why = 'quotes Firebase strips — they are not part of the value it pushes';
+      meant.push(['for the value without the quotes', value], ['if the quotes are part of the value', written]);
+    } else if (!quoted && written !== value) {
+      why = 'quoting Firebase does not read as written';
+      meant.push(['for what Firebase reads', value]);
+    } else if (!quoted && /^["'`]|["'`]$/.test(written)) {
+      why = 'a stray or unbalanced quote — it reads as an unfinished quoted value';
+      meant.push(['if the quote is part of the value', value]);
+    }
+    if (/^\s*export\b/.test(whole)) {
+      if (why) why += '; and the line starts with `export`, which Firebase drops';
+      else {
+        why = '`export` — Firebase drops it, and pushes the key without it';
+        meant.push(['without export', value]);
+      }
+    }
+    if (why) out.push({ key, why, write: meant.map(([when, v]) => `${when}: ${shapeFor(key, v)}`) });
+  }
+  return out;
+}
+
+/** The refusal for a set of ambiguities, one block per key — keys and shapes only, never a value. */
+const describeAmbiguities = (found) =>
+  found.map(({ key, why, write }) => `  ${key}: ${why}.\n${write.map((w) => `      ${w}`).join('\n')}`).join('\n');
 
 /** One KEY="value" line — always double-quoted and escaped, so any value round-trips through `parse`. */
 const formatLine = (key, value) => `${key}="${value.replace(/[\n\r\t\v\\'"]/g, (c) => ESCAPE[c])}"`;
@@ -217,6 +307,51 @@ function firebaseTools(rel) {
   }
 }
 
+/**
+ * Does the INSTALLED firebase-tools send the emulator's Secret Manager fetch where CLOUD_SECRET_MANAGER_URL says?
+ * Asked the way the emulator meets it: in a fresh process, the variable set BEFORE firebase-tools loads (its Secret
+ * Manager client captures the origin at module load — lib/gcp/secretManager.js), then the emulator's own call
+ * (`accessSecretVersion`) against a local listener. Isolated so it can dial nothing else: a throwaway access token,
+ * an empty config home (no `firebase login` is read), no proxy, no ADC. Returns { ok } or { ok: false, why }.
+ */
+function sinkHonoured(cwd) {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const probe = `
+    const http = require('node:http');
+    let hit = '';
+    const srv = http.createServer((req, res) => { hit = req.method + ' ' + req.url; res.writeHead(404, { 'content-type': 'application/json' }); res.end('{}'); });
+    srv.listen(0, '127.0.0.1', async () => {
+      process.env.CLOUD_SECRET_MANAGER_URL = 'http://127.0.0.1:' + srv.address().port;
+      const ft = (rel) => require(require.resolve('firebase-tools/' + rel, { paths: [process.argv[1]] }));
+      try {
+        ft('lib/apiv2').setAccessToken('bespunky-sink-probe');
+        await ft('lib/gcp/secretManager').accessSecretVersion('demo-sink-probe', 'PROBE', 'latest').catch(() => {});
+      } catch (e) {
+        process.stdout.write('LOAD ' + (e && e.message));
+        process.exit(0);
+      }
+      srv.close();
+      process.stdout.write('HIT ' + hit);
+      process.exit(0);
+    });`;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sink-probe-'));
+  const env = { ...process.env, XDG_CONFIG_HOME: home };
+  for (const k of ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'GOOGLE_APPLICATION_CREDENTIALS', 'FIREBASE_TOKEN', 'CLOUD_SECRET_MANAGER_URL']) delete env[k];
+  try {
+    const r = spawnSync(process.execPath, ['-e', probe, cwd], { env, encoding: 'utf8', timeout: 20000 });
+    const out = r.stdout ?? '';
+    if (out === 'HIT GET /v1/projects/demo-sink-probe/secrets/PROBE/versions/latest:access') return { ok: true };
+    if (out.startsWith('LOAD ')) return { ok: false, why: `could not load the installed firebase-tools to check it (${out.slice(5)})` };
+    return {
+      ok: false,
+      why: `the installed firebase-tools does not send the emulator's Secret Manager fetch to CLOUD_SECRET_MANAGER_URL (${out ? `probe: ${out}` : r.error ? r.error.message : 'nothing reached it'})`,
+    };
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 /** `show`: the functions emulator is part of this run — the banner is printed and the sink checked only then. */
 function place({ mode, source, dist, mainSource, projectMode, show }) {
   const say = (line) => show && console.error(`[emulators] ${line}`);
@@ -232,8 +367,25 @@ function place({ mode, source, dist, mainSource, projectMode, show }) {
   for (const file of prodFiles) {
     for (const v of [...Object.values(readEnvs(file)), ...Object.values(readRaw(file))]) if (filled(v)) prodValues.add(v);
   }
-  const sandboxFile = readEnvs(path.join(source, '.secret.sandbox.local'));
+  const sandboxPath = path.join(source, '.secret.sandbox.local');
+  const sandboxFile = readEnvs(sandboxPath);
   const sandbox = mode === 'sandbox' ? sandboxFile : {};
+  if (mode === 'sandbox') {
+    // The same rule push-secrets applies to production: a live value means exactly what its line says, or nothing
+    // is launched with it.
+    let found = [];
+    try {
+      found = ambiguities(fs.readFileSync(sandboxPath, 'utf8'));
+    } catch {
+      // absent — the mode check in tools/emulators.sh already refused a sandbox run without the file
+    }
+    if (found.length) {
+      fail(
+        `.secret.sandbox.local: ${found.length} value(s) Firebase would read as something other than what is written — ` +
+          `refusing to launch with them live:\n${describeAmbiguities(found)}\n[emulators]   Or disarm the sandbox for this run: EMULATOR_SECRETS=inert.`,
+      );
+    }
+  }
   const bundled = bundledSecrets(dist);
 
   const declared = [...new Set([...Object.keys(example), ...prodKeys, ...Object.keys(sandboxFile), ...bundled])].sort();
@@ -289,16 +441,13 @@ function place({ mode, source, dist, mainSource, projectMode, show }) {
     );
   }
 
-  // The sink is an undocumented firebase-tools knob: check the INSTALLED one honours it. Offline, the project id is
-  // the guarantee and the sink only depth; under the real id the sink is what stands between a missing value and
-  // production, so a firebase-tools that ignores it is a refusal.
-  const api = show ? firebaseTools('lib/api') : undefined;
-  const origin = typeof api?.secretManagerOrigin === 'function' ? api.secretManagerOrigin() : undefined;
-  if (show && origin !== SINK) {
-    const why =
-      origin === undefined
-        ? 'could not load the installed firebase-tools to check it'
-        : `the installed firebase-tools ignores CLOUD_SECRET_MANAGER_URL (Secret Manager origin: ${origin})`;
+  // The sink is an undocumented firebase-tools knob: check the INSTALLED one honours it — where it matters, not
+  // through a getter: `sinkHonoured` makes the very call the emulator makes for a missing secret and sees where it
+  // dials. Offline, the project id is the guarantee and the sink only depth; under the real id the sink is what
+  // stands between a missing value and production, so a firebase-tools that ignores it is a refusal.
+  const sink = show ? sinkHonoured(process.cwd()) : { ok: true };
+  if (show && !sink.ok) {
+    const why = sink.why;
     if (projectMode === 'real') {
       fail(
         `${why} — so under the REAL project id a secret missing from the placeholders would be fetched from production. ` +
@@ -344,14 +493,15 @@ function place({ mode, source, dist, mainSource, projectMode, show }) {
   else if (Object.keys(env).length) say('params: .env as-is (production values) — aim any at a test target in .env.local (emulator-only).');
 }
 
-module.exports = { parse, parseStrict, keyProblem, formatLine, bundledSecrets, inertSecretsPlugin, place, SINK, CONFIG_DIR_SINCE };
+module.exports = { parse, parseStrict, keyProblem, formatLine, ambiguities, spellingOf, bundledSecrets, inertSecretsPlugin, place, sinkHonoured, SINK, CONFIG_DIR_SINCE };
 
 // ── 3. the production push (tools/push-secrets.sh) ───────────────────────────────────────────────────────────────
 /**
  * The values tools/push-secrets.sh sets in Secret Manager — read from `.secret.local` with the SAME rules as everything
- * above (firebase-tools' dotenv semantics), so `KEY="v" # note` pushes `v`, never `"v" # note`, and `export KEY=v`
- * pushes KEY. Refuses the whole file (exit 2) on a line that is not KEY=VALUE or a key Firebase refuses — a push is
- * production, so nothing is half-pushed on a guess. Unfilled values (empty, `PASTE_…`) are skipped, by name.
+ * above (firebase-tools' dotenv semantics) — and refused wherever those semantics would change what a line says (see
+ * `ambiguities`: an unquoted `#`, quotes or escapes Firebase strips, `export`). Refuses the whole file (exit 2) on such
+ * a value, on a line that is not KEY=VALUE, or on a key Firebase refuses — a push is production, so nothing is pushed
+ * with a meaning the developer did not write, and nothing half-pushed. Unfilled values (empty, `PASTE_…`) are skipped.
  * Writes NUL-separated `key, value` pairs to stdout for the shell to pipe into the CLI; never prints a value.
  */
 function pushEntries(file) {
@@ -378,6 +528,14 @@ function pushEntries(file) {
     );
     process.exit(2);
   }
+  const found = ambiguities(text);
+  if (found.length) {
+    console.error(
+      `[push-secrets] ${found.length} value(s) in ${file} would be pushed as something other than what is written — ` +
+        `refusing to push anything. Rewrite each as shown (values are not printed):\n${describeAmbiguities(found)}`,
+    );
+    process.exit(2);
+  }
   const out = [];
   for (const [key, value] of Object.entries(envs)) {
     if (value === '' || value.startsWith('PASTE_')) {
@@ -389,11 +547,15 @@ function pushEntries(file) {
   process.stdout.write(out.map((x) => `${x}\0`).join(''));
 }
 
-/** What a dry run shows for one value: its length, a fingerprint, and its edges — enough to spot a stray quote or comment. */
+/**
+ * What a dry run shows for one value: its LENGTH CLASS, nothing else. A dry run lands in transcripts and CI logs, so no
+ * part of a value (edges) and nothing derived from it alone (a hash — an offline oracle for a short secret) is shown;
+ * a stray quote or comment no longer needs eyeballing, because `ambiguities` refuses it before anything is shown.
+ */
 function describeValue(value) {
-  const hash = require('node:crypto').createHash('sha256').update(value).digest('hex').slice(0, 12);
-  const edge = value.length > 8 ? `${JSON.stringify(value.slice(0, 3))}…${JSON.stringify(value.slice(-2))}` : '(short: edges hidden)';
-  return `${value.length} chars, sha256 ${hash}, ${edge}`;
+  const n = [...value].length;
+  const cls = n < 8 ? 'under 8' : n < 16 ? '8–15' : n < 32 ? '16–31' : n < 64 ? '32–63' : '64 or more';
+  return `${cls} characters`;
 }
 
 module.exports.pushEntries = pushEntries;

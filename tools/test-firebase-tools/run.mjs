@@ -7,18 +7,26 @@
 //   1. tools/emulator-secrets.cjs's PORT of firebase-tools' dotenv parser (lib/functions/env.js) agrees with the real
 //      one — parse, the key rules, the strict parse — over a corpus of awkward files. The port decides what is a
 //      production copy and what the emulator can be given; if it drifts, both decisions drift silently.
-//   2. CLOUD_SECRET_MANAGER_URL — an undocumented origin override (lib/api.js secretManagerOrigin) — still moves the
-//      Secret Manager origin. It is the sink under the emulator; a rename would quietly remove it.
+//   2. CLOUD_SECRET_MANAGER_URL — an undocumented origin override — still moves WHERE THE EMULATOR'S SECRET MANAGER
+//      FETCH DIALS. Not a getter (lib/api.js secretManagerOrigin): lib/gcp/secretManager.js captures the origin into a
+//      module-level client when it loads, so the check is the launch's own (tools/emulator-secrets.cjs sinkHonoured):
+//      a fresh process, the variable set before firebase-tools loads, the emulator's own `accessSecretVersion` call
+//      against a local listener — which must receive it.
 //   3. END TO END: the real Functions emulator, under the house's offline `demo-` project id, with firebase.json's
 //      `configDir` and the inert file the house places: a function sees the PLACEHOLDER for its declared secret and the
-//      `.env.local` param value; a secret the placeholders miss is NOT served (fetched against a project that cannot
-//      exist, through the sink); firebase-tools announces the demo project. This is the guarantee as a user meets it.
+//      `.env.local` param value; a secret the placeholders miss is NOT served; firebase-tools announces the demo
+//      project — and, every outbound request routed through a recording proxy, NO request reaches a Google API.
+//   4. THE SINK UNDER A REAL ID, where it is load-bearing: the same emulator under a non-`demo-` id, with a (fake)
+//      login so firebase-tools gets past auth and really dials. The missed secret's fetch goes to the house's sink
+//      host, and nothing is sent to secretmanager.googleapis.com. (Without a login firebase-tools fails at auth before
+//      dialling anything — which is why a check without one proves nothing.)
 //
 //   node tools/test-firebase-tools/run.mjs            (FIREBASE_TOOLS_CACHE=<dir> to reuse an install; KEEP=1 keeps the project)
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createServer } from 'node:net';
+import http from 'node:http';
+import { createConnection, createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -101,11 +109,9 @@ for (const value of ['plain', 'with "quotes" and \'apos\'', 'nl\nand\ttab', 'bac
 }
 
 // ── 2. the sink ──────────────────────────────────────────────────────────────────────────────────────────────────
-console.log('\n2. CLOUD_SECRET_MANAGER_URL (lib/api.js secretManagerOrigin)');
-process.env.CLOUD_SECRET_MANAGER_URL = port.SINK;
-const api = req('firebase-tools/lib/api');
-ok('secretManagerOrigin() honours CLOUD_SECRET_MANAGER_URL', api.secretManagerOrigin?.() === port.SINK, String(api.secretManagerOrigin?.()));
-delete process.env.CLOUD_SECRET_MANAGER_URL;
+console.log('\n2. CLOUD_SECRET_MANAGER_URL moves where the emulator\'s Secret Manager fetch dials (module-load capture)');
+const sink = port.sinkHonoured(CACHE);
+ok('accessSecretVersion, in a fresh process, dials the listener CLOUD_SECRET_MANAGER_URL names', sink.ok, sink.why);
 
 // ── 3. end to end: the real Functions emulator under the offline id ──────────────────────────────────────────────
 console.log('\n3. the real Functions emulator, offline id, configDir, the placed inert file');
@@ -151,16 +157,51 @@ execFileSync(process.execPath, [join(work, 'tools/emulator-secrets.cjs'), 'place
 const placed = readFileSync(join(dist, '.secret.local'), 'utf8');
 ok('the placed file passes the real strict parser', (() => { try { return real.parseStrict(placed).S1 === 'EMULATOR_INERT_S1'; } catch { return false; } })(), placed);
 
-const log = join(project, 'emulator.log');
-const child = spawn(process.execPath, [req.resolve('firebase-tools/lib/bin/firebase.js'), 'emulators:start', '--only', 'functions', '--project', 'demo-tripwire', '--debug'], {
-  cwd: project,
-  env: { ...process.env, CLOUD_SECRET_MANAGER_URL: port.SINK },
-  stdio: ['ignore', 'pipe', 'pipe'],
-  detached: true,
+// Every outbound request the emulator makes through firebase-tools' HTTP client goes through this recording proxy
+// (HTTPS_PROXY): loopback is relayed, anything else is RECORDED and refused — so "nothing leaves" is observed, not
+// assumed, and nothing does leave. It also answers a fake login's token exchange (part 4), as the token endpoint.
+const loopback = (host) => /^(127\.|localhost$|\[?::1\]?$)/.test(host);
+const left = [];
+const recorder = http.createServer((rq, rs) => {
+  if (/^https?:\/\//.test(rq.url)) {
+    const u = new URL(rq.url);
+    if (!loopback(u.hostname)) {
+      left.push(u.host);
+      rs.writeHead(403);
+      return rs.end();
+    }
+    const fwd = http.request({ host: u.hostname, port: u.port || 80, path: u.pathname + u.search, method: rq.method, headers: rq.headers }, (r) => {
+      rs.writeHead(r.statusCode, r.headers);
+      r.pipe(rs);
+    });
+    fwd.on('error', () => rs.destroy());
+    return rq.pipe(fwd);
+  }
+  if (rq.url.startsWith('/oauth2/v3/token')) {
+    rs.writeHead(200, { 'content-type': 'application/json' });
+    return rs.end(JSON.stringify({ access_token: 'tripwire-fake-access-token', expires_in: 3600, token_type: 'Bearer' }));
+  }
+  rs.writeHead(404);
+  rs.end();
 });
-let output = '';
-child.stdout.on('data', (d) => (output += d));
-child.stderr.on('data', (d) => (output += d));
+recorder.on('connect', (rq, sock) => {
+  const [host, p] = rq.url.split(/:(?=\d+$)/);
+  if (!loopback(host)) {
+    left.push(rq.url);
+    return sock.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+  }
+  const up = createConnection(Number(p), host, () => {
+    sock.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    up.pipe(sock);
+    sock.pipe(up);
+  });
+  up.on('error', () => sock.destroy());
+  sock.on('error', () => up.destroy());
+});
+await new Promise((r) => recorder.listen(0, '127.0.0.1', r));
+const proxy = `http://127.0.0.1:${recorder.address().port}`;
+const configHome = mkdtempSync(join(tmpdir(), 'fbt-config-')); // no `firebase login` of whoever runs this is read
+
 const until = async (cond, ms) => {
   for (const end = Date.now() + ms; Date.now() < end; ) {
     if (cond()) return true;
@@ -168,34 +209,74 @@ const until = async (cond, ms) => {
   }
   return false;
 };
+/** Start the real emulator under `projectId`, run `checks(call, output)`, stop it; the log is kept beside the project. */
+async function withEmulator(projectId, extraEnv, checks) {
+  const env = { ...process.env, CLOUD_SECRET_MANAGER_URL: port.SINK, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, XDG_CONFIG_HOME: configHome, ...extraEnv };
+  for (const k of ['https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'GOOGLE_APPLICATION_CREDENTIALS', ...(extraEnv.FIREBASE_TOKEN ? [] : ['FIREBASE_TOKEN'])]) delete env[k];
+  const child = spawn(process.execPath, [req.resolve('firebase-tools/lib/bin/firebase.js'), 'emulators:start', '--only', 'functions', '--project', projectId, '--debug'], {
+    cwd: project,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+  });
+  let output = '';
+  child.stdout.on('data', (d) => (output += d));
+  child.stderr.on('data', (d) => (output += d));
+  try {
+    const up = await until(() => /All emulators ready/.test(output), 120000);
+    ok(`${projectId}: the emulator came up`, up, output.slice(-1500));
+    if (up) {
+      const call = async (fn) => {
+        const r = await fetch(`http://127.0.0.1:${fnPort}/${projectId}/us-central1/${fn}`);
+        return r.ok ? r.json() : { status: r.status, body: await r.text() };
+      };
+      await checks(call, () => output);
+    }
+  } finally {
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {}
+    await until(() => child.exitCode !== null || child.signalCode !== null, 15000);
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {}
+    writeFileSync(join(project, `emulator-${projectId}.log`), output);
+  }
+}
+
 try {
-  const up = await until(() => /All emulators ready/.test(output), 120000);
-  ok('the emulator came up', up, output.slice(-1500));
-  if (up) {
-    ok('firebase-tools announces the demo project', /Detected demo project ID "demo-tripwire"/.test(output));
-    const call = async (fn) => {
-      const r = await fetch(`http://127.0.0.1:${fnPort}/demo-tripwire/us-central1/${fn}`);
-      return r.ok ? r.json() : { status: r.status, body: await r.text() };
-    };
+  await withEmulator('demo-tripwire', {}, async (call, output) => {
+    ok('firebase-tools announces the demo project', /Detected demo project ID "demo-tripwire"/.test(output()));
     const declared = await call('declared');
     ok('a declared secret is the inert placeholder, not production', declared.S1 === 'EMULATOR_INERT_S1', JSON.stringify(declared));
     ok('.env.local overrides .env through configDir', declared.CHAT === '-100test', JSON.stringify(declared));
     const missed = await call('missed');
     ok('a secret the placeholders miss is not served', !missed.S2, JSON.stringify(missed));
-    await until(() => /Unable to access secret/.test(output), 15000);
-    ok('…its Secret Manager fetch failed, in the log', /Unable to access secret/.test(output), output.slice(-2500));
-    // (Where the fetch went is part 2's check: without a login — CI — firebase-tools fails before it dials anything.)
-    ok('…and never at secretmanager.googleapis.com', !/secretmanager\.googleapis\.com/.test(output), output.slice(-2500));
-  }
+    await until(() => /Unable to access secret/.test(output()), 15000);
+    ok('…its Secret Manager fetch failed, in the log', /Unable to access secret/.test(output()), output().slice(-2500));
+    // firebase-tools' own housekeeping does try to leave (an update check at registry.npmjs.org, its public config at
+    // firebase-public.firebaseio.com, google-auth's metadata-server probe) — none addresses a project. What must never
+    // leave is a call to a Google API (*.googleapis.com), where a project's data lives.
+    ok('…and NO request went to a Google API (every outbound attempt is recorded by the proxy)', !left.some((h) => /googleapis\.com/.test(h)), left.join(', '));
+    console.log(`         (outbound attempts, all refused by the proxy: ${left.join(', ') || 'none'})`);
+  });
+
+  console.log('\n4. the sink under a REAL id (a fake login, so firebase-tools really dials)');
+  left.length = 0;
+  const realId = 'bespunky-tripwire-sink';
+  await withEmulator(realId, { FIREBASE_TOKEN: 'tripwire-fake-refresh-token', FIREBASE_TOKEN_URL: proxy }, async (call, output) => {
+    const missed = await call('missed');
+    ok('a secret the placeholders miss is not served', !missed.S2, JSON.stringify(missed));
+    const sinkHost = `${new URL(port.SINK).hostname}:443`;
+    await until(() => left.includes(sinkHost), 15000);
+    ok(`…its Secret Manager fetch dialled the house's sink (${sinkHost})`, left.includes(sinkHost), `outbound attempts: ${left.join(', ') || 'none'}`);
+    ok('…and nothing was sent to secretmanager.googleapis.com', !left.some((h) => /secretmanager\.googleapis\.com/.test(h)), left.join(', '));
+    ok('…the declared secret is still the placeholder', (await call('declared')).S1 === 'EMULATOR_INERT_S1');
+    console.log(`         (outbound attempts, all refused by the proxy: ${left.join(', ') || 'none'})`);
+  });
 } finally {
-  try {
-    process.kill(-child.pid, 'SIGTERM');
-  } catch {}
-  await until(() => child.exitCode !== null || child.signalCode !== null, 15000);
-  try {
-    process.kill(-child.pid, 'SIGKILL');
-  } catch {}
-  writeFileSync(log, output);
+  recorder.close();
+  rmSync(configHome, { recursive: true, force: true });
   if (!process.env.KEEP) rmSync(project, { recursive: true, force: true });
   rmSync(work, { recursive: true, force: true });
 }

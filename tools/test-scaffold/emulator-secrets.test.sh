@@ -118,18 +118,29 @@ ok 'worktree: no main-worktree borrowing'               "$(yes_if '! placed "$WT
 ok 'worktree: bundle secret still inert'                "$(yes_if '[ "$(value_of "$WT" WEBHOOK_SECRET)" = EMULATOR_INERT_WEBHOOK_SECRET ]')"
 
 # ── Sandbox: the file is the opt-in; production-equal values are refused ─────────────────────────
-# R2-1: an inline comment, other quoting, or a production value under ANOTHER key are all still production's.
+# A sandbox value is LIVE, so it means exactly what its line says or the run is refused — the rule push-secrets
+# applies to production, from the same parser: an inline comment, quotes Firebase strips, an unquoted #.
 cat > "$MAIN/$FN/.secret.sandbox.local" <<'EOF'
 BOT_TOKEN=sandbox-bot   # the test bot
 STRIPE_KEY="sk_live_prod" #x
-PAY_KEY='prod-bot-token'
-TG_TOKEN="tg \"quoted\" # not a comment"
+PAY_KEY=sbx#k3y
+EOF
+rc="$(rc_of "$MAIN")"; out="$(launch "$MAIN")"
+ok 'ambiguous sandbox values refuse the launch (exit 2)' "$(yes_if '[ "$rc" = 2 ]')"
+ok '…naming each key with the shape to write'           "$(yes_if '[[ "$out" == *"BOT_TOKEN: a # comment"* && "$out" == *"STRIPE_KEY: a # comment"* && "$out" == *"PAY_KEY: an unquoted #"*"PAY_KEY='"'"'<value>'"'"'"* ]]')"
+ok '…and printing no value'                             "$(yes_if '[[ "$out" != *sandbox-bot* && "$out" != *sk_live* && "$out" != *k3y* ]]')"
+# R2-1: a production value under ANOTHER key, or in another (unambiguous) spelling, is still production's.
+cat > "$MAIN/$FN/.secret.sandbox.local" <<'EOF'
+BOT_TOKEN=sandbox-bot
+STRIPE_KEY=sk_live_prod
+PAY_KEY=prod-bot-token
+TG_TOKEN='tg "quoted" # not a comment'
 EOF
 out="$(launch "$MAIN")"
 ok 'sandbox file arms the run, loudly'                  "$(yes_if '[[ "$out" == *"secrets: SANDBOX"*"BOT_TOKEN"*"WILL reach real services"* ]]')"
 ok 'sandbox value is placed, as firebase parses it'     "$(yes_if '[ "$(value_of "$MAIN" BOT_TOKEN)" = sandbox-bot ]')"
-ok 'quoted value with escapes round-trips'              "$(yes_if '[ "$(value_of "$MAIN" TG_TOKEN)" = "tg \"quoted\" # not a comment" ]')"
-ok 'quoted + commented production copy refused'         "$(yes_if '[[ "$out" == *"REFUSED"*"STRIPE_KEY"* ]] && [ "$(value_of "$MAIN" STRIPE_KEY)" = EMULATOR_INERT_STRIPE_KEY ]')"
+ok 'a quoted value with # and quotes round-trips'       "$(yes_if '[ "$(value_of "$MAIN" TG_TOKEN)" = "tg \"quoted\" # not a comment" ]')"
+ok 'a production copy refused'                          "$(yes_if '[[ "$out" == *"REFUSED"*"STRIPE_KEY"* ]] && [ "$(value_of "$MAIN" STRIPE_KEY)" = EMULATOR_INERT_STRIPE_KEY ]')"
 ok 'production value under another key refused'         "$(yes_if '[[ "$out" == *"REFUSED"*"PAY_KEY"* ]] && [ "$(value_of "$MAIN" PAY_KEY)" = EMULATOR_INERT_PAY_KEY ]')"
 ok 'keys absent from sandbox stay inert'                "$(yes_if '[ "$(value_of "$MAIN" WEBHOOK_SECRET)" = EMULATOR_INERT_WEBHOOK_SECRET ]')"
 ok 'the refusal says it catches exact copies only'      "$(yes_if '[[ "$out" == *"Only exact copies"* ]]')"
@@ -156,13 +167,18 @@ ok 'auth-only run prints no secrets banner'             "$(yes_if '[[ "$out" != 
 
 # ── The installed firebase-tools is checked, not assumed ───────────────────────────────────────────
 FT="$MAIN/node_modules/firebase-tools"
-mkdir -p "$FT/lib/functions"
-fake_ft() {   # fake_ft <version> <secretManagerOrigin expr> <parseStrict body>
+mkdir -p "$FT/lib/functions" "$FT/lib/gcp"
+# The launch check makes the emulator's own Secret Manager call (lib/gcp/secretManager accessSecretVersion) and sees
+# where it dials — so the fake mirrors the real module: its client's origin is CAPTURED AT MODULE LOAD. (Port 9 on
+# loopback stands for "somewhere other than the sink": nothing listens there, nothing leaves the machine.)
+fake_ft() {   # fake_ft <version> <origin expr, evaluated at module load> <parseStrict body>
   printf '{ "name": "firebase-tools", "version": "%s" }\n' "$1" > "$FT/package.json"
-  printf 'exports.secretManagerOrigin = () => %s;\n' "$2" > "$FT/lib/api.js"
+  printf 'exports.secretManagerOrigin = () => process.env.CLOUD_SECRET_MANAGER_URL || "http://127.0.0.1:9";\n' > "$FT/lib/api.js"
+  printf 'exports.setAccessToken = () => {};\n' > "$FT/lib/apiv2.js"
+  printf 'const origin = %s;\nexports.accessSecretVersion = (p, n, v) => fetch(`${origin}/v1/projects/${p}/secrets/${n}/versions/${v}:access`).then((r) => r.json());\n' "$2" > "$FT/lib/gcp/secretManager.js"
   printf 'exports.parseStrict = (d) => { %s };\n' "$3" > "$FT/lib/functions/env.js"
 }
-SINK_OK='process.env.CLOUD_SECRET_MANAGER_URL || "https://secretmanager.googleapis.com"'
+SINK_OK='process.env.CLOUD_SECRET_MANAGER_URL || "http://127.0.0.1:9"'
 REAL_PARSE='return require(process.cwd() + "/tools/emulator-secrets.cjs").parseStrict(d);'
 fake_ft 15.32.1 "$SINK_OK" "$REAL_PARSE"
 ok 'a firebase-tools that honours the sink: launches'   "$(yes_if '[ "$(rc_of "$MAIN")" -eq 0 ]')"
@@ -172,9 +188,11 @@ fake_ft 15.32.1 "$SINK_OK" 'return {};'
 ok 'placed file does not round-trip: exit 2'            "$(yes_if '[ "$(rc_of "$MAIN")" -eq 2 ]')"
 fake_ft 15.20.0 "$SINK_OK" "$REAL_PARSE"
 ok 'firebase-tools below configDir support: exit 2'     "$(yes_if '[ "$(rc_of "$MAIN")" -eq 2 ] && [[ "$(launch "$MAIN")" == *"functions.configDir"* ]]')"
-fake_ft 15.32.1 '"https://secretmanager.googleapis.com"' "$REAL_PARSE"
+# The blind spot of a getter check: lib/api.js still honours the variable, but the client was built with a fixed
+# origin when the module loaded — the fetch goes elsewhere. Only dialling shows it.
+fake_ft 15.32.1 '"http://127.0.0.1:9"' "$REAL_PARSE"
 out="$(launch "$MAIN")"
-ok 'sink ignored, offline: launches, says so'           "$(yes_if '[ "$(rc_of "$MAIN")" -eq 0 ] && [[ "$out" == *"ignores CLOUD_SECRET_MANAGER_URL"* ]]')"
+ok 'sink ignored where it dials (getter honours it), offline: launches, says so' "$(yes_if '[ "$(rc_of "$MAIN")" -eq 0 ] && [[ "$out" == *"does not send the emulator'"'"'s Secret Manager fetch to CLOUD_SECRET_MANAGER_URL"* ]]')"
 
 # ── Committing a real service: the suite runs under the REAL id, and then the sink is load-bearing ──
 sed -i 's/^  auth: true,/  auth: false,/' "$MAIN/$ENV"

@@ -12,7 +12,9 @@ import type { Environment } from './environment.interface';
 
 // ── Per-service emulator toggle (committed default for the whole team) ───────────────────────────
 // Flip any to `false` to use the REAL Firebase backend for that service instead of the local
-// emulator. Saving hot-reloads the dev server (~1s). Example — Firestore emulated, real Auth:
+// emulator. Saving hot-reloads the dev server (~1s) — but committing a service real (or the last one back) moves the
+// app onto another project id, so RESTART the stack too: the running suite says so, with the command. Example —
+// Firestore emulated, real Auth:
 //     auth: false        (then fill `firebase` below with real/STAGING web config so real Auth works)
 // Prefer per-SESSION toggling without editing this file: append `?real=auth` or
 // `?emulate=firestore,storage` to the URL, or `localStorage.setItem('emulate','firestore')`.
