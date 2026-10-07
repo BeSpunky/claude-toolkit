@@ -226,7 +226,7 @@ export interface GitignoreBlock {
 // STRING TOKENS, substituted by the composer in every string a fragment contributes:
 //   {{home}}        the remote user's home (`/home/<remoteUser>` — it follows the image, never hard-coded)
 //   {{remoteUser}}  the user the container runs as
-//   {{nodeMajor}}   the Node major the image / Node feature is pinned to — the project's `.nvmrc` (_utils/node-version)
+//   {{nodeMajor}}   the Node major the image / Node feature is pinned to — the project's declared Node (.nvmrc / .node-version / volta.node — _utils/node-version)
 
 /** The Debian architectures the house images run on — what an `ArchiveTool` names its downloads by. */
 export type DebianArch = 'amd64' | 'arm64';

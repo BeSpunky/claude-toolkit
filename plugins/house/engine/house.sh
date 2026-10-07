@@ -1017,7 +1017,7 @@ else
   command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
   echo "Resolving latest typescript-node base image..."
   # The image the GENERATORS run in — nothing more. The project's own Node (its devcontainer image, its functions
-  # runtime) is the project's .nvmrc, which the generators read; this runner's Node never leaks into the output.
+  # runtime) is the project's own Node file (.nvmrc, .node-version or volta.node), which the generators read; this runner's Node never leaks into the output.
   MAJOR="$(base_image_node_major)"
   IMAGE="$(base_image_for_major "$MAJOR")"
   echo "Base image: $IMAGE"

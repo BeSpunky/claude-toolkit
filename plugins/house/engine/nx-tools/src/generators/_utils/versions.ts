@@ -53,7 +53,7 @@ export const FIREBASE_FUNCTIONS_VERSION = '^7.0.0';
 export const TYPESCRIPT_UTILS_VERSION = '0.1.0-alpha.0';
 
 /**
- * The Node major a NEW project is seeded with (its `.nvmrc`). Only a seed: from then on the project's `.nvmrc` is
+ * The Node major a project with no Node at all is seeded with (its `.nvmrc`). Only a seed: from then on the project's Node file is
  * the one source — the devcontainer image, the functions `engines` and the docs read it, and no upgrade moves it.
  * Must be a GA Cloud Functions runtime (tools/test-layers checks it against the projected table).
  */
