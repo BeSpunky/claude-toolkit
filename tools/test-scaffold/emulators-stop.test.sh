@@ -159,4 +159,32 @@ done
 gone "$P" 100; CODE="$(rc "$W")"
 ok "crash: the script exits non-zero (got $CODE) and names the suite's log" "$([ -n "$CODE" ] && [ "$CODE" -ne 0 ] && grep -q 'CRASHED.*its log: .*emulators.log' "$W/out.log" && echo 1 || echo 0)"
 
+# ── 7. Its stack's serve was killed first (Nx's force-kill after a Ctrl+C mid-export): the keeper, last one out, ──
+# removes the stack's run record and state dir — through the engine's own rule, so never a stack that is live.
+DEVLIB="$ROOT/plugins/house/engine/nx-tools/src/generators/dev/files/lib/stacks.mjs.tpl"
+under_engine() {   # under_engine <ws> <record-pid> — a dev-engine stack app@0 whose serve is <record-pid>; echoes the session
+  local d="$1"
+  mkdir -p "$d/tools/dev/lib" "$d/.bespunky/run/app@0"
+  cp "$DEVLIB" "$d/tools/dev/lib/stacks.mjs"
+  printf '{ "version": 1, "key": "app@0", "app": "app", "tree": "%s", "offset": 0, "pid": %s, "host": "%s", "processes": [] }\n' "$d" "$2" "$(hostname)" > "$d/.bespunky/run/app@0.json"
+  ( cd "$d" || exit 1
+    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT=20 DEV_STACK_DIR="$d/.bespunky/run/app@0" env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
+    echo $! )
+}
+entry_gone() { for _ in $(seq 1 100); do [ -d "$1" ] || return 0; sleep 0.1; done; return 1; }
+sleep 0 & DEAD=$!; wait "$DEAD"
+W="$(mkws pruned)"; P="$(under_engine "$W" "$DEAD")"; STARTED+=("$P")
+ready "$W" >/dev/null
+kill -KILL -- "-$P"
+ok "serve gone: the keeper saves, then removes the stack's record and state dir" "$(entry_gone "$W/.bespunky/run/app@0" && exported "$W" && [ ! -f "$W/.bespunky/run/app@0.json" ] && echo 1 || echo 0)"
+bash -c 'exec -a "node dev.mjs serve" sleep 300' & LIVE=$!
+W="$(mkws spared)"; P="$(under_engine "$W" "$LIVE")"; STARTED+=("$P")
+ready "$W" >/dev/null
+kill -KILL -- "-$P"
+sleep 0.5
+for _ in $(seq 1 100); do exported "$W" && grep -q '"status": "exited"' "$W/.bespunky/run/app@0/detached/emulators.json" 2>/dev/null && break; sleep 0.1; done
+sleep 1
+ok "serve live (or a new stack on the key): the keeper leaves its record and state dir" "$([ -f "$W/.bespunky/run/app@0.json" ] && [ -d "$W/.bespunky/run/app@0" ] && echo 1 || echo 0)"
+kill "$LIVE" 2>/dev/null
+
 exit "$FAILED"

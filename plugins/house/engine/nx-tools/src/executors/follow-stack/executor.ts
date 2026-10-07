@@ -5,7 +5,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { tellInvoker } from '../_utils/invoker';
-import { type ExitRecord, exitRecordPath, isAlive, readExit, registerFollower } from '../_utils/run-records';
+import { type ExitRecord, attachedDone, exitRecordPath, isAlive, readExit, registerFollower } from '../_utils/run-records';
 import type { FollowStackSchema } from './schema';
 
 /**
@@ -95,7 +95,10 @@ const runExecutor: PromiseExecutor<FollowStackSchema> = async (options, context)
   const engine = join(root, 'tools', 'dev', 'dev.mjs');
   const mine = process.env.NX_INVOCATION_ROOT_PID ?? '';
 
-  const finish = (record: ExitRecord, followed?: Stack) => {
+  const finish = async (record: ExitRecord, followed?: Stack) => {
+    // This run's own stack: Nx stops `dev-stack` the moment this task returns, and runs attached to the stack are
+    // watching that task — they must have ended first, or they read its end as a crash.
+    if (!followed && !record.refused) await attachedDone(root, project, record.pid);
     const v = verdict(project, record, followed);
     if (v.message) logger.error(v.message);
     // Claude reads `nx serve` in Nx's agent renderer, which prints a task's output as a log path at best — which

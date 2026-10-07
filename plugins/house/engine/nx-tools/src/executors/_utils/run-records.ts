@@ -23,6 +23,8 @@ export interface ExitRecord {
   key?: string;
   /** Set by serve-preflight: this run asked for a stack it cannot have here, and started none. */
   refused?: boolean;
+  /** The engine's PID — the stack's identity for the runs attached to it (see attachedFollowers). */
+  pid?: number;
 }
 
 const runDir = (root: string) => join(root, '.bespunky', 'run');
@@ -92,4 +94,22 @@ export function attachedFollowers(root: string, app: string, enginePid: number):
     }
   }
   return live;
+}
+
+/**
+ * How long a stack that ended waits for the runs ATTACHED to it to finish. They notice within a quarter second and end
+ * within one more; this only bounds a run that keeps going after its follower is done (a run-many with other work) —
+ * past it, that run may read the stack's end as a crash, which is all it would have read without the wait.
+ */
+const ATTACHED_WAIT_MS = 10_000;
+
+/**
+ * Wait until no run is attached to the stack whose engine was `enginePid`. Called by whatever would otherwise let this
+ * stack's own Nx drop the shared `dev-stack` task while an attached run still watches it: the stack's own follower
+ * before it returns (its return is what makes Nx stop dev-stack), and dev-stack itself when nothing here follows it.
+ */
+export async function attachedDone(root: string, app: string, enginePid: number | undefined): Promise<void> {
+  if (!enginePid) return;
+  const until = Date.now() + ATTACHED_WAIT_MS;
+  while (attachedFollowers(root, app, enginePid).length && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
 }

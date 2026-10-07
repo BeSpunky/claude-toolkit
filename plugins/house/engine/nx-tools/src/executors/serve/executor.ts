@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { attachedFollowers, exitRecordPath, readExit, writeExit } from '../_utils/run-records';
+import { attachedDone, exitRecordPath, readExit, writeExit } from '../_utils/run-records';
 import type { ServeExecutorSchema } from './schema';
 
 /**
@@ -60,21 +60,6 @@ export function dependedOnHere(taskGraph: TaskGraph | undefined, project: string
   if (!taskGraph) return false;
   const mine = new Set(Object.values(taskGraph.tasks).filter((t) => t.target.project === project && t.target.target === target).map((t) => t.id));
   return Object.values(taskGraph.continuousDependencies ?? {}).some((deps) => deps.some((d) => mine.has(d)));
-}
-
-/**
- * How long a stack that ended cleanly waits for the runs ATTACHED to it to finish (see run-records
- * `attachedFollowers`). They notice within a quarter second and end within one more; this only bounds a run that
- * keeps going after its follower is done (a run-many with other work) — past it, that run may read the stack's end
- * as a crash, which is all it would have read without the wait.
- */
-const ATTACHED_WAIT_MS = 10_000;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function attachedDone(root: string, project: string, enginePid: number | undefined): Promise<void> {
-  if (!enginePid) return;
-  const until = Date.now() + ATTACHED_WAIT_MS;
-  while (attachedFollowers(root, project, enginePid).length && Date.now() < until) await sleep(100);
 }
 
 const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, context) => {
@@ -165,7 +150,8 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
       // The follower ends on the exit record; an engine that ended cleanly without leaving one (it could not write
       // it) must not leave the follower — and so this task — waiting forever.
       if (invocation && !readExit(exitRecordPath(context.root, invocation, project))) writeExit(context.root, invocation, project, { code: 0 });
-      // Runs attached to this stack watch THIS task through Nx's shared-task record, which disappears when it ends.
+      // Runs attached to this stack watch THIS task through Nx's shared-task record, which disappears when it ends
+      // (the follower waits for them too, before its return lets Nx stop this task).
       await attachedDone(context.root, project, child.pid);
       if (followed && !stopping) await released;
       done(true);

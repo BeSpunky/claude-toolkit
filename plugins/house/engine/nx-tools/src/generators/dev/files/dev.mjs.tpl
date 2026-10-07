@@ -402,6 +402,9 @@ async function serve(opts) {
     },
     onStop: (signal) => {
       stopSignal = signal;
+      // A stop asked for from outside (not a process of the stack ending it) is announced, with who asked — and what
+      // the stack's processes are about to print about their own stop is read as what it is, not as a failure.
+      if (signal) log(`stopping the stack (asked by ${stoppedBy(stackDir, signal)}) — each process reports its own stop below ("stopped before finishing" included); that is the stop, not a failure.`);
       until.done = true;
       if (route.registered) detachRoute(tree.path, process.env, slug);
     },
@@ -412,6 +415,7 @@ async function serve(opts) {
   const detached = await awaitDetached(tree.path, key, { say: log });
   for (const w of detached.finished) (w.code ? warn : log)(`${w.id}: ${w.result ?? `ended (code ${w.code ?? 0})`}`);
   if (!result.success) reportFailure(result.failures, plan, detached);
+  else if (detached.ok) log(`${key} stopped cleanly${EXIT_STOPPED_BY ? ` (asked by ${EXIT_STOPPED_BY})` : ''}.`);
   dropRecord();
   return result.success && detached.ok;
 }
@@ -458,7 +462,7 @@ const STOP_REQUEST = 'stop-request.json';
 function stoppedBy(stackDir, signal) {
   try {
     const req = JSON.parse(readFileSync(join(stackDir, STOP_REQUEST), 'utf8'));
-    if (req?.by) return `${req.by} (tools/dev/dev stop)`;
+    if (req?.by) return `${req.by}, with tools/dev/dev stop`;
   } catch {
     /* none */
   }

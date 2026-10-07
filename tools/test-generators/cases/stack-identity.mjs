@@ -100,8 +100,8 @@ export default {
         const refused = ctx.follow.verdict('web', { code: 1, refused: true, report: ['[serve] web is already served … Start the stack you asked for beside it'] });
         t.ok(!refused.success && /^\[serve\] REFUSED — web is already served/.test(refused.headline) && refused.message.includes('Start the stack'), `a refusal fails the run and is said: ${refused.headline}`);
         // NB2: an ATTACHED run whose stack was stopped cleanly succeeds, and says whose stack it was and who stopped it.
-        const attached = ctx.follow.verdict('web', { code: 0, stoppedBy: 'claude:abc (tools/dev/dev stop)' }, { key: 'web@31959', owner: 'user:node' });
-        t.ok(attached.success && /web@31959 — the stack this run was following \(owner user:node\) — was stopped by claude:abc \(tools\/dev\/dev stop\)/.test(attached.note), `attached, stopped cleanly: success, with a line: ${attached.note}`);
+        const attached = ctx.follow.verdict('web', { code: 0, stoppedBy: 'claude:abc, with tools/dev/dev stop' }, { key: 'web@31959', owner: 'user:node' });
+        t.ok(attached.success && /web@31959 — the stack this run was following \(owner user:node\) — was stopped by claude:abc, with tools\/dev\/dev stop;/.test(attached.note), `attached, stopped cleanly: success, with a line: ${attached.note}`);
         const attachedFailed = ctx.follow.verdict('web', { code: 1, summary: ['emulators exited with code 1'] }, { key: 'web@31959' });
         t.ok(!attachedFailed.success && /web@31959 — the stack this run was following — FAILED \(exit 1\)/.test(attachedFailed.headline), `attached, failed: the run fails (${attachedFailed.headline})`);
       },
