@@ -130,9 +130,10 @@ export default {
         t.equal(deploy?.dependsOn, ['build', 'lint'], 'dependsOn');
         t.ok(deploy?.inputs?.includes('firebaseConfig'), `the project's own input kept: ${deploy?.inputs}`);
         t.equal(deploy?.configurations, { staging: { args: '-P staging' } }, 'the project\'s configuration kept');
-        // Only the house's own old command is replaced (no record: it cannot tell, so it says so) — nothing of the project's.
+        // The old command is what 0.49.2 itself wrote (the frozen baseline), so replacing it is silent — reporting it
+        // would tell every consumer a hand edit was lost when none was. Nothing of the project's is touched either.
         const said = ctx.logs.filter((l) => l.includes('functions:deploy'));
-        t.ok(said.length === 1 && said[0].includes('options.command') && said[0].includes('firebase deploy --only functions'), `only the house's old command reported: ${said}`);
+        t.equal(said, [], 'no override reported: the replaced command was the house\'s own');
         t.ok(getProjects(tree).get('firebase')?.targets?.deploy?.inputs?.includes('{workspaceRoot}/firestore.rules'), 'firebase:deploy watches the root rules');
       },
     },
