@@ -3,10 +3,10 @@
 // WHY. The firewall fails closed (src/platform/firewall): a project with no `platform:` tag may not be imported by a
 // tagged one, and may itself import no workspace project. The house's own generators tag what they create
 // (`app`, `publishable-lib`), but `nx g @nx/js:lib` — or any generator that is not the house's — writes no tag, so
-// the developer's first sight of the new library would be Nx's fixed lint text. This generator closes that gap the
-// way Nx means sync generators to: it runs before every `lint` task (registered on `targetDefaults.<lint>.
-// syncGenerators` — src/platform/sync), Nx offers to apply what it would change, and `nx sync:check` fails CI while
-// a project it CAN classify is still untagged.
+// the developer's first sight of the new library would be Nx's fixed lint text. This generator is the one command
+// that settles it: a GLOBAL sync generator (nx.json `sync.globalGenerators` — src/platform/sync, which says why it
+// is never attached to a task), so `nx sync` tags every project the evidence settles and `nx sync:check` names them;
+// the firewall's guidance in eslint.config.mjs points here.
 //
 // What it tags is exactly what the classifier settles — an application by its stack, a library by its evidence —
 // and nothing else: a project that mixes web and server, or that nothing binds to a platform, is left for a human

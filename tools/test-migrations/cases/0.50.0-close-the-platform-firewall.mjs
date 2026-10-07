@@ -1,6 +1,7 @@
-// 0.50.0 — close the platform firewall: the old constraints moved out of the project's rule into the firewall's own
-// (`platformConstraints`, `platform/enforce-module-boundaries`), the sync generator registered, and every untagged
-// code project classified from evidence — or reported, never defaulted to shared.
+// 0.50.0 — close the platform firewall: the old constraints replaced by `platformConstraints` in the project's OWN
+// `@nx/enforce-module-boundaries` (its options hoisted into `moduleBoundaryOptions`, every exemption kept), the sync
+// generator registered, and every untagged code project classified from evidence — or reported, never defaulted to
+// shared.
 //
 // The shapes it meets: the eslint.config.mjs the pre-0.50.0 firebase-emulators wrote (old comment — both shipped
 // wordings —, two ban-only constraints, a project's own addition to a ban list), a workspace with no firewall at all
@@ -117,7 +118,7 @@ export default {
   ladder: ['0.50.0/close-the-platform-firewall'],
   cases: [
     {
-      name: 'the old firewall moves into its own rule: platformConstraints (own bans carried), the scopes, the guidance',
+      name: "the old firewall is rewritten inside the project's own rule: platformConstraints (own bans carried), the scopes, the guidance",
       setup: (tree) => workspace(tree),
       historicalShapes: [
         { name: '≤0.35 comment wording, prettier-formatted (1ac9b19 / 0d09453)', setup: (tree) => workspace(tree, OLD_FIREWALL_035) },
@@ -131,14 +132,57 @@ export default {
         t.occurrences('eslint.config.mjs', "onlyDependOnLibsWithTags: ['platform:shared']", 1);
         t.occurrences('eslint.config.mjs', "sourceTag: 'platform:", 3);
         t.ok(/sourceTag: 'platform:server',[\s\S]*?'react',[\s\S]*?sourceTag: 'platform:shared',[\s\S]*?'react',/.test(config), `the project's own 'react' carried, and in shared:\n${config}`);
-        t.has('eslint.config.mjs', "rules: { 'platform/enforce-module-boundaries': ['error', { depConstraints: platformConstraints }] }");
+        t.has('eslint.config.mjs', "'@nx/enforce-module-boundaries': moduleBoundaries(platformConstraints),");
+        t.hasNot('eslint.config.mjs', 'platform/enforce-module-boundaries');
         t.has('eslint.config.mjs', 'THE PLATFORM FIREWALL');
         t.has('eslint.config.mjs', 'g @bespunky/nx-tools:platform <project>');
         t.hasNot('eslint.config.mjs', 'by platform:');
-        // The project's own rule keeps exactly what was its own.
-        t.ok(/depConstraints: \[\n {12}\{\n {14}sourceTag: '\*',\n {14}onlyDependOnLibsWithTags: \['\*'\],\n {12}\},\n {10}\],/.test(config), `the project's constraints:\n${config}`);
-        t.equal(t.json('nx.json')?.targetDefaults?.lint?.syncGenerators, ['@bespunky/nx-tools:platform-sync'], 'the sync generator, on lint');
+        // The project's own options, hoisted verbatim — less the old platform constraints and Nx's stock catch-all.
+        t.has('eslint.config.mjs', 'const moduleBoundaryOptions = {\n  enforceBuildableLibDependency: true,\n  allow: [],\n  depConstraints: [],\n};');
+        t.ok(logs.some((line) => line.includes("removed Nx's stock catch-all")), `the catch-all's removal reported:\n${logs.join('\n')}`);
+        t.equal(t.json('nx.json')?.sync?.globalGenerators, ['@bespunky/nx-tools:platform-sync'], 'the sync generator, global (never before a task: S2-7)');
+        t.equal(t.json('nx.json')?.targetDefaults?.lint?.syncGenerators, undefined, 'not attached to lint');
         t.ok(logs.some((line) => line.includes("carried this project's own platform:server bans: react")), `the carried ban is reported:\n${logs.join('\n')}`);
+      },
+    },
+    {
+      // S2-1/S2-2: the exemptions the project wrote must hold for the firewall too (one rule instance), a constraint
+      // of its own that matches every project is kept and reported, and a plugin it registered as `platform` is
+      // nobody's business but its own.
+      name: "the project's own options move verbatim: allow, ignoredCircularDependencies, a non-stock '*' constraint, its own `platform` plugin",
+      setup: (tree) =>
+        workspace(
+          tree,
+          OLD_FIREWALL.replace(
+            '          allow: [],',
+            // A function: the pattern's own `$'` would be a replacement token in a string.
+            () => "          allow: ['^.*/eslint(\\\\.base)?\\\\.config\\\\.[cm]?[jt]s$'],\n          ignoredCircularDependencies: [['ui', 'util']],\n          checkDynamicDependenciesExceptions: ['util'],",
+          )
+            .replace("              onlyDependOnLibsWithTags: ['*'],\n            },", "              onlyDependOnLibsWithTags: ['*'],\n            },\n            { sourceTag: '*', notDependOnLibsWithTags: ['deprecated'] },")
+            .replace("  ...nx.configs['flat/base'],", "  ...nx.configs['flat/base'],\n  { plugins: { platform: { rules: {} } } },"),
+        ),
+      expect: (tree, t, logs) => {
+        t.has(
+          'eslint.config.mjs',
+          "const moduleBoundaryOptions = {\n  enforceBuildableLibDependency: true,\n  allow: ['^.*/eslint(\\\\.base)?\\\\.config\\\\.[cm]?[jt]s$'],\n  ignoredCircularDependencies: [['ui', 'util']],\n" +
+            "  checkDynamicDependenciesExceptions: ['util'],\n  depConstraints: [\n    { sourceTag: '*', notDependOnLibsWithTags: ['deprecated'] },\n  ],\n};",
+        );
+        t.occurrences('eslint.config.mjs', 'ignoredCircularDependencies: [[', 1);
+        t.has('eslint.config.mjs', '  { plugins: { platform: { rules: {} } } },');
+        t.occurrences('eslint.config.mjs', 'plugins:', 1);
+        t.ok(logs.some((line) => line.includes("kept this workspace's own `sourceTag: '*'` constraint")), `the kept catch-all is reported:\n${logs.join('\n')}`);
+      },
+    },
+    {
+      name: 'the rule configured in two places: the config is left alone, the reason and the snippet reported',
+      setup: (tree) => {
+        workspace(tree);
+        const config = tree.read('eslint.config.mjs', 'utf8');
+        tree.write('eslint.config.mjs', config.replace(/\n\];\n$/, "\n  { files: ['**/*.mts'], rules: { '@nx/enforce-module-boundaries': 'warn' } },\n];\n"));
+      },
+      expect: (tree, t, logs) => {
+        t.hasNot('eslint.config.mjs', 'platformConstraints');
+        t.ok(logs.some((line) => line.includes('configures @nx/enforce-module-boundaries in 2 places') && line.includes('const platformConstraints = [')), `refused, with the snippet:\n${logs.join('\n')}`);
       },
     },
     {

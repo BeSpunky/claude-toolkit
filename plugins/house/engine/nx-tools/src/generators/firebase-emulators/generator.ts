@@ -406,27 +406,29 @@ export default async function firebaseEmulatorsGenerator(
   // not declared yet). The web layer's own seeding ran before this step on a first scaffold.
   seedServedApps(tree, 'firebase-emulators');
 
-  // 4) Best-effort: the platform firewall in the root flat ESLint config (src/platform/firewall — fail closed, its own
-  //    rule instance). Firebase is what brings a second platform, so it is what brings the firewall — and the
-  //    firewall arrives over projects nobody classified. Classify them in the same act (evidence only, every
-  //    inference reported, what nothing settles left for a human), and register the sync generator that classifies
-  //    the projects created later, before lint judges them (generators/platform-sync).
+  // 4) Best-effort: the platform firewall in the root flat ESLint config (src/platform/firewall — fail closed, joined
+  //    to the workspace's own module-boundaries rule). Firebase is what brings a second platform, so it is what brings
+  //    the firewall — and the firewall arrives over projects nobody classified. Classify them in the same act
+  //    (evidence only, every inference reported, what nothing settles left for a human), and register the sync
+  //    generator that classifies the projects created later on `nx sync` (generators/platform-sync).
   //    An EXISTING firewall is project state: the 0.49 shape is migration 0.50.0's to upgrade, never re-written here.
   const externals = platformExternals(tree);
   const nx = nxInvocation(tree).command;
   if (tree.exists(FIREWALL_CONFIG)) {
     const current = tree.read(FIREWALL_CONFIG, 'utf8') ?? '';
-    const patched = insertPlatformFirewall(current, FIREWALL_CONFIG, externals, nx);
-    if (patched && patched !== current) {
-      tree.write(FIREWALL_CONFIG, patched);
-      registerPlatformSync(tree);
-      classifyUntaggedProjects(tree, { who: 'firebase-emulators', nx, externals });
-    } else if (!patched) {
+    const edit = insertPlatformFirewall(current, FIREWALL_CONFIG, externals, nx);
+    if ('refused' in edit) {
       logger.warn(
-        `[firebase-emulators] Could not insert the platform firewall into ${FIREWALL_CONFIG} (it needs an \`export default [ … ]\` ` +
-          `array, and TypeScript to read it). Add it by hand, then classify every project (${platformCommand(nx, '<project>')}):\n` +
+        `[firebase-emulators] Did not insert the platform firewall into ${FIREWALL_CONFIG}: ${edit.refused}. Add it by hand, then ` +
+          `classify every project (${platformCommand(nx, '<project>')}):\n` +
           firewallSnippet(externals, nx),
       );
+    } else if (edit.changes.length) {
+      tree.write(FIREWALL_CONFIG, edit.source);
+      for (const change of edit.changes) logger.info(`[firebase-emulators] ${FIREWALL_CONFIG}: ${change}.`);
+      for (const note of edit.notes) logger.warn(`[firebase-emulators] ${FIREWALL_CONFIG}: ${note}.`);
+      registerPlatformSync(tree);
+      classifyUntaggedProjects(tree, { who: 'firebase-emulators', nx, externals });
     }
   }
 

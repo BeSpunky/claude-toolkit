@@ -20,7 +20,7 @@ export {
   bannedFor,
   guidance,
   RULE as PLATFORM_RULE,
-  type FirewallUpgrade,
+  type FirewallEdit,
 } from './firewall';
 export { scopeOf, type FileScope } from './scopes';
 export { registerPlatformSync, PLATFORM_SYNC } from './sync';

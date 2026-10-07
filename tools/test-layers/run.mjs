@@ -1497,8 +1497,11 @@ checkAsync('firebase core on an old-shaped eslint.config.mjs (no trailing comma)
   ok(!/^\s*,\s*$/m.test(out) && !/},\]/.test(out), `malformed splice:\n${out}`);
   ok(/\n {4}},\n {4}\/\/ THE PLATFORM FIREWALL/.test(out), `not at the neighbours' indentation:\n${out}`);
   ok(/\n {4}}\n\];\n$/.test(out), `closing bracket not on its own line:\n${out}`);
-  ok(/';\n\n\/\/ THE PLATFORM FIREWALL[\s\S]*\n\];\n\nexport default \[/.test(out), `the constraints, set apart above the export:\n${out}`);
-  ok(/sourceTag: "\*",/.test(out) && !/sourceTag: 'platform:[a-z]+',\n {28}/.test(out), `the project's own constraints untouched:\n${out}`);
+  ok(/';\n\n\/\/ THE PLATFORM FIREWALL[\s\S]*\n\];\n\n[\s\S]*\nconst moduleBoundaries = [^\n]*\n\nexport default \[\n {4}\/\/ THE PLATFORM FIREWALL/.test(out), `the declarations, set apart above the export; the coverage block first:\n${out}`);
+  // ONE rule instance: the project's options hoisted (dedented to the top level, its stock catch-all gone, in its own
+  // style), its entry replaced in place.
+  ok(/\nconst moduleBoundaryOptions = \{\n {4}depConstraints: \[\]\n\};\n/.test(out), `the project's options, hoisted:\n${out}`);
+  ok(/\n {12}'@nx\/enforce-module-boundaries': moduleBoundaries\(platformConstraints\)\n {8}}/.test(out), `the project's entry, in place:\n${out}`);
   await generator('firebase-emulators')(tree, {});
   ok(tree.read('eslint.config.mjs', 'utf8') === out, 'a re-run changed eslint.config.mjs');
 });
