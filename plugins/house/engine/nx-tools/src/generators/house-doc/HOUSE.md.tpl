@@ -288,12 +288,18 @@ The **rules** — the mandatory `bespunky-workflow:branch-and-release` skill inv
 
 New work branches off {{BRANCH_WORK_BASE}} and, by default, lands on {{BRANCH_INTEGRATION}} (unless the skill's plan says otherwise — e.g. stabilisation work on a release line); work and hotfix branches are never protected. This table is the model's **projection** — names and roles only. How each line advances, what its patterns mean and where it deploys are the model's semantics: ask the skill's engine (`branches.mjs describe`), never infer them from this table. The model changes only through the skill's change procedure, never by hand-editing the file.
 
-**Deploy bindings (this project):** if any are recorded, they live in the model (each line's, pattern's or tag's `deploys`), and `branches.mjs describe` lists them — this page cannot see them, so it does not claim any. Bindings are documentation — nothing verifies them against the deploy mechanism itself.{{#firebase}} Each Firebase App Hosting backend tracks one branch, chosen when the repo is linked at `firebase apphosting:backends:create` (see the Firebase deploy recipe above); record which line each backend tracks as that line's `deploys`.{{/firebase}}
+**Deploy bindings (this project):** {{#deploys-bound}}the model binds these (each line's, pattern's or tag's `deploys`; a free-text note, if any, is in `branches.mjs describe`):
+
+{{BRANCH_DEPLOYS}}
+
+{{/deploys-bound}}{{^deploys-bound}}none is structured in the model yet — a line's `deploys` may still carry a free-text note, which `branches.mjs describe` lists. {{/deploys-bound}}A **`ci`** binding is what a push to that line deploys through CI{{#ci}} — it drives this project's deploy workflow (see *Continuous deployment (CI)*){{/ci}}{{^ci}} — the house `ci` layer renders its deploy workflow from it, if this project adds one{{/ci}}. An **`appHosting`** binding records a Firebase App Hosting backend that rolls out **on its own** from that line. Bindings change only through the skill's change procedure — and a `ci` binding is not documentation: changing it changes what deploys where.{{#firebase}}
+
+**App Hosting has two deploy modes, and only one of them is a binding** (the `bespunky-house:firebase-app-hosting` skill has both in full): a **GitHub-linked** backend rolls out on every push to its live branch — that line's `appHosting` binding records it; a **local-source** backend (no linked repository) deploys only when someone runs `firebase deploy --only apphosting`, from whatever is checked out — no push deploys it, so it is bound to no line (record a note saying who deploys it, if anything). `branches.mjs evidence --app-hosting` shows which mode each backend is in and which branch it tracks, and flags any drift from what the model declares — re-run it after connecting or disconnecting a repository on a backend.{{/firebase}}
 {{/branches-declared}}
 {{^branches-declared}}
 **The branch model is not declared yet** — there is no `{{BRANCH_MODEL_FILE}}`. Until there is, no model is assumed, and every existing branch named {{BRANCH_UNDECLARED_PROTECTED}} (locally or on the remote) is **protected**: never committed onto directly, never promoted into or out of without the user. Before the first branch or promotion action of a session, the skill investigates how this repo actually works (its branches, their history, its CI and deploy configuration) and asks the user which model it follows; declaring that model, through the skill's change procedure, writes the file and replaces this section on the next sync.
 
-**Deploy bindings (this project):** not declared. The investigation reads what it can observe ({{#firebase}}`apphosting*.yaml`, `firebase.json`, {{/firebase}}CI workflows, environment files) and asks about the rest; once declared they live in the model and `branches.mjs describe` lists them.
+**Deploy bindings (this project):** not declared. The investigation reads what it can observe ({{#firebase}}`apphosting*.yaml`, `firebase.json`, the App Hosting backends themselves with `branches.mjs evidence --app-hosting`, {{/firebase}}CI workflows, environment files) and asks about the rest; once declared they live in the model and `branches.mjs describe` lists them.{{#ci}} **Until then the `ci` layer writes no deploy workflow** — the house never guesses which branch is production.{{/ci}}
 {{/branches-declared}}
 
 {{#web}}
@@ -308,6 +314,34 @@ New work branches off {{BRANCH_WORK_BASE}} and, by default, lands on {{BRANCH_IN
 
 It runs the declaration's install (`install` in `.bespunky/dev.json`) in a worktree on its first serve{{#nx-serve}} and applies the `NX_WORKSPACE_ROOT_PATH` / `NX_DAEMON=false` overrides for you{{/nx-serve}}. A worktree serve shifts the **whole stack** (every declared process{{#firebase}} **and** the emulator suite{{/firebase}}) onto the worktree's stable, verified-free offset block, so it never collides with a server on the base/forwarded ports. **A worktree serve is viewable ONLY through the shared browser** — its shifted ports aren't forwarded, so watch it in the shared browser over noVNC (the engine navigates it to the worktree's pretty `<slug>.localhost` domain), not a host tab. (A worktree serve does **not** reliably hot-reload — restart after each edit; the skill covers this and the promotion mechanics in full.)
 {{/web}}
+{{#ci}}
+## Continuous deployment (CI)
+
+**`.github/workflows/deploy.yml` is generator-owned** (the `ci` layer) and rendered from the branch model's **`ci` bindings** — the table under *Branch & release parameters*. Never hand-edit it: **when** and **where** it deploys is the model, **what** ships is each project's `deploy` target.
+
+- **On a push to a bound line** it runs `nx affected -t deploy` against the last **successful** deploy of that line (`nrwl/nx-set-shas`), in that line's **GitHub environment**, with each provider's target (e.g. `--project=<alias> --non-interactive`). One deploy per branch at a time, **never cancelled** — a failed deploy is retried by the next push, and nothing in between is skipped.
+- **By hand:** Actions → *Deploy* → *Run workflow* on the branch; **scope `all`** runs every project's `deploy` (`nx run-many`). Use it for **the first deploy** and to recover an environment.
+- **Node** comes from `.nvmrc`, the install is the lockfile exactly — the same versions the devcontainer uses.
+- **No workflow?** `.bespunky/ci.json` → `pending` says why: the model is undeclared, no line has a `ci` binding, or this repo already deploys from a workflow of its own (the house never writes a second one — delete yours to hand deployment over).
+- **To change when or where it deploys** — add, move or remove a `ci` binding through the `bespunky-workflow:branch-and-release` skill (its change procedure), then upgrade; the workflow follows.
+{{#firebase}}- **What ships here:** the Firebase `deploy` targets — Cloud Functions and the rules/indexes `firebase.json` declares. **App Hosting is never deployed by CI**: it is Firebase's own rollout (or a deliberate local-source deploy) — the `bespunky-house:firebase-app-hosting` skill. A one-off deploy by hand, only when the user asks for it: `{{NX}} run <project>:deploy -P <alias>`.
+
+### The one-time cloud setup — a human runs it, never Claude
+
+The workflow authenticates **keylessly** (GitHub's OIDC token, exchanged by Workload Identity Federation for a `github-deployer` service account). Creating that identity **grants IAM roles**, and Claude Code refuses IAM grants to agents **by design** — so `tools/setup-gcp.sh` (generator-owned, idempotent, every role justified inline, derived from what `firebase.json` deploys) is **run by the user**, in Claude Code with the `!` prefix:
+
+```bash
+! bash tools/setup-gcp.sh --dry-run                         # every gcloud call it would make — changes nothing
+! bash tools/setup-gcp.sh --environment <environment>       # create / converge (once per environment)
+! bash tools/setup-gcp.sh --rollback --environment <environment>
+```
+
+The provider trusts tokens **only** from this repository, **only** in that GitHub environment and **only** for the branches the model binds to it. At the end it prints the GitHub environment and the two variables to set — `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOY_SERVICE_ACCOUNT` (not secrets) — as `gh` commands to run or paste back to Claude. **Re-run it whenever an upgrade prints a `HUMAN_STEP:` line** — the bindings it was rendered for changed, and the cloud side cannot be regenerated.
+
+**For Claude:** never run `tools/setup-gcp.sh`, `gcloud iam …` or `gcloud projects add-iam-policy-binding` yourself, and never try a workaround — hand the user the exact `!` line (from the `HUMAN_STEP:` output, or above) and say what to paste back.
+{{/firebase}}
+
+{{/ci}}
 {{#js}}
 ## Publishable libraries & reusable tools
 

@@ -64,6 +64,9 @@ For the discipline in full — the loop, the promotion loop, the styling patches
 
 **This project's parameters** — the {{#branches-declared}}declared lines and their roles{{/branches-declared}}{{^branches-declared}}undeclared-model protections{{/branches-declared}} and the deploy bindings{{#web}}, and how to serve an in-flight worktree{{/web}} — are in [`HOUSE.md`](HOUSE.md) → *Branch & release parameters*. The skill reads them.
 
+{{#ci}}{{#firebase}}
+**Deploys go through CI, and its cloud identity is the human's to grant.** Production deploys come from `.github/workflows/deploy.yml`, rendered from the model's `ci` bindings — change *where* by changing the binding (the skill's change procedure), never the workflow. **Never run `tools/setup-gcp.sh`, `gcloud iam …` or `gcloud projects add-iam-policy-binding`** — IAM grants are refused to agents by design; hand the user the exact `! bash tools/setup-gcp.sh …` line (an upgrade prints it as `HUMAN_STEP:`) and say what to paste back. [`HOUSE.md`](HOUSE.md) → *Continuous deployment (CI)*.
+{{/firebase}}{{/ci}}
 ## A feature is a package (non-negotiable)
 
 **Every effort's durable, non-code output lives in ONE folder, named by the effort's slug — the same slug as its branch and worktree.** Invoke `bespunky-workflow:feature-package` for the method; these rules are always on:
