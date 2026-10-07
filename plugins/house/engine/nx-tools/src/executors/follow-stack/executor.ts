@@ -1,10 +1,11 @@
 import type { PromiseExecutor } from '@nx/devkit';
 import { logger } from '@nx/devkit';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { tellInvoker } from '../_utils/invoker';
+import { type ExitRecord, exitRecordPath, isAlive, readExit, registerFollower } from '../_utils/run-records';
 import type { FollowStackSchema } from './schema';
 
 /**
@@ -21,22 +22,22 @@ import type { FollowStackSchema } from './schema';
  *
  * WHICH STACK. Its own run's, found by the invocation (Nx hands every task NX_INVOCATION_ROOT_PID; the engine records
  * it). Or — when this run ATTACHED to a stack another `nx serve` in this workspace runs (Nx shares the continuous
- * `dev-stack`; serve-preflight said so) — that stack, followed until its engine exits.
+ * `dev-stack`; serve-preflight said so) — that stack, followed until its engine exits, and said to be over, with
+ * who stopped it. It registers itself with that stack (run-records `registerFollower`), whose dev-stack then keeps
+ * Nx's shared task alive until this run has ended — or this run's Nx would read the stack's end as a crash.
+ *
+ * A REFUSED RUN. serve-preflight never fails (a failed dependency leaves this task SKIPPED, and Nx exits a run with a
+ * skipped task 130 — a Ctrl+C, to anyone reading the status). It writes the refusal as this run's exit record; the
+ * follower says it and fails: exit 1.
  */
-interface ExitRecord {
-  code: number;
-  /** The engine's full account (it streamed it too). */
-  report?: string[];
-  /** The same in a line or two. */
-  summary?: string[];
-}
 interface Stack {
   app: string;
+  key: string;
   pid: number;
   state: string;
+  owner: string;
   nxRoot: string | null;
   invocation: string | null;
-  key: string;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -47,25 +48,6 @@ const real = (p: string) => {
     return p;
   }
 };
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
-  }
-};
-
-export const exitRecordPath = (root: string, invocation: string, app: string) => join(root, '.bespunky', 'run', 'exits', `${invocation}@${app}.json`);
-
-function readExit(file: string): ExitRecord | null {
-  try {
-    const record = JSON.parse(readFileSync(file, 'utf8')) as ExitRecord;
-    return typeof record.code === 'number' ? record : null;
-  } catch {
-    return null;
-  }
-}
 
 function stacksOf(engine: string, project: string, root: string): Stack[] {
   try {
@@ -80,12 +62,25 @@ function stacksOf(engine: string, project: string, root: string): Stack[] {
  * The run's result from a stack's exit record. Pure (exported for tests). `message` is the full account, for this
  * task's log; `headline` the same in a line or two, said to the invoker — the stack's stream already printed the full
  * block, so repeating all of it beside Nx's summary would be noise, and saying nothing there would leave an agent
- * with "✖ nx run <app>:serve" and a file path.
+ * with "✖ nx run <app>:serve" and a file path. `followed` names the stack when this run was ATTACHED to another
+ * run's: its end is news here, and how it ended is said either way.
  */
-export function verdict(project: string, record: ExitRecord): { success: boolean; message?: string; headline?: string } {
-  if (record.code === 0) return { success: true };
+export function verdict(
+  project: string,
+  record: ExitRecord,
+  followed?: { key: string; owner?: string },
+): { success: boolean; message?: string; headline?: string; note?: string } {
+  if (record.refused) {
+    const told = (record.report ?? []).join('\n');
+    return { success: false, message: told, headline: `[serve] REFUSED — ${told.replace(/^\[serve\] /, '')}` };
+  }
+  const whose = followed ? `${followed.key} — the stack this run was following${followed.owner ? ` (owner ${followed.owner})` : ''} —` : `${project}'s dev stack`;
+  if (record.code === 0) {
+    if (!followed) return { success: true };
+    return { success: true, note: `[serve] ${whose} was stopped${record.stoppedBy ? ` by ${record.stoppedBy}` : ''}; it ended cleanly, so this run did too.` };
+  }
   const told = (record.report ?? []).join('\n');
-  const head = `[serve] ${project}'s dev stack FAILED (exit ${record.code})`;
+  const head = `[serve] ${whose} FAILED (exit ${record.code})`;
   return {
     success: false,
     message: `${head}.${told ? `\n${told}` : ' Its output is above.'}`,
@@ -100,14 +95,14 @@ const runExecutor: PromiseExecutor<FollowStackSchema> = async (options, context)
   const engine = join(root, 'tools', 'dev', 'dev.mjs');
   const mine = process.env.NX_INVOCATION_ROOT_PID ?? '';
 
-  const finish = (record: ExitRecord) => {
-    const v = verdict(project, record);
-    if (v.message) {
-      logger.error(v.message);
-      // Claude reads `nx serve` in Nx's agent renderer, which prints a failed task as a log path — which process died,
-      // and why, goes where it is read.
-      if (v.headline) tellInvoker(v.headline);
-    }
+  const finish = (record: ExitRecord, followed?: Stack) => {
+    const v = verdict(project, record, followed);
+    if (v.message) logger.error(v.message);
+    // Claude reads `nx serve` in Nx's agent renderer, which prints a task's output as a log path at best — which
+    // process died and why, a refusal, and who stopped a followed stack go where they are read.
+    if (v.note) logger.info(v.note);
+    const said = v.headline ?? v.note;
+    if (said) tellInvoker(said);
     return { success: v.success };
   };
 
@@ -118,9 +113,9 @@ const runExecutor: PromiseExecutor<FollowStackSchema> = async (options, context)
     const own = mine ? readExit(exitRecordPath(root, mine, project)) : null;
     if (own) return finish(own);
     if (followed) {
-      if (!alive(followed.pid)) {
+      if (!isAlive(followed.pid)) {
         // An attached run ends when the stack it shares ends — with that stack's status, when its engine recorded it.
-        return finish((followed.invocation && readExit(exitRecordPath(root, followed.invocation, project))) || { code: 0 });
+        return finish((followed.invocation && readExit(exitRecordPath(root, followed.invocation, project))) || { code: 0 }, followed);
       }
     } else if (!ownSeen && Date.now() - lastLook >= 2000 && existsSync(engine)) {
       lastLook = Date.now();
@@ -128,6 +123,8 @@ const runExecutor: PromiseExecutor<FollowStackSchema> = async (options, context)
       ownSeen = stacks.some((s) => mine && String(s.invocation) === mine);
       if (!ownSeen) {
         followed = stacks.find((s) => s.state === 'live' && s.invocation && String(s.invocation) !== mine && s.nxRoot && real(s.nxRoot) === real(root));
+        // Say so to that stack, which then lets its Nx drop the shared task only after this run has ended.
+        if (followed && mine) registerFollower(root, mine, project, followed.pid);
       }
     }
     // Waiting on nothing else is safe: if `dev-stack` dies before recording anything, Nx fails the run and ends us.

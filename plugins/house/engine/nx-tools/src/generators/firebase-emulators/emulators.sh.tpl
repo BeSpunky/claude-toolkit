@@ -441,6 +441,35 @@ EXPORT_ARGS=()
 FIREBASE_ARGS=("${CONFIG_ARGS[@]}" emulators:start --project="$PROJECT" "${ONLY_ARGS[@]}" "${IMPORT_ARGS[@]}" "${EXPORT_ARGS[@]}")
 if [ "$PERSIST" -eq 1 ]; then STOP_DOING="exporting emulator data to $DATA_DIR"; else STOP_DOING="stopping (a focused run exports nothing, by design)"; fi
 
+# Is any process of the keeper's group (the suite: firebase-tools, its JVMs, whatever they started) still alive?
+group_busy() {
+  local f stat pid
+  for f in /proc/[0-9]*/stat; do
+    pid="${f#/proc/}"; pid="${pid%/stat}"
+    [ "$pid" = "$BASHPID" ] && continue
+    read -r stat < "$f" 2>/dev/null || continue
+    stat="${stat##*) }"
+    set -- $stat
+    [ "${3:-}" = "$KEEPER_PID" ] && return 0
+  done
+  return 1
+}
+
+# THE STACK'S STATE DIR GOES WITH THE LAST ONE OUT. On a clean stop the dev engine removes it after this suite has
+# finished; when the engine was killed first (Nx force-kills a stopping `nx serve` after a few seconds — a Ctrl+C
+# while the suite exports), the keeper is the last one out. It prunes through the engine's own rule (tools/dev
+# readStacks): only a stack whose serve and processes are all gone, so never a live one — and a stack that has
+# since restarted on this key has a live record of its own. Run directly (no engine), the suite keeps its dir:
+# the next start of the same suite may be waiting on this keeper, inside it.
+release_stack_dir() {
+  [ -n "${DEV_STACK_DIR:-}" ] && [ -f "$ROOT/tools/dev/lib/stacks.mjs" ] || return 0
+  node --input-type=module -e '
+    const [lib, tree] = process.argv.slice(1);
+    const { readStacks } = await import(lib);
+    readStacks([tree]);
+  ' "file://$ROOT/tools/dev/lib/stacks.mjs" "$(dirname "$(dirname "$(dirname "$STACK_DIR")")")" >/dev/null 2>&1 || true
+}
+
 # The keeper (see SUPERVISION). Runs detached; the only process that ever signals firebase-tools.
 keep() {
   KEEPER_PID=$BASHPID
@@ -476,8 +505,13 @@ keep() {
   else
     result="CRASHED — firebase-tools exited with code $code; its log: $LOG"
   fi
+  # The suite is over when EVERY process of it is: firebase-tools does not always wait for what it started, and a
+  # straggler still writes into this stack's TMPDIR as it exits. They share the keeper's process group (bounded).
+  local waited=0
+  while group_busy && [ "$waited" -lt 50 ]; do nap 0.2; waited=$((waited + 1)); done
   entry_write exited "" "$code" "$result"
   rm -f "$STOP_FILE"
+  release_stack_dir
 }
 
 PROXY_PID=$$

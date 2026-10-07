@@ -67,6 +67,9 @@ export default {
         t.ok(ctx.preflight('web', {}, []) === null, 'nothing running: silent');
         const attach = ctx.preflight('web', {}, [holder]);
         t.ok(attach && !attach.refuse && /ATTACHES/.test(attach.message) && attach.message.includes('pid 42'), `plain repeat attaches: ${attach?.message}`);
+        // NB3: the attached run's "second stack" must not name the running stack's own offset — it would collide.
+        const same = ctx.preflight('web', { portOffset: 0 }, [holder]);
+        t.ok(same.message.includes('tools/dev/dev serve web --port-offset=auto') && !same.message.includes('--port-offset=0'), `attached at the running offset, a second stack is offered at auto: ${same.message}`);
         t.ok(!ctx.preflight('web', { portOffset: 'auto' }, [holder]).refuse, 'auto is not a different stack');
         t.ok(!ctx.preflight('web', { portOffset: 0 }, [holder]).refuse, 'the same offset attaches');
         const other = ctx.preflight('web', { portOffset: 3000 }, [holder]);
@@ -81,6 +84,7 @@ export default {
       setup: () => workspace(),
       run: async (tree, ctx) => {
         ctx.follow = ctx.load('executors/follow-stack/executor');
+        ctx.records = ctx.load('executors/_utils/run-records');
       },
       expect: (tree, t, ctx) => {
         t.ok(ctx.follow.verdict('web', { code: 0 }).success === true, 'a stack that ended cleanly: success');
@@ -91,7 +95,35 @@ export default {
         });
         t.ok(!failed.success && /FAILED \(exit 1\)/.test(failed.message) && /emulators exited with code 1/.test(failed.message), `a failed stack fails the run, saying why: ${failed.message}`);
         t.ok(/^\[serve\] web's dev stack FAILED \(exit 1\): emulators exited with code 1; emulators: Error: Could not spawn/.test(failed.headline), `the invoker gets it in a line: ${failed.headline}`);
-        t.ok(ctx.follow.exitRecordPath('/r', '42', 'web') === '/r/.bespunky/run/exits/42@web.json', 'the exit record the engine writes');
+        t.ok(ctx.records.exitRecordPath('/r', '42', 'web') === '/r/.bespunky/run/exits/42@web.json', 'the exit record the engine writes');
+        // A refused run: serve-preflight wrote the refusal as the exit record; the follower says it and fails (exit 1).
+        const refused = ctx.follow.verdict('web', { code: 1, refused: true, report: ['[serve] web is already served … Start the stack you asked for beside it'] });
+        t.ok(!refused.success && /^\[serve\] REFUSED — web is already served/.test(refused.headline) && refused.message.includes('Start the stack'), `a refusal fails the run and is said: ${refused.headline}`);
+        // NB2: an ATTACHED run whose stack was stopped cleanly succeeds, and says whose stack it was and who stopped it.
+        const attached = ctx.follow.verdict('web', { code: 0, stoppedBy: 'claude:abc (tools/dev/dev stop)' }, { key: 'web@31959', owner: 'user:node' });
+        t.ok(attached.success && /web@31959 — the stack this run was following \(owner user:node\) — was stopped by claude:abc \(tools\/dev\/dev stop\)/.test(attached.note), `attached, stopped cleanly: success, with a line: ${attached.note}`);
+        const attachedFailed = ctx.follow.verdict('web', { code: 1, summary: ['emulators exited with code 1'] }, { key: 'web@31959' });
+        t.ok(!attachedFailed.success && /web@31959 — the stack this run was following — FAILED \(exit 1\)/.test(attachedFailed.headline), `attached, failed: the run fails (${attachedFailed.headline})`);
+      },
+    },
+    {
+      // NB1: a clean `dev stop` made `nx serve` exit 130 ("Stopped before finishing"): Nx reads a continuous task that
+      // ends while a task of the run depends on it as crashed (code 0) or interrupted (143). The composer stays until
+      // Nx releases it whenever something in THIS run depends on it — and only then.
+      name: 'dev-stack: knows whether anything in this run depends on it',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        ctx.depended = ctx.load('executors/serve/executor').dependedOnHere;
+      },
+      expect: (tree, t, ctx) => {
+        const task = (id) => {
+          const [project, target, configuration] = id.split(':');
+          return { id, target: { project, target, configuration } };
+        };
+        const graph = (deps) => ({ tasks: Object.fromEntries(['web:dev-stack:development', 'web:serve:development', 'web:serve-preflight'].map((id) => [id, task(id)])), continuousDependencies: deps, dependencies: {}, roots: [] });
+        t.ok(ctx.depended(graph({ 'web:serve:development': ['web:dev-stack:development'] }), 'web', 'dev-stack'), '`nx serve`: the follower depends on it');
+        t.ok(!ctx.depended(graph({ 'web:serve:development': [] }), 'web', 'dev-stack'), '`nx run web:dev-stack` alone: nothing does');
+        t.ok(!ctx.depended(undefined, 'web', 'dev-stack'), 'no task graph handed over: nothing does');
       },
     },
     {
@@ -101,6 +133,7 @@ export default {
       setup: () => workspace(),
       run: async (tree, ctx) => {
         ctx.hides = ctx.load('executors/_utils/invoker').nxHidesTaskOutput;
+        ctx.eaten = ctx.load('executors/_utils/invoker').eatenByInvoker;
       },
       expect: (tree, t, ctx) => {
         t.ok(ctx.hides({ invokerIsTty: false, aiAgent: true }), 'an agent without a terminal (summary): said to the invoker');
@@ -108,6 +141,10 @@ export default {
         t.ok(!ctx.hides({ invokerIsTty: false, aiAgent: false }), 'CI / a pipe (static-failures-only shows it): not duplicated');
         t.ok(ctx.hides({ style: 'summary', invokerIsTty: true, aiAgent: false }), '--output-style=summary named: said to the invoker');
         t.ok(!ctx.hides({ style: 'static', invokerIsTty: false, aiAgent: true }), '--output-style=static named: Nx prints it itself');
+        // `> log 2>&1`: Nx writes at its own offset in a file it did not open for appending — over anything appended.
+        t.ok(ctx.eaten({ regularFile: true, invokerAppends: false }), '`> file`: an appended line would be written over — it goes after Nx\'s last line');
+        t.ok(!ctx.eaten({ regularFile: true, invokerAppends: true }), '`>> file`: appended lines survive');
+        t.ok(!ctx.eaten({ regularFile: false, invokerAppends: false }), 'a pipe: nothing to write over');
       },
     },
   ],
