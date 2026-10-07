@@ -33,7 +33,7 @@
     "seedRules": {
       "type": "boolean",
       "default": false,
-      "description": "Seed deny-all Firestore rules, Firestore indexes and Storage rules into the `firebase` project (and declare them in firebase.json) for each service firebase.json declares none for. TRUE ONLY WHEN ENSURING the layer (`new`, `add-layer firebase`) — never on a plain upgrade: a project with no rules in the repo keeps them in the Firebase console, and the first deploy would overwrite them. The seeds carry a marker line; `nx run firebase:deploy` skips a file that still has it. Default false."
+      "description": "Seed deny-all Firestore rules and Storage rules into the `firebase` project (and declare them in firebase.json) for each service firebase.json declares none for. TRUE ONLY WHEN THIS RUN CREATES the layer (`new`, or `add-layer firebase` on a project without it) — never on an upgrade or a re-ensure: a project with no rules in the repo keeps them in the Firebase console (the first deploy would overwrite them) and its local emulators run open (deny-all would break them). The seeds carry a marker line; `nx run firebase:deploy` skips a file that still has it. Never an indexes file: a forced deploy deletes every live index the file does not list. Default false."
     }
   },
   "required": []

@@ -43,12 +43,14 @@ function main(argv: string[]): void {
       return;
     case 'plan': {
       const csv = (key: string) => (flags[key] ?? '').split(',').filter(Boolean);
+      const tree = workspace();
       const lines = plan(
         {
-          tree: workspace(),
+          tree,
           mode: runMode(flags.mode),
           active: new Set(inRegistryOrder(csv('active'))),
           ensured: new Set(inRegistryOrder(csv('ensured'))),
+          detected: new Set(detectLayers(tree)),
           project: required(flags, 'project'),
           app: required(flags, 'app'),
           voice: flags.voice === '1',

@@ -180,6 +180,12 @@
       "description": "The web layer's per-tool `<folder>-playwright-cache` volume (~/.cache/ms-playwright) folds into ONE persisted ~/.cache volume (the agent layer's `<folder>-cache`), which also keeps the shared browser's own Playwright runtime and every other tool cache across rebuilds. Removes the house-written mount (and the house comment above it) so it does not stay nested inside the new one; a project-written one is reported. The unused Docker volume lives on the host and is reported by name for `docker volume rm` \u2014 a cache, so nothing is lost.",
       "implementation": "./src/migrations/0.49.0/fold-playwright-cache-into-home-cache"
     },
+    "record-house-targets": {
+      "version": "0.50.0",
+      "layer": "nx",
+      "description": "Writes the first .bespunky/house-targets.json \u2014 the record of what the house last wrote into each house project's targets (functions, firebase, shared-browser, worktree-domains), which upgrades from 0.50.0 merge against three-way so a project's own edits inside a house target survive. Records 0.49.2's values (the last release before the record; house targets were then replaced whole, so every project got the same) only where the project still holds them, rendered for where its projects live: a differing key is left out and reported by the next merge instead of guessed, a set is recorded only while every member 0.49.2 wrote is still there, and a target 0.49.2 did not write stays the project's own. Never overwrites a record.",
+      "implementation": "./src/migrations/0.50.0/record-house-targets"
+    },
     "correct-app-hosting-guidance": {
       "version": "0.50.0",
       "layer": "firebase",

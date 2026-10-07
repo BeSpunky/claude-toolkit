@@ -18,7 +18,7 @@ Deploying to Firebase App Hosting? Its Root Directory must be the app (--root-di
 Ship the Firebase backend with nx affected -t deploy — functions build through Nx, rules ship from what firebase.json declares
 First Firebase deploy? node tools/firebase-deploy.mjs --check ticks off login, alias, deploy and CI — and says how to tell each worked
 Rules only in the Firebase console? npx firebase init firestore, then npx firebase init storage, pulls the live ones into the repo (one feature per init)
-Your edits inside a house target (inputs, args, configurations) survive upgrades — the upgrade says if it had to replace one
+Your edits inside a house target (inputs, args, configurations) survive upgrades — the upgrade's summary lists any it had to replace, under UPGRADE_ATTENTION
 What is running, and whose? tools/dev/dev ps lists every dev stack in every worktree; tools/dev/dev stop takes yours down cleanly
 Deploy from CI with /bespunky-house:add-layer ci — the branch model's `ci` bindings decide which branch deploys where
 The cloud setup behind CI deploys is yours to run: ! bash tools/setup-gcp.sh --dry-run --environment <env> shows every IAM grant first
