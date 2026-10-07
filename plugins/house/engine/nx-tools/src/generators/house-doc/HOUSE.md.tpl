@@ -214,9 +214,30 @@ You don't have to emulate everything or nothing — each Firebase service is ind
 
 ### Cloud Functions ({{FUNCTIONS_ROOT}})
 
-Cloud Functions are a first-class Nx app: `{{NX}} build {{FUNCTIONS_PROJECT}}` (esbuild) bundles `{{FUNCTIONS_ROOT}}/src/main.ts` into `dist/{{FUNCTIONS_ROOT}}` with a generated deploy-manifest `package.json`; the emulator and `firebase deploy` both consume that dist output (`firebase.json` → `functions.source`). Runtime deps (`firebase-admin`/`firebase-functions`) live at the **workspace root** — no per-project `node_modules`. Deploy with `{{NX}} run {{FUNCTIONS_PROJECT}}:deploy`. **Platform firewall (ESLint-enforced):** `platform:web` projects must never import `firebase-admin`/`firebase-functions`; `platform:server` projects (`{{FUNCTIONS_PROJECT}}`, `firebase`) must never import `firebase`/`@angular/*`. Tag new libraries accordingly.
+Cloud Functions are a first-class Nx app: `{{NX}} build {{FUNCTIONS_PROJECT}}` (esbuild) bundles `{{FUNCTIONS_ROOT}}/src/main.ts` into `dist/{{FUNCTIONS_ROOT}}` with a generated deploy-manifest `package.json`; the emulator and `firebase deploy` both consume that dist output (`firebase.json` → `functions.source`). Runtime deps (`firebase-admin`/`firebase-functions`) live at the **workspace root** — no per-project `node_modules`. Deploy with `{{NX}} run {{FUNCTIONS_PROJECT}}:deploy` (see *Deploying the backend* below). **Platform firewall (ESLint-enforced):** `platform:web` projects must never import `firebase-admin`/`firebase-functions`; `platform:server` projects (`{{FUNCTIONS_PROJECT}}`, `firebase`) must never import `firebase`/`@angular/*`. Tag new libraries accordingly.
 
 **Functions secrets (`defineSecret`).** Secret values live in `{{FUNCTIONS_ROOT}}/.secret.local` — **gitignored**; copy `.secret.local.example` and fill it. One source of truth, two sinks: `tools/emulators.sh` injects it beside the local bundle so the **emulator** reads it, and `{{NX}} run {{FUNCTIONS_PROJECT}}:push-secrets` sets each `KEY` in **Google Secret Manager** for production (values piped via stdin — never on a command line or in a log). Add a `KEY=VALUE` when your functions call `defineSecret('KEY')`, then re-push and redeploy.
+
+### Deploying the backend — functions, rules & indexes
+
+App Hosting ships the web app; it never deploys Cloud Functions, Firestore rules and indexes, or Storage rules. Those ship through **two Nx targets, both named `deploy`**, so one command deploys whatever a change touched:
+
+| Target | Ships | Before it runs |
+| --- | --- | --- |
+| `{{FUNCTIONS_PROJECT}}:deploy` | `firebase deploy --only functions` (the bundle in `dist/{{FUNCTIONS_ROOT}}`) | Nx builds `{{FUNCTIONS_PROJECT}}` (and lints it, where the workspace lints) through `dependsOn` — `firebase.json` has no `predeploy`, so nothing builds twice |
+| `firebase:deploy` | the Firestore rules, Firestore indexes and Storage rules **`firebase.json` declares** (`tools/firebase-deploy-rules.mjs` reads it each run) — and nothing it does not declare | — |
+
+```bash
+{{NX}} affected -t deploy --project=<alias> --non-interactive   # what changed since the base — CI's command
+{{NX}} run-many -t deploy --project=<alias>                       # everything
+{{NX}} run firebase:deploy -P <alias>                             # one target: `nx run` takes --project itself, so use -P
+```
+
+- **Every extra argument reaches the Firebase CLI** (`--project=<alias>` / `-P <alias>` picks the `.firebaserc` alias; `--non-interactive` for CI). Deploy targets are **never cached** and **never run beside another task** (`parallelism: false`), so two deploys never race one Firebase project.
+- **`affected` sees the root Firebase files.** `firebase.json`, `.firebaserc` and root rules files belong to no project, so the deploy targets list them as `{workspaceRoot}/…` inputs — a rules-only commit deploys `firebase`, a `firebase.json` change both.
+- **Deploy through Nx, never a raw `firebase deploy`** — that skips the build and ships whatever stale bundle sits in `dist/`.
+- **Rules not in the repo yet?** Then `firebase:deploy` deploys nothing and says so: the console keeps them. To bring them under review and version control, pull the **live** ones in once — a human, in a terminal (it asks where to put each file; answer `firebase/<file>`): `npx firebase init firestore storage -P <alias>`. It downloads the current rules and indexes and declares them in `firebase.json`, so the first deploy changes nothing.
+- **Rules the house seeded** (when the Firebase layer was added to a project with none) are **deny-all** and carry a `bespunky:house-seed` line; `firebase:deploy` **skips** a file that still has it, so the placeholder never reaches production. Write your rules (the emulators enforce them too), then delete the line.
 
 ### Emulator seeds, caching & reset (no re-onboarding each serve)
 
@@ -372,6 +393,7 @@ Libraries here are **publishable by default** — one generator owns the package
 - You have access to the Nx MCP server and its tools (through the Nx plugin) - use them.
 - For Nx plugin best practices, check `{{#node}}node_modules{{/node}}{{^node}}.nx/installation/node_modules{{/node}}/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
 - For scaffolding (projects, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
+- **House targets are yours to extend.** The targets on the house's own projects (the house tooling{{#firebase}}, `{{FUNCTIONS_PROJECT}}`, `firebase`{{/firebase}}) are re-asserted on every upgrade by a **three-way merge** against `.bespunky/house-targets.json` — the record of what the house last wrote (generated; commit it, never edit it). So an input, an option (`args`), a `configurations` entry or a `dependsOn` entry you add — or a value you change — **survives every upgrade** unless the house changes the same key; then the house's value wins and the upgrade **says what it replaced**, so you can re-apply it. A house target you delete comes back; to run something different, add a target of your own beside it.
 {{^js}}{{^angular}}- This workspace has no JavaScript/TypeScript layer, so the house's TypeScript generators (`app`, `publishable-lib`, `design-system`, …) do not apply — they say so if you run them. Nx itself is language-agnostic: add the plugin for this stack (`{{NX}} add <plugin>`) to give its projects targets.
 {{/angular}}{{/js}}
 {{#angular}}
