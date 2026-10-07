@@ -16,6 +16,7 @@ import { type Tree, type ProjectConfiguration, addProjectConfiguration, getProje
 import { detectLinking, ensureWorkspaceMember, referenceFromSolution } from './linking';
 import { workspacePath } from './linking/shared';
 import { resolveWorkspaceScope } from './workspace-layout';
+import { describeOverride, mergeHouseTargets, recordHouseTargets, recordedHouseTargets } from './house-targets';
 
 export type ProjectFileKind = 'project.json' | 'package.json';
 
@@ -102,8 +103,11 @@ export function joinWorkspace(tree: Tree, root: string): string | null {
 //                  linked by `paths`, a package.json workspace member where they are `workspaces`-linked. Writing
 //                  `<root>/project.json` by hand forked a TS-solution workspace into two conventions.
 //   WHAT IS OURS?  The house's targets and tags — re-asserted on every run, into whichever file defines the
-//                  project (`projectDefinitionFile`); anything the project added itself is left alone. Removing a
-//                  target the house no longer ships is a migration's job, never a generator's (project state).
+//                  project (`projectDefinitionFile`). Re-asserted by a THREE-WAY MERGE against a record of what the
+//                  house last wrote (_utils/house-targets.ts): the project's own targets, and its own edits and
+//                  additions INSIDE a house target (an input, an option, a configuration), survive an upgrade unless
+//                  the house changed the same key — and then the upgrade says what it replaced. Removing a target
+//                  the house no longer ships is a migration's job, never a generator's (project state).
 //
 // A house project created as a PACKAGE is named under the workspace's npm scope (`@acme/firebase`) while its Nx
 // name stays the bare one — `createProject`'s rule, which every creator gets.
@@ -160,11 +164,13 @@ export function ensureHouseProject(
   owned: HouseProjectConfig,
   manifest: Record<string, unknown> = {},
 ): void {
+  const ownedTargets = owned.targets ?? {};
   if (!home.exists) {
     // The package's name is never the seed's: a house project is always named the way `createProject` scopes
     // one (a template manifest's bare `"name": "functions"` is exactly the shadowing that rule prevents).
     const { name: _seedName, ...seed } = manifest;
     createProject(tree, home.name, { root: home.root, ...owned }, { private: true, ...seed });
+    recordHouseTargets(tree, home.name, ownedTargets);
     return;
   }
   if (home.root !== home.canonical.root || home.name !== home.canonical.name) {
@@ -174,11 +180,15 @@ export function ensureHouseProject(
     );
   }
   const file = projectDefinitionFile(tree, home.root);
+  const recorded = recordedHouseTargets(tree, home.name);
   updateJson(tree, file.path, (json) => {
     // A package.json-defined project keeps its Nx configuration under `nx`; a project.json at the top level.
     const config = file.kind === 'package.json' ? (json.nx ??= {}) : json;
     config.tags = [...new Set([...(config.tags ?? []), ...owned.tags])];
-    config.targets = { ...(config.targets ?? {}), ...owned.targets };
+    const { targets, overrides } = mergeHouseTargets(config.targets, ownedTargets, recorded);
+    config.targets = targets;
+    for (const override of overrides) logger.warn(`[${who}] ${describeOverride(home.name, override)}`);
     return json;
   });
+  recordHouseTargets(tree, home.name, ownedTargets);
 }

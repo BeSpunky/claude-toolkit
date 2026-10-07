@@ -67,6 +67,9 @@ export const firebase: LayerDescriptor = {
           `--workspaceName=${ctx.project}`,
           ...(ctx.staging ? ['--staging=true'] : []),
           ...(attachable(ctx) ? [`--clientApp=${ctx.app}`] : []),
+          // Seeding rules is a BASELINE act: an upgrade must never put a placeholder where the console holds the
+          // live rules (generators/firebase-emulators — the deploy would ship it).
+          ...(ctx.ensured.has('firebase') ? ['--seedRules'] : []),
         ],
       },
     ],
