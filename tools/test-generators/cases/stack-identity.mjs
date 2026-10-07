@@ -13,6 +13,25 @@ export default {
   name: 'stack identity · one level of continuity, the preflight, the runtime port table',
   cases: [
     {
+      // serve-options used to look for the composer on `serve` — since the split it is the follower, and `host` never
+      // reached the composer again.
+      name: 'serve-options puts host on the dev-server leaf and the dev-stack composer, never on the serve follower',
+      setup: () => {
+        const tree = workspace();
+        addProjectConfiguration(tree, 'site', { root: 'apps/site', targets: { 'dev-server': { executor: 'nx:run-commands', options: { command: 'x', port: 4300 } } } });
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        await ctx.load('generators/serve/generator').default(tree, { project: 'site' });
+        await ctx.load('generators/serve-options/generator').default(tree, { project: 'site', host: '0.0.0.0' });
+      },
+      expect: (tree, t) => {
+        const targets = readProjectConfiguration(tree, 'site').targets;
+        t.equal([targets['dev-server'].options.host, targets['dev-stack'].options?.host], ['0.0.0.0', '0.0.0.0'], 'host on the leaf and the composer');
+        t.ok(targets.serve.options?.host === undefined, `the follower forwards its flags; it holds no host: ${JSON.stringify(targets.serve)}`);
+      },
+    },
+    {
       name: 'the composer is continuous and depends on its preflight; a stack leaf is not continuous',
       setup: () => {
         const tree = workspace();

@@ -15,7 +15,8 @@
 // 0.50.0 it declares none where the plugin infers `lint` (an explicit `eslint .` where inference is off), and
 // generators never remove a whole target — so it is converted here too.
 //
-// WHICH APPS: the house's — an Angular application behind the house `serve` composer. Already linted (a `lint`
+// WHICH APPS: the house's — an Angular application behind the house composer (`serve` before split-serve-follower,
+// `dev-stack` after it). Already linted (a `lint`
 // target, or one @nx/eslint/plugin infers from its own or the root eslint config) → nothing. @nx/angular not installed (it is
 // what created the app; a broken install) → nothing written, the command reported.
 //

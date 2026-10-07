@@ -69,8 +69,9 @@
 //                        web/server depend only on their own + shared projects, shared only on shared, each
 //                        banning the packages bound to another platform; untagged projects are classified then.
 //
-// No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (a continuous multi-process serve),
-// not of Firebase, and belongs to the generator that owns that loop.
+// No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (one multi-process stack — the
+// continuous `dev-stack` composer, which `serve` follows), not of Firebase, and belongs to the generator that owns
+// that loop.
 import { seedServedApps } from '../dev/generator';
 import {
   type Tree,

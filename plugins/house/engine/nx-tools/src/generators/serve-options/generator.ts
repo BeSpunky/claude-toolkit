@@ -9,8 +9,9 @@
 //
 // Where it routes the option:
 //   - House shape — the app dev-server is the `dev-server` leaf (created by the `serve` generator) and
-//     `serve` is the @bespunky/nx-tools:serve composer → set `host` on the `dev-server` leaf AND on
-//     `serve` (the composer DELEGATES host to the dev-server via `--host`, so it belongs there too).
+//     `dev-stack` is the @bespunky/nx-tools:serve composer (`serve` follows it) → set `host` on the
+//     `dev-server` leaf AND on `dev-stack` (the composer DELEGATES host to the dev-server via `--host`, so it
+//     belongs there too).
 //   - Plain case — `serve` is still the raw Angular dev-server (a fresh scaffold before the `serve`
 //     generator runs) → set `host` on `serve.options`.
 //
@@ -33,6 +34,7 @@ import {
   logger,
 } from '@nx/devkit';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
+import { SERVE_EXECUTOR, STACK_TARGET } from '../_utils/dev-server';
 
 /** The legacy orchestrator's executor — the one `serve` shape that must never be given `host`. */
 const RUN_COMMANDS_EXECUTOR = 'nx:run-commands';
@@ -53,18 +55,16 @@ export default async function serveOptionsGenerator(
   const targets = project.targets;
 
   const serve = targets.serve;
-  const serveIsNxToolsComposer = serve?.executor === '@bespunky/nx-tools:serve';
+  const composer = targets[STACK_TARGET]?.executor === SERVE_EXECUTOR ? targets[STACK_TARGET] : undefined;
 
   // The one canonical name for the real app dev-server — the leaf the `dev-stack` composer drives by name.
   const devServer = targets['dev-server'];
 
   if (devServer) {
-    // House shape: the real dev-server leaf lives alongside the composing serve.
+    // House shape: the real dev-server leaf lives alongside the `dev-stack` composer.
     // 1) The nx-tools:serve composer DELEGATES `host` to the dev-server (forwards `--host`), so `host`
     //    belongs on it too — assert it (the `serve` generator sets it; this keeps an upgrade honest).
-    if (serveIsNxToolsComposer && serve) {
-      serve.options = { ...serve.options, host };
-    }
+    if (composer) composer.options = { ...composer.options, host };
     // 2) Apply host to the dev-server leaf itself.
     devServer.options = { ...devServer.options, host };
   } else if (serve?.executor === RUN_COMMANDS_EXECUTOR) {
