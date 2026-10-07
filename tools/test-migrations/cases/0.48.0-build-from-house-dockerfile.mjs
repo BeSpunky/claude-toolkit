@@ -114,6 +114,18 @@ export default {
         t.hasNot(LOCAL, 'sudo apt-get update -qq && sudo apt-get install');
         t.has(LOCAL, 'os-packages.txt');
       },
+      // The seed is written once and never again, so every stub a release seeded is still on disk somewhere.
+      historicalShapes: [
+        ['0.15.0 stub (2ace14b)', 'scaffold.sh --repair'],
+        ['0.16.0–0.38.x stub (2c58e20)', 'scaffold.sh --sync'],
+      ].map(([name, command]) => ({
+        name,
+        setup: (tree) => {
+          tree.write(DC, OWNED);
+          tree.write(MARKER, marker(true));
+          tree.write(LOCAL, STUB_0_47.replace('`house.sh upgrade`', `\`${command}\``));
+        },
+      })),
     },
     {
       name: "the project's own apt step in post-create.local.sh: left exactly as it is (reported)",
