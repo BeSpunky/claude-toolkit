@@ -123,7 +123,8 @@ const ENV = {
   GIT_AUTHOR_NAME: 'dogfood', GIT_AUTHOR_EMAIL: 'dogfood@localhost',
   GIT_COMMITTER_NAME: 'dogfood', GIT_COMMITTER_EMAIL: 'dogfood@localhost',
 };
-delete ENV.FORCE_COLOR;
+ENV.FORCE_COLOR = '0';   // logs a human reads in an editor, and verdict lines matched by regex
+ENV.NO_COLOR = '1';
 
 // ── running things ────────────────────────────────────────────────────────────────────────────────────────
 let logSeq = 0;
@@ -180,7 +181,13 @@ function record(step, check, ok, { ms = 0, detail = '', log = '' } = {}) {
 /** The line of a log that says why — a house.sh verdict token, an error, else the last line. */
 function why(out) {
   const lines = out.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('[dogfood]'));
-  const hit = [...lines].reverse().find((l) => /^(UPGRADE_[A-Z]+|NEW_OK|ERROR|BACKUP_ABORT)\b|error[: ]|✖|failed/i.test(l));
+  // The CAUSE — Nx's error banner (`NX   <message>`), a package manager's `error <message>`, house.sh's `ERROR:` — is
+  // preferred over the consequence printed after it (`NX   Command failed`, `UPGRADE_FAILED`, `error Command failed`).
+  const cause = [...lines].reverse().find((l) =>
+    (/^NX\s{2,}/.test(l) && !/^NX\s+(Generating|Running target|Successfully|Pass --verbose|Command failed)|success/i.test(l))
+    || (/^error /.test(l) && !/^error (Command failed|Found incompatible)/.test(l))
+    || /^ERROR\b/.test(l));
+  const hit = cause ?? [...lines].reverse().find((l) => /^(UPGRADE_[A-Z]+|NEW_OK|BACKUP_ABORT)\b|✖|failed/i.test(l));
   return (hit ?? lines.at(-1) ?? '').slice(0, 140);
 }
 function stamp(dir) {
@@ -215,6 +222,12 @@ const SEEDS = [
           ? `App Hosting backend ${c.name}-web tracks main (GitHub-linked); functions deployed by hand: nx run functions:deploy`
           : `App Hosting backend ${c.name}-${s.branch} tracks ${s.branch}; functions deployed by hand: nx run functions:deploy -P ${s.branch}`;
       }
+      // The lines the model declares exist, as in the reporting projects, and the seeds land on the integration line.
+      const head = gitOut(c.dir, 'rev-parse', 'HEAD');
+      for (const b of [model.integration.branch, ...model.stages.map((s) => s.branch)]) {
+        if (git(c.dir, 'rev-parse', '--verify', '-q', `refs/heads/${b}`).status !== 0) gitOut(c.dir, 'branch', b, head);
+      }
+      gitOut(c.dir, 'checkout', '-q', model.integration.branch);
       const draft = join(TMP, 'branches.draft.json');
       writeJson(draft, model);
       const w = spawnSync('node', [b, 'write', draft], { cwd: c.dir, env: ENV, encoding: 'utf8' });
@@ -378,6 +391,7 @@ export const onInquiryCreated = onDocumentCreated(
 // ── the steps ─────────────────────────────────────────────────────────────────────────────────────────────
 const consumer = { name: 'coach', app: 'web', staging: opts.staging, dir: join(CONSUMERS, 'coach'), integration: null };
 const ok = { released: false, seed: false };
+let baseline = null; // { build: Set<failed task>, lint: … } from the seeded consumer, before the upgrade
 
 async function stepReleased() {
   const step = 'released';
@@ -415,7 +429,11 @@ async function stepSeed() {
   }
   const status = gitOut(consumer.dir, 'status', '--porcelain');
   record(step, 'tree clean after seeding', status === '', { detail: status ? status.split('\n').slice(0, 3).join(' | ') : '' });
-  return (ok.seed = all && status === '');
+  ok.seed = all && status === '';
+  // The same build + lint the upgraded workspace gets, BEFORE the upgrade: what fails here was already broken in what
+  // consumers have, so the upgrade's own rows can say which failures it introduced.
+  if (ok.seed) baseline = await verify('seed', consumer.dir, 'baseline: ');
+  return ok.seed;
 }
 
 function upgradeVerdict(out) {
@@ -459,18 +477,35 @@ async function stepUpgrade() {
       : [r2.code && `exit ${r2.code}`, v2.bad.join(' '), v2.next !== 'none' && `UPGRADE_NEXT: ${v2.next}`, moved && 'new commits', dirty && `dirty: ${dirty.split('\n').slice(0, 3).join(' | ')}`, !v2.okLine && why(r2.out)].filter(Boolean).join('; '),
   });
   console.log(`        (first upgrade printed ${reports} report line(s) — read them in ${r1.log})`);
-  await verify(step, c.dir);
+  await verify(step, c.dir, '', baseline);
   return true;
 }
 
 /** The check UPGRADE_OK / NEW_OK is not: the workspace builds and lints. `run-many` over every project (a fresh
  *  fixture has no cache to make `affected` cheaper), static output so the log reads top to bottom. */
-async function verify(step, dir) {
+async function verify(step, dir, prefix = '', before = null) {
   const [bin, pre] = nx(dir);
+  const failedSets = {};
   for (const target of ['build', 'lint']) {
-    const r = await run(`${step}-${target}`, bin, [...pre, 'run-many', '-t', target, '--output-style=static'], { cwd: dir, timeoutMs: 20 * 60_000 });
-    record(step, `nx run-many -t ${target}`, r.code === 0, { ms: r.ms, log: r.log, detail: r.code ? why(r.out) : (r.out.match(/Successfully ran target \S+ for (\d+ projects?)/) ?? [, ''])[1] });
+    const r = await run(`${step}-${prefix ? 'baseline-' : ''}${target}`, bin, [...pre, 'run-many', '-t', target, '--output-style=static'], { cwd: dir, timeoutMs: 20 * 60_000 });
+    const failed = r.code ? failedTasks(r.out) : [];
+    failedSets[target] = new Set(failed);
+    let detail = (r.out.match(/Successfully ran target \S+ for (\d+ projects?)/) ?? [, ''])[1];
+    if (r.code) {
+      detail = failed.length ? `failed: ${failed.join(', ')}` : why(r.out);
+      if (before?.[target]) {
+        const fresh = failed.filter((t) => !before[target].has(t));
+        detail += fresh.length === failed.length ? ' (all new since the baseline)' : fresh.length ? ` (NEW since the baseline: ${fresh.join(', ')})` : ' (every one already failed before the upgrade)';
+      }
+    }
+    record(step, `${prefix}nx run-many -t ${target}`, r.code === 0, { ms: r.ms, log: r.log, detail });
   }
+  return failedSets;
+}
+/** Nx's own "Failed tasks:" list, as task ids. */
+function failedTasks(out) {
+  const at = out.indexOf('Failed tasks:');
+  return at < 0 ? [] : [...out.slice(at).matchAll(/^- (\S+)$/gm)].map((m) => m[1]);
 }
 
 async function stepNew(id) {
@@ -512,7 +547,11 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, () => { console.error(`\n[dogfood] ${sig} — cleaning up`); cleanup(); summary(); process.exit(130); });
 }
 
-function fmt(ms) { return ms >= 60_000 ? `${Math.floor(ms / 60_000)}m${String(Math.round((ms % 60_000) / 1000)).padStart(2, '0')}s` : `${(ms / 1000).toFixed(1)}s`; }
+function fmt(ms) {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
+}
 function summary() {
   const w = { step: Math.max(4, ...results.map((r) => r.step.length)), check: Math.max(5, ...results.map((r) => r.check.length)) };
   const line = (a, b, c, d, e) => `${a.padEnd(w.step)}  ${b.padEnd(w.check)}  ${c.padEnd(4)}  ${d.padStart(7)}  ${e}`;
