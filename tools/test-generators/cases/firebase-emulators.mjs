@@ -9,7 +9,7 @@ const { updateJson, writeJson, getProjects } = requireFromRepo('@nx/devkit');
 const run = async (tree, ctx) => {
   await ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: SCOPE });
 };
-const TEMPLATED = ['tools/emulators.sh', 'tools/push-secrets.sh', 'tools/firebase-welcome.sh'];
+const TEMPLATED = ['tools/emulators.sh', 'tools/push-secrets.sh', 'tools/firebase-welcome.sh', 'tools/seed/apply.mjs', 'tools/seed/world.mjs'];
 
 export default {
   name: 'firebase-emulators · the functions app follows the layout',
@@ -68,7 +68,17 @@ export default {
         t.equal(project?.targets?.build?.options?.outputPath, `dist/${root}`, 'build output');
         t.equal(t.json(`${root}/tsconfig.json`)?.extends, '../../tsconfig.base.json', 'tsconfig extends, two levels up');
         t.has('.gitignore', `\n${root}/.secret.local\n`);
-        t.has('tools/emulators.sh', `$ROOT/${root}/.secret.local`);
+        t.has('.gitignore', `\n${root}/.secret.sandbox.local\n`);
+        t.has('tools/emulators.sh', `FUNCTIONS_SRC="$ROOT/${root}"`);
+        t.has('tools/emulators.sh', `FUNCTIONS_DIST="$ROOT/dist/${root}"`);
+        // The params files are read in place from the source dir — so the emulator-only .env.local works.
+        t.equal(t.json('firebase.json')?.functions?.[0]?.configDir, root, 'firebase.json configDir');
+        t.ok(!project?.targets?.build?.options?.assets, `build copies no params file: ${JSON.stringify(project?.targets?.build?.options?.assets)}`);
+        // The seed applier is generator-owned; the worlds are not.
+        t.has('tools/seed/apply.mjs', 'export async function applyWorld');
+        t.has('tools/seed/build.mjs', "from './apply.mjs'");
+        t.has('tools/seed/world.mjs', "import { ref, at } from './apply.mjs';");
+        t.hasNot('tools/seed/world.mjs', 'localhost:8080');
         t.has('tools/firebase-welcome.sh', `"$_fb_root"/${appsDir}/*/src/environments`);
         for (const file of [...TEMPLATED, `${root}/package.json`, `${root}/tsconfig.json`, `${root}/src/main.ts`]) {
           t.ok(!/\{\{\s*\w+\s*\}\}/.test(t.read(file)), `leftover {{…}} in ${file}`);
@@ -84,6 +94,31 @@ export default {
         }
       },
     })),
+    {
+      // firebase-tools' `init auth` with no active project writes `support@undefined.firebaseapp.com`. Not ours to
+      // repair (the right value is the real project's), but the upgrade says so — and must not touch the key.
+      name: "firebase.json from `firebase init` without a project: the undefined support email is reported, kept",
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'firebase.json', { auth: { providers: { googleSignIn: { supportEmail: 'support@undefined.firebaseapp.com' } } } });
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        const logger = requireFromRepo('@nx/devkit').logger;
+        const previous = logger.warn;
+        ctx.warnings = [];
+        logger.warn = (...args) => (ctx.warnings.push(args.join(' ')), previous(...args));
+        try {
+          await run(tree, ctx);
+        } finally {
+          logger.warn = previous;
+        }
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(ctx.warnings.some((w) => w.includes('undefined.firebaseapp.com') && w.includes('firebase use --add')), `warnings: ${ctx.warnings}`);
+        t.equal(t.json('firebase.json')?.auth?.providers?.googleSignIn?.supportEmail, 'support@undefined.firebaseapp.com', 'auth block untouched');
+      },
+    },
     {
       name: 'a deeper appsDir (src/apps): the tsconfig climbs three levels, not a hard-coded two',
       setup: () => {

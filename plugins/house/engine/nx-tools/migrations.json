@@ -191,6 +191,18 @@
       "layer": "firebase",
       "description": "The browser reaches every Firebase emulator (Auth, Firestore, Storage, Functions) through the dev server's own origin, so a host browser needs only the app's port — whatever host port the editor forwarded it to — and a worktree's stack needs no ?portOffset=. Removes the retired per-service `proxied` switch from each Firebase app's src/environments files and its type (surgically, a directory whole or not at all), with the house's comments about it; reports a `proxied: false` service (it is relayed now), project code importing the retired emulatorFor/portOffset/offsetUrl/resolvePortOffset, and an https dev server (the SDK dials emulators over http only). Drops the house-seeded ?portOffset= URL switch from .bespunky/dev.json.",
       "implementation": "./src/migrations/0.50.0/route-emulators-through-origin"
+    },
+    "split-seed-applier": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The seed applier (encoder, REST calls, banner, emulator hosts) moves out of the project-owned tools/seed/world.mjs into the generator-owned tools/seed/apply.mjs, regenerated on every upgrade — so its fixes reach existing projects: it now refuses to run without emulator hosts (no more fallback to the base ports, which wrote into whichever suite owned them) and handles a world without accounts. A world.mjs whose applier is still the stock one loses it, imports ref/at from apply.mjs, and drops the host constants nothing else reads (a constant its worlds still read is kept and reported). A customised applier is left exactly as it is and reported: build.mjs no longer runs it.",
+      "implementation": "./src/migrations/0.50.0/split-seed-applier"
+    },
+    "retell-secrets-example": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The committed <functions>/.secret.local.example stops claiming tools/emulators.sh places .secret.local beside the bundle: from 0.50.0 the emulator never reads production secrets (inert placeholders for every declared key; sandbox values only from an opt-in .secret.sandbox.local). Replaces only the stock 0.49 header comment — every key the project added stays byte-for-byte; a header of the project's own that still makes the retired claim is left and reported.",
+      "implementation": "./src/migrations/0.50.0/retell-secrets-example"
     }
   }
 }

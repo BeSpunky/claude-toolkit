@@ -1,12 +1,8 @@
 // The seed worlds — the single source of truth for what a "known good" emulator
-// state contains. Run inside `firebase emulators:exec` (see tools/seed/build-seeds.sh),
-// which sets the emulator host env vars and exports the resulting state to a seed dir.
-//
-// Zero dependencies on purpose: this talks to the emulators' REST APIs directly (Node's
-// global fetch), so the workspace root needs no firebase-admin and this tool stays
-// decoupled from the functions package. Accounts are created through the Auth emulator;
-// Firestore docs are written with the emulator's `Bearer owner` admin bypass, so the
-// app's real security rules are irrelevant to seeding.
+// state contains. YOURS: written once, never regenerated. The generic machinery that
+// applies a world (encoder, REST calls, the emulator-host guard) is tools/seed/apply.mjs,
+// which the house owns and keeps current; tools/seed/build-seeds.sh runs both inside
+// `firebase emulators:exec` and exports the resulting state to a seed dir.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // SCALING THE SEED — read this before changing the data model.
@@ -36,18 +32,11 @@
 // as soon as one exists.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const AUTH_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || 'localhost:9099';
-const FS_HOST = process.env.FIRESTORE_EMULATOR_HOST || 'localhost:8080';
-const PROJECT = process.env.GCLOUD_PROJECT || 'demo-{{workspaceName}}';
+import { ref, at } from './apply.mjs';
 
 // A fixed timestamp keeps exported seeds byte-stable across rebuilds (no spurious diffs
 // from "now"). Only cosmetic for dev data.
 const CREATED_AT = '2026-01-01T00:00:00.000Z';
-
-/** Marker: resolve to the uid of the account created under `key`. Use for ids or fields. */
-export const ref = (key) => ({ __ref: key });
-/** Marker: a Firestore timestamp from an ISO string (a bare string stays a string field). */
-export const at = (iso) => ({ __ts: iso });
 
 // ── The worlds (the declarative source of truth) ───────────────────────────────
 // Sign in with one of an account's emails (against the Auth emulator) and you land
@@ -69,74 +58,3 @@ export const WORLDS = {
     ],
   },
 };
-
-// ── The applier (generic; never needs touching to add data) ────────────────────
-
-/** Create an Auth-emulator account for an email and return its uid (localId). */
-async function createAccount(email) {
-  const res = await fetch(
-    `http://${AUTH_HOST}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // A password fully forms the account; passwordless/magic-link sign-in with the same
-      // email still resolves to THIS account (email is the identity), inheriting its uid.
-      body: JSON.stringify({ email, password: 'seed-password', returnSecureToken: true }),
-    },
-  );
-  if (!res.ok) throw new Error(`Auth signUp(${email}) failed: ${res.status} ${await res.text()}`);
-  return (await res.json()).localId;
-}
-
-/** Encode any JS value as a Firestore REST typed value, resolving ref()/at() markers. */
-function encode(value, uids) {
-  if (value && typeof value === 'object') {
-    if ('__ref' in value) return { stringValue: requireUid(uids, value.__ref) };
-    if ('__ts' in value) return { timestampValue: value.__ts };
-    if (Array.isArray(value)) return { arrayValue: { values: value.map((v) => encode(v, uids)) } };
-    const fields = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, encode(v, uids)]));
-    return { mapValue: { fields } };
-  }
-  if (value === null) return { nullValue: null };
-  if (typeof value === 'string') return { stringValue: value };
-  if (typeof value === 'boolean') return { booleanValue: value };
-  if (typeof value === 'number')
-    return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
-  throw new Error(`Cannot encode seed value of type ${typeof value}: ${String(value)}`);
-}
-
-function requireUid(uids, key) {
-  const uid = uids[key];
-  if (!uid) throw new Error(`Seed references unknown account "${key}" — add it to the world's accounts.`);
-  return uid;
-}
-
-/** Write (create-or-overwrite) one Firestore doc, with already-encoded typed fields. */
-async function writeDoc(path, fields) {
-  const res = await fetch(
-    `http://${FS_HOST}/v1/projects/${PROJECT}/databases/(default)/documents/${path}`,
-    {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
-      body: JSON.stringify({ fields }),
-    },
-  );
-  if (!res.ok) throw new Error(`Firestore write(${path}) failed: ${res.status} ${await res.text()}`);
-}
-
-/** Apply a declarative world: create its accounts, then write every doc it describes. */
-export async function applyWorld(name, world) {
-  const uids = {};
-  for (const [key, account] of Object.entries(world.accounts)) {
-    uids[key] = await createAccount(account.email);
-  }
-  for (const { collection, id, fields } of world.docs) {
-    const docId = id && typeof id === 'object' && '__ref' in id ? requireUid(uids, id.__ref) : id;
-    const encoded = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, encode(v, uids)]));
-    await writeDoc(`${collection}/${docId}`, encoded);
-  }
-  const who = Object.values(world.accounts)
-    .map((a) => `${a.email} (${a.name})`)
-    .join(' · ');
-  console.log(`[seed] '${name}' world ready — sign in as: ${who}`);
-}

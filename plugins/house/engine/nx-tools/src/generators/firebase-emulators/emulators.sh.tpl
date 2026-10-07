@@ -162,10 +162,9 @@ if [ "$EXPLICIT_ONLY" -eq 0 ]; then
 fi
 
 # ── CLONE-LEVEL RESOURCES, RESOLVED ONCE ───────────────────────────────────────────────────────
-# Two things the emulators need are gitignored, so they exist per CLONE and never arrive in a
-# freshly-created git worktree: the built emulator SEEDS and `.secret.local`. Both resolve the same
-# way — this tree's own copy wins, else the main worktree's — so resolve the main worktree once here
-# rather than twice by hand further down, which is how the two would drift apart.
+# The built emulator SEEDS are gitignored, so they exist per CLONE and never arrive in a freshly-created
+# git worktree. A worktree resolves them this tree first, else the main worktree's — resolve the main
+# worktree once here. (Secrets are deliberately NOT resolved this way: see FUNCTIONS SECRETS below.)
 #
 # `|| true` under `set -euo pipefail`: outside a repository `git worktree list` exits 128, and
 # pipefail would propagate that into an errexit kill. Not being in a repo is ordinary here.
@@ -205,30 +204,133 @@ elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ]; then
   fi
 fi
 
-# Local Functions secrets: the Functions emulator reads `.secret.local` from the loaded bundle
-# (firebase.json → {{functionsDist}}), but the file lives with the app source
-# ({{functionsRoot}}/.secret.local, gitignored). It is deliberately NOT a build asset — Nx skips
-# gitignored assets anyway, and routing a secret through build outputs would persist it into the
-# Nx cache. Copy it into place at launch, so it stays a runtime concern of the emulator alone.
-# (Re-run the suite after a functions rebuild — `deleteOutputPath` wipes dist.)
+# ── FUNCTIONS SECRETS: INERT BY DEFAULT — NOTHING RUN LOCALLY CAN REACH PRODUCTION ─────────────────
+# The Functions emulator reads `.secret.local` from the loaded bundle ({{functionsDist}}) — and for every
+# declared secret that file does not give a NON-EMPTY value, it fetches the REAL one from Google Secret
+# Manager whenever the suite runs under a real projectId (firebase-tools' functionsEmulator
+# `resolveSecretEnvs`). So "no secrets file" is not "no secrets": it is production's secrets. Two layers
+# close that, and neither depends on the app's code remembering to check FUNCTIONS_EMULATOR:
 #
-# `.secret.local` is a CLONE-level resource, not a per-worktree one: it's gitignored, so a
-# freshly-created git worktree never receives a copy — and its emulated functions would then
-# launch WITHOUT the secret (failing e.g. an OAuth code→token exchange with "client_secret is
-# missing"). Resolve it as a cascade: the current tree's own file wins (a worktree may still drop
-# in its own), else fall back to the MAIN worktree's copy (git lists it first). So serving ANY
-# worktree — `nx serve` here or `<app>:serve --worktree` — reuses the one secret the main tree
-# holds, with no per-worktree setup.
-SECRETS_FILE="$ROOT/{{functionsRoot}}/.secret.local"
-if [ ! -f "$SECRETS_FILE" ]; then
-  # Same cascade as the seeds above, off the same resolved MAIN_WORKTREE.
-  if [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && [ -f "$MAIN_WORKTREE/{{functionsRoot}}/.secret.local" ]; then
-    echo "[emulators] .secret.local absent in this worktree; using the main worktree's copy: $MAIN_WORKTREE" >&2
-    SECRETS_FILE="$MAIN_WORKTREE/{{functionsRoot}}/.secret.local"
-  fi
+#   1. PLACEHOLDERS. This script WRITES the bundle's `.secret.local` itself, at every launch: one line per
+#      declared secret, an inert `EMULATOR_INERT_<KEY>` value by default. Declared = the keys named in
+#      {{functionsRoot}}/.secret.local.example (the committed declaration) ∪ the keys of the production
+#      file ∪ the sandbox file's keys ∪ every literal `defineSecret('KEY')` in the built bundle (so a
+#      secret someone forgot to document is still covered). Only key NAMES are ever read from the
+#      production file — never a value.
+#   2. A SINK. Secret Manager is pointed at an address that cannot resolve (`.invalid`, RFC 2606) for the
+#      emulator process, so anything the placeholders miss — a secret named dynamically, or a functions
+#      rebuild mid-session (`deleteOutputPath` wipes the bundle's file until the next launch) — fails
+#      LOUDLY in the emulator log instead of quietly acting as production. CLOUD_SECRET_MANAGER_URL is
+#      firebase-tools' own origin override (lib/api.js `secretManagerOrigin`).
+#
+# REAL VALUES ARE AN OPT-IN, AND ONLY EVER SANDBOX ONES. A developer who needs to exercise a real
+# integration (a test bot, a sandbox payment account) puts THOSE credentials in
+# {{functionsRoot}}/.secret.sandbox.local (gitignored) — creating that file is the opt-in, and every launch
+# says which keys are live. The production `.secret.local` is push-secrets' source and is NEVER fed to an
+# emulator; a sandbox value identical to its production counterpart is refused. `EMULATOR_SECRETS=inert`
+# disarms a sandbox file for one run; `EMULATOR_SECRETS=sandbox` insists on it (and fails without one).
+#
+# NEVER BORROWED ACROSS TREES. A worktree gets its own sandbox file or none — an unattended agent's
+# worktree must never wake up armed because the main tree is.
+FUNCTIONS_SRC="$ROOT/{{functionsRoot}}"
+FUNCTIONS_DIST="$ROOT/{{functionsDist}}"
+SANDBOX_FILE="$FUNCTIONS_SRC/.secret.sandbox.local"
+export CLOUD_SECRET_MANAGER_URL="https://secret-manager.disabled-for-emulators.invalid"
+
+SECRETS_MODE="${EMULATOR_SECRETS:-}"
+case "$SECRETS_MODE" in
+  '') if [ -f "$SANDBOX_FILE" ]; then SECRETS_MODE=sandbox; else SECRETS_MODE=inert; fi ;;
+  inert|sandbox) ;;
+  *)
+    echo "[emulators] EMULATOR_SECRETS=$SECRETS_MODE — expected 'inert' or 'sandbox'." >&2
+    exit 2
+    ;;
+esac
+if [ "$SECRETS_MODE" = sandbox ] && [ ! -f "$SANDBOX_FILE" ]; then
+  echo "[emulators] EMULATOR_SECRETS=sandbox, but there is no {{functionsRoot}}/.secret.sandbox.local in this tree." >&2
+  echo "[emulators]   Create it (KEY=VALUE lines, SANDBOX credentials only — never production's) or drop the flag." >&2
+  exit 2
 fi
-if [ -f "$SECRETS_FILE" ] && [ -d "$ROOT/{{functionsDist}}" ]; then
-  cp "$SECRETS_FILE" "$ROOT/{{functionsDist}}/.secret.local"
+
+# Functions run in this launch? (No `--only` at all = firebase-tools' own selection, which includes them.)
+FUNCTIONS_IN_RUN=1
+if [ "${#ONLY_ARGS[@]}" -gt 0 ]; then
+  case ",${ONLY_ARGS[1]}," in *,functions,*) ;; *) FUNCTIONS_IN_RUN=0 ;; esac
+fi
+
+if [ -d "$FUNCTIONS_DIST" ]; then
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const [mode, dist, src, show] = process.argv.slice(1);
+    const say = (line) => { if (show === "1") console.error(`[emulators] ${line}`); };
+    const LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
+    const entries = (file) => {
+      const out = new Map();
+      let text = "";
+      try { text = fs.readFileSync(file, "utf8"); } catch { return out; }
+      for (const line of text.split(/\r?\n/)) {
+        if (/^\s*#/.test(line)) continue;
+        const m = LINE.exec(line);
+        if (m) out.set(m[1], m[2].trim());
+      }
+      return out;
+    };
+    const unquote = (v) => v.replace(/^(["\x27`])(.*)\1$/s, "$2");
+    const filled = (v) => v !== undefined && unquote(v) !== "" && !unquote(v).startsWith("PASTE_");
+
+    const example = entries(path.join(src, ".secret.local.example"));
+    const prod = entries(path.join(src, ".secret.local"));            // key NAMES; values only for the clash check
+    const sandboxFile = entries(path.join(src, ".secret.sandbox.local"));   // its keys are declarations either way
+    const sandbox = mode === "sandbox" ? sandboxFile : new Map();
+
+    // Every literal defineSecret("KEY") the bundle makes — esbuild may write it `(0, x.defineSecret)("KEY")`.
+    const bundled = new Set();
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === "node_modules") continue;
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.(c|m)?js$/.test(e.name)) {
+          for (const m of fs.readFileSync(p, "utf8").matchAll(/defineSecret\)?\s*\(\s*(["\x27`])([A-Za-z_][A-Za-z0-9_]*)\1/g)) bundled.add(m[2]);
+        }
+      }
+    };
+    try { walk(dist); } catch {}
+
+    const declared = [...new Set([...example.keys(), ...prod.keys(), ...sandboxFile.keys(), ...bundled])].sort();
+    const live = [], inert = [], refused = [];
+    const lines = [`# Written by tools/emulators.sh at launch — mode: ${mode}. Regenerated every run; never edit.`];
+    for (const key of declared) {
+      const value = sandbox.get(key);
+      const isProd = filled(value) && filled(prod.get(key)) && unquote(value) === unquote(prod.get(key));
+      if (filled(value) && !isProd) { live.push(key); lines.push(`${key}=${value}`); continue; }
+      (isProd ? refused : inert).push(key);
+      lines.push(`${key}=EMULATOR_INERT_${key}`);
+    }
+    fs.writeFileSync(path.join(dist, ".secret.local"), lines.join("\n") + "\n", { mode: 0o600 });
+
+    const list = (keys) => keys.join(", ");
+    if (mode === "inert") {
+      say(declared.length
+        ? `secrets: INERT — ${declared.length} declared (${list(declared)}) get placeholder values; no real credential is loaded.`
+        : "secrets: INERT — no declared secrets (none in .secret.local.example or the bundle).");
+      say("  To exercise a real integration, put SANDBOX credentials in {{functionsRoot}}/.secret.sandbox.local and restart.");
+    } else {
+      say(`secrets: SANDBOX — LIVE from .secret.sandbox.local: ${live.length ? list(live) : "(none filled)"}. Calls using them WILL reach real services.`);
+      if (inert.length) say(`  inert (not in the sandbox file): ${list(inert)}`);
+      if (refused.length) say(`  REFUSED — identical to the production value in .secret.local: ${list(refused)}. Load a sandbox credential instead.`);
+      say("  Disarm: EMULATOR_SECRETS=inert for one run, or delete the sandbox file.");
+    }
+    const undocumented = [...bundled].filter((k) => !example.has(k)).sort();
+    if (undocumented.length) say(`  The bundle declares ${list(undocumented)}, missing from {{functionsRoot}}/.secret.local.example — document them there.`);
+    say("  Secret Manager is unreachable from the emulator: a secret it cannot find locally fails loudly, never fetched from production.");
+
+    // Firebase reads params from .env, then (emulator only) .env.local — firebase.json functions.configDir
+    // points both at the source dir, so .env.local is where local runs aim params at TEST targets.
+    const env = entries(path.join(src, ".env")), envLocal = entries(path.join(src, ".env.local"));
+    if (envLocal.size) say(`params: .env.local overrides for the emulator: ${list([...envLocal.keys()].sort())}`);
+    else if (env.size) say(`params: .env as-is (production values) — aim any at a test target in {{functionsRoot}}/.env.local (emulator-only).`);
+  ' "$SECRETS_MODE" "$FUNCTIONS_DIST" "$FUNCTIONS_SRC" "$FUNCTIONS_IN_RUN"
 fi
 
 # Only import when the working dir is actually primed — `--import` on a missing dir is
