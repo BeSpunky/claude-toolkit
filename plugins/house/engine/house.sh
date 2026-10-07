@@ -2106,6 +2106,22 @@ while IFS=\"\$_tab\" read -r -u 9 _kind _gen _args; do
   esac
 done 9<<< \"\$_plan\""
 
+# --- THE CONTAINER VERDICT: does the container this run leaves differ from the one running? ----------------------
+# Asked of CONTENT, by the one definition of "what the container is built from" (nx-tools
+# generators/devcontainer/container-inputs.ts): every file under .devcontainer/ minus the house's records, each
+# reduced to what its consumer reads — so a layer list in the ownership marker or a comment naming the layers is not
+# a rebuild. Computed HERE, inside the program, because this is where Node and the installed payload are guaranteed
+# (the outer script may have neither, on the Docker fallback); handed over through the upgrade lock, which
+# _upgrade_next reads. Best effort by design: no verdict means the reporter falls back to "any .devcontainer/
+# change rebuilds" — an over-report, never a needed rebuild swallowed.
+CONTAINER_VERDICT_BLOCK=""
+if [ "$MODE" = "upgrade" ] && [ -n "$UPGRADE_BASE" ]; then
+  CONTAINER_VERDICT_BLOCK="if [ -d .bespunky-upgrade.lock ]; then
+  node '$NXT_DIR/src/generators/devcontainer/container-inputs.js' '$UPGRADE_BASE' > .bespunky-upgrade.lock/container 2>/dev/null \\
+    || rm -f .bespunky-upgrade.lock/container
+fi"
+fi
+
 # --- the SCAFFOLD bootstrap: what creates the ensured layers from an empty directory ---
 # Derived from the ENSURE set, never hard-wired: scaffold is upgrade with an ensure set against an empty directory.
 # The default (`agent`) scaffolds a wrapper-hosted Nx repo with the agent DX and bootstraps no stack at all; the
@@ -2258,6 +2274,7 @@ $CHECK_NAME_FN
 _resolve_upgrade_app '$NXT_DIR' '$APP' '$PROJECT'
 $PLAN_RUN_BLOCK
 $FINALIZE_LOCAL
+$CONTAINER_VERDICT_BLOCK
 # A run that skipped generators is not a clean run, and the outer summary prints UPGRADE_OK either way.
 # Say so here, while the reason is still on screen, so neither a human nor a model reads that final
 # line as everything-was-applied.
@@ -2517,8 +2534,8 @@ fi
 # between these markers against real git fixtures; keep them intact and keep the function self-contained
 # (no globals beyond its arguments), or the test silently covers nothing.
 # --->8--- UPGRADE_NEXT
-_upgrade_next() {   # <target> <base-sha|''> — sets UPGRADE_NEXT and UPGRADE_RELOAD
-  local target="$1" base="$2" changed=""
+_upgrade_next() {   # <target> <base-sha|''> [container verdict: same|changed|''] — sets UPGRADE_NEXT and UPGRADE_RELOAD
+  local target="$1" base="$2" container="${3-}" changed=""
   UPGRADE_NEXT="unknown"
   UPGRADE_RELOAD=""
   [ -n "$base" ] || return 0
@@ -2542,7 +2559,12 @@ _upgrade_next() {   # <target> <base-sha|''> — sets UPGRADE_NEXT and UPGRADE_R
   # everyone learns to ignore, which is exactly what this line exists to prevent. `.claude/data/` is also
   # gitignored, so this is belt and braces; the anchor is the half that does not depend on a project having
   # been upgraded yet.
-  if printf '%s\n' "$changed" | grep -q '^\.devcontainer/'; then
+  # A REBUILD IS DECIDED BY WHAT THE CONTAINER IS BUILT FROM, not by which paths moved: `.devcontainer/` also holds
+  # the house's ownership record (its `layers` list moves with every layer added) and prose comments, and neither is
+  # read by a container build. The program's content comparison (CONTAINER_VERDICT_BLOCK) says `same` when every
+  # change under `.devcontainer/` is of that kind. Without a verdict — an older payload, a failed comparison — any
+  # change there still rebuilds: an over-report is recoverable, a swallowed rebuild is not.
+  if [ "$container" != "same" ] && printf '%s\n' "$changed" | grep -q '^\.devcontainer/'; then
     UPGRADE_NEXT="rebuild-container"
   elif printf '%s\n' "$changed" | grep -qE '^(\.claude/settings\.json|\.mcp\.json)$'; then
     UPGRADE_NEXT="restart-session"
@@ -2571,7 +2593,9 @@ _upgrade_attention() {   # <upgrade lock dir, or ''>
 # ---8<--- UPGRADE_ATTENTION
 
 if [ "$MODE" = "upgrade" ]; then
-  _upgrade_next "$TARGET" "$UPGRADE_BASE"
+  _container_verdict=""
+  [ -n "${UPGRADE_LOCK:-}" ] && _container_verdict="$(sed -n 1p "$UPGRADE_LOCK/container" 2>/dev/null || true)"
+  _upgrade_next "$TARGET" "$UPGRADE_BASE" "$_container_verdict"
   echo "UPGRADE_NEXT: $UPGRADE_NEXT"
   case "$UPGRADE_NEXT" in
     rebuild-container)

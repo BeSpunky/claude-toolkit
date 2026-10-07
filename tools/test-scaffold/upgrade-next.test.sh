@@ -83,22 +83,22 @@ fixture() {   # fixture <name> -> repo path on stdout (base sha written to <repo
 # passes the broken reporter exactly like the no-`set -e` version did. `bash -c` gives the reporter its own
 # process, where errexit is live and untested; only the outer shell tests the resulting exit code.
 DIED=0
-invoke() {   # invoke <repo> <base> -> sets UPGRADE_NEXT, UPGRADE_RELOAD, DIED
+invoke() {   # invoke <repo> <base> [container verdict] -> sets UPGRADE_NEXT, UPGRADE_RELOAD, DIED
   local out=""
   DIED=0
   out="$(bash -c '
     set -euo pipefail
     . "$1"
-    _upgrade_next "$2" "$3"
+    _upgrade_next "$2" "$3" "$4"
     printf "%s\n%s" "$UPGRADE_NEXT" "$UPGRADE_RELOAD"
-  ' _ "$TMP/reporter.sh" "$1" "$2")" || DIED=1
+  ' _ "$TMP/reporter.sh" "$1" "$2" "${3-}")" || DIED=1
   UPGRADE_NEXT="$(printf '%s' "$out" | sed -n '1p')"
   UPGRADE_RELOAD="$(printf '%s' "$out" | sed -n '2p')"
 }
 
-check() {   # check <label> <repo> <expected-next> [expected-reload]
+check() {   # check <label> <repo> <expected-next> [expected-reload] [container verdict]
   local label="$1" repo="$2" want="$3" want_reload="${4-}"
-  invoke "$repo" "$(cat "$repo/.base")"
+  invoke "$repo" "$(cat "$repo/.base")" "${5-}"
   ok "$label — survives set -e" "$([ "$DIED" = 0 ] && echo 1 || echo 0)" "the reporter exited non-zero"
   ok "$label" "$([ "$UPGRADE_NEXT" = "$want" ] && echo 1 || echo 0)" "got '$UPGRADE_NEXT', wanted '$want'"
   if [ -n "$want_reload" ]; then
@@ -150,6 +150,30 @@ r="$(fixture both)"
 printf '{"image":"x"}\n' > "$r/.devcontainer/devcontainer.json"
 printf '{"enabledPlugins":{"x":true}}\n' > "$r/.claude/settings.json"
 check "a rebuild SUBSUMES a restart (never both)" "$r" rebuild-container
+
+# ── the container verdict: a rebuild is decided by what the container is BUILT FROM ─────────────────
+# The program compares the content under .devcontainer/ (nx-tools generators/devcontainer/container-inputs.ts) and
+# hands its verdict over. `same` means every change there is a record or a comment — S2-8: `add-layer ci` moved only
+# the ownership marker's layer list and the post-create header, and was told to rebuild a container nothing changed.
+r="$(fixture verdict-same)"
+printf '{"layers":["agent","ci"]}\n' > "$r/.devcontainer/.bespunky-devcontainer.json"
+printf '# layers: agent, ci\necho hi\n' > "$r/.devcontainer/post-create.sh"
+check "records/comments only (verdict same) are NOT a rebuild" "$r" none "" same
+
+r="$(fixture verdict-same-settings)"
+printf '{"layers":["agent","ci"]}\n' > "$r/.devcontainer/.bespunky-devcontainer.json"
+printf '{"enabledPlugins":{"x":true}}\n' > "$r/.claude/settings.json"
+check "…and the restart boundary still stands behind them" "$r" restart-session "" same
+
+r="$(fixture verdict-changed)"
+printf '{"image":"x"}\n' > "$r/.devcontainer/devcontainer.json"
+check "a verdict of changed rebuilds" "$r" rebuild-container "" changed
+
+# NO VERDICT (an older payload, a comparison that failed) must keep the old, safe answer — every case above the
+# verdict block runs without one and still expects a rebuild for any .devcontainer/ change.
+r="$(fixture verdict-garbage)"
+printf '{"image":"x"}\n' > "$r/.devcontainer/devcontainer.json"
+check "an unreadable verdict falls back to rebuild" "$r" rebuild-container "" "Error: boom"
 
 # ── near misses that must NOT trip it ────────────────────────────────────────────────────────────
 r="$(fixture settings-local)"

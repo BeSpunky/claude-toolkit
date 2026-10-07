@@ -27,7 +27,7 @@
 // Idempotent + upgrade-safe: re-running re-asserts the same targets (reclaiming the raw @nx/angular `serve`
 // slot into the `dev-server` leaf).
 //
-// It also turns Nx's interactive TUI off (nx.json `tui.enabled: false`, set-if-absent): the composer streams
+// It also turns Nx's interactive TUI off (nx.json `tui.enabled: false`, set-if-absent): the dev engine streams
 // every process's prefixed logs under one Ctrl+C, and the TUI would re-wrap that stream in a redrawing pane that
 // humans and agents alike read worse. That is a property of THIS dev loop, so it lives with it (it used to be
 // written by the Firebase generator, back when the emulators were the only reason a run had several streams).

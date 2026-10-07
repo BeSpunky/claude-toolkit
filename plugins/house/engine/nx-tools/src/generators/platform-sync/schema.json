@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "$id": "BeSpunkyPlatformSync",
   "title": "Classify untagged projects for the platform firewall (sync generator)",
-  "description": "Nx sync generator, run before lint: tags every untagged project whose platform the evidence settles (an application by its stack, a library by its imports), so a project created by any generator is classified before the platform firewall judges it. Leaves a mixed or evidence-free project for a human.",
+  "description": "Nx global sync generator, run by `nx sync`: tags every untagged project whose platform the evidence settles (an application by its stack, a library by its imports), so a project created by any generator is classified in one command. Never run before a task. Leaves a mixed or evidence-free project for a human.",
   "type": "object",
   "properties": {}
 }

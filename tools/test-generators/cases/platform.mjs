@@ -71,21 +71,28 @@ export default {
         t.has('eslint.config.mjs', 'THE PLATFORM FIREWALL');
         t.has('eslint.config.mjs', 'g @bespunky/nx-tools:platform <project>');
         t.occurrences('eslint.config.mjs', "sourceTag: 'platform:web'", 1);
-        // Its own rule instance: the project's constraints untouched, the platform ones in platformConstraints.
+        // ONE rule instance: the workspace's own options hoisted (the stock catch-all gone), its entry and every
+        // scoped block built by `moduleBoundaries`, no second registration of the plugin.
         t.has('eslint.config.mjs', 'const platformConstraints = [');
-        t.has('eslint.config.mjs', 'plugins: { platform: nx }');
-        t.has('eslint.config.mjs', "rules: { 'platform/enforce-module-boundaries': ['error', { depConstraints: platformConstraints }] }");
+        t.has('eslint.config.mjs', 'const moduleBoundaryOptions = {\n  depConstraints: [],\n};');
+        t.has('eslint.config.mjs', "const moduleBoundaries = (platform) => ['error', { ...moduleBoundaryOptions, depConstraints: [...(moduleBoundaryOptions.depConstraints ?? []), ...platform] }];");
+        t.occurrences('eslint.config.mjs', "'@nx/enforce-module-boundaries': moduleBoundaries(platformConstraints)", 2);
+        t.hasNot('eslint.config.mjs', 'platform/enforce-module-boundaries');
+        t.hasNot('eslint.config.mjs', 'plugins:');
+        t.has('eslint.config.mjs', "export default [\n  // THE PLATFORM FIREWALL (house) — `platformConstraints` on every linted file");
         t.has('eslint.config.mjs', "files: ['**/src/server.ts', '**/src/server/**']");
-        t.has('eslint.config.mjs', "rules: { 'platform/enforce-module-boundaries': 'off' }");
+        t.occurrences('eslint.config.mjs', "moduleBoundaries([{ sourceTag: '*', onlyDependOnLibsWithTags: ['*'] }])", 2);
+        t.hasNot('eslint.config.mjs', "onlyDependOnLibsWithTags: ['*'],\n");
         t.has('eslint.config.mjs', "'@google-cloud/*'");
         t.has('eslint.config.mjs', "'@firebase/*'");
-        t.has('eslint.config.mjs', "              sourceTag: '*',\n              onlyDependOnLibsWithTags: ['*'],\n            },\n          ],");
+        t.ok(ctx.logs.some((line) => line.includes("removed Nx's stock catch-all")), `the catch-all's removal reported:\n${ctx.logs.join('\n')}`);
         t.ok(tags(tree, 'brand').includes('platform:server'), `brand (firebase-admin): ${tags(tree, 'brand')}`);
         t.equal(tags(tree, 'util'), [], 'util (no evidence) is NOT defaulted to shared');
         t.ok(ctx.logs.some((line) => line.includes('Left `util` without a platform') && line.includes('--platform=')), `util reported:\n${ctx.logs.join('\n')}`);
         t.ok(tags(tree, 'functions').includes('platform:server'), `functions: ${tags(tree, 'functions')}`);
         t.ok(ctx.logs.some((line) => line.includes('Classified `brand` platform:server')), `reported:\n${ctx.logs.join('\n')}`);
-        t.equal(t.json('nx.json')?.targetDefaults?.lint?.syncGenerators, ['@bespunky/nx-tools:platform-sync'], 'the sync generator, on lint');
+        t.equal(t.json('nx.json')?.sync?.globalGenerators, ['@bespunky/nx-tools:platform-sync'], 'the sync generator, global (never before a task: S2-7)');
+        t.equal(t.json('nx.json')?.targetDefaults?.lint?.syncGenerators, undefined, 'not attached to lint');
       },
     },
     {
@@ -293,7 +300,7 @@ export default {
       },
     },
     {
-      name: 'platform-sync: a project created later is tagged before lint when the evidence settles it; nothing without a firewall',
+      name: 'platform-sync: a project created later is tagged on `nx sync` when the evidence settles it; nothing without a firewall',
       setup: () => {
         const tree = workspace();
         tree.write('eslint.config.mjs', ESLINT);
@@ -329,8 +336,9 @@ export default {
       expect: (tree, t) => {
         const out = t.read('eslint.config.mjs');
         t.ok(out.includes("import nx from '@nx/eslint-plugin';"), `the plugin import is added:\n${out}`);
-        t.ok(/const platformConstraints = \[[\s\S]*\];\n\nexport default defineConfig\(\[/.test(out), `declared before the export:\n${out}`);
-        t.ok(/\{ files: \['\*\*\/\*\.ts'\] \},\n  \/\/ THE PLATFORM FIREWALL/.test(out), `appended to the array:\n${out}`);
+        t.ok(/const platformConstraints = \[[\s\S]*\];\n\n[\s\S]*const moduleBoundaryOptions = \{\};\nconst moduleBoundaries = [^\n]*\n\nexport default defineConfig\(\[/.test(out), `declared before the export:\n${out}`);
+        // The rule was configured nowhere: the firewall's own block configures it, registering the plugin it imported.
+        t.ok(/defineConfig\(\[\n  \/\/ THE PLATFORM FIREWALL[^\n]*\n  \{\n    files: \[[^\n]*\],\n    plugins: \{ '@nx': nx \},\n    rules: \{ '@nx\/enforce-module-boundaries': moduleBoundaries\(platformConstraints\) \},\n  \},\n  \{ files: \['\*\*\/\*\.ts'\] \},\n  \/\/ THE PLATFORM FIREWALL/.test(out), `the coverage block first, the scoped ones appended:\n${out}`);
       },
     },
   ],

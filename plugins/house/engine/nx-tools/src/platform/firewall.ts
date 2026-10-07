@@ -1,4 +1,4 @@
-// THE PLATFORM FIREWALL — the root flat ESLint config's platform rule.
+// THE PLATFORM FIREWALL — the platform constraints of the root flat ESLint config.
 //
 // FAIL CLOSED. Each platform may depend only on its own and on shared projects (`onlyDependOnLibsWithTags`), and
 // may import no package bound to another platform (`bannedExternalImports`, ./externals):
@@ -7,17 +7,27 @@
 //   platform:server  → server | shared    bans the web-only packages
 //   platform:shared  → shared             bans both
 //
-// ITS OWN RULE INSTANCE. The constraints are not spliced into the project's `@nx/enforce-module-boundaries`
-// constraints: @nx/eslint-plugin is registered a second time, under the `platform` namespace, and the firewall is
-// `platform/enforce-module-boundaries` with `platformConstraints` as its only constraints. Three things follow:
-//   - an UNTAGGED project is checked too. Nx reports a project that matches no constraint of an instance ("A project
-//     without tags matching at least one constraint cannot depend on any libraries") — in the project's own
-//     instance a `sourceTag: '*'` catch-all always matched, so an untagged project used to import anything;
-//   - the firewall can be SCOPED BY FILE (./scopes) without restating the project's own options: ESLint replaces a
-//     rule's options wholesale per block, so a block that re-configured `@nx/enforce-module-boundaries` for tests
-//     would have had to copy every constraint the project ever wrote. Here a block re-configures only the
-//     firewall: the SSR server half of a web app gets the web constraint relaxed, tests and tool configs are off;
-//   - the lint message names the rule — `platform/enforce-module-boundaries` — so it says which boundary it is.
+// ONE RULE INSTANCE. The constraints join the workspace's own `@nx/enforce-module-boundaries`. A second instance of
+// the rule (0.50.0's first design) re-ran every generic check it makes — relative or absolute project imports,
+// circular dependencies, lazy-load imports — so each violation was reported twice, and the workspace's exemptions
+// (`allow`, `ignoredCircularDependencies`, …) never reached it. Two things are written instead:
+//   - the workspace's own options are HOISTED into `moduleBoundaryOptions`, and every block that configures the rule
+//     builds its entry with `moduleBoundaries(<platform constraints>)`. ESLint replaces a rule's options wholesale per
+//     config block, so this is how a block scoped by file (./scopes) changes ONLY the platform part: the SSR server
+//     half of a web app gets the web constraint relaxed, tests and tool configs get none — while the workspace's own
+//     options reach every block from one place;
+//   - Nx's stock catch-all `{ sourceTag: '*', onlyDependOnLibsWithTags: ['*'] }` is REMOVED from those options. It
+//     forbids nothing; its only effect is that every project matches some constraint, which exempts an UNTAGGED
+//     project from Nx's "A project without tags matching at least one constraint cannot depend on any libraries" —
+//     the hole a fail-closed firewall exists to close. The test and tool-config blocks restate it, so nothing that
+//     never ships is newly judged.
+//
+// THE LIMIT, stated rather than papered over: Nx selects a constraint by the tags a project HAS, never by one it
+// lacks. So a project with no platform tag but another tag one of the workspace's own constraints matches (say
+// `scope:billing`) is not caught by that message. Its importers still are — a tagged project may depend only on
+// platform-tagged ones — and the classifier reports it. A catch-all the workspace wrote with more than the stock
+// content is kept, and reported, for the same reason.
+//
 // Every project in a web app's graph is then itself web or shared and is checked for its own imports, which is why
 // `checkNestedExternalImports` (a whole-graph walk on every lint) is not set.
 //
@@ -35,6 +45,8 @@ import {
   type ClassicTypeScript,
   type TsArrayLiteralExpression,
   type TsNode,
+  type TsObjectLiteralExpression,
+  type TsPropertyAssignment,
   type TsSourceFile,
 } from '../generators/_utils/typescript-api';
 import { type Platform, PLATFORMS, PLATFORM_MEANING, platformTag, reachable } from './platform';
@@ -45,10 +57,15 @@ import { LINTED_FILES, SSR_SERVER_FILES, TEST_FILES, TOOL_CONFIG_FILES } from '.
 const MARKER = 'THE PLATFORM FIREWALL';
 /** The constant the constraints live in — the one list a project edits, and what the readers locate. */
 export const CONSTRAINTS = 'platformConstraints';
-/** The ESLint namespace the firewall's own instance of @nx/eslint-plugin is registered under. */
-export const NAMESPACE = 'platform';
-export const RULE = `${NAMESPACE}/enforce-module-boundaries`;
+/** The constant the workspace's own options for the rule are hoisted into — where an exemption goes. */
+export const OPTIONS = 'moduleBoundaryOptions';
+/** The function every block builds the rule's entry with: the workspace's options plus that block's platform part. */
+export const ENTRY = 'moduleBoundaries';
+/** The ONE rule the firewall's constraints join. */
+export const RULE = '@nx/enforce-module-boundaries';
 const PLUGIN = '@nx/eslint-plugin';
+/** Nx's stock catch-all constraint, as text — and its reading. */
+const ANY_PROJECT = `{ sourceTag: '*', onlyDependOnLibsWithTags: ['*'] }`;
 
 /**
  * The comment the old generator wrote above its two constraints — every shape it ever shipped, superseded by
@@ -88,16 +105,17 @@ export function guidance(nx: string): string[] {
   return [
     `// ${MARKER} (house) — every code project carries exactly ONE platform tag:`,
     ...PLATFORMS.map((platform) => `//   ${platformTag(platform).padEnd(width)}  ${PLATFORM_MEANING[platform]}`),
-    `// Enforced by its own rule, \`${RULE}\` (the blocks at the end of this config). What lint says:`,
+    `// Enforced by \`${RULE}\`: these join the workspace's own (\`${OPTIONS}\`).`,
+    `// What lint says:`,
     `//   'A project tagged with "platform:…" can only depend on libs tagged with …' — the project it imports has no`,
     `//     platform (or another one). Classify it — inferred from its imports, or stated:`,
     `//       ${nx} g @bespunky/nx-tools:platform <project> [--platform=web|server|shared]`,
     `//   'A project without tags matching at least one constraint cannot depend on any libraries' — THIS project has`,
-    `//     no platform: the same command, for it.`,
+    `//     no platform: the same command, for it. \`${nx} sync\` classifies every project whose evidence settles it.`,
     `//   '… is not allowed to import "<package>"' — that package belongs to another platform: move the code into a`,
     `//     project of that platform, or re-classify this one. Never widen these lists to make it pass.`,
     `// Not judged: tests and the tools' own configs (they never ship), and in a platform:web project the server half`,
-    `// of SSR (src/server.ts, src/server/**), which runs only in Node.`,
+    `// of SSR (src/server.ts, src/server/**), which runs only in Node — the blocks at the end of this config.`,
   ];
 }
 
@@ -123,30 +141,57 @@ function constraintsDeclaration(bans: Readonly<Record<Platform, readonly string[
   ];
 }
 
-/** The firewall's config blocks — elements of the exported array, comma-separated, no trailing comma. */
-function firewallBlocks(plugin: string): string[] {
-  const relaxedWeb = `${CONSTRAINTS}.map((c) => (c.sourceTag === '${platformTag('web')}' ? { sourceTag: c.sourceTag } : c))`;
+/** The workspace's own options, hoisted, and the one function every block builds the rule's entry with. */
+function optionsDeclaration(options: string, severity: string): string[] {
   return [
-    `// ${MARKER} (house) — \`${CONSTRAINTS}\` above, enforced by its own instance of the rule.`,
+    `// ${RULE} — ONE rule instance, and these are this workspace's own options for it: an`,
+    `// exemption (\`allow\`, \`ignoredCircularDependencies\`, …) or a constraint of its own goes HERE. Every`,
+    `// block that configures the rule builds its entry with \`${ENTRY}(…)\`, which adds the platform`,
+    `// constraints for that block's files — so these options hold in all of them.`,
+    `const ${OPTIONS} = ${options};`,
+    `const ${ENTRY} = (platform) => [${severity}, { ...${OPTIONS}, depConstraints: [...(${OPTIONS}.depConstraints ?? []), ...platform] }];`,
+  ];
+}
+
+/** The rule's entry for the files that ship — what replaces the workspace's own entry. */
+const SHIPPING_ENTRY = `${ENTRY}(${CONSTRAINTS})`;
+
+/**
+ * The block that holds every linted file to the firewall — the FIRST element of the exported array, so any block of
+ * the workspace's own after it (its entry for the rule, an override for one folder) still decides for its files. It
+ * is what makes the firewall cover every extension Nx lints (`.mts`, `.cjs`, …) even where the workspace's own block
+ * lists fewer. `plugin` (the plugin's local name) when the config registers the rule's plugin nowhere it can see.
+ */
+function coverageBlock(plugin?: string): string[] {
+  return [
+    `// ${MARKER} (house) — \`${CONSTRAINTS}\` on every linted file; a block below may still narrow it.`,
     `{`,
     `  files: [${quoted(LINTED_FILES)}],`,
-    `  plugins: { ${NAMESPACE}: ${plugin} },`,
-    `  rules: { '${RULE}': ['error', { depConstraints: ${CONSTRAINTS} }] },`,
-    `},`,
+    ...(plugin ? [`  plugins: { '@nx': ${plugin} },`] : []),
+    `  rules: { '${RULE}': ${SHIPPING_ENTRY} },`,
+    `}`,
+  ];
+}
+
+/** The file-scoped blocks — the LAST elements of the exported array, comma-separated, no trailing comma. */
+function scopedBlocks(): string[] {
+  const relaxedWeb = `${CONSTRAINTS}.map((c) => (c.sourceTag === '${platformTag('web')}' ? { sourceTag: c.sourceTag } : c))`;
+  return [
+    `// ${MARKER} (house) — the same rule, scoped by file (\`${ENTRY}\` keeps the own options).`,
     `// The server half of an SSR web app runs only in Node: there, platform:web may reach server code too.`,
     `{`,
     `  files: [${quoted(SSR_SERVER_FILES)}],`,
-    `  rules: { '${RULE}': ['error', { depConstraints: ${relaxedWeb} }] },`,
+    `  rules: { '${RULE}': ${ENTRY}(${relaxedWeb}) },`,
     `},`,
-    `// Tests and the tools' own configs never ship: the firewall judges what reaches a runtime.`,
+    `// Tests and the tools' own configs never ship: the firewall does not judge them (any project may reach any).`,
     `{`,
     `  files: [${quoted(TEST_FILES)}],`,
-    `  rules: { '${RULE}': 'off' },`,
+    `  rules: { '${RULE}': ${ENTRY}([${ANY_PROJECT}]) },`,
     `},`,
     `{`,
     `  files: [${quoted(TOOL_CONFIG_FILES.files)}],`,
     `  ignores: [${quoted(TOOL_CONFIG_FILES.ignores)}],`,
-    `  rules: { '${RULE}': 'off' },`,
+    `  rules: { '${RULE}': ${ENTRY}([${ANY_PROJECT}]) },`,
     `}`,
   ];
 }
@@ -158,9 +203,13 @@ export function firewallSnippet(externals: PlatformExternals, nx: string): strin
     '',
     ...constraintsDeclaration(tableBans(externals), nx),
     '',
+    ...optionsDeclaration(`{ /* your options for ${RULE}, without ${ANY_PROJECT} */ }`, `'error'`),
+    '',
     'export default [',
-    '  // … your config …',
-    ...firewallBlocks('nx').map((line) => `  ${line}`),
+    ...coverageBlock().map((line, i, all) => `  ${line}${i === all.length - 1 ? ',' : ''}`),
+    '  // … your config — where it configures the rule, the entry becomes:',
+    `  //   rules: { '${RULE}': ${SHIPPING_ENTRY} },`,
+    ...scopedBlocks().map((line) => `  ${line}`),
     '];',
   ].join('\n');
 }
@@ -171,39 +220,43 @@ const tableBans = (externals: PlatformExternals): Record<Platform, string[]> => 
   shared: bannedFor('shared', externals),
 });
 
-/** Is the 0.50 firewall (its constant or its rule) already in this config? */
-export const hasPlatformFirewall = (source: string): boolean => source.includes(RULE) || new RegExp(`\\b${CONSTRAINTS}\\b`).test(source);
+/** Is the 0.50 firewall already in this config? */
+export const hasPlatformFirewall = (source: string): boolean => new RegExp(`\\b${CONSTRAINTS}\\b`).test(source);
+
+/** What a writer did to the config — or why it would not touch it (the caller then prints `firewallSnippet`). */
+export type FirewallEdit =
+  | {
+      source: string;
+      /** What changed, one line each — for the log. Empty: the config already carries the firewall. */
+      changes: string[];
+      /** What the project had declared that the house carried, removed or could not carry — for the report. */
+      notes: string[];
+    }
+  | { refused: string };
 
 /**
- * Insert the whole firewall into a config that declares none. Returns the updated source; the original when the
- * firewall — or the 0.49 shape, which is the migration's to upgrade — is already there; `null` when the config has
- * no `export default [ … ]` (or `export default fn([ … ])`) this can extend, or no usable TypeScript — the caller
- * then says what to add (`firewallSnippet`).
+ * Insert the whole firewall into a config that declares none. Unchanged (no `changes`) when the firewall — or the
+ * 0.49 shape, which is the migration's to upgrade — is already there; `refused` when the config cannot be edited
+ * safely (no `export default [ … ]`, the rule configured in more than one place or by an expression, no usable
+ * TypeScript) — the reason says which.
  */
-export function insertPlatformFirewall(source: string, sourcePath: string, externals: PlatformExternals, nx: string): string | null {
-  if (hasPlatformFirewall(source) || legacyConstraints(source, sourcePath)?.length) return source;
-  return spliceFirewall(source, sourcePath, tableBans(externals), nx, [])?.source ?? null;
-}
-
-export interface FirewallUpgrade {
-  source: string;
-  /** What changed, one line each — for the migration's log. Empty: nothing to upgrade. */
-  changes: string[];
-  /** What the project had declared that the house carried or could not carry — for the migration's report. */
-  notes: string[];
+export function insertPlatformFirewall(source: string, sourcePath: string, externals: PlatformExternals, nx: string): FirewallEdit {
+  if (hasPlatformFirewall(source) || legacyConstraints(source, sourcePath)?.length) return { source, changes: [], notes: [] };
+  return spliceFirewall(source, sourcePath, tableBans(externals), nx, []);
 }
 
 /**
  * Bring a 0.49 firewall (two ban-only constraints, web and server, inside the project's own `depConstraints`) to the
- * 0.50 shape: those constraints are REMOVED from the project's rule (with the old comment) and the firewall is
- * written as its own instance. The project's own edits to the old ban lists are carried: what it added stays banned,
- * what it removed stays allowed (both reported); any other key it gave those constraints is reported, not guessed at.
- * `null` when the config carries no 0.49 platform constraint (nothing to upgrade), or cannot be read.
+ * 0.50 shape: those constraints and the old comment are REMOVED, and the firewall is written into the same rule. The
+ * project's own edits to the old ban lists are carried: what it added stays banned, what it removed stays allowed
+ * (both reported); any other key it gave those constraints is reported, not guessed at. `null` when the config
+ * carries no 0.49 platform constraint (nothing to upgrade).
  */
-export function upgradePlatformFirewall(source: string, sourcePath: string, externals: PlatformExternals, nx: string): FirewallUpgrade | null {
+export function upgradePlatformFirewall(source: string, sourcePath: string, externals: PlatformExternals, nx: string): FirewallEdit | null {
   if (hasPlatformFirewall(source)) return null;
   const legacy = legacyConstraints(source, sourcePath);
-  if (!legacy?.length) return null;
+  if (legacy === null) return { refused: 'no usable TypeScript to read it with' };
+  if (!legacy.length) return null;
 
   const notes: string[] = [];
   const table = tableBans(externals);
@@ -230,16 +283,15 @@ export function upgradePlatformFirewall(source: string, sourcePath: string, exte
   const removals: StringChange[] = legacy.map((constraint) => ({ type: ChangeType.Delete, start: constraint.start, length: constraint.end - constraint.start }));
   const span = legacyCommentSpan(source);
   if (span) removals.push({ type: ChangeType.Delete, start: span.start, length: span.length });
-  const spliced = spliceFirewall(source, sourcePath, bans, nx, removals);
-  if (!spliced) return null;
+  const edit = spliceFirewall(source, sourcePath, bans, nx, removals);
+  if ('refused' in edit) return edit;
   return {
-    source: spliced.source,
+    source: edit.source,
     changes: [
-      `moved the platform constraints out of @nx/enforce-module-boundaries into their own rule, ${RULE} (${CONSTRAINTS})`,
-      `each platform now depends only on its own and shared projects; platform:shared added; an untagged project is checked too`,
-      `tests, tool configs and the SSR server half of a web app are scoped (not judged / server-relaxed)`,
+      `replaced the two ban-only platform constraints in ${RULE} with the firewall, ${CONSTRAINTS}: each platform now depends only on its own and shared projects, platform:shared added`,
+      ...edit.changes,
     ],
-    notes,
+    notes: [...notes, ...edit.notes],
   };
 }
 
@@ -277,6 +329,9 @@ interface DeclaredConstraint {
   end: number;
 }
 
+const keyOf = (ts: ClassicTypeScript, property: TsPropertyAssignment): string =>
+  ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) ? property.name.text : '';
+
 function readConstraints(ts: ClassicTypeScript, array: TsArrayLiteralExpression, source = '', sf?: TsSourceFile): DeclaredConstraint[] {
   const found: DeclaredConstraint[] = [];
   for (const element of array.elements) {
@@ -286,7 +341,7 @@ function readConstraints(ts: ClassicTypeScript, array: TsArrayLiteralExpression,
     const otherKeys: string[] = [];
     for (const property of element.properties) {
       if (!ts.isPropertyAssignment(property)) continue;
-      const key = ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) ? property.name.text : '';
+      const key = keyOf(ts, property);
       if (key === 'sourceTag' && ts.isStringLiteral(property.initializer)) platform = PLATFORMS.find((p) => platformTag(p) === (property.initializer as { text: string }).text);
       else if (key === 'bannedExternalImports' && ts.isArrayLiteralExpression(property.initializer)) {
         banned = property.initializer.elements.filter((e) => ts.isStringLiteral(e)).map((e) => (e as { text: string }).text);
@@ -306,7 +361,7 @@ function legacyConstraints(source: string, sourcePath: string): DeclaredConstrai
   const sf = parse(ts, source, sourcePath);
   const found: DeclaredConstraint[] = [];
   const visit = (node: TsNode): void => {
-    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === 'depConstraints' && ts.isArrayLiteralExpression(node.initializer)) {
+    if (ts.isPropertyAssignment(node) && keyOf(ts, node) === 'depConstraints' && ts.isArrayLiteralExpression(node.initializer)) {
       found.push(...readConstraints(ts, node.initializer, source, sf));
       return;
     }
@@ -316,10 +371,71 @@ function legacyConstraints(source: string, sourcePath: string): DeclaredConstrai
   return found;
 }
 
+/** The workspace's own entry for the rule: its severity's text and its options object, if it has one. */
+interface RuleEntry {
+  /** The entry's value — the span the firewall replaces with `moduleBoundaries(platformConstraints)`. */
+  value: TsNode;
+  severity: string;
+  options: TsObjectLiteralExpression | null;
+}
+
+/** Every `'@nx/enforce-module-boundaries': …` in the config — or the reason one of them cannot be read. */
+function ruleEntries(ts: ClassicTypeScript, sf: TsSourceFile, source: string): RuleEntry[] | { refused: string } {
+  const entries: RuleEntry[] = [];
+  let refused: string | undefined;
+  const text = (node: TsNode) => source.slice(node.getStart(sf), node.getEnd());
+  const visit = (node: TsNode): void => {
+    if (ts.isPropertyAssignment(node) && keyOf(ts, node) === RULE) {
+      const value = node.initializer;
+      if (ts.isStringLiteral(value)) entries.push({ value, severity: text(value), options: null });
+      else if (ts.isArrayLiteralExpression(value) && value.elements.length >= 1 && value.elements.length <= 2) {
+        const options = value.elements[1];
+        if (options && !ts.isObjectLiteralExpression(options)) refused = `its ${RULE} options are an expression (\`${text(options)}\`), not an object this can extend`;
+        else entries.push({ value, severity: text(value.elements[0]), options: options && ts.isObjectLiteralExpression(options) ? options : null });
+      } else refused = `its ${RULE} entry is \`${text(value)}\`, not a [severity, options] pair this can extend`;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  if (refused) return { refused };
+  if (entries.length > 1) return { refused: `it configures ${RULE} in ${entries.length} places — one entry is what the firewall joins` };
+  return entries;
+}
+
+/** Is this constraint Nx's stock catch-all — `sourceTag: '*'`, `onlyDependOnLibsWithTags: ['*']`, nothing else? */
+function isStockCatchAll(ts: ClassicTypeScript, element: TsNode): boolean {
+  if (!ts.isObjectLiteralExpression(element) || element.properties.length !== 2) return false;
+  const values = new Map<string, TsNode>();
+  for (const property of element.properties) if (ts.isPropertyAssignment(property)) values.set(keyOf(ts, property), property.initializer);
+  const source = values.get('sourceTag');
+  const only = values.get('onlyDependOnLibsWithTags');
+  return (
+    !!source && ts.isStringLiteral(source) && source.text === '*' &&
+    !!only && ts.isArrayLiteralExpression(only) && only.elements.length === 1 && ts.isStringLiteral(only.elements[0]) && only.elements[0].text === '*'
+  );
+}
+
+/** Does a constraint match EVERY project (`sourceTag: '*'`)? — then an untagged project is never "without tags". */
+function matchesEveryProject(ts: ClassicTypeScript, element: TsNode): boolean {
+  if (!ts.isObjectLiteralExpression(element)) return false;
+  return element.properties.some((p) => ts.isPropertyAssignment(p) && keyOf(ts, p) === 'sourceTag' && ts.isStringLiteral(p.initializer) && p.initializer.text === '*');
+}
+
+/** The `depConstraints` array of an options object, if it is a literal one. */
+function constraintsOf(ts: ClassicTypeScript, options: TsObjectLiteralExpression): TsArrayLiteralExpression | null {
+  for (const property of options.properties) {
+    if (ts.isPropertyAssignment(property) && keyOf(ts, property) === 'depConstraints' && ts.isArrayLiteralExpression(property.initializer)) return property.initializer;
+  }
+  return null;
+}
+
 /**
- * Write the firewall: the `platformConstraints` declaration above the `export default` statement, the plugin import
- * when the config has none to reuse, and the blocks after the exported array's last element — plus any `extra`
- * changes (the upgrade's removals), applied in the same pass.
+ * Write the firewall: the `platformConstraints` declaration and the workspace's hoisted options above the
+ * `export default` statement, the workspace's entry for the rule replaced by `moduleBoundaries(platformConstraints)`
+ * (or, when it configures the rule nowhere, a block of the firewall's own), the scoped blocks after the exported
+ * array's last element — plus any `extra` removals (the upgrade's), applied in the same pass, inside the hoisted
+ * options or elsewhere.
  */
 function spliceFirewall(
   source: string,
@@ -327,40 +443,99 @@ function spliceFirewall(
   bans: Readonly<Record<Platform, readonly string[]>>,
   nx: string,
   extra: StringChange[],
-): { source: string } | null {
+): FirewallEdit {
   const ts = loadTypeScript();
-  if (!ts) return null;
+  if (!ts) return { refused: 'no usable TypeScript to read it with' };
   const sf = parse(ts, source, sourcePath);
   const exported = exportedArray(ts, sf);
-  if (!exported) return null;
+  if (!exported) return { refused: 'it has no `export default [ … ]` (or `export default fn([ … ])`) to extend' };
+  for (const name of [OPTIONS, ENTRY]) {
+    if (identifierUsed(ts, sf, name)) return { refused: `it already uses the name \`${name}\`, which the firewall declares` };
+  }
+  const entries = ruleEntries(ts, sf, source);
+  if ('refused' in entries) return entries;
+  const entry = entries[0];
   const { statement, array } = exported;
 
-  const changes: StringChange[] = [...extra];
-  const pluginImport = defaultImportOf(ts, sf, PLUGIN);
-  const plugin = pluginImport ?? (identifierUsed(ts, sf, 'nx') ? 'nxPlatform' : 'nx');
-  if (!pluginImport) {
-    const imports = sf.statements.filter((s) => ts.isImportDeclaration(s));
-    const at = imports.length ? imports[imports.length - 1].getEnd() : 0;
-    changes.push({ type: ChangeType.Insert, index: at, text: imports.length ? `\nimport ${plugin} from '${PLUGIN}';` : `import ${plugin} from '${PLUGIN}';\n\n` });
+  const changes: string[] = [];
+  const notes: string[] = [];
+  const edits: StringChange[] = [];
+  let severity = `'error'`;
+  let options = '{}';
+  let plugin: string | undefined;
+
+  if (entry) {
+    const value = { start: entry.value.getStart(sf), end: entry.value.getEnd() };
+    const inValue = (change: StringChange) => change.type === ChangeType.Delete && change.start >= value.start && change.start + change.length <= value.end;
+    edits.push(...extra.filter((change) => !inValue(change)));
+    if (/^(['"]off['"]|0)$/.test(entry.severity)) notes.push(`${RULE} was off; the firewall turns it on ('error') with this workspace's own options`);
+    else severity = entry.severity;
+    if (entry.options) {
+      const at = entry.options.getStart(sf);
+      const inner: StringChange[] = extra.filter(inValue).map((change) => ({ ...change, start: (change as { start: number }).start - at }) as StringChange);
+      const constraints = constraintsOf(ts, entry.options);
+      for (const element of constraints?.elements ?? []) {
+        if (isStockCatchAll(ts, element)) {
+          const span = removableSpan(source, element.getStart(sf), element.getEnd());
+          inner.push({ type: ChangeType.Delete, start: span.start - at, length: span.end - span.start });
+          changes.push(
+            `removed Nx's stock catch-all ${ANY_PROJECT} from ${OPTIONS}: it forbade nothing and exempted every untagged project from the firewall (tests and tool configs keep it)`,
+          );
+        } else if (matchesEveryProject(ts, element)) {
+          notes.push(
+            `kept this workspace's own \`sourceTag: '*'\` constraint (\`${source.slice(element.getStart(sf), element.getEnd())}\`) — every project matches it, so an ` +
+              `untagged one is not reported as having no platform; the classifier's report is then the only place that says so`,
+          );
+        }
+      }
+      // An emptied list collapses to `[]` rather than keeping the lines its constraints stood on.
+      options = dedent(applyChangesToString(source.slice(at, entry.options.getEnd()), inner), indentOfLineAt(source, at)).replace(/(depConstraints:\s*)\[\s*\]/, '$1[]');
+    }
+    edits.push({ type: ChangeType.Delete, start: value.start, length: value.end - value.start }, { type: ChangeType.Insert, index: value.start, text: SHIPPING_ENTRY });
+    changes.unshift(`hoisted this workspace's own ${RULE} options into ${OPTIONS}; its entry is now ${SHIPPING_ENTRY} — one rule instance, every exemption honoured`);
+  } else {
+    edits.push(...extra);
+    const pluginImport = defaultImportOf(ts, sf, PLUGIN);
+    plugin = pluginImport ?? (identifierUsed(ts, sf, 'nx') ? 'nxPlugin' : 'nx');
+    if (!pluginImport) {
+      const imports = sf.statements.filter((s) => ts.isImportDeclaration(s));
+      const at = imports.length ? imports[imports.length - 1].getEnd() : 0;
+      edits.push({ type: ChangeType.Insert, index: at, text: imports.length ? `\nimport ${plugin} from '${PLUGIN}';` : `import ${plugin} from '${PLUGIN}';\n\n` });
+    }
+    changes.unshift(`configured ${RULE} (it was configured nowhere) with the firewall's constraints on every linted file`);
   }
+  changes.push(`scoped by file: tests and tool configs are not judged; the SSR server half of a web app may reach server code`);
 
   const statementStart = lineStart(source, statement.getStart(sf));
   const blankBefore = statementStart === 0 || /\n[ \t]*\n$/.test(source.slice(0, statementStart)) ? '' : '\n';
-  changes.push({ type: ChangeType.Insert, index: statementStart, text: `${blankBefore}${constraintsDeclaration(bans, nx).join('\n')}\n\n` });
+  const declarations = [...constraintsDeclaration(bans, nx), '', ...optionsDeclaration(options, severity)];
+  edits.push({ type: ChangeType.Insert, index: statementStart, text: `${blankBefore}${declarations.join('\n')}\n\n` });
 
-  // Spliced after the last element (past its trailing comma, if any) at its own indentation; into an empty array,
-  // one level inside it — never just before `]`, which leaves `}\n   ,` wherever prettier is absent.
+  // The coverage block goes before the first element, at its indentation; the scoped blocks after the last element
+  // (past its trailing comma, if any). Into an empty array, all of them one level inside it — never just before `]`,
+  // which leaves `}\n   ,` wherever prettier is absent.
   const elements = array.elements;
+  const first = elements.length ? elements[0] : null;
   const last = elements.length ? elements[elements.length - 1] : null;
-  const indent = last ? indentOfLineAt(source, last.getStart(sf)) : `${indentOfLineAt(source, array.getStart(sf))}  `;
-  const block = firewallBlocks(plugin).map((line) => `${indent}${line}`).join('\n');
-  const afterLast = last ? (elements.hasTrailingComma ? source.indexOf(',', last.getEnd()) + 1 : last.getEnd()) : -1;
-  changes.push(
-    last
-      ? { type: ChangeType.Insert, index: afterLast, text: `${elements.hasTrailingComma ? '' : ','}\n${block}${elements.hasTrailingComma ? ',' : ''}` }
-      : { type: ChangeType.Insert, index: array.getStart(sf) + 1, text: `\n${block},\n${indentOfLineAt(source, array.getStart(sf))}` },
-  );
-  return { source: applyChangesToString(source, changes) };
+  const indent = first ? indentOfLineAt(source, first.getStart(sf)) : `${indentOfLineAt(source, array.getStart(sf))}  `;
+  const lines = (block: string[]) => block.map((line) => `${indent}${line}`).join('\n');
+  if (first && last) {
+    edits.push({ type: ChangeType.Insert, index: first.getStart(sf), text: `${lines(coverageBlock(plugin)).trimStart()},\n${indent}` });
+    const afterLast = elements.hasTrailingComma ? source.indexOf(',', last.getEnd()) + 1 : last.getEnd();
+    edits.push({ type: ChangeType.Insert, index: afterLast, text: `${elements.hasTrailingComma ? '' : ','}\n${lines(scopedBlocks())}${elements.hasTrailingComma ? ',' : ''}` });
+  } else {
+    const all = [...coverageBlock(plugin).map((line, i, block) => (i === block.length - 1 ? `${line},` : line)), ...scopedBlocks()];
+    edits.push({ type: ChangeType.Insert, index: array.getStart(sf) + 1, text: `\n${lines(all)},\n${indentOfLineAt(source, array.getStart(sf))}` });
+  }
+  return { source: applyChangesToString(source, edits), changes, notes };
+}
+
+/** Move a nested block of text to the top level: every line after the first loses `indent`. */
+function dedent(text: string, indent: string): string {
+  return text
+    .split('\n')
+    .map((line, i) => (i > 0 && line.startsWith(indent) ? line.slice(indent.length) : line))
+    .join('\n');
 }
 
 /** `export default [ … ]`, or `export default someConfig([ … ], …)` (defineConfig and the like) — its array. */

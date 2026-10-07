@@ -114,7 +114,7 @@
     "platform-sync": {
       "factory": "./src/generators/platform-sync/generator",
       "schema": "./src/generators/platform-sync/schema.json",
-      "description": "Nx sync generator for the platform firewall, registered on the lint target: before lint runs, every untagged project whose platform the evidence settles (an application by its stack, a library by its imports) is tagged — so a library made with `nx g @nx/js:lib` is classified before the firewall judges it, and `nx sync:check` fails CI while one is not. A mixed or evidence-free project is left for `nx g @bespunky/nx-tools:platform`.",
+      "description": "Nx global sync generator for the platform firewall: `nx sync` tags every untagged project whose platform the evidence settles (an application by its stack, a library by its imports) — so a library made with `nx g @nx/js:lib` is classified in one command, and `nx sync:check` names it. Never attached to a task: a non-interactive run is never stopped by it. A mixed or evidence-free project is left for `nx g @bespunky/nx-tools:platform`.",
       "hidden": true
     },
     "platform": {
