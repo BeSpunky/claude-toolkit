@@ -33,13 +33,14 @@ export default function declareNodeVersion(tree: Tree): void {
     if (!declared) {
       logger.warn(
         `${TAG} ${NVMRC} says "${(tree.read(NVMRC, 'utf8') ?? '').trim()}", which names no Node major — the house now tags the ` +
-          `devcontainer image${running ? ` (today Node ${running.major})` : ''} and the Cloud Functions runtime with it, so the next ` +
-          `upgrade will refuse it. Write the major alone (e.g. "${running?.major ?? '24'}").`,
+          `devcontainer image${running ? ` (today Node ${running.major})` : ''} and the Cloud Functions runtime with it, so THIS upgrade ` +
+          `will stop at the generators (after these migrations are committed). Write the major alone (e.g. "${running?.major ?? '24'}").`,
       );
     } else if (running && running.major !== declared) {
       logger.warn(
         `${TAG} ${NVMRC} declares Node ${declared}, but the devcontainer runs Node ${running.major} (${running.from}). ${NVMRC} is now the ` +
-          `one source: the next upgrade moves the container to Node ${declared}. If ${running.major} is right, write it into ${NVMRC} first.`,
+          `one source: this upgrade's generators move the container to Node ${declared} (it takes effect on the next rebuild). If ` +
+          `${running.major} is right, write it into ${NVMRC} and re-run the upgrade.`,
       );
     }
   } else if (running) {

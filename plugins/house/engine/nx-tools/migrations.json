@@ -207,7 +207,7 @@
     "recompose-pre-0.3-serve-leftovers": {
       "version": "0.50.0",
       "layer": "web",
-      "description": "Recomposes two pre-0.3.0 serve shapes that 0.24.0/0.24.1 left half-migrated: an app whose `serve` was itself the Angular dev-server depending on `emulators` (e76c12a) \u2014 after the suite moved to the `firebase` project that dependsOn dangled and `nx serve` ran without emulators \u2014 and a `dev-server` whose default configuration was the retired `no-emulators` (703ca41), which served a production build. Drops the leftover and runs the serve generator for the app (dev-server leaf, serve composer, its .bespunky/dev.json entry). Every other project is left alone.",
+      "description": "Recomposes two pre-0.3.0 serve shapes that 0.24.0/0.24.1 left half-migrated: an app whose `serve` was itself the Angular dev-server depending on `emulators` (e76c12a) \u2014 after the suite moved to the `firebase` project that dependsOn dangled and `nx serve` ran without emulators \u2014 and a `dev-server` whose default configuration was the retired `no-emulators` (703ca41), which served a production build. Drops the leftover and runs the serve generator for the app: the dev-server leaf, the `dev-stack` composer (depending on a `serve-preflight` that refuses a second stack on taken ports), the `serve` follower, and its .bespunky/dev.json entry (with the workspace `install` step when none is declared). Every other project is left alone.",
       "implementation": "./src/migrations/0.50.0/recompose-pre-0.3-serve-leftovers"
     },
     "stack-owned-dev-processes": {
@@ -231,7 +231,7 @@
     "lint-house-apps": {
       "version": "0.50.0",
       "layer": "angular",
-      "description": "Give every house Angular app a lint target (through @nx/angular's own add-linting), so the platform firewall checks its imports \u2014 house apps were created with none, leaving the web app outside the boundary it exists for. Reports any other platform-tagged project that is not linted.",
+      "description": "Give every house Angular app a lint target (through @nx/angular's own add-linting), so the platform firewall checks its imports \u2014 house apps were created with none, leaving the web app outside the boundary it exists for. Also converts the house's own `functions:lint` (the deprecated @nx/eslint:lint executor up to 0.49) to @nx/eslint/plugin's inferred target. Reports any other platform-tagged project that is not linted.",
       "implementation": "./src/migrations/0.50.0/lint-house-apps"
     },
     "add-design-system-a11y": {
