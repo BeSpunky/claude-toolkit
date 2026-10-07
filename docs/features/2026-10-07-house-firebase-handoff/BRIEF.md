@@ -1,43 +1,52 @@
-# Brief — what the shir-halili-coaching handoff means for the toolkit
+# Brief: what the shir-halili-coaching handoff means for the toolkit
 
-**Status:** analysis only. Nothing implemented, nothing released. Evidence per item in `analysis/`, full plan in `PLAN.md`.
+**Status:** analysis only. Nothing has been implemented or released. Every claim below was checked twice: first a triage against the toolkit's code (`analysis/`), then a pass whose only job was to disprove it (`verification/`), running the behaviour wherever that could be done. The plan is in `PLAN.md`.
 
 ## What came in
 
-One day of real work on a house Firebase + Angular SSR project hit 22 problems. The report asks for each one to be fixed in the toolkit, and wants the version that fixes it back, so the project can drop its hand-made workarounds.
+One day of real work on a house Firebase + Angular SSR project hit 22 problems. The report asks for each to be fixed in the toolkit, and wants back the version that fixes each one, so the project can drop its hand-made workarounds.
 
-## What we found
+## What survived verification
 
-**18 of the 22 are ours.** Three come from other tools (the Firebase CLI's own init, and Nx / Analog upstream). One (the skip link) is the project's own code, but it points at something the design system should offer.
+**18 of the 22 are toolkit problems.** Three come from other tools: the `undefined` support email is a Firebase CLI init bug, and the `__dirname` and `tsconfig.app.json` warnings are Nx and Analog behaviour. The skip link is the project's own code, but it points at something the design system should provide.
 
-**Four are worse than the report says:**
+**Shown by actually running it:**
+- **Two copies of the Firebase SDK.** Installing `latest` of both packages gave Firebase 12 at the root, with 11 nested under `@angular/fire`. Every upgrade also puts back a `latest` someone removed.
+- **A worktree's emulators lose or swap data.** If the worktree stops first, it exports the main stack's data and loses its own. If main stops first, the worktree's export fails.
+- **A second `dev-server` in the same tree waits on the first.** When the first stops, it reports success without having run anything.
+- **Upgrades overwrite hand edits.** Running the generator twice wipes hand-edited `inputs`, `args` and `configurations` on house targets. The project's next upgrade will undo their `functions:deploy` fix.
 
-- **Staging ships production's config.** The toolkit writes `apphosting.yaml` and `apphosting.staging.yaml` at the repo root, where Firebase never reads them. Every house project's staging backend builds with production settings.
-- **A worktree's emulators swap data with the main tree's.** Both stacks share one emulator "hub" lookup file, so on shutdown the main stack's data is exported into the worktree's folder.
-- **The container's Node version follows whoever ran the last upgrade.** The upgrade copies the Node major of the machine running it, in every house project, not only Firebase ones.
-- **Floating versions aren't just Firebase.** Three other generators write `latest` or similar. The two-copies-of-Firebase crash is one instance of that.
+**Confirmed by reading the source:**
+- **Local emulators can read production secrets.** The emulator is fed the production `.secret.local`, and worktrees borrow the main tree's copy. A secret that is missing or empty makes the emulator fetch the real value from Google's Secret Manager.
+- **The container's Node version follows whoever ran the last upgrade.** It comes from the upgrading machine's Node, or from the newest base image on the Docker fallback. The project's existing value is never consulted.
+- **The deploy targets are incomplete.** There is no deploy target for Firestore rules, Functions builds twice on every deploy, and `nx affected` can't see the root Firebase files.
+- **The firewall misses untagged libraries.** The platform firewall checks only projects that carry a `platform:` tag, and only direct imports. An untagged library is unchecked.
+- **Firestore and Storage emulators break when ports shift.** They always dial their emulator port directly, so a shifted port forward breaks them.
 
-**One thing the project must hear now:** their next house upgrade will wipe the inputs they added by hand to `functions:deploy`. The toolkit rewrites those targets on every upgrade.
+## What my first brief got wrong
+
+- **"Staging ships production config because the yaml is in the wrong place": false.** Firebase's builder starts at the backend's root directory and walks up the folders, so the root files *are* read. I checked its source myself. The real staging bug: the toolkit says to create the backend with `backends:create --environment staging`, and **that flag doesn't exist**. I checked the Firebase CLI. So the staging environment name is never set unless someone finds the console setting. Two smaller issues: the toolkit never tells Nx users they must set the backend's Root Directory (Firebase says the build fails without it), and any `apphosting.yaml` under the app folder silently shadows the root one. That may be what the project actually hit.
+- **The proposed fix for the stuck `dev-server` doesn't work.** The house's own `nx serve` target collides the same way before our code runs. This needs a redesign, not an environment variable.
+- **"Make the forwarded port fail loudly" isn't possible.** VS Code's `requireLocalPort` doesn't fail. It forwards to another port and shows a dialog. Routing everything through the app's address does work, but only over http, and Storage uploads need special handling.
+- **The emulator port collisions were overstated.** Emulators the offset doesn't move pick free ports themselves, so they don't collide unless a project pins their ports.
 
 ## The fix, as six ideas instead of 18 patches
 
-1. **Every version comes from one place.** Generators can't write a floating version, AngularFire and Firebase are pinned as a matched pair, and the Node version lives once in the project.
-2. **Nothing run locally can reach production.** The emulators get dummy secrets by default, worktrees no longer borrow the main tree's real ones, and seeding refuses to run against anything that isn't the emulators.
-3. **Each running dev stack gets its own state folder.** That ends the data swap and the stuck `nx serve`. It also gives agents `dev ps` and `dev stop`, so they never kill processes by name.
-4. **The browser reaches every emulator through the app's own address.** When the dev container shifts the forwarded ports, the app still finds its emulators.
-5. **Deploys are declared.** Real deploy targets for Firestore rules and Functions, plus an opt-in CI layer that follows the project's branch model. The cloud-permissions script is one the human runs, never the agent.
-6. **The docs say what's true.** Both App Hosting deploy modes, where `apphosting.yaml` must live, and how to move a project between accounts.
+1. **Every version comes from one place.** Generators never write a floating version. `@angular/fire` follows the installed Angular major, and `firebase` follows `@angular/fire`. That matters because no stable `@angular/fire` supports Angular 21 or 22 yet. Node is declared once in the project.
+2. **Nothing run locally can reach production.** The emulators get a dummy value for every declared secret, worktrees no longer borrow the main tree's real ones, and seeding refuses to run against anything that isn't the emulators.
+3. **Each running dev stack gets its own identity.** Its own emulator-hub file, and a fix for the Nx lock that still needs designing. Agents get `dev ps` and `dev stop`, so they never kill processes by name.
+4. **The browser reaches every emulator through the app's own address**, over http.
+5. **Deploys are declared.** Owned deploy targets with the right inputs, an opt-in CI layer that follows the branch model, and a cloud-permissions script that the human runs.
+6. **The docs say what's true.** The missing `--environment` flag, the Root Directory requirement for Nx, both App Hosting deploy modes, and the account-move recipe.
 
-## Proposed order (four releases)
+## Still unverified
 
-1. **Safety:** ideas 1 and 2, moving `apphosting.yaml` to where Firebase reads it, and ending the emulator data swap.
-2. **Dev loop:** the rest of idea 3, plus idea 4.
-3. **Deploy:** idea 5 and the account-move recipe.
-4. **Cleanup:** stop untagged libraries from slipping past the platform firewall, add a skip-link primitive to the design system, and print who to sign in as after seeding.
+- That a subagent's background servers survive after it returns. That would explain the leaked servers, but nobody has seen it happen.
+- The account-move recipe, the probe for which branch a backend deploys from, and the CI design. These are proposals, not claims.
 
 ## Decisions waiting on you
 
-- **Backward compatibility for release 1:** it removes the container's global `firebase` command (the project's pinned copy replaces it) and stops the emulators from using real secrets unless someone opts in. Does any project need the old behaviour kept?
-- **Emulator routing (release 2):** keep an option for existing projects to dial emulator ports directly?
-- **CI deploy (release 3):** should the toolkit own this as an opt-in layer? It needs a small schema change to how the branch model describes deploys.
-- **Firewall (release 4):** tightening it makes untagged libraries fail lint in existing projects until someone tags them.
+- **Backward compatibility for release 1:** it drops the container's global `firebase` command (the project's pinned copy replaces it) and dummy-fills the emulators' secrets unless someone opts in. Does any project need the old behaviour?
+- **Emulator routing:** keep an option for existing projects to dial emulator ports directly?
+- **CI deploy:** should the toolkit own it as an opt-in layer? It needs a small schema change to how the branch model describes deploys.
+- **Firewall:** tightening it makes untagged libraries fail lint in existing projects until they're tagged.

@@ -50,3 +50,15 @@ Input: `INBOUND-HANDOFF.md`. Evidence: `analysis/U1…U7`. Status: **proposal, n
 
 - Owned targets are re-asserted on every upgrade (`_utils/project-files.ts:177-183`): their hand-added `inputs` on `functions:deploy` will be **wiped** by their next upgrade until wave 3 ships.
 - E1/E2/E3 are not toolkit output — `firebase use --add` before `firebase init`; `nx migrate latest`.
+
+## Corrections after adversarial verification (2026-10-07)
+
+Ledger: `handoffs/20261007T010000Z-verify.md`; evidence: `verification/V1…V9`. Supersedes the rows above where they disagree.
+
+- **C1 — premise refuted.** App Hosting walks up from the backend rootDir (buildpacks `detectAppHostingYAMLRoot`), so root `apphosting*.yaml` are read. The real bugs: the toolkit instructs `backends:create --environment staging`, a flag firebase-tools 15.32.1 does not have (env name never set → staging builds prod); no guidance that Nx needs Root Directory set; an app-level yaml shadows the root one. **No relocation migration** — fix the instructions instead.
+- **D2 — proposed fix unsound.** The outer `serve` target is continuous and collides before the engine runs; a separate Nx data dir costs a cold graph and cache misses. Needs a design.
+- **A3 — refined.** `requireLocalPort` cannot make a mismatch fail (VS Code forwards elsewhere + dialog). Origin routing works over http only; Storage resumable uploads need `changeOrigin: false`; SSR offset matters only for apps that add SSR.
+- **D1 — confirmed by reproduction, both exit orders lose data.** eventarc/tasks don't collide (they float); only a declared `websocketPort` would.
+- **A1 — widened.** `@angular/fire` must follow the installed Angular major (no stable release for Angular 21/22); the per-app step re-adds `latest` on every upgrade.
+- **A2 — widened.** A missing or empty secret makes the emulator fetch the real Secret Manager value when the projectId is real.
+- **B2 — new fact.** Owned targets are replaced whole on every upgrade (`project-files.ts:180`); CLAUDE.md's "targets are class B" is wrong for house-owned targets.
