@@ -45,7 +45,8 @@ export default async function dsThemeGenerator(tree: Tree, options: DsThemeSchem
 
   // 1) The theme source. Seeded, never overwritten — after the first run this file is the project's
   //    design, and a re-run must not wipe a brand someone spent a week on.
-  if (!tree.exists(themePath)) {
+  const created = !tree.exists(themePath);
+  if (created) {
     tree.write(themePath, themeSource(themeName));
   } else {
     logger.info(`[ds-theme] ${themePath} already exists — left untouched; re-asserting the build wiring only.`);
@@ -62,7 +63,7 @@ export default async function dsThemeGenerator(tree: Tree, options: DsThemeSchem
   if (!options.skipFormat) await formatFiles(tree);
 
   logger.info(
-    `[ds-theme] Created the "${themeName}" theme (wired into ${wired} app(s)). It builds to ` +
+    `[ds-theme] ${created ? 'Created' : 'Re-wired'} the "${themeName}" theme (wired into ${wired} app(s)). It builds to ` +
       `\`${bundleName}.css\`. Link it in index.html to apply it before first paint:\n` +
       `    <link id="ds-theme" rel="stylesheet" href="${bundleName}.css">\n` +
       `…or swap it at runtime: \`inject(DsRuntimeTheme).use('${bundleName}.css')\`.`

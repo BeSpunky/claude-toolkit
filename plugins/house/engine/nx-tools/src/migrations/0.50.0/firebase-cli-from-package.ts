@@ -17,6 +17,7 @@
 // file the feature's copy wrote, so nobody logs in again.
 import { type Tree, logger } from '@nx/devkit';
 import { retireHouseFeature } from '../../generators/_utils/devcontainer-feature';
+import { placeDependency } from '../../generators/_utils/dependencies';
 
 const TAG = '[0.50.0 firebase-cli-from-package]';
 const FEATURE = /^ghcr\.io\/devcontainers-extra\/features\/firebase-cli(?::[\w.-]+)?$/;
@@ -63,7 +64,7 @@ function declareFirebaseTools(tree: Tree): string | undefined {
     }
   }
   const target = block ?? 'devDependencies';
-  pkg[target] = { ...pkg[target], 'firebase-tools': version };
+  pkg[target] = placeDependency(pkg[target], 'firebase-tools', version);
   const indent = /^(\s+)"/m.exec(text)?.[1] ?? '  ';
   tree.write('package.json', `${JSON.stringify(pkg, null, indent)}\n`);
   logger.info(`${TAG} package.json ${target}["firebase-tools"] = "${version}"${block ? ' (was "latest")' : ''}.`);

@@ -14,6 +14,25 @@ const suite = (only) => ({
   options: { command: `bash tools/emulators.sh${only ? ` --only ${only},ui` : ''}`, cwd: '{workspaceRoot}' },
 });
 
+const FIREBASE_TEXT = `{
+  "name": "firebase",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "targets": {
+    "emulators": {
+      "continuous": true,
+      "executor": "nx:run-commands",
+      "options": { "command": "bash tools/emulators.sh", "cwd": "{workspaceRoot}" },
+      "dependsOn": [{ "projects": ["functions"], "target": "build" }]
+    },
+    "emulators:auth": {
+      "continuous": true,
+      "executor": "nx:run-commands",
+      "options": { "command": "bash tools/emulators.sh --only auth,ui", "cwd": "{workspaceRoot}" }
+    }
+  }
+}
+`;
+
 const targetsOf = (tree, p) => readProjectConfiguration(tree, p).targets;
 
 export default {
@@ -41,6 +60,17 @@ export default {
         t.ok(fb.emulators.continuous === undefined && fb['emulators:auth'].continuous === undefined, 'every suite launcher lost continuous');
         t.ok(JSON.stringify(fb.emulators.dependsOn) === JSON.stringify([{ projects: ['functions'], target: 'build' }]), 'the functions build dependency is kept');
         t.ok(fb.watch.continuous === true, 'a firebase target that does not launch the suite is untouched');
+      },
+    },
+    {
+      name: 'in place: only the `continuous` lines go — key order and one-line formatting stay (no options-below-dependsOn churn)',
+      setup: (tree) => {
+        addProjectConfiguration(tree, 'functions', { root: 'apps/functions', targets: { build: { executor: 'nx:noop' } } });
+        tree.write('firebase/project.json', FIREBASE_TEXT);
+      },
+      expect: (tree, t) => {
+        const text = tree.read('firebase/project.json', 'utf8');
+        t.ok(text === FIREBASE_TEXT.split('\n').filter((line) => !line.includes('"continuous"')).join('\n'), `project.json:\n${text}`);
       },
     },
     {

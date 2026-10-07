@@ -9,30 +9,23 @@
 // firebase 12 at the root, firebase 11 nested under @angular/fire 20 — two SDKs, "No Firebase App '[DEFAULT]'". Freezing
 // that would seal the bug behind a pin. So the pair is DERIVED from the workspace's INSTALLED ANGULAR MAJOR:
 //   - @angular/fire: the installed one when it is the release line for that Angular major (no surprise upgrade), else the
-//     house's release for that major (the frozen table below — never the live one, which moves on);
+//     house's release for that major (generators/_utils/firebase-compat.ts — the SAME table the Angular firebase client
+//     reads every upgrade; a later toolkit running this rung knows more releases, and the installed Angular major is
+//     what decides, so the newer table only ever yields a pair that is coherent for THIS project);
 //   - firebase: EXACTLY the range that @angular/fire release declares in its own dependencies — never the installed root
 //     firebase. The package manager then keeps ONE SDK, after a reinstall.
 // Where Angular's major has no stable @angular/fire (21, 22 as of 0.50.0), there is no coherent pair to write: the
-// `latest` stays, and the report says what is true and what the developer can choose.
+// `latest` stays, and the report NAMES each floating entry, says what is true and lists the choices, most recommended
+// first. The judging and the wording are the Angular adapter's (adapters/angular/angularfire.ts), so this rung and the
+// generator that runs right after it can never again give a project two different answers.
 //
 // ONLY the literal `"latest"` is rewritten — it is what the house wrote. Any other spec is the project's own choice; a
 // floating one (`next`, `*`, …) is REPORTED with what to do, never rewritten.
 import { type Tree, getProjects, logger } from '@nx/devkit';
+import { browserSdkFindings, coherentPair, readBrowserSdkFacts, renderAdvice } from '../../adapters/angular/angularfire';
 
 const TAG = '[0.50.0 pin-floating-dependencies]';
 
-/**
- * The house's @angular/fire per Angular major, AS OF 0.50.0 — frozen (tools/firebase-compat/project.mjs projected it
- * from npm on 2026-10-07). `firebase` is that release's own `dependencies.firebase`.
- */
-const ANGULARFIRE_AS_OF_0_50_0: Record<number, { angularfire: string; firebase: string } | { none: string }> = {
-  17: { angularfire: '17.1.0', firebase: '^10.12.0' },
-  18: { angularfire: '18.0.1', firebase: '^10.12.0' },
-  19: { angularfire: '19.2.0', firebase: '^11.8.0' },
-  20: { angularfire: '20.1.0', firebase: '^11.8.0' },
-  21: { none: 'only a prerelease exists (@angular/fire 21.0.0-rc.1, firebase ^12.18.0, @angular/core >= 21.2.0)' },
-  22: { none: 'none exists, not even a prerelease' },
-};
 /** @bespunky/typescript-utils as of 0.50.0 (the only published version). */
 const TYPESCRIPT_UTILS_AS_OF_0_50_0 = '0.1.0-alpha.0';
 
@@ -75,7 +68,7 @@ export default function pinFloatingDependencies(tree: Tree): void {
 
   // 1) The Firebase browser SDK pair.
   if (spec('firebase') === 'latest' || spec('@angular/fire') === 'latest') {
-    if (pinFirebasePair(spec, set, installed, reports)) handled.add('firebase').add('@angular/fire');
+    if (pinFirebasePair(tree, spec, set, reports)) handled.add('firebase').add('@angular/fire');
   }
 
   // 2) The navigation kernel's type utilities.
@@ -126,60 +119,36 @@ export default function pinFloatingDependencies(tree: Tree): void {
   for (const line of reports) logger.warn(`${TAG} ${line}`);
 }
 
-/** Returns whether it spoke for the pair (false: not an Angular workspace — the house never wrote these there). */
+/**
+ * Rewrites the house-written `latest`s to the coherent pair, then reports — in the Angular adapter's own words —
+ * whatever is still wrong with the pair as declared (a `latest` with no pair to pin, a firebase that is not the range
+ * the @angular/fire carries). Returns whether it spoke for the pair (false: not an Angular workspace — the house never
+ * wrote these there).
+ */
 function pinFirebasePair(
+  tree: Tree,
   spec: (name: string) => string | undefined,
   set: (name: string, version: string, why: string) => void,
-  installed: (name: string) => { version?: string; dependencies?: Record<string, string> } | undefined,
   reports: string[],
 ): boolean {
-  const angular = installed('@angular/core')?.version ?? /(\d+\.\d+\.\d+|\d+)/.exec(spec('@angular/core') ?? '')?.[1];
-  if (!angular && !spec('@angular/fire')) return false;
-  const major = angular ? Number(angular.split('.')[0]) : undefined;
-  const fire = installed('@angular/fire');
-  const fireMajor = fire?.version ? Number(fire.version.split('.')[0]) : undefined;
-  const fireSpec = spec('@angular/fire');
-
-  // @angular/fire: the installed one when it is THIS Angular's release line, else the house release for the major.
-  let release: { angularfire: string; firebase: string } | undefined;
-  if (fire?.version && fire.dependencies?.firebase && fireMajor === major && PINNED.test(fire.version)) {
-    release = { angularfire: fire.version, firebase: fire.dependencies.firebase };
-  } else if (fireSpec && fireSpec !== 'latest') {
-    // The project pinned @angular/fire itself; firebase follows THAT release — known only once it is installed.
-    if (fire?.dependencies?.firebase && fire.version && fireSpec.replace(/^[~^]/, '') === fire.version) {
-      set('firebase', fire.dependencies.firebase, `the range the installed @angular/fire ${fire.version} declares`);
-    } else {
-      reports.push(
-        `firebase is "latest" beside your own @angular/fire "${fireSpec}": set firebase to exactly that release's range ` +
-          `(\`npm view @angular/fire@<version> dependencies.firebase\`), or the app carries two Firebase SDKs.`,
-      );
-    }
-    return true;
-  } else if (major !== undefined) {
-    const row = ANGULARFIRE_AS_OF_0_50_0[major];
-    if (row && 'angularfire' in row) release = row;
-    else {
-      reports.push(
-        `firebase / @angular/fire are "latest", but no stable @angular/fire supports Angular ${major} (${row ? row.none : 'it is outside the house table'}). ` +
-          `Left as they are — there is no coherent pair to pin. Choose deliberately: declare an @angular/fire release for Angular ${major} ` +
-          `and firebase as exactly the range it declares, or move to Angular 20 (@angular/fire 20.1.0, firebase ^11.8.0). Then reinstall.`,
-      );
-      return true;
+  const facts = () => readBrowserSdkFacts(tree, spec);
+  const before = facts();
+  if (!before.angular && !before.declared.fire) return false;
+  const fire = before.declared.fire;
+  if (fire && fire !== 'latest') {
+    // The project chose @angular/fire itself: firebase follows THAT release — known once it is installed.
+    const carried = before.installedFire;
+    if (carried?.firebase && fire.replace(/^[~^]/, '') === carried.version) {
+      set('firebase', carried.firebase, `the range the installed @angular/fire ${carried.version} declares`);
     }
   } else {
-    reports.push('firebase / @angular/fire are "latest", but @angular/core is neither installed nor declared — install, then run `nx migrate` again, or pin them by hand (firebase = the range your @angular/fire declares).');
-    return true;
+    const verdict = coherentPair(before);
+    if ('pair' in verdict) {
+      set('@angular/fire', verdict.pair.angularfire, verdict.pair.why);
+      set('firebase', verdict.pair.firebase, `the range @angular/fire ${verdict.pair.angularfire} itself declares — never the installed root firebase`);
+    }
   }
-  const why = fire?.version === release.angularfire ? 'the installed release' : `the house's release for Angular ${major}`;
-  set('@angular/fire', release.angularfire, why);
-  set('firebase', release.firebase, `the range @angular/fire ${release.angularfire} itself declares — never the installed root firebase`);
-  const own = spec('firebase');
-  if (own && own !== 'latest' && own !== release.firebase) {
-    reports.push(
-      `firebase is your own "${own}", but @angular/fire ${release.angularfire} carries firebase "${release.firebase}" — two ` +
-        `Firebase SDKs ("No Firebase App '[DEFAULT]'"). Set "firebase": "${release.firebase}" and reinstall.`,
-    );
-  }
+  for (const advice of browserSdkFindings(facts())) reports.push(renderAdvice('', advice).trimStart());
   return true;
 }
 

@@ -6,17 +6,20 @@
 // projects through `addProjectConfiguration` (which always writes project.json), silently forked a TS-solution
 // workspace into two conventions. The answer now lives here, once:
 //
-//   - devkit's `readProjectConfiguration` / `updateProjectConfiguration` already work on both kinds (update
-//     merges into the package.json `nx` block) — prefer them to touching either file;
+//   - devkit's `readProjectConfiguration` reads both kinds; to CHANGE an existing project, prefer
+//     `updateProjectConfigInPlace` (below) to devkit's `updateProjectConfiguration`, which re-serializes the whole
+//     file and rebuilds the object (an upgrade that reorders keys is a diff nobody asked for);
 //   - when a generator genuinely needs the FILE (to edit it with comments preserved, to report it, to know
 //     whether a write lands in an `nx` block), `projectDefinitionFile` names it;
 //   - `createProject` creates a project the way this workspace defines them;
 //   - `houseProjectHome` / `ensureHouseProject` find and keep the projects a house generator OWNS (below).
-import { type Tree, type ProjectConfiguration, addProjectConfiguration, getProjects, updateProjectConfiguration, updateJson, writeJson, logger } from '@nx/devkit';
+import { type Tree, type ProjectConfiguration, addProjectConfiguration, getProjects, updateProjectConfiguration, writeJson, logger } from '@nx/devkit';
 import { detectLinking, ensureWorkspaceMember, referenceFromSolution } from './linking';
 import { workspacePath } from './linking/shared';
 import { resolveWorkspaceScope } from './workspace-layout';
 import { describeOverride, mergeHouseTargets, recordHouseTargets, recordedHouseTargets } from './house-targets';
+import { updateJsonInPlace } from './json-edits';
+import { HOUSE_TARGETS_AS_OF_0_49_2 } from './house-targets-0.49.2';
 
 export type ProjectFileKind = 'project.json' | 'package.json';
 
@@ -36,6 +39,15 @@ export function projectDefinitionFile(tree: Tree, root: string): ProjectFile {
   if (tree.exists(at('project.json').path)) return at('project.json');
   if (tree.exists(at('package.json').path)) return at('package.json');
   return at(detectLinking(tree) === 'workspaces' ? 'package.json' : 'project.json');
+}
+
+/**
+ * Change the configuration of the project at `root` IN PLACE: `update` edits a copy, and only the members that
+ * differ are written (./json-edits.ts) — in project.json, or in package.json's `nx` block. Returns whether it wrote.
+ */
+export function updateProjectConfigInPlace(tree: Tree, root: string, update: (config: ProjectConfiguration) => void): boolean {
+  const file = projectDefinitionFile(tree, root);
+  return updateJsonInPlace<ProjectConfiguration>(tree, file.path, update, file.kind === 'package.json' ? ['nx'] : []);
 }
 
 /**
@@ -179,16 +191,13 @@ export function ensureHouseProject(
         `there instead of into a new project at ${home.canonical.root} — two projects under one name break every \`nx\` command.`,
     );
   }
-  const file = projectDefinitionFile(tree, home.root);
   const recorded = recordedHouseTargets(tree, home.name);
-  updateJson(tree, file.path, (json) => {
-    // A package.json-defined project keeps its Nx configuration under `nx`; a project.json at the top level.
-    const config = file.kind === 'package.json' ? (json.nx ??= {}) : json;
+  // In place: only what the merge changed is written — the project's formatting and key order stay.
+  updateProjectConfigInPlace(tree, home.root, (config) => {
     config.tags = [...new Set([...(config.tags ?? []), ...owned.tags])];
-    const { targets, overrides } = mergeHouseTargets(config.targets, ownedTargets, recorded);
+    const { targets, overrides } = mergeHouseTargets(config.targets, ownedTargets, recorded, HOUSE_TARGETS_AS_OF_0_49_2[home.canonical.name]);
     config.targets = targets;
     for (const override of overrides) logger.warn(`[${who}] ${describeOverride(home.name, override)}`);
-    return json;
   });
   recordHouseTargets(tree, home.name, ownedTargets);
 }

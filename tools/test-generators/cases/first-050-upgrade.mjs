@@ -15,6 +15,27 @@ const RECORD = '.bespunky/house-targets.json';
 const RUNGS = ['migrations/0.50.0/stack-owned-dev-processes', 'migrations/0.50.0/read-functions-params-in-place'];
 const generate = (tree, ctx) => ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: SCOPE });
 
+/** A project exactly as 0.49.2 left it: its house targets are the frozen 0.49.2 output, and there is no record. */
+const stock0492 = async (ctx, handEdit = () => undefined) => {
+  const tree = workspace();
+  await generate(tree, ctx); // the files a 0.49 project has
+  tree.delete(RECORD);
+  const { HOUSE_TARGETS_AS_OF_0_49_2: before } = ctx.load('generators/_utils/house-targets-0.49.2');
+  for (const name of ['functions', 'firebase']) {
+    const config = readProjectConfiguration(tree, name);
+    config.targets = JSON.parse(JSON.stringify(before[name]));
+    updateProjectConfiguration(tree, name, config);
+  }
+  handEdit(tree);
+  return tree;
+};
+const upgrade = async (tree, ctx) => {
+  for (const rung of RUNGS) await ctx.load(rung).default(tree);
+  await generate(tree, ctx);
+};
+/** What the house-targets merge reported as replaced (describeOverride's two forms). */
+const overrides = (logs) => logs.filter((line) => line.startsWith('[warn]') && /the house's (?:new |value is )/.test(line));
+
 export default {
   name: 'the first 0.50 upgrade · retired keys in house-owned shapes',
   cases: [
@@ -54,6 +75,30 @@ export default {
         t.ok(!('predeploy' in fn), `predeploy survived: ${JSON.stringify(fn)}`);
         t.ok(typeof fn.configDir === 'string', 'configDir is declared');
         t.exists(RECORD);
+      },
+    },
+    {
+      name: 'a STOCK 0.49.2 project upgraded once: every value the house changed is its own — no override reported',
+      setup: (ctx) => stock0492(ctx),
+      run: upgrade,
+      expect: (tree, t, ctx) => {
+        t.equal(overrides(ctx.logs), [], 'no false alarm');
+        t.exists(RECORD);
+      },
+    },
+    {
+      name: 'the same project with ONE real hand edit: exactly that one is reported',
+      setup: (ctx) =>
+        stock0492(ctx, (tree) => {
+          const functions = readProjectConfiguration(tree, 'functions');
+          functions.targets.deploy.options.cwd = 'apps/functions';
+          updateProjectConfiguration(tree, 'functions', functions);
+        }),
+      run: upgrade,
+      expect: (tree, t, ctx) => {
+        const said = overrides(ctx.logs);
+        t.equal(said.length, 1, `one report: ${said}`);
+        t.ok(said[0]?.includes('functions:deploy') && said[0]?.includes('options.cwd') && said[0]?.includes('apps/functions'), `the hand edit: ${said}`);
       },
     },
   ],

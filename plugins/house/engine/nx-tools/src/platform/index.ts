@@ -7,7 +7,7 @@ import type { PlatformExternals } from './externals';
 
 export * from './platform';
 export { platformExternals, matchesExternal, type PlatformExternals } from './externals';
-export { classifyWorkspace, violations, type Classification, type Violation } from './classify';
+export { classifyWorkspace, holdsCode, violations, type Classification, type Violation } from './classify';
 export { insertPlatformFirewall, upgradePlatformFirewall, firewallBlock, bannedFor, guidance, type FirewallUpgrade } from './firewall';
 
 /** The one-line command that classifies a project, as this repo runs Nx. */

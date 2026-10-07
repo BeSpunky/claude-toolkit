@@ -150,6 +150,24 @@ function app(tree, root = 'apps/shop', { env = STOCK_ENV, iface = STOCK_INTERFAC
   if (iface) tree.write(`${root}/src/environments/environment.interface.ts`, iface);
 }
 
+const OLD_GITIGNORE = `# Isolated port-offset stacks (\`<app>:serve --portOffset\`): each gets its own data dir
+# and a generated offset firebase.json. Ephemeral and machine-local.
+/.emulator-data-*
+/.firebase.offset-*.json
+`;
+const OLD_DEVCONTAINER = `{
+  "portsAttributes": {
+    "6119": { "label": "Shared Browser (noVNC)", "onAutoForward": "notify", "requireLocalPort": true },
+    // Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a
+    // host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.
+    // KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;
+    // real Google OAuth is pinned to whichever holds the dev-server port). The shared browser runs INSIDE the
+    // container and reaches them on loopback, so it works for every container.
+    "4200": { "label": "Angular Dev Server", "onAutoForward": "openPreview" },
+    "4000": { "label": "Firebase Emulator UI", "onAutoForward": "notify" }
+  }
+}
+`;
 const ENV = 'apps/shop/src/environments/environment.ts';
 const IFACE = 'apps/shop/src/environments/environment.interface.ts';
 const logged = (lines, needle) => lines.some((line) => line.includes(needle));
@@ -173,6 +191,34 @@ export default {
         t.has(IFACE, 'google?: { oauthClientId: string };');
         t.equal(t.read('apps/shop/src/environments/environment.prod.ts'), PROD_ENV, 'the prod file (nothing to do) is untouched');
       },
+    },
+    {
+      name: "the house's 0.49 words this change made false: the .gitignore flag and the devcontainer port comment retold; reworded ones kept",
+      setup: (tree) => {
+        app(tree);
+        tree.write('.gitignore', `node_modules\n\n${OLD_GITIGNORE}`);
+        tree.write('.devcontainer/devcontainer.json', OLD_DEVCONTAINER);
+      },
+      expect: (tree, t, lines) => {
+        t.equal(
+          t.read('.gitignore'),
+          `node_modules\n\n${OLD_GITIGNORE.replace('`<app>:serve --portOffset`', '`nx serve <app> --port-offset=N`')}`,
+          'only the flag line changed',
+        );
+        const dc = t.read('.devcontainer/devcontainer.json');
+        t.ok(!dc.includes('SAME host port'), `the false comment is gone:\n${dc}`);
+        t.ok(dc.includes("    // The app reaches every Firebase emulator through the dev server's own origin"), 'retold at its indentation');
+        t.ok(dc.includes('"4200": { "label": "Angular Dev Server", "onAutoForward": "openPreview" },'), 'the entry under it untouched');
+        t.ok(logged(lines, '.gitignore: rewrote') && logged(lines, 'devcontainer.json: rewrote'), `reported: ${lines}`);
+      },
+    },
+    {
+      name: 'a comment the project reworded is its own: left',
+      setup: (tree) => {
+        app(tree);
+        tree.write('.gitignore', '# Isolated port-offset stacks (our own words): each gets its own data dir\n/.emulator-data-*\n');
+      },
+      expect: (tree, t) => t.has('.gitignore', '(our own words)'),
     },
     {
       // 0.24.3 left these projects on direct dialling. There is nothing to remove — and nothing to write.

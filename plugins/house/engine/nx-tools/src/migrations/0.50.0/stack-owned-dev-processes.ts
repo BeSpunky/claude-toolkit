@@ -23,7 +23,8 @@
 //     must depend on `serve` (the continuous stack) instead.
 //
 // SELF-CONTAINED by the migration contract: the executor list and target names are frozen here.
-import { type Tree, getProjects, logger, updateProjectConfiguration } from '@nx/devkit';
+import { type Tree, getProjects, logger } from '@nx/devkit';
+import { updateProjectConfigInPlace } from '../../generators/_utils/project-files';
 
 const TAG = '[migrate 0.50.0 stack-owned-dev-processes]';
 const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
@@ -71,7 +72,11 @@ export default function update(tree: Tree): void {
       }
     }
 
-    if (touched) updateProjectConfiguration(tree, name, config);
+    // In place: only the `continuous` members go — devkit's updateProjectConfiguration rebuilt each target and
+    // moved its `options` below `dependsOn`.
+    if (touched) updateProjectConfigInPlace(tree, config.root, (onDisk) => {
+      for (const { target } of changed.filter((c) => c.project === name)) delete (onDisk.targets?.[target] as Target | undefined)?.continuous;
+    });
   }
 
   if (!changed.length) return;

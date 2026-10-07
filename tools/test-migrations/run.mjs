@@ -54,6 +54,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compilePayload, requireInstalled, requireFromRepo, snapshot, snapshotDiff, unparseable, captureDevkitLogger, treeAssertions } from '../test-support/payload.mjs';
 
+/** A log line that says the tree changed — false on a run that changed nothing. */
+const CLAIMS_A_CHANGE = /\b(?:Rewrote|Rewrites|Wrote|Updated|Created|Added|Removed|Seeded|Pinned|Moved|Replaced|Wired|Retargeted|Adopted)\b/;
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const only = process.argv[2];
 
@@ -107,8 +110,14 @@ async function main() {
           const migrate = payload.load(`migrations/${rung}`).default;
           await migrate(tree);
           const afterFirst = snapshot(tree);
+          const said = log.lines.length;
           await migrate(tree); // Idempotence is the harness's job, not each fixture's. See the header.
           if (snapshot(tree) !== afterFirst) failures.push(`${label}rung ${rung} is not idempotent — a second run changed ${snapshotDiff(afterFirst, snapshot(tree)).join(', ')}`);
+          // …and so is honesty: a re-run that changed nothing must not CLAIM a change.
+          else {
+            const claims = log.lines.slice(said).filter((line) => CLAIMS_A_CHANGE.test(line.split('\n')[0]));
+            if (claims.length) failures.push(`${label}rung ${rung}: a no-op second run claims a change: ${claims.map((l) => l.split('\n')[0]).join(' | ')}`);
+          }
         }
         for (const error of unparseable(beforeLadder, snapshot(tree))) failures.push(`${label}wrote a file that does not parse: ${error}`);
         return tree;

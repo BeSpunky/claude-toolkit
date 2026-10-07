@@ -35,7 +35,7 @@ import {
 } from '@nx/devkit';
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking } from '../_utils/linking';
-import { declareDependencies } from '../_utils/dependencies';
+import { declareDependencies, declaredSpec } from '../_utils/dependencies';
 
 interface AdoptExtractedSchema {
   lib: string;
@@ -129,6 +129,7 @@ export default async function adoptExtractedGenerator(
         `(\`npm view ${packageName} version\` names the newest) — the house never declares a dist-tag like latest.`
     );
   }
+  const alreadyDeclared = declaredSpec(tree, packageName) !== undefined;
   const installCallback = declareDependencies(tree, 'adopt-extracted', { [packageName]: version });
 
   const entry = project.sourceRoot
@@ -180,7 +181,11 @@ export default async function adoptExtractedGenerator(
         changed++;
       }
     });
-    logger.info(`Rewrote imports (${rewriteAliases.join(', ')}) → "${packageName}" in ${changed} file(s).`);
+    logger.info(
+      changed
+        ? `Rewrote imports (${rewriteAliases.join(', ')}) → "${packageName}" in ${changed} file(s).`
+        : `No file imports ${rewriteAliases.join(', ')} — nothing to rewrite.`,
+    );
   } else {
     logger.warn(
       `Could not determine the local import specifier for "${options.lib}" — rewrite skipped. Update imports to "${packageName}" by hand.`
@@ -192,7 +197,7 @@ export default async function adoptExtractedGenerator(
   await formatFiles(tree);
 
   logger.info(
-    `Added ${packageName} and rewrote imports. Next: build to verify the package works, then ` +
+    `${alreadyDeclared ? `${packageName} is declared` : `Declared ${packageName}`}; imports point at it. Next: build to verify the package works, then ` +
       `re-run with --finalize to remove the local library "${options.lib}".`
   );
   return installCallback;

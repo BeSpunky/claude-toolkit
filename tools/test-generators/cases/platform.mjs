@@ -70,6 +70,39 @@ export default {
       },
     },
     {
+      name: 'the workspace root as a shell (the verdaccio holder): never tagged, never mentioned — root-level tooling is not its code',
+      setup: () => {
+        const tree = workspace();
+        tree.write('eslint.config.mjs', ESLINT);
+        writeJson(tree, 'project.json', { name: 'shell', root: '.', targets: { 'local-registry': { executor: '@nx/js:verdaccio' } } });
+        tree.write('tools/script.mjs', "import x from 'firebase-admin';\n"); // tooling at the root is not the root's code
+        lib(tree, 'packages/util', { 'src/index.ts': 'export const x = 1;\n' });
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        await ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: SCOPE });
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(tags(tree, 'shell').filter((tag) => tag.startsWith('platform:')), [], 'the shell stays untagged');
+        t.ok(!ctx.logs.some((line) => line.includes('`shell`')), `and unmentioned: ${ctx.logs.filter((l) => l.includes('shell'))}`);
+        t.ok(tags(tree, 'util').includes('platform:shared'), 'a real library is still classified');
+      },
+    },
+    {
+      name: 'the workspace root with a build target is a code project: classified like any other',
+      setup: () => {
+        const tree = workspace();
+        tree.write('eslint.config.mjs', ESLINT);
+        writeJson(tree, 'project.json', { name: 'solo', root: '.', targets: { build: { executor: 'nx:run-commands', options: { command: 'tsc' } } } });
+        tree.write('src/main.ts', 'export const main = 1;\n');
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        await ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: SCOPE });
+      },
+      expect: (tree, t) => t.ok(tags(tree, 'solo').some((tag) => tag.startsWith('platform:')), `tagged: ${tags(tree, 'solo')}`),
+    },
+    {
       name: 'platform <project>: inferred from its imports, with the reason; a package.json project tagged in its nx block',
       setup: () => {
         const tree = workspace({ layout: 'packages', link: 'workspaces-npm' });

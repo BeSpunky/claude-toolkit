@@ -37,6 +37,22 @@ export default {
   name: 'house targets · the three-way merge',
   cases: [
     pure(
+      'no record: a value the last record-less release (0.49.2) wrote is the house\'s own — replaced silently; a hand value is still reported',
+      (merge) => {
+        const before = { deploy: { executor: 'nx:run-commands', options: { command: 'firebase deploy --only functions', cwd: '{workspaceRoot}' } } };
+        const now = { deploy: { executor: 'nx:run-commands', options: { command: 'node tools/firebase-deploy.mjs', cwd: '{workspaceRoot}' } } };
+        const stock = JSON.parse(JSON.stringify(before));
+        const edited = { deploy: { ...stock.deploy, options: { ...stock.deploy.options, cwd: 'apps/functions' } } };
+        return { stock: merge(stock, now, undefined, before), blind: merge(stock, now, undefined), edited: merge(edited, now, undefined, before) };
+      },
+      (t, { stock, blind, edited }) => {
+        t.equal(stock.overrides, [], 'the house\'s own old value: no report');
+        t.equal(stock.targets.deploy.options.command, 'node tools/firebase-deploy.mjs', 'and it is replaced');
+        t.equal(blind.overrides.length, 1, 'without the 0.49.2 base it WOULD cry wolf (the regression this guards)');
+        t.equal(edited.overrides.map((o) => o.key), ['options.cwd'], 'exactly the hand edit is reported');
+      },
+    ),
+    pure(
       'the project\'s additions inside a house target are kept (options, configurations, inputs, its own targets)',
       (merge) =>
         merge(
@@ -110,7 +126,7 @@ export default {
       (t, { targets, overrides }) => {
         t.equal(targets.deploy.options, { command: HOUSE.deploy.options.command, cwd: '{workspaceRoot}', args: 'a' }, 'options');
         t.equal(targets.deploy.dependsOn, ['build', 'lint'], 'dependsOn: the house\'s set, nothing removed without a record');
-        t.equal(targets.deploy.inputs, [...HOUSE.deploy.inputs, '{workspaceRoot}/x'], 'inputs: the project\'s entry kept');
+        t.equal(targets.deploy.inputs, ['{workspaceRoot}/x', ...HOUSE.deploy.inputs], 'inputs: the project\'s entry kept, in its place; the house\'s arrive after');
         t.equal(overrides.map((o) => [o.key, o.was, o.conflict]), [['options.command', 'old', false]], 'reported, as unknowable');
       },
     ),

@@ -22,6 +22,7 @@
 // write is treated as the user's, and we only ADD what's missing — of the ACTIVE layers' fragments only.
 import { type Tree, logger, parseJson } from '@nx/devkit';
 import { applyEdits, modify } from 'jsonc-parser';
+import { insertJsoncMember } from '../_utils/jsonc-insert';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 
@@ -615,7 +616,8 @@ function mergeIntoExisting(
 
   const write = (path: (string | number)[], value: unknown, bucket: string[]) => {
     if (isNoise(path, value)) return;
-    text = applyEdits(text, modify(text, path, value, { formattingOptions: JSONC_FORMAT }));
+    // A NEW member is placed in its container's own style (../_utils/jsonc-insert.ts); a changed value is edited in place.
+    text = insertJsoncMember(text, path, value) ?? applyEdits(text, modify(text, path, value, { formattingOptions: JSONC_FORMAT }));
     bucket.push(path.join('.'));
     if (bucket === added) houseAdded.push(...asRecorded(path.map(String), value));
   };
@@ -654,17 +656,17 @@ function mergeIntoExisting(
    * Append missing array members ONE AT A TIME, in place.
    *
    * Replacing the whole array would re-serialize it — and take out every comment written BETWEEN its
-   * members, which in a devcontainer.json is where people explain why a mount exists. jsonc-parser's
-   * array insertion splices a single element at an index and leaves the rest of the text untouched.
+   * members, which in a devcontainer.json is where people explain why a mount exists. Each member is placed as
+   * text in the array's own style (one-line arrays stay one line — ../_utils/jsonc-insert.ts); jsonc-parser's
+   * formatted insertion reflowed every line it touched, which spread a one-line forwardPorts over nine.
    */
   const appendMissing = (path: (string | number)[], house: unknown[], current: unknown[]) => {
     const missing = house.filter((item) => !current.some((have) => sameMember(have, item)));
     let at = current.length;
     for (const item of missing) {
-      text = applyEdits(
-        text,
-        modify(text, [...path, at], item, { formattingOptions: JSONC_FORMAT, isArrayInsertion: true })
-      );
+      text =
+        insertJsoncMember(text, [...path, at], item) ??
+        applyEdits(text, modify(text, [...path, at], item, { formattingOptions: JSONC_FORMAT, isArrayInsertion: true }));
       added.push(`${path.join('.')}[+${JSON.stringify(item).slice(0, 40)}]`);
       houseAdded.push({ path: path.map(String), member: item });
       at++;
@@ -696,6 +698,8 @@ function mergeIntoExisting(
     }
   }
 
+  // Say what changed only when something did: a re-sync of a complete file writes nothing and claims nothing.
+  if (text === existingText) return { skipped, houseAdded };
   tree.write(DEVCONTAINER, text);
 
   if (mode === 'assert') {
