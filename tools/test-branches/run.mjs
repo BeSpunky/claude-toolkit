@@ -766,6 +766,24 @@ const cases = {
     assert.equal(st.data.projection.deploys.length, 2, 'status --json carries the bindings to readers');
   },
 
+  'deploys: a ci binding only on protected, non-maintained lines, one line per environment — refused with why and what instead'() {
+    const r = repo();
+    r.branch('development');
+    const ci = (environment) => ({ ci: { environment, providers: { firebase: 'default' } } });
+    const hot = r.proposed('gitflow', [], (d) => { d.hotfixes.deploys = ci('hot'); d.tags[0].deploys = ci('tagged'); });
+    const v = r.run(['validate', hot]);
+    assert.equal(v.code, 1);
+    assert.match(v.err, /hotfixes\.deploys\.ci: hotfix lines are work branches[\s\S]*Bind `ci` on the protected line the hotfix lands on \("main"\)/);
+    assert.match(v.err, /tags\[0\]\.deploys\.ci: a tag is not a protected line[\s\S]*Bind `ci` on the line the tag is on \("main"\)/);
+    const maintained = r.proposed('maintained-releases', [], (d) => { d.releases.deploys = ci('lts'); });
+    assert.match(r.run(['validate', maintained]).err, /releases\.deploys\.ci: maintained release lines are each their own production/);
+    const twice = r.proposed('gitflow', [], (d) => { d.stages[0].deploys = ci('production'); d.releases.deploys = ci('production'); });
+    assert.match(r.run(['validate', twice]).err, /releases\.deploys\.ci\.environment: "production" is already bound by stages\[0\]\.deploys — one line per environment/);
+    const fine = r.proposed('gitflow', [], (d) => { d.integration.deploys = ci('dev'); d.stages[0].deploys = ci('production'); d.releases.deploys = ci('uat'); d.hotfixes.deploys = { note: 'deployed when landed on main' }; });
+    const ok = r.run(['validate', fine]);
+    assert.equal(ok.code, 0, ok.err);
+  },
+
   'deploys: a note alone projects nothing — a { note } declaration does not read as drifted'() {
     const r = repo();
     r.branch('development');

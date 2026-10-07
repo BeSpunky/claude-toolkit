@@ -4,7 +4,7 @@
 // rewritten on every upgrade — change what ships by changing firebase.json, never this file.
 //
 //   nx run firebase:deploy -P <alias>                              by hand (`nx run` takes --project itself)
-//   nx affected -t deploy --project=<alias> --non-interactive      CI — every extra argument reaches the Firebase CLI
+//   nx run-many -t deploy -c ci-<environment>                      CI — the configuration's args reach the Firebase CLI
 //
 // What ships is read from firebase.json WHEN THIS RUNS, so rules declared later ship without an upgrade:
 //   firestore.rules     → firestore:rules

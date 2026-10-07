@@ -410,7 +410,8 @@ silently and mention it in one clause.
 ### Steps only the human may take — `HUMAN_STEP:`
 
 A generator prints `HUMAN_STEP: <line> — <why>` for something the user must do themselves — today, the `ci` layer's
-cloud setup (`! bash tools/setup-gcp.sh --environment <env>`), whenever the environments it was rendered for changed.
+cloud setup (`! bash tools/setup-gcp.sh --environment <env>`) whenever the environments it was rendered for changed, and
+its `--rollback` while a removed binding's setup is still recorded.
 **Relay each one verbatim, as a step for the user, and never attempt it yourself**: it grants IAM, which Claude Code
 refuses to agents by design — no `gcloud iam …`, no workaround, no retry. Say what to paste back (the `gh variable
 set …` lines it prints; you may run those once pasted — they are not secrets). It is not a boundary — it does not

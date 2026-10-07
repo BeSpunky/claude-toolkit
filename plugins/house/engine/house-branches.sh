@@ -11,6 +11,14 @@
 # as `layers.sh` from the layer registry (contract: docs/features/2026-10-03-branch-model/CONTRACT.md §2).
 # It never interprets the model, never guesses past an unknown schema, and never writes the file.
 #
+# WHERE THE TWO RESOLVERS DIFFER, deliberately. The engine also validates the DECLARATION (the part above the
+# projection) and reads a copy whose declaration it refuses as UNREADABLE; this reader validates only the projection,
+# so it says DECLARED for such a copy. The difference is safe because the projection is written only by the engine's
+# `write`, after validation — a projection is a model the engine accepted, even when the declaration beside it was
+# hand-edited since (the engine's `verify` reports that drift). The readers downstream of this one re-check what
+# they act on in the projection itself: the `ci` generator refuses a deploy binding on an unprotected line, a
+# maintained release pattern, a tag, or a second line in one environment, whatever the projection says.
+#
 # RENDERED BY VALUE. house.sh sources this and renders the functions into its program with `declare -f`
 # (as it does house-mounts.sh), so the check runs wherever the program does — natively or inside the fallback
 # container — with no file to find there.
