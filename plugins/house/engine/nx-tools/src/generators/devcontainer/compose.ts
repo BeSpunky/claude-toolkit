@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseJson } from '@nx/devkit';
 import type {
+  AptRepository,
   DevcontainerFragment,
   DevcontainerJson,
   DevcontainerPort,
@@ -65,7 +66,7 @@ export interface Composition {
   runArgs: ({ args: string[] } & Why)[];
   ports: ComposedPort[];
   initializeCommand: ({ name: string; command: string } & Why)[];
-  osPackages: ({ packages: string[] } & Why)[];
+  osPackages: ({ packages: string[]; repository?: AptRepository } & Why)[];
   postCreate: (PostCreatePiece & { from: string })[];
 }
 
@@ -234,8 +235,8 @@ export function compose(
     osPackages: all('osPackages')
       .filter(({ item }) => !(source.kind === 'foreign' && (item as { onHouseImageOnly?: boolean }).onHouseImageOnly))
       .map(({ item }) => {
-        const entry = item as { packages: readonly string[]; why?: string };
-        return { packages: [...entry.packages], why: entry.why };
+        const entry = item as { packages: readonly string[]; why?: string; repository?: AptRepository };
+        return { packages: [...entry.packages], why: entry.why, ...(entry.repository ? { repository: entry.repository } : {}) };
       }),
     postCreate: unique(
       all('postCreate').map(({ item, from }) => ({ ...(item as PostCreatePiece), from })),
@@ -557,7 +558,18 @@ export function renderOsPackagesScript(groups: Composition['osPackages']): strin
     if (group.why) lines.push(...group.why.split('\n').map((line) => `# ${line}`.trimEnd()));
     lines.push(fresh.join(' '));
   }
+  // Each third-party repository once, as `id key source` — validated here, because the installer runs it as root.
+  const repositories = new Map<string, AptRepository>();
+  for (const { repository } of groups) {
+    if (!repository) continue;
+    if (!/^[a-z0-9-]+$/.test(repository.id) || !/^https:\/\/\S+$/.test(repository.key) || !/^https:\/\/\S+( [\w.-]+)+$/.test(repository.source)) {
+      throw new Error(`[devcontainer] apt repository "${repository.id}" is malformed: ${JSON.stringify(repository)}`);
+    }
+    repositories.set(repository.id, repository);
+  }
   const script = readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8')
+    .split('{{HOUSE_REPOSITORIES}}')
+    .join([...repositories.values()].map(({ id, key, source }) => `${id} ${key} ${source}`).join('\n'))
     .split('{{HOUSE_PACKAGES}}')
     // The list is one single-quoted shell string: a `'` in a why would end it early, so it is closed, escaped, reopened.
     .join(lines.join('\n').split("'").join("'\\''"));

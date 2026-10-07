@@ -16,3 +16,4 @@ House containers keep your logins across rebuilds — Claude, and every tool tha
 Need a system package in the container? Add it to .devcontainer/os-packages.txt — it is built into the image, so rebuilds reuse it
 Node is one project fact: .nvmrc — the devcontainer and Cloud Functions follow it, and no upgrade moves it
 firebase in a house project is the repo's own pinned firebase-tools — the same CLI on every machine and in CI
+gcloud in a house Firebase container is pinned in the image — a rebuild never moves it, and its login stays in ~/.config/gcloud

@@ -15,6 +15,7 @@ import { hostDialledPorts } from '../generators/firebase-emulators/emulator-port
 import { projectExists } from './evidence';
 import { adapterOf, applicationsWith } from '../adapters/registry';
 import { firebaseFragment } from '../generators/firebase-emulators/dev-fragment';
+import { GCLOUD_CLI_VERSION } from '../generators/_utils/versions';
 
 /** The sync's app, when its stack can take the Firebase client. */
 const attachable = (ctx: PlanContext): boolean =>
@@ -85,8 +86,7 @@ export const firebase: LayerDescriptor = {
     // (_utils/versions.ts), on PATH through node_modules/.bin (the node layer, which this layer requires) — the image
     // used to install whatever version was newest on build day, a second `firebase` beside the project's. Its login
     // lives in ~/.config/configstore (persisted whole by the agent layer), its emulator downloads in ~/.cache.
-    // gcloud has no npm home and its feature no version option — it installs Google's current CLI at build.
-    features: [{ id: 'ghcr.io/jajera/features/gcloud-cli' }],
+    // No gcloud feature either: gcloud is a pinned image package (osPackages below).
     extensions: ['toba.vsfire'],
     ports: [...clientDevServerPorts(tree), ...emulatorForwards(tree)],
     osPackages: [
@@ -95,6 +95,17 @@ export const firebase: LayerDescriptor = {
         why:
           'The emulator suite (Firestore / RTDB / Storage) runs on the JVM. apt, not the SDKMAN-based java feature,\n' +
           'whose build-time github.com fetch fails intermittently.',
+      },
+      {
+        packages: [`google-cloud-cli=${GCLOUD_CLI_VERSION}`],
+        repository: {
+          id: 'google-cloud-sdk',
+          key: 'https://packages.cloud.google.com/apt/doc/apt-key.gpg',
+          source: 'https://packages.cloud.google.com/apt cloud-sdk main',
+        },
+        why:
+          `The Google Cloud CLI (gcloud), pinned (${GCLOUD_CLI_VERSION}) and built into the image from Google's apt repository —\n` +
+          'not a devcontainer feature, which installed whatever was newest on build day. Its logins live in ~/.config/gcloud.',
       },
     ],
     postCreate: [{ phase: 'provision', piece: 'firebase-banner' }],

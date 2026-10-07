@@ -16,13 +16,9 @@
 // THE LOGIN SURVIVES: firebase-tools keeps it in ~/.config/configstore, the agent layer's persisted volume — the same
 // file the feature's copy wrote, so nobody logs in again.
 import { type Tree, logger } from '@nx/devkit';
-import { findNodeAtLocation, getNodeValue } from 'jsonc-parser';
-import { parseJsoncStrict } from '../../generators/_utils/jsonc-strict';
-import { houseWrote } from '../../generators/_utils/devcontainer-provenance';
-import { removeFeature } from '../../generators/_utils/devcontainer-feature';
+import { retireHouseFeature } from '../../generators/_utils/devcontainer-feature';
 
 const TAG = '[0.50.0 firebase-cli-from-package]';
-const DEVCONTAINER = '.devcontainer/devcontainer.json';
 const FEATURE = /^ghcr\.io\/devcontainers-extra\/features\/firebase-cli(?::[\w.-]+)?$/;
 /** The house's firebase-tools as of 0.50.0 — frozen (the live pin moves on). */
 const FIREBASE_TOOLS_AS_OF_0_50_0 = '15.32.1';
@@ -30,7 +26,7 @@ const FIREBASE_TOOLS_AS_OF_0_50_0 = '15.32.1';
 export default function firebaseCliFromPackage(tree: Tree): void {
   if (!tree.exists('firebase.json')) return; // the firebase layer's evidence
   const declared = declareFirebaseTools(tree);
-  const removed = retireFeature(tree);
+  const removed = retireHouseFeature(tree, TAG, FEATURE, "an unpinned second Firebase CLI, superseded by the project's firebase-tools");
   if (declared || removed) {
     logger.info(
       `${TAG} the Firebase CLI is now this project's own firebase-tools${declared ? ` ${declared}` : ''}: INSTALL (yarn / npm / pnpm ` +
@@ -72,40 +68,4 @@ function declareFirebaseTools(tree: Tree): string | undefined {
   tree.write('package.json', `${JSON.stringify(pkg, null, indent)}\n`);
   logger.info(`${TAG} package.json ${target}["firebase-tools"] = "${version}"${block ? ' (was "latest")' : ''}.`);
   return version;
-}
-
-/** Remove the house-written firebase-cli feature (and its lock pin); report one the project wrote. */
-function retireFeature(tree: Tree): boolean {
-  if (!tree.exists(DEVCONTAINER)) return false;
-  const text = tree.read(DEVCONTAINER, 'utf8') ?? '';
-  if (!text.includes('features/firebase-cli')) return false;
-  const root = parseJsoncStrict(text);
-  const features = root && findNodeAtLocation(root, ['features']);
-  if (!root || features?.type !== 'object') {
-    logger.warn(`${TAG} ${DEVCONTAINER} could not be read as JSONC — remove its firebase-cli feature by hand: the CLI is the project's firebase-tools now.`);
-    return false;
-  }
-  let removed = false;
-  for (const property of features.children ?? []) {
-    const [key, value] = property.children ?? [];
-    const id = String(key?.value);
-    if (!FEATURE.test(id)) continue;
-    if (houseWrote(tree, { path: ['features', id], value: value ? getNodeValue(value) : {} })) {
-      const result = removeFeature(tree, id);
-      if (result.declaration || result.lock) {
-        removed = true;
-        logger.info(
-          `${TAG} removed the "${id}" feature from ${[result.declaration && DEVCONTAINER, result.lock && '.devcontainer/devcontainer-lock.json'].filter(Boolean).join(' and ')} ` +
-            `— an unpinned second Firebase CLI, superseded by the project's firebase-tools.`,
-        );
-      }
-    } else {
-      logger.warn(
-        `${TAG} Left in place — "${id}" in ${DEVCONTAINER} was not written by the house, so something outside the workspace may use ` +
-          `it. Inside the workspace it is now shadowed by the project's pinned firebase-tools; if nothing else needs it, remove it ` +
-          `(and its devcontainer-lock.json pin) and rebuild.`,
-      );
-    }
-  }
-  return removed;
 }

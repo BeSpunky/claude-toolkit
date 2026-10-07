@@ -12,6 +12,7 @@
 //     @angular/fire whose peer admits it, with its firebase range; else the newest prerelease (named in the refusal
 //     so a developer can choose it deliberately);
 //   - firebase-tools@<FIREBASE_TOOLS_VERSION>'s own runtime table → the GA `nodejsNN` runtimes.
+// And it CHECKS (never projects) that the pinned GCLOUD_CLI_VERSION is still in Google's apt repository.
 //
 // IT DRIFTS WITH UPSTREAM, BY DESIGN. Unlike playwright-deps (keyed to a pin), the check re-asks npm, so a new
 // @angular/fire release (the day Angular 21 gets a stable one) makes it fail: that is the staleness alarm — re-run
@@ -31,6 +32,7 @@ const semver = createRequire(join(ROOT, 'package.json'))('semver');
 const UTILS = join(ROOT, 'plugins/house/engine/nx-tools/src/generators/_utils');
 const VERSIONS = readFileSync(join(UTILS, 'versions.ts'), 'utf8');
 const FIREBASE_TOOLS = VERSIONS.match(/FIREBASE_TOOLS_VERSION = '([^']+)'/)[1];
+const GCLOUD = VERSIONS.match(/GCLOUD_CLI_VERSION = '([^']+)'/)[1];
 const OUT = join(UTILS, 'firebase-compat.ts');
 /** The oldest Angular major the table covers: older majors' @angular/fire predates the modular API the house uses. */
 const FIRST_MAJOR = 17;
@@ -135,6 +137,23 @@ export const FUNCTIONS_NODE_RUNTIMES: readonly string[] = [${runtimes.map((major
 `;
 }
 
+/**
+ * The pinned gcloud must still be INSTALLABLE: Google's apt repository serves it for both architectures the house images
+ * run on. Not projected (the pin is a deliberate choice) — only checked, so a pruned version fails here, not in a build.
+ */
+async function checkGcloudPin() {
+  for (const arch of ['amd64', 'arm64']) {
+    const response = await fetch(`https://packages.cloud.google.com/apt/dists/cloud-sdk/main/binary-${arch}/Packages`);
+    if (!response.ok) throw new Error(`Google's apt index (${arch}) → HTTP ${response.status}`);
+    const index = await response.text();
+    if (!new RegExp(`Package: google-cloud-cli\\n(?:[^\\n]+\\n)*?Version: ${GCLOUD.replace(/\./g, '\\.')}\\n`).test(index)) {
+      console.error(`GONE: google-cloud-cli=${GCLOUD} is not in Google's apt repository for ${arch} — move GCLOUD_CLI_VERSION (versions.ts) to a published version.`);
+      process.exit(1);
+    }
+  }
+}
+await checkGcloudPin();
+
 const expected = render(await angularFireRows(), functionsRuntimes(FIREBASE_TOOLS));
 if (process.argv.includes('--write')) {
   writeFileSync(OUT, expected);
@@ -146,5 +165,5 @@ if (process.argv.includes('--write')) {
   );
   process.exit(1);
 } else {
-  console.log(`ok: the Firebase compatibility table matches npm (firebase-tools@${FIREBASE_TOOLS})`);
+  console.log(`ok: the Firebase compatibility table matches npm (firebase-tools@${FIREBASE_TOOLS}); google-cloud-cli=${GCLOUD} is published`);
 }

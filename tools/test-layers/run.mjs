@@ -1149,13 +1149,20 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
 
 // The Firebase CLI is the PROJECT's pinned devDependency (0.50.0), not an image feature: no second `firebase` on PATH,
 // and nothing new to persist — firebase-tools keeps its login in ~/.config/configstore (configstore's XDG home) and its
-// emulator downloads in ~/.cache/firebase, both inside the agent layer's persisted volumes asserted above.
-checkAsync('firebase: the CLI comes from node_modules/.bin (no firebase-cli feature), its state lives in the persisted XDG homes', async (ok) => {
+// emulator downloads in ~/.cache/firebase, both inside the agent layer's persisted volumes asserted above. gcloud keeps
+// its logins and application-default credentials in ~/.config/gcloud (googlecloudsdk/core/config.py) — persisted too.
+checkAsync('firebase: the CLI comes from node_modules/.bin, gcloud is a pinned image package — no unpinned features; their state lives in the persisted XDG homes', async (ok) => {
   const tree = createTreeWithEmptyWorkspace();
   writeJson(tree, 'firebase.json', {});
   const a = await artifacts(tree, ['nx', 'agent', 'node', 'firebase']);
   const features = Object.keys(a.dc.features ?? {});
   ok(!features.some((id) => id.includes('firebase-cli')), `the image still installs a Firebase CLI of its own: ${features}`);
+  // gcloud: a PINNED image package from Google's apt repository (signed-by keyring), never the unpinned feature.
+  const { GCLOUD_CLI_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  ok(!features.some((id) => id.includes('gcloud')), `gcloud still comes from a feature: ${features}`);
+  ok(a.osScript.includes(`google-cloud-cli=${GCLOUD_CLI_VERSION}`), 'gcloud is not a pinned image package');
+  ok(a.osScript.includes('google-cloud-sdk https://packages.cloud.google.com/apt/doc/apt-key.gpg https://packages.cloud.google.com/apt cloud-sdk main'), 'Google\'s apt repository is not declared to the installer');
+  ok(!a.osScript.includes('apt-key add'), 'the installer uses apt-key (gone from Debian 13)');
   ok((a.dc.remoteEnv?.PATH ?? '').includes('${containerWorkspaceFolder}/node_modules/.bin'), 'node_modules/.bin is not on PATH — the pinned `firebase` would not resolve');
   const home = `/home/${a.dc.remoteUser ?? 'node'}`;
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.config,type=volume`)), 'firebase login (~/.config/configstore) would not survive a rebuild');

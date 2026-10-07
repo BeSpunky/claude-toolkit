@@ -197,6 +197,12 @@
       "layer": "firebase",
       "description": "The Firebase CLI becomes the project's exact `firebase-tools` devDependency (on PATH through node_modules/.bin in the container and in every Nx target), replacing the unpinned `ghcr.io/devcontainers-extra/features/firebase-cli` feature that installed whatever was newest on image-build day. Adds the devDependency (a `latest` one is pinned to what is installed); removes the feature — and its devcontainer-lock.json pin — where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config is kept. Reminds to install and rebuild.",
       "implementation": "./src/migrations/0.50.0/firebase-cli-from-package"
+    },
+    "gcloud-cli-from-image": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The Google Cloud CLI becomes a PINNED image package (`google-cloud-cli=<version>` from Google's apt repository, added with a `signed-by=` keyring) in the one cached package layer, replacing the `ghcr.io/jajera/features/gcloud-cli` feature, which downloaded whatever Google served on image-build day. Removes the feature — and its devcontainer-lock.json pin — where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config/gcloud is kept. Reminds to rebuild.",
+      "implementation": "./src/migrations/0.50.0/gcloud-cli-from-image"
     }
   }
 }

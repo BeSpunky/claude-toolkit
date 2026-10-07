@@ -25,23 +25,41 @@ HOUSE_PACKAGES='
 {{HOUSE_PACKAGES}}
 '
 
+# Third-party apt repositories some of those packages come from, one per line: `<id> <key url> <deb source>`. Added
+# with the MODERN method — the key dearmored into /usr/share/keyrings/<id>.gpg, the source `signed-by=` it — never
+# `apt-key` (gone from Debian 13). Validated by the composer; written only when something is missing.
+HOUSE_REPOSITORIES='
+{{HOUSE_REPOSITORIES}}
+'
+
 # Every list: the house's, then each file given (the project's own). Comments and blanks dropped, de-duplicated in
 # order; CR stripped, so a list saved with Windows line endings still reads. A token that is not a Debian package NAME
-# is refused here, before it can reach a root apt-get command line.
+# (optionally pinned, `name=version`) is refused here, before it can reach a root apt-get command line.
 wanted() {
   { printf '%s\n' "$HOUSE_PACKAGES"; for list in "$@"; do [ -f "$list" ] && cat "$list"; done; } |
     tr -d '\r' | sed 's/#.*//' | tr -s ' \t' '\n\n' | sed '/^$/d' | awk '!seen[$0]++' |
     while read -r name; do
+      case "${name%%=*}" in
+        *[!a-z0-9.+-]* | [!a-z0-9]* | '') echo "[os-packages] ignoring '$name' — not a Debian package name" >&2; continue ;;
+      esac
       case "$name" in
-        *[!a-z0-9.+-]* | [!a-z0-9]*) echo "[os-packages] ignoring '$name' — not a Debian package name" >&2 ;;
+        *=*[!A-Za-z0-9.+~:-]* | *=) echo "[os-packages] ignoring '$name' — not a Debian package version" >&2 ;;
         *) echo "$name" ;;
       esac
     done
 }
 
+# Installed — and, for a pinned `name=version`, installed AT that version (a pin moved in the toolkit must reinstall).
+present() {
+  case "$1" in
+    *=*) [ "$(dpkg-query -W -f='${Status} ${Version}' "${1%%=*}" 2>/dev/null)" = "install ok installed ${1#*=}" ] ;;
+    *) dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q ' installed$' ;;
+  esac
+}
+
 missing=""
 for name in $(wanted "$@"); do
-  dpkg-query -W -f='${Status}' "$name" 2>/dev/null | grep -q ' installed$' || missing="$missing $name"
+  present "$name" || missing="$missing $name"
 done
 if [ -z "$missing" ]; then
   echo "[os-packages] all present — nothing to install"
@@ -50,6 +68,34 @@ fi
 
 as_root=""
 [ "$(id -u)" = 0 ] || as_root="sudo"
+
+# Each declared repository not yet configured: its fetch tools first (Debian's own packages), then key + source.
+repositories() {
+  printf '%s\n' "$HOUSE_REPOSITORIES" | while read -r id key source; do
+    [ -n "$id" ] || continue
+    list="/etc/apt/sources.list.d/$id.list"
+    line="deb [signed-by=/usr/share/keyrings/$id.gpg] $source"
+    [ -f "$list" ] && [ "$(cat "$list")" = "$line" ] && continue
+    tools=""
+    for tool in curl gpg; do command -v "$tool" >/dev/null 2>&1 || tools="$tools $tool"; done
+    if [ -n "$tools" ] || [ ! -f /etc/ssl/certs/ca-certificates.crt ]; then
+      # shellcheck disable=SC2086
+      $as_root apt-get update && $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y curl gnupg ca-certificates || return 1
+    fi
+    echo "[os-packages] adding the apt repository '$id' ($source)"
+    curl -fsSL "$key" -o "/tmp/bespunky-$id.key" || return 1
+    if grep -q -- '-----BEGIN PGP' "/tmp/bespunky-$id.key"; then
+      $as_root gpg --batch --yes --dearmor -o "/usr/share/keyrings/$id.gpg" "/tmp/bespunky-$id.key" || return 1
+    else
+      $as_root cp "/tmp/bespunky-$id.key" "/usr/share/keyrings/$id.gpg" || return 1
+    fi
+    rm -f "/tmp/bespunky-$id.key"
+    printf '%s\n' "$line" | $as_root tee "$list" >/dev/null || return 1
+  done
+}
+if ! repositories; then
+  echo "[os-packages] FAILED to add an apt repository — its packages cannot install" >&2
+fi
 echo "[os-packages] installing:$missing"
 for attempt in 1 2 3; do
   # $missing is deliberately UNQUOTED: one argument per package. Safe — every member passed the name check above.
