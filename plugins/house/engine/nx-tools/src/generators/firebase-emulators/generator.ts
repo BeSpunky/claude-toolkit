@@ -664,7 +664,7 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
     logger.info(
       '[firebase-emulators] `nx run firebase:deploy` now ships the Firestore / Storage rules firebase.json declares — ' +
         'none yet, so it deploys nothing and the console keeps its rules. To keep them in the repo, pull the live ones ' +
-        'in once (a human, in a terminal): `npx firebase init firestore storage -P <alias>`.',
+        'in once (a human, in a terminal): `npx firebase init firestore -P <alias>`, then `npx firebase init storage -P <alias>`.',
     );
   }
 

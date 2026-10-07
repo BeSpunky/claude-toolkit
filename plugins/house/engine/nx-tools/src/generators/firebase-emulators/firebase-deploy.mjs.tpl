@@ -103,7 +103,7 @@ export function road(state) {
     '    5. Grant CI its keyless identity — a HUMAN runs it (it grants IAM; Claude never does). First, in a terminal,',
     '       log gcloud in as an account that may grant IAM in the project:  gcloud auth login',
     '       Then, in Claude Code with `!` (or any terminal):',
-    '         ! bash tools/setup-gcp.sh --dry-run                     every call it would make, nothing changed',
+    `         ! bash tools/setup-gcp.sh --dry-run --environment ${envs}     every call it would make, nothing changed`,
     `         ! bash tools/setup-gcp.sh --environment ${envs}`,
     '       Worked when: it ends by printing the `gh` commands for step 6.',
     '    6. Set the GitHub environment and its two variables (not secrets) — the `gh` lines step 5 printed:',

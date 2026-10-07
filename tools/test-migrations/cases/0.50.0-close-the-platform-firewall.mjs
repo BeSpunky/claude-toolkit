@@ -10,6 +10,11 @@ import { createRequire } from 'node:module';
 
 const devkit = createRequire(import.meta.url)('@nx/devkit');
 
+// The firewall exactly as firebase-emulators wrote it from 0.36.0 through 0.49.x on an Angular workspace (d1acfe8's
+// well-formed splice, c69fbac's framework-neutral comment), plus one project addition to the server list ('react'):
+// git show 8a017ae:plugins/house/engine/nx-tools/src/generators/firebase-emulators/generator.ts — addPlatformBoundaries.
+// Up to 0.35.0 it was spliced before the closing `]` with an Angular-worded comment (0d09453); that shape is NOT
+// listed under historicalShapes because the rung does not recognise that comment (it survives above the guidance).
 const OLD_FIREWALL = `import nx from '@nx/eslint-plugin';
 
 export default [

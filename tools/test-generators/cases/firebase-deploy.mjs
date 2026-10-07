@@ -216,7 +216,7 @@ export default {
       },
       expect: (tree, t, ctx) => {
         t.equal([ctx.none.status, ctx.none.called], [0, null], `nothing declared: no deploy, success (${ctx.none.out})`);
-        t.ok(ctx.none.out.includes('npx firebase init firestore storage -P <alias>'), 'nothing declared: says how to adopt the live rules');
+        t.ok(ctx.none.out.includes('npx firebase init firestore -P <alias>') && ctx.none.out.includes('npx firebase init storage -P <alias>'), 'nothing declared: says how to adopt the live rules');
         t.equal(ctx.seeded.called, 'FIREBASE deploy --only firestore:indexes --project=prod --non-interactive', 'seeds: rules skipped, args forwarded');
         t.ok(ctx.seeded.out.includes('SKIPPING firestore:rules') && ctx.seeded.out.includes('SKIPPING storage'), `seeds: said (${ctx.seeded.out})`);
         t.equal(ctx.adopted.called, 'FIREBASE deploy --only firestore:rules,firestore:indexes,storage --project=prod --non-interactive', 'adopted: all three');

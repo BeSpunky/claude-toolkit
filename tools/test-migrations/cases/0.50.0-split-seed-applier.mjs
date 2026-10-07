@@ -53,6 +53,26 @@ export default {
     {
       name: 'stock 0.49 world: becomes exactly the 0.50 seeded world.mjs; apply.mjs + build.mjs written; it loads',
       setup: (tree) => tree.write(WORLD, stock),
+      // The template shipped two shapes before 0.50 (0d09453 first, 5a05026 → 8ec2259 → 0.49 the stock fixture); the
+      // applier section, the header and the markers the rung keys on are byte-identical in both. They differ in one
+      // worlds-section comment line the rung does not own, which is the project's from then on.
+      historicalShapes: [
+        {
+          // git show 0d09453:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/seed-world.mjs.tpl
+          name: 'first release of the template (0d09453)',
+          diverges: 'its worlds-section comment still names `firebase/project.json` (changed by 5a05026); the rung never touches the worlds',
+          setup: (tree) =>
+            tree.write(WORLD, stock.replace(
+              '//                                    to it, a `reset:<name>` target on the `firebase` project.',
+              '//                                    to it, a `reset:<name>` target in firebase/project.json.',
+            )),
+          expect: (tree, t) => {
+            t.ok(t.read(WORLD) === current.replace('target on the `firebase` project.', 'target in firebase/project.json.'),
+              `the 0d09453 world did not land on the 0.50 seed (modulo its own comment):\n${t.read(WORLD)}`);
+            t.ok(worldsLoad(tree) === 'ok', 'the migrated 0d09453 world does not load');
+          },
+        },
+      ],
       expect: (tree, t) => {
         t.ok(t.read(WORLD) === current, 'the migrated stock world differs from what 0.50 seeds');
         t.hasNot(WORLD, BANNER);

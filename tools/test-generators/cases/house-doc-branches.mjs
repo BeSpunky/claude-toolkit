@@ -158,7 +158,7 @@ export default {
         t.ok(params.includes('| `main` | `production` (firebase: `default`) | `default/web` |'), `the binding row: ${params}`);
         t.ok(params.includes('local-source'), 'both App Hosting modes are named');
         const ci = section(t.read('HOUSE.md'), 'Continuous deployment (CI)');
-        t.ok(ci.includes('! bash tools/setup-gcp.sh --dry-run') && ci.includes('never Claude'), 'the human-run setup');
+        t.ok(ci.includes('! bash tools/setup-gcp.sh --dry-run --environment <environment>') && ci.includes('never Claude'), 'the human-run setup');
         t.ok(t.read('HOUSE.rules.md').includes('Never run `tools/setup-gcp.sh`'), 'the always-on IAM rule');
         t.ok(!/\{\{[^}]*\}\}/.test(t.read('HOUSE.md')), 'no unrendered token');
       },
