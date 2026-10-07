@@ -295,7 +295,7 @@ export default async function firebaseEmulatorsGenerator(
   //    canonical on every run); any other top-level keys the user added are preserved.
   // How functions is linted where the workspace lints: @nx/eslint/plugin's inferred target (registered if need be), or
   // an explicit `eslint .` where inference is off — never the deprecated @nx/eslint:lint executor (_utils/lint-inference).
-  const lint = hasDependency(tree, '@nx/eslint') ? houseLintTarget(tree) : undefined;
+  const lint = hasDependency(tree, '@nx/eslint') ? houseLintTarget(tree, functions.root) : undefined;
   const firebaseJson: Record<string, unknown> = tree.exists('firebase.json') ? readJson(tree, 'firebase.json') : {};
   firebaseJson.emulators = canonicalEmulatorsBlock();
   firebaseJson.functions = canonicalFunctionsBlock(functions);

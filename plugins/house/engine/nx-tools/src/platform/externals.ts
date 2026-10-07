@@ -13,9 +13,7 @@
 // unresolved import the rule bails ("If target is not found (including node internals) we bail early",
 // @nx/eslint-plugin 23). A built-in in a browser bundle fails the BUILD instead (esbuild cannot resolve it), so it
 // is loud where a banned package would be silent. Hence `isNodeBuiltin`: evidence only, never written as a ban.
-import type { Tree } from '@nx/devkit';
 import { isBuiltin } from 'node:module';
-import { workspaceStacksWith } from '../adapters/workspace';
 
 /** Package patterns (Nx `bannedExternalImports` syntax) that only one platform may import. */
 export interface PlatformExternals {
@@ -44,13 +42,12 @@ const WEB_ONLY = [
   'rxfire', 'rxfire/*',
 ];
 
-export function platformExternals(tree: Tree): PlatformExternals {
-  return {
-    server: SERVER_ONLY,
-    // Each stack names its own framework (Angular: `@angular/*`) — the same list it hands the server firewall.
-    web: [...new Set([...WEB_ONLY, ...workspaceStacksWith(tree, 'firebase').flatMap((stack) => stack.firebase.serverBannedImports)])],
-    unsided: [],
-  };
+/**
+ * The table, given the web-only packages the workspace's stacks name (Angular: `@angular/*`). Pure — the stacks are
+ * read by the caller (./index `platformExternals`), so this module, which the classifier loads, loads no adapter.
+ */
+export function tableExternals(stackWebOnly: readonly string[]): PlatformExternals {
+  return { server: SERVER_ONLY, web: [...new Set([...WEB_ONLY, ...stackWebOnly])], unsided: [] };
 }
 
 /** The table, plus what the project's own firewall declares (from `readDeclaredBans`). */
