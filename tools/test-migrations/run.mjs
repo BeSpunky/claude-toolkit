@@ -36,12 +36,23 @@
  * ladder. Re-running a whole ladder is legitimately not idempotent (a later rung can create the anchor an
  * earlier rung looks for), and asserting that would be asserting something false.
  *
+ * ── HISTORICAL SHAPES CONVERGE, OR SAY WHY NOT ─────────────────────────────────────────────────────────
+ *
+ * Idempotence re-runs a rung on its OWN output, so it can never catch the bug that bit 0.24.3: an "already
+ * current" guard keyed on ONE marker of the new shape, fooled by an intermediate shape an EARLIER release wrote
+ * (a 0.7.1 repair's interface had every `default:` and no `proxied?`, was judged current, and stayed
+ * half-migrated forever). So a case may declare `historicalShapes` — the same input as it really shipped from
+ * earlier toolkit versions (taken from git, sha named) — and the harness runs the ladder on each and asserts
+ * the result is IDENTICAL to the canonical input's. A shape that legitimately ends elsewhere declares
+ * `diverges: '<reason>'` (and may bring its own `expect`); the reason is printed, and a declared divergence that
+ * in fact converges FAILS, so a stale reason cannot outlive the fix that made it untrue.
+ *
  * Usage:  node tools/test-migrations/run.mjs [case-name-substring]
  */
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { compilePayload, requireInstalled, requireFromRepo, snapshot, unparseable, captureDevkitLogger, treeAssertions } from '../test-support/payload.mjs';
+import { compilePayload, requireInstalled, requireFromRepo, snapshot, snapshotDiff, unparseable, captureDevkitLogger, treeAssertions } from '../test-support/payload.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const only = process.argv[2];
@@ -85,27 +96,49 @@ async function main() {
       if (only && !`${suite.name} ${testCase.name}`.toLowerCase().includes(only.toLowerCase())) continue;
 
       const failures = [];
+      const notes = [];
       log.reset();
-      const tree = createTreeWithEmptyWorkspace();
-      try {
-        testCase.setup(tree);
+      // One ladder run on a fresh fixture: idempotence and parse-ability checked per run, by the harness.
+      const run = async (setup, label) => {
+        const tree = createTreeWithEmptyWorkspace();
+        setup(tree);
         const beforeLadder = snapshot(tree);
         for (const rung of testCase.ladder ?? suite.ladder) {
           const migrate = payload.load(`migrations/${rung}`).default;
           await migrate(tree);
           const afterFirst = snapshot(tree);
           await migrate(tree); // Idempotence is the harness's job, not each fixture's. See the header.
-          if (snapshot(tree) !== afterFirst) failures.push(`rung ${rung} is not idempotent — a second run changed the tree`);
+          if (snapshot(tree) !== afterFirst) failures.push(`${label}rung ${rung} is not idempotent — a second run changed ${snapshotDiff(afterFirst, snapshot(tree)).join(', ')}`);
         }
-        for (const error of unparseable(beforeLadder, snapshot(tree))) failures.push(`wrote a file that does not parse: ${error}`);
+        for (const error of unparseable(beforeLadder, snapshot(tree))) failures.push(`${label}wrote a file that does not parse: ${error}`);
+        return tree;
+      };
+      try {
+        const tree = await run(testCase.setup, '');
         testCase.expect(tree, treeAssertions(tree, failures), log.lines); // log.lines: what the ladder reported
+        const canonical = snapshot(tree);
+        // Every shape an earlier release really wrote must land where the canonical input lands. See the header.
+        for (const shape of testCase.historicalShapes ?? []) {
+          const label = `historical shape "${shape.name}": `;
+          const historical = await run(shape.setup, label);
+          const differs = snapshotDiff(canonical, snapshot(historical));
+          if (shape.diverges) {
+            if (differs.length === 0) failures.push(`${label}declares it diverges (${shape.diverges}) but converged — drop the reason`);
+            else notes.push(`${shape.name} diverges by design: ${shape.diverges}`);
+            shape.expect?.(historical, treeAssertions(historical, failures), log.lines);
+          } else if (differs.length > 0) {
+            failures.push(`${label}did not converge with the canonical input — differs in ${differs.join(', ')}`);
+          }
+        }
       } catch (error) {
         failures.push(`threw: ${error.stack || error.message}`);
       }
 
       if (failures.length === 0) {
         passed++;
-        console.log(`  ok   ${testCase.name}`);
+        const shapes = testCase.historicalShapes?.length;
+        console.log(`  ok   ${testCase.name}${shapes ? ` (+${shapes} historical shape${shapes === 1 ? '' : 's'})` : ''}`);
+        for (const note of notes) console.log(`         ${note}`);
       } else {
         failed++;
         console.log(`  FAIL ${testCase.name}`);

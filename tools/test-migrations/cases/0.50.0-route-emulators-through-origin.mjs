@@ -84,6 +84,63 @@ export const environment: Environment = {
 };
 `;
 
+/**
+ * The our-journey bundle (INBOUND-HANDOFF-2): an interface whose every member declares `default` — the 0.7.1 repair's
+ * shape, which 0.24.3 judged current and so never gave `proxied?` — with `proxied?: boolean` then hand-added on `auth`
+ * ONLY, to make the documented one-word opt-in compile; the value file opted `auth` in and nothing else. The
+ * never-opted-in version of the same project is the canonical input it must converge to.
+ */
+const JOURNEY_INTERFACE = (authType) => `export interface Environment {
+  production: boolean;
+  firebase: { projectId: string; apiKey: string; appId: string; authDomain?: string };
+  emulators?: {
+    auth?: ${authType};
+    firestore?: { host: string; port: number; default: boolean };
+    storage?: { host: string; port: number; default: boolean };
+    functions?: { host: string; port: number; default: boolean };
+  };
+}
+`;
+const JOURNEY_ENV = (auth) => `import type { Environment } from './environment.interface';
+
+export const environment: Environment = {
+  production: false,
+  firebase: { projectId: 'our-journey', apiKey: 'demo', appId: 'demo' },
+  emulators: {
+    auth: ${auth},
+    firestore: { host: 'localhost', port: 8080, default: true },
+    storage: { host: 'localhost', port: 9199, default: true },
+    functions: { host: 'localhost', port: 5001, default: true },
+  },
+};
+`;
+/** dev.json as the house seeded it for a Firebase app — with and without the retired ?portOffset= switch. */
+const journeyDevJson = (withSwitch) => ({
+  apps: {
+    journey: {
+      processes: [
+        { id: 'app', cmd: 'x', ports: { app: 4200 }, primary: true },
+        {
+          id: 'emulators',
+          cmd: 'y',
+          ports: { auth: 9099, firestore: 8080, storage: 9199, functions: 5001 },
+          url: [
+            ...(withSwitch ? [{ param: 'portOffset', value: '${OFFSET}', when: 'offset' }] : []),
+            { param: 'emulate', value: 'none', when: 'skipped' },
+          ],
+        },
+      ],
+    },
+  },
+});
+const journey = ({ opted }) => (tree) => {
+  app(tree, 'apps/journey', {
+    env: JOURNEY_ENV(`{ url: 'http://localhost:9099', default: true${opted ? ', proxied: true' : ''} }`),
+    iface: JOURNEY_INTERFACE(`{ url: string; default: boolean${opted ? '; proxied?: boolean' : ''} }`),
+  });
+  writeJson(tree, '.bespunky/dev.json', journeyDevJson(opted));
+};
+
 function app(tree, root = 'apps/shop', { env = STOCK_ENV, iface = STOCK_INTERFACE } = {}) {
   tree.write('firebase.json', '{ "emulators": {} }\n');
   tree.write(`${root}/src/app/firebase.config.ts`, '// generator-owned\n');
@@ -206,6 +263,17 @@ export default {
         t.equal(d.apps.shop.processes[1].url, [{ param: 'emulate', value: 'none', when: 'skipped' }], 'shop emulators url');
         t.equal(d.apps.other.processes[0].url, [{ param: 'portOffset', value: '1', when: 'always' }], 'the project-shaped switch');
       },
+    },
+    {
+      // The canonical input is the project that never opted in; the our-journey shape must end exactly there.
+      name: 'our-journey: `proxied` on auth only (value + hand-added type) and the ?portOffset= switch — converges to never-opted-in',
+      setup: journey({ opted: false }),
+      expect: (tree, t) => {
+        t.equal(t.read('apps/journey/src/environments/environment.ts'), JOURNEY_ENV("{ url: 'http://localhost:9099', default: true }"), 'environment.ts');
+        t.equal(t.read('apps/journey/src/environments/environment.interface.ts'), JOURNEY_INTERFACE('{ url: string; default: boolean }'), 'the interface');
+        t.equal(readJson(tree, '.bespunky/dev.json'), journeyDevJson(false), 'dev.json');
+      },
+      historicalShapes: [{ name: 'our-journey, nx-tools 0.47.0 (auth opted in by hand)', setup: journey({ opted: true }) }],
     },
     {
       name: 'no firebase.json: nothing is touched',

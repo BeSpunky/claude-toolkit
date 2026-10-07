@@ -63,6 +63,24 @@ a line that is not a comment.
 the tree, so no fixture needs to remember it. The claim is per *rung*, not per ladder: re-running a whole
 ladder legitimately is not idempotent, because a later rung can create the anchor an earlier one looks for.
 
+**Historical shapes converge — or say why not.** Idempotence re-runs a rung on its *own* output, so it cannot
+catch an "already current" guard keyed on one marker of the new shape and fooled by an intermediate shape an
+*earlier* release wrote (0.24.3 judged a 0.7.1-repaired interface current because every member had `default:`,
+and it never got `proxied?`). So a case may list the same input as earlier toolkit versions really shipped it —
+taken from git, sha named:
+
+```js
+historicalShapes: [
+  { name: '0.7.1 repair (abc1234)', setup: (tree) => … },                 // must land byte-identical to `setup`'s result
+  { name: 'pre-0.12 scaffold', diverges: 'why it legitimately ends elsewhere', setup, expect }, // reason printed
+],
+```
+
+The harness runs the ladder on each (idempotence and parsing checked as usual) and fails unless the whole tree is
+identical to the canonical case's. A shape that declares `diverges` but converges anyway fails too, so a stale
+reason cannot outlive the fix that made it untrue. Whenever a rung skips "already migrated" input, list every
+shape that carries the marker it skips on.
+
 **Coverage today is `0.33.0`, `0.33.1`, `0.34.0`, and `0.24.0`'s `unify-serve-targets`** (back-filled for the
 `host`-stripping fix). The other earlier rungs have no cases. Back-filling them is
 real work with its own judgement calls about what each should assert — worth doing, deliberately left out
