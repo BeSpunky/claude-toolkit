@@ -23,6 +23,8 @@ import fs from 'node:fs';
 import { CDP_URL as DEFAULT_CDP, loadPlaywright } from './runtime.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────────────────
+// A best-effort step (closing, detaching, cleaning up): its failure changes nothing, so it is deliberately ignored.
+const bestEffort = () => undefined;
 const RUNTIME = process.env.SB_RUNTIME || `${process.env.XDG_RUNTIME_DIR || '/tmp'}/shared-browser`;
 const LOG_DIR = `${RUNTIME}/logs`;
 const EVENTS = `${LOG_DIR}/events.jsonl`;
@@ -275,7 +277,7 @@ function shutdown(signal) {
   shuttingDown = true;
   status(`received ${signal} — shutting down`);
   try {
-    currentBrowser?.close().catch(() => {});
+    currentBrowser?.close().catch(bestEffort);
   } catch {
     // ignore
   }
