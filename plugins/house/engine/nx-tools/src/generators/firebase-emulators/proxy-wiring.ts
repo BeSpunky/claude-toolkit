@@ -47,9 +47,10 @@ export function reportProxyWiring(who: string, project: string, houseProxy: stri
         who,
         `\`${project}:${wiring.target}\` runs \`${wiring.executor}\`, a dev server the house cannot point at ` +
           `${houseProxy} — so it does not relay the Firebase emulators, and every emulated service reaches its emulator ` +
-          `through the page's origin. Give it the house's routes: ${houseProxy} exports them as \`emulatorRoutes\` ` +
-          `(Angular / webpack-dev-server / http-proxy-middleware form) and \`viteEmulatorRoutes\` (a Vite ` +
-          `\`server.proxy\`), offset-aware for a worktree's stack.`,
+          `through the page's origin. Give it the house's routes, offset-aware for a worktree's stack: a bare Vite ` +
+          `config takes \`server: { proxy: viteProxy }\` from ${houseProxy} (the house's routes and your ` +
+          `${local}, in Vite's dialect); any other dev server includes its \`emulatorRoutes\` (Angular / ` +
+          `webpack-dev-server / http-proxy-middleware form).`,
       );
       return;
   }
