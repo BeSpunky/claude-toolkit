@@ -171,7 +171,7 @@
     "build-from-house-dockerfile": {
       "version": "0.48.0",
       "layer": "agent",
-      "description": "A house-written devcontainer.json stops pulling its image and builds it from .devcontainer/house.Dockerfile (FROM the same image, with the OS packages as one cached Docker layer, so a rebuild reinstalls nothing that has not changed). Removes the house-written `image` (and the comment above it) so it does not linger beside the `build` the generator now composes \u2014 refusing, and reporting, if the removal would not leave the file intact; an `image` not recorded as house-written is left and reported. Reports any apt install in the project's own post-create.local.sh (or a post-create.sh the house did not write): it now reinstalls on every rebuild and no longer gets the house's per-create `apt-get update` \u2014 move it into .devcontainer/os-packages.txt. Refreshes a post-create.local.sh that is still the untouched 0.47 stub.",
+      "description": "A house-written devcontainer.json stops pulling its image and builds it from .devcontainer/house.Dockerfile (FROM the same image, with the OS packages as one cached Docker layer, so a rebuild reinstalls nothing that has not changed). Removes the house-written `image` (and the comment above it) so it does not linger beside the `build` the generator now composes \u2014 refusing, and reporting, if the removal would not leave the file intact; an `image` not recorded as house-written is left and reported. Reports any apt install in the project's own post-create.local.sh (or a post-create.sh the house did not write): it now reinstalls on every rebuild and no longer gets the house's per-create `apt-get update` \u2014 move it into .devcontainer/os-packages.txt. Refreshes a post-create.local.sh that is still an untouched stub a release seeded (0.15, 0.16–0.38 or 0.39–0.47).",
       "implementation": "./src/migrations/0.48.0/build-from-house-dockerfile"
     },
     "fold-playwright-cache-into-home-cache": {
@@ -245,6 +245,12 @@
       "layer": "firebase",
       "description": "The Firebase CLI becomes the project's exact `firebase-tools` devDependency (on PATH through node_modules/.bin in the container and in every Nx target), replacing the unpinned `ghcr.io/devcontainers-extra/features/firebase-cli` feature that installed whatever was newest on image-build day. Adds the devDependency (a `latest` one is pinned to what is installed); removes the feature \u2014 and its devcontainer-lock.json pin \u2014 where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config is kept. Reminds to install and rebuild.",
       "implementation": "./src/migrations/0.50.0/firebase-cli-from-package"
+    },
+    "refresh-pre-0.39-local-stub": {
+      "version": "0.50.0",
+      "layer": "agent",
+      "description": "Refreshes .devcontainer/post-create.local.sh when it is still the untouched stub seeded by 0.15 (scaffold.sh --repair) or 0.16\u20130.38 (scaffold.sh --sync): 0.48.0 recognised only the 0.39\u20130.47 stub, so these older seeds kept the apt-get example the image build retired and named a command that no longer exists. Any other content is the project's and is not touched.",
+      "implementation": "./src/migrations/0.50.0/refresh-pre-0.39-local-stub"
     },
     "gcloud-cli-from-image": {
       "version": "0.50.0",
