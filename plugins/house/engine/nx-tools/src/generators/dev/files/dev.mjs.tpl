@@ -30,7 +30,7 @@ import { attachBrowser, detachRoute, foreignOwner, sharedBrowserUrl } from './li
 import { DECLARATION_PATH, DeclarationError, boundPorts, declaredPorts, loadDeclaration, pickApp, planApp, primaryOf } from './lib/declaration.mjs';
 import { PortError, isPortFree, portBlock, resolvePortOffset } from './lib/ports.mjs';
 import { descendants, runStack } from './lib/stack.mjs';
-import { ensureStackDir, isAlive, ownerOf, processStart, readStacks, removeRecord, stackKey, survivors, unfinished, writeRecord } from './lib/stacks.mjs';
+import { RUN_DIR, detachedWork, ensureStackDir, isAlive, ownerOf, processStart, readStacks, removeRecord, stackKey, survivors, unfinished, writeRecord } from './lib/stacks.mjs';
 import { collectWorktrees, matchWorktree, servedSlug, worktreeKey, worktreeLabel } from './lib/worktrees.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -66,12 +66,10 @@ const doing = (w) => `${w.id}: ${w.doing ?? w.status}`;
  * when the wait ran out. `ok` is false when work is still pending or any of it ended in failure (`code` non-zero).
  */
 async function awaitDetached(tree, key, { say, timeoutMs = DETACHED_TIMEOUT_MS, every = 5000 } = {}) {
-  const watched = new Map();
   const start = Date.now();
   let next = start + every;
   for (;;) {
     const running = unfinished(tree, key);
-    for (const w of running) watched.set(w.file, w);
     if (!running.length) break;
     if (Date.now() - start >= timeoutMs) {
       for (const w of running) {
@@ -85,15 +83,9 @@ async function awaitDetached(tree, key, { say, timeoutMs = DETACHED_TIMEOUT_MS, 
     }
     await sleep(250);
   }
-  // Re-read what each watched entry ended with (its owner writes the result as its last act).
-  const finished = [];
-  for (const file of watched.keys()) {
-    try {
-      finished.push(JSON.parse(readFileSync(file, 'utf8')));
-    } catch {
-      /* removed by its owner — nothing to report */
-    }
-  }
+  // Every entry of this stack has ended — including work that finished before we started waiting (an export that
+  // beat its supervisor's grace). Each owner writes its result as its last act; that is what is reported.
+  const finished = detachedWork(join(tree, RUN_DIR, key)).filter((w) => w.status === 'exited' || !w.alive);
   return { ok: finished.every((w) => !w.code), finished, pending: [] };
 }
 
@@ -428,8 +420,21 @@ function reportFailure(failures, plan, detached) {
     const proc = plan.running.find((p) => p.id === f.id);
     err(`  ${f.id} exited ${f.signal ? `on ${f.signal}` : `with code ${f.code}`}${proc ? ` — it ran: ${proc.display}` : ''}`);
   }
-  err('  Its output is above.');
-  for (const w of detached.finished) if (w.log) err(`  ${w.id} log: ${w.log}`);
+  err('  Its output is above (or, when Nx summarised it, in the `full log:` file Nx named for that task).');
+  // The detached work's own log is the one place the cause is sure to be (an emulator suite that cannot start says
+  // why there — no Java, a port in use). Its tail goes here, where every output mode shows it.
+  for (const w of detached.finished) {
+    if (!w.log) continue;
+    err(`  ${w.id} log: ${w.log}${w.code ? ' — its last lines:' : ''}`);
+    if (!w.code) continue;
+    let tail = [];
+    try {
+      tail = readFileSync(w.log, 'utf8').replace(/\x1b\[[0-9;]*m/g, '').split('\n').filter((l) => l.trim()).slice(-12);
+    } catch {
+      /* unreadable — the path is still named */
+    }
+    for (const line of tail) err(`    | ${line}`);
+  }
   if (process.env.DEV_NX_ROOT) err('  (Nx will list `serve` as succeeded/stopped — it reports any end of a continuous task that way; this exit code is 1.)');
 }
 
