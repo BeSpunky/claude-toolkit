@@ -69,6 +69,8 @@ export default {
         t.equal(t.json(`${root}/tsconfig.json`)?.extends, '../../tsconfig.base.json', 'tsconfig extends, two levels up');
         t.has('.gitignore', `\n${root}/.secret.local\n`);
         t.has('.gitignore', `\n${root}/.secret.sandbox.local\n`);
+        // firebase-tools stages every export in the workspace root; one cut short is left there, holding emulator data.
+        t.has('.gitignore', '\n/firebase-export-*\n');
         t.has('tools/emulators.sh', `FUNCTIONS_SRC="$ROOT/${root}"`);
         t.has('tools/emulators.sh', `FUNCTIONS_DIST="$ROOT/dist/${root}"`);
         // The params files are read in place from the source dir — so the emulator-only .env.local works.
@@ -99,6 +101,29 @@ export default {
         }
       },
     })),
+    {
+      // A project already past every earlier block (0.49's .gitignore) gains the export-staging block on upgrade —
+      // once (the harness re-runs the generator on its own output and asserts nothing more changes).
+      name: '.gitignore: a 0.49 project gains /firebase-export-* once; the earlier blocks are not repeated',
+      setup: () => {
+        const tree = workspace();
+        tree.write(
+          '.gitignore',
+          'node_modules\n\n/.emulator-data\n/.emulator-data-*\n\napps/functions/.secret.local\n\napps/functions/.secret.sandbox.local\n',
+        );
+        return tree;
+      },
+      run,
+      expect: (tree, t) => {
+        const lines = t.read('.gitignore').split('\n');
+        const count = (line) => lines.filter((l) => l === line).length;
+        t.equal(
+          ['/.emulator-data', 'apps/functions/.secret.local', 'apps/functions/.secret.sandbox.local', '/firebase-export-*'].map(count),
+          [1, 1, 1, 1],
+          'each marker exactly once',
+        );
+      },
+    },
     {
       // firebase-tools' `init auth` with no active project writes `support@undefined.firebaseapp.com`. Not ours to
       // repair (the right value is the real project's), but the upgrade says so — and must not touch the key.

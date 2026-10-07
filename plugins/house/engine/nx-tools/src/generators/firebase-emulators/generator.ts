@@ -260,6 +260,18 @@ const sandboxGitignoreBlock = (functions: HouseProjectHome) => `# Opt-in SANDBOX
 ${sandboxSecretsOf(functions)}
 `;
 
+// The export staging dirs firebase-tools leaves in the WORKSPACE ROOT when an export is cut short. It stages every
+// export (`--export-on-exit`, `emulators:export`) in `mkdtempSync('firebase-export-<ms>')` — relative, so the cwd —
+// and only renames it over the data dir once it is complete (firebase-tools lib/emulator/hubExport.js). A suite killed
+// mid-export (its keeper's deadline, an abandoned stop) leaves that dir behind holding the emulated world — user data,
+// auth users — where `git add -A` would commit it. Its own block under its own marker, so a project already past the
+// blocks above gains it on upgrade.
+const EXPORT_STAGING_MARKER = '/firebase-export-*';
+const EXPORT_STAGING_GITIGNORE_BLOCK = `# Firebase emulator export staging dirs (firebase-export-<ms>XXXXXX/), left in the workspace root when an export
+# is interrupted. They hold emulator data (users, documents) — never commit them; delete one once no suite is running.
+${EXPORT_STAGING_MARKER}
+`;
+
 /**
  * `firebase init <feature>` run with no active project templates the literal `undefined` where the project id
  * belongs — e.g. auth's `support@undefined.firebaseapp.com` (firebase-tools init/features/auth.js). The house
@@ -350,17 +362,17 @@ export default async function firebaseEmulatorsGenerator(
   }
   for (const shadow of shadowedAppHostingConfigs(tree)) logger.warn(`[firebase-emulators] ${describeShadow(shadow)}`);
 
-  // 1c) .gitignore — the emulator block, then the secrets block under its own marker (so a project already past
-  //     the first still gains the second on upgrade).
-  const gitignore = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
-  if (!gitignore.includes('/.emulator-data')) tree.write('.gitignore', `${gitignore.trimEnd()}\n\n${GITIGNORE_BLOCK}`);
-  const gitignoreNow = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
-  if (!gitignoreNow.includes(secretsOf(functions))) {
-    tree.write('.gitignore', `${gitignoreNow.trimEnd()}\n\n${secretGitignoreBlock(functions)}`);
-  }
-  const gitignoreLast = tree.read('.gitignore', 'utf8') ?? '';
-  if (!gitignoreLast.includes(sandboxSecretsOf(functions))) {
-    tree.write('.gitignore', `${gitignoreLast.trimEnd()}\n\n${sandboxGitignoreBlock(functions)}`);
+  // 1c) .gitignore — each block under its own marker, appended when its marker is missing (so a project already past
+  //     the earlier blocks still gains each later one on upgrade), never twice.
+  const gitignoreBlocks: Array<[marker: string, block: string]> = [
+    ['/.emulator-data', GITIGNORE_BLOCK],
+    [secretsOf(functions), secretGitignoreBlock(functions)],
+    [sandboxSecretsOf(functions), sandboxGitignoreBlock(functions)],
+    [EXPORT_STAGING_MARKER, EXPORT_STAGING_GITIGNORE_BLOCK],
+  ];
+  for (const [marker, block] of gitignoreBlocks) {
+    const gitignore = tree.exists('.gitignore') ? tree.read('.gitignore', 'utf8') ?? '' : '';
+    if (!gitignore.includes(marker)) tree.write('.gitignore', `${gitignore.trimEnd()}\n\n${block}`);
   }
 
   // 2) The emulator tooling. Generator-owned (always rewritten) EXCEPT tools/seed/world.mjs and
