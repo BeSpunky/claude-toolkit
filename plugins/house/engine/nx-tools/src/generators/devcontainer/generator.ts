@@ -696,6 +696,8 @@ function mergeIntoExisting(
     }
   }
 
+  // Say what changed only when something did: a re-sync of a complete file writes nothing and claims nothing.
+  if (text === existingText) return { skipped, houseAdded };
   tree.write(DEVCONTAINER, text);
 
   if (mode === 'assert') {

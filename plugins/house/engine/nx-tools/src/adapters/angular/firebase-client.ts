@@ -24,6 +24,7 @@ import {
 } from '../../generators/firebase-emulators/service-configs';
 import { angular } from './index';
 import { declareBrowserSdk, pinAngularForFirebase } from './angularfire';
+import { rewrittenBy } from '../../generators/_utils/changed-files';
 
 /** Blank the credential placeholders: a half-wired prod/staging build must fail loud, not silently use dev. */
 const blankCredentials = (source: string): string =>
@@ -52,15 +53,16 @@ export const angularFirebaseClient: FirebaseClientPort = {
       tree.write(env.staging, blankCredentials(firebaseTemplate('environment.staging.ts.tpl')));
     }
 
-    // 2) The generator-owned client glue — rewritten in full, every run.
-    if (tree.exists(`${appRoot}/src/app/firebase.config.ts`)) {
+    // 2) The generator-owned client glue — re-asserted in full, every run; said only when it actually changed.
+    //    The proxy is baked with THIS app's env path so it reads the project id from its single source of truth.
+    const config = `${appRoot}/src/app/firebase.config.ts`;
+    const { result: proxy, rewritten } = rewrittenBy(tree, [config], () => writeFirebaseClientGlue(tree, appRoot, env.dev));
+    if (rewritten.length) {
       logger.info(
-        `[firebase-emulators] Rewrote ${appRoot}/src/app/firebase.config.ts to the current generator-owned shape (it holds no ` +
+        `[firebase-emulators] Rewrote ${config} to the current generator-owned shape (it holds no ` +
           `per-project values — customize via environment.ts for config, app.config.ts for providers, never this file).`,
       );
     }
-    // The proxy is baked with THIS app's env path so it reads the project id from its single source of truth.
-    const proxy = writeFirebaseClientGlue(tree, appRoot, env.dev);
     // …and the dev-server uses it. (0.34.x appended --proxyConfig at serve time; the declare-dev-processes
     // migration moved it onto existing apps' dev-server leaf — a new app gets it here.) An app with no Angular
     // dev-server yet (no web layer) has nothing to point; a later sync wires it once one exists (this step runs

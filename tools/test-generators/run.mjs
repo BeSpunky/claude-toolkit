@@ -70,6 +70,9 @@ import {
   treeAssertions,
 } from '../test-support/payload.mjs';
 
+/** A log line that says the tree changed — false on a run that changed nothing. */
+const CLAIMS_A_CHANGE = /\b(?:Rewrote|Rewrites|Wrote|Updated|Created|Added|Removed|Seeded|Pinned|Moved|Replaced|Wired|Retargeted|Adopted)\b/;
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const strict = args.includes('--strict');
@@ -157,9 +160,14 @@ async function main() {
         for (const error of unparseable(beforeRun, snapshot(tree))) failures.push(`wrote a file that does not parse: ${error}`);
         if (!testCase.once) {
           const afterFirst = snapshot(tree);
+          log.reset();
           await quiet(testCase.run)(tree, ctx); // Idempotence is the harness's job — see the header.
           const changed = snapshotDiff(afterFirst, snapshot(tree));
           if (changed.length) failures.push(`not idempotent — a second run changed: ${changed.join(', ')}`);
+          // …and so is honesty: a second run that changed nothing must not CLAIM a change (a notice that fires on
+          // every no-op upgrade is one everyone learns to ignore).
+          const claims = changed.length ? [] : log.lines.filter((line) => CLAIMS_A_CHANGE.test(line));
+          if (claims.length) failures.push(`a no-op second run claims a change: ${claims.map((l) => l.split('\n')[0]).join(' | ')}`);
         }
         await testCase.expect(tree, treeAssertions(tree, failures), ctx);
       } catch (error) {
