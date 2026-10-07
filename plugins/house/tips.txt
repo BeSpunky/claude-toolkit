@@ -17,12 +17,11 @@ Need a system package in the container? Add it to .devcontainer/os-packages.txt 
 Deploying to Firebase App Hosting? Its Root Directory must be the app (--root-dir <the app's dir>) — ask Claude, it knows both deploy modes
 Ship the Firebase backend with nx affected -t deploy — functions build through Nx, rules ship from what firebase.json declares
 First Firebase deploy? node tools/firebase-deploy.mjs --check ticks off login, alias, deploy and CI — and says how to tell each worked
-Edited a house target (an input, args, a configuration)? Upgrades keep it — and when the house changed the same value, the summary lists it under UPGRADE_ATTENTION
-Rules only in the Firebase console? npx firebase init firestore storage pulls the live ones into the repo, unchanged
-Your edits inside a house target (inputs, args, configurations) survive upgrades — the upgrade says if it had to replace one
+Rules only in the Firebase console? npx firebase init firestore, then npx firebase init storage, pulls the live ones into the repo (one feature per init)
+Your edits inside a house target (inputs, args, configurations) survive upgrades — the upgrade's summary lists any it had to replace, under UPGRADE_ATTENTION
 What is running, and whose? tools/dev/dev ps lists every dev stack in every worktree; tools/dev/dev stop takes yours down cleanly
 Deploy from CI with /bespunky-house:add-layer ci — the branch model's `ci` bindings decide which branch deploys where
-The cloud setup behind CI deploys is yours to run: ! bash tools/setup-gcp.sh --dry-run shows every IAM grant first
+The cloud setup behind CI deploys is yours to run: ! bash tools/setup-gcp.sh --dry-run --environment <env> shows every IAM grant first
 Node is one project fact: .nvmrc — the devcontainer and Cloud Functions follow it, and no upgrade moves it
 firebase in a house project is the repo's own pinned firebase-tools — the same CLI on every machine and in CI
 gcloud in a house Firebase container is pinned in the image — a rebuild never moves it, and its login stays in ~/.config/gcloud

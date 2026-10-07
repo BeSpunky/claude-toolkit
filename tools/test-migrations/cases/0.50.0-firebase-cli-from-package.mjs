@@ -29,10 +29,88 @@ const firebaseWorkspace = (tree, devDeps = { nx: '23.1.0' }) => {
 const lock = (tree) =>
   tree.write(LOCK, `${JSON.stringify({ features: { [FEATURE]: { version: '1.0.0' }, [GCLOUD]: { version: '1.0.1' } } }, null, 2)}\n`);
 
+// ── The feature as earlier releases really shipped it (owned devcontainers, firebase on). The id and its `{}` never
+//    changed, and the house never wrote a comment above it; what changed is what SURROUNDS it — the template era's
+//    claude-code feature, trailing commas, the JDK note and local features after it; the composed era's local feature.
+//    The rung removes the one member, so each shape keeps its own neighbours: it "diverges" from the composed
+//    canonical only there, and asserts that exactly the feature's line (and its lock pin) went. ─────────────────────
+const CC = 'ghcr.io/devcontainers-extra/features/claude-code';
+const GH_BARE = 'ghcr.io/devcontainers/features/github-cli';
+const LOCAL = './features/bespunky-house-setup';
+/** git show 0d09453:…/devcontainer/devcontainer.json.tpl — the JDK note after the last feature (0.6.0 …). */
+const JDK_NOTE = `    // Note: the JDK required by the Firebase emulators (Firestore / RTDB / Storage all run
+    // on the JVM) is installed via apt in .devcontainer/post-create.sh — NOT as a
+    // devcontainer feature. The canonical \`ghcr.io/devcontainers/features/java\` is
+    // SDKMAN-based and structurally fragile (its install fetches from github.com, which
+    // intermittently fails: TLS errors / "Could not connect to server"). apt pulls from
+    // Debian's package mirrors which are far more reliable, and apt runs in the container's
+    // runtime network stack rather than the buildx build phase.
+`;
+/** git show 7aafe46:…/devcontainer/compose.ts — the local feature's `why`, as render() prints it. */
+const LOCAL_WHY = `    // The one LOCAL feature (a \`./\` id is a PATH beside this file), written by the same generator. It INSTALLS
+    // NOTHING: its postCreateCommand chains \`.devcontainer/post-create.bespunky.sh\` when that file exists —
+    // where the house setup goes in a project whose own postCreateCommand runs something else. Feature
+    // lifecycle commands are ADDITIVE (they run before this file's), so it is the one key that can run the
+    // house setup in an adopted project without displacing what that project already runs.
+`;
+const devcontainer = (features) => `{\n  "name": "shop",\n  "features": {\n${features}  },\n  "postCreateCommand": "bash .devcontainer/post-create.sh"\n}\n`;
+const ERAS = {
+  // git show 7aafe46:…/compose.ts + layers/agent.ts + layers/firebase.ts (0.35.0 … 0.49.x; claude-code gone by 0.43.0)
+  composed: devcontainer(`    "${GH_BARE}": {},\n    "${FEATURE}": {},\n    "${GCLOUD}": {},\n${LOCAL_WHY}    "${LOCAL}": {}\n`),
+  // git show 2e62f9c:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/devcontainer/devcontainer.json.tpl
+  '2e62f9c': devcontainer(`    "${CC}": {},\n    "${GH_BARE}": {},\n    "${FEATURE}": {},\n    "${GCLOUD}": {}\n`),
+  // git show 0d09453:<same path> — the JDK note after the last member
+  '0d09453': devcontainer(`    "${CC}": {},\n    "${GH_BARE}": {},\n    "${FEATURE}": {},\n    "${GCLOUD}": {}\n${JDK_NOTE}`),
+  // git show 2ace14b:<same path> — trailing commas
+  '2ace14b': devcontainer(`    "${CC}": {},\n    "${GH_BARE}": {},\n    "${FEATURE}": {},\n    "${GCLOUD}": {},\n${JDK_NOTE}`),
+  // git show 97b7851:<same path> — the local feature after it (its long comment abridged to its first line)
+  '97b7851': devcontainer(
+    `    "${CC}": {},\n    "${GH_BARE}": {},\n    "${FEATURE}": {},\n    "${GCLOUD}": {},\n` +
+      `    // The one LOCAL feature. An id that starts with \`./\` is a PATH resolved from the folder holding THIS\n    "${LOCAL}": {},\n${JDK_NOTE}`,
+  ),
+};
+/** devcontainer-lock.json as the devcontainer CLI writes it (git show 9c24d7e:.devcontainer/devcontainer-lock.json). */
+const realLock = (tree) =>
+  tree.write(
+    LOCK,
+    `${JSON.stringify(
+      {
+        features: Object.fromEntries(
+          [GH_BARE, FEATURE, GCLOUD].map((id) => [id, { version: '1.0.0', resolved: `${id}@sha256:0000`, integrity: 'sha256:0000' }]),
+        ),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+const ownedEra = (era) => (tree) => {
+  firebaseWorkspace(tree);
+  tree.write(DC, ERAS[era]);
+  writeJson(tree, MARKER, { generator: '@bespunky/nx-tools:devcontainer', owned: true });
+  realLock(tree);
+};
+const featureGone = (era) => (tree, t) => {
+  t.ok(tree.read(DC, 'utf8') === ERAS[era].replace(`    "${FEATURE}": {},\n`, ''), `devcontainer.json:\n${tree.read(DC, 'utf8')}`);
+  t.ok(!readJson(tree, LOCK).features[FEATURE] && readJson(tree, LOCK).features[GCLOUD], 'its lock pin goes, the others stay');
+  t.ok(readJson(tree, 'package.json').devDependencies['firebase-tools'] === '15.32.1', 'firebase-tools pinned');
+};
+const AROUND = "that release's own neighbours (claude-code, trailing commas, the JDK note) stay — the rung removes only the feature";
+
 export default {
   name: '0.50.0 · firebase-cli-from-package',
   ladder: ['0.50.0/firebase-cli-from-package'],
   cases: [
+    {
+      name: 'owned, the composed 0.35–0.49 shape: the feature line and its lock pin go — and every shape the house shipped it in',
+      setup: ownedEra('composed'),
+      expect: featureGone('composed'),
+      historicalShapes: ['2e62f9c', '0d09453', '2ace14b', '97b7851'].map((era) => ({
+        name: `template era (${era})`,
+        setup: ownedEra(era),
+        diverges: AROUND,
+        expect: featureGone(era),
+      })),
+    },
     {
       name: 'owned: firebase-tools declared exactly; the feature, its comment and its lock pin go — nothing else',
       setup: (tree) => {

@@ -5,7 +5,8 @@
 # `http://<slug>.localhost/` (Chromium auto-resolves any `*.localhost` to loopback — no DNS, no hosts
 # file) lands on the proxy, which forwards to `127.0.0.1:<port>` per a slug→port route registry. So the
 # main tree and each git worktree each get a stable, human-readable domain instead of a shifted port a
-# human has to remember (and that isn't forwarded anyway — a worktree serve is viewable only through the shared browser).
+# human has to remember (and that isn't forwarded anyway — :80 is, so the domain works in the shared browser and in a
+# host tab alike).
 #
 # The proxy is a self-contained Node reverse proxy (tools/worktree-domains/proxy.mjs) using ONLY Node
 # built-ins (http + net) — no npm dep, no apt package beyond what the shared-browser stack already

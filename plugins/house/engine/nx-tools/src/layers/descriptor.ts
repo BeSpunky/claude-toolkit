@@ -182,10 +182,12 @@ export interface LayerDescriptor {
 
 // ── THE CI DEPLOY PROVIDER ────────────────────────────────────────────────────────────────────────────────────
 //
-// The `ci` layer owns the stack-agnostic pipeline (push to a line the branch model binds → `nx affected -t deploy`
-// in that line's environment). What differs per cloud is contributed here: a line's `ci` binding names, per provider
+// The `ci` layer owns the stack-agnostic pipeline (push to a line the branch model binds → deploy what changed, in
+// that line's environment). What differs per cloud is contributed here: a line's `ci` binding names, per provider
 // id, the provider's TARGET there (`{"firebase": "prod"}` — a .firebaserc alias), and the provider turns it into
-// the arguments its deploy targets take, the steps that authenticate the job, and the one-time cloud setup.
+// the options ITS OWN deploy targets take in that environment, the steps that authenticate the job, and the
+// one-time cloud setup. A provider's options reach only its own targets (a `ci-<environment>` Nx configuration on
+// each), so several providers — and a project's own deploy targets — compose without seeing each other's flags.
 
 /** One environment a provider deploys into, as the `ci` layer resolved it from the branch model. */
 export interface CiEnvironment {
@@ -195,24 +197,34 @@ export interface CiEnvironment {
   target: string;
   /** The branches that deploy into it, as names and globs. */
   branches: string[];
+  /**
+   * No binding names it any more, but its cloud setup is still recorded as applied: rendered only so a human can
+   * roll it back (`retireStep`), never set up again.
+   */
+  retired?: boolean;
 }
 
 export interface CiDeployProvider {
   /** The provider id a binding names (`ci.providers.<id>`). */
   id: string;
   title: string;
-  /** Arguments forwarded to EVERY `deploy` target the run executes, for this target. */
-  deployArgs(target: string): string[];
+  /** The deploy targets this provider's layer owns in this workspace — the ONLY targets its options reach. */
+  deployTargets(tree: Tree): { project: string; target: string }[];
+  /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
+  deployOptions(target: string): Record<string, unknown>;
   /** GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. */
   authSteps(): string;
-  /** The GitHub environment variables those steps read, and what each holds. */
-  variables: readonly { name: string; holds: string }[];
   /**
-   * Owned files this provider adds (the human-run cloud setup), rendered from the resolved environments, and the
-   * HUMAN_STEP line for each environment — printed by the upgrade whenever what a human must re-run has changed.
+   * Owned files this provider adds (the human-run cloud setup), rendered from the resolved environments — retired
+   * ones included, so the tool that undoes their setup outlives their binding.
    */
   files?(tree: Tree, environments: readonly CiEnvironment[]): { path: string; content: string; mode?: number }[];
+  /** Whether the environment's cloud setup is recorded as applied (and not rolled back) in this workspace. */
+  isSetUp?(tree: Tree, environment: string): boolean;
+  /** The HUMAN_STEP that (re-)applies an environment's cloud setup — printed when what it was rendered for changed. */
   humanStep?(environment: CiEnvironment): string;
+  /** The HUMAN_STEP that undoes a retired environment's cloud setup — printed on every upgrade until it is done. */
+  retireStep?(environment: CiEnvironment): string;
 }
 
 /** A `.gitignore` block: a `#` heading (without the `#`) and the entries under it. */

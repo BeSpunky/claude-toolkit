@@ -78,7 +78,7 @@ export const firebase: LayerDescriptor = {
     ],
   },
   docSections: ['firebase'],
-  // With the `ci` layer: keyless GitHub → GCP auth, `--project=<alias>` for the deploy targets, and tools/setup-gcp.sh.
+  // With the `ci` layer: keyless GitHub → GCP auth, a `ci-<environment>` configuration on its deploy targets, and tools/setup-gcp.sh.
   ciDeploy: firebaseCiProvider,
   // The emulator suite, served beside every app the dev engine runs.
   devFragment: (tree) => firebaseFragment(tree),

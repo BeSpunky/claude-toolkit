@@ -267,7 +267,7 @@ export default {
       },
       expect: (tree, t, ctx) => {
         t.equal([ctx.none.status, ctx.none.called], [0, null], `nothing declared: no deploy, success (${ctx.none.out})`);
-        t.ok(ctx.none.out.includes('npx firebase init firestore storage -P <alias>'), 'nothing declared: says how to adopt the live rules');
+        t.ok(ctx.none.out.includes('npx firebase init firestore -P <alias>') && ctx.none.out.includes('npx firebase init storage -P <alias>'), 'nothing declared: says how to adopt the live rules');
         t.equal([ctx.seeded.status, ctx.seeded.called], [0, null], `seeds: nothing at all reaches the CLI (${ctx.seeded.out})`);
         t.equal([ctx.seededForced.status, ctx.seededForced.called], [0, null], 'R5-1: not even with --force — there is no seeded indexes file for it to delete live indexes by');
         t.ok(ctx.seeded.out.includes('SKIPPING firestore:rules') && ctx.seeded.out.includes('SKIPPING storage'), `seeds: said (${ctx.seeded.out})`);
@@ -281,7 +281,7 @@ export default {
         t.equal([ctx.functions.status, ctx.functions.called], [0, 'FIREBASE deploy --only functions -P prod'], `functions: the runner deploys, args forwarded (${ctx.functions.out})`);
         t.ok(!ctx.functions.out.includes('road to a first deploy'), 'a successful deploy prints no road');
         t.equal(ctx.noLogin.status, 1, 'a failed deploy keeps the CLI\'s exit code');
-        for (const step of ['no Firebase login: step 1', 'npx firebase login', 'npx firebase use --add', 'run functions:deploy -P <alias>', '/bespunky-house:add-layer ci', 'bash tools/setup-gcp.sh', 'GCP_WORKLOAD_IDENTITY_PROVIDER', 'Worked when'])
+        for (const step of ['no Firebase login: step 1', 'npx firebase login', 'npx firebase use --add', 'run functions:deploy -P <alias>', '/bespunky-house:add-layer ci', 'bash tools/setup-gcp.sh', '.bespunky/gcp/<environment>.tsv', 'Worked when'])
           t.ok(ctx.noLogin.out.includes(step), `no login: the road names "${step}" (${ctx.noLogin.out})`);
         t.ok(ctx.noAlias.out.includes('No project was named') && ctx.noAlias.out.includes('Here: dev@example.com'), `logged in, no alias: points at step 2 (${ctx.noAlias.out})`);
         t.ok(ctx.active.out.includes('project (staging) are set') && !ctx.active.out.includes('No project was named'), `the project \`firebase use\` made active is the one Firebase used (${ctx.active.out})`);
