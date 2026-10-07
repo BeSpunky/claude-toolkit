@@ -22,7 +22,9 @@ const TAG = '[0.50.0 declare-node-version]';
 const NVMRC = '.nvmrc';
 const DOCKERFILE = '.devcontainer/house.Dockerfile';
 const DEVCONTAINER = '.devcontainer/devcontainer.json';
-const TYPESCRIPT_NODE = /mcr\.microsoft\.com\/devcontainers\/typescript-node:(\d+)/;
+// The Node major in a typescript-node tag: `24`, `24-bookworm`, and the image-versioned `1-24-bookworm` / `1.1-24`
+// (the leading `1` is the IMAGE's version — read as the major, it would declare Node 1).
+const TYPESCRIPT_NODE = /mcr\.microsoft\.com\/devcontainers\/typescript-node:(?:\d+(?:\.\d+)*-(?=\d))?(\d+)(?![\d.])/;
 const NODE_FEATURE = /^ghcr\.io\/devcontainers\/features\/node(?::\d+)?$/;
 
 export default function declareNodeVersion(tree: Tree): void {
