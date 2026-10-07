@@ -5,11 +5,12 @@
 //   observed     — read directly (refs, history, files, an authenticated API answer)
 //   inferred     — derived by a heuristic that can be wrong (a crude YAML read, a history pattern)
 //   unobservable — cannot be known from here; it becomes a question to the user, never an assumption
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { verify } from './verify.mjs';
 import { SCHEMA, deployBindings } from './model.mjs';
+import { match } from './patterns.mjs';
 import { detectLongLived } from './long-lived.mjs';
 import { WORKFLOW, triggerScope, deploySignals, workflowTriggers } from './workflows.mjs';
 
@@ -247,8 +248,10 @@ function remoteFacts(fact, longLived) {
 // What it reports per backend: id, region, linked repository (none → it deploys from local source,
 // `firebase deploy --only apphosting`), root directory, environment name — `apphosting:backends:list --json`. The
 // LIVE BRANCH is not on the backend: it is the backend's traffic `rolloutPolicy.codebaseBranch`, which no firebase
-// command prints, so it is read from the App Hosting API with a gcloud access token when one is available, and is
-// otherwise its own `unobservable` fact. With a declared model, each declared `appHosting` binding is checked against
+// command prints, so it is read from the App Hosting API with a gcloud access token when one is available (sent in a
+// header from a child process that receives it on stdin — never on a command line, where `ps` shows it), and is
+// otherwise its own `unobservable` fact. When the CLI cannot list backends, WHY is the fact: not installed, not
+// logged in, or Firebase's own first error line (an API not enabled, a permission denied) — each asks something else. With a declared model, each declared `appHosting` binding is checked against
 // what was observed (`drift`) — the case that once went stale silently: auto-rollout switched on, `deploys` unchanged.
 const APPHOSTING_API = 'https://firebaseapphosting.googleapis.com/v1beta';
 
@@ -267,15 +270,12 @@ function appHostingFacts(fact, top, files, model) {
   const token = accessToken();
   const observed = []; // { project, backend, branch|undefined }
   for (const project of projects) {
-    let backends;
-    try {
-      const out = JSON.parse(run(firebase[0], [...firebase.slice(1), 'apphosting:backends:list', '--project', project, '--json', '--non-interactive'], 90000));
-      backends = Array.isArray(out.result) ? out.result : (out.result?.backends ?? []);
-      if (out.status && out.status !== 'success') throw new Error(out.error ?? out.status);
-    } catch {
-      fact('app hosting', project, 'the firebase CLI is not installed or not logged in (`firebase login`), or cannot see this project — ask', 'unobservable');
+    const listed = listBackends(firebase, project);
+    if (listed.unobservable) {
+      fact('app hosting', project, `${listed.unobservable} — ask`, 'unobservable');
       continue;
     }
+    const { backends } = listed;
     if (!backends.length) fact('app hosting', project, 'no App Hosting backends', 'observed');
     for (const b of backends) {
       const m = /^projects\/([^/]+)\/locations\/([^/]+)\/backends\/([^/]+)$/.exec(b.name ?? '');
@@ -307,7 +307,8 @@ function appHostingFacts(fact, top, files, model) {
   if (!model) return;
   const seen = new Set(observed.map((o) => o.project));
   const aliases = firebaseAliases(top);
-  for (const binding of deployBindings(model)) {
+  const bindings = deployBindings(model);
+  for (const binding of bindings) {
     for (const want of binding.appHosting ?? []) {
       const project = aliases[want.project] ?? want.project;
       if (!seen.has(project)) continue;
@@ -315,13 +316,49 @@ function appHostingFacts(fact, top, files, model) {
       const subject = `${binding.line} → ${want.project}/${want.backend}`;
       if (!got) fact('drift', subject, 'declared, but no such backend exists', 'observed');
       else if (!got.linked) fact('drift', subject, 'declared as rolling out from this line, but the backend has no linked repository (local-source deploys)', 'observed');
-      else if (got.branch !== undefined && got.branch !== binding.line) fact('drift', subject, `declared on ${binding.line}, but it rolls out from ${got.branch ?? 'no branch (automatic rollouts off)'}`, 'observed');
+      else if (got.branch !== undefined && !(got.branch && covers(binding, got.branch))) fact('drift', subject, `declared on ${binding.line}, but it rolls out from ${got.branch ?? 'no branch (automatic rollouts off)'}`, 'observed');
     }
   }
   for (const o of observed.filter((x) => x.linked && typeof x.branch === 'string')) {
-    const declared = deployBindings(model).some((b) => (b.appHosting ?? []).some((w) => (aliases[w.project] ?? w.project) === o.project && w.backend === o.backend));
+    const declared = bindings.some((b) => (b.appHosting ?? []).some((w) => (aliases[w.project] ?? w.project) === o.project && w.backend === o.backend));
     if (!declared) fact('drift', `${o.project}/${o.backend}`, `rolls out from ${o.branch}, but no line's deploys declares it — propose an appHosting binding`, 'observed');
   }
+}
+
+/**
+ * Whether a deploy binding covers a concrete branch: a line by name, a pattern binding by its glob (as GitHub's branch
+ * filter reads it — a `*` never crosses `/`; read through patterns.mjs by naming each `*` a one-segment placeholder),
+ * and a tag series never (App Hosting rolls out from a branch).
+ */
+function covers(binding, branch) {
+  if (binding.kind === 'line') return binding.line === branch;
+  if (binding.kind === 'pattern') return match(binding.line.replaceAll('*', '{part}'), branch) !== null;
+  return false;
+}
+
+/**
+ * `apphosting:backends:list` for one project: `{ backends }`, or `{ unobservable }` — why it could not be read. With
+ * `--json`, firebase-tools prints its error on stdout as `{ status: 'error', error }` and exits non-zero.
+ */
+function listBackends(firebase, project) {
+  const res = spawnSync(firebase[0], [...firebase.slice(1), 'apphosting:backends:list', '--project', project, '--json', '--non-interactive'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 90000, env: { ...process.env, NO_UPDATE_NOTIFIER: '1', CI: process.env.CI ?? '1' },
+  });
+  if (res.error?.code === 'ENOENT') return { unobservable: 'the firebase CLI is not installed (no node_modules/.bin/firebase, none on PATH)' };
+  if (res.error) return { unobservable: `the firebase CLI could not list backends: ${res.error.message}` };
+  let out = null;
+  try {
+    out = JSON.parse(res.stdout);
+  } catch {
+    /* no JSON answer — its stderr says why */
+  }
+  if (res.status === 0 && out && (!out.status || out.status === 'success')) {
+    return { backends: Array.isArray(out.result) ? out.result : (out.result?.backends ?? []) };
+  }
+  const said = typeof out?.error === 'string' ? out.error : (out?.error?.message ?? res.stderr ?? res.stdout ?? '');
+  const first = said.split('\n').map((l) => l.trim()).find(Boolean) ?? `exit ${res.status}`;
+  if (/firebase login/.test(said)) return { unobservable: 'the firebase CLI is not logged in (`firebase login`)' };
+  return { unobservable: `the firebase CLI could not list backends: ${first}` };
 }
 
 /** The project's pinned firebase CLI when it has one (house projects do), else whatever is on PATH. */
@@ -350,13 +387,29 @@ function accessToken() {
 function liveBranch(token, project, region, backend) {
   if (!token) return undefined;
   try {
-    const traffic = JSON.parse(run('curl', ['-sSf', '--max-time', '20', '-H', `Authorization: Bearer ${token}`, `${APPHOSTING_API}/projects/${project}/locations/${region}/backends/${backend}/traffic`], 25000));
+    const traffic = JSON.parse(authorizedGet(`${APPHOSTING_API}/projects/${project}/locations/${region}/backends/${backend}/traffic`, token));
     const policy = traffic.rolloutPolicy;
     if (!policy || policy.disabled || !policy.codebaseBranch) return null;
     return policy.codebaseBranch;
   } catch {
     return undefined;
   }
+}
+
+// `evidence` is a synchronous read, like every other probe here (git, gh, firebase — each a child process), so the
+// API call runs in a child too: Node's own fetch, the token handed over on STDIN, so it appears in no argv.
+const AUTHORIZED_GET = `
+let input = '';
+for await (const chunk of process.stdin) input += chunk;
+const { url, token } = JSON.parse(input);
+const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(20000) });
+if (!res.ok) process.exit(1);
+process.stdout.write(await res.text());
+`;
+
+/** GET `url` with a bearer token; the body, or throws. */
+function authorizedGet(url, token) {
+  return execFileSync(process.execPath, ['--input-type=module', '-e', AUTHORIZED_GET], { input: JSON.stringify({ url, token }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 25000 });
 }
 
 function run(cmd, args, timeout) {

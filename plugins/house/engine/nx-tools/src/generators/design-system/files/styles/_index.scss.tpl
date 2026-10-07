@@ -63,8 +63,8 @@
 // Mechanisms, not looks.
 @forward '_utils/mixins' show $breakpoints, media, container, focus-ring, elevation, transition, reduced-motion;
 
-// Accessibility mechanisms: `visually-hidden($focusable)` and the app shell's `skip-link()`.
-@forward '_utils/a11y' show visually-hidden, skip-link;
+// Accessibility mechanisms: `visually-hidden($focusable)`, and the app shell's `skip-link()` and `skip-target()`.
+@forward '_utils/a11y' show visually-hidden, skip-link, skip-target;
 
 // Placeholders: %visually-hidden, %reset-button, %truncate, %overlay-surface.
 // No `show` list here, and not by choice: a sass `show`/`hide` list accepts only variables, functions

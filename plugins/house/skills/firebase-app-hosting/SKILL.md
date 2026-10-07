@@ -1,7 +1,7 @@
 ---
 name: firebase-app-hosting
 description: >-
-  Deploy a house project's web app to Firebase App Hosting and keep the deploy healthy. Covers creating a backend for an Nx app (its Root Directory must be the app - the Nx build fails at the default /), the two deploy modes and how to tell which one is live (GitHub rollouts through a Developer Connect link vs firebase deploy from local source), where apphosting.yaml and apphosting.ENV.yaml are read from (a walk up from the Root Directory - the nearest wins, so an app-level file shadows the root one), binding a staging backend to its Environment name (a console setting - backends:create has no flag for it), and moving the GitHub link to another Google or GitHub account or org. Use when the user asks to deploy, put the app online, create or fix an App Hosting backend, or set up staging; when a rollout does not trigger, a build fails to find the Nx project, staging ships production config, or an apphosting.yaml change has no effect; or when the repo or Firebase project moves between accounts.
+  Deploy a house project's web app to Firebase App Hosting and keep the deploy healthy: creating a backend for an Nx app (its Root Directory must be the app - the Nx build fails at the default /), the two deploy modes and which one is live (GitHub rollouts via a Developer Connect link vs firebase deploy from local source), where apphosting.yaml and apphosting.ENV.yaml are read from (the nearest up from the Root Directory wins), binding a staging backend to its Environment name (a console setting), and moving the GitHub link to another Google or GitHub account or org. Use when the user asks to deploy the WEB APP or put it online, create or fix an App Hosting backend, or set up a staging backend; when a rollout does not trigger, a build cannot find the Nx project, staging ships production config, or an apphosting.yaml change has no effect; or when the repo or Firebase project moves accounts. Not for Cloud Functions or rules deploys (the deploy Nx targets) or CI deploys (the ci layer).
 ---
 
 # Firebase App Hosting — deploy a house project, and keep it deploying
@@ -13,7 +13,7 @@ version and points here.
 
 **Ground rules.** Never fabricate cloud state — `.firebaserc`, backend ids, the web config and the
 Developer Connect link all come from the Firebase CLI / console. Run commands from the workspace root inside the
-devcontainer (the Firebase CLI and `gcloud` are there). Before anything account-shaped, check *who* is signed
+devcontainer: `firebase` there is the project's own pinned `firebase-tools` (on PATH through `node_modules/.bin`; outside the container the same commands run as `npx firebase …`), and `gcloud` is in the image. Before anything account-shaped, check *who* is signed
 in: `firebase login:list`, `gcloud auth list` — the wrong active account is the root of most App Hosting
 confusion. Every step that links an outside account (GitHub, OAuth) is the user's to perform; walk them through
 it, then verify.

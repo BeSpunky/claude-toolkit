@@ -16,7 +16,8 @@
 // generators never remove a whole target — so it is converted here too.
 //
 // WHICH APPS: the house's — an Angular application behind the house composer (`serve` before split-serve-follower,
-// `dev-stack` after it). Already linted (a `lint`
+// `dev-stack` after it; an e76c12a app is one only once recompose-pre-0.3-serve-leftovers, which runs first, has
+// recomposed it). Already linted (a `lint`
 // target, or one @nx/eslint/plugin infers from its own or the root eslint config) → nothing. @nx/angular not installed (it is
 // what created the app; a broken install) → nothing written, the command reported.
 //
@@ -24,24 +25,33 @@
 // carries a `platform:` tag and is not linted — its tag states a boundary nothing checks. (A tooling project of
 // scripts — shared-browser, the emulator suite — holds no importable code, so its tag is not news.)
 import { type GeneratorCallback, type ProjectConfiguration, type Tree, getProjects, logger } from '@nx/devkit';
-import { angular } from '../../adapters/angular';
+// Through the registry, never the adapter module itself: adapters/angular reaches the registry back (project-files →
+// workspace-layout), so loading it first froze ADAPTERS with the half-loaded Angular adapter in it.
+import { adapter } from '../../adapters/registry';
 import { nxInvocation } from '../../generators/_utils/nx-host';
 import { holdsCode } from '../../platform';
 import { platformOf } from '../../platform/platform';
-import { convertBareLint, inferredLintTarget } from '../../generators/_utils/lint-inference';
+import { convertBareLint, lintTargetFor } from '../../generators/_utils/lint-inference';
 import { houseProjectHome } from '../../generators/_utils/project-files';
 import { resolveAppsDir } from '../../generators/_utils/workspace-layout';
 
 const TAG = '[0.50.0 lint-house-apps]';
 const HOUSE_SERVE = '@bespunky/nx-tools:serve';
-const ESLINT_CONFIGS = ['eslint.config.mjs', 'eslint.config.js', 'eslint.config.cjs', 'eslint.config.ts', '.eslintrc.json'];
 
 export default async function lintHouseApps(tree: Tree): Promise<GeneratorCallback | void> {
   const nx = nxInvocation(tree).command;
+  const angular = adapter('angular');
   const tasks: GeneratorCallback[] = [];
-  for (const [name, config] of getProjects(tree)) {
-    if (isLinted(tree, config)) continue;
-    // The composer is `serve` before split-serve-follower (this release) and `dev-stack` after it: either order holds.
+  // Which projects are linted is read ONCE, before anything is added: the first app's add-linting registers
+  // @nx/eslint/plugin, and a snapshot taken inside the loop would then read every later app as already linted.
+  const projects = [...getProjects(tree)];
+  const linted = new Set(projects.filter(([, config]) => isLinted(tree, config)).map(([name]) => name));
+  for (const [name, config] of projects) {
+    if (linted.has(name)) continue;
+    // The composer is `serve` before split-serve-follower (this release) and `dev-stack` after it, so either order
+    // against THAT rung holds. Not so recompose-pre-0.3-serve-leftovers: it is what makes an e76c12a app a house app at
+    // all, so it runs before this rung (migrations.json order; the reasons and the proof: tools/test-migrations/cases/
+    // 0.50.0-ladder-order.mjs).
     const house = angular.ownsApp(config) && [config.targets?.serve, config.targets?.['dev-stack']].some((t) => t?.executor === HOUSE_SERVE);
     if (!house) {
       if (platformOf(config.tags) && holdsCode(tree, name, config)) {
@@ -85,12 +95,10 @@ export default async function lintHouseApps(tree: Tree): Promise<GeneratorCallba
 }
 
 /**
- * A `lint` target, or one @nx/eslint/plugin infers: the plugin lints every project under an ESLint config — its own,
- * or (for a project with none) the workspace root's.
+ * A `lint` target, or one an @nx/eslint/plugin entry infers for it — read the way Nx reads it: the entry's
+ * include/exclude must take the project, and an ESLint config must govern it (its own, or one above it).
  */
 function isLinted(tree: Tree, config: ProjectConfiguration): boolean {
   if (config.targets?.lint) return true;
-  if (inferredLintTarget(tree) === undefined) return false;
-  const prefix = config.root === '.' ? '' : `${config.root}/`;
-  return ESLINT_CONFIGS.some((file) => tree.exists(`${prefix}${file}`) || tree.exists(file));
+  return lintTargetFor(tree, config.root || '.') !== undefined;
 }

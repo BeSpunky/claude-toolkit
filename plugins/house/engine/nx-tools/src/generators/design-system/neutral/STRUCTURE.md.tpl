@@ -26,7 +26,7 @@ A consumer reads **semantic** tokens (`color-on-surface`), never a primitive swa
 │   ├── _index.scss          ★ THE PUBLIC SASS API — @forward … show
 │   ├── _core/               the token engine (private): _tokens.scss (the ONLY file with literal values),
 │   │                        _functions.scss, _theme.scss
-│   └── _utils/              the authoring toolkit (private): mixins, accessibility (visually-hidden, skip-link), placeholders
+│   └── _utils/              the authoring toolkit (private): mixins, accessibility (visually-hidden, skip-link, skip-target), placeholders
 └── src/
     ├── index.ts             ★ THE PUBLIC RUNTIME API ({{importPath}})
     └── lib/ds-mode.ts       setMode / getMode / resolvedMode — writes `data-{{tokenPrefix}}-mode`

@@ -57,6 +57,8 @@ export interface StackAdapter {
   readonly env?: EnvPort;
   readonly providers?: ProvidersPort;
   readonly styles?: StylesPort;
+  /** The app's shell markup — what a capability adds to it (the design system: the skip link it styles). */
+  readonly shell?: ShellPort;
   /** The app's dev-server, as an Nx `dev-server` target — what the web layer's `dev-stack` composer drives. */
   readonly devServer?: DevServerPort;
   /** The framework half of the design system: its runtime binding, library shape, component generator. */
@@ -144,6 +146,14 @@ export interface StylesPort {
   registerStylesheet(tree: Tree, project: string, sheet: { input: string; bundleName: string }): boolean;
 }
 
+export interface ShellPort {
+  /**
+   * Add the skip link before the house `<main id="main">` landmark the stack seeded at creation. `present`: the shell
+   * has one; `no-landmark`: the shell is the app's own (no house landmark) — left alone, the caller says how.
+   */
+  addSkipLink(tree: Tree, project: string): 'added' | 'present' | 'no-landmark';
+}
+
 /**
  * The stack's DEV-SERVER LEAF — the `dev-server` target the `dev-stack` composer (web layer) drives by name. The
  * composer itself is stack-free; only the leaf is the framework's. A project that already has a dev-server of its
@@ -163,11 +173,25 @@ export interface DevServerPort {
   /** The leaf for `project`, carrying `preserved` (the options a user tuned on the previous leaf). */
   leaf(tree: Tree, project: string, preserved: Record<string, unknown>): TargetConfiguration;
   /**
-   * Point the app's dev-server at a dev proxy config (workspace-relative). True when set (or already set); false
-   * when the app has no dev-server of this stack's to configure — the caller reports it.
+   * Point the app's dev-server at a dev proxy config (workspace-relative) — set when it names none. What became of
+   * it is the answer, never a guess: the caller reports every outcome but `wired` (see ProxyWiring).
    */
-  useProxy(tree: Tree, project: string, proxyConfig: string): boolean;
+  useProxy(tree: Tree, project: string, proxyConfig: string): ProxyWiring;
 }
+
+/**
+ * Whether an app's dev-server serves through a given proxy config. Only `wired` means it does; each other case
+ * carries what a person needs to make it so:
+ *   - `foreign`: the dev-server already names a proxy config of the project's own — kept, because it is theirs;
+ *     `where` is the option's path (`options`, or `configurations.<name>`), `proxyConfig` the file it names;
+ *   - `unconfigurable`: the app's dev-server runs an executor this stack does not configure;
+ *   - `none`: the app has no dev-server at all (yet — a later sync wires it once one exists).
+ */
+export type ProxyWiring =
+  | { status: 'wired' }
+  | { status: 'foreign'; target: string; where: string; proxyConfig: string }
+  | { status: 'unconfigurable'; target: string; executor: string }
+  | { status: 'none' };
 
 /**
  * The library itself is created by `publishable-lib` through the SAME adapter's `libs` port — a design system

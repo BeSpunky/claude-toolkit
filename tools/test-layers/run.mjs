@@ -307,6 +307,7 @@ const ctxFor = (tree, overrides = {}) => {
     mode: 'upgrade',
     active: ordered([...detected, ...ensured]),
     ensured: new Set(ensured),
+    detected: new Set(detected),
     project: 'shop',
     app: 'shop',
     voice: false,
@@ -381,10 +382,18 @@ check('full house sync: per-app steps first, then workspace steps in registry or
   // Phase 4: the Firebase CLIENT attaches per app (through the app's stack adapter), the neutral CORE is a
   // workspace step that runs after it and follows the client app.
   ok(got.includes('firebase-client --project=shop --workspaceName=shop --staging=true --wireProviders'), 'firebase client args');
-  ok(got.includes('firebase-emulators --workspaceName=shop --staging=true --clientApp=shop --seedRules'), 'firebase core args (ensured: seeds rules)');
-  // Seeding rules is a baseline act: an upgrade that merely DETECTS firebase never seeds (the console may hold the live rules).
+  // R5-3: seeding rules is a CREATION act. This workspace already has Firebase (detected), so ensuring it again
+  // (`add-layer firebase` on it) must not seed: its emulators run open today, and deny-all would break them.
+  ok(got.includes('firebase-emulators --workspaceName=shop --staging=true --clientApp=shop'), 'firebase core args');
+  ok(!got.some((l) => l.startsWith('firebase-emulators ') && l.includes('--seedRules')), `a re-ensure of a detected layer seeds no rules: ${got.find((l) => l.startsWith('firebase-emulators '))}`);
+  // An upgrade that merely DETECTS firebase never seeds either (the console may hold the live rules).
   const detected = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { ensured: ['nx'] }), STAMP));
   ok(detected.some((l) => l.startsWith('firebase-emulators ') && !l.includes('--seedRules')), `a detect-only sync seeds no rules: ${detected.find((l) => l.startsWith('firebase-emulators '))}`);
+  // The run that CREATES it — ensured, not detected — seeds.
+  const fresh = FIXTURES['angular web app with firebase and a design system']();
+  fresh.delete('firebase.json');
+  const created = render(plan(ctxFor(fresh, { ensured: ['nx', 'firebase'] }), STAMP));
+  ok(created.some((l) => l.startsWith('firebase-emulators ') && l.includes('--seedRules')), `creating the layer seeds rules: ${created.find((l) => l.startsWith('firebase-emulators '))}`);
   const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';
   ok(devcontainer.endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${devcontainer}`);
 });
@@ -1328,6 +1337,29 @@ checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-serv
   ok(tree.read('apps/shop/project.json', 'utf8') === once, 'a re-run changed project.json');
 });
 
+checkAsync('firebase client on an app whose dev server has its own proxy config: kept, and told what to add (R4-1)', async (ok) => {
+  const tree = angularShop();
+  tree.write('apps/shop/src/app/app.config.ts', "import { ApplicationConfig } from '@angular/core';\nexport const appConfig: ApplicationConfig = { providers: [] };\n");
+  await generator('serve')(tree, { project: 'shop' });
+  const config = JSON.parse(tree.read('apps/shop/project.json', 'utf8'));
+  config.targets['dev-server'].options.proxyConfig = 'apps/shop/proxy.api.mjs';
+  tree.write('apps/shop/project.json', JSON.stringify(config));
+  const { angular } = require_(join(BUILD, 'src/adapters/angular'));
+  const { logger } = require_('@nx/devkit');
+  const warned = [];
+  const warn = logger.warn;
+  logger.warn = (message) => warned.push(String(message));
+  try {
+    angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: true });
+  } finally {
+    logger.warn = warn;
+  }
+  const t = JSON.parse(tree.read('apps/shop/project.json', 'utf8')).targets;
+  ok(t['dev-server'].options.proxyConfig === 'apps/shop/proxy.api.mjs', `the project's choice kept: ${t['dev-server'].options.proxyConfig}`);
+  ok(tree.exists('apps/shop/proxy.local.mjs'), 'the proxy.local.mjs seam is seeded');
+  ok(warned.some((w) => w.includes('uses a proxy config of its own') && w.includes("import { emulatorRoutes } from './proxy.conf.mjs';")), `warned: ${warned.join(' | ') || '(nothing)'}`);
+});
+
 checkAsync('a first scaffold: the Firebase core, arriving after the web seeding, still declares the emulators for served apps', async (ok) => {
   const tree = angularShop();
   await generator('serve')(tree, { project: 'shop' });
@@ -1385,8 +1417,10 @@ checkAsync('firebase core on an old-shaped eslint.config.mjs (no trailing comma)
   const sf = ts_.createSourceFile('eslint.config.mjs', out, ts_.ScriptTarget.Latest, true, ts_.ScriptKind.JS);
   ok(sf.parseDiagnostics.length === 0, `does not parse: ${sf.parseDiagnostics.map((d) => d.messageText).join('; ')}`);
   ok(!/^\s*,\s*$/m.test(out) && !/},\]/.test(out), `malformed splice:\n${out}`);
-  ok(/\n {24}},\n {24}\/\/ THE PLATFORM FIREWALL/.test(out), `not at the neighbours' indentation:\n${out}`);
-  ok(/sourceTag: 'platform:shared'[\s\S]*\n {24}}\n {20}\]/.test(out), `closing bracket not on its own line:\n${out}`);
+  ok(/\n {4}},\n {4}\/\/ THE PLATFORM FIREWALL/.test(out), `not at the neighbours' indentation:\n${out}`);
+  ok(/\n {4}}\n\];\n$/.test(out), `closing bracket not on its own line:\n${out}`);
+  ok(/';\n\n\/\/ THE PLATFORM FIREWALL[\s\S]*\n\];\n\nexport default \[/.test(out), `the constraints, set apart above the export:\n${out}`);
+  ok(/sourceTag: "\*",/.test(out) && !/sourceTag: 'platform:[a-z]+',\n {28}/.test(out), `the project's own constraints untouched:\n${out}`);
   await generator('firebase-emulators')(tree, {});
   ok(tree.read('eslint.config.mjs', 'utf8') === out, 'a re-run changed eslint.config.mjs');
 });

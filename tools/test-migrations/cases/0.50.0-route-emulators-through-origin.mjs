@@ -66,6 +66,25 @@ const STOCK_INTERFACE = `export interface Environment {
 }
 `;
 
+/** The 0.7.x templates (eddc392 … 8312546~1): auth had neither `proxied` nor its paragraph — the 0.8.0 diff, reversed. */
+const STOCK_ENV_0_7 = STOCK_ENV.replace(
+  `    // \`proxied\` (auth + functions) routes the emulator through the dev-server's OWN origin (proxy.conf.mjs
+    // relays it, offset-shifted) so the host browser needs only the port the app loaded on. It matters MOST
+    // for auth: apps usually gate every route on auth readiness, so a squatted/forwarded :9099 leaves the app
+    // blank AND sign-in hanging. Set false to dial the emulator port directly.
+    auth: { url: 'http://localhost:9099', default: EMULATE.auth, proxied: true },
+`,
+  `    auth: { url: 'http://localhost:9099', default: EMULATE.auth },
+`,
+);
+const STOCK_INTERFACE_0_7 = STOCK_INTERFACE.replace(
+  `    // \`proxied\` (auth too): reach the emulator through the dev-server's own origin (proxy.conf.mjs relays it).
+    auth?: { url: string; default: boolean; proxied?: boolean };
+`,
+  `    auth?: { url: string; default: boolean };
+`,
+);
+
 /** A pre-0.24.3-migrated project: no `proxied` anywhere — 0.24.3 left it off on purpose. */
 const MIGRATED_ENV = `export const environment = {
   production: false,
@@ -142,6 +161,21 @@ const journey = ({ opted }) => (tree) => {
   writeJson(tree, '.bespunky/dev.json', journeyDevJson(opted));
 };
 
+/** An app's project.json with an Angular dev-server leaf. */
+const DEV_SERVER = (options = {}, configurations) => ({
+  name: 'shop',
+  root: 'apps/shop',
+  targets: { 'dev-server': { executor: '@angular/build:dev-server', options: { buildTarget: 'shop:build', ...options }, ...(configurations ? { configurations } : {}) } },
+});
+/** The emulators process as the house seeds it. */
+const HOUSE_EMULATORS = (extraPorts) => ({
+  id: 'emulators',
+  cmd: ['node_modules/.bin/nx', 'run', 'firebase:emulators'],
+  ports: { auth: 9099, firestore: 8080, ...extraPorts },
+  url: [{ param: 'emulate', value: 'none', when: 'skipped' }],
+  advice: [{ when: 'contended', text: 'Real Google OAuth sign-in is registered for that base origin only.' }],
+});
+
 function app(tree, root = 'apps/shop', { env = STOCK_ENV, iface = STOCK_INTERFACE } = {}) {
   tree.write('firebase.json', '{ "emulators": {} }\n');
   tree.write(`${root}/src/app/firebase.config.ts`, '// generator-owned\n');
@@ -179,6 +213,17 @@ export default {
     {
       name: 'the stock 0.49 bundle: `proxied` and its paragraphs gone, every value kept, the endpoints comment replaced',
       setup: (tree) => app(tree),
+      historicalShapes: [
+        {
+          // The 0.7.x bundle: `proxied` on functions only, in the value AND the type. 0.24.3's (pre-88f71fb) guard judged
+          // that interface current, so a project past 0.24.3 still carries it byte-for-byte. It differs from the 0.8.0+
+          // stock only by auth's paragraph and member — exactly what this rung removes.
+          // git show eddc392:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/environment.ts.tpl
+          // git show eddc392:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/environment.interface.ts.tpl
+          name: 'nx-tools 0.7.x (eddc392): `proxied` on functions only',
+          setup: (tree) => app(tree, 'apps/shop', { env: STOCK_ENV_0_7, iface: STOCK_INTERFACE_0_7 }),
+        },
+      ],
       expect: (tree, t) => {
         for (const path of [ENV, IFACE]) t.hasNot(path, 'proxied');
         t.has(ENV, "auth: { url: 'http://localhost:9099', default: EMULATE.auth },");
@@ -199,6 +244,36 @@ export default {
         tree.write('.gitignore', `node_modules\n\n${OLD_GITIGNORE}`);
         tree.write('.devcontainer/devcontainer.json', OLD_DEVCONTAINER);
       },
+      historicalShapes: [
+        {
+          // The firebase-emulators .gitignore block is appended ONCE (keyed on /.emulator-data) and never rewritten, so a
+          // 0.2.x project still carries the serve-worktree flag. git show ec7abcb:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/generator.ts (GITIGNORE_BLOCK)
+          name: '0.2.x .gitignore (ec7abcb): `<app>:serve-worktree --portOffset`',
+          setup: (tree) => {
+            app(tree);
+            tree.write('.gitignore', `node_modules\n\n${OLD_GITIGNORE.replace('`<app>:serve --portOffset`', '`<app>:serve-worktree --portOffset`')}`);
+            tree.write('.devcontainer/devcontainer.json', OLD_DEVCONTAINER);
+          },
+        },
+        {
+          // The 0.35.0–0.36.x wrap of the port comment (on `:4200`, not "the dev-server port").
+          // git show 7aafe46:plugins/project-starter/skills/new-project/assets/nx-tools/src/layers/firebase.ts (devcontainer `why`)
+          name: '0.35 devcontainer port comment (7aafe46): wrapped on `:4200`',
+          setup: (tree) => {
+            app(tree);
+            tree.write('.gitignore', `node_modules\n\n${OLD_GITIGNORE}`);
+            tree.write(
+              '.devcontainer/devcontainer.json',
+              OLD_DEVCONTAINER.replace(
+                `    // real Google OAuth is pinned to whichever holds the dev-server port). The shared browser runs INSIDE the
+    // container and reaches them on loopback, so it works for every container.`,
+                `    // real Google OAuth is pinned to whichever holds :4200). The shared browser runs INSIDE the container and
+    // reaches them on loopback, so it works for every container.`,
+              ),
+            );
+          },
+        },
+      ],
       expect: (tree, t, lines) => {
         t.equal(
           t.read('.gitignore'),
@@ -337,7 +412,84 @@ export default {
           t.hasNot(`apps/shop/src/app/${file}`, 'proxied');
         }
         t.hasNot('apps/shop/proxy.conf.mjs', '0.49');
-        t.has('apps/shop/proxy.conf.mjs', 'apps/shop/src/environments/environment.ts');
+        // Composable, and keyed on no project id (so whatever id the client runs under, emulated or real, is relayed).
+        t.has('apps/shop/proxy.conf.mjs', 'export const emulatorRoutes');
+        t.hasNot('apps/shop/proxy.conf.mjs', 'environment.ts');
+        t.has('apps/shop/proxy.local.mjs', 'export default {};');
+      },
+    },
+    {
+      name: "a project's own proxy.local.mjs is never rewritten",
+      setup: (tree) => {
+        app(tree);
+        tree.write('apps/shop/proxy.local.mjs', "export default { '/api/': { target: 'http://localhost:3000' } };\n");
+      },
+      expect: (tree, t) => t.equal(t.read('apps/shop/proxy.local.mjs'), "export default { '/api/': { target: 'http://localhost:3000' } };\n", 'proxy.local.mjs'),
+    },
+    {
+      // Before 0.50 only callables depended on the relay; now every emulated service does.
+      name: 'an Angular dev server naming no proxy config is pointed at proxy.conf.mjs',
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, 'apps/shop/project.json', DEV_SERVER());
+      },
+      expect: (tree, t) => {
+        t.equal(readJson(tree, 'apps/shop/project.json').targets['dev-server'].options.proxyConfig, 'apps/shop/proxy.conf.mjs', 'proxyConfig');
+      },
+    },
+    {
+      name: "R4-1 — a dev server with a JSON proxy config of its own: kept, and told exactly what to do (it can't import)",
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, 'apps/shop/project.json', DEV_SERVER({ proxyConfig: 'apps/shop/proxy.conf.json' }));
+      },
+      expect: (tree, t, log) => {
+        t.equal(readJson(tree, 'apps/shop/project.json').targets['dev-server'].options.proxyConfig, 'apps/shop/proxy.conf.json', 'kept');
+        t.ok(logged(log, '`shop:dev-server` uses a proxy config of its own (options.proxyConfig: apps/shop/proxy.conf.json)'), `reported: ${log.join(' | ')}`);
+        t.ok(logged(log, 'move your routes into apps/shop/proxy.local.mjs'), 'the seam is named');
+        t.ok(logged(log, 'is not a module, so it cannot import them'), 'no import advice for JSON');
+      },
+    },
+    {
+      name: 'R4-1 — an ES-module proxy config in a configuration: kept, and handed the one-line import',
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, 'apps/shop/project.json', DEV_SERVER({}, { development: { proxyConfig: 'apps/shop/dev/proxy.mjs' } }));
+      },
+      expect: (tree, t, log) => {
+        const leaf = readJson(tree, 'apps/shop/project.json').targets['dev-server'];
+        t.equal(leaf.options.proxyConfig, undefined, 'not set beside a configuration that overrides it');
+        t.ok(logged(log, "import { emulatorRoutes } from '../proxy.conf.mjs';"), `the import, relative to that file: ${log.join(' | ')}`);
+      },
+    },
+    {
+      name: 'R4-1 — a dev server the house cannot configure: told which export to use',
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, 'apps/shop/project.json', { name: 'shop', root: 'apps/shop', targets: { 'dev-server': { executor: '@nx/vite:dev-server' } } });
+      },
+      expect: (tree, t, log) => {
+        t.ok(logged(log, 'runs `@nx/vite:dev-server`'), `reported: ${log.join(' | ')}`);
+        t.ok(logged(log, '`viteEmulatorRoutes`'), 'the Vite export is named');
+      },
+    },
+    {
+      name: "R4-5 — the house's emulators process gains the Emulator UI banner advice; one without a ui port does not",
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, '.bespunky/dev.json', {
+          apps: {
+            shop: { processes: [{ id: 'app', cmd: 'x', ports: { app: 4200 }, primary: true }, HOUSE_EMULATORS({ ui: 4000 })] },
+            noui: { processes: [{ id: 'app', cmd: 'x', ports: { app: 4300 }, primary: true }, HOUSE_EMULATORS({})] },
+          },
+        });
+      },
+      expect: (tree, t) => {
+        const d = readJson(tree, '.bespunky/dev.json');
+        const advice = d.apps.shop.processes[1].advice;
+        t.equal(advice.map((a) => a.when), ['contended', 'base', 'offset'], 'the OAuth advice kept, the UI advice appended');
+        t.ok(advice[2].text.includes('${PORT:ui}') && advice[2].text.includes('shared browser'), advice[2].text);
+        t.equal(d.apps.noui.processes[1].advice.length, 1, 'no ui port: nothing to name');
       },
     },
     {
@@ -351,6 +503,29 @@ export default {
             "  // Emulator endpoints. Match `firebase.json` at the workspace root — if you\n  // change a port there, change it here too, AND in the devcontainer's\n  // `forwardPorts` (all three speak about the same local emulator suite;\n  // there's no auto-sync).\n  emulators: {",
           ),
         }),
+      historicalShapes: [
+        {
+          // The first env-file template wrote an earlier wording that never mentioned forwardPorts — true as far as it
+          // goes (keep the ports in step with firebase.json), so it is the project's comment and stays.
+          // git show 6106999:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/environment.ts.tpl (same through e76c12a)
+          name: 'the 6106999 endpoints comment (no forwardPorts claim)',
+          diverges: 'its comment makes no claim this change made false, so the rung leaves it — the values are converted alike',
+          setup: (tree) =>
+            app(tree, 'apps/old', {
+              iface: null,
+              env: MIGRATED_ENV.replace(
+                '  emulators: {',
+                "  // Emulator endpoints. Match `firebase.json` at the workspace root — if you\n  // change a port there, change it here too. (Both files speak about the same\n  // local emulator suite; there's no auto-sync.)\n  emulators: {",
+              ),
+            }),
+          expect: (tree, t) => {
+            const env = 'apps/old/src/environments/environment.ts';
+            t.has(env, '(Both files speak about the same');
+            t.hasNot(env, 'THE BROWSER NEVER DIALS');
+            t.has(env, "firestore: { host: 'localhost', port: 8081, default: true }");
+          },
+        },
+      ],
       expect: (tree, t) => {
         const env = 'apps/old/src/environments/environment.ts';
         t.hasNot(env, 'forwardPorts');

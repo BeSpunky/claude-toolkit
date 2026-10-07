@@ -128,28 +128,73 @@ export interface EmulatorEndpoint {
  *     port and no offset: only the address the app loaded on, whatever port the editor forwarded it to.
  *   • ON THE SERVER (SSR) — directly, at the container address in environment.ts, shifted by the stack's
  *     PORT_OFFSET, which the dev engine exports to every process of a shifted stack.
+ * WHETHER a service is emulated is decided once, the same way in both (see emulator-overrides.ts): the browser
+ * reads the URL the dev engine opened (`?emulate=none` when the suite is skipped), the server the same query from
+ * the engine's DEV_URL_QUERY — so a server render and the page it hydrates talk to the same backend.
  */
 export function emulatorEndpoint(service: EmulatorService): EmulatorEndpoint | undefined {
   const entry = emulate[service] ? environment.emulators?.[service] : undefined;
   if (!entry) return undefined;
-  return typeof window === 'undefined' ? containerEndpoint(entry) : originEndpoint(service, window.location);
+  if (typeof window === 'undefined') return containerEndpoint(entry);
+  checkTheRelay(service, window.location);
+  return { host: window.location.hostname, port: Number(window.location.port) || 80, origin: window.location.origin };
 }
 
-/** The browser's route to every emulator: the page's own origin, which the dev server relays. */
-function originEndpoint(service: EmulatorService, page: Location): EmulatorEndpoint {
-  // The Firebase SDK dials an emulator over plain http only (connect*Emulator forces http on every host but a
-  // Cloud Workstation), so an emulator relayed through an https origin is unreachable — mixed content at best.
-  // Say so at bootstrap rather than leave every call to fail somewhere else.
+/**
+ * What the emulator hub says, through the page's origin, about the running suite: the emulators it runs, or the
+ * sentence that explains why it could not be asked. Asked once per page load, by the first emulated service.
+ */
+let hubAnswer: Promise<string[] | string> | undefined;
+/** Each sentence is said once, however many services it concerns. */
+const said = new Set<string>();
+
+/**
+ * Check, for one emulated service, the relay it depends on — and say out loud, in the console, the three ways it
+ * goes quiet otherwise: the page is served over https (the SDK dials an emulator over http only), the dev server
+ * does not relay (its proxy config leaves proxy.conf.mjs's routes out: Firestore would hang offline, Auth fail with
+ * a network error), or the suite does not run that emulator. A console error, never a throw — the same policy as
+ * the dev guard in provideAppFirebase(): one broken service must not brick the dev app, and the error names the fix.
+ */
+function checkTheRelay(service: EmulatorService, page: Location): void {
+  const say = (sentence: string): void => {
+    if (said.has(sentence)) return;
+    said.add(sentence);
+    console.error(`[firebase.config.ts] ${sentence}`);
+  };
   if (page.protocol !== 'http:') {
-    throw new Error(
-      `[firebase.config.ts] ${service} is emulated, and the browser reaches every emulator through this page's own ` +
-        `origin (the dev server relays it) — but the page is served over ${page.protocol.replace(':', '')}, and the ` +
-        `Firebase SDK can reach an emulator over plain http only.\n` +
-        `  Serve the dev server over http (drop \`ssl\` from its dev-server target), or open the app with ` +
-        `?emulate=none to use the real backend for every service.`
+    say(
+      `Emulated Firebase services will not connect: this page is served over ${page.protocol.replace(':', '')}, the ` +
+        `browser reaches every emulator through the page's own origin, and the Firebase SDK reaches an emulator over ` +
+        `plain http only.\n  Serve the dev server over http locally (drop \`ssl\` from its dev-server target), or open ` +
+        `the app with ?emulate=none to use the real backend for every service.`,
     );
+    return;
   }
-  return { host: page.hostname, port: Number(page.port) || 80, origin: page.origin };
+  hubAnswer ??= fetch(`${page.origin}/__bespunky/emulator-hub/emulators`, { cache: 'no-store' }).then(
+    async (response) => {
+      if (response.ok && (response.headers.get('content-type') ?? '').includes('json')) {
+        return Object.keys((await response.json()) as Record<string, unknown>);
+      }
+      return response.status >= 500
+        ? `Emulated Firebase services will not connect: the emulator suite is not answering behind the dev server ` +
+            `(HTTP ${response.status}) — is it running? \`nx serve\` starts it beside the app; served with ` +
+            `--no-emulators, every service should resolve real (?emulate=none).`
+        : `Emulated Firebase services will not connect: the dev server does not relay the emulators (the hub route ` +
+            `answered ${response.status} ${response.headers.get('content-type') ?? ''} — the app, not the emulator hub). ` +
+            `Its proxyConfig must be this app's proxy.conf.mjs — your own routes go in proxy.local.mjs beside it — or a ` +
+            `config of yours that includes its \`emulatorRoutes\`.`;
+    },
+    (error: unknown) => `The emulator hub could not be asked through this page's origin (${String(error)}).`,
+  );
+  void hubAnswer.then((answer) => {
+    if (typeof answer === 'string') say(answer);
+    else if (!answer.includes(service)) {
+      say(
+        `${service} is emulated, but the running suite has no ${service} emulator (it runs: ${answer.join(', ')}). ` +
+          `Enable it in firebase.json, or use the real ${service} with ?real=${service}.`,
+      );
+    }
+  });
 }
 
 /** Server-side code's route: the container address from environment.ts, shifted by the stack's PORT_OFFSET. */

@@ -2,7 +2,8 @@
 //
 // Its ports are the Angular answers to framework-neutral questions:
 //   apps       — @nx/angular:application with the house defaults (minimal, scss, routing, no e2e), and a first
-//                shell with a skip link and the <main> landmark (./app-shell);
+//                shell with the <main> landmark (./app-shell);
+//   shell      — the skip link, added by the design system with its look (./app-shell);
 //   libs       — @nx/angular:library (+ the ng-package.json normalisation a publishable lib needs);
 //   env        — Angular's environment-files pattern: src/environments/environment*.ts + build fileReplacements;
 //   providers  — the app's ApplicationConfig (src/app/app.config.ts);
@@ -27,7 +28,7 @@ import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
-import { seedAppShell } from './app-shell';
+import { addSkipLink, seedLandmark } from './app-shell';
 import { convertBareLint } from '../../generators/_utils/lint-inference';
 
 /**
@@ -129,7 +130,7 @@ export const angular: StackAdapter = {
       convertBareLint(tree, project);
       const root = readProjectConfiguration(tree, project).root;
       stateAngularCompilerContract(tree, root);
-      seedAppShell(tree, root); // the skip link and the <main> landmark, once (./app-shell)
+      seedLandmark(tree, root); // the <main> landmark, once; the skip link comes with its look (./app-shell, `shell`)
       return { project, callback };
     },
   },
@@ -186,6 +187,12 @@ export const angular: StackAdapter = {
       if (wired === current) return 'already';
       tree.write(path, wired);
       return 'wired';
+    },
+  },
+
+  shell: {
+    addSkipLink(tree, project) {
+      return addSkipLink(tree, readProjectConfiguration(tree, project).root);
     },
   },
 
@@ -254,12 +261,24 @@ export const angular: StackAdapter = {
     },
 
     // The dev-server's OWN option (Angular's `proxyConfig`), so a direct `nx run <app>:dev-server` gets it too;
-    // set-if-absent, so a project that points elsewhere keeps its choice. Through setLeafOption, which keeps the
-    // `dev-stack` composer's mirror of the leaf true.
+    // set-if-absent, so a project that points elsewhere keeps its choice — and is TOLD, by the caller: a proxy config
+    // of its own, in the leaf's options or any configuration, is a dev server that does not serve this one. Through
+    // setLeafOption, which keeps the `dev-stack` composer's mirror of the leaf true.
     useProxy(tree, project, proxyConfig) {
-      const leaf = projectOf(tree, project)?.targets?.['dev-server'];
-      if (!leaf || !DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) return false;
-      return setLeafOption(tree, project, 'proxyConfig', proxyConfig);
+      const target = 'dev-server';
+      const leaf = projectOf(tree, project)?.targets?.[target];
+      if (!leaf) return { status: 'none' };
+      if (!DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) {
+        return { status: 'unconfigurable', target, executor: leaf.executor ?? '(none — a command target)' };
+      }
+      const named = [
+        ['options', leaf.options?.proxyConfig],
+        ...Object.entries(leaf.configurations ?? {}).map(([name, c]) => [`configurations.${name}`, c?.proxyConfig]),
+      ] as const;
+      const foreign = named.find(([, value]) => value !== undefined && value !== proxyConfig);
+      if (foreign) return { status: 'foreign', target, where: foreign[0], proxyConfig: String(foreign[1]) };
+      setLeafOption(tree, project, 'proxyConfig', proxyConfig);
+      return { status: 'wired' };
     },
   },
 

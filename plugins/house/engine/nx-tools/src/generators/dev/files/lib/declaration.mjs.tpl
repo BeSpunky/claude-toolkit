@@ -24,13 +24,15 @@
 //
 // Substitutions in cmd / env / url values: ${PORT:<name>} (that port, shifted), ${OFFSET}, ${TREE} (the
 // served tree's absolute path), ${APP}, ${STACK_DIR} (this stack's own state dir). Every process also gets
-// PORT_<NAME> for every port of the app, PORT_OFFSET when the stack is shifted, and DEV_STACK_DIR — the
+// PORT_<NAME> for every port of the app, PORT_OFFSET when the stack is shifted, DEV_URL_QUERY when the app is
+// opened with URL switches (the same query, for a server that must resolve what the page resolves), and DEV_STACK_DIR — the
 // directory that is this stack's alone (tree + app + offset), where a process keeps anything a tool would
 // otherwise key by something every stack shares (a TMPDIR, a lock, a locator file). See lib/stacks.mjs. A bare PORT is NOT exported: it is a convention some runtimes act on
 // (a Cloud Functions worker, say) — a server that wants it declares `"env": { "PORT": "${PORT:app}" }`.
 //
 // url[].when    always | offset (stack shifted) | running (this process runs) | skipped (--skip'ed)
-// advice[].when always | base (stack on its base ports) | offset | contended (base ports owned elsewhere)
+// advice[].when always | base (stack on its base ports) | offset | contended (base ports owned elsewhere) — a
+//               --skip'ed process's advice is never given
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -187,6 +189,20 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
       throw new DeclarationError(`${where}: unknown substitution ${whole} (known: \${PORT:<name>} \${OFFSET} \${TREE} \${APP} \${STACK_DIR})`);
     });
 
+  const holds = (when, proc) =>
+    when === 'always' ||
+    (when === 'offset' && offset > 0) ||
+    (when === 'base' && offset === 0) ||
+    (when === 'running' && !proc.skipped) ||
+    (when === 'skipped' && proc.skipped);
+
+  // The URL switches the app is opened with — and, as DEV_URL_QUERY, what every process of the stack is told: a
+  // server rendering the app resolves exactly what the page it hydrates was opened with.
+  const query = new URLSearchParams();
+  for (const p of app.processes) {
+    for (const u of p.url ?? []) if (holds(u.when ?? 'always', { skipped: skip.includes(p.id) })) query.set(u.param, subst(u.value, `apps.${appName}.${p.id}.url`));
+  }
+
   const portEnv = Object.fromEntries(Object.entries(ports).map(([name, port]) => [envName(name), String(port)]));
 
   const processes = app.processes.map((p) => {
@@ -197,6 +213,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
       ...portEnv,
       ...(offset > 0 ? { PORT_OFFSET: String(offset) } : {}),
       ...(stackDir ? { DEV_STACK_DIR: stackDir } : {}),
+      ...(query.size ? { DEV_URL_QUERY: query.toString() } : {}),
     };
     const shell = typeof p.cmd === 'string';
     const command = shell ? [subst(p.cmd, `${where}.cmd`), ...extra.map(shellQuote)].join(' ') : subst(p.cmd[0], `${where}.cmd`);
@@ -216,17 +233,10 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
     };
   });
 
-  const holds = (when, proc) =>
-    when === 'always' ||
-    (when === 'offset' && offset > 0) ||
-    (when === 'base' && offset === 0) ||
-    (when === 'running' && !proc.skipped) ||
-    (when === 'skipped' && proc.skipped);
-
-  const query = new URLSearchParams();
+  // A process's advice is about that process: a skipped one has nothing to say.
   const advice = [];
-  app.processes.forEach((p, i) => {
-    for (const u of p.url ?? []) if (holds(u.when ?? 'always', processes[i])) query.set(u.param, subst(u.value, `apps.${appName}.${p.id}.url`));
+  app.processes.forEach((p) => {
+    if (skip.includes(p.id)) return;
     for (const a of p.advice ?? []) advice.push({ when: a.when ?? 'always', text: subst(a.text, `apps.${appName}.${p.id}.advice`) });
   });
 
