@@ -117,7 +117,7 @@ open (a redirected stderr file is never truncated), Linux /proc, best effort. **
   self-ignoring `.bespunky/run/`.
 - Bumps owed (not done here, by instruction): `@bespunky/nx-tools` (payload), `bespunky-workflow`
   (`local-server-isolation/SKILL.md`). `check-release-invariants` reports them.
-- Tests: test-generators 165 ok / 22 skip; test-migrations 206 ok; test-layers 100 ok; test-scaffold 22 files ok
+- Tests: test-generators 164 ok / 22 skip; test-migrations 206 ok; test-layers 100 ok; test-scaffold 22 files ok
   (new: `machine-output`, `emulators-stop`; `dev-engine` gained the detached-work cases).
 
 ## Left open
