@@ -12,6 +12,16 @@
 // No evidence at all → `shared`: nothing in it ties it to a platform, which is exactly what shared means — and the
 // firewall then holds it to that (a shared project importing firebase-admin fails lint, saying so).
 //
+// THE WORKSPACE ROOT PROJECT is not classified unless it really is code. Nx makes the repo root a project for
+// many reasons that have nothing to do with source — the verdaccio `local-registry` holder every
+// create-nx-workspace writes, a root package.json with scripts — and "nothing in it is bound to a platform" is
+// true of such a shell only because it HAS nothing; tagging it `platform:shared` states a fact about code that
+// does not exist. A platform tag is read by one consumer, the module-boundaries lint rule, about a project it
+// lints or a project something imports — so the root is classified when the evidence says it is code in one of
+// those senses: a stack builds it (a standalone app at the root), it declares a target that builds, tests, serves
+// or lints code (`build`, `test`, `serve`, `lint`), or another project imports it. Otherwise it is left untagged and
+// unmentioned (`isWorkspaceShell`).
+//
 // It also answers the question an upgrade owes the developer: which EXISTING dependencies will the tightened
 // firewall now fail on (`violations`) — the leaks it was blind to.
 import { type Tree, getProjects, joinPathFragments, readJson } from '@nx/devkit';
@@ -83,6 +93,13 @@ export function classifyWorkspace(tree: Tree, externals: PlatformExternals): Map
     result.set(name, { project: name, platform: declared ?? platform, declared: Boolean(declared), evidence, dependsOn: [...dependsOn].sort() });
   }
 
+  // The workspace root, when it is a shell and not code (see the header): out of the classification entirely.
+  const imported = new Set([...result.values()].flatMap((entry) => entry.dependsOn));
+  for (const [name, project] of projects) {
+    const entry = result.get(name)!;
+    if (!entry.declared && isWorkspaceShell(tree, name, project, imported)) result.delete(name);
+  }
+
   // (3) The fixed point: an undeclared project is joined with what it imports. Monotone on a finite lattice, so it
   // settles within (number of projects) rounds; the bound is only a guard.
   for (let round = 0, changed = true; changed && round <= projects.size; round++) {
@@ -111,6 +128,21 @@ export function classifyWorkspace(tree: Tree, externals: PlatformExternals): Map
 }
 
 /** Every dependency between two classified projects that the firewall forbids. */
+/** Targets whose presence says a project holds code of its own (built, tested, served or linted). */
+const CODE_TARGETS = ['build', 'test', 'serve', 'lint'];
+
+/** The repo root as a project that is no code project — see the header. */
+export function isWorkspaceShell(
+  tree: Tree,
+  name: string,
+  project: { root: string; targets?: Record<string, unknown> },
+  imported: Set<string>,
+): boolean {
+  if (normalizeRoot(project.root) !== '.') return false;
+  if (imported.has(name) || adapterOf(tree, name)) return false;
+  return !Object.keys(project.targets ?? {}).some((target) => CODE_TARGETS.includes(target));
+}
+
 export function violations(classified: Map<string, Classification>): Violation[] {
   const found: Violation[] = [];
   for (const entry of classified.values()) {
