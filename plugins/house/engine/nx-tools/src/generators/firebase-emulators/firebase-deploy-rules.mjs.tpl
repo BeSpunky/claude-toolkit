@@ -43,7 +43,9 @@ if (!declared.length) {
   say('firebase.json declares no Firestore or Storage rules, so there is nothing to deploy — this project\'s rules live');
   say('only in the Firebase console. To keep them in the repo (reviewed, versioned, shipped by `nx affected -t deploy`),');
   say('pull the LIVE ones in once — a human, in a terminal (it asks where to put each file; answer firebase/<file>):');
-  say('    npx firebase init firestore storage -P <alias>');
+  say('    npx firebase init firestore -P <alias>');
+  say('    npx firebase init storage -P <alias>');
+  say('(two commands: `firebase init` takes ONE feature, and drops any second one without a word).');
   say('It downloads the current rules and indexes from the console, so the first deploy changes nothing, and declares');
   say('them in firebase.json.');
   process.exit(0);
