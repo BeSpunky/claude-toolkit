@@ -26,6 +26,10 @@
 // and silently loads no placeholder at all. Values are written back re-quoted, and the placed file is re-read with
 // the installed firebase-tools' strict parser before launch: anything but an exact round-trip is exit 2.
 //
+// ONE PARSER FOR BOTH SIDES. tools/push-secrets.sh reads production's `.secret.local` through this file too
+// (`push-entries`), so what is pushed to Secret Manager and what the emulator is refused are decided by the same
+// rules — the ones Firebase itself applies.
+//
 //   node tools/emulator-secrets.cjs place --mode=inert|sandbox --source=<functions root> --dist=<bundle dir>
 //        [--main-source=<the main worktree's functions root>] [--project-mode=offline|real] [--show]
 'use strict';
@@ -342,19 +346,82 @@ function place({ mode, source, dist, mainSource, projectMode, show }) {
 
 module.exports = { parse, parseStrict, keyProblem, formatLine, bundledSecrets, inertSecretsPlugin, place, SINK, CONFIG_DIR_SINCE };
 
+// ── 3. the production push (tools/push-secrets.sh) ───────────────────────────────────────────────────────────────
+/**
+ * The values tools/push-secrets.sh sets in Secret Manager — read from `.secret.local` with the SAME rules as everything
+ * above (firebase-tools' dotenv semantics), so `KEY="v" # note` pushes `v`, never `"v" # note`, and `export KEY=v`
+ * pushes KEY. Refuses the whole file (exit 2) on a line that is not KEY=VALUE or a key Firebase refuses — a push is
+ * production, so nothing is half-pushed on a guess. Unfilled values (empty, `PASTE_…`) are skipped, by name.
+ * Writes NUL-separated `key, value` pairs to stdout for the shell to pipe into the CLI; never prints a value.
+ */
+function pushEntries(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    console.error(`[push-secrets] cannot read ${file}: ${e.message}`);
+    process.exit(2);
+  }
+  const { envs, errors } = parse(text);
+  if (errors.length) {
+    console.error(
+      `[push-secrets] ${file} has ${errors.length} line(s) that are not KEY=VALUE (or a # comment) — refusing to push ` +
+        `anything. (Line contents are not printed: they may hold a value.)`,
+    );
+    process.exit(2);
+  }
+  const bad = Object.keys(envs).filter((k) => keyProblem(k));
+  if (bad.length) {
+    console.error(
+      `[push-secrets] Firebase refuses these secret names: ${bad.map((k) => `${k} (${keyProblem(k)})`).join(', ')} — ` +
+        `rename them (and their defineSecret) before pushing; nothing was pushed.`,
+    );
+    process.exit(2);
+  }
+  const out = [];
+  for (const [key, value] of Object.entries(envs)) {
+    if (value === '' || value.startsWith('PASTE_')) {
+      console.error(`[push-secrets] skipping ${key} — value not filled in.`);
+      continue;
+    }
+    out.push(key, value);
+  }
+  process.stdout.write(out.map((x) => `${x}\0`).join(''));
+}
+
+/** What a dry run shows for one value: its length, a fingerprint, and its edges — enough to spot a stray quote or comment. */
+function describeValue(value) {
+  const hash = require('node:crypto').createHash('sha256').update(value).digest('hex').slice(0, 12);
+  const edge = value.length > 8 ? `${JSON.stringify(value.slice(0, 3))}…${JSON.stringify(value.slice(-2))}` : '(short: edges hidden)';
+  return `${value.length} chars, sha256 ${hash}, ${edge}`;
+}
+
+module.exports.pushEntries = pushEntries;
+module.exports.describeValue = describeValue;
+
 if (require.main === module) {
   const [command, ...rest] = process.argv.slice(2);
   const opt = Object.fromEntries(rest.map((a) => /^--([^=]+)(?:=(.*))?$/.exec(a)).filter(Boolean).map((m) => [m[1], m[2] ?? '1']));
-  if (command !== 'place' || !['inert', 'sandbox'].includes(opt.mode) || !opt.source || !opt.dist) {
-    console.error('usage: emulator-secrets.cjs place --mode=inert|sandbox --source=<dir> --dist=<dir> [--main-source=<dir>] [--project-mode=offline|real] [--show]');
+  if (command === 'push-entries' && opt.file) {
+    pushEntries(opt.file);
+  } else if (command === 'describe') {
+    // The value on stdin (never argv: it would show in `ps`).
+    let value = '';
+    process.stdin.on('data', (c) => (value += c)).on('end', () => process.stdout.write(describeValue(value)));
+  } else if (command === 'place' && ['inert', 'sandbox'].includes(opt.mode) && opt.source && opt.dist) {
+    place({
+      mode: opt.mode,
+      source: opt.source,
+      dist: opt.dist,
+      mainSource: opt['main-source'] || undefined,
+      projectMode: opt['project-mode'] || 'offline',
+      show: opt.show === '1',
+    });
+  } else {
+    console.error(
+      'usage: emulator-secrets.cjs place --mode=inert|sandbox --source=<dir> --dist=<dir> [--main-source=<dir>] [--project-mode=offline|real] [--show]\n' +
+        '       emulator-secrets.cjs push-entries --file=<.secret.local>   |   describe < value',
+    );
     process.exit(2);
   }
-  place({
-    mode: opt.mode,
-    source: opt.source,
-    dist: opt.dist,
-    mainSource: opt['main-source'] || undefined,
-    projectMode: opt['project-mode'] || 'offline',
-    show: opt.show === '1',
-  });
 }
