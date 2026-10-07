@@ -42,8 +42,9 @@
 //                        `emulators:<svc>`, `seed:build`, `reset`. User-added targets are preserved.
 //   Both projects are HOUSE PROJECTS (_utils/project-files): found by project, created the way this workspace
 //   defines projects (a project.json, or a package.json workspace member under TS-solution linking).
-//   - tools/{emulators,emulator-data,reap-emulators,push-secrets,firebase-welcome}.sh, tools/seed/* — the
-//                        launch path, data lifecycle, port reclaim, secrets push, cloud-linkage banner, and
+//   - tools/{emulators,emulator-data,reap-emulators,push-secrets,firebase-welcome}.sh, tools/emulator-ports.mjs,
+//                        tools/seed/* — the launch path, data lifecycle, port reclaim (and the one port table
+//                        both read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
 //                        the declarative seed worlds (world.mjs and the seeds README are user-owned once written).
 //   - root eslint.config.mjs — best-effort insertion of the `platform:` dependency-constraint firewall:
 //                        `platform:web` bans firebase-admin/firebase-functions; `platform:server` bans the
@@ -73,7 +74,7 @@ import { loadTypeScript, type TsArrayLiteralExpression, type TsNode } from '../_
 import { adapterOf, applicationsWith } from '../../adapters/registry';
 import { workspaceStacksWith } from '../../adapters/workspace';
 import { hasDependency } from '../../layers/evidence';
-import { FIREBASE_DEFAULT_PORTS, HOUSE_EMULATORS } from './emulator-ports';
+import { FIREBASE_DEFAULT_PORTS, HOUSE_EMULATORS, renderEmulatorPortsModule } from './emulator-ports';
 import firebaseClientGenerator from '../firebase-client/generator';
 import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
 import { resolveAppsDir } from '../_utils/workspace-layout';
@@ -228,6 +229,7 @@ export default async function firebaseEmulatorsGenerator(
   //    workspace step re-running, and the banner must still see them.
   tree.write('tools/firebase-welcome.sh', template('firebase-welcome.sh.tpl').split('{{appsDir}}').join(appsDir));
   tree.write('tools/reap-emulators.sh', template('reap-emulators.sh.tpl'));
+  tree.write('tools/emulator-ports.mjs', renderEmulatorPortsModule(template('emulator-ports.mjs.tpl')));
   tree.write(
     'tools/emulators.sh',
     functionsPaths(substitute(template('emulators.sh.tpl'))).split('{{appEnvPath}}').join(clientEnv?.dev ?? ''),

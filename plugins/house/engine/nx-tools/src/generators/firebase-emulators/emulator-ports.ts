@@ -35,6 +35,21 @@ const FIRESTORE_WEBSOCKET_DEFAULT = 9150;
 /** Always occupied by a running suite — tools/emulators.sh pins them (shifted) even when firebase.json is silent. */
 const ALWAYS_ON = ['hub', 'logging'];
 
+/**
+ * Ports an emulator declares under a key of its own, not `port`: emulator → { key → the port's name }. Occupied
+ * (and shifted) only when DECLARED — undeclared, firebase-tools lets it float to a free port.
+ */
+const NESTED_PORTS: Readonly<Record<string, Readonly<Record<string, string>>>> = { firestore: { websocketPort: 'firestore-websocket' } };
+
+/**
+ * The table the RUNTIME reads — projected into the owned tools/emulator-ports.mjs (its `SUITE`), which emulators.sh
+ * and reap-emulators.sh use to list and shift the suite's ports. One table, two readers, no hand-copied literals.
+ */
+export const SUITE_PORTS = { defaults: FIREBASE_DEFAULT_PORTS, alwaysOn: ALWAYS_ON, nested: NESTED_PORTS } as const;
+
+/** tools/emulator-ports.mjs, rendered from its template with the table above. */
+export const renderEmulatorPortsModule = (template: string): string => template.split('{{SUITE}}').join(JSON.stringify(SUITE_PORTS, null, 2));
+
 type EmulatorsJson = Record<string, unknown>;
 
 function emulatorsOf(tree: Tree): EmulatorsJson {
@@ -60,7 +75,11 @@ function configured(tree: Tree): { name: string; port: number; entry: Record<str
 
 /** Every port a running suite occupies, by emulator name — what the dev engine shifts as one block. */
 export function emulatorPorts(tree: Tree): Record<string, number> {
-  const ports: Record<string, number> = Object.fromEntries(configured(tree).map(({ name, port }) => [name, port]));
+  const ports: Record<string, number> = {};
+  for (const { name, port, entry } of configured(tree)) {
+    ports[name] = port;
+    for (const [key, as] of Object.entries(NESTED_PORTS[name] ?? {})) if (Number.isInteger(entry[key])) ports[as] = entry[key] as number;
+  }
   for (const name of ALWAYS_ON) ports[name] ??= FIREBASE_DEFAULT_PORTS[name];
   return ports;
 }
