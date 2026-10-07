@@ -6,8 +6,8 @@ Worktree `hfh-fh` (branch `feat/house-firebase-handoff--fh`). Every finding repr
 
 | unit | finding(s) | who | status |
 | --- | --- | --- | --- |
-| docs | R7-1, R7-3 (non-serve half), R7-4..R7-11 | FH (inline) | in progress |
-| ladder+harness | R9-2, R9-4, R9-5, R9-6, R9-7 | FH subagent (paths: `plugins/house/engine/nx-tools/migrations.json`, `src/migrations/0.50.0/*` except split-serve-follower, `tools/test-migrations/**`) | dispatched |
+| docs | R7-1, R7-3 (non-serve half), R7-4..R7-11 | FH (inline) | done |
+| ladder+harness | R9-2, R9-4, R9-5, R9-6, R9-7 | FH subagent (paths: `plugins/house/engine/nx-tools/migrations.json`, `src/migrations/0.50.0/*` except split-serve-follower, `tools/test-migrations/**`) | done |
 
 ## Findings
 
@@ -42,3 +42,9 @@ Worktree `hfh-fh` (branch `feat/house-firebase-handoff--fh`). Every finding repr
   - **FA's rungs (split-serve-follower, stack-owned-dev-processes) — shapes FA's cases need:** composer `serve` (`@bespunky/nx-tools:serve`): 60bd79f (0.3.0–0.3.1) `{continuous:true, executor, options:{}}`; 296d706 (0.4.0–0.35) leaf options + Angular dev/prod configurations, `defaultConfiguration: development` (+`proxyConfig` from eddc392; kept Angular configs even over a non-Angular leaf from 5607eb3); 5607eb3 0.24.0 rung output `{continuous:true, executor}` (no options); d1acfe8 (0.35–0.49.2) `composerFor` = mirror of the leaf + continuous — **no shipped composer ever had dependsOn**. Leaf `dev-server`: always continuous — Angular `@angular/build:dev-server` with host + configurations (60bd79f / d1acfe8 adapters/angular); b65399d 0.24.0-renamed `serve-with-emulators` (possibly `@angular-devkit/build-angular:dev-server`, options only, no configurations). Firebase emulator targets: always continuous, 0d09453 → 0.49.2, `nx:run-commands` `bash tools/emulators.sh[ --only …]`, `emulators`/`emulators:functions` with `dependsOn:[{projects:['functions'],target:'build'}]`. **Gap:** from 5a05026 (0.36) `houseProjectHome` puts the suite into whatever project sits at `firebase/` under ITS name — stack-owned's `name === 'firebase'` misses it. e2e on `<app>:serve`: none shipped (`e2eTestRunner: 'none'`). Fixtures modelling never-shipped shapes: split-serve-follower's COMPOSER with `dependsOn: serve-preflight` (R9-1); stack-owned's SERVE/LEAF without host/configurations.
 - **R9-7 — fixed (2120901).** recompose's description: dev-stack (+ serve-preflight dependsOn, `_utils/dev-server.ts:89`), serve follower, dev.json entry + install step (`generators/dev/declaration.ts:76-78`) — verified. lint-house-apps': the functions:lint conversion (`lint-house-apps.ts`, `convertBareLint`). declare-node-version's two warnings now say THIS upgrade's generators act (wording only). Note for FF: the rung's `.nvmrc` regex `^v?(\d+)` still accepts what `declaredNodeMajor`'s `^v?(\d+)(?:\.\d+){0,2}$` refuses — untouched here.
 - Tests: `node tools/test-migrations/run.mjs` 227 passed, 0 failed; `node tools/test-generators/run.mjs` 181 passed, 0 failed, 23 skipped.
+
+### Final verification (FH)
+
+test-migrations 227/0 · test-generators 181/0 (23 skipped: optional framework plugins) · test-layers 100/0 · test-scaffold ok · test-branches 51/0 · test-standing ok · test-tips 10/0 · test-mod-brand 8/0 · test-voice 38/38 · check-descriptions ok · check-script-modes ok · mod-brand projection ok. check-release-invariants fails only for the known reason (payload/plugins not bumped — bumping is out of scope).
+
+**For FF:** 5bf7f22 changed declare-node-version's *image-tag* regex (typescript-node `1-22-bookworm` read as Node 1) — not `.nvmrc` parsing, which stays yours.
