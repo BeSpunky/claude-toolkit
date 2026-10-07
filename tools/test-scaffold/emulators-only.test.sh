@@ -141,6 +141,20 @@ refute '…auth is not passed' 'auth' "$out"
 out="$(run "$d" --only auth)"
 expect 'an explicit --only of only real services starts nothing' '<never invoked firebase>' "$out"
 
+# ── FIREBASE_EMULATOR_PROJECT was REMOVED: set, it refuses the launch instead of being silently ignored ─────────
+# It overrode only the suite's id — which the browser cannot see — so whoever still sets it would believe the suite
+# runs under their id while it does not.
+d="$(mkworkspace removed-override '{ "auth": { "port": 9099 } }')"
+export FIREBASE_ARGS_FILE="$d/.firebase-args"; rm -f "$FIREBASE_ARGS_FILE"
+said="$( cd "$d" && PATH="$TMP/bin:$PATH" FIREBASE_EMULATOR_PROJECT=acme-prod bash tools/emulators.sh 2>&1 >/dev/null )"; rc=$?
+expect 'FIREBASE_EMULATOR_PROJECT set: refused (exit 2)' 'rc=2 started=no' "rc=$rc started=$([ -f "$FIREBASE_ARGS_FILE" ] && echo yes || echo no)"
+expect '…saying it was removed' 'FIREBASE_EMULATOR_PROJECT is set ("acme-prod"), but it was REMOVED' "$said"
+expect '…why: one project id, derived from environment.ts' 'must share ONE project id, and both now derive it from environment.ts' "$said"
+expect '…and what to do instead' 'commit the service to the real backend in environment.ts' "$said"
+expect '…or unset it' 'unset FIREBASE_EMULATOR_PROJECT' "$said"
+out="$( cd "$d" && PATH="$TMP/bin:$PATH" FIREBASE_EMULATOR_PROJECT= bash tools/emulators.sh >/dev/null 2>&1; echo "rc=$?" )"
+expect 'set but EMPTY is still set: refused' 'rc=2' "$out"
+
 # ── No emulator block: warn rather than silently fall back into the broken default ──────────────────────────
 d="$(mkworkspace empty '{}')"
 export FIREBASE_ARGS_FILE="$d/.firebase-args"

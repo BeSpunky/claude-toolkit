@@ -102,7 +102,10 @@ export async function evaluateEnvironment(envFile) {
   try {
     mod = await import(pathToFileURL(resolve(envFile)).href);
   } catch (e) {
-    throw new EnvironmentError(`could not evaluate ${envFile}: ${e?.code ? `${e.code}: ` : ''}${e?.message ?? e}`);
+    throw new EnvironmentError(
+      `could not evaluate ${envFile}: ${e?.code ? `${e.code}: ` : ''}${e?.message ?? e}\n` +
+        "[emulators]   The suite's project id is the browser's decision, read from environment.ts's values — refusing to guess.",
+    );
   }
   const environment = mod.environment;
   const appId = environment?.firebase?.projectId;
@@ -122,8 +125,26 @@ const isFile = (path) => {
   }
 };
 
+/**
+ * FIREBASE_EMULATOR_PROJECT WAS REMOVED, and a removed knob that is silently ignored is worse than one that still
+ * works: whoever set it believes the suite runs under their id. It overrode the suite's id at launch only — which the
+ * browser cannot see — so the two could run under different projects. Set, it is a refusal that says so.
+ */
+export function refuseRemovedOverride(env = process.env) {
+  if (env.FIREBASE_EMULATOR_PROJECT === undefined) return;
+  throw new EnvironmentError(
+    `FIREBASE_EMULATOR_PROJECT is set (${JSON.stringify(env.FIREBASE_EMULATOR_PROJECT)}), but it was REMOVED — refusing to start ` +
+      'rather than ignore it. Why: the emulator suite and the app in the browser must share ONE project id, and both now ' +
+      "derive it from environment.ts (its `demo-` twin, or the real id when a service is committed to the real backend); a " +
+      'launch-time override would move the suite and leave the browser behind. Instead: commit the service to the real ' +
+      "backend in environment.ts (`false` in its EMULATE map) to run under the real id — or unset the variable " +
+      '(unset FIREBASE_EMULATOR_PROJECT) to run offline.',
+  );
+}
+
 /** Where this run's suite stands: its project id, why, and the ids/buckets on either side of the choice. */
 export async function resolveEmulatorProject(envFile, fallback) {
+  refuseRemovedOverride();
   // No client app env file (a workspace without one): the workspace's own offline id, nothing committed real.
   const env = isFile(envFile) ? await evaluateEnvironment(envFile) : { appId: fallback, real: [], storageBucket: '' };
   const { appId, storageBucket } = env;
@@ -199,7 +220,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       p = await resolveEmulatorProject(args[0], args[1]);
     } catch (e) {
       if (!(e instanceof EnvironmentError)) throw e;
-      process.stderr.write(`[emulators] ${e.message}\n[emulators]   The suite's project id is the browser's decision, read from environment.ts's values — refusing to guess.\n`);
+      process.stderr.write(`[emulators] ${e.message}\n`);
       process.exit(2);
     }
     process.stdout.write(

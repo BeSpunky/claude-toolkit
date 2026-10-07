@@ -114,7 +114,7 @@ fi
 ENV_FILE="$ROOT/{{appEnvPath}}"
 resolve_project() { node "$ROOT/tools/emulator-project.mjs" resolve "$ENV_FILE" demo-{{workspaceName}}; }
 EMU_VARS="$(resolve_project)" \
-  || { echo "[emulators] could not resolve the emulator project id (tools/emulator-project.mjs) — refusing to guess." >&2; exit 2; }
+  || { echo "[emulators] not started: the suite's project id could not be decided (tools/emulator-project.mjs, above)." >&2; exit 2; }
 eval "$EMU_VARS"
 PROJECT="$EMU_PROJECT"
 if [ "$EMU_MODE" = real ]; then
