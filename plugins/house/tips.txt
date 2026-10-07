@@ -17,6 +17,7 @@ Need a system package in the container? Add it to .devcontainer/os-packages.txt 
 Deploying to Firebase App Hosting? Its Root Directory must be the app (--root-dir <the app's dir>) — ask Claude, it knows both deploy modes
 Ship the Firebase backend with nx affected -t deploy — functions build through Nx, rules ship from what firebase.json declares
 First Firebase deploy? node tools/firebase-deploy.mjs --check ticks off login, alias, deploy and CI — and says how to tell each worked
+Edited a house target (an input, args, a configuration)? Upgrades keep it — and when the house changed the same value, the summary lists it under UPGRADE_ATTENTION
 Rules only in the Firebase console? npx firebase init firestore storage pulls the live ones into the repo, unchanged
 Your edits inside a house target (inputs, args, configurations) survive upgrades — the upgrade says if it had to replace one
 What is running, and whose? tools/dev/dev ps lists every dev stack in every worktree; tools/dev/dev stop takes yours down cleanly

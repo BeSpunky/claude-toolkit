@@ -2066,6 +2066,11 @@ echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 # fd 9, not stdin: nx g may read stdin, and would swallow the rest of the plan.
 PLAN_RUN_BLOCK="
 _UPGRADE_PARTIAL=\${_UPGRADE_PARTIAL:-0}
+# THE ATTENTION LIST (nx-tools _utils/upgrade-report.ts): a generator that replaced a value in the project's own
+# targets (or kept a target of the project's over the house's) names it in this file too, and the outer summary
+# prints every line under UPGRADE_ATTENTION — the warning alone drowns in the generators' output. Inside the
+# self-ignoring upgrade lock, so it crosses the Docker boundary and goes with the lock.
+[ -d .bespunky-upgrade.lock ] && export BESPUNKY_UPGRADE_REPORT=\"\$PWD/.bespunky-upgrade.lock/report\"
 _plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM --branch-projection=\"\${_bm_projection:-}\")\" || {
   echo 'ERROR: the layer planner failed — no house generators were run, and nothing has been stamped.' >&2
   exit 1
@@ -2536,6 +2541,19 @@ _upgrade_next() {   # <target> <base-sha|''> — sets UPGRADE_NEXT and UPGRADE_R
 }
 # ---8<--- UPGRADE_NEXT
 
+# What the generators need a HUMAN to look at (nx-tools _utils/upgrade-report.ts): a value of the project's replaced
+# inside a house target, a value with no record to tell an edit from an older house value, a deploy-contract value
+# re-asserted, a target of the project's own kept over the house's. Generators append one line each to the report
+# file in the upgrade lock (BESPUNKY_UPGRADE_REPORT, exported by the plan runner); their warnings alone drown in the
+# run's output. Each line says what happened and what to do; none of it failed the run. Silent when there is none.
+# --->8--- UPGRADE_ATTENTION
+_upgrade_attention() {   # <upgrade lock dir, or ''>
+  [ -n "$1" ] && [ -s "$1/report" ] || return 0
+  echo "UPGRADE_ATTENTION: $(grep -c . "$1/report") thing(s) this run changed or kept in the project's own targets — read each:"
+  sed 's/^/  /' "$1/report"
+}
+# ---8<--- UPGRADE_ATTENTION
+
 if [ "$MODE" = "upgrade" ]; then
   _upgrade_next "$TARGET" "$UPGRADE_BASE"
   echo "UPGRADE_NEXT: $UPGRADE_NEXT"
@@ -2590,4 +2608,5 @@ else
   if [ -n "$RESTORE_SHA" ] && printf ',%s,' "${_final_layers:-}" | grep -q ',node,'; then
     echo "UPGRADE_VERIFY: nothing was built, linted or tested. Before landing it: $NX_RUN affected -t build lint test --base=$RESTORE_SHA"
   fi
+  _upgrade_attention "${UPGRADE_LOCK:-}"
 fi

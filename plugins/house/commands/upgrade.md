@@ -388,6 +388,16 @@ generator-owned file locally (the next upgrade rewrites it); the fix belongs ups
 A target that already failed before the upgrade (check it at the restore point if unsure) is not the upgrade's —
 report it as pre-existing.
 
+### Relay what needs a human — `UPGRADE_ATTENTION`
+
+If the output carries an `UPGRADE_ATTENTION:` block, **relay every line under it** in your report, as it is — each
+names a project target, what the run did to the project's own value there, and what to do. They are the house-target
+merge's findings (`.bespunky/house-targets.json`): a value of the project's replaced because the house changed the
+same key, a value with no record to tell an edit from an older house value, a deploy-contract value re-asserted, or
+a target of the project's own kept over the house's. None of them failed the run, and none is yours to "fix" by
+editing the targets on the user's behalf: whether an edit is re-applied, or a target of their own renamed so the
+house's applies, is their call.
+
 ### First, close the gap the run left open — `UPGRADE_RELOAD`
 
 If the output carries a `UPGRADE_RELOAD:` line, **Read every file it names** (`HOUSE.rules.md`, `HOUSE.md`,

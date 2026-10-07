@@ -19,12 +19,13 @@
 //     in 0.50.0) is not recorded — one the project already defines is its own, and stays so.
 //
 // Each house project is found the way its generator finds it (canonical root, else name), and the frozen values are
-// rendered for where it actually lives (the capture was made in the apps/ layout). Writes nothing for a house project
-// that is absent, or already recorded (idempotence; a record is never overwritten by a guess).
+// rendered for where it actually lives (the capture was made in the apps/ layout). Writes nothing when a record
+// already exists — from then on the record is the generators', and a guess must never overwrite it — and nothing for
+// a house project that is absent.
 import { type Tree, type TargetConfiguration, logger, readProjectConfiguration } from '@nx/devkit';
 import { houseProjectHome } from '../../generators/_utils/project-files';
 import { resolveAppsDir } from '../../generators/_utils/workspace-layout';
-import { SET_KEYS, type Targets, houseTargetsProvenance, isPlainObject, recordHouseTargets, same } from '../../generators/_utils/house-targets';
+import { HOUSE_TARGETS_RECORD, SET_KEYS, type Targets, isPlainObject, recordHouseTargets, same } from '../../generators/_utils/house-targets';
 import { CAPTURED, HOUSE_TARGETS_AS_OF_0_49_2 } from './house-targets-0.49.2';
 
 const TAG = '[migrate 0.50.0 record-house-targets]';
@@ -32,6 +33,7 @@ const TAG = '[migrate 0.50.0 record-house-targets]';
 type Json = unknown;
 
 export default function recordHouseTargetsRung(tree: Tree): void {
+  if (tree.exists(HOUSE_TARGETS_RECORD)) return;
   const appsDir = resolveAppsDir(tree);
   const canonicalRoots: Record<string, string> = {
     functions: `${appsDir}/functions`,
@@ -44,7 +46,7 @@ export default function recordHouseTargetsRung(tree: Tree): void {
   const recorded: string[] = [];
   for (const [canonical, baseline] of Object.entries(HOUSE_TARGETS_AS_OF_0_49_2)) {
     const home = houseProjectHome(tree, canonical, canonicalRoots[canonical] ?? canonical);
-    if (!home.exists || houseTargetsProvenance(tree, canonical).kind === 'recorded') continue;
+    if (!home.exists) continue;
     let current: Targets;
     try {
       current = readProjectConfiguration(tree, home.name).targets ?? {};

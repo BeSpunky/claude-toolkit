@@ -75,6 +75,12 @@ export interface PlanContext {
   active: ReadonlySet<LayerId>;
   /** Only what this run was explicitly asked to create — the baseline acts (provider wiring) key off it. */
   ensured: ReadonlySet<LayerId>;
+  /**
+   * What the workspace had BEFORE this run (detected from it, never declared). `ensured` also holds a layer the
+   * project already has (`add-layer firebase` on a Firebase project), so an act that writes a layer's STARTING
+   * CONTENT — seeding what the project then owns — keys off ensured AND not detected: the run that creates it.
+   */
+  detected: ReadonlySet<LayerId>;
   /** The project (workspace) name. */
   project: string;
   /** The app the per-app generators target. */
