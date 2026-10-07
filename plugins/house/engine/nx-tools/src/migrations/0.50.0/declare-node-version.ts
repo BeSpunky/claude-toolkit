@@ -64,7 +64,8 @@ export default function declareNodeVersion(tree: Tree): void {
     if (running && !('unknown' in running) && running.major !== major) {
       logger.warn(
         `${TAG} ${declared.from} declares Node ${major}, but the devcontainer runs Node ${running.major} (${running.from}). ${declared.from} is ` +
-          `the one source: the next upgrade moves the house-built container to Node ${major}. If ${running.major} is right, write it there first.`,
+          `the one source: this upgrade's generators move the house-built container to Node ${major} (it takes effect on the next ` +
+          `rebuild). If ${running.major} is right, write it there and re-run the upgrade.`,
       );
     }
   } else if (running && 'unknown' in running) {

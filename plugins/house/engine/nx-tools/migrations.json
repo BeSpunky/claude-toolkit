@@ -180,6 +180,12 @@
       "description": "The web layer's per-tool `<folder>-playwright-cache` volume (~/.cache/ms-playwright) folds into ONE persisted ~/.cache volume (the agent layer's `<folder>-cache`), which also keeps the shared browser's own Playwright runtime and every other tool cache across rebuilds. Removes the house-written mount (and the house comment above it) so it does not stay nested inside the new one; a project-written one is reported. The unused Docker volume lives on the host and is reported by name for `docker volume rm` \u2014 a cache, so nothing is lost.",
       "implementation": "./src/migrations/0.49.0/fold-playwright-cache-into-home-cache"
     },
+    "record-house-targets": {
+      "version": "0.50.0",
+      "layer": "nx",
+      "description": "Writes the first .bespunky/house-targets.json \u2014 the record of what the house last wrote into each house project's targets (functions, firebase, shared-browser, worktree-domains), which upgrades from 0.50.0 merge against three-way so a project's own edits inside a house target survive. Records 0.49.2's values (the last release before the record; house targets were then replaced whole, so every project got the same) only where the project still holds them, rendered for where its projects live: a differing key is left out and reported by the next merge instead of guessed, a set is recorded only while every member 0.49.2 wrote is still there, and a target 0.49.2 did not write stays the project's own. Never overwrites a record.",
+      "implementation": "./src/migrations/0.50.0/record-house-targets"
+    },
     "correct-app-hosting-guidance": {
       "version": "0.50.0",
       "layer": "firebase",
@@ -204,6 +210,12 @@
       "description": "The committed <functions>/.secret.local.example stops claiming tools/emulators.sh places .secret.local beside the bundle: from 0.50.0 the emulator never reads production secrets (inert placeholders for every declared key; sandbox values only from an opt-in .secret.sandbox.local). Replaces only the stock 0.49 header comment \u2014 every key the project added stays byte-for-byte; a header of the project's own that still makes the retired claim is left and reported.",
       "implementation": "./src/migrations/0.50.0/retell-secrets-example"
     },
+    "recompose-pre-0.3-serve-leftovers": {
+      "version": "0.50.0",
+      "layer": "web",
+      "description": "Recomposes two pre-0.3.0 serve shapes that 0.24.0/0.24.1 left half-migrated: an app whose `serve` was itself the Angular dev-server depending on `emulators` (e76c12a) \u2014 after the suite moved to the `firebase` project that dependsOn dangled and `nx serve` ran without emulators \u2014 and a `dev-server` whose default configuration was the retired `no-emulators` (703ca41), which served a production build. Drops the leftover and runs the serve generator for the app: the dev-server leaf, the `dev-stack` composer (depending on a `serve-preflight` that refuses a second stack on taken ports), the `serve` follower, and its .bespunky/dev.json entry (with the workspace `install` step when none is declared). Every other project is left alone.",
+      "implementation": "./src/migrations/0.50.0/recompose-pre-0.3-serve-leftovers"
+    },
     "stack-owned-dev-processes": {
       "version": "0.50.0",
       "layer": "web",
@@ -225,7 +237,7 @@
     "lint-house-apps": {
       "version": "0.50.0",
       "layer": "angular",
-      "description": "Give every house Angular app a lint target (through @nx/angular's own add-linting), so the platform firewall checks its imports \u2014 house apps were created with none, leaving the web app outside the boundary it exists for. Reports any other platform-tagged project that is not linted.",
+      "description": "Give every house Angular app a lint target (through @nx/angular's own add-linting), so the platform firewall checks its imports \u2014 house apps were created with none, leaving the web app outside the boundary it exists for. Also converts the house's own `functions:lint` (the deprecated @nx/eslint:lint executor up to 0.49) to @nx/eslint/plugin's inferred target. Reports any other platform-tagged project that is not linted.",
       "implementation": "./src/migrations/0.50.0/lint-house-apps"
     },
     "add-design-system-a11y": {
@@ -251,12 +263,6 @@
       "layer": "firebase",
       "description": "The Firebase CLI becomes the project's exact `firebase-tools` devDependency (on PATH through node_modules/.bin in the container and in every Nx target), replacing the unpinned `ghcr.io/devcontainers-extra/features/firebase-cli` feature that installed whatever was newest on image-build day. Adds the devDependency (a `latest` one is pinned to what is installed; where the project's @angular/fire peers a firebase-tools range the house pin is outside of — Angular 17–19 — the newest inside it, said, since npm would refuse the install); removes the feature \u2014 and its devcontainer-lock.json pin \u2014 where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config is kept. Reminds to install and rebuild.",
       "implementation": "./src/migrations/0.50.0/firebase-cli-from-package"
-    },
-    "recompose-pre-0.3-serve-leftovers": {
-      "version": "0.50.0",
-      "layer": "web",
-      "description": "Recomposes two pre-0.3.0 serve shapes that 0.24.0/0.24.1 left half-migrated: an app whose `serve` was itself the Angular dev-server depending on `emulators` (e76c12a) \u2014 after the suite moved to the `firebase` project that dependsOn dangled and `nx serve` ran without emulators \u2014 and a `dev-server` whose default configuration was the retired `no-emulators` (703ca41), which served a production build. Drops the leftover and runs the serve generator for the app (dev-server leaf, serve composer, its .bespunky/dev.json entry). Every other project is left alone.",
-      "implementation": "./src/migrations/0.50.0/recompose-pre-0.3-serve-leftovers"
     },
     "refresh-pre-0.39-local-stub": {
       "version": "0.50.0",

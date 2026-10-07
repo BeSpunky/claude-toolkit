@@ -8,7 +8,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const STYLES = join(dirname(fileURLToPath(import.meta.url)), '../../../plugins/house/engine/nx-tools/src/generators/design-system/files/styles');
-// The public API as 0.49 seeded it: today's template without the a11y forward.
+// The public API as 0.49 seeded it: today's template without the a11y forward. That is byte-for-byte the ONLY
+// _index.scss the toolkit ever shipped — unchanged from ed399a8 (the design-system generator's birth) through 0.49
+// (git show ed399a8:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/design-system/files/styles/_index.scss.tpl),
+// and no shipped style file ever carried `'_utils/a11y'` or a `visually-hidden`/`skip-link` mixin (git log -S) — so
+// there is no historical shape to list.
 const NEW_INDEX = readFileSync(join(STYLES, '_index.scss.tpl'), 'utf8');
 const OLD_INDEX = NEW_INDEX.replace(/\/\/ Accessibility mechanisms[^\n]*\n@forward '_utils\/a11y'[^\n]*\n\n/, '');
 const ROOT = 'libs/design-system';

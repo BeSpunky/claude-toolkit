@@ -80,15 +80,16 @@ export const firebase: LayerDescriptor = {
           `--workspaceName=${ctx.project}`,
           ...(ctx.staging ? ['--staging=true'] : []),
           ...(attachable(ctx) ? [`--clientApp=${ctx.app}`] : []),
-          // Seeding rules is a BASELINE act: an upgrade must never put a placeholder where the console holds the
-          // live rules (generators/firebase-emulators — the deploy would ship it).
-          ...(ctx.ensured.has('firebase') ? ['--seedRules'] : []),
+          // Seeding rules is a CREATION act — only the run that brings Firebase into the workspace. Never an upgrade
+          // (the console holds the live rules), and never a re-ensure of a project that already has Firebase: its
+          // emulators run open today, and deny-all seeds would break every local read and write.
+          ...(ctx.ensured.has('firebase') && !ctx.detected.has('firebase') ? ['--seedRules'] : []),
         ],
       },
     ],
   },
   docSections: ['firebase'],
-  // With the `ci` layer: keyless GitHub → GCP auth, `--project=<alias>` for the deploy targets, and tools/setup-gcp.sh.
+  // With the `ci` layer: keyless GitHub → GCP auth, a `ci-<environment>` configuration on its deploy targets, and tools/setup-gcp.sh.
   ciDeploy: firebaseCiProvider,
   // The emulator suite, served beside every app the dev engine runs.
   devFragment: (tree) => firebaseFragment(tree),
