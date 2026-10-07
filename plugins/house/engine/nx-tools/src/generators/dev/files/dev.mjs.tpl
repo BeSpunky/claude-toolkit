@@ -6,8 +6,9 @@
 //   tools/dev/dev ps    [app] [--json]
 //   tools/dev/dev stop  [app] [--worktree=<x>] [--offset=<n>] [--all-mine] [--owner=<label>] [--any-owner] [--abandon]
 //   tools/dev/dev list
-//   tools/dev/dev claim <app> --pid=<pid> --ports=<name=port,…> [--port-offset=<n|auto>] [--shifted]   (scripts)
-//   tools/dev/dev release <key> --pid=<pid>                                                            (scripts)
+//   tools/dev/dev with  <app> [--task=<project:target>] [--timeout=<s>] -- <command…>
+//   tools/dev/dev claim <app> --pid=<pid> --lock=<file> --ports=<name=port,…> [--port-offset=<n|auto>] [--shifted]  (scripts)
+//   tools/dev/dev release <key> --lock=<file>                                                                     (scripts)
 //
 // A serve: pick a tree → install it if its declaration says how and it needs it → CLAIM the stack: one port
 // offset for every port it will bind (sized from the declaration) and its RUN RECORD (its handle), atomically
@@ -18,14 +19,17 @@
 // stacks BY HANDLE — the record's PID, verified to still be that very process — and then checks that the
 // stack's ports are actually free. Nobody needs to kill a dev server by name: see lib/stacks.mjs.
 //
+// `with` runs a command against THIS tree's running stack of an app, told where it is through the environment — the
+// address contract of an e2e target that depends on `<app>:dev-stack` (see withStack).
+//
 // `claim` / `release` are the same claim for a SCRIPT that runs a stack of its own — tools/emulators.sh run
 // directly, a seed build's private suite: one identity for everything that binds this project's ports, so a
 // direct emulator run and a serve see each other instead of colliding on a port.
 //
 // Node built-ins only, and no project node_modules: this must serve a Python or Go repo exactly as it serves
 // an Nx one. `nx serve <app>` (the @bespunky/nx-tools:serve executor) is a thin wrapper over this file.
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -41,18 +45,21 @@ import {
   describe,
   detachedWork,
   groupMembers,
-  heartbeat,
+  holdStackLock,
+  isAgent,
   isAlive,
   isSameProcess,
   ownerIsShared,
   ownerOf,
   processStart,
+  pruneDead,
   readStacks,
   removeRecord,
   stackDir as stackDirOf,
   stopCommandFor,
   survivors,
   unfinished,
+  withClaimLock,
   writeRecord,
 } from './lib/stacks.mjs';
 import { collectWorktrees, matchWorktree, servedSlug, worktreeKey, worktreeLabel } from './lib/worktrees.mjs';
@@ -173,6 +180,7 @@ const USAGE = `Usage:
   tools/dev/dev ps    [app] [--json]
   tools/dev/dev stop  [app] [--worktree=<branch|slug|path>] [--offset=<n>] [--all-mine] [--owner=<label>] [--any-owner] [--abandon]
   tools/dev/dev list
+  tools/dev/dev with  <app> [--task=<project:target>] [--timeout=<seconds>] -- <command...>
 
 serve  serves an app declared in ${DECLARATION_PATH}. --worktree with no value picks one interactively.
 ps     lists the running stacks of every worktree (app@offset, owner, pid, ports and whether each is listening).
@@ -181,16 +189,21 @@ stop   stops a stack by its handle and confirms its ports are free. --offset nam
        A Claude Code session is ONE owner for itself and all its subagents, so under it a stack must be NAMED
        (--offset), or the owner made yours alone (DEV_OWNER=<label> / --owner=<label>). Another owner's stack is
        refused unless --any-owner — never stop a server you did not start. --abandon: do not wait for detached
-       work (an emulator suite saving its data) — end it now; what it has not saved is lost.`;
+       work (an emulator suite saving its data) — end it now; what it has not saved is lost.
+with   runs <command> against this tree's running stack of <app> — by default the one Nx runs as <app>:dev-stack —
+       once it answers, with BASE_URL, DEV_URL, PORT_OFFSET, PORT_<NAME> and what the declaration exports (an emulator
+       suite's FIREBASE_*_EMULATOR_HOST) in its environment. What an e2e target runs: never a hard-coded port.
+An AI agent (CLAUDECODE=1) never takes the base ports: auto skips them, an explicit --port-offset=0 is refused.`;
 
 /** The flags each command takes — any other flag is refused, never ignored. */
 const COMMAND_FLAGS = {
-  serve: ['worktree', 'portOffset', 'skip', 'owner', 'sharedBrowser', 'install', 'dryRun'],
+  serve: ['worktree', 'portOffset', 'skip', 'owner', 'sharedBrowser', 'install', 'dryRun', 'task'],
   ps: ['json'],
   stop: ['worktree', 'offset', 'allMine', 'owner', 'anyOwner', 'abandon'],
   list: [],
-  claim: ['pid', 'ports', 'portOffset', 'shifted', 'owner'],
-  release: ['pid'],
+  with: ['task', 'timeout'],
+  claim: ['pid', 'lock', 'ports', 'portOffset', 'shifted', 'owner'],
+  release: ['lock'],
 };
 
 /** Is an argv item a flag's value (present, and not itself a flag or the passthrough separator)? */
@@ -198,7 +211,7 @@ const isValue = (next) => next !== undefined && !next.startsWith('-');
 
 /** Parse argv into `{ command, app, flags, passthrough }`. Unknown flags are refused, never ignored. */
 export function parseArgs(argv) {
-  const out = { command: argv[0], app: undefined, passthrough: [], worktree: undefined, portOffset: 'auto', skip: [], sharedBrowser: true, install: true, dryRun: false };
+  const out = { command: argv[0], app: undefined, passthrough: [], worktree: undefined, portOffset: undefined, skip: [], sharedBrowser: true, install: true, dryRun: false };
   const given = new Set();
   const rest = argv.slice(1);
   for (let i = 0; i < rest.length; i++) {
@@ -232,6 +245,7 @@ export function parseArgs(argv) {
         out.skip.push(...takeValue().split(',').map((s) => s.trim()).filter(Boolean));
         break;
       case '--offset':
+      case '--timeout':
       case '--pid': {
         const raw = takeValue();
         const n = Number(raw);
@@ -249,7 +263,9 @@ export function parseArgs(argv) {
         );
         break;
       case '--owner':
-        out.owner = takeValue();
+      case '--lock':
+      case '--task':
+        out[name] = takeValue();
         break;
       case '--all-mine':
       case '--any-owner':
@@ -281,7 +297,7 @@ export function parseArgs(argv) {
   if (allowed) {
     const stray = [...given].filter((f) => !allowed.includes(f));
     if (stray.length) throw new UsageError(`unknown flag for ${out.command}: --${stray[0].replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`);
-    if (out.command !== 'serve' && out.passthrough.length) throw new UsageError(`${out.command} takes no '-- <args>'`);
+    if (out.command !== 'serve' && out.command !== 'with' && out.passthrough.length) throw new UsageError(`${out.command} takes no '-- <args>'`);
   }
   return out;
 }
@@ -390,16 +406,34 @@ async function serve(opts) {
   // with. Before anything is spawned: a port probe sees a server only once it has bound, which is how concurrent
   // serves used to pick the same block and lose each other's handles. A dry run claims nothing: it says where the
   // stack WOULD land, as of now.
-  const claimArgs = { ...scopeOf(worktrees), tree: tree.path, app: appName, spec: opts.portOffset, treeKey: worktreeKey(tree), isMain: tree.isMain, basePorts };
-  const { record, passed } = await claimStack({
-    ...claimArgs,
-    dryRun: opts.dryRun,
-    fields: { owner, label: `serve of ${appName} (tools/dev)` },
-    say: log,
-  });
+  // Its LOCK first: the stack is alive exactly while this process — and what it spawns — holds it (lib/stacks.mjs).
+  const scope = scopeOf(worktrees);
+  const lock = opts.dryRun ? null : holdStackLock(tree.path);
+  let claim;
+  try {
+    claim = await claimStack({
+      ...scope,
+      tree: tree.path,
+      app: appName,
+      spec: opts.portOffset ?? 'auto',
+      treeKey: worktreeKey(tree),
+      isMain: tree.isMain,
+      basePorts,
+      lock: lock?.path,
+      agent: isAgent(process.env),
+      dryRun: opts.dryRun,
+      fields: { owner, label: `serve of ${appName} (tools/dev)`, ...(opts.task ? { task: opts.task } : {}) },
+      say: log,
+    });
+  } catch (err) {
+    lock?.release();
+    if (lock) rmSync(lock.path, { force: true }); // never recorded: nobody else knows it
+    throw err;
+  }
+  const { record, passed } = claim;
   const { key, offset } = record;
   const stackDir = stackDirOf(tree.path, key);
-  const plan = planApp(decl, appName, { offset, tree: tree.path, skip: opts.skip, passthrough: opts.passthrough, baseEnv: process.env, stackDir, stackTmp: record.tmp });
+  const plan = planApp(decl, appName, { offset, tree: tree.path, skip: opts.skip, passthrough: opts.passthrough, baseEnv: process.env, stackDir, stackTmp: record.tmp, stackLock: lock?.path });
   for (const id of plan.ignoredSkips) warn(`--skip=${id}: app "${appName}" declares no such process — nothing to skip.`);
   const prettyUrl = `http://${slug}.localhost/${plan.query}`;
   const browserOn = opts.sharedBrowser;
@@ -430,13 +464,22 @@ async function serve(opts) {
     return 0;
   }
 
-  // The handle is ours from here; it goes when the stack is down (removeRecord keeps it while detached work runs).
-  // A stack killed so hard it never removes it (SIGKILL, a container stop) leaves a record `ps` recognises as dead.
+  // The handle is ours from here. It goes when the stack is down: we let go of the lock, and the record is removed
+  // if nothing else of the stack holds it — detached work still saving keeps it, and removes it as the last one out.
+  // A stack killed so hard it never gets here (SIGKILL, a container stop) frees its lock all the same: the kernel
+  // does, and the next claim or `ps` prunes the record.
   record.url = plan.localUrl;
+  record.readyUrl = plan.readyUrl;
+  record.exports = { ...plan.exports, DEV_STACK: key };
   writeRecord(record);
-  const dropRecord = () => removeRecord(tree.path, key);
+  let dropped = false;
+  const dropRecord = () => {
+    if (dropped) return;
+    dropped = true;
+    lock.release();
+    removeRecord(scope.lockRoot, tree.path, key, lock.path);
+  };
   process.on('exit', dropRecord);
-  heartbeat(tree.path, key);
 
   log(`Serving ${appName} from ${worktreeLabel(tree)}`);
   log(`App:    ${plan.localUrl}`);
@@ -470,6 +513,7 @@ async function serve(opts) {
   const result = await runStack({
     children: plan.running,
     cwd: tree.path,
+    lockFd: lock.fd,
     log,
     onSpawn: (id, pid) => {
       record.processes.push({ id, pid, procStart: processStart(pid) });
@@ -560,6 +604,8 @@ async function portStates(record) {
 
 async function ps(opts) {
   const trees = collectWorktrees(ROOT);
+  const { lockRoot } = scopeOf(trees);
+  await withClaimLock(lockRoot, () => pruneDead(trees.map((w) => w.path)));
   const stacks = readStacks(trees.map((w) => w.path)).filter((s) => !opts.app || s.app === opts.app);
   const label = (s) => {
     const w = trees.find((t) => samePath(t.path, s.tree));
@@ -587,7 +633,7 @@ async function ps(opts) {
           ? `ORPHANED — what started it died without stopping ${survivors(s).map((p) => `${p.id} (pid ${p.pid})`).join(', ')}; stop them with: ${stopCommandFor(s)}`
           : s.state === 'finishing'
             ? `FINISHING — stopped, but still completing work it detached (below); it ends on its own (or now: ${stopCommandFor(s, { abandon: true })})`
-            : `${s.state} — claimed in another container (${s.host}) that still keeps it fresh; cannot be checked from here`;
+            : `FOREIGN — running in ANOTHER container (${s.host}) that shares this workspace; it cannot be checked or stopped from here, and no stack can be claimed while it runs (stop it there)`;
     console.log(`${s.key}  ${s.treeLabel}  pid ${s.pid}  ${state}  owner ${s.owner}${mine}${s.label ? `  — ${s.label}` : ''}`);
     if (s.url) console.log(`    ${s.url}`);
     if (s.portStates.length) console.log(`    ports ${s.portStates.map((p) => `${p.name}=${p.port}${p.listening ? '' : ' (not listening)'}`).join('  ')}`);
@@ -659,7 +705,10 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   for (const w of detached.finished) say(w.result ?? `${w.id} ended (code ${w.code ?? 0})`);
   if (detached.pending.length) return { ok: false, why: `stopped, but its detached work is still finishing (above) — or end it now: ${stopCommandFor(record, { abandon: true })}` };
   if (!detached.ok) return { ok: false, why: `stopped, but ${detached.finished.filter((w) => w.code).map((w) => w.id).join(', ')} did not finish cleanly (above)` };
-  if (record.state !== 'live') readStacks([record.tree]);
+  if (record.state !== 'live') {
+    const all = collectWorktrees(ROOT);
+    await withClaimLock(scopeOf(all).lockRoot, () => pruneDead([record.tree]));
+  }
   // The claimer is gone; its children were waited for, but a socket can outlive its process by a moment.
   let held = [];
   for (let i = 0; i < 25; i++) {
@@ -720,26 +769,31 @@ async function stop(opts) {
 }
 
 /**
- * `claim <app> --pid=<pid> --ports=<name=port,…>` — a SCRIPT's stack (tools/emulators.sh run on its own, a seed build's
- * private suite), claimed exactly like a serve: the same lock, the same records, the same refusal when another stack
- * holds the block. The claimer is the SCRIPT (`--pid`, normally `$$`), not this short-lived process: the record lives
- * as long as it does. `--shifted` never takes the base ports (a seed build must not land on the developer's).
+ * `claim <app> --pid=<pid> --lock=<file> --ports=<name=port,…>` — a SCRIPT's stack (tools/emulators.sh run on its own, a
+ * seed build's private suite), claimed exactly like a serve: the same lock, the same records, the same refusal when
+ * another stack holds the block. The claimer is the SCRIPT (`--pid`, normally `$$`), not this short-lived process, and
+ * so is the stack's lock: the script holds `--lock` (a fresh file under .bespunky/run/locks/, flock'ed shared) for its
+ * whole life, and the record names it. `--shifted` never takes the base ports (a seed build must not land on the
+ * developer's). No `--port-offset`: the base block — or, under an AI agent, `auto` (it never takes the base ports).
  * Prints shell assignments for `eval`: STACK_KEY, STACK_OFFSET, STACK_DIR, STACK_TMP, STACK_RECORD.
  */
 async function claim(opts) {
-  if (!opts.app || opts.pid === undefined || !opts.ports || !Object.keys(opts.ports).length) {
-    throw new UsageError('claim needs <app> --pid=<pid> --ports=<name=port,…>');
+  if (!opts.app || opts.pid === undefined || !opts.lock || !opts.ports || !Object.keys(opts.ports).length) {
+    throw new UsageError('claim needs <app> --pid=<pid> --lock=<file> --ports=<name=port,…>');
   }
   const worktrees = collectWorktrees(ROOT);
   const tree = worktrees.find((w) => w.isCurrent) ?? worktrees.find((w) => w.isMain) ?? worktrees[0];
+  const agent = isAgent(process.env);
   const { record, passed } = await claimStack({
     ...scopeOf(worktrees),
     tree: tree.path,
     app: opts.app,
-    spec: opts.portOffset,
+    spec: opts.portOffset ?? (agent ? 'auto' : '0'),
     treeKey: worktreeKey(tree),
     isMain: tree.isMain && !opts.shifted,
     basePorts: opts.ports,
+    lock: opts.lock,
+    agent,
     claimer: opts.pid,
     fields: { owner: ownerOf(process.env, opts.owner), label: opts.app === 'firebase' ? 'emulator suite run directly' : `${opts.app} (its own suite)` },
     say: (m) => console.error(`[claim] ${m}`),
@@ -754,13 +808,79 @@ async function claim(opts) {
   return 0;
 }
 
-/** `release <key> --pid=<pid>` — a script's claim, given up (only while still that script's, and its detached work done). */
+/**
+ * `release <key> --lock=<file>` — a script's claim, given up: called by each holder AFTER closing its own descriptor of
+ * the lock. The record goes only while it is still the claim made with that lock and nothing holds it any more.
+ */
 function release(opts) {
-  if (!opts.app || opts.pid === undefined) throw new UsageError('release needs <key> --pid=<pid>');
+  if (!opts.app || !opts.lock) throw new UsageError('release needs <key> --lock=<file>');
   const worktrees = collectWorktrees(ROOT);
   const tree = worktrees.find((w) => w.isCurrent) ?? worktrees[0];
-  removeRecord(tree.path, opts.app, opts.pid);
+  removeRecord(scopeOf(worktrees).lockRoot, tree.path, opts.app, opts.lock);
   return 0;
+}
+
+/**
+ * `with <app> -- <command…>` — THE ADDRESS CONTRACT of a stack's dependents. An e2e target depends on `<app>:dev-stack`
+ * (Nx starts that stack — on whatever block `auto` gave it: a worktree never gets the base ports, and the developer's
+ * own serve may hold them) and runs its tests through this: it finds THIS tree's live stack of that task, waits until
+ * it answers, and runs the command with where it is in the environment —
+ *   BASE_URL (the app's origin) · DEV_URL (the page as the stack opens it) · DEV_URL_QUERY · PORT_OFFSET · DEV_STACK
+ *   PORT_<NAME> for every port · and what the declaration's processes export (an emulator suite: its
+ *   FIREBASE_AUTH_EMULATOR_HOST, FIRESTORE_EMULATOR_HOST, …)
+ * — so a test never aims at a hard-coded port, which is another stack's (the developer's, or main's). Nx shares a
+ * continuous task, so a tree runs one `<app>:dev-stack` at a time; two found is refused, never guessed between.
+ * Exits with the command's status.
+ */
+async function withStack(opts) {
+  if (!opts.app || !opts.passthrough.length) throw new UsageError('with needs <app> -- <command…>');
+  const task = opts.task ?? `${opts.app}:dev-stack`;
+  const worktrees = collectWorktrees(ROOT);
+  const tree = worktrees.find((w) => w.isCurrent) ?? worktrees[0];
+  const until = Date.now() + (opts.timeout ?? 300) * 1000;
+  const say = (m) => console.error(`[with] ${m}`);
+  let stack;
+  for (let said = false; ; said = true) {
+    const found = readStacks([tree.path]).filter((s) => s.app === opts.app && s.task === task && s.state === 'live');
+    if (found.length > 1) throw new UsageError(`${found.length} running stacks of ${task} in ${tree.path} (${found.map((s) => s.key).join(', ')}) — which one this run belongs to cannot be told. Stop the extra one (tools/dev/dev stop ${opts.app} --offset=<n>).`);
+    if (found.length === 1 && (await answers(found[0].readyUrl ?? found[0].url))) {
+      stack = found[0];
+      break;
+    }
+    if (Date.now() > until) {
+      throw new UsageError(
+        found.length
+          ? `${found[0].key} did not answer at ${found[0].readyUrl ?? found[0].url} within ${opts.timeout ?? 300}s — see its output.`
+          : `no running ${task} stack in ${tree.path} after ${opts.timeout ?? 300}s. Run this from a target that dependsOn ${task} (Nx starts the stack), or start one: nx run ${task}`,
+      );
+    }
+    if (!said) say(`waiting for ${found[0]?.key ?? task} to ${found.length ? 'answer' : 'start'}…`);
+    await sleep(500);
+  }
+  say(`${stack.key} — ${stack.exports?.BASE_URL ?? stack.url}`);
+  const [cmd, ...args] = opts.passthrough;
+  const child = spawn(cmd, args, { stdio: 'inherit', env: { ...process.env, ...stack.exports }, shell: false });
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => child.kill(sig));
+  return new Promise((done) => {
+    child.on('error', (err) => {
+      say(`could not run ${cmd}: ${err.message}`);
+      done(127);
+    });
+    child.on('exit', (code, signal) => done(code ?? (signal ? 128 : 1)));
+  });
+}
+
+/** Does `url` answer HTTP at all (any status: a 404 still means the server is up)? */
+function answers(url) {
+  return new Promise((done) => {
+    if (!url) return done(false);
+    const req = get(url, (res) => {
+      res.resume();
+      done(true);
+    });
+    req.setTimeout(2000, () => req.destroy());
+    req.on('error', () => done(false));
+  });
 }
 
 function list() {
@@ -791,6 +911,8 @@ async function main(argv) {
       return claim(opts);
     case 'release':
       return release(opts);
+    case 'with':
+      return withStack(opts);
     case 'list':
       return list();
     case undefined:

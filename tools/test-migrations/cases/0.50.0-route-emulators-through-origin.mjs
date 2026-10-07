@@ -493,6 +493,33 @@ export default {
       },
     },
     {
+      name: "S3-5 — the house's emulators process exports its emulator hosts (an e2e's address); a project's own export is kept",
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, '.bespunky/dev.json', {
+          apps: {
+            shop: { processes: [{ id: 'app', cmd: 'x', ports: { app: 4200 }, primary: true }, HOUSE_EMULATORS({ storage: 9199, hub: 4400 })] },
+            own: { processes: [{ id: 'app', cmd: 'x', ports: { app: 4300 }, primary: true }, { ...HOUSE_EMULATORS({}), exports: { FIRESTORE_EMULATOR_HOST: 'db:8080' } }] },
+          },
+        });
+      },
+      expect: (tree, t, log) => {
+        const d = readJson(tree, '.bespunky/dev.json');
+        t.equal(
+          d.apps.shop.processes[1].exports,
+          {
+            FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:${PORT:auth}',
+            FIRESTORE_EMULATOR_HOST: '127.0.0.1:${PORT:firestore}',
+            FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1:${PORT:storage}',
+            FIREBASE_EMULATOR_HUB: '127.0.0.1:${PORT:hub}',
+          },
+          'one variable per emulator the suite runs, at its (shifted) port',
+        );
+        t.equal(d.apps.own.processes[1].exports, { FIRESTORE_EMULATOR_HOST: 'db:8080', FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:${PORT:auth}' }, "the project's own value kept, the missing one added");
+        t.ok(logged(log, 'exports FIREBASE_AUTH_EMULATOR_HOST'), 'said so');
+      },
+    },
+    {
       // 6106999 … 703ca41~1 wrote this comment above the pre-toggle block; 0.24.3 converted the values, not the comment.
       name: 'the pre-toggle endpoints comment (forwardPorts in step) is replaced too — without the EMULATE sentence',
       setup: (tree) =>

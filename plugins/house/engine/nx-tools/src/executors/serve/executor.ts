@@ -2,7 +2,7 @@ import type { PromiseExecutor } from '@nx/devkit';
 import { logger } from '@nx/devkit';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import type { ServeExecutorSchema } from './schema';
 
@@ -18,6 +18,19 @@ import type { ServeExecutorSchema } from './schema';
  *              migration sets it on any dev-server-looking target that lacks it.
  *   dev-stack  the same, CONTINUOUS — only so an e2e target can `dependsOn` a running stack (and two e2e runs, or
  *              an e2e beside a `nx run <app>:dev-stack`, share it — the one level where Nx's sharing is right).
+ *              The stack is recorded as that task's (`--task=<project>:<target>`), which is how the e2e finds it:
+ *              it runs `tools/dev/dev with <app> -- <tests>`, told the stack's BASE_URL and emulator hosts in its
+ *              environment — `auto` puts the stack on whatever block is free, so no port can be assumed.
+ *
+ * UNDER AN AI AGENT, `nx serve` is refused when Nx would show nothing of it. From Nx 23.3 an agent's run is rendered
+ * as `summary` (Nx's own default when it detects an agent and no style is named): nothing of a non-continuous task
+ * while it runs — no URL, no stop handle — and only a log path when it ends, so `nx serve` blocks, silent, until the
+ * tool call times out. Refused at once instead, saying what works: the engine itself (`tools/dev/dev serve <app>`), or
+ * NX_DEFAULT_OUTPUT_STYLE=stream. Not `--output-style=stream`: a flag reaches only the Nx process, and the task's own
+ * environment is byte-for-byte the same under every flag (checked on 23.3) — the env default is what a task can see.
+ * Nx 23.1 streams the task to an agent (checked), so there it runs as usual. (Nothing in the task can reach the
+ * agent's screen past Nx's renderer, so the refusal is the useful thing this executor can do.)
+ * The agent's PORT rule is the engine's — it never takes the base ports — so it holds however the stack is started.
  *
  * The dev loop lives in `tools/dev/` (written by the `dev` generator) and reads what the project serves from
  * `.bespunky/dev.json`: worktree selection, one port offset for every declared port, `<slug>.localhost`, the
@@ -37,7 +50,7 @@ import type { ServeExecutorSchema } from './schema';
  * processes run `nx run <target>` with NX_WORKSPACE_ROOT_PATH pinned to the served tree and NX_DAEMON=false
  * (see the dev generator's fragments/nx.ts).
  */
-const OWN = new Set(['project', 'worktree', 'portOffset', 'skip', 'sharedBrowser', 'install', 'dryRun', 'emulators', 'port']);
+const OWN = new Set(['project', 'worktree', 'portOffset', 'skip', 'sharedBrowser', 'install', 'dryRun', 'emulators', 'port', 'task']);
 
 /** An option value as one engine flag: `--k` (true), `--k=false`, `--k=<v>`. */
 function asFlag(key: string, value: unknown): string {
@@ -56,12 +69,30 @@ export function engineArgs(project: string, options: ServeExecutorSchema & Recor
   if (options.sharedBrowser === false) args.push('--no-shared-browser');
   if (options.install === false) args.push('--no-install');
   if (options.dryRun) args.push('--dry-run');
+  if (typeof options.task === 'string') args.push(`--task=${options.task}`);
 
   const forwarded = Object.entries(options)
     .filter(([key, value]) => !OWN.has(key) && !key.startsWith('_') && !key.startsWith('$') && value !== undefined)
     .map(([key, value]) => asFlag(key, value));
   if (forwarded.length) args.push('--', ...forwarded);
   return args;
+}
+
+/**
+ * Does Nx render this run as an agent's `summary` — nothing of a task until it ends? Its own rule: an AI agent (Claude
+ * Code here: CLAUDECODE=1), no TUI (NX_TUI), no default style other than summary (NX_DEFAULT_OUTPUT_STYLE), and an Nx
+ * that has the summary renderer at all (23.3 on; 23.1 streams to an agent). An --output-style flag is invisible here.
+ */
+function silentUnderNx(root: string): boolean {
+  if (process.env.CLAUDECODE !== '1' || process.env.NX_STREAM_OUTPUT === 'true' || process.env.NX_TUI === 'true') return false;
+  const style = process.env.NX_DEFAULT_OUTPUT_STYLE;
+  if (style && style !== 'summary') return false;
+  try {
+    const nx = dirname(require.resolve('nx/package.json', { paths: [root] }));
+    return ['dist/src', 'src'].some((at) => existsSync(join(nx, at, 'tasks-runner/life-cycles/summary-terminal-output-life-cycle.js')));
+  } catch {
+    return false;
+  }
 }
 
 const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, context) => {
@@ -79,6 +110,15 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
     );
     return { success: false };
   }
+  const continuous = context.target?.continuous === true;
+  if (!continuous && !options.dryRun && silentUnderNx(context.root)) {
+    logger.error(
+      `[serve] Refused: under an AI agent Nx shows nothing of \`nx serve\` while it runs (no URL, no stop handle) — it would block silently until the tool call times out.\n` +
+        `  Serve with the engine itself, which prints both:  tools/dev/dev serve ${project}\n` +
+        `  or make Nx stream it:  NX_DEFAULT_OUTPUT_STYLE=stream nx serve ${project}`,
+    );
+    return { success: false };
+  }
   if (options.port !== undefined) {
     logger.warn(
       `[serve] Ignoring port=${options.port}: a served port is declared in .bespunky/dev.json (processes[].ports) and ` +
@@ -86,7 +126,7 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
     );
   }
 
-  const args = engineArgs(project, options as ServeExecutorSchema & Record<string, unknown>);
+  const args = engineArgs(project, { ...options, task: `${project}:${context.targetName}` } as ServeExecutorSchema & Record<string, unknown>);
   return new Promise((resolve) => {
     // The engine's own signal rule, one level up (tools/dev/lib/stack.mjs states it in full): SIGINT is the
     // terminal's Ctrl+C, already delivered to the whole foreground group — the engine and its children have

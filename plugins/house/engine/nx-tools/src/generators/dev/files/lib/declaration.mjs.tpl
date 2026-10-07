@@ -12,6 +12,7 @@
 //           "cmd": "python3 -m http.server ${PORT:app}",   // a string runs through `sh -c`; an array is argv
 //           "ports": { "app": 8000 },                       // name → BASE port; every port shifts by one offset
 //           "env": { "KEY": "value" },                      // optional; values substitute like cmd
+//           "exports": { "KEY": "127.0.0.1:${PORT:app}" },  // optional; what a DEPENDENT of the stack is told (below)
 //           "primary": true,                                // optional; the process the app URL points at
 //           "ready": { "http": "/" },                       // optional; what "up" means for the primary
 //           "url": [{ "param": "emulate", "value": "none", "when": "skipped" }],          // optional
@@ -24,12 +25,20 @@
 //
 // Substitutions in cmd / env / url values: ${PORT:<name>} (that port, shifted), ${OFFSET}, ${TREE} (the
 // served tree's absolute path), ${APP}, ${STACK_DIR} (this stack's own state dir). Every process also gets
-// PORT_<NAME> for every port of the app, PORT_OFFSET when the stack is shifted, DEV_URL_QUERY when the app is
+// PORT_<NAME> for every port of the app, PORT_OFFSET (0 on the base stack), DEV_URL_QUERY when the app is
 // opened with URL switches (the same query, for a server that must resolve what the page resolves), DEV_STACK_DIR —
 // the directory that is this stack's alone (tree + app + offset), where a process keeps anything a tool would
 // otherwise key by something every stack shares (a lock, a locator file) — and DEV_STACK_TMP, the stack's own SHORT
-// temp dir, for a tool that keys its state by os.tmpdir() (see lib/stacks.mjs stackTmp). A bare PORT is NOT exported: it is a convention some runtimes act on
-// (a Cloud Functions worker, say) — a server that wants it declares `"env": { "PORT": "${PORT:app}" }`.
+// temp dir, for a tool that keys its state by os.tmpdir() (see lib/stacks.mjs stackTmp) — and DEV_STACK_LOCK, the stack's
+// lock, which a process that must keep the stack alive past its own parent holds (tools/emulators.sh's keeper does).
+// None of these is ever INHERITED: a stack started from inside another stack's process gets its own, and one this
+// stack does not set is removed, never left at an outer stack's value. A bare PORT is NOT exported: it is a
+// convention some runtimes act on (a Cloud Functions worker, say) — a server that wants it declares
+// `"env": { "PORT": "${PORT:app}" }`.
+//
+// EXPORTS are the stack's ADDRESS for whatever runs AGAINST it — an e2e run (`tools/dev/dev with <app> -- …`):
+// BASE_URL (the primary's origin), DEV_URL, DEV_URL_QUERY, PORT_OFFSET and PORT_<NAME>, plus each running process's
+// own `exports` (an emulator suite declares its FIREBASE_*_EMULATOR_HOST there).
 //
 // url[].when    always | offset (stack shifted) | running (this process runs) | skipped (--skip'ed)
 // advice[].when always | base (stack on its base ports) | offset | contended (base ports owned elsewhere) — a
@@ -97,7 +106,9 @@ export function validate(decl) {
         portNames.add(port);
         if (!Number.isInteger(base) || base < 1 || base > 65535) fail(`${pat}.ports.${port}`, 'must be a port number');
       }
-      if (p.env !== undefined && (!isObject(p.env) || !Object.values(p.env).every((v) => typeof v === 'string'))) fail(`${pat}.env`, 'must map names to strings');
+      for (const field of ['env', 'exports']) {
+        if (p[field] !== undefined && (!isObject(p[field]) || !Object.values(p[field]).every((v) => typeof v === 'string'))) fail(`${pat}.${field}`, 'must map names to strings');
+      }
       if (p.primary !== undefined && typeof p.primary !== 'boolean') fail(`${pat}.primary`, 'must be a boolean');
       if (p.primary) {
         primaries++;
@@ -151,6 +162,9 @@ export function boundPorts(app, skip = []) {
   return app.processes.filter((p) => !skip.includes(p.id)).flatMap((p) => Object.values(p.ports ?? {}));
 }
 
+/** The stack's own variables — every process gets its own values, never an outer stack's (see the header). */
+const STACK_ENV = ['PORT_OFFSET', 'DEV_URL_QUERY', 'DEV_STACK_DIR', 'DEV_STACK_TMP', 'DEV_STACK_LOCK'];
+
 const envName = (port) => `PORT_${port.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 
 const shellQuote = (word) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
@@ -165,8 +179,9 @@ const shellQuote = (word) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'$
  *   baseEnv      the environment the children inherit
  *   stackDir     this stack's own state dir (lib/stacks.mjs) — DEV_STACK_DIR / ${STACK_DIR}
  *   stackTmp     this stack's own short TMPDIR (lib/stacks.mjs stackTmp) — DEV_STACK_TMP
+ *   stackLock    this stack's lock file (lib/stacks.mjs holdStackLock) — DEV_STACK_LOCK
  */
-export function planApp(decl, appName, { offset, tree, skip = [], passthrough = [], baseEnv = {}, stackDir, stackTmp }) {
+export function planApp(decl, appName, { offset, tree, skip = [], passthrough = [], baseEnv = {}, stackDir, stackTmp, stackLock }) {
   const app = decl.apps[appName];
   const primary = primaryOf(app);
   const ids = app.processes.map((p) => p.id);
@@ -206,6 +221,16 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
   }
 
   const portEnv = Object.fromEntries(Object.entries(ports).map(([name, port]) => [envName(name), String(port)]));
+  // The stack's own identity — set whole, never inherited: what an outer stack left in the environment is removed.
+  const inherited = { ...baseEnv };
+  for (const k of STACK_ENV) delete inherited[k];
+  const stackEnv = {
+    PORT_OFFSET: String(offset),
+    ...(stackDir ? { DEV_STACK_DIR: stackDir } : {}),
+    ...(stackTmp ? { DEV_STACK_TMP: stackTmp } : {}),
+    ...(stackLock ? { DEV_STACK_LOCK: stackLock } : {}),
+    ...(query.size ? { DEV_URL_QUERY: query.toString() } : {}),
+  };
 
   const processes = app.processes.map((p) => {
     const where = `apps.${appName}.${p.id}`;
@@ -213,10 +238,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
     const added = {
       ...Object.fromEntries(Object.entries(p.env ?? {}).map(([k, v]) => [k, subst(v, `${where}.env.${k}`)])),
       ...portEnv,
-      ...(offset > 0 ? { PORT_OFFSET: String(offset) } : {}),
-      ...(stackDir ? { DEV_STACK_DIR: stackDir } : {}),
-      ...(stackTmp ? { DEV_STACK_TMP: stackTmp } : {}),
-      ...(query.size ? { DEV_URL_QUERY: query.toString() } : {}),
+      ...stackEnv,
     };
     const shell = typeof p.cmd === 'string';
     const command = shell ? [subst(p.cmd, `${where}.cmd`), ...extra.map(shellQuote)].join(' ') : subst(p.cmd[0], `${where}.cmd`);
@@ -231,7 +253,8 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
       display: shell ? command : [command, ...args].join(' '),
       ports: Object.fromEntries(Object.entries(p.ports ?? {}).map(([n, b]) => [n, b + offset])),
       added,
-      env: { ...baseEnv, ...added },
+      env: { ...inherited, ...added },
+      exports: Object.fromEntries(Object.entries(p.exports ?? {}).map(([k, v]) => [k, subst(v, `${where}.exports.${k}`)])),
       ready: p.ready ? subst(p.ready.http, `${where}.ready`) : '/',
     };
   });
@@ -246,11 +269,21 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
   const primaryPlan = processes.find((p) => p.primary);
   const primaryPort = Object.values(primaryPlan.ports)[0];
   const q = query.toString() ? `?${query}` : '';
+  const running = processes.filter((p) => !p.skipped);
+  const exports = {
+    BASE_URL: `http://localhost:${primaryPort}`,
+    DEV_URL: `http://localhost:${primaryPort}/${q}`,
+    PORT_OFFSET: String(offset),
+    ...(query.size ? { DEV_URL_QUERY: query.toString() } : {}),
+    ...Object.fromEntries(running.flatMap((p) => Object.entries(p.ports)).map(([name, port]) => [envName(name), String(port)])),
+    ...Object.assign({}, ...running.map((p) => p.exports)),
+  };
   return {
     app: appName,
     ignoredSkips,
     processes,
-    running: processes.filter((p) => !p.skipped),
+    running,
+    exports,
     primary: primaryPlan,
     primaryPort,
     query: q,

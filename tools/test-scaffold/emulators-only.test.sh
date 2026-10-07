@@ -21,6 +21,8 @@
 # fake `firebase` on PATH that records its arguments instead of starting anything. So this asserts the real
 # shipped script's real command line, without Java, firebase-tools, or a network.
 set -uo pipefail
+# A human runs these: under an AI agent (CLAUDECODE=1) the engine never takes the base ports.
+unset CLAUDECODE
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TPL="$ROOT/plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl"

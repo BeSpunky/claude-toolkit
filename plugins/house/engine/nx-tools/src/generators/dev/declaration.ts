@@ -19,6 +19,8 @@ export interface DevProcess {
   cmd: DevCmd;
   ports?: Record<string, number>;
   env?: Record<string, string>;
+  /** What a dependent of the stack (an e2e run, through `tools/dev/dev with`) is told — values substitute like env. */
+  exports?: Record<string, string>;
   primary?: boolean;
   ready?: { http: string };
   url?: { param: string; value: string; when?: 'always' | 'offset' | 'running' | 'skipped' }[];

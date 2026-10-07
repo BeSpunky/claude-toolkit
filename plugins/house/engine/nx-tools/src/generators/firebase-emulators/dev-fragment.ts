@@ -40,6 +40,23 @@ export const EMULATOR_UI_ADVICE: { when: 'base' | 'offset'; text: string }[] = [
 ];
 export const EMULATORS_TARGET = 'emulators';
 
+/**
+ * Where this stack's emulators are, for whatever runs AGAINST the stack (an e2e run through `tools/dev/dev with`): the
+ * variables the Firebase Admin SDK and firebase-tools read, at this stack's shifted ports. Only for the services the
+ * suite runs — a test seeding Auth or Firestore then reaches THIS stack's suite, never the developer's on the base ports.
+ */
+const EMULATOR_HOST_VARS: Record<string, string> = {
+  auth: 'FIREBASE_AUTH_EMULATOR_HOST',
+  firestore: 'FIRESTORE_EMULATOR_HOST',
+  storage: 'FIREBASE_STORAGE_EMULATOR_HOST',
+  database: 'FIREBASE_DATABASE_EMULATOR_HOST',
+  pubsub: 'PUBSUB_EMULATOR_HOST',
+  hub: 'FIREBASE_EMULATOR_HUB',
+};
+export function emulatorExports(ports: Record<string, number>): Record<string, string> {
+  return Object.fromEntries(Object.entries(EMULATOR_HOST_VARS).filter(([name]) => ports[name] !== undefined).map(([name, v]) => [v, `127.0.0.1:\${PORT:${name}}`]));
+}
+
 export function firebaseFragment(tree: Tree): DevFragment {
   if (!tree.exists('firebase.json')) return { processes: [] };
   try {
@@ -55,6 +72,7 @@ export function firebaseFragment(tree: Tree): DevFragment {
         cmd: [nxInvocation(tree).bin, 'run', `${FIREBASE_PROJECT}:${EMULATORS_TARGET}`],
         env: { ...NX_TREE_ENV },
         ports,
+        exports: emulatorExports(ports),
         url: [{ param: 'emulate', value: 'none', when: 'skipped' }],
         advice: [
           {

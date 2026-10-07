@@ -13,6 +13,8 @@
 # Every half of that fails SILENTLY if it regresses: a production value in the emulator looks exactly like a
 # working local setup, right up until a function sends a real message.
 set -euo pipefail
+# A human runs these: under an AI agent (CLAUDECODE=1) the engine never takes the base ports.
+unset CLAUDECODE
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TPL="$ROOT/plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl"

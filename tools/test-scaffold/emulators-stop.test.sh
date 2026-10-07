@@ -17,6 +17,8 @@
 # FATAL (exit 1, no export); a SIGTERM to firebase itself exports (slowly) and exits — or, with FAKE_HANG, never. Each stop below is delivered the way its real sender
 # delivers it, including Nx's: every leaf of the script's tree first, then the parents, then SIGKILL after 1 s.
 set -uo pipefail
+# A human runs these: under an AI agent (CLAUDECODE=1) a direct run never takes the base ports.
+unset CLAUDECODE
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TPL="$ROOT/plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl"
@@ -220,30 +222,34 @@ OUT="$(cd "$W" && DEV_OWNER=test timeout 30 node tools/dev/dev.mjs stop firebase
 ok "orphan: dev stop ends exactly what it left, and the stack is released" "$(none_left "$W" && gone_dir "$W/.bespunky/run/firebase@0" && echo 1 || echo 0)"
 
 # ── 7. Its stack's serve was killed first (Nx's force-kill after a Ctrl+C mid-export): the keeper, last one out, ──
-# removes the stack's run record and state dir — through the engine's own rule, so never a stack that is live.
+# removes the stack's run record and state dir — and only when nothing else holds the stack's lock, so never a stack
+# that is live.
+serve_lock() { mkdir -p "$1/.bespunky/run/locks"; : > "$1/.bespunky/run/locks/serve.lock"; echo "$1/.bespunky/run/locks/serve.lock"; }
 under_engine() {   # under_engine <ws> <record-pid> — a dev-engine stack app@0 whose serve is <record-pid>; echoes the session
-  local d="$1"
+  local d="$1" lock
+  lock="$d/.bespunky/run/locks/serve.lock"
   mkdir -p "$d/.bespunky/run/app@0" /tmp/bespunky-0123456789ab
-  # The record the engine's claim writes — its claimer named by PID, kernel start time, command line and process table.
+  # The record the engine's claim writes — its claimer named by PID and kernel start time, and the stack's lock.
   node --input-type=module -e '
-    const [lib, d, pid] = process.argv.slice(1);
-    const { machineId, processStart, commandLine } = await import(lib);
+    const [lib, d, pid, lock] = process.argv.slice(1);
+    const { machineId, processStart } = await import(lib);
     const p = Number(pid);
-    const rec = { version: 2, key: "app@0", app: "app", tree: d, offset: 0, pid: p, procStart: processStart(p), command: commandLine(p), machine: machineId(), ports: {}, tmp: "/tmp/bespunky-0123456789ab", processes: [] };
+    const rec = { version: 3, key: "app@0", app: "app", tree: d, offset: 0, pid: p, procStart: processStart(p), lock, machine: machineId(), ports: {}, tmp: "/tmp/bespunky-0123456789ab", processes: [] };
     (await import("node:fs")).writeFileSync(d + "/.bespunky/run/app@0.json", JSON.stringify(rec));
-  ' "file://$d/tools/dev/lib/stacks.mjs" "$d" "$2"
+  ' "file://$d/tools/dev/lib/stacks.mjs" "$d" "$2" "$lock"
   ( cd "$d" || exit 1
-    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT=20 DEV_STACK_DIR="$d/.bespunky/run/app@0" DEV_STACK_TMP=/tmp/bespunky-0123456789ab env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
+    PATH="$TMP/bin:$PATH" EMULATORS_STOP_TIMEOUT=20 DEV_STACK_DIR="$d/.bespunky/run/app@0" DEV_STACK_TMP=/tmp/bespunky-0123456789ab DEV_STACK_LOCK="$lock" env --default-signal=INT,QUIT setsid bash -c 'bash tools/emulators.sh > out.log 2>&1; echo $? > rc' < /dev/null > /dev/null 2>&1 &
     echo $! )
 }
 entry_gone() { for _ in $(seq 1 100); do [ -d "$1" ] || return 0; sleep 0.1; done; return 1; }
 sleep 0 & DEAD=$!; wait "$DEAD"
-W="$(mkws pruned)"; P="$(under_engine "$W" "$DEAD")"; STARTED+=("$P")
+W="$(mkws pruned)"; serve_lock "$W" >/dev/null; P="$(under_engine "$W" "$DEAD")"; STARTED+=("$P")
 ready "$W" >/dev/null
 kill -KILL -- "-$P"
 ok "serve gone: the keeper saves, then removes the stack's record and state dir" "$(entry_gone "$W/.bespunky/run/app@0" && exported "$W" && [ ! -f "$W/.bespunky/run/app@0.json" ] && echo 1 || echo 0)"
-bash -c 'exec -a "node dev.mjs serve" sleep 300' & LIVE=$!
-W="$(mkws spared)"; P="$(under_engine "$W" "$LIVE")"; STARTED+=("$P")
+W="$(mkws spared)"; LOCK="$(serve_lock "$W")"
+bash -c 'exec 9<"$0"; flock -s 9; exec -a "node dev.mjs serve" sleep 300' "$LOCK" & LIVE=$!
+P="$(under_engine "$W" "$LIVE")"; STARTED+=("$P")
 ready "$W" >/dev/null
 KEEPER="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$W/.bespunky/run/app@0/detached/emulators.json" 2>/dev/null)"
 kill -KILL -- "-$P"

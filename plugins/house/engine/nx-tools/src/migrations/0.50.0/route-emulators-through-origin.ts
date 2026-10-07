@@ -28,7 +28,9 @@
 //     cannot configure.
 //   - .bespunky/dev.json (project state): drops the `?portOffset=${OFFSET}` URL switch the house seeded on the
 //     emulators process — the page no longer reads it — and gives that process the banner advice a new app gets:
-//     where this stack's Emulator UI works (a host tab only on the base stack with same-number forwards).
+//     where this stack's Emulator UI works (a host tab only on the base stack with same-number forwards) — and the
+//     `exports` a new app gets: the FIREBASE_*_EMULATOR_HOST variables an e2e run against the stack is told
+//     (`tools/dev/dev with`), at the stack's shifted ports. A variable the project already exports is left as it is.
 //   - The house's own words that this change made false, where they still stand VERBATIM (anything reworded is the
 //     project's, and stays): the .gitignore block's `<app>:serve --portOffset` (the flag is `--port-offset`), and
 //     the devcontainer's dev-server port comment that said every Firebase port must forward to the SAME host number
@@ -44,7 +46,7 @@ import { applyJsonChanges } from '../../generators/_utils/json-edits';
 import { findAppRoots } from '../../generators/_utils/app-roots';
 import { writeFirebaseClientGlue } from '../../generators/firebase-emulators/service-configs';
 import { reportProxyWiring } from '../../generators/firebase-emulators/proxy-wiring';
-import { EMULATOR_UI_ADVICE } from '../../generators/firebase-emulators/dev-fragment';
+import { EMULATOR_UI_ADVICE, emulatorExports } from '../../generators/firebase-emulators/dev-fragment';
 import { angular } from '../../adapters/angular';
 
 const TAG = '[0.50.0 route-emulators-through-origin]';
@@ -439,6 +441,7 @@ interface DeclaredProcess {
   ports?: Record<string, unknown>;
   url?: UrlSwitch[];
   advice?: Array<{ text?: unknown; when?: unknown }>;
+  exports?: Record<string, unknown>;
 }
 
 /** The emulators process the house seeded: its id, and a command that runs the workspace's `firebase:emulators`. */
@@ -459,6 +462,7 @@ function migrateDevDeclaration(tree: Tree): void {
     for (const process of entry?.processes ?? []) {
       changed = dropPortOffsetSwitch(app, process) || changed;
       changed = adviseOnTheEmulatorUi(app, process) || changed;
+      changed = exportEmulatorHosts(app, process) || changed;
     }
   }
   // In place: only the members it changed — dev.json is the project's to edit, in its own form.
@@ -500,6 +504,24 @@ function adviseOnTheEmulatorUi(app: string, process: DeclaredProcess): boolean {
   logger.info(
     `${TAG} ${DEV_JSON}: apps.${app}.emulators — the serve banner now says where this stack's Emulator UI works ` +
       `(its page dials each emulator directly, so a host tab is complete only on the base stack).`,
+  );
+  return true;
+}
+
+/**
+ * Where the stack's emulators are, for an e2e run against it — what a new app's emulators process exports. Only on the
+ * house's own process; a variable the project already exports (its own value) is never replaced.
+ */
+function exportEmulatorHosts(app: string, process: DeclaredProcess): boolean {
+  if (!isHouseEmulators(process)) return false;
+  const ports = Object.fromEntries(Object.entries(process.ports ?? {}).filter(([, p]) => Number.isInteger(p))) as Record<string, number>;
+  const own = process.exports && typeof process.exports === 'object' ? process.exports : {};
+  const missing = Object.entries(emulatorExports(ports)).filter(([k]) => !(k in own));
+  if (!missing.length) return false;
+  process.exports = { ...own, ...Object.fromEntries(missing) };
+  logger.info(
+    `${TAG} ${DEV_JSON}: apps.${app}.emulators — exports ${missing.map(([k]) => k).join(', ')}: an e2e run against the ` +
+      `stack (tools/dev/dev with <app> -- …) reaches THIS stack's emulators, at its shifted ports.`,
   );
   return true;
 }

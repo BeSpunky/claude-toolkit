@@ -56,8 +56,14 @@ DATA_DIR="$ROOT/.emulator-data"
 # for its whole stack before it started anything, and hands the suite its state dir (DEV_STACK_DIR), its TMPDIR
 # (DEV_STACK_TMP) and its offset (PORT_OFFSET). Run on its own (`nx run firebase:emulators`), this script claims
 # `firebase@<offset>` itself, through the same engine — so a direct run and a serve see each other, and the second
-# of them is refused naming the first, instead of the two colliding port by port. The claim is atomic and is never
-# taken over a live stack; a block whose previous suite is still SAVING is waited for (nothing is lost).
+# of them is refused naming the first, instead of the two colliding port by port. The claim is atomic; a block whose
+# previous suite is still SAVING is waited for (nothing is lost). Run directly by an AI agent (CLAUDECODE=1), the
+# suite never lands on the base ports (`auto`), and PORT_OFFSET=0 is refused.
+#
+# THE STACK LIVES WHILE ITS LOCK IS HELD (tools/dev/lib/stacks.mjs): a SHARED flock this script takes — on the lock the
+# serve passed (DEV_STACK_LOCK), or on a fresh one of its own before it claims — and that everything it starts
+# inherits, the detached keeper above all. So the stack stays claimed while the suite saves after this script is gone,
+# and is free the instant the last of them exits, however it exits: the kernel releases it.
 #
 # Port-offset isolation (PORT_OFFSET): the WHOLE suite moves onto one block, so it COEXISTS with a suite on the base
 # ports. We generate an offset copy of firebase.json (every emulator port +OFFSET, every nested port such as
@@ -76,19 +82,27 @@ DATA_DIR="$ROOT/.emulator-data"
 if [ -n "${DEV_STACK_DIR:-}" ]; then
   STACK_DIR="$DEV_STACK_DIR"
   STACK_TMP="${DEV_STACK_TMP:?the dev engine that started this suite gave it no TMPDIR (DEV_STACK_TMP) — run the house upgrade}"
+  STACK_LOCK="${DEV_STACK_LOCK:?the dev engine that started this suite gave it no stack lock (DEV_STACK_LOCK) — run the house upgrade}"
+  exec {STACK_LOCK_FD}<"$STACK_LOCK"
+  flock -s -w 30 "$STACK_LOCK_FD" || { echo "[emulators] could not join the stack's lock $STACK_LOCK" >&2; exit 1; }
   OFFSET="${PORT_OFFSET:-0}"
   DIRECT=0
 else
-  CLAIM="$(node "$ROOT/tools/dev/dev.mjs" claim firebase --pid=$$ --port-offset="${PORT_OFFSET:-0}" \
+  mkdir -p "$ROOT/.bespunky/run/locks"
+  STACK_LOCK="$ROOT/.bespunky/run/locks/$$-$RANDOM$RANDOM.lock"
+  exec {STACK_LOCK_FD}>"$STACK_LOCK"
+  flock -s -n "$STACK_LOCK_FD"
+  STACK_KEY=''
+  # Given up when this script ends: our descriptor closed, then the record removed — unless the suite is still saving
+  # (its keeper holds the lock): then the keeper, the last one out, removes it. A claim that never happened: the lock file.
+  trap 'exec {STACK_LOCK_FD}>&-; if [ -n "$STACK_KEY" ]; then node "$ROOT/tools/dev/dev.mjs" release "$STACK_KEY" --lock="$STACK_LOCK" >/dev/null 2>&1 || true; else rm -f "$STACK_LOCK"; fi' EXIT
+  CLAIM="$(node "$ROOT/tools/dev/dev.mjs" claim firebase --pid=$$ --lock="$STACK_LOCK" ${PORT_OFFSET:+--port-offset="$PORT_OFFSET"} \
     --ports="$(node "$ROOT/tools/emulator-ports.mjs" claim "$ROOT/firebase.json")")" || exit 1
   eval "$CLAIM"
   OFFSET="$STACK_OFFSET"
   DIRECT=1
-  # Given up when this script ends — unless the suite is still saving: then the keeper's own last act releases it.
-  trap 'node "$ROOT/tools/dev/dev.mjs" release "$STACK_KEY" --pid=$$ >/dev/null 2>&1 || true' EXIT
   echo "[emulators] stack $STACK_KEY claimed — tools/dev/dev ps shows it; stop it with Ctrl+C or: tools/dev/dev stop firebase --offset=$OFFSET" >&2
 fi
-RECORD="$STACK_DIR.json"
 mkdir -p "$STACK_DIR" "$STACK_TMP"
 export TMPDIR="$STACK_TMP"
 
@@ -417,17 +431,14 @@ kill_group() {
   kill -KILL "${members[@]}" 2>/dev/null || true
 }
 
-# THE STACK'S RECORD GOES WITH THE LAST ONE OUT. On a clean stop whoever claimed it (the dev engine, or this script
-# run directly) removes it after this suite has finished; when that claimer was killed first (Nx force-kills a
-# stopping task after a few seconds — a Ctrl+C while the suite exports), the keeper is the last one out. It prunes
-# through the engine's own rule (tools/dev readStacks): only a stack whose claimer and processes are all gone, so
-# never a live one — and a stack that has since been claimed again has a live record of its own.
+# THE STACK'S RECORD GOES WITH THE LAST ONE OUT. Each holder of the stack's lock lets go of it as it leaves and asks
+# for the record to be removed; the engine removes it only once the kernel says nobody holds the lock — so the
+# claimer (the dev engine, or this script run directly) leaves it to a keeper still saving, and the keeper, when it is
+# the last one out (Nx force-kills a stopping task after a few seconds — a Ctrl+C while the suite exports), removes it.
+# A stack since claimed again under the same key names another lock, and is never touched.
 release_stack() {
-  node --input-type=module -e '
-    const [lib, tree] = process.argv.slice(1);
-    const { readStacks } = await import(lib);
-    readStacks([tree]);
-  ' "file://$ROOT/tools/dev/lib/stacks.mjs" "$ROOT" >/dev/null 2>&1 || true
+  exec {STACK_LOCK_FD}>&-
+  node "$ROOT/tools/dev/dev.mjs" release "$(basename "$STACK_DIR")" --lock="$STACK_LOCK" >/dev/null 2>&1 || true
 }
 
 # The keeper (see SUPERVISION). Runs detached; the only process that ever signals firebase-tools.
@@ -445,7 +456,7 @@ keep() {
   # never waited, and the keeper's own release left the stack behind.
   KEEPER_PID=$BASHPID
   KEEPER_START="$(proc_start "$KEEPER_PID")"
-  local requested=0 abandon='' signalled=0 stop_at=0 deadline=0 code=0 fb result now beat=0 abandoned=''
+  local requested=0 abandon='' signalled=0 stop_at=0 deadline=0 code=0 fb result now abandoned='' partial
   trap 'requested=1' TERM INT HUP
   trap 'abandon="asked for (tools/dev/dev stop --abandon)"; requested=1' USR1
   firebase "${FIREBASE_ARGS[@]}" </dev/null >>"$LOG" 2>&1 &
@@ -469,13 +480,15 @@ keep() {
         break
       fi
     fi
-    # Fresh for anyone reading this stack's record from another container (lib/stacks.mjs heartbeat).
-    beat=$((beat + 1)); [ $((beat % 75)) -eq 0 ] && touch -c "$RECORD" 2>/dev/null
     nap 0.2
   done
   wait "$fb" 2>/dev/null || code=$?
   if [ -n "$abandoned" ]; then
-    result="ABANDONED after $(( $(date +%s) - stop_at ))s — ${abandoned}. firebase-tools had not finished ${STOP_DOING}; its processes were killed, and ${DATA_DIR} keeps what it held before. Its log: $LOG"
+    # What is left on disk, said as it is: firebase-tools writes an export into a firebase-export-* dir in the project
+    # root, then DELETES the data dir and moves the new export in. Killed before that swap, the data dir is as it was;
+    # during it, partly deleted; and a staged export may be left behind (gitignored) holding the newest data.
+    partial="$(find "$ROOT" -maxdepth 1 -type d -name 'firebase-export-*' -newermt "@$stop_at" 2>/dev/null | head -n 3 | tr '\n' ' ')"
+    result="ABANDONED after $(( $(date +%s) - stop_at ))s — ${abandoned}. firebase-tools had not finished ${STOP_DOING}; its processes were killed. ${DATA_DIR} holds what it held before only if the export had not yet begun to replace it — it may be partly deleted.${partial:+ A staged export it left: ${partial}(the newest data, possibly incomplete — check it before copying it over ${DATA_DIR}).} Its log: $LOG"
     code=1
   elif [ "$signalled" -eq 1 ] && [ "$PERSIST" -eq 1 ]; then
     if [ -f "$DATA_DIR/firebase-export-metadata.json" ] && [ "$(stat -c %Y "$DATA_DIR/firebase-export-metadata.json" 2>/dev/null || echo 0)" -ge "$stop_at" ]; then
