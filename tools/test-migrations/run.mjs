@@ -85,7 +85,9 @@ async function main() {
   process.stdout.write('compiling the payload… ');
   let payload;
   try {
-    payload = compilePayload('bespunky-migration-tests');
+    // Per process: compilePayload empties its build dir first, so two runs in one tree (parallel fixers, an agent
+    // beside a human) sharing a name would delete each other's payload mid-run.
+    payload = compilePayload(`bespunky-migration-tests-${process.pid}`);
   } catch (error) {
     console.error(`\n${error.message}`);
     process.exit(2);
