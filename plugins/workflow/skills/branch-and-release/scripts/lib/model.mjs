@@ -129,9 +129,7 @@ const isSha = (v) => v === null || v === undefined || (typeof v === 'string' && 
 
 // ---- deploy bindings -------------------------------------------------------------------------------------
 //
-// `deploys` says what a push to a line (or a line pattern, or a tag series) DEPLOYS. Two forms:
-//   - a NOTE (a string): documentation only — read by humans, never by a machine (the form `deploys` always had);
-//   - a BINDING (an object): the same note, plus structured facts tooling may READ —
+// `deploys` says what a push to a line (or a line pattern, or a tag series) DEPLOYS. ONE form, an object —
 //       { "note"?: "…",
 //         "ci"?: { "environment": "production", "providers": { "firebase": "prod" } },
 //         "appHosting"?: [{ "project": "my-project-id", "backend": "web" }] }
@@ -142,6 +140,13 @@ const isSha = (v) => v === null || v === undefined || (typeof v === 'string' && 
 //     `appHosting` — Firebase App Hosting backends that roll out on a push here (GitHub-linked). Not CI: Firebase's
 //                    own integration deploys them, and `evidence --app-hosting` can observe them, so a declared one
 //                    can be checked against the cloud.
+//     `note`       — documentation only: read by humans, never by a machine.
+// A bare string (the note alone, the form `deploys` had before bindings existed) is NOT a deploys value. It is
+// reported as OUTDATED rather than plainly invalid, because it has one exact, meaning-preserving rewrite —
+// `{ "note": <the string> }` — which the house upgrade's migration applies (nx-tools 0.50.0
+// `deploys-object-form`) and every message prints. A note binds nothing, so the projection is the same before and
+// after that rewrite: the resolver keeps reading such a copy as declared (with the fix in its notes), while the
+// commands a human or Claude reads — validate, write, verify, describe — refuse it until it is rewritten.
 // A binding is a FACT the model declares, like every other line in it — written only by `write`, after a human
 // decision. Nothing reads the note; tooling reads the projection's `deploys` (`project` below).
 export const DEPLOY_KEYS = ['note', 'ci', 'appHosting'];
@@ -150,10 +155,16 @@ const PROVIDER = /^[a-z][a-z0-9-]*$/;
 const TARGET = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const BACKEND = /^[a-z0-9][a-z0-9-]*$/;
 
-/** Problems with one `deploys` value (`field` names it in the messages). */
-function deploysErrors(field, d, err) {
-  if (d === undefined || d === null || typeof d === 'string') return;
-  if (!isObj(d)) return err(field, 'must be null, a note (string), or a binding { note, ci, appHosting }');
+/** The message for an outdated (bare-string) `deploys` — it carries its own fix. */
+export const outdatedDeploys = (field, note) =>
+  `${field}: a bare string is no longer a deploys value — replace it with "deploys": { "note": ${JSON.stringify(note)} } ` +
+  '(same meaning: a note binds nothing). The house upgrade (/bespunky-house:upgrade, @bespunky/nx-tools 0.50.0+) migrates it automatically.';
+
+/** Problems with one `deploys` value (`field` names it in the messages); a bare string goes to `outdated`. */
+function deploysErrors(field, d, err, outdated) {
+  if (d === undefined || d === null) return;
+  if (typeof d === 'string') return outdated(outdatedDeploys(field, d));
+  if (!isObj(d)) return err(field, 'must be null or { note, ci, appHosting }');
   for (const k of Object.keys(d)) if (!DEPLOY_KEYS.includes(k)) err(`${field}.${k}`, `unknown field (a binding has ${DEPLOY_KEYS.join(', ')})`);
   if (d.note !== undefined && typeof d.note !== 'string') err(`${field}.note`, 'must be a string');
   if (d.ci !== undefined) {
@@ -187,9 +198,20 @@ function deploysErrors(field, d, err) {
 
 /** Every problem with a declaration, as `field: message` strings. Empty = valid. */
 export function validate(m) {
+  const { errors, outdated } = check(m);
+  return [...errors, ...outdated];
+}
+
+/**
+ * A declaration's problems, split: `errors` make it no model at all; `outdated` are format-only problems with an
+ * exact rewrite (see `deploys` above) — the model they describe, and its projection, are unaffected.
+ */
+export function check(m) {
   const errors = [];
+  const outdatedErrors = [];
   const err = (field, msg) => errors.push(`${field}: ${msg}`);
-  if (!isObj(m)) return ['(root): the declaration must be a JSON object'];
+  const outdated = (msg) => outdatedErrors.push(msg);
+  if (!isObj(m)) return { errors: ['(root): the declaration must be a JSON object'], outdated: [] };
 
   for (const k of Object.keys(m)) if (!TOP_KEYS.includes(k)) err(k, 'unknown field (the vocabulary is closed)');
   if (!isSchemaMajor1(m.schema)) err('schema', `must be schema major ${SCHEMA}`);
@@ -202,7 +224,7 @@ export function validate(m) {
   else {
     if (!isName(m.integration.branch)) err('integration.branch', 'must be a branch name');
     if (!isSha(m.integration.baseline)) err('integration.baseline', 'must be a commit SHA or null');
-    deploysErrors('integration.deploys', m.integration.deploys, err);
+    deploysErrors('integration.deploys', m.integration.deploys, err, outdated);
   }
   const integration = m.integration?.branch;
 
@@ -220,7 +242,7 @@ export function validate(m) {
       if (!PROMOTE.includes(s.promote)) err(`${f}.promote`, `must be one of ${PROMOTE.join(' | ')}`);
       if (s.promote === 'pr' && !PR_STYLES.includes(m.landing?.prStyle)) err(`${f}.promote`, '"pr" promotion needs landing.prStyle (the style the PR merges with)');
       if (!isSha(s.baseline)) err(`${f}.baseline`, 'must be a commit SHA or null');
-      deploysErrors(`${f}.deploys`, s.deploys, err);
+      deploysErrors(`${f}.deploys`, s.deploys, err, outdated);
     });
   const named = [integration, ...stageNames].filter(Boolean);
 
@@ -264,7 +286,7 @@ export function validate(m) {
       } else if (!stageNames.includes(r.shipsTo)) err('releases.shipsTo', `must name a stage (${stageNames.join(', ') || 'none declared'}) or be null`);
       if (r.allowDirect !== undefined && (!Array.isArray(r.allowDirect) || r.allowDirect.some((a) => !ALLOW_DIRECT.includes(a)))) err('releases.allowDirect', `may only contain ${ALLOW_DIRECT.join(', ')}`);
       if (r.baselines !== undefined && (!isObj(r.baselines) || Object.values(r.baselines).some((v) => !isSha(v)))) err('releases.baselines', 'must map release-line names to SHAs or null');
-      deploysErrors('releases.deploys', r.deploys, err);
+      deploysErrors('releases.deploys', r.deploys, err, outdated);
     }
   }
 
@@ -280,7 +302,7 @@ export function validate(m) {
         if (!ph.includes('line') || !ph.includes('slug')) err('hotfixes.pattern', 'must contain {line} (the production line it targets) and {slug}');
         patterns.push(['hotfixes.pattern', h.pattern, {}]);
       }
-      deploysErrors('hotfixes.deploys', h.deploys, err);
+      deploysErrors('hotfixes.deploys', h.deploys, err, outdated);
     }
   }
 
@@ -298,7 +320,7 @@ export function validate(m) {
       if (!isWellFormed(t.pattern)) err(`${f}.pattern`, 'must be a tag pattern like "v{version}"');
       const lines = [...named, ...(isObj(r) && r.pattern ? [r.pattern] : [])];
       if (!lines.includes(t.on)) err(`${f}.on`, `must name a declared line or the release pattern (${lines.join(', ')})`);
-      deploysErrors(`${f}.deploys`, t.deploys, err);
+      deploysErrors(`${f}.deploys`, t.deploys, err, outdated);
     });
 
   // patterns: no overlap with each other, never match a named line
@@ -311,7 +333,7 @@ export function validate(m) {
     }
   }
 
-  return errors;
+  return { errors, outdated: outdatedErrors };
 }
 
 // ---- derived facts ------------------------------------------------------------------------------------
@@ -378,7 +400,6 @@ export function deployBindings(m) {
 /** A `deploys` value in words — the note, then what is bound. */
 export function deploysText(d) {
   if (d === undefined || d === null) return null;
-  if (typeof d === 'string') return d;
   const parts = [];
   if (d.note) parts.push(d.note);
   if (d.ci) {

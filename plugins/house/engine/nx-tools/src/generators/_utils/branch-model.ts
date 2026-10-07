@@ -1,7 +1,8 @@
 // The project's DECLARED BRANCH MODEL, as the generators may see it.
 //
 // The model lives in `.bespunky/branches.json` and is written by ONE thing only: the branch-and-release skill's
-// engine (`branches.mjs write`), after a human decision. That engine is the only code that INTERPRETS the model —
+// engine (`branches.mjs write`), after a human decision. (A migration may re-spell a declared fact in a format the
+// user approved — 0.50.0 `deploys-object-form` — but never changes what the model declares or its projection.) That engine is the only code that INTERPRETS the model —
 // how a line advances, what a release or hotfix line means, which fix flow applies. Everything else reads the
 // flat, derived `projection` block the engine writes beside it (the same arrangement as `layers.sh` beside the
 // layer registry): names and globs, nothing to interpret. This module is that reader for the payload, so it

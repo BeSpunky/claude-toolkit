@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Git } from './lib/git.mjs';
-import { PRESETS, FILE, UsageError, expand, validate, project, releaseLines } from './lib/model.mjs';
+import { PRESETS, FILE, UsageError, check, expand, validate, project, releaseLines } from './lib/model.mjs';
 import { resolveModel } from './lib/resolve.mjs';
 import { verify, NAMES } from './lib/verify.mjs';
 import { plan, format, GATES } from './lib/plan.mjs';
@@ -84,9 +84,22 @@ const statusShape = (r) => ({
 });
 const STATE_EXIT = { declared: EXIT.ok, undeclared: EXIT.undeclared, unreadable: EXIT.fail };
 
-/** The model in force — or the exit code of a state no command may act under (undeclared, unreadable). */
-function inForce(git, top) {
+/**
+ * The model in force — or the exit code of a state no command may act under (undeclared, unreadable). `current`:
+ * the command reads the declaration itself (describe, verify), so an OUTDATED copy (model.mjs `check`) is refused
+ * until it is rewritten; `plan` reads only names and moves, which an outdated format leaves intact.
+ */
+function inForce(git, top, { current = false } = {}) {
   const r = resolveModel(git, top);
+  if (r.state === 'declared' && current) {
+    const { outdated } = check(r.model);
+    if (outdated.length) {
+      for (const n of r.notes) if (!outdated.some((o) => n.endsWith(o))) err(`note: ${n}`);
+      reportErrors(outdated, `${FILE} on ${r.source}, outdated format`);
+      err('Refusing until it is rewritten as shown — propose the rewrite to a human (it changes no binding), or run the house upgrade, whose migration applies it. status and plan still read the model meanwhile.');
+      return { code: EXIT.fail, resolved: r };
+    }
+  }
   for (const n of r.notes) err(`note: ${n}`);
   if (r.state === 'declared') return { model: r.model, source: r.source, resolved: r };
   if (r.state === 'unreadable') {
@@ -122,7 +135,7 @@ const commands = {
   },
 
   describe(git, top) {
-    const r = inForce(git, top);
+    const r = inForce(git, top, { current: true });
     if (r.code !== undefined) return r.code;
     out(describe(r.model));
     return EXIT.ok;
@@ -201,7 +214,7 @@ const commands = {
       if (errors.length) return reportErrors(errors, opts.proposed);
       source = `${opts.proposed} (proposed)`;
     } else {
-      const r = inForce(git, top);
+      const r = inForce(git, top, { current: true });
       if (r.code !== undefined) return r.code;
       ({ model, source } = r);
     }
