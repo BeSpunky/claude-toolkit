@@ -1271,9 +1271,11 @@ checkAsync('serve: the Angular leaf comes from the adapter; the composer mirrors
   const t = targetsOf(tree, 'shop');
   ok(t['dev-server'].executor === '@angular/build:dev-server' && t['dev-server'].options.host === '0.0.0.0', `leaf: ${JSON.stringify(t['dev-server'])}`);
   ok(t['dev-server'].options.port === 4300, 'a user-tuned leaf option survives');
-  ok(t.serve.executor === '@bespunky/nx-tools:serve', 'composer on `serve`');
-  ok(JSON.stringify(t.serve.options) === JSON.stringify(t['dev-server'].options), 'composer options mirror the leaf');
-  ok(JSON.stringify(t.serve.configurations) === JSON.stringify(t['dev-server'].configurations), 'composer configurations mirror the leaf');
+  ok(t['dev-stack'].executor === '@bespunky/nx-tools:serve' && t['dev-stack'].continuous === true, 'the continuous composer on `dev-stack`');
+  ok(t.serve.executor === '@bespunky/nx-tools:follow-stack' && !t.serve.continuous, '`serve` is the follower — not continuous, so a dead stack fails `nx serve`');
+  ok(JSON.stringify(t['dev-stack'].options) === JSON.stringify(t['dev-server'].options), 'composer options mirror the leaf');
+  ok(JSON.stringify(t['dev-stack'].configurations) === JSON.stringify(t['dev-server'].configurations), 'composer configurations mirror the leaf');
+  ok(JSON.stringify(Object.keys(t.serve.configurations ?? {})) === JSON.stringify(Object.keys(t['dev-server'].configurations ?? {})), '`serve` takes the same -c names');
   ok(JSON.parse(tree.read('nx.json', 'utf8')).tui?.enabled === false, 'nx.json tui.enabled=false');
 });
 
@@ -1303,7 +1305,7 @@ checkAsync('serve: an existing non-Angular dev-server is composed as-is', async 
   await generator('serve')(tree, { project: 'site' });
   const t = targetsOf(tree, 'site');
   ok(t['dev-server'].executor === '@nx/vite:dev-server' && !('buildTarget' in t['dev-server'].options), `leaf touched: ${JSON.stringify(t['dev-server'])}`);
-  ok(t.serve.options.port === 5173 && !('buildTarget' in t.serve.options), `composer: ${JSON.stringify(t.serve)}`);
+  ok(t['dev-stack'].options.port === 5173 && !('buildTarget' in t['dev-stack'].options), `composer: ${JSON.stringify(t['dev-stack'])}`);
 });
 
 checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-server proxyConfig, on the leaf AND its mirror; idempotent', async (ok) => {
@@ -1316,7 +1318,7 @@ checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-serv
   const t = JSON.parse(once).targets;
   ok(tree.exists('apps/shop/proxy.conf.mjs'), 'proxy.conf.mjs written');
   ok(t['dev-server'].options.proxyConfig === 'apps/shop/proxy.conf.mjs', `leaf: ${JSON.stringify(t['dev-server'].options)}`);
-  ok(t.serve.options.proxyConfig === 'apps/shop/proxy.conf.mjs', 'the composer mirror carries it too');
+  ok(t['dev-stack'].options.proxyConfig === 'apps/shop/proxy.conf.mjs', 'the composer mirror carries it too');
   // the next sync's order: serve, then the client again — nothing may move
   await generator('serve')(tree, { project: 'shop' });
   angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: false });

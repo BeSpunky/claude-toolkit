@@ -19,7 +19,7 @@
 // Node built-ins only, and no project node_modules: this must serve a Python or Go repo exactly as it serves
 // an Nx one. `nx serve <app>` (the @bespunky/nx-tools:serve executor) is a thin wrapper over this file.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { get } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
@@ -273,6 +273,7 @@ function announceReady(url, appUrl, until) {
 }
 
 async function serve(opts) {
+  pruneExits();
   const worktrees = collectWorktrees(ROOT);
   const tree = await selectWorktree(worktrees, opts.worktree);
 
@@ -355,6 +356,9 @@ async function serve(opts) {
     // The workspace whose Nx runs this serve as its `serve` task (set by the @bespunky/nx-tools:serve executor) —
     // what the `serve-preflight` target reads to tell a second `nx serve` that it would only wait on this one.
     nxRoot: process.env.DEV_NX_ROOT || null,
+    // The nx process the person invoked (NX_INVOCATION_ROOT_PID, which Nx hands every task) — how that run's `serve`
+    // follower finds THIS stack, and how a second run attached to it finds the stack it is following.
+    invocation: process.env.NX_INVOCATION_ROOT_PID || null,
     processes: [],
   };
   writeRecord(record);
@@ -414,7 +418,10 @@ async function serve(opts) {
  * the only place an Nx run says it failed.
  */
 function reportFailure(failures, plan, detached) {
-  const err = (m) => console.error(`[serve] ${m}`);
+  const err = (m) => {
+    console.error(`[serve] ${m}`);
+    EXIT_REPORT.push(`[serve] ${m}`);
+  };
   err('✖ the stack FAILED and was stopped:');
   for (const f of failures) {
     const proc = plan.running.find((p) => p.id === f.id);
@@ -435,7 +442,48 @@ function reportFailure(failures, plan, detached) {
     }
     for (const line of tail) err(`    | ${line}`);
   }
-  if (process.env.DEV_NX_ROOT) err('  (Nx will list `serve` as succeeded/stopped — it reports any end of a continuous task that way; this exit code is 1.)');
+}
+
+/** What the engine said about its end — carried to the Nx `serve` follower in the exit record (see writeExit). */
+const EXIT_REPORT = [];
+
+/**
+ * THE EXIT RECORD — how `nx serve` learns how its stack ended. Nx runs the stack as the continuous `dev-stack` task
+ * and `serve` as a follower that ends with it (@bespunky/nx-tools:follow-stack); the follower is told nothing by
+ * Nx, so the engine leaves `<nx root>/.bespunky/run/exits/<invocation>@<app>.json` = { code, report } as its last
+ * act, for every end — a stopped stack, a failed one, a refused or dry run. Only under Nx (DEV_NX_ROOT and the
+ * invocation set); records of invocations that are gone are pruned on the next serve.
+ */
+function writeExit(app, code) {
+  const root = process.env.DEV_NX_ROOT;
+  const invocation = process.env.NX_INVOCATION_ROOT_PID;
+  if (!root || !invocation || !app) return;
+  try {
+    const dir = join(root, '.bespunky', 'run', 'exits');
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${invocation}@${app}.json`);
+    writeFileSync(`${file}.tmp`, `${JSON.stringify({ app, invocation, pid: process.pid, code, report: EXIT_REPORT, at: new Date().toISOString() }, null, 2)}\n`);
+    renameSync(`${file}.tmp`, file);
+  } catch {
+    /* the follower then ends with the Nx run itself */
+  }
+}
+
+/** Drop exit records whose invocation is gone — nobody can be following them any more. */
+function pruneExits() {
+  const root = process.env.DEV_NX_ROOT;
+  if (!root) return;
+  const dir = join(root, '.bespunky', 'run', 'exits');
+  let files = [];
+  try {
+    files = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const f of files) {
+    const invocation = Number(f.split('@')[0]);
+    if (Number.isInteger(invocation) && invocation > 0 && !isAlive(invocation)) rmSync(join(dir, f), { force: true });
+  }
 }
 
 /** The exact command that stops a stack, as printed for whoever holds its handle. */
@@ -627,15 +675,27 @@ async function main(argv) {
 // resolved file, while argv[1] is the path as invoked — through a symlinked home, macOS's /tmp, or the logical
 // NX_WORKSPACE_ROOT_PATH the house sets — and a plain comparison then made `dev serve` print nothing and exit 0.
 if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))) {
-  main(process.argv.slice(2)).then(
-    (ok) => process.exit(ok ? 0 : 1),
+  const argv = process.argv.slice(2);
+  // The app a `serve` names — for the exit record, which must be written however the serve ends (even refused).
+  const servedApp = () => {
+    try {
+      const opts = parseArgs(argv);
+      return opts.command === 'serve' ? opts.app : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  main(argv).then(
+    (ok) => {
+      writeExit(servedApp(), ok ? 0 : 1);
+      process.exit(ok ? 0 : 1);
+    },
     (err) => {
-      if (err instanceof UsageError || err instanceof DeclarationError || err instanceof PortError) {
-        console.error(`[${process.argv[2] ?? "dev"}] ${err.message}`);
-        if (err instanceof UsageError && /unknown|unexpected/.test(err.message)) console.error(USAGE);
-      } else {
-        console.error(`[serve] ${err?.stack ?? err}`);
-      }
+      const line = err instanceof UsageError || err instanceof DeclarationError || err instanceof PortError ? `[${process.argv[2] ?? 'dev'}] ${err.message}` : `[serve] ${err?.stack ?? err}`;
+      console.error(line);
+      if (err instanceof UsageError && /unknown|unexpected/.test(err.message)) console.error(USAGE);
+      EXIT_REPORT.push(line);
+      writeExit(servedApp(), 1);
       process.exit(1);
     },
   );

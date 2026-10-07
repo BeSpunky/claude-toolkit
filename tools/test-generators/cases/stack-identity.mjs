@@ -24,8 +24,10 @@ export default {
       },
       expect: (tree, t) => {
         const targets = readProjectConfiguration(tree, 'site').targets;
-        t.ok(targets.serve.continuous === true, 'the composer stays continuous (e2e shares the running stack)');
-        t.equal(targets.serve.dependsOn, [{ target: 'serve-preflight', params: 'forward' }], 'serve depends on its preflight, flags forwarded');
+        t.ok(targets['dev-stack'].continuous === true, 'the composer (dev-stack) stays continuous (e2e shares the running stack)');
+        t.equal(targets['dev-stack'].dependsOn, [{ target: 'serve-preflight', params: 'forward' }], 'dev-stack depends on its preflight, flags forwarded');
+        t.ok(!targets.serve.continuous && targets.serve.executor === '@bespunky/nx-tools:follow-stack', 'serve is the non-continuous follower');
+        t.equal(targets.serve.dependsOn, [{ target: 'dev-stack', params: 'forward' }], 'serve depends on dev-stack, flags forwarded');
         t.equal(targets['serve-preflight'], { executor: '@bespunky/nx-tools:serve-preflight', cache: false }, 'the preflight target');
       },
     },
@@ -73,12 +75,27 @@ export default {
       },
     },
     {
+      // D3: `nx serve` ends with the STACK's status. Nx calls a continuous task that ends "succeeded"; the follower
+      // reads the engine's exit record instead.
+      name: 'follow-stack: the run ends with the stack’s exit status, and a failure carries the engine’s account',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        ctx.follow = ctx.load('executors/follow-stack/executor');
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(ctx.follow.verdict('web', { code: 0 }).success === true, 'a stack that ended cleanly: success');
+        const failed = ctx.follow.verdict('web', { code: 1, report: ['[serve] ✖ the stack FAILED and was stopped:', '[serve]   emulators exited with code 1'] });
+        t.ok(!failed.success && /FAILED \(exit 1\)/.test(failed.message) && /emulators exited with code 1/.test(failed.message), `a failed stack fails the run, saying why: ${failed.message}`);
+        t.ok(ctx.follow.exitRecordPath('/r', '42', 'web') === '/r/.bespunky/run/exits/42@web.json', 'the exit record the engine writes');
+      },
+    },
+    {
       // D6: an agent's `nx serve` got only "✖ nx run web:serve-preflight" and a log path — the refusal itself never
       // reached it. The verdict is also said to the invoking nx exactly when Nx's renderer would hide it.
       name: 'serve-preflight: the verdict reaches the invoker in the one Nx renderer that hides task output',
       setup: () => workspace(),
       run: async (tree, ctx) => {
-        ctx.hides = ctx.load('executors/serve-preflight/executor').nxHidesTaskOutput;
+        ctx.hides = ctx.load('executors/_utils/invoker').nxHidesTaskOutput;
       },
       expect: (tree, t, ctx) => {
         t.ok(ctx.hides({ invokerIsTty: false, aiAgent: true }), 'an agent without a terminal (summary): said to the invoker');

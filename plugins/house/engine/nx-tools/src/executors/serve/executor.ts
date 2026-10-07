@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { ServeExecutorSchema } from './schema';
 
 /**
- * `nx serve <app>` — the NX FACE of the stack-free dev engine.
+ * `<app>:dev-stack` (what `nx serve <app>` runs, through its `serve` follower) — the NX FACE of the stack-free dev engine.
  *
  * The dev loop lives in `tools/dev/` (written by the `dev` generator) and reads what the project serves from
  * `.bespunky/dev.json`: worktree selection, one port offset for every declared port, `<slug>.localhost`, the
@@ -106,7 +106,18 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
       logger.error(`[serve] Could not start the dev engine: ${err.message}`);
       done(false);
     });
-    child.on('exit', (code) => done(code === 0));
+    child.on('exit', (code) => {
+      // A stack that ENDED CLEANLY ends this task as a STOPPED one (143, SIGTERM's code — Nx's own "terminated").
+      // This target is continuous and `serve` (the follower) depends on it: Nx reads a continuous dependency that
+      // exits with an ordinary status while its dependent still runs as CRASHED — even exit 0 — and a clean
+      // `dev stop` would fail the run. 143 is one of the codes Nx reads as an intended stop. A FAILED stack exits 1
+      // (crashed: the run fails, which is the point); the follower carries the exit status either way.
+      if (code === 0) {
+        for (const [signal, handler] of Object.entries(handlers)) process.off(signal, handler);
+        process.exit(143);
+      }
+      done(false);
+    });
   });
 };
 

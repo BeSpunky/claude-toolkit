@@ -275,6 +275,12 @@
       "layer": "nx",
       "description": "A branch model's `deploys` is an object only: every bare-string note in .bespunky/branches.json (integration, a stage, releases, hotfixes, a tag series) becomes { \"note\": <the same text> }, edited in place so every other byte is kept. Format only, as decided for 0.50.0 \u2014 a note binds nothing, so no binding changes and the projection is left as it is. The branch-and-release engine reports the string form as outdated (describe, verify, validate and write refuse it). A declaration that is not JSON is left and reported.",
       "implementation": "./src/migrations/0.50.0/deploys-object-form"
+    },
+    "split-serve-follower": {
+      "version": "0.50.0",
+      "layer": "web",
+      "description": "`nx serve <app>` fails when its stack dies. Nx completes a continuous task that ends while nothing depends on it as succeeded whatever its exit code, so `serve` (the continuous composer) exited 0 for a dead stack. The composer moves, unchanged, to `dev-stack` (continuous; what an e2e target depends on), and `serve` becomes @bespunky/nx-tools:follow-stack: not continuous, depending on `dev-stack` with its flags forwarded, ending with the stack's exit status. Every unambiguous reference to a split project's `serve` is retargeted to `dev-stack` (dependsOn in every project.json, and option values such as devServerTarget \"web:serve\"), because a dependent of `serve` would now wait for the stack to end. `^serve`, project patterns, nx.json targetDefaults and a project's own `dev-stack` target are reported and left.",
+      "implementation": "./src/migrations/0.50.0/split-serve-follower"
     }
   }
 }

@@ -2,15 +2,17 @@
 // and declare it in `.bespunky/dev.json`.
 //
 // The dev loop itself is stack-free: `tools/dev/dev serve` runs what `.bespunky/dev.json` declares. This
-// generator is how an Nx project joins it. It parks two targets on the app, one composing the other — on
+// generator is how an Nx project joins it. It parks the targets on the app, one composing the other — on
 // OPPOSITE sides of the layer line (see THE SEAM in the generator body):
 //   - `dev-server` — the app's real dev-server. Supplied by the project's STACK (its adapter's `devServer`
 //     port — Angular's is @angular/build:dev-server, host 0.0.0.0, configurations development (default) /
 //     production) ONLY when the project has none of its own. A project that already has a dev-server — Vite,
 //     Next, anything — keeps it untouched.
-//   - `serve`      — the @bespunky/nx-tools:serve executor: a THIN WRAPPER over `tools/dev/dev serve <app>`.
-//     `nx serve <app> --worktree=… --port-offset=…` is the engine with Nx's option parsing in front; every
-//     option the wrapper does not own (buildTarget, host, …) is forwarded to the app's primary process.
+//   - `dev-stack`  — the @bespunky/nx-tools:serve executor: a THIN WRAPPER over `tools/dev/dev serve <app>`,
+//     continuous (the running stack Nx shares). Every option the wrapper does not own (buildTarget, host, …) is
+//     forwarded to the app's primary process.
+//   - `serve`      — what is typed: `nx serve <app> --worktree=… --port-offset=…` runs `dev-stack` with those flags
+//     and follows it, ending with the stack's exit status (@bespunky/nx-tools:follow-stack).
 // …and it SEEDS the app's entry in `.bespunky/dev.json` from the adapters that apply (the dev-server process;
 // the Firebase emulators when the workspace has them) — only what the app does not declare yet, so a later
 // `nx g @bespunky/nx-tools:app` is servable before the next sync.
@@ -43,7 +45,7 @@ import {
 } from '@nx/devkit';
 import { seedFromAdapters } from '../dev/fragments';
 import { adapterOf } from '../../adapters/registry';
-import { SERVE_PREFLIGHT_TARGET, composerFor, findExistingDevServer, preflightTarget } from '../_utils/dev-server';
+import { SERVE_EXECUTOR, SERVE_PREFLIGHT_TARGET, STACK_TARGET, findExistingDevServer, preflightTarget, serveTargetsFor } from '../_utils/dev-server';
 
 interface ServeSchema {
   project: string;
@@ -59,7 +61,7 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   // THE SEAM. This generator writes two things with genuinely different preconditions, and conflating them
   // is what pinned the whole dev loop to Angular:
   //
-  //   the COMPOSER (`serve`)      — runs the app's declared processes under one Ctrl+C. It drives a TARGET BY
+  //   the COMPOSER (`dev-stack`)  — runs the app's declared processes under one Ctrl+C. It drives a TARGET BY
   //                                 NAME and never learns what produced it. Framework-agnostic; the `web` layer's.
   //   the LEAF     (`dev-server`) — the actual server: the project's own, or its STACK's (the adapter's
   //                                 `devServer` port — src/adapters). This file names no framework.
@@ -97,10 +99,18 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   }
   targets['dev-server'] = leaf;
 
-  // The composing `serve` — the Nx face of `tools/dev/dev serve <app>`: every process the app declares, one
+  // The composer `dev-stack` — the Nx face of `tools/dev/dev serve <app>`: every process the app declares, one
   // graceful Ctrl+C, the current worktree or any chosen one. Flags (`--worktree`, `--port-offset`, `--skip`,
-  // `--no-shared-browser`, `--configuration`) tune it. It MIRRORS the leaf (see _utils/dev-server).
-  targets.serve = composerFor(leaf);
+  // `--no-shared-browser`, `--configuration`) tune it. It MIRRORS the leaf. And `serve`, what people type: the
+  // follower that ends with the stack's exit status (see _utils/dev-server for why it is two targets).
+  const own = targets[STACK_TARGET];
+  if (own && (typeof own !== 'object' || own.executor !== SERVE_EXECUTOR)) {
+    throw new Error(
+      `[serve] Project "${projectName}" has a \`${STACK_TARGET}\` target of its own — the house dev loop's composer needs that name.\n` +
+        `  Rename yours (and anything that depends on it), then re-run this generator.`,
+    );
+  }
+  Object.assign(targets, serveTargetsFor(leaf));
   targets[SERVE_PREFLIGHT_TARGET] = preflightTarget();
 
   updateProjectConfiguration(tree, projectName, project);

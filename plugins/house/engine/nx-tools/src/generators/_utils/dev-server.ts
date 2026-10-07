@@ -1,11 +1,19 @@
-// The Nx dev loop's two targets and the ONE rule that relates them.
+// The Nx dev loop's targets and the rules that relate them.
 //
 //   `dev-server` — the LEAF: the app's real dev-server, the stack's (its adapter's `devServer` port) or the
 //                  project's own. Its options are where a dev-server option LIVES.
-//   `serve`      — the COMPOSER (@bespunky/nx-tools:serve), a thin wrapper over `tools/dev/dev serve <app>` that
-//                  forwards every option it does not own to the primary process. It MIRRORS the leaf — the same
-//                  options and configurations — so `nx serve <app> -c production` is the native Nx flag and any
-//                  dev-server option can be tuned on `serve` too ("enrich, don't hide").
+//   `dev-stack`  — the COMPOSER (@bespunky/nx-tools:serve), a thin wrapper over `tools/dev/dev serve <app>` that
+//                  forwards every option it does not own to the primary process. CONTINUOUS: the Nx-visible running
+//                  stack, which Nx shares — what an e2e target depends on. It MIRRORS the leaf — the same options and
+//                  configurations — so `nx serve <app> -c production` is the native Nx flag and any dev-server
+//                  option can be tuned here too ("enrich, don't hide").
+//   `serve`      — what a person or an agent types: a NON-continuous follower (@bespunky/nx-tools:follow-stack) that
+//                  depends on `dev-stack` (flags forwarded) and ends when the stack ends, with ITS exit status. It
+//                  exists because Nx reports a continuous task that ends — whatever its exit code — as succeeded
+//                  when nothing depends on it, so `nx serve` straight on the composer said "succeeded" for a stack
+//                  that died. With `serve` depending on it, a dying stack is a CRASHED dependency: the run fails.
+//                  Depend on `dev-stack`, never on `serve`, for a running server — a dependent of `serve` waits for
+//                  the stack to END.
 //
 // The mirror is derived, never maintained by hand in two places: the `serve` generator builds the composer from
 // the leaf, and anything that sets a leaf option after it (the Firebase client's proxy config, on a brand-new app
@@ -14,6 +22,10 @@
 import { type Tree, type TargetConfiguration, readProjectConfiguration, updateProjectConfiguration } from '@nx/devkit';
 
 export const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
+/** The continuous composer's target — the running stack Nx shares (see the header). */
+export const STACK_TARGET = 'dev-stack';
+/** `serve`'s executor: follows the stack to its end and carries its exit status. */
+export const FOLLOW_EXECUTOR = '@bespunky/nx-tools:follow-stack';
 
 /**
  * The composer's preflight — a NON-continuous dependency of `serve`, with the serve's flags forwarded, so it runs in
@@ -53,16 +65,17 @@ export function findExistingDevServer(
     if (!target || typeof target !== 'object' || Array.isArray(target)) continue;
     // The composer itself is not a dev-server — on a re-run it occupies `serve`, and treating it as the leaf
     // would compose it with itself.
-    if (target.executor !== SERVE_EXECUTOR) return target;
+    // Nor is `serve` once it is the follower of the composer: it serves nothing itself.
+    if (target.executor !== SERVE_EXECUTOR && target.executor !== FOLLOW_EXECUTOR) return target;
   }
   return undefined;
 }
 
 /**
- * The composer for this leaf.
+ * The composer for this leaf (the `dev-stack` target).
  *
  * WHERE A STACK'S IDENTITY LIVES. The composer is CONTINUOUS — the Nx-visible instance of a running stack, which Nx
- * shares between invocations (that is how an e2e target depending on `serve` reuses the stack the developer has
+ * shares between invocations (that is how an e2e target depending on `dev-stack` reuses the stack the developer has
  * up). The processes it composes — the `dev-server` leaf, the emulator suite — are NOT: the dev engine runs each one
  * per stack, on that stack's shifted ports, and Nx sharing them across stacks is exactly what made a second stack
  * of one tree wait forever on the first's dev-server. So the leaf a stack supplies is never continuous; nothing
@@ -80,6 +93,27 @@ export function composerFor(leaf: TargetConfiguration): TargetConfiguration {
 }
 
 /**
+ * `serve` for this composer — the follower people and agents type. It mirrors the composer's configuration NAMES
+ * (`nx serve <app> -c production` must resolve on `serve` to reach `dev-stack:production`), and forwards every flag
+ * to the composer, which forwards them to its preflight.
+ */
+export function followerFor(composer: TargetConfiguration): TargetConfiguration {
+  return {
+    executor: FOLLOW_EXECUTOR,
+    dependsOn: [{ target: STACK_TARGET, params: 'forward' }],
+    cache: false,
+    ...(composer.configurations ? { configurations: Object.fromEntries(Object.keys(composer.configurations).map((name) => [name, {}])) } : {}),
+    ...(composer.defaultConfiguration ? { defaultConfiguration: composer.defaultConfiguration } : {}),
+  };
+}
+
+/** The dev loop's Nx face for this leaf: the composer and its follower, by target name. */
+export function serveTargetsFor(leaf: TargetConfiguration): Record<string, TargetConfiguration> {
+  const composer = composerFor(leaf);
+  return { [STACK_TARGET]: composer, serve: followerFor(composer) };
+}
+
+/**
  * Set `key` on the project's `dev-server` leaf (set-if-absent: a value the project chose is kept) and keep the
  * house composer's mirror true. Returns false when the project has no leaf.
  */
@@ -89,7 +123,7 @@ export function setLeafOption(tree: Tree, project: string, key: string, value: u
   if (!leaf) return false;
   if (leaf.options?.[key] !== undefined) return true;
   leaf.options = { ...(leaf.options ?? {}), [key]: value };
-  if (config.targets!.serve?.executor === SERVE_EXECUTOR) config.targets!.serve = composerFor(leaf);
+  if (config.targets![STACK_TARGET]?.executor === SERVE_EXECUTOR) Object.assign(config.targets!, serveTargetsFor(leaf));
   updateProjectConfiguration(tree, project, config);
   return true;
 }

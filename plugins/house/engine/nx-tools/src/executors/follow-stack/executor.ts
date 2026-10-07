@@ -1,0 +1,128 @@
+import type { PromiseExecutor } from '@nx/devkit';
+import { logger } from '@nx/devkit';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { tellInvoker } from '../_utils/invoker';
+import type { FollowStackSchema } from './schema';
+
+/**
+ * `<app>:serve` — what a person or an agent types, FOLLOWING the stack `<app>:dev-stack` runs, to its end.
+ *
+ * WHY IT EXISTS. Nx completes a continuous task that ends while nothing depends on it as SUCCEEDED, whatever its exit
+ * code (task-orchestrator `handleContinuousTaskExit`: not needed → "fulfilled"). With `nx serve` straight on the
+ * continuous composer, a stack whose emulators died reported "2 tasks: 2 succeeded" and exit 0 — and background
+ * runners, an agent's included, trust that status. So `serve` is this NON-continuous follower, depending on
+ * `dev-stack` (flags forwarded): while it runs, a dying stack is a crashed dependency and the run fails; and the
+ * follower ends with the stack's own exit status, read from the engine's EXIT RECORD
+ * (`.bespunky/run/exits/<invocation>@<app>.json`, written by tools/dev/dev as its last act), so either order of
+ * the two endings gives the same answer.
+ *
+ * WHICH STACK. Its own run's, found by the invocation (Nx hands every task NX_INVOCATION_ROOT_PID; the engine records
+ * it). Or — when this run ATTACHED to a stack another `nx serve` in this workspace runs (Nx shares the continuous
+ * `dev-stack`; serve-preflight said so) — that stack, followed until its engine exits.
+ */
+interface ExitRecord {
+  code: number;
+  report?: string[];
+}
+interface Stack {
+  app: string;
+  pid: number;
+  state: string;
+  nxRoot: string | null;
+  invocation: string | null;
+  key: string;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const real = (p: string) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+};
+
+export const exitRecordPath = (root: string, invocation: string, app: string) => join(root, '.bespunky', 'run', 'exits', `${invocation}@${app}.json`);
+
+function readExit(file: string): ExitRecord | null {
+  try {
+    const record = JSON.parse(readFileSync(file, 'utf8')) as ExitRecord;
+    return typeof record.code === 'number' ? record : null;
+  } catch {
+    return null;
+  }
+}
+
+function stacksOf(engine: string, project: string, root: string): Stack[] {
+  try {
+    const out = execFileSync(process.execPath, [engine, 'ps', project, '--json'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return JSON.parse(out) as Stack[];
+  } catch {
+    return [];
+  }
+}
+
+/** The run's result from a stack's exit record. Pure (exported for tests). */
+export function verdict(project: string, record: ExitRecord): { success: boolean; message?: string } {
+  if (record.code === 0) return { success: true };
+  const told = (record.report ?? []).join('\n');
+  return {
+    success: false,
+    message: `[serve] ${project}'s dev stack FAILED (exit ${record.code}).${told ? `\n${told}` : ' Its output is above.'}`,
+  };
+}
+
+const runExecutor: PromiseExecutor<FollowStackSchema> = async (options, context) => {
+  const project = options.project ?? context.projectName;
+  if (!project) return { success: false };
+  const root = context.root;
+  const engine = join(root, 'tools', 'dev', 'dev.mjs');
+  const mine = process.env.NX_INVOCATION_ROOT_PID ?? '';
+
+  const finish = (record: ExitRecord) => {
+    const v = verdict(project, record);
+    if (v.message) {
+      logger.error(v.message);
+      // Claude reads `nx serve` in Nx's agent renderer, which prints a failed task as a log path — the account of
+      // which process died goes where it is read.
+      tellInvoker(v.message);
+    }
+    return { success: v.success };
+  };
+
+  let ownSeen = false;
+  let followed: Stack | undefined;
+  let lastLook = 0;
+  for (;;) {
+    const own = mine ? readExit(exitRecordPath(root, mine, project)) : null;
+    if (own) return finish(own);
+    if (followed) {
+      if (!alive(followed.pid)) {
+        // An attached run ends when the stack it shares ends — with that stack's status, when its engine recorded it.
+        return finish((followed.invocation && readExit(exitRecordPath(root, followed.invocation, project))) || { code: 0 });
+      }
+    } else if (!ownSeen && Date.now() - lastLook >= 2000 && existsSync(engine)) {
+      lastLook = Date.now();
+      const stacks = stacksOf(engine, project, root).filter((s) => s.app === project);
+      ownSeen = stacks.some((s) => mine && String(s.invocation) === mine);
+      if (!ownSeen) {
+        followed = stacks.find((s) => s.state === 'live' && s.invocation && String(s.invocation) !== mine && s.nxRoot && real(s.nxRoot) === real(root));
+      }
+    }
+    // Waiting on nothing else is safe: if `dev-stack` dies before recording anything, Nx fails the run and ends us.
+    await sleep(250);
+  }
+};
+
+export default runExecutor;
