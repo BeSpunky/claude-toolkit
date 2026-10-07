@@ -146,13 +146,13 @@ export default {
       historicalShapes: [
         {
           name: '0.48.0 house.Dockerfile (0484236)',
-          setup: (tree) => tree.write('.devcontainer/house.Dockerfile', DOCKERFILE_0_48_0('mcr.microsoft.com/devcontainers/typescript-node:22')),
+          setup: (tree) => houseBuilt(tree, DOCKERFILE_0_48_0('mcr.microsoft.com/devcontainers/typescript-node:22')),
           diverges: READS_ONLY,
           expect: seeded(22),
         },
         {
           name: '0.48.1 … 0.49.x house.Dockerfile (f0d6905)',
-          setup: (tree) => tree.write('.devcontainer/house.Dockerfile', DOCKERFILE_0_49('mcr.microsoft.com/devcontainers/typescript-node:22')),
+          setup: (tree) => houseBuilt(tree, DOCKERFILE_0_49('mcr.microsoft.com/devcontainers/typescript-node:22')),
           diverges: READS_ONLY,
           expect: seeded(22),
         },
