@@ -179,6 +179,12 @@
       "layer": "agent",
       "description": "The web layer's per-tool `<folder>-playwright-cache` volume (~/.cache/ms-playwright) folds into ONE persisted ~/.cache volume (the agent layer's `<folder>-cache`), which also keeps the shared browser's own Playwright runtime and every other tool cache across rebuilds. Removes the house-written mount (and the house comment above it) so it does not stay nested inside the new one; a project-written one is reported. The unused Docker volume lives on the host and is reported by name for `docker volume rm` — a cache, so nothing is lost.",
       "implementation": "./src/migrations/0.49.0/fold-playwright-cache-into-home-cache"
+    },
+    "stack-owned-dev-processes": {
+      "version": "0.50.0",
+      "layer": "web",
+      "description": "The processes a dev stack composes stop being `continuous` Nx tasks: the house `dev-server` leaf of every app served by the house composer, and every `firebase` target that launches tools/emulators.sh. Nx shares one instance of a continuous task per workspace, so a second stack of the same tree (another port offset) waited on the first stack's dev-server and emulators instead of starting its own. The `serve` composer stays continuous (an e2e target may depend on it). A continuous dev-server of the project's own, and any target that depends on one of the changed targets, are reported.",
+      "implementation": "./src/migrations/0.50.0/stack-owned-dev-processes"
     }
   }
 }
