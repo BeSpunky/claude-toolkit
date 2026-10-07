@@ -79,8 +79,6 @@ export interface PlanContext {
   project: string;
   /** The app the per-app generators target. */
   app: string;
-  /** Node major the devcontainer image is pinned to. */
-  nodeMajor: string;
   /** --voice on this run (the devcontainer also carries a previous answer forward from its marker). */
   voice: boolean;
   /** --staging on this run. */
@@ -181,7 +179,7 @@ export interface GitignoreBlock {
 // STRING TOKENS, substituted by the composer in every string a fragment contributes:
 //   {{home}}        the remote user's home (`/home/<remoteUser>` — it follows the image, never hard-coded)
 //   {{remoteUser}}  the user the container runs as
-//   {{nodeMajor}}   the Node major the image / Node feature is pinned to
+//   {{nodeMajor}}   the Node major the image / Node feature is pinned to — the project's `.nvmrc` (_utils/node-version)
 
 /** A JSON value as it may appear in devcontainer.json. */
 export type DevcontainerJson =

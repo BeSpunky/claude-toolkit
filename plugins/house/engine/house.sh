@@ -1005,7 +1005,6 @@ if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
   echo "Node $(node -v) is new enough — running the generators natively (no Docker)."
   WORK_ROOT="$PROJECTS_DIR"          # where the <project> dir lives (host path)
   ENGINE_ROOT="$ENGINE_DIR"          # nx-tools + compile-generators.mts (host path)
-  MAJOR="$(node -p 'process.versions.node.split(".")[0]')"   # generated devcontainer's nodeMajor = this Node's
   RUNTIME_DESC="native node $(node -v)"
 else
   RUNTIME="docker"
@@ -1018,6 +1017,8 @@ else
   docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
   command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
   echo "Resolving latest typescript-node base image..."
+  # The image the GENERATORS run in — nothing more. The project's own Node (its devcontainer image, its functions
+  # runtime) is the project's .nvmrc, which the generators read; this runner's Node never leaks into the output.
   MAJOR="$(base_image_node_major)"
   IMAGE="$(base_image_for_major "$MAJOR")"
   echo "Base image: $IMAGE"
@@ -2065,7 +2066,7 @@ echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 # fd 9, not stdin: nx g may read stdin, and would swallow the rest of the plan.
 PLAN_RUN_BLOCK="
 _UPGRADE_PARTIAL=\${_UPGRADE_PARTIAL:-0}
-_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM --branch-projection=\"\${_bm_projection:-}\")\" || {
+_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM --branch-projection=\"\${_bm_projection:-}\")\" || {
   echo 'ERROR: the layer planner failed — no house generators were run, and nothing has been stamped.' >&2
   exit 1
 }

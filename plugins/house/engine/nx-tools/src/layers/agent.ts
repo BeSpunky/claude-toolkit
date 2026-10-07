@@ -31,7 +31,6 @@ export const agent: LayerDescriptor = {
         // what it is about to ENSURE before the tree reflects it (the same reason house-doc takes --layers).
         args: (ctx) => [
           `--name=${ctx.project}`,
-          `--nodeMajor=${ctx.nodeMajor}`,
           `--layers=${[...ctx.active].join(',')}`,
           ...(wantsVoice(ctx) ? ['--voice=true'] : []),
         ],

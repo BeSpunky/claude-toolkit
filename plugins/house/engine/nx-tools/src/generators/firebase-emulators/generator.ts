@@ -58,7 +58,6 @@ import {
   type TargetConfiguration,
   formatFiles,
   offsetFromRoot,
-  addDependenciesToPackageJson,
   installPackagesTask,
   applyChangesToString,
   type StringChange,
@@ -79,6 +78,10 @@ import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../
 import { resolveAppsDir } from '../_utils/workspace-layout';
 import { rootTsconfig } from '../_utils/linking';
 import { workspaceIdentity } from '../_utils/workspace-identity';
+import { declareDependencies, declaredSpec, isPinnedSpec } from '../_utils/dependencies';
+import { projectNodeMajor } from '../_utils/node-version';
+import { FIREBASE_ADMIN_VERSION, FIREBASE_FUNCTIONS_VERSION, FIREBASE_TOOLS_VERSION } from '../_utils/versions';
+import { FUNCTIONS_NODE_RUNTIMES } from '../_utils/firebase-compat';
 
 interface FirebaseEmulatorsSchema {
   /** Also attach the Firebase client to this app (composes `firebase-client`), and make it the client app. */
@@ -273,8 +276,8 @@ export default async function firebaseEmulatorsGenerator(
     }
   }
 
-  // 5) The Cloud Functions runtime + build deps, at the WORKSPACE ROOT (no per-project node_modules). Existing
-  //    entries are never overwritten. @nx/esbuild moves in lockstep with `nx`. A repo with no package.json hosts
+  // 5) The Cloud Functions runtime + build deps and the Firebase CLI, at the WORKSPACE ROOT (no per-project
+  //    node_modules). Existing entries are never overwritten. @nx/esbuild moves in lockstep with `nx`. A repo with no package.json hosts
   //    Nx through the wrapper and has no Node dependency graph to add them to — said, not guessed around.
   if (!tree.exists('package.json')) {
     logger.warn(
@@ -288,15 +291,18 @@ export default async function firebaseEmulatorsGenerator(
     tree,
     'package.json',
   );
-  const missing = (deps: Record<string, string>) =>
-    Object.fromEntries(
-      Object.entries(deps).filter(([name]) => !rootPkg.dependencies?.[name] && !rootPkg.devDependencies?.[name]),
-    );
-  const nxVersion = rootPkg.devDependencies?.['nx'] ?? rootPkg.dependencies?.['nx'] ?? 'latest';
-  addDependenciesToPackageJson(
+  // Every version from one place (_utils/versions.ts) — and the Firebase CLI is the PROJECT's: a pinned
+  // devDependency, so the emulators, the deploy targets and `firebase login` run the version this commit names, on
+  // every machine and in CI (node_modules/.bin is on PATH in the container and for every Nx target).
+  declareDependencies(
     tree,
-    missing({ 'firebase-admin': '^13.6.0', 'firebase-functions': '^7.0.0' }),
-    missing({ '@nx/esbuild': nxVersion, ...functionsToolchain(tree) }),
+    'firebase-emulators',
+    { 'firebase-admin': FIREBASE_ADMIN_VERSION, 'firebase-functions': FIREBASE_FUNCTIONS_VERSION },
+    {
+      'firebase-tools': FIREBASE_TOOLS_VERSION,
+      ...(declaredSpec(tree, '@nx/esbuild') ? {} : { '@nx/esbuild': nxVersion(tree, rootPkg) }),
+      ...functionsToolchain(tree, functionsRuntimeMajor(tree)),
+    },
   );
 
   await formatFiles(tree);
@@ -304,6 +310,35 @@ export default async function firebaseEmulatorsGenerator(
     clientCallback();
     installPackagesTask(tree);
   };
+}
+
+/**
+ * @nx/esbuild moves in LOCKSTEP with Nx: the version the workspace declares for `nx`, else the one installed. Neither
+ * (an `nx` nobody can name) is refused — the house never guesses an Nx version.
+ */
+function nxVersion(tree: Tree, rootPkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }): string {
+  const declared = rootPkg.devDependencies?.['nx'] ?? rootPkg.dependencies?.['nx'];
+  if (declared && isPinnedSpec(declared)) return declared;
+  try {
+    return (require(require.resolve('nx/package.json', { paths: [tree.root] })) as { version: string }).version;
+  } catch {
+    throw new Error(
+      '[firebase-emulators] Cloud Functions build with @nx/esbuild, which must match the workspace\'s Nx version — but ' +
+        `package.json ${declared ? `declares nx as "${declared}", which names no version,` : 'declares no `nx`'} and none is ` +
+        'installed. Declare nx as exactly the version this workspace runs, and re-run.',
+    );
+  }
+}
+
+/**
+ * The Node major Cloud Functions runs: the project's own (.nvmrc) when Cloud Functions offers it as a GA runtime
+ * (projected from the pinned firebase-tools — _utils/firebase-compat.ts), else the newest runtime below it.
+ */
+function functionsRuntimeMajor(tree: Tree): { major: string; project: string } {
+  const project = projectNodeMajor(tree);
+  if (FUNCTIONS_NODE_RUNTIMES.includes(project)) return { major: project, project };
+  const below = [...FUNCTIONS_NODE_RUNTIMES].reverse().find((major) => Number(major) < Number(project));
+  return { major: below ?? FUNCTIONS_NODE_RUNTIMES[FUNCTIONS_NODE_RUNTIMES.length - 1], project };
 }
 
 /**
@@ -329,7 +364,7 @@ function resolveClientApp(tree: Tree, named: string | undefined): string | undef
  * none. So each is declared exactly when NOTHING provides it — never added over a working install — at the
  * version Nx itself pins (@nx/js's versions, when resolvable), else the versions Nx 23.2 pins.
  */
-function functionsToolchain(tree: Tree): Record<string, string> {
+function functionsToolchain(tree: Tree, runtime: { major: string }): Record<string, string> {
   let pinned: { esbuildVersion?: string; typescriptVersion?: string; typesNodeVersion?: string } = {};
   try {
     pinned = require(require.resolve('@nx/js/src/utils/versions', { paths: [tree.root] }));
@@ -339,7 +374,7 @@ function functionsToolchain(tree: Tree): Record<string, string> {
   const wanted: Record<string, string> = {
     esbuild: pinned.esbuildVersion ?? '^0.27.0',
     typescript: pinned.typescriptVersion ?? '~6.0.3',
-    '@types/node': pinned.typesNodeVersion ?? '^22.0.0',
+    '@types/node': pinned.typesNodeVersion ?? `^${runtime.major}.0.0`,
   };
   return Object.fromEntries(Object.entries(wanted).filter(([pkg]) => !resolvable(tree, pkg)));
 }
@@ -367,7 +402,13 @@ function ensureFunctionsProject(
 ): void {
   const { root } = functions;
   const offset = offsetFromRoot(root);
-  const template = (name: string) => render(readFileSync(join(__dirname, name), 'utf8')).split('{{offsetFromRoot}}').join(offset);
+  const runtime = functionsRuntimeMajor(tree);
+  const template = (name: string) =>
+    render(readFileSync(join(__dirname, name), 'utf8'))
+      .split('{{offsetFromRoot}}').join(offset)
+      .split('{{functionsNodeMajor}}').join(runtime.major)
+      .split('{{firebaseAdminVersion}}').join(FIREBASE_ADMIN_VERSION)
+      .split('{{firebaseFunctionsVersion}}').join(FIREBASE_FUNCTIONS_VERSION);
 
   // Source files: user-owned once written (the manifest's deps, the functions code, and the compiler options are
   // all things a project legitimately evolves).
@@ -443,11 +484,39 @@ function ensureFunctionsProject(
     JSON.parse(template('functions-package.json.tpl')),
   );
 
+  if (!tree.exists(`${root}/package.json`) && runtime.major !== runtime.project) {
+    logger.warn(
+      `[firebase-emulators] Cloud Functions has no Node ${runtime.project} runtime (GA: ${FUNCTIONS_NODE_RUNTIMES.join(', ')}), ` +
+        `so ${root}/package.json declares engines.node "${runtime.major}" while the project (.nvmrc) runs ${runtime.project}.`,
+    );
+  }
   ifAbsent(`${root}/package.json`, 'functions-package.json.tpl');
+  reportRuntimeMismatch(tree, `${root}/package.json`, runtime);
   ifAbsent(`${root}/src/main.ts`, 'functions-main.ts.tpl');
   // The committed shape doc for local Functions secrets (.secret.local itself is gitignored).
   // User-owned once written — it grows with each `defineSecret` the functions add.
   ifAbsent(`${root}/.secret.local.example`, 'functions-secret.local.example.tpl');
+}
+
+/**
+ * The deployed runtime and the project's Node are two declarations of one fact, and the manifest is the project's
+ * once written — so a disagreement is NAMED on every run, never silently rewritten (moving a deployed runtime is a
+ * deploy decision).
+ */
+function reportRuntimeMismatch(tree: Tree, manifest: string, runtime: { major: string; project: string }): void {
+  let engines: string | undefined;
+  try {
+    engines = (readJson(tree, manifest) as { engines?: { node?: string } }).engines?.node;
+  } catch {
+    return;
+  }
+  if (engines === undefined || engines === runtime.major) return;
+  logger.warn(
+    `[firebase-emulators] ${manifest} deploys Cloud Functions on Node "${engines}", but the project's Node (.nvmrc) is ` +
+      `${runtime.project}${runtime.major !== runtime.project ? ` (nearest Cloud Functions runtime: ${runtime.major})` : ''}. ` +
+      `Set engines.node to "${runtime.major}" there — or .nvmrc to ${engines} — so the code you run locally is the code ` +
+      `that is deployed.`,
+  );
 }
 
 /** The emulator suite as its own workspace-level Nx project — a house project (see the header). */

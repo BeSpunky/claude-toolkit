@@ -1,6 +1,6 @@
 // THE VERSIONS THE HOUSE WRITES — every dependency version a generator puts into a project, in ONE place.
 //
-// WHY ONE PLACE. A generator that writes `"latest"` (or `*`, `next`, an unbounded `>=`) hands the project a version
+// WHY ONE PLACE. A generator that writes `latest` (or `*`, `next`, an unbounded `>=`) hands the project a version
 // nobody chose: it moves with no commit behind it, and two packages that must agree (`@angular/fire` and the
 // `firebase` it carries) each float to THEIR newest — which is how a house app ended up with two Firebase SDKs and
 // "No Firebase App '[DEFAULT]'". 0.35.0 fixed one instance (`@playwright/test`); the class was never swept, so

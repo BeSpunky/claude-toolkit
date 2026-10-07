@@ -13,13 +13,6 @@
       },
       "x-prompt": "Devcontainer name?"
     },
-    "nodeMajor": {
-      "type": [
-        "string",
-        "number"
-      ],
-      "description": "Node major version \u2014 the typescript-node image tag (the `node` layer) or the Node feature's version (the neutral base). Defaults to the running Node major."
-    },
     "layers": {
       "type": "array",
       "items": {

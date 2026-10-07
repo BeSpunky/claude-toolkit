@@ -15,7 +15,7 @@
 //
 // The TEMPLATES stay beside the firebase-emulators generator on purpose: shipped migrations (0.24.2) resolve
 // them by that path, and a migration must keep finding what it was written against.
-import { type Tree, addDependenciesToPackageJson, readJson, readProjectConfiguration, logger } from '@nx/devkit';
+import { readProjectConfiguration, logger } from '@nx/devkit';
 import type { FirebaseClientPort } from '../stack-adapter';
 import {
   firebaseProvidersNote,
@@ -23,6 +23,7 @@ import {
   writeFirebaseConfigs,
 } from '../../generators/firebase-emulators/service-configs';
 import { angular } from './index';
+import { declareBrowserSdk } from './angularfire';
 
 /** Blank the credential placeholders: a half-wired prod/staging build must fail loud, not silently use dev. */
 const blankCredentials = (source: string): string =>
@@ -95,16 +96,9 @@ export const angularFirebaseClient: FirebaseClientPort = {
       );
     }
 
-    // 5) The browser SDK. Existing entries are never overwritten (preserves user pins on upgrade).
-    const rootPkg = readJson<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(
-      tree,
-      'package.json',
-    );
-    const missing = Object.fromEntries(
-      Object.entries({ firebase: 'latest', '@angular/fire': 'latest' }).filter(
-        ([name]) => !rootPkg.dependencies?.[name] && !rootPkg.devDependencies?.[name],
-      ),
-    );
-    return addDependenciesToPackageJson(tree, missing, {});
+    // 5) The browser SDK — @angular/fire for THIS workspace's Angular major, and firebase as exactly the range that
+    //    release declares (./angularfire.ts): one SDK, never two. Baseline only — what the project declares stays.
+    return declareBrowserSdk(tree);
   },
 };
+

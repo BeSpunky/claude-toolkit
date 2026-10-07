@@ -47,7 +47,7 @@ export function declareDependencies(
     throw new Error(
       `[${by}] refusing to write a floating dependency version: ${floating.map(([name, spec]) => `${name}@"${spec}"`).join(', ')}. ` +
         `A house generator writes only pinned versions (exact, ^x.y.z or ~x.y.z) — take it from ` +
-        `generators/_utils/versions.ts, never "latest".`,
+        `generators/_utils/versions.ts, never a dist-tag like latest.`,
     );
   }
   const missing = (deps: Record<string, string>) =>

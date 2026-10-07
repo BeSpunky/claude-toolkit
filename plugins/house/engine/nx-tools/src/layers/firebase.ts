@@ -81,7 +81,12 @@ export const firebase: LayerDescriptor = {
   // A function of the workspace: the forwarded ports are the suite's as firebase.json configures it, and the
   // dev-server port of each app the Firebase client can attach to — never a hand-copied list.
   devcontainer: (tree) => ({
-    features: [{ id: 'ghcr.io/devcontainers-extra/features/firebase-cli' }, { id: 'ghcr.io/jajera/features/gcloud-cli' }],
+    // NO firebase-cli feature: the Firebase CLI is the project's pinned `firebase-tools` devDependency
+    // (_utils/versions.ts), on PATH through node_modules/.bin (the node layer, which this layer requires) — the image
+    // used to install whatever version was newest on build day, a second `firebase` beside the project's. Its login
+    // lives in ~/.config/configstore (persisted whole by the agent layer), its emulator downloads in ~/.cache.
+    // gcloud has no npm home and its feature no version option — it installs Google's current CLI at build.
+    features: [{ id: 'ghcr.io/jajera/features/gcloud-cli' }],
     extensions: ['toba.vsfire'],
     ports: [...clientDevServerPorts(tree), ...emulatorForwards(tree)],
     osPackages: [
