@@ -12,6 +12,11 @@
 //                                                                       (a one-off suite's own — tools/seed/build-seeds.sh)
 //
 // Node built-ins only.
+//
+// MACHINE OUTPUT IS WRITTEN AS STRINGS, never handed to console.log. The callers are shell scripts that parse stdout,
+// and console.log formats a non-string the way util.inspect does: under FORCE_COLOR (which Nx's run-commands sets for
+// every task) a number comes out as `\e[33m9099\e[39m`. That once made every `nx run firebase:seed:build` die on
+// "usage: emulator-ports.mjs shift" and made reap-emulators.sh's port reclaim silently match nothing.
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -100,10 +105,12 @@ const isMain = (() => {
   }
 })();
 const [command, ...args] = isMain ? process.argv.slice(2) : [];
+/** One value per line on stdout, as plain text — what a `$(…)` or `mapfile` reads. */
+const emit = (values) => process.stdout.write(values.map((v) => `${String(v)}\n`).join(''));
 if (isMain) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
   if (command === 'ports') {
-    for (const port of new Set(Object.values(suitePorts(read(args[0]).emulators)))) console.log(port);
+    emit([...new Set(Object.values(suitePorts(read(args[0]).emulators)))]);
   } else if (command === 'shift') {
     const offset = Number(args[1]);
     if (!Number.isInteger(offset) || offset < 0 || !args[2]) {
@@ -117,7 +124,7 @@ if (isMain) {
       console.error('emulator-ports.mjs: no free port block for the suite — stop a running stack (tools/dev/dev ps) and retry');
       process.exit(1);
     }
-    console.log(offset);
+    emit([offset]);
   } else {
     console.error(`emulator-ports.mjs: unknown command ${command ?? '(none)'} (ports | shift | free-offset)`);
     process.exit(2);
