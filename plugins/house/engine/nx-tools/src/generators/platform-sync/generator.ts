@@ -1,4 +1,4 @@
-// House SYNC generator: every project created since the firewall arrived is classified before lint judges it.
+// House SYNC generator: every project created since the firewall arrived is classified by one `nx sync`.
 //
 // WHY. The firewall fails closed (src/platform/firewall): a project with no `platform:` tag may not be imported by a
 // tagged one, and may itself import no workspace project. The house's own generators tag what they create
