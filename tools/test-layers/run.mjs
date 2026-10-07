@@ -309,7 +309,6 @@ const ctxFor = (tree, overrides = {}) => {
     ensured: new Set(ensured),
     project: 'shop',
     app: 'shop',
-    nodeMajor: '22',
     voice: false,
     staging: false,
     ...overrides,
@@ -323,7 +322,7 @@ check('bare repo, add-layer agent: the floor\'s gitignore, the agent trio, then 
   const got = render(plan(ctxFor(FIXTURES['bare nx workspace'](), { ensured: ['nx', 'agent'] }), STAMP));
   const want = [
     'gitignore --layers=nx,agent,node',
-    'devcontainer --name=shop --nodeMajor=22 --layers=nx,agent,node',
+    'devcontainer --name=shop --layers=nx,agent,node',
     'claude-settings --layers=nx,agent,node',
     'window-identity --name=shop',
     'house-doc --nxToolsVersion=9.9.9 --pluginVersion=1.0.0 --packageManager=yarn --layers=nx,agent,node',
@@ -495,7 +494,9 @@ console.log('\nagent artifacts (composed from the layers)');
 const { parse: parseJsonc } = require_('jsonc-parser');
 const generator = (name) => require_(join(BUILD, `src/generators/${name}/generator`)).default;
 const artifacts = async (tree, layers, extra = {}) => {
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers, ...extra });
+  // The project's Node major is its .nvmrc (_utils/node-version) — these fixtures declare 22.
+  if (!tree.exists('.nvmrc')) tree.write('.nvmrc', '22\n');
+  await generator('devcontainer')(tree, { name: 'shop', layers, ...extra });
   await generator('claude-settings')(tree, { layers });
   await generator('gitignore')(tree, { layers });
   await generator('house-doc')(tree, { layers, nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', ...(extra.packageManager ? { packageManager: extra.packageManager } : {}) });
@@ -1016,7 +1017,7 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
   const OURS = 'ghcr.io/example/features/ours';
   const tree = wrapperRepo();
   tree.write(DC, `{\n  "image": "python:3.12",\n  "features": { "${OURS}": {} },\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n`);
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  await generator('devcontainer')(tree, { name: 'shop', layers: ['nx', 'agent'] });
   const recorded = () => JSON.parse(tree.read(MARKER, 'utf8')).adopted.houseAdded;
   const has = (entry) => recorded().some((e) => JSON.stringify(e) === JSON.stringify(entry));
   ok(has({ path: ['features', GH], value: {} }), `the house feature it added is recorded: ${JSON.stringify(recorded())}`);
@@ -1029,13 +1030,13 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
 
   // A second run adds nothing new: the record neither grows nor loses what the FIRST run added.
   const before = recorded().length;
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  await generator('devcontainer')(tree, { name: 'shop', layers: ['nx', 'agent'] });
   ok(recorded().length === before && has({ path: ['features', GH], value: {} }), `a re-run keeps the record as it was: ${before} -> ${recorded().length}`);
 
   // The project edits a value the house added: it is theirs now — out of the record, and houseWrote says no.
   const text = tree.read(DC, 'utf8').replace(pathEntry.value, '/opt/ours/bin:${containerEnv:PATH}');
   tree.write(DC, text);
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  await generator('devcontainer')(tree, { name: 'shop', layers: ['nx', 'agent'] });
   ok(!recorded().some((e) => e.path.join('.') === 'remoteEnv.PATH'), 'a value the project changed left the record');
   ok(!prov.houseWrote(tree, pathEntry), 'houseWrote refuses a value the file no longer holds');
   ok(has({ path: ['features', GH], value: {} }), 'everything else the house added is still recorded');
@@ -1044,7 +1045,7 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
 checkAsync('owned devcontainer: no provenance record — ownership already answers it', async (ok) => {
   const prov = require_(join(BUILD, 'src/generators/_utils/devcontainer-provenance'));
   const tree = createTreeWithEmptyWorkspace();
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  await generator('devcontainer')(tree, { name: 'shop', layers: ['nx', 'agent'] });
   const marker = JSON.parse(tree.read('.devcontainer/.bespunky-devcontainer.json', 'utf8'));
   ok(marker.owned === true && !marker.adopted, `owned marker: ${JSON.stringify(marker)}`);
   ok(prov.houseWrote(tree, { path: ['features', 'anything'], value: {} }), 'an owned file is the house\'s');
@@ -1062,7 +1063,7 @@ checkAsync('post-create: web provisions the shared browser through its own runti
   ok((both.osScript.match(/(^| )libnss3( |$)/gm) ?? []).length === 1, 'js+web: Chromium\'s libraries listed twice (the composer must de-duplicate)');
   const js = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js']);
   ok(/(^| )libnss3( |$)/m.test(js.osScript), 'js (no web): @playwright/test\'s Chromium libraries are not image packages');
-  const { PLAYWRIGHT_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright'));
+  const { PLAYWRIGHT_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
   const { CHROMIUM_OS_PACKAGES_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright-deps'));
   ok(CHROMIUM_OS_PACKAGES_VERSION === PLAYWRIGHT_VERSION, `Chromium's OS packages were projected from playwright-core@${CHROMIUM_OS_PACKAGES_VERSION}, the pin is ${PLAYWRIGHT_VERSION} — run: node tools/playwright-deps/project.mjs --write`);
   ok(bashParses(both.post), 'js+web post-create does not parse');
@@ -1171,6 +1172,37 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   rmSync(dir, { recursive: true, force: true });
 });
 
+// The Firebase CLI is the PROJECT's pinned devDependency (0.50.0), not an image feature: no second `firebase` on PATH,
+// and nothing new to persist — firebase-tools keeps its login in ~/.config/configstore (configstore's XDG home) and its
+// emulator downloads in ~/.cache/firebase, both inside the agent layer's persisted volumes asserted above. gcloud keeps
+// its logins and application-default credentials in ~/.config/gcloud (googlecloudsdk/core/config.py) — persisted too.
+checkAsync('firebase: the CLI comes from node_modules/.bin, gcloud is a pinned image package — no unpinned features; their state lives in the persisted XDG homes', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  writeJson(tree, 'firebase.json', {});
+  const a = await artifacts(tree, ['nx', 'agent', 'node', 'firebase']);
+  const features = Object.keys(a.dc.features ?? {});
+  ok(!features.some((id) => id.includes('firebase-cli')), `the image still installs a Firebase CLI of its own: ${features}`);
+  // gcloud: a PINNED image package from Google's apt repository (signed-by keyring), never the unpinned feature.
+  const { GCLOUD_CLI_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  ok(!features.some((id) => id.includes('gcloud')), `gcloud still comes from a feature: ${features}`);
+  ok(a.osScript.includes(`google-cloud-cli=${GCLOUD_CLI_VERSION}`), 'gcloud is not a pinned image package');
+  ok(a.osScript.includes('google-cloud-sdk https://packages.cloud.google.com/apt/doc/apt-key.gpg https://packages.cloud.google.com/apt cloud-sdk main'), 'Google\'s apt repository is not declared to the installer');
+  ok(!a.osScript.includes('apt-key add'), 'the installer uses apt-key (gone from Debian 13)');
+  ok((a.dc.remoteEnv?.PATH ?? '').includes('${containerWorkspaceFolder}/node_modules/.bin'), 'node_modules/.bin is not on PATH — the pinned `firebase` would not resolve');
+  const home = `/home/${a.dc.remoteUser ?? 'node'}`;
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.config,type=volume`)), 'firebase login (~/.config/configstore) would not survive a rebuild');
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.cache,type=volume`)), 'the emulator downloads (~/.cache/firebase) would not survive a rebuild');
+});
+
+// Version truth: the derived table must have been projected from the CLI the house pins, and the seed Node must be one
+// Cloud Functions runs (offline; tools/firebase-compat/project.mjs re-asks npm in CI).
+check('versions: the Firebase table was projected from the pinned firebase-tools, and the house Node seed is a live Functions runtime', (ok) => {
+  const { FIREBASE_TOOLS_VERSION, HOUSE_NODE_MAJOR } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const { FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS, FUNCTIONS_NODE_RUNTIMES } = require_(join(BUILD, 'src/generators/_utils/firebase-compat'));
+  ok(FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS === FIREBASE_TOOLS_VERSION, `projected from firebase-tools@${FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS}, the pin is ${FIREBASE_TOOLS_VERSION} — run: node tools/firebase-compat/project.mjs --write`);
+  ok(FUNCTIONS_NODE_RUNTIMES.includes(HOUSE_NODE_MAJOR), `HOUSE_NODE_MAJOR ${HOUSE_NODE_MAJOR} is not a GA Cloud Functions runtime (${FUNCTIONS_NODE_RUNTIMES})`);
+});
+
 checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes, ~/.config, ~/.local and ~/.cache; a rebuild reclaims nothing', async (ok) => {
   const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
   expectCalls(ok, 'wrapper', reclaimed(a.post).calls, [
@@ -1218,7 +1250,8 @@ check('volume ownership: a volume outside the workspace and home must DECLARE it
 const ts_ = require_('typescript');
 const angularShop = () => {
   const tree = createTreeWithEmptyWorkspace();
-  writeJson(tree, 'package.json', { name: 'shop', devDependencies: { '@nx/angular': '23.1.0' } });
+  // What an Angular house workspace declares: Nx exactly (house.sh pins it), Angular (which @angular/fire follows).
+  writeJson(tree, 'package.json', { name: 'shop', dependencies: { '@angular/core': '~20.3.0' }, devDependencies: { '@nx/angular': '23.1.0', nx: '23.1.0' } });
   addProjectConfiguration(tree, 'shop', {
     root: 'apps/shop',
     projectType: 'application',

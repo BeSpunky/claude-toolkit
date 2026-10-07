@@ -45,12 +45,12 @@ import {
   reconcileHouseAdded,
   recordedHouseAdded,
 } from '../_utils/devcontainer-provenance';
+import { projectNodeMajor } from '../_utils/node-version';
 
 type Json = Record<string, unknown>;
 
 interface DevcontainerSchema {
   name: string;
-  nodeMajor?: string | number;
   /** The layers this devcontainer serves. Default: DETECTED from the workspace. */
   layers?: string[] | string;
   /**
@@ -120,8 +120,8 @@ export default async function devcontainerGenerator(
   if (!options.name) {
     throw new Error('devcontainer generator requires --name (the devcontainer / project name).');
   }
-  // Default the image tag to the Node major we are running under, if not given.
-  const nodeMajor = String(options.nodeMajor ?? process.versions.node.split('.')[0]);
+  // The image tag / Node feature version: the PROJECT's declared Node (.nvmrc) — never the machine running this.
+  const nodeMajor = projectNodeMajor(tree);
   const voice = !!options.voice;
   const layers = activeLayers(tree, options.layers);
   const layerIds = layers.map((entry) => entry.id);

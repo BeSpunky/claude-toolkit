@@ -8,7 +8,10 @@
     "lib": {
       "type": "string",
       "description": "The local library project to adopt away (replace with the published package).",
-      "$default": { "$source": "argv", "index": 0 },
+      "$default": {
+        "$source": "argv",
+        "index": 0
+      },
       "x-prompt": "Which local library is being replaced by the published package?"
     },
     "package": {
@@ -17,8 +20,7 @@
     },
     "version": {
       "type": "string",
-      "description": "npm version range to install.",
-      "default": "latest"
+      "description": "The version range of the published package to declare (pinned: exact, ^x.y.z or ~x.y.z \u2014 never `latest`). Defaults to ^<the version extract-tool recorded in the lib's extraction.json>; without one, the generator asks for it."
     },
     "finalize": {
       "type": "boolean",
@@ -31,5 +33,7 @@
       "description": "Instead of rewrite + delete, replace the local library's entry with `export * from '<package>'` and keep it (staged migration). One step, no finalize."
     }
   },
-  "required": ["lib"]
+  "required": [
+    "lib"
+  ]
 }

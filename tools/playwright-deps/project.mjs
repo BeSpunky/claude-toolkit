@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const UTILS = join(ROOT, 'plugins/house/engine/nx-tools/src/generators/_utils');
-const PIN = readFileSync(join(UTILS, 'playwright.ts'), 'utf8').match(/PLAYWRIGHT_VERSION = '([^']+)'/)[1];
+const PIN = readFileSync(join(UTILS, 'versions.ts'), 'utf8').match(/PLAYWRIGHT_VERSION = '([^']+)'/)[1];
 const OUT = join(UTILS, 'playwright-deps.ts');
 const PLATFORM = 'debian13';
 

@@ -37,7 +37,6 @@ export async function attachCapabilities(tree: Tree, context: AttachContext): Pr
     ensured: context.active,
     project: context.workspaceName,
     app: context.app,
-    nodeMajor: '',
     voice: false,
     staging: context.staging,
   };

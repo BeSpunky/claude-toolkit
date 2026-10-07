@@ -21,3 +21,6 @@ Your edits inside a house target (inputs, args, configurations) survive upgrades
 What is running, and whose? tools/dev/dev ps lists every dev stack in every worktree; tools/dev/dev stop takes yours down cleanly
 Deploy from CI with /bespunky-house:add-layer ci — the branch model's `ci` bindings decide which branch deploys where
 The cloud setup behind CI deploys is yours to run: ! bash tools/setup-gcp.sh --dry-run shows every IAM grant first
+Node is one project fact: .nvmrc — the devcontainer and Cloud Functions follow it, and no upgrade moves it
+firebase in a house project is the repo's own pinned firebase-tools — the same CLI on every machine and in CI
+gcloud in a house Firebase container is pinned in the image — a rebuild never moves it, and its login stays in ~/.config/gcloud

@@ -26,7 +26,6 @@ import {
   type GeneratorCallback,
   readProjectConfiguration,
   removeProjectConfiguration,
-  addDependenciesToPackageJson,
   readJson,
   writeJson,
   visitNotIgnoredFiles,
@@ -36,6 +35,7 @@ import {
 } from '@nx/devkit';
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking } from '../_utils/linking';
+import { declareDependencies } from '../_utils/dependencies';
 
 interface AdoptExtractedSchema {
   lib: string;
@@ -117,11 +117,19 @@ export default async function adoptExtractedGenerator(
     for (const field of linkedFields) delete rootManifest[field][packageName];
     writeJson(tree, 'package.json', rootManifest);
   }
-  const installCallback = addDependenciesToPackageJson(
-    tree,
-    { [packageName]: options.version ?? 'latest' },
-    {}
-  );
+  // The version is a deliberate value — never `latest` (0.50.0): the one given, else the one extract-tool recorded
+  // when it published (marker.ingestedPackage.version), as a caret range; with neither, ask rather than float.
+  const recorded: unknown = marker.ingestedPackage?.version;
+  const version =
+    options.version ?? (typeof recorded === 'string' && /^\d+\.\d+\.\d+/.test(recorded) ? `^${recorded}` : undefined);
+  if (!version) {
+    throw new Error(
+      `adopt-extracted: which version of ${packageName} should "${options.lib}" adopt? The extraction marker records ` +
+        `none it can use${typeof recorded === 'string' ? ` ("${recorded}")` : ''}. Pass --version=^<published version> ` +
+        `(\`npm view ${packageName} version\` names the newest) — the house never declares a dist-tag like latest.`
+    );
+  }
+  const installCallback = declareDependencies(tree, 'adopt-extracted', { [packageName]: version });
 
   const entry = project.sourceRoot
     ? joinPathFragments(project.sourceRoot, 'index.ts')

@@ -191,6 +191,12 @@ export interface FirebaseClientPort {
   readonly serverBannedImports: readonly string[];
   /** Has this app already been given the Firebase client? (the suite's scripts follow the wired app) */
   isWired(tree: Tree, project: string): boolean;
+  /**
+   * Called before the FIRST app of this stack is created in a workspace that will wear Firebase: the framework's
+   * version is not chosen yet, so choose one the Firebase client supports (a creation-time choice — a workspace that
+   * already declares its framework keeps it, and the client refuses there with the choices if it cannot follow).
+   */
+  chooseFrameworkVersion?(tree: Tree): void;
   /** Attach the Firebase client to the app. Returns the post-commit install callback. */
   attach(
     tree: Tree,

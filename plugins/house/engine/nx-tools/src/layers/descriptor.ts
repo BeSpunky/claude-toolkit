@@ -79,8 +79,6 @@ export interface PlanContext {
   project: string;
   /** The app the per-app generators target. */
   app: string;
-  /** Node major the devcontainer image is pinned to. */
-  nodeMajor: string;
   /** --voice on this run (the devcontainer also carries a previous answer forward from its marker). */
   voice: boolean;
   /** --staging on this run. */
@@ -228,7 +226,17 @@ export interface GitignoreBlock {
 // STRING TOKENS, substituted by the composer in every string a fragment contributes:
 //   {{home}}        the remote user's home (`/home/<remoteUser>` — it follows the image, never hard-coded)
 //   {{remoteUser}}  the user the container runs as
-//   {{nodeMajor}}   the Node major the image / Node feature is pinned to
+//   {{nodeMajor}}   the Node major the image / Node feature is pinned to — the project's `.nvmrc` (_utils/node-version)
+
+/** A third-party apt repository an `osPackages` group installs from (see `DevcontainerFragment.osPackages`). */
+export interface AptRepository {
+  /** Names the keyring and the sources.list.d file: `[a-z0-9-]+`. */
+  id: string;
+  /** HTTPS URL of the repository's signing key (ASCII-armored or binary). */
+  key: string;
+  /** The `deb` line after `deb [signed-by=…]`: `<https url> <suite> <component…>`. */
+  source: string;
+}
 
 /** A JSON value as it may appear in devcontainer.json. */
 export type DevcontainerJson =
@@ -352,7 +360,14 @@ export interface DevcontainerFragment {
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
   /** Debian packages — composed into the one installer (house.packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
   osPackages?: readonly ({
+    /** Debian package names; `name=version` pins one exactly (a tool that is a build input must not float). */
     packages: readonly string[];
+    /**
+     * The third-party apt repository these packages come from (a tool Debian does not ship, at a version Debian
+     * does not carry). The installer adds it before installing — its key dearmored into `/usr/share/keyrings/<id>.gpg`
+     * and the source line `signed-by=` it, the modern method (no `apt-key`, which Debian 13 no longer has).
+     */
+    repository?: AptRepository;
     /**
      * Names that are right only for the HOUSE images' distro (a projection for Debian 13, like Chromium's libraries):
      * left out on an adopted devcontainer's foreign image, whose distro the house cannot know — one wrong name fails
