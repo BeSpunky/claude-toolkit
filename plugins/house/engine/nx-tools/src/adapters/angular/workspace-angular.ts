@@ -58,15 +58,18 @@ export function installedManifest(
 }
 
 /**
- * The unit-test runner for a new Angular LIBRARY. The house runs Vitest; WHICH Vitest is the major's and the build's:
+ * The unit-test runner for a new Angular LIBRARY. From Angular 21 the house runs Vitest, and WHICH Vitest is the build's:
  *   - `vitest-angular` (Angular's own `@angular/build:unit-test`, through @nx/angular:unit-test) needs Angular 21+ AND a
  *     library with a build — @nx/angular refuses it otherwise (library/lib/validate-options: "requires Angular v21 or
  *     higher", "requires the library to be buildable or publishable");
- *   - `vitest-analog` (AnalogJS's Vite plugin through @nx/vitest) runs on every major @nx/angular supports, built or not.
- * Unknown Angular (nothing declared or installed yet): undefined — @nx/angular then picks for the version it installs.
+ *   - `vitest-analog` (AnalogJS's Vite plugin through @nx/vitest) for a library without one.
+ * Below 21: undefined — @nx/angular's own default for that major (jest), its tested path. vitest-analog is ALLOWED there,
+ * but on a publishable library its vite config imports vite / @analogjs / @nx/vite, which @nx/angular's lint setup does
+ * not exempt from @nx/dependency-checks — the library would fail its own lint (observed in a real Angular 20 workspace).
+ * Unknown Angular (nothing declared or installed yet): undefined as well — @nx/angular picks for what it installs.
  */
 export function libraryUnitTestRunner(tree: Tree, buildable: boolean): 'vitest-angular' | 'vitest-analog' | undefined {
   const angular = workspaceAngular(tree, undefined, 'declared');
-  if (!angular) return undefined;
-  return angular.major >= 21 && buildable ? 'vitest-angular' : 'vitest-analog';
+  if (!angular || angular.major < 21) return undefined;
+  return buildable ? 'vitest-angular' : 'vitest-analog';
 }

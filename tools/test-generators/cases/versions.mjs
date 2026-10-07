@@ -378,7 +378,7 @@ export default {
         ctx.unknown = libraryUnitTestRunner(tree, true);
       },
       expect: (tree, t, ctx) => {
-        t.equal(JSON.stringify(ctx.choices['~20.3.0']), JSON.stringify(['vitest-analog', 'vitest-analog']), 'Angular 20: Analog for both');
+        t.equal(JSON.stringify(ctx.choices['~20.3.0']), JSON.stringify([undefined, undefined]), 'Angular 20: @nx/angular\'s own default (jest)');
         t.equal(JSON.stringify(ctx.choices['~21.2.0']), JSON.stringify(['vitest-angular', 'vitest-analog']), 'Angular 21: vitest-angular for a built lib');
         t.equal(JSON.stringify(ctx.choices['~22.1.0']), JSON.stringify(['vitest-angular', 'vitest-analog']), 'Angular 22 likewise');
         t.equal(ctx.unknown, undefined, 'no Angular yet: left to @nx/angular');
