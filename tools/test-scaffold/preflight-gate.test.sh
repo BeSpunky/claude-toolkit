@@ -50,6 +50,10 @@ HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_
 # shellcheck source=../../plugins/house/engine/house-branches.sh
 . "$ROOT/plugins/house/engine/house-branches.sh"
 HOUSE_BRANCHES_FNS="$(house_branches_fns)"
+# The gate RUNS inside the inner program, whose environment house.sh sets (INNER_ENV): the engine root (the gate's
+# project-facts probe, house-probe.mts, lives there) and the layer sets the probe judges — empty here, as for a repo with
+# no layers, so the probe has nothing to refuse and these cases test the gate's own checks.
+export HOUSE_ENGINE_ROOT="$ROOT/plugins/house/engine" HOUSE_ENSURE_LAYERS='' HOUSE_EVIDENT_LAYERS=''
 # The branch model is resolved once, above the gate, and the gate embeds that block — so it is extracted first.
 model_src="$(extract 'BRANCH_MODEL_BLOCK="' 'esac"')" || exit 2
 eval "$model_src"
