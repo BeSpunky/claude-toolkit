@@ -97,11 +97,10 @@ export const firebase: LayerDescriptor = {
 };
 
 /**
- * The dev-server of every app the Firebase client can attach to, forwarded to the SAME host port: the page loads
- * over it, then the Firebase SDK INSIDE it calls the emulators at hardcoded localhost:<port> addresses
- * (environment.ts), which only resolve from a host browser if those ports are forwarded to the identical number.
- * The port is the app's own (its dev-server leaf's `port`), else its stack's default — so a backend-only Firebase
- * forwards no dev-server at all.
+ * The dev-server of every app the Firebase client can attach to: the one port a host browser needs for the app.
+ * The Firebase SDK inside the page reaches every emulator through that same origin (the dev server's proxy.conf.mjs
+ * relays it), so it works on whatever host port the editor forwards it to. The port is the app's own (its
+ * dev-server leaf's `port`), else its stack's default — so a backend-only Firebase forwards no dev-server at all.
  */
 function clientDevServerPorts(tree: Tree): DevcontainerPort[] {
   const ports = new Set<number>();
@@ -118,17 +117,17 @@ function clientDevServerPorts(tree: Tree): DevcontainerPort[] {
     ...(index === 0
       ? {
           why:
-            'Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a\n' +
-            'host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.\n' +
-            'KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;\n' +
-            'real Google OAuth is pinned to whichever holds the dev-server port). The shared browser runs INSIDE the\n' +
-            'container and reaches them on loopback, so it works for every container.',
+            'The app reaches every Firebase emulator through the dev server\'s own origin (proxy.conf.mjs relays it),\n' +
+            'so the app works on whatever host port this is forwarded to. The emulator ports below are for the\n' +
+            'Emulator UI: its page dials each emulator directly, so the UI is complete in a host tab only while they\n' +
+            'forward to the same number. Real Google OAuth is registered for one origin (the base dev-server port);\n' +
+            'the shared browser runs INSIDE the container and reaches everything on loopback.',
         }
       : {}),
   }));
 }
 
-/** The emulator suite's host-dialled ports (firebase.json, else the house suite), forwarded at the same number. */
+/** The ports the Emulator UI's page dials (firebase.json, else the house suite), forwarded at the same number. */
 function emulatorForwards(tree: Tree): DevcontainerPort[] {
   return hostDialledPorts(tree).map(({ name, port, label }) => ({
     port,

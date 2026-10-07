@@ -41,22 +41,18 @@ export const environment: Environment = {
     // is emulated (the emulator intercepts the flow); it just has to be present.
     authDomain: 'demo-{{workspaceName}}.firebaseapp.com',
   },
-  // Local emulator endpoints (match firebase.json at the workspace root — change a port there and
-  // change it here too, AND in the devcontainer's forwardPorts). Each entry's `default` comes from
-  // EMULATE above; the endpoint is always present so a runtime `?emulate=<service>` can switch a
-  // defaulted-off service back on.
+  // Each emulated service's `default` comes from EMULATE above; the entry is always present so a runtime
+  // `?emulate=<service>` can switch a defaulted-off service back on.
+  //
+  // THE BROWSER NEVER DIALS THESE ADDRESSES. In the browser every emulator is reached through the dev server's
+  // OWN origin — its proxy.conf.mjs relays each one to the suite inside the container, shifted for a worktree's
+  // stack — so a host browser needs only the port the app loaded on, whatever the editor forwarded it to. The
+  // addresses below are where the suite listens INSIDE the container: what server-side code (SSR) dials, shifted
+  // by the stack's PORT_OFFSET. Keep them in step with firebase.json at the workspace root.
   emulators: {
-    // `proxied` (auth + functions) routes the emulator through the dev-server's OWN origin (proxy.conf.mjs
-    // relays it, offset-shifted) so the host browser needs only the port the app loaded on. It matters MOST
-    // for auth: apps usually gate every route on auth readiness, so a squatted/forwarded :9099 leaves the app
-    // blank AND sign-in hanging. Set false to dial the emulator port directly.
-    auth: { url: 'http://localhost:9099', default: EMULATE.auth, proxied: true },
+    auth: { url: 'http://localhost:9099', default: EMULATE.auth },
     firestore: { host: 'localhost', port: 8080, default: EMULATE.firestore },
     storage: { host: 'localhost', port: 9199, default: EMULATE.storage },
-    // `proxied` routes Functions callables through the dev-server's OWN origin (its proxy.conf.mjs relays
-    // them to this emulator, offset-shifted) instead of the browser dialing :5001 — dodging a squatted or
-    // forwarded :5001 on the host (common on Windows) and staying correct under worktree port offsets.
-    // Set false to dial the emulator port directly.
-    functions: { host: 'localhost', port: 5001, default: EMULATE.functions, proxied: true },
+    functions: { host: 'localhost', port: 5001, default: EMULATE.functions },
   },
 };

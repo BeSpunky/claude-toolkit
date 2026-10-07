@@ -66,21 +66,27 @@ export function emulatorPorts(tree: Tree): Record<string, number> {
 }
 
 /**
- * The ports a HOST browser dials — the emulators' own listeners (the Firebase SDK inside a host-loaded page calls
- * hardcoded `localhost:<port>`), plus Firestore's WebSocket. Not the hub or logging ports: nothing outside the
- * container dials them. `label` is for the devcontainer's port attributes.
+ * The ports a HOST browser dials — for a PERSON, not the app. The app reaches every emulator through its dev
+ * server's own origin (proxy.conf.mjs), but the Emulator UI's page calls each emulator directly at the
+ * `host:port` the hub reports: the services, Firestore's WebSocket (its requests view) and the logging port (its
+ * Logs tab). So these are the UI and what it dials; the hub is not — the UI's own server reads it, inside the
+ * container. `label` is for the devcontainer's port attributes.
  */
 export function hostDialledPorts(tree: Tree): { name: string; port: number; label: string }[] {
   const out: { name: string; port: number; label: string }[] = [];
   // The UI first — the one a person opens; then the services in firebase.json's order.
   const suite = configured(tree).sort((a, b) => Number(b.name === 'ui') - Number(a.name === 'ui'));
   for (const { name, port, entry } of suite) {
-    if (ALWAYS_ON.includes(name)) continue;
+    if (name === 'hub') continue;
+    if (name === 'logging') continue; // added once, below, whether or not firebase.json names it
     out.push({ name, port, label: name === 'ui' ? 'Firebase Emulator UI' : `${title(name)} Emulator` });
     if (name === 'firestore') {
       const ws = Number(entry.websocketPort ?? FIRESTORE_WEBSOCKET_DEFAULT);
       if (Number.isInteger(ws) && ws > 0) out.push({ name: 'firestore-websocket', port: ws, label: 'Firestore WebSocket' });
     }
+  }
+  if (suite.some(({ name }) => name === 'ui')) {
+    out.push({ name: 'logging', port: emulatorPorts(tree).logging, label: 'Emulator Logs (Emulator UI)' });
   }
   return out;
 }

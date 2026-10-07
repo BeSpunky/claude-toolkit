@@ -43,14 +43,13 @@ export default {
     },
 
     {
-      // The root file must be rewritten TOO: the siblings import emulatorFor/portOffset/offsetUrl from it,
+      // The root file must be rewritten TOO: the siblings import their emulator helper from it,
       // and a pre-0.33.0 root file keeps those private. Writing siblings alone yields four files that do
       // not compile — reachable on a bare `nx migrate`, on a partial sync, and in every multi-app workspace.
       name: 'rewrites the root config so the siblings can import from it',
       setup: (tree) => plainApp(tree, 'apps/web'),
       expect: (tree, t) => {
-        t.has('apps/web/src/app/firebase.config.ts', 'export function emulatorFor');
-        t.has('apps/web/src/app/firebase.config.ts', 'export const portOffset');
+        t.has('apps/web/src/app/firebase.config.ts', 'export function emulatorEndpoint');
         for (const service of ['auth', 'firestore', 'storage', 'functions']) {
           t.exists(`apps/web/src/app/firebase-${service}.config.ts`);
         }

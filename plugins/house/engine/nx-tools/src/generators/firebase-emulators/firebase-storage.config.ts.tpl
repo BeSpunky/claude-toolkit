@@ -10,7 +10,7 @@
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { connectStorageEmulator, getStorage, provideStorage } from '@angular/fire/storage';
 
-import { emulatorFor, portOffset } from './firebase.config';
+import { emulatorEndpoint } from './firebase.config';
 
 declare const ngDevMode: boolean;
 
@@ -29,9 +29,11 @@ export function provideAppStorage(): EnvironmentProviders {
     provideStorage(() => {
       const storage = getStorage();
       if (ngDevMode && !emulatorConnected.has(storage)) {
-        const e = emulatorFor('storage');
+        // In the browser: the app's own origin (proxy.conf.mjs relays /v0/b, resumable uploads included);
+        // server-side: the container address, shifted by the stack's offset. See emulatorEndpoint().
+        const e = emulatorEndpoint('storage');
         if (e) {
-          connectStorageEmulator(storage, e.host, e.port + portOffset);
+          connectStorageEmulator(storage, e.host, e.port);
           emulatorConnected.add(storage);
         }
       }
