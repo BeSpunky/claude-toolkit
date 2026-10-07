@@ -266,6 +266,13 @@ App Hosting ships the web app; it never deploys Cloud Functions, Firestore rules
 {{NX}} run firebase:deploy -P <alias>                             # one target: `nx run` takes --project itself, so use -P
 ```
 
+**The road to a first deploy** — in order, each with how to tell it worked. `node tools/firebase-deploy.mjs --check` shows where this machine stands, and a deploy that fails prints the same road (both targets run the CLI through that owned runner), so nobody is left at Firebase's bare *"have you run firebase login?"*:
+
+1. **Log in** — a human, in a terminal (it opens a browser): `npx firebase login`. *Worked:* `npx firebase login:list` names the account. The login lives in `~/.config`, which survives a container rebuild.
+2. **Pick the project** — `npx firebase use --add`: choose a project from the account and give it an **alias** (`prod`, `staging`, …); it writes `.firebaserc` — commit it. *Worked:* `.firebaserc` lists the alias and `npx firebase use` prints it.
+3. **Deploy by hand** — `{{NX}} run {{FUNCTIONS_PROJECT}}:deploy -P <alias>` (Nx builds and lints `{{FUNCTIONS_PROJECT}}`, then `firebase deploy --only functions`) and `{{NX}} run firebase:deploy -P <alias>` (the rules and indexes `firebase.json` declares), or both at once with `{{NX}} run-many -t deploy --project=<alias>`. *Worked:* the CLI ends with *Deploy complete!* and a console link; `npx firebase functions:list -P <alias>` lists what is live.
+4. **Hand deploys to CI** (optional) — {{#ci}}this project has the `ci` layer: *Continuous deployment (CI)* below takes it from here (the one-time cloud setup a human runs, then the two repository variables). *Worked:* `.github/workflows/deploy.yml` exists, and its first manual run goes green.{{/ci}}{{^ci}}`/bespunky-house:add-layer ci` renders a deploy workflow from the branch model's `ci` bindings (set one through the `bespunky-workflow:branch-and-release` skill first). Then a **human** runs `gcloud auth login` in a terminal and `! bash tools/setup-gcp.sh --environment <environment>` in Claude Code — it grants IAM, which Claude never does — and sets the two repository variables it prints (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, per GitHub environment). *Worked:* `gh variable list --env <environment>` shows both, and Actions → *Deploy* → *Run workflow* (scope `all`) goes green.{{/ci}}
+
 - **Every extra argument reaches the Firebase CLI** (`--project=<alias>` / `-P <alias>` picks the `.firebaserc` alias; `--non-interactive` for CI). Deploy targets are **never cached** and **never run beside another task** (`parallelism: false`), so two deploys never race one Firebase project.
 - **`affected` sees the root Firebase files.** `firebase.json`, `.firebaserc` and root rules files belong to no project, so the deploy targets list them as `{workspaceRoot}/…` inputs — a rules-only commit deploys `firebase`, a `firebase.json` change both.
 - **Deploy through Nx, never a raw `firebase deploy`** — that skips the build and ships whatever stale bundle sits in `dist/`.
@@ -391,7 +398,7 @@ It runs the declaration's install (`install` in `.bespunky/dev.json`) in a workt
 
 ### The one-time cloud setup — a human runs it, never Claude
 
-The workflow authenticates **keylessly** (GitHub's OIDC token, exchanged by Workload Identity Federation for a `github-deployer` service account). Creating that identity **grants IAM roles**, and Claude Code refuses IAM grants to agents **by design** — so `tools/setup-gcp.sh` (generator-owned, idempotent, every role justified inline, derived from what `firebase.json` deploys) is **run by the user**, in Claude Code with the `!` prefix:
+The workflow authenticates **keylessly** (GitHub's OIDC token, exchanged by Workload Identity Federation for a `github-deployer` service account). Creating that identity **grants IAM roles**, and Claude Code refuses IAM grants to agents **by design** — so `tools/setup-gcp.sh` (generator-owned, idempotent, every role justified inline, derived from what `firebase.json` deploys) is **run by the user**, in Claude Code with the `!` prefix — after logging gcloud in, in a terminal, as an account that may grant IAM in the project (`gcloud auth login`; the script refuses without it):
 
 ```bash
 ! bash tools/setup-gcp.sh --dry-run                         # every gcloud call it would make — changes nothing
@@ -399,7 +406,7 @@ The workflow authenticates **keylessly** (GitHub's OIDC token, exchanged by Work
 ! bash tools/setup-gcp.sh --rollback --environment <environment>
 ```
 
-The provider trusts tokens **only** from this repository, **only** in that GitHub environment and **only** for the branches the model binds to it. At the end it prints the GitHub environment and the two variables to set — `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOY_SERVICE_ACCOUNT` (not secrets) — as `gh` commands to run or paste back to Claude. **Re-run it whenever an upgrade prints a `HUMAN_STEP:` line** — the bindings it was rendered for changed, and the cloud side cannot be regenerated.
+The provider trusts tokens **only** from this repository, **only** in that GitHub environment and **only** for the branches the model binds to it. At the end it prints the GitHub environment and the two variables to set — `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOY_SERVICE_ACCOUNT` (not secrets) — as `gh` commands to run or paste back to Claude. *Worked:* `gh variable list --env <environment>` shows both — then Actions → *Deploy* → *Run workflow* (scope `all`) is the first CI deploy, and it goes green (an unset variable fails it at a step that names the variable). **Re-run it whenever an upgrade prints a `HUMAN_STEP:` line** — the bindings it was rendered for changed, and the cloud side cannot be regenerated.
 
 **For Claude:** never run `tools/setup-gcp.sh`, `gcloud iam …` or `gcloud projects add-iam-policy-binding` yourself, and never try a workaround — hand the user the exact `!` line (from the `HUMAN_STEP:` output, or above) and say what to paste back.
 {{/firebase}}

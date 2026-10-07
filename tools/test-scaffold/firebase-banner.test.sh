@@ -39,6 +39,10 @@ for sh in dash bash; do
   fi
 done
 
+# The banner also points at the backend's road to a first deploy (login → alias → deploy → CI), not only App Hosting.
+out="$(cd / && bash -c ". '$HOOK'" 2>&1)"
+in_text "$out" -q 'node tools/firebase-deploy.mjs --check' && ok "the pending banner names the first-deploy road" || fail "no first-deploy road in: $out"
+
 : > "$WS/.firebaserc"   # linked, and no house-wired client: the banner must go silent
 out="$(cd / && dash -c ". '$HOOK'" 2>&1)"
 [ -z "$out" ] && ok "silent once .firebaserc exists (no client to wire)" || fail "still printing after setup: $out"
