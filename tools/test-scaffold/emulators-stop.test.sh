@@ -23,8 +23,13 @@ TMP="$(mktemp -d)"
 STARTED=()
 cleanup() {
   for pid in "${STARTED[@]}"; do kill -KILL -- "-$pid" 2>/dev/null; done
-  # Anything the fake suite left (it is detached by design) — found by its unique marker, never by name.
-  pkill -KILL -f "$TMP/" 2>/dev/null
+  # A keeper is detached by design, in its own process group with the fake suite under it: stop each one by the
+  # PID it recorded — never by name.
+  for entry in "$TMP"/*/.bespunky/run/*/detached/emulators.json; do
+    [ -f "$entry" ] || continue
+    pid="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$entry" 2>/dev/null)"
+    [ -n "$pid" ] && kill -KILL -- "-$pid" 2>/dev/null
+  done
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -92,8 +97,8 @@ descendants() { local c; for c in $(pgrep -P "$1"); do descendants "$c"; echo "$
 gone() { for _ in $(seq 1 "${2:-100}"); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done; return 1; }
 exported() { [ -f "$1/.emulator-data/firebase-export-metadata.json" ]; }
 signals() { grep -vx JVM-KILLED "$1/.fake-firebase-signals" | tr '\n' ' ' | sed 's/ $//'; }
-keeper_gone() {   # the detached keeper (and the suite under it) finished on its own
-  for _ in $(seq 1 100); do pgrep -f "$1/" >/dev/null || return 0; sleep 0.1; done; return 1
+keeper_gone() {   # the detached keeper finished on its own — its last act is recording the result
+  for _ in $(seq 1 100); do grep -q '"status": "exited"' "$1/.bespunky/run/firebase@0/detached/emulators.json" 2>/dev/null && return 0; sleep 0.1; done; return 1
 }
 
 # ── 1. Nx's stop: leaf-first tree kill, then SIGKILL after a 1 s grace ─────────────────────────────
