@@ -1337,6 +1337,29 @@ checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-serv
   ok(tree.read('apps/shop/project.json', 'utf8') === once, 'a re-run changed project.json');
 });
 
+checkAsync('firebase client on an app whose dev server has its own proxy config: kept, and told what to add (R4-1)', async (ok) => {
+  const tree = angularShop();
+  tree.write('apps/shop/src/app/app.config.ts', "import { ApplicationConfig } from '@angular/core';\nexport const appConfig: ApplicationConfig = { providers: [] };\n");
+  await generator('serve')(tree, { project: 'shop' });
+  const config = JSON.parse(tree.read('apps/shop/project.json', 'utf8'));
+  config.targets['dev-server'].options.proxyConfig = 'apps/shop/proxy.api.mjs';
+  tree.write('apps/shop/project.json', JSON.stringify(config));
+  const { angular } = require_(join(BUILD, 'src/adapters/angular'));
+  const { logger } = require_('@nx/devkit');
+  const warned = [];
+  const warn = logger.warn;
+  logger.warn = (message) => warned.push(String(message));
+  try {
+    angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: true });
+  } finally {
+    logger.warn = warn;
+  }
+  const t = JSON.parse(tree.read('apps/shop/project.json', 'utf8')).targets;
+  ok(t['dev-server'].options.proxyConfig === 'apps/shop/proxy.api.mjs', `the project's choice kept: ${t['dev-server'].options.proxyConfig}`);
+  ok(tree.exists('apps/shop/proxy.local.mjs'), 'the proxy.local.mjs seam is seeded');
+  ok(warned.some((w) => w.includes('uses a proxy config of its own') && w.includes("import { emulatorRoutes } from './proxy.conf.mjs';")), `warned: ${warned.join(' | ') || '(nothing)'}`);
+});
+
 checkAsync('a first scaffold: the Firebase core, arriving after the web seeding, still declares the emulators for served apps', async (ok) => {
   const tree = angularShop();
   await generator('serve')(tree, { project: 'shop' });
