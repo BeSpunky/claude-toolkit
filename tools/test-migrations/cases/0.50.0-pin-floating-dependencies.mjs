@@ -23,6 +23,37 @@ const listen = () => {
   };
 };
 
+// ── adopt-extracted's `latest` as it really shipped (e532f3b … 0.49.x): the marker the rung keys on is
+//    libs/<lib>/extraction.json, written by mark-extractable, `ingestedPackage` set by tools/extract-tool, `status` by
+//    adopt-extracted itself — `adopting` (default) or `adopted-shim` (--keepShim, the lib's entry a re-export).
+//    git show e532f3b:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/adopt-extracted/generator.ts
+//    git show 52fe452:…/generators/mark-extractable/generator.ts, tools/extract-tool/extract-tool.mjs (ingestOne). ─────
+const realMarker = (status) => ({
+  status,
+  proposedPackage: '@bespunky/kit',
+  summary: 'Typed helpers',
+  rationale: '',
+  sourceWorkspace: 'shop',
+  sourceLib: 'kit',
+  sourceLibRoot: 'libs/kit',
+  entry: 'libs/kit/src/index.ts',
+  kind: 'ts',
+  declaredDeps: { dependencies: {}, peerDependencies: {} },
+  frameworkVersions: { nx: '23.1.0' },
+  ingestedPackage: { name: '@bespunky/kit', version: '0.1.0' },
+  markedAt: '2026-06-01',
+  notes: '',
+});
+const otherFloats = (status, entry) => (tree) => {
+  pkg(tree, { '@bespunky/typescript-utils': 'latest', '@bespunky/kit': 'latest' }, { nx: '23.1.0', '@nx/esbuild': 'latest' });
+  installed(tree, '@bespunky/kit', { version: '1.4.2' });
+  writeJson(tree, 'libs/kit/project.json', { name: 'kit', root: 'libs/kit', projectType: 'library' });
+  writeJson(tree, 'libs/kit/extraction.json', realMarker(status));
+  if (entry) tree.write('libs/kit/src/index.ts', entry);
+};
+const adoptedPinned = (tree, t) => t.ok(deps(tree)['@bespunky/kit'] === '^1.4.2', `adopted: ${deps(tree)['@bespunky/kit']}`);
+const MARKER_TEXT = "the marker's own lifecycle fields (and a shim's re-export) stay as adopt-extracted wrote them — asserted: the same pin";
+
 export default {
   name: '0.50.0 · pin-floating-dependencies',
   ladder: ['0.50.0/pin-floating-dependencies'],
@@ -126,6 +157,15 @@ export default {
         t.ok(deps(tree)['@nx/esbuild'] === '23.1.0', `@nx/esbuild: ${deps(tree)['@nx/esbuild']}`);
         t.ok(deps(tree)['@bespunky/kit'] === '^1.4.2', `adopted: ${deps(tree)['@bespunky/kit']}`);
       },
+      historicalShapes: [
+        { name: 'adopt-extracted, default path (e532f3b): the full marker, status "adopting"', setup: otherFloats('adopting'), diverges: MARKER_TEXT, expect: adoptedPinned },
+        {
+          name: 'adopt-extracted --keepShim (e532f3b): status "adopted-shim", the entry a re-export',
+          setup: otherFloats('adopted-shim', "export * from '@bespunky/kit';\n"),
+          diverges: MARKER_TEXT,
+          expect: adoptedPinned,
+        },
+      ],
     },
     {
       name: "a project's own floating spec is reported, never rewritten; a workspace link `*` is not a version at all",

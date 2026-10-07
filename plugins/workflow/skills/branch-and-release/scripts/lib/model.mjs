@@ -223,6 +223,47 @@ function deploysErrors(field, d, err, outdated) {
   if (d.note === undefined && d.ci === undefined && d.appHosting === undefined) err(field, 'binds nothing — give it a note, a ci binding or appHosting backends (or make it null)');
 }
 
+/**
+ * WHERE a `ci` binding may sit — a security rule, not a style one. A `ci` binding hands the line a cloud identity
+ * that deploys whatever is pushed to it, so:
+ *   - only a PROTECTED line may hold one (integration, a stage, a non-maintained release line). A hotfix line is a
+ *     work branch: anyone who can push opens one and nothing reviews it, so a binding there deploys unreviewed code
+ *     into the environment. A tag is not a line at all: anyone with push access creates one.
+ *   - never a MAINTAINED release line: each is its own production, so one environment bound to all of them is rolled
+ *     back to whichever old line was pushed last.
+ *   - ONE line per environment: two lines deploying into one environment race, and `affected` (whose base is per
+ *     branch) leaves it running code that matches neither.
+ * Each message says why and what to do instead. The house `ci` generator re-checks the same rules on the
+ * projection (defence in depth for a hand-edited one).
+ */
+function ciBindingErrors(m, err) {
+  const ciOf = (d) => (isObj(d) && isObj(d.ci) ? d.ci : null);
+  const holders = []; // [field, ci]
+  const production = isObj(m.integration) && Array.isArray(m.stages) ? [m.integration.branch, ...m.stages.map((s) => s?.branch)].filter(Boolean).at(-1) : null;
+  if (isObj(m.integration) && ciOf(m.integration.deploys)) holders.push(['integration.deploys', ciOf(m.integration.deploys)]);
+  if (Array.isArray(m.stages)) m.stages.forEach((s, i) => isObj(s) && ciOf(s.deploys) && holders.push([`stages[${i}].deploys`, ciOf(s.deploys)]));
+  if (isObj(m.releases) && ciOf(m.releases.deploys)) {
+    if (m.releases.maintained === true) {
+      err('releases.deploys.ci', 'maintained release lines are each their own production — one environment bound to all of them would be rolled back to whichever old line was pushed last. Deploy a maintained line by hand (or from your own pipeline per line); bind `ci` only on a non-maintained line');
+    } else holders.push(['releases.deploys', ciOf(m.releases.deploys)]);
+  }
+  if (isObj(m.hotfixes) && ciOf(m.hotfixes.deploys)) {
+    err('hotfixes.deploys.ci', `hotfix lines are work branches — anyone who can push opens one and nothing reviews it, so a \`ci\` binding there deploys unreviewed code. Bind \`ci\` on the protected line the hotfix lands on${production ? ` ("${production}")` : ''}: it deploys when the hotfix lands there`);
+  }
+  if (Array.isArray(m.tags)) {
+    m.tags.forEach((t, i) => {
+      if (isObj(t) && ciOf(t.deploys)) err(`tags[${i}].deploys.ci`, `a tag is not a protected line — anyone with push access creates one — and CI deploys from branches only. Bind \`ci\` on the line the tag is on${typeof t.on === 'string' ? ` ("${t.on}")` : ''}`);
+    });
+  }
+  const seen = new Map();
+  for (const [field, ci] of holders) {
+    if (typeof ci.environment !== 'string') continue;
+    const first = seen.get(ci.environment);
+    if (first) err(`${field}.ci.environment`, `"${ci.environment}" is already bound by ${first} — one line per environment: two lines deploying into one environment race, and each leaves it running code the other line never had. Give this line its own environment, or drop one of the two bindings`);
+    else seen.set(ci.environment, field);
+  }
+}
+
 /** Every problem with a declaration, as `field: message` strings. Empty = valid. */
 export function validate(m) {
   const { errors, outdated } = check(m);
@@ -350,6 +391,8 @@ export function check(m) {
       if (!lines.includes(t.on)) err(`${f}.on`, `must name a declared line or the release pattern (${lines.join(', ')})`);
       deploysErrors(`${f}.deploys`, t.deploys, err, outdated);
     });
+
+  ciBindingErrors(m, err);
 
   // patterns: no overlap with each other, never match a named line
   for (let i = 0; i < patterns.length; i++) {

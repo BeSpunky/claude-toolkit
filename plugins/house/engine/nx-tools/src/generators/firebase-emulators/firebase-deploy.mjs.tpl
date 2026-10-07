@@ -4,6 +4,10 @@
 //
 //   node tools/firebase-deploy.mjs --check                   where this machine stands on the road to a first deploy
 //   node tools/firebase-deploy.mjs --only functions [args]   what `nx run {{functionsProject}}:deploy` runs
+//
+// Arguments reach this file through Nx run-commands, which joins them into one SHELL command line, each double-quoted:
+// `$` and backticks in an argument are expanded before they get here — escape them with a backslash. This file
+// itself never uses a shell (the CLI is spawned with an argument vector).
 //   import { deploy } from './firebase-deploy.mjs'           what tools/firebase-deploy-rules.mjs (firebase:deploy) runs
 //
 // Every deploy target runs the project's pinned Firebase CLI through here, so a deploy that fails for want of a
@@ -48,29 +52,49 @@ function projectArg(args) {
 }
 
 /**
- * What this machine has — local facts only (no network, no CLI call), each one a step of the road. A credential
- * source is any the Firebase CLI accepts: a `firebase login` (its configstore record), a service-account or
- * workload-identity credential file (what CI's auth step exports), gcloud's application-default login, or a token.
+ * What this machine has — local facts only (no network, no CLI call), each one a step of the road, read where the
+ * Firebase CLI itself reads them (firebase-tools 15: lib/command.js, lib/requireAuth.js, google-auth-library):
+ *   credentials  a `firebase login` (configstore — `$XDG_CONFIG_HOME`, else ~/.config — `configstore/firebase-tools.json`),
+ *                FIREBASE_TOKEN, a credential file in GOOGLE_APPLICATION_CREDENTIALS (what CI's auth step exports), or
+ *                gcloud's application-default login — which the CLI reads ONLY at $HOME/.config/gcloud (not from
+ *                `CLOUDSDK_CONFIG`, where gcloud may have written it: that one is named, as not seen by Firebase);
+ *   project      `-P` / `--project`, else the ACTIVE project `firebase use` set for this directory (configstore
+ *                `activeProjects`, nearest enclosing directory), else the only alias in .firebaserc, else its
+ *                `default` — the CLI's own order.
  */
 export function readiness(args = []) {
   const config = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
   const store = readJson(join(config, 'configstore', 'firebase-tools.json'));
-  const login = store?.tokens?.refresh_token ? store.user?.email || 'a Firebase login' : undefined;
+  const login = store?.user && store?.tokens?.refresh_token ? store.user.email || 'a Firebase login' : undefined;
+  const home = process.env.HOME || homedir();
+  const adc = existsSync(join(home, '.config', 'gcloud', 'application_default_credentials.json'));
   const credentials =
-    login ??
-    (process.env.GOOGLE_APPLICATION_CREDENTIALS && 'GOOGLE_APPLICATION_CREDENTIALS') ??
-    (process.env.FIREBASE_TOKEN && 'FIREBASE_TOKEN') ??
-    (existsSync(join(config, 'gcloud', 'application_default_credentials.json')) ? 'gcloud application-default login' : undefined);
+    (process.env.FIREBASE_TOKEN && 'FIREBASE_TOKEN') ||
+    login ||
+    (process.env.GOOGLE_APPLICATION_CREDENTIALS && 'GOOGLE_APPLICATION_CREDENTIALS') ||
+    (adc ? 'gcloud application-default login' : undefined);
+  // gcloud honours CLOUDSDK_CONFIG; the Firebase CLI does not — an ADC login there is invisible to a deploy.
+  const sdk = process.env.CLOUDSDK_CONFIG;
+  const strandedAdc = !adc && sdk && existsSync(join(sdk, 'application_default_credentials.json')) ? join(sdk, 'application_default_credentials.json') : undefined;
 
   const rc = readJson(join(ROOT, '.firebaserc'));
   const aliases = Object.keys(rc?.projects ?? {});
   const named = projectArg(args);
-  const project = named ?? rc?.projects?.default;
+  const project = named ?? activeProject(store) ?? (aliases.length === 1 ? aliases[0] : undefined) ?? (rc?.projects?.default ? 'default' : undefined);
 
   const ci = readJson(join(ROOT, '.bespunky', 'ci.json'));
   const workflow = existsSync(join(ROOT, '.github', 'workflows', 'deploy.yml')) && Array.isArray(ci?.files) && ci.files.includes('.github/workflows/deploy.yml');
   const environments = Object.keys(ci?.cloud?.firebase ?? {});
-  return { credentials, aliases, project, named, ci: ci ? { workflow, pending: ci.pending, environments } : undefined };
+  return { credentials, strandedAdc, aliases, project, named, ci: ci ? { workflow, pending: ci.pending, environments } : undefined };
+}
+
+/** The project `firebase use` made active for this directory — the nearest enclosing directory's, as the CLI looks it up. */
+function activeProject(store) {
+  const active = store?.activeProjects ?? {};
+  for (let dir = ROOT; ; dir = dirname(dir)) {
+    if (active[dir]) return active[dir];
+    if (dirname(dir) === dir) return undefined;
+  }
 }
 
 /** The road to a first deploy, as lines: each step ticked from `state`, with how to tell it worked. */
@@ -83,11 +107,14 @@ export function road(state) {
     '',
     `  ${mark(state.credentials)} 1. Log in — a human, in a terminal (it opens a browser):  npx firebase login`,
     `       Worked when: \`npx firebase login:list\` names your account.${state.credentials ? `  Here: ${state.credentials}.` : ''}`,
+    ...(state.strandedAdc
+      ? [`       (gcloud's application-default login is at ${state.strandedAdc} — CLOUDSDK_CONFIG — where the Firebase CLI never looks.)`]
+      : []),
     '       (Logins live in ~/.config, which the devcontainer keeps across rebuilds — once per project is enough.)',
-    `  ${mark(state.project)} 2. Pick the Firebase project:  npx firebase use --add`,
+    `  ${mark(state.aliases.length)} 2. Pick the Firebase project:  npx firebase use --add`,
     '       It lists your account\'s projects; choose one and give it an ALIAS (`prod`, `staging`, …). It writes',
     '       .firebaserc — commit it. No project yet? Create one first (console, or `npx firebase projects:create <id>`).',
-    `       Worked when: .firebaserc lists the alias and \`npx firebase use\` prints it.${state.aliases.length ? `  Here: ${state.aliases.join(', ')}.` : ''}`,
+    `       Worked when: .firebaserc lists the alias and \`npx firebase use\` prints it.${state.aliases.length ? `  Here: ${state.aliases.join(', ')}${state.project ? ` (in use: ${state.project})` : ''}.` : ''}`,
     `    3. Deploy by hand — every deploy target takes the alias:`,
     `         ${NX} run ${FUNCTIONS}:deploy -P <alias>     builds and lints ${FUNCTIONS}, then \`firebase deploy --only functions\``,
     `         ${NX} run firebase:deploy -P <alias>      the Firestore / Storage rules and indexes firebase.json declares`,
@@ -103,11 +130,11 @@ export function road(state) {
     '    5. Grant CI its keyless identity — a HUMAN runs it (it grants IAM; Claude never does). First, in a terminal,',
     '       log gcloud in as an account that may grant IAM in the project:  gcloud auth login',
     '       Then, in Claude Code with `!` (or any terminal):',
-    '         ! bash tools/setup-gcp.sh --dry-run                     every call it would make, nothing changed',
+    `         ! bash tools/setup-gcp.sh --dry-run --environment ${envs}     every call it would make, nothing changed`,
     `         ! bash tools/setup-gcp.sh --environment ${envs}`,
     '       Worked when: it ends by printing the `gh` commands for step 6.',
-    '    6. Set the GitHub environment and its two variables (not secrets) — the `gh` lines step 5 printed:',
-    `         GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_DEPLOY_SERVICE_ACCOUNT   (per environment)`,
+    '    6. Run the `gh` lines step 5 printed — the GitHub environment\'s protection and its two variables (not secrets) —',
+    '       and commit the record it wrote (.bespunky/gcp/<environment>.tsv).',
     `       Worked when: \`gh variable list --env ${envs}\` shows both; then GitHub → Actions → Deploy → Run workflow`,
     '       (scope `all`) is the first CI deploy, and it goes green.',
     '',
@@ -136,7 +163,8 @@ export function deploy(only, args, label) {
   console.error('');
   console.error(`[${label}] The deploy failed — Firebase's own message is above.`);
   if (!state.credentials) console.error(`[${label}] This machine has no Firebase login: step 1 below.`);
-  else if (!state.project) console.error(`[${label}] No project was named and .firebaserc has no default: step 2 below, then pass -P <alias>.`);
+  else if (!state.project)
+    console.error(`[${label}] No project was named, none is active here (\`firebase use\`) and .firebaserc names no single or default one: step 2 below, then pass -P <alias>.`);
   else if (state.named && state.aliases.length && !state.aliases.includes(state.named))
     console.error(`[${label}] "${state.named}" is not an alias in .firebaserc (${state.aliases.join(', ')}) — Firebase took it as a project id.`);
   else console.error(`[${label}] Login (${state.credentials}) and project (${state.project}) are set, so the cause is in Firebase's message.`);

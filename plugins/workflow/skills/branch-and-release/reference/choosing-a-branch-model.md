@@ -65,7 +65,7 @@ Edit the expansion to fit (real line names, `deploys` for what each line fires, 
 | a backend with **no** repository (local-source deploys) | nothing for App Hosting — it deploys only when someone runs `firebase deploy --only apphosting`; say so |
 | a `live branch` that is `unobservable` | a question: *"Does backend `web` roll out from `main`?"* — never a guess |
 | a workflow that deploys on push to the line (`bindings`, `deploys: true`) | a `note` naming it; a `ci` binding only if the project adopts the house `ci` layer (it owns its own workflow) |
-| the user wants CI to deploy the line (house projects: the `ci` layer) | `"ci": { "environment": "<name>", "providers": { "firebase": "<.firebaserc alias>" } }` — one environment per Firebase project the line ships to |
+| the user wants CI to deploy the line (house projects: the `ci` layer) | `"ci": { "environment": "<name>", "providers": { "firebase": "<.firebaserc alias>" } }` — one environment per Firebase project the line ships to. **Only on a protected line** (integration, a stage, a non-maintained release line) and **one line per environment**: the engine refuses it on hotfix lines and tags (anyone who can push creates one — bind the line they land on) and on maintained release lines (each is its own production) |
 
 A `drift` fact (with `--app-hosting` on a declared model) is a binding that no longer matches the cloud — a backend that moved branch, lost its repository, or exists undeclared. Each one is a model change to propose (`changing-the-model.md`), not a note to ignore.
 
