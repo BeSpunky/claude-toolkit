@@ -3,7 +3,8 @@
 # `.secret.local`, through the one parser the emulator side uses (tools/emulator-secrets.cjs).
 #
 # WHY. It used to push the raw text after `=`: `KEY="v" # note` became the production secret `"v" # note`, and
-# `export KEY=v` the secret named `export KEY`. Silent — the push succeeds, and production breaks later.
+# `export KEY=v` the secret named `export KEY`. Then it pushed Firebase's dotenv reading — and `DB_PASS=p@ss#w0rd`
+# became `p@ss`. Both silent. Now a value whose reading differs from its text is refused, with the shape to write.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -30,34 +31,54 @@ ok() { if [ "$2" = 1 ]; then printf '  ok   %-64s\n' "$1"; else printf '  FAIL %
 push() { : > "$TMP/pushed"; ( cd "$W" && PATH="$TMP/bin:$PATH" PUSHED_LOG="$TMP/pushed" FIREBASE_PROJECT=acme-prod bash tools/push-secrets.sh "$@" 2>&1 ); }
 pushed() { grep -Fxq -- "$1" "$TMP/pushed" && echo 1 || echo 0; }
 
+# ── What is written is what is pushed: bare when it can be, quoted (literally) when it must be ─────────────────
 cat > "$W/$FN/.secret.local" <<'EOF2'
 # production
 PLAIN=sk_live_plain
-COMMENTED=sk_live_c   # the live key
-QUOTED="sk_live_q" #x
-SINGLE='sk_live_s'
-export EXPORTED=sk_live_e
-ESCAPED="a \"b\" c"
 HASHED="pa#ss"
+SQ='p@ss#w0rd'
+MULTI="-----BEGIN KEY-----
+sk_live_line
+-----END KEY-----"
+PADDED='  sk_live_pad  '
+APOS=it's sk_live
 UNFILLED=PASTE_ME
 EMPTY=
 EOF2
 out="$(push)"
 ok 'plain value pushed as is'                    "$(pushed '["PLAIN","sk_live_plain"]')"
-ok 'inline comment is not part of the value'     "$(pushed '["COMMENTED","sk_live_c"]')"
-ok 'double quotes and a trailing comment stripped' "$(pushed '["QUOTED","sk_live_q"]')"
-ok 'single quotes stripped'                      "$(pushed '["SINGLE","sk_live_s"]')"
-ok '`export KEY=` pushes KEY'                    "$(pushed '["EXPORTED","sk_live_e"]')"
-ok 'escapes in double quotes decoded'            "$(pushed '["ESCAPED","a \"b\" c"]')"
-ok 'a # inside quotes is the value'              "$(pushed '["HASHED","pa#ss"]')"
+ok 'a # inside double quotes is the value'       "$(pushed '["HASHED","pa#ss"]')"
+ok 'a # inside single quotes is the value'       "$(pushed '["SQ","p@ss#w0rd"]')"
+ok 'a literal multi-line quoted value, newlines and all' "$(pushed '["MULTI","-----BEGIN KEY-----\nsk_live_line\n-----END KEY-----"]')"
+ok 'edge whitespace kept when quoted'            "$(pushed '["PADDED","  sk_live_pad  "]')"
+ok 'an inner apostrophe in a bare value is the value' "$(pushed '["APOS","it'"'"'s sk_live"]')"
 ok 'unfilled values skipped, by name'            "$([ "$(grep -c 'UNFILLED\|EMPTY' "$TMP/pushed")" = 0 ] && [[ "$out" == *"skipping UNFILLED"* ]] && echo 1 || echo 0)"
-ok 'exactly seven secrets set'                   "$([ "$(wc -l < "$TMP/pushed")" = 7 ] && echo 1 || echo 0)"
-ok 'no value appears in the output'              "$([[ "$out" != *sk_live* ]] && echo 1 || echo 0)"
+ok 'exactly six secrets set'                     "$([ "$(wc -l < "$TMP/pushed")" = 6 ] && echo 1 || echo 0)"
+ok 'no value appears in the output'              "$([[ "$out" != *sk_live* && "$out" != *w0rd* ]] && echo 1 || echo 0)"
 
 out="$(push --dry-run)"
 ok 'dry run sets nothing'                        "$([ ! -s "$TMP/pushed" ] && echo 1 || echo 0)"
-ok 'dry run names every key it would push'       "$([[ "$out" == *"would set QUOTED — 9 chars"* && "$out" == *"would set EXPORTED"* && "$out" == *"7 secret(s) would be pushed to acme-prod"* ]] && echo 1 || echo 0)"
-ok 'dry run shows edges, never the whole value'  "$([[ "$out" == *'"sk_"…"_q"'* && "$out" != *sk_live_q* ]] && echo 1 || echo 0)"
+ok 'dry run names every key, with a length class' "$([[ "$out" == *"would set PLAIN — 8–15 characters"* && "$out" == *"would set HASHED — under 8 characters"* && "$out" == *"would set MULTI — 32–63 characters"* && "$out" == *"6 secret(s) would be pushed to acme-prod"* ]] && echo 1 || echo 0)"
+ok 'dry run shows no part of a value, no hash'   "$([[ "$out" != *sk_* && "$out" != *pa#* && "$out" != *'"pa'* && "$out" != *sha256* ]] && echo 1 || echo 0)"
+
+# ── A value Firebase would read as something other than its text is REFUSED, never reinterpreted ──────────────
+# Each alone in the file beside a good line: the whole push stops (nothing set), the key is named with why and the
+# shape to write, and the value itself is never printed.
+refused() {   # refused <label> <line(s)> <key> <reason needle> <shape needle>
+  printf 'GOOD=sk_live_good\n%s\n' "$2" > "$W/$FN/.secret.local"
+  local out rc
+  set +e; out="$(push)"; rc=$?; set -e
+  ok "refused: $1" "$([ "$rc" -eq 2 ] && [ ! -s "$TMP/pushed" ] && [[ "$out" == *"$3: $4"* && "$out" == *"$5"* && "$out" != *sk_live* && "$out" != *w0rd* ]] && echo 1 || echo 0)"
+  [ "$rc" -eq 2 ] && [[ "$out" == *"$3: $4"* && "$out" == *"$5"* ]] || printf '%s\n' "$out" | sed 's/^/         /'
+}
+refused 'an unquoted # (p@ss#w0rd would push p@ss)' 'DB_PASS=p@ss#w0rd' DB_PASS 'an unquoted #' "DB_PASS='<value>'"
+refused 'a # comment on the value line' 'COMMENTED=sk_live_c   # the live key' COMMENTED 'a # comment' 'COMMENTED=<value>'
+refused 'a quoted value followed by a comment' 'QUOTED="sk_live_q" #x' QUOTED 'a # comment' 'QUOTED=<value>'
+refused 'quotes Firebase strips' "SINGLE='sk_live_s'" SINGLE 'quotes Firebase strips' 'SINGLE=<value>'
+refused '`export`' 'export EXPORTED=sk_live_e' EXPORTED '`export`' 'EXPORTED=<value>'
+refused 'escapes Firebase decodes' 'ESCAPED="sk_live \"b\" c"' ESCAPED 'escape sequences' 'ESCAPED=<value>'
+refused 'an escaped newline (literal or a line break?)' 'PEM="sk_live\nline"' PEM 'escape sequences' "PEM='<value>'"
+refused 'an unbalanced quote (A="abc)' 'UNBAL="sk_live_abc' UNBAL 'a stray or unbalanced quote' "UNBAL='<value>'"
 
 printf 'GOOD=v\nthis is not a pair\n' > "$W/$FN/.secret.local"
 set +e; out="$(push)"; rc=$?; set -e
