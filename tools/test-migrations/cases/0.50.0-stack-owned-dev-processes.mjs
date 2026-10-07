@@ -113,6 +113,21 @@ export default {
       expect: (tree, t) => t.ok(targetsOf(tree, 'web')['dev-server'].continuous === false, `explicit: ${JSON.stringify(targetsOf(tree, 'web')['dev-server'])}`),
     },
     {
+      name: 'the suite in a project of another name (0.36+, 5a05026: the project already at firebase/) and a 0.24.0-renamed leaf (b65399d, build-angular, options only) are reached too',
+      setup: (tree) => {
+        addProjectConfiguration(tree, 'backend', { root: 'firebase', targets: { emulators: suite(), 'emulators:auth': suite('auth') } });
+        addProjectConfiguration(tree, 'old', {
+          root: 'apps/old',
+          targets: { serve: SERVE, 'dev-server': { continuous: true, executor: '@angular-devkit/build-angular:dev-server', options: { browserTarget: 'old:build' } } },
+        });
+      },
+      expect: (tree, t) => {
+        const fb = targetsOf(tree, 'backend');
+        t.ok(fb.emulators.continuous === false && fb['emulators:auth'].continuous === false, `the launchers are found by what they run, not the project name: ${JSON.stringify(fb)}`);
+        t.ok(targetsOf(tree, 'old')['dev-server'].continuous === false, 'the build-angular leaf is the house\'s too');
+      },
+    },
+    {
       name: 'a leaf behind a foreign serve is not the house stack: untouched',
       setup: (tree) => {
         addProjectConfiguration(tree, 'other', { root: 'apps/other', targets: { serve: { continuous: true, executor: 'nx:run-commands', options: { command: 'x' } }, 'dev-server': LEAF } });

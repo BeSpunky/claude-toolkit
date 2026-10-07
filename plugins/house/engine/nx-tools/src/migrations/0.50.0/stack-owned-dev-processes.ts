@@ -18,7 +18,8 @@
 //   - the `dev-server` leaf of every house app (its `serve` — or, once serve-runs-its-own-stack has run, its
 //     `dev-stack` — is @bespunky/nx-tools:serve), when the leaf is the house's — an Angular dev-server builder, the
 //     only stack whose leaf the house writes;
-//   - every target of the workspace `firebase` project that launches `tools/emulators.sh`.
+//   - every target that launches `tools/emulators.sh` (`nx:run-commands`), in whichever project holds the suite —
+//     `firebase`, or since 0.36 (5a05026) the project that already sat at `firebase/`, under its own name.
 // What it REPORTS and leaves:
 //   - a leaf of another executor (the project's own dev-server) that is not explicitly `continuous: false`: a second
 //     stack of that app in one tree may wait on the first — the line says how to fix it;
@@ -41,7 +42,6 @@ const TAG = '[migrate 0.50.0 stack-owned-dev-processes]';
 const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
 const HOUSE_LEAF_EXECUTORS = ['@angular/build:dev-server', '@angular-devkit/build-angular:dev-server', '@nx/angular:dev-server'];
 const LEAF = 'dev-server';
-const FIREBASE_PROJECT = 'firebase';
 const launchesSuite = (target: { executor?: string; options?: { command?: unknown } }) =>
   target.executor === 'nx:run-commands' && typeof target.options?.command === 'string' && target.options.command.includes('tools/emulators.sh');
 
@@ -78,7 +78,9 @@ export default function update(tree: Tree): void {
       }
     }
 
-    if (name === FIREBASE_PROJECT) {
+    // Wherever the suite lives: from 0.36 (5a05026) the house puts it in whatever project already sits at `firebase/`,
+    // under that project's own name — the launcher, not the name, says what a target is.
+    {
       for (const [targetName, target] of Object.entries(targets)) {
         if (!target || typeof target !== 'object' || target.continuous === false || !launchesSuite(target)) continue;
         const was = target.continuous;

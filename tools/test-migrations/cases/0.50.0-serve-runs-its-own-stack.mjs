@@ -8,7 +8,8 @@
 //   - 0.49.2 (4f01d00, origin/development `_utils/dev-server.ts` composerFor + the angular adapter's leaf): `serve` IS
 //     the continuous composer mirroring the leaf's options/configurations, NO dependsOn; the leaf is continuous too.
 //   - 0.3.0 (60bd79f, serve/generator.ts): the composer before it mirrored the leaf — `{ continuous, executor,
-//     options: {} }`.
+//     options: {} }`; 0.24.0's rung output (5607eb3) — `{ continuous, executor }`; 0.4.0–0.35 (296d706, + eddc392's
+//     proxyConfig) — leaf options and Angular configurations. Shapes per FH's audit (impl/FH.md, R9-6).
 //   - e76c12a (pre-0.3: `serve` IS the dev-server, depending on the app's own `emulators`), carried by the real ladder
 //     through 0.24.0 → 0.24.1 → recompose-pre-0.3 (which runs the LIVE serve generator, i.e. today's shape) → here.
 // The rung must leave EVERY app complete on its own (R9-1: the per-app generator runs for one app at most).
@@ -74,6 +75,26 @@ export default {
           diverges: 'its composer carried no options or configurations of the leaf; the rung keeps what is there and adds nothing',
           setup: (tree) => house0492(tree, 'web', { serve: { continuous: true, executor: SERVE, options: {} } }),
           expect: (tree, t) => complete(tree, t, 'web', { options: {} }),
+        },
+        {
+          name: '0.24.0 rung output, no options at all (5607eb3)',
+          diverges: 'the 0.24.0 rung wrote a bare composer; the rung keeps what is there and adds nothing',
+          setup: (tree) => house0492(tree, 'web', { serve: { continuous: true, executor: SERVE } }),
+          expect: (tree, t) => complete(tree, t, 'web', {}),
+        },
+        {
+          name: '0.4.0–0.35 composer: leaf options plus proxyConfig, Angular configurations (296d706, eddc392)',
+          diverges: 'it carried a proxyConfig of its own beside the mirror; the rung keeps it on both targets',
+          setup: (tree) =>
+            house0492(tree, 'web', {
+              serve: { ...composer0492('web'), options: { buildTarget: 'web:build', host: '0.0.0.0', proxyConfig: 'apps/web/proxy.conf.mjs' } },
+            }),
+          expect: (tree, t) =>
+            complete(tree, t, 'web', {
+              options: { buildTarget: 'web:build', host: '0.0.0.0', proxyConfig: 'apps/web/proxy.conf.mjs' },
+              configurations: configurations('web'),
+              defaultConfiguration: 'development',
+            }),
         },
       ],
     },
