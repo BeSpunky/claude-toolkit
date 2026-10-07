@@ -119,6 +119,28 @@ out="$(run "$d" --only auth,ui)"
 expect 'explicit --only is honoured verbatim' '--only auth,ui' "$out"
 refute 'explicit --only does NOT export' '--export-on-exit' "$out"
 
+# ── A service environment.ts commits to the REAL backend is not emulated ─────────────────────────────────────
+# The browser uses the real backend for it; an emulator of it would be a second, empty copy that only emulated code
+# sees (emulated Functions get FIREBASE_AUTH_EMULATOR_HOST and reject a real-Auth user's token).
+commit_real() {   # commit_real <workspace dir> <services csv>
+  mkdir -p "$1/apps/demo/src/environments"
+  node -e '
+    const real = new Set(process.argv[2].split(","));
+    const entry = (s) => `    ${s}: { host: "localhost", port: 1, default: ${!real.has(s)} },`;
+    process.stdout.write(`export const environment = {\n  production: false,\n  firebase: { projectId: "acme-prod", apiKey: "k", appId: "a" },\n  emulators: {\n${["auth", "firestore", "storage", "functions"].map(entry).join("\n")}\n  },\n};\n`);
+  ' "$1" "$2" > "$1/apps/demo/src/environments/environment.ts"
+}
+d="$(mkworkspace committed-real '{ "auth": { "port": 9099 }, "firestore": { "port": 8080 }, "storage": { "port": 9199 }, "ui": { "port": 4000 } }')"
+commit_real "$d" auth
+out="$(run "$d")"
+expect 'committed-real auth: the real project id' '--project=acme-prod' "$out"
+expect 'committed-real auth: not in the derived --only' '--only firestore,storage,ui' "$out"
+out="$(run "$d" --only auth,firestore)"
+expect 'committed-real auth: dropped from an explicit --only too' '--only firestore' "$out"
+refute '…auth is not passed' 'auth' "$out"
+out="$(run "$d" --only auth)"
+expect 'an explicit --only of only real services starts nothing' '<never invoked firebase>' "$out"
+
 # ── No emulator block: warn rather than silently fall back into the broken default ──────────────────────────
 d="$(mkworkspace empty '{}')"
 export FIREBASE_ARGS_FILE="$d/.firebase-args"

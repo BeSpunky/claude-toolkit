@@ -229,7 +229,7 @@ Provide each one either in **`app.config.ts`** (root — it is then in the initi
 
 You don't have to emulate everything or nothing — each Firebase service is independently emulated-or-real, so you can run e.g. **Firestore on the emulator but real Auth**.
 
-- **Committed default (whole team):** the `EMULATE` map at the top of `{{APPS_DIR}}/<app>/src/environments/environment.ts`. Flip any service to `false`, save, the dev server hot-reloads (~1s).
+- **Committed default (whole team):** the `EMULATE` map at the top of `{{APPS_DIR}}/<app>/src/environments/environment.ts`. Flip any service to `false`, save, the dev server hot-reloads (~1s). **The emulator suite does not:** committing a service real (or the last real one back to emulated) changes the project id the app runs under (see below), and a running suite's id is fixed at launch — so from that save on, every still-emulated call names the other project and fails. **Restart the stack** (Ctrl+C the serve and start it again); the running suite watches `environment.ts`, says `RESTART NEEDED` when the two disagree, and prints the exact restart command for that stack. A service committed real is then **not emulated at all** — the suite leaves it out, so the emulated Functions never see an empty Auth or Storage emulator while the browser uses the real one.
 - **Per session (just you, no rebuild):** override via URL query or localStorage —
   - `?emulate=firestore,storage` → ONLY these emulated this tab (others real); `all` / `none` work too
   - `?real=auth` → force Auth to the real backend this tab

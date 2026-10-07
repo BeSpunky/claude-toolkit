@@ -259,4 +259,23 @@ OUT="$(cd "$W" && DEV_OWNER=test timeout 30 node tools/dev/dev.mjs stop firebase
 [ -n "${KEEP:-}" ] && printf "%s\n" "$OUT"
 ok "abandon: dev stop --abandon returns at once, the keeper's ABANDONED result reported" "$(grep -q 'ABANDONED' <<<"$OUT" && gone_dir "$W/.bespunky/run/firebase@0" && echo 1 || echo 0)"
 
+# ── 10. environment.ts commits a service real under a RUNNING suite (S2-3): the browser hot-reloads onto the real id at
+# once, the suite cannot follow — it says so, with the exact restart command, and says so again when back in step.
+W="$(mkws flip)"
+sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}|app/environment.ts|g' -e 's|{{functionsRoot}}|apps/fn|g' -e 's|{{functionsDist}}|dist/apps/fn|g' "$TPL" > "$W/tools/emulators.sh"
+mkdir -p "$W/app"
+envfile() { printf 'export const environment = { firebase: { projectId: "acme-prod" }, emulators: { auth: { default: %s }, firestore: { default: true } } };\n' "$1" > "$W/app/environment.ts"; }
+envfile true
+P="$(start "$W")"; STARTED+=("$P")
+ready "$W" >/dev/null
+said() { for _ in $(seq 1 80); do grep -q "$2" "$1/out.log" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+envfile false
+ok "flip: committing auth real under the running offline suite is said (RESTART NEEDED)" "$(said "$W" 'RESTART NEEDED: environment.ts now commits auth to the real backend — the app runs under acme-prod, but this suite was started under demo-acme-prod' && echo 1 || echo 0)"
+ok "flip: …with the exact restart command for a direct run" "$(grep -qF "cd $W && tools/dev/dev stop firebase --offset=0 && PORT_OFFSET=0 bash tools/emulators.sh" "$W/out.log" && echo 1 || echo 0)"
+printf 'export const environment = ;\n' > "$W/app/environment.ts"
+ok "flip: a file that no longer evaluates is said, the suite kept" "$(said "$W" 'cannot be evaluated now' && echo 1 || echo 0)"
+envfile true
+ok "flip: back in step is said too" "$(said "$W" 'back in step with this suite (demo-acme-prod)' && echo 1 || echo 0)"
+kill -TERM "$(script "$P")"; gone "$P" 100
+
 exit "$FAILED"
