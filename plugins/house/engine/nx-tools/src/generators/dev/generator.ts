@@ -25,6 +25,7 @@ export const ENGINE_FILES = [
   'lib/declaration.mjs',
   'lib/ports.mjs',
   'lib/stack.mjs',
+  'lib/stacks.mjs',
   'lib/worktrees.mjs',
 ] as const;
 

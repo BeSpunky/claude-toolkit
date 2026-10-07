@@ -163,7 +163,7 @@ if [ "${#live_holders[@]}" -gt 0 ]; then
   for entry in "${live_holders[@]}"; do echo "[reap-emulators]   ${entry}" >&2; done
   echo "[reap-emulators] Something is already running here — most likely an emulator suite you started." >&2
   echo "[reap-emulators] Nothing was killed. Stop it yourself, or serve on an isolated stack:" >&2
-  echo "[reap-emulators]   nx serve <app> --portOffset=auto" >&2
+  echo "[reap-emulators]   nx serve <app> --port-offset=auto   (or: tools/dev/dev serve <app>)" >&2
   exit 1
 fi
 

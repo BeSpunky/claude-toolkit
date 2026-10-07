@@ -23,8 +23,10 @@
 // }
 //
 // Substitutions in cmd / env / url values: ${PORT:<name>} (that port, shifted), ${OFFSET}, ${TREE} (the
-// served tree's absolute path), ${APP}. Every process also gets PORT_<NAME> for every port of the app, and
-// PORT_OFFSET when the stack is shifted. A bare PORT is NOT exported: it is a convention some runtimes act on
+// served tree's absolute path), ${APP}, ${STACK_DIR} (this stack's own state dir). Every process also gets
+// PORT_<NAME> for every port of the app, PORT_OFFSET when the stack is shifted, and DEV_STACK_DIR — the
+// directory that is this stack's alone (tree + app + offset), where a process keeps anything a tool would
+// otherwise key by something every stack shares (a TMPDIR, a lock, a locator file). See lib/stacks.mjs. A bare PORT is NOT exported: it is a convention some runtimes act on
 // (a Cloud Functions worker, say) — a server that wants it declares `"env": { "PORT": "${PORT:app}" }`.
 //
 // url[].when    always | offset (stack shifted) | running (this process runs) | skipped (--skip'ed)
@@ -137,6 +139,15 @@ export function declaredPorts(app) {
   return app.processes.flatMap((p) => Object.values(p.ports ?? {}));
 }
 
+/**
+ * Every base port a serve will actually BIND — each process it runs, not only the primary. This is what decides
+ * whether a port block is free: a block whose app port is free but whose emulator hub is held would be accepted,
+ * and the suite would then fail to bind.
+ */
+export function boundPorts(app, skip = []) {
+  return app.processes.filter((p) => !skip.includes(p.id)).flatMap((p) => Object.values(p.ports ?? {}));
+}
+
 const envName = (port) => `PORT_${port.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 
 const shellQuote = (word) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
@@ -149,8 +160,9 @@ const shellQuote = (word) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'$
  *   skip         process ids not to run
  *   passthrough  extra argv for the PRIMARY process (`dev serve app -- --flag`)
  *   baseEnv      the environment the children inherit
+ *   stackDir     this stack's own state dir (lib/stacks.mjs) — DEV_STACK_DIR / ${STACK_DIR}
  */
-export function planApp(decl, appName, { offset, tree, skip = [], passthrough = [], baseEnv = {} }) {
+export function planApp(decl, appName, { offset, tree, skip = [], passthrough = [], baseEnv = {}, stackDir }) {
   const app = decl.apps[appName];
   const primary = primaryOf(app);
   const ids = app.processes.map((p) => p.id);
@@ -163,7 +175,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
   for (const p of app.processes) for (const [name, base] of Object.entries(p.ports ?? {})) ports[name] = base + offset;
 
   const subst = (text, where) =>
-    text.replace(/\$\{([A-Z]+)(?::([a-z0-9_-]+))?\}/g, (whole, kind, arg) => {
+    text.replace(/\$\{([A-Z_]+)(?::([a-z0-9_-]+))?\}/g, (whole, kind, arg) => {
       if (kind === 'PORT' && arg !== undefined) {
         if (ports[arg] === undefined) throw new DeclarationError(`${where}: ${whole} names no declared port (has: ${Object.keys(ports).join(', ')})`);
         return String(ports[arg]);
@@ -171,7 +183,8 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
       if (arg === undefined && kind === 'OFFSET') return String(offset);
       if (arg === undefined && kind === 'TREE') return tree;
       if (arg === undefined && kind === 'APP') return appName;
-      throw new DeclarationError(`${where}: unknown substitution ${whole} (known: \${PORT:<name>} \${OFFSET} \${TREE} \${APP})`);
+      if (arg === undefined && kind === 'STACK_DIR' && stackDir) return stackDir;
+      throw new DeclarationError(`${where}: unknown substitution ${whole} (known: \${PORT:<name>} \${OFFSET} \${TREE} \${APP} \${STACK_DIR})`);
     });
 
   const portEnv = Object.fromEntries(Object.entries(ports).map(([name, port]) => [envName(name), String(port)]));
@@ -183,6 +196,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
       ...Object.fromEntries(Object.entries(p.env ?? {}).map(([k, v]) => [k, subst(v, `${where}.env.${k}`)])),
       ...portEnv,
       ...(offset > 0 ? { PORT_OFFSET: String(offset) } : {}),
+      ...(stackDir ? { DEV_STACK_DIR: stackDir } : {}),
     };
     const shell = typeof p.cmd === 'string';
     const command = shell ? [subst(p.cmd, `${where}.cmd`), ...extra.map(shellQuote)].join(' ') : subst(p.cmd[0], `${where}.cmd`);
