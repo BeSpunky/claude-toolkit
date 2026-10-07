@@ -12,3 +12,4 @@ Testing a server? The house rule binds a random port, so the dev server you star
 The status line shows your branch in the declared model (feat/x → development → main) and warns on a protected line
 Compacting? The checkpoint the PreCompact hook saves pops up as a toast with its path, so you know where it went
 When Claude proposes landing your branch, a merge gate appears above the prompt: Land, Land & promote, Push, or Not yet
+Have Firebase App Hosting? branches.mjs evidence --app-hosting shows which branch each backend rolls out from

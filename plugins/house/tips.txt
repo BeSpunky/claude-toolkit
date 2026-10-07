@@ -14,3 +14,5 @@ A dark-first design? Set $default-mode: 'dark' in the design system's _tokens.sc
 After an upgrade, UPGRADE_VERIFY names the one command that builds, lints and tests what it rewrote
 House containers keep your logins across rebuilds — Claude, and every tool that logs in under ~/.config (gh, git through it, firebase)
 Need a system package in the container? Add it to .devcontainer/os-packages.txt — it is built into the image, so rebuilds reuse it
+Deploy from CI with /bespunky-house:add-layer ci — the branch model's `ci` bindings decide which branch deploys where
+The cloud setup behind CI deploys is yours to run: ! bash tools/setup-gcp.sh --dry-run shows every IAM grant first
