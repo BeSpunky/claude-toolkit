@@ -179,6 +179,24 @@
       "layer": "agent",
       "description": "The web layer's per-tool `<folder>-playwright-cache` volume (~/.cache/ms-playwright) folds into ONE persisted ~/.cache volume (the agent layer's `<folder>-cache`), which also keeps the shared browser's own Playwright runtime and every other tool cache across rebuilds. Removes the house-written mount (and the house comment above it) so it does not stay nested inside the new one; a project-written one is reported. The unused Docker volume lives on the host and is reported by name for `docker volume rm` — a cache, so nothing is lost.",
       "implementation": "./src/migrations/0.49.0/fold-playwright-cache-into-home-cache"
+    },
+    "pin-floating-dependencies": {
+      "version": "0.50.0",
+      "layer": "node",
+      "description": "Pin every `\"latest\"` a house generator wrote — firebase + @angular/fire, @bespunky/typescript-utils, @nx/esbuild, an adopt-extracted package — to a COHERENT version. The Firebase pair is derived from the INSTALLED ANGULAR MAJOR, never from the installed root firebase (which, in the two-SDK bug state, is the wrong one): @angular/fire is the installed release when it belongs to that major, else the house release for it, and firebase is exactly the range that @angular/fire release declares. An Angular major with no stable @angular/fire (21, 22) is left and reported with the choices. Any other floating spec is the project's own and is reported, never rewritten. Reminds to reinstall.",
+      "implementation": "./src/migrations/0.50.0/pin-floating-dependencies"
+    },
+    "declare-node-version": {
+      "version": "0.50.0",
+      "layer": "agent",
+      "description": "The project's Node major becomes ONE declared fact, `.nvmrc`, which the devcontainer composer and the Cloud Functions manifest now read — instead of the Node of whichever machine ran the last upgrade (or the newest image on the Docker fallback). Writes `.nvmrc` from the Node the devcontainer already runs (house.Dockerfile FROM typescript-node:<n>, else devcontainer.json's image, else its Node feature), so nothing moves. An existing `.nvmrc` is kept and a disagreement with the container reported (the next upgrade follows `.nvmrc`); a functions `engines.node` that disagrees is reported, never rewritten.",
+      "implementation": "./src/migrations/0.50.0/declare-node-version"
+    },
+    "firebase-cli-from-package": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The Firebase CLI becomes the project's exact `firebase-tools` devDependency (on PATH through node_modules/.bin in the container and in every Nx target), replacing the unpinned `ghcr.io/devcontainers-extra/features/firebase-cli` feature that installed whatever was newest on image-build day. Adds the devDependency (a `latest` one is pinned to what is installed); removes the feature — and its devcontainer-lock.json pin — where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config is kept. Reminds to install and rebuild.",
+      "implementation": "./src/migrations/0.50.0/firebase-cli-from-package"
     }
   }
 }
