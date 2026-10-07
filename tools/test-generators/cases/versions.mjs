@@ -196,6 +196,38 @@ export default {
       },
     },
     {
+      name: 'Angular 22 + @angular/fire 20 installed, both "latest": the SAME ordered advice the 0.50.0 migration gives — never "set firebase" alone',
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'package.json', { name: 'x', dependencies: { '@angular/core': '~22.1.0', '@angular/fire': 'latest', firebase: 'latest' } });
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, '@angular/fire', { version: '20.1.0', dependencies: { firebase: '^11.8.0' } });
+        return tree;
+      },
+      run: (tree, ctx) => ctx.load('adapters/angular/angularfire').declareBrowserSdk(tree),
+      expect: (tree, t, ctx) => {
+        const report = ctx.logs.find((line) => line.includes('"@angular/fire": "latest" and "firebase": "latest"')) ?? '';
+        t.ok(/1\. Pin what is installed[\s\S]*2\. Move to Angular 20[\s\S]*3\. Declare another/.test(report), `ordered choices: ${ctx.logs}`);
+        t.ok(!ctx.logs.some((line) => /two Firebase SDKs/.test(line)), 'no half-advice');
+        t.equal(deps(tree)['@angular/fire'], 'latest', 'a generator reports, never rewrites a declared spec');
+      },
+    },
+    {
+      name: 'Angular 22 running a pinned @angular/fire 20 stopgap: an info line (no nagging), naming that the upgrade checks again',
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'package.json', { name: 'x', dependencies: { '@angular/core': '~22.1.0', '@angular/fire': '20.1.0', firebase: '^11.8.0' } });
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, '@angular/fire', { version: '20.1.0', dependencies: { firebase: '^11.8.0' } });
+        return tree;
+      },
+      run: (tree, ctx) => ctx.load('adapters/angular/angularfire').declareBrowserSdk(tree),
+      expect: (tree, t, ctx) => {
+        t.ok(!ctx.logs.some((line) => line.startsWith('[warn]')), `no warning: ${ctx.logs}`);
+        t.ok(ctx.logs.some((line) => /built for Angular 20\) runs on Angular 22\.1\.2[\s\S]*checks again/.test(line)), `said: ${ctx.logs}`);
+      },
+    },
+    {
       name: 'a firebase that disagrees with the installed @angular/fire is NAMED (the two-SDK state)',
       setup: () => {
         const tree = workspace();

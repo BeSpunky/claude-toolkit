@@ -67,7 +67,38 @@ export default {
       },
       expect: (tree, t) => {
         t.ok(deps(tree).firebase === 'latest' && deps(tree)['@angular/fire'] === 'latest', 'left as they are');
-        t.ok(said.some((line) => /no stable @angular\/fire supports Angular 21[\s\S]*21\.0\.0-rc\.1/.test(line)), `reported: ${said}`);
+        t.ok(said.some((line) => /no stable @angular\/fire supports Angular 21[\s\S]*21\.0\.0-rc\.1/i.test(line)), `reported: ${said}`);
+      },
+    },
+    {
+      name: 'Angular 22 with @angular/fire 20 installed (the dogfood state): BOTH floats named, choices ordered, and the generator says the same',
+      setup: (tree) => {
+        listen();
+        pkg(tree, { '@angular/core': '~22.1.0', firebase: 'latest', '@angular/fire': 'latest' });
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, '@angular/fire', { version: '20.1.0', dependencies: { firebase: '^11.8.0' } });
+        installed(tree, 'firebase', { version: '12.19.0' });
+      },
+      expect: (tree, t) => {
+        t.ok(deps(tree).firebase === 'latest' && deps(tree)['@angular/fire'] === 'latest', 'no coherent pair: left as they are');
+        const report = said.find((line) => line.includes('"@angular/fire": "latest" and "firebase": "latest"')) ?? '';
+        t.ok(report, `both floating entries named: ${said}`);
+        const order = ['1. Pin what is installed and runs today: "@angular/fire": "20.1.0", "firebase": "^11.8.0"', '2. Move to Angular 20', '3. Declare another'];
+        t.ok(order.every((step, i) => report.indexOf(step) > (i ? report.indexOf(order[i - 1]) : -1)), `choices in order: ${report}`);
+        t.ok(!said.some((line) => /Set "firebase": "\^11\.8\.0"/.test(line)), 'never the half-advice (firebase alone) on a mismatched Angular');
+      },
+    },
+    {
+      name: 'Angular 22 after following half the advice (firebase pinned, @angular/fire still "latest"): the float is still REPORTED',
+      setup: (tree) => {
+        listen();
+        pkg(tree, { '@angular/core': '~22.1.0', firebase: '^11.8.0', '@angular/fire': 'latest' });
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, '@angular/fire', { version: '20.1.0', dependencies: { firebase: '^11.8.0' } });
+      },
+      expect: (tree, t) => {
+        t.ok(deps(tree)['@angular/fire'] === 'latest', 'left');
+        t.ok(said.some((line) => /declares "@angular\/fire": "latest" —[\s\S]*1\. Pin what is installed/.test(line)), `reported: ${said}`);
       },
     },
     {
