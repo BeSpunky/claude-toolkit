@@ -53,7 +53,9 @@ missing=""
 for name in $(wanted "$@"); do
   dpkg-query -W -f='${Status}' "$name" 2>/dev/null | grep -q ' installed$' || missing="$missing $name"
 done
-# The archive tools to install (below); none without them.
+{{#ARCHIVES}}
+# The archive tools to install (found below).
+{{/ARCHIVES}}
 pending=""
 {{#ARCHIVES}}
 
