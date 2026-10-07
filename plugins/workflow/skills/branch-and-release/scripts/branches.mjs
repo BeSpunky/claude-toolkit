@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Git } from './lib/git.mjs';
-import { PRESETS, FILE, UsageError, check, expand, validate, project, releaseLines } from './lib/model.mjs';
+import { PRESETS, FILE, UsageError, expand, validate, project, releaseLines } from './lib/model.mjs';
 import { resolveModel } from './lib/resolve.mjs';
 import { verify, NAMES } from './lib/verify.mjs';
 import { plan, format, GATES } from './lib/plan.mjs';
@@ -81,6 +81,7 @@ const statusShape = (r) => ({
   protectedPatterns: r.protectedPatterns,
   notes: r.notes,
   reason: r.reason,
+  outdated: r.outdated, // null, or { resolution: 'rewrite'|'lands', line, problems } — what an outdated format awaits
 });
 const STATE_EXIT = { declared: EXIT.ok, undeclared: EXIT.undeclared, unreadable: EXIT.fail };
 
@@ -91,14 +92,13 @@ const STATE_EXIT = { declared: EXIT.ok, undeclared: EXIT.undeclared, unreadable:
  */
 function inForce(git, top, { current = false } = {}) {
   const r = resolveModel(git, top);
-  if (r.state === 'declared' && current) {
-    const { outdated } = check(r.model);
-    if (outdated.length) {
-      for (const n of r.notes) if (!outdated.some((o) => n.endsWith(o))) err(`note: ${n}`);
-      reportErrors(outdated, `${FILE} on ${r.source}, outdated format`);
-      err('Refusing until it is rewritten as shown — propose the rewrite to a human (it changes no binding), or run the house upgrade, whose migration applies it. status and plan still read the model meanwhile.');
-      return { code: EXIT.fail, resolved: r };
-    }
+  if (r.state === 'declared' && current && r.outdated) {
+    for (const n of r.notes) err(`note: ${n}`);
+    err(`${FILE} on ${r.source} is in an outdated format (${r.outdated.problems.map((o) => o.field).join(', ')}) — see the note(s) above.`);
+    err(r.outdated.resolution === 'lands'
+      ? `Refusing until this branch lands on "${r.outdated.line}" — it already carries the rewrite; nothing else to do. status and plan still read the model meanwhile.`
+      : 'Refusing until it is rewritten as shown — run the house upgrade, whose migration applies it, or propose the exact rewrite to a human (it changes no binding). status and plan still read the model meanwhile.');
+    return { code: EXIT.fail, resolved: r };
   }
   for (const n of r.notes) err(`note: ${n}`);
   if (r.state === 'declared') return { model: r.model, source: r.source, resolved: r };

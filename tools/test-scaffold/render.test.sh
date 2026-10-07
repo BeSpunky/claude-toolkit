@@ -101,9 +101,13 @@ fail() { printf '  FAIL %s\n' "$1"; FAILED=1; }
 #
 # WHY THIS IS NOT JUST "GREP FOR A REPEATED WORD". A generator invocation in the rendered program is a
 # concatenation of a literal command and one or more shell variables that are filled in LATER, when the
-# program runs:
+# program runs. The bug this guards against, as `0.29.0` rendered it (trimmed to the flags that matter):
 #
-#     yarn nx g @bespunky/nx-tools:devcontainer --name=x --nodeMajor=22$DC_LAYER_FLAGS --firebase=true
+#     yarn nx g @bespunky/nx-tools:devcontainer --name=x$DC_LAYER_FLAGS --firebase=true
+#
+# (Neither flag exists any more: the devcontainer generator now takes `--layers`, and its invocation comes from
+# the layer planner rather than a literal line. The generator lines the program still renders itself — the
+# layout, the first app — are what this keeps honest.)
 #
 # That line passed `--firebase=true` TWICE — once literally, and once from `$DC_LAYER_FLAGS`, which the
 # program had assembled from layer detection forty lines earlier. Nx coerces a repeated flag to an array,

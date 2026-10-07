@@ -44,7 +44,8 @@ export default {
           t.equal(target?.options?.cwd, '{workspaceRoot}', `${name}: runs from the root`);
         }
         t.equal(functionsDeploy?.dependsOn, ['build', 'lint'], 'functions:deploy: Nx builds and lints what ships');
-        t.equal(functionsDeploy?.options?.command, 'firebase deploy --only functions', 'functions:deploy command');
+        t.equal(functionsDeploy?.options?.command, 'node tools/firebase-deploy.mjs --only functions', 'functions:deploy command: through the deploy runner');
+        t.ok(functionsDeploy?.inputs?.includes('{workspaceRoot}/tools/firebase-deploy.mjs'), 'functions:deploy: the runner is an input');
         t.equal(suiteDeploy?.options?.command, 'node tools/firebase-deploy-rules.mjs', 'firebase:deploy command');
         t.ok(suiteDeploy?.inputs?.includes('{workspaceRoot}/firestore.rules'), 'a root firestore.rules is watched before it is declared');
         const firebaseJson = t.json('firebase.json');
@@ -52,7 +53,7 @@ export default {
         t.ok(!('firestore' in firebaseJson) && !('storage' in firebaseJson), 'no rules declared by a plain run');
         for (const file of ['firestore.rules', 'firestore.indexes.json', 'storage.rules']) t.missing(`firebase/${file}`);
         t.has('tools/firebase-deploy-rules.mjs', `const MARKER = '${MARKER}'`);
-        t.ok(!/\{\{\s*\w+\s*\}\}/.test(t.read('tools/firebase-deploy-rules.mjs')), 'no leftover {{…}}');
+        for (const file of ['tools/firebase-deploy-rules.mjs', 'tools/firebase-deploy.mjs']) t.ok(!/\{\{\s*\w+\s*\}\}/.test(t.read(file)), `${file}: no leftover {{…}}`);
       },
     },
     {
@@ -129,7 +130,9 @@ export default {
         t.equal(deploy?.dependsOn, ['build', 'lint'], 'dependsOn');
         t.ok(deploy?.inputs?.includes('firebaseConfig'), `the project's own input kept: ${deploy?.inputs}`);
         t.equal(deploy?.configurations, { staging: { args: '-P staging' } }, 'the project\'s configuration kept');
-        t.equal(ctx.logs.filter((l) => l.includes('functions:deploy')), [], 'nothing of the project\'s replaced, nothing said');
+        // Only the house's own old command is replaced (no record: it cannot tell, so it says so) — nothing of the project's.
+        const said = ctx.logs.filter((l) => l.includes('functions:deploy'));
+        t.ok(said.length === 1 && said[0].includes('options.command') && said[0].includes('firebase deploy --only functions'), `only the house's old command reported: ${said}`);
         t.ok(getProjects(tree).get('firebase')?.targets?.deploy?.inputs?.includes('{workspaceRoot}/firestore.rules'), 'firebase:deploy watches the root rules');
       },
     },
@@ -147,14 +150,18 @@ export default {
           mkdirSync(join(dir, 'tools'));
           mkdirSync(join(dir, 'firebase'));
           mkdirSync(join(dir, 'node_modules/.bin'), { recursive: true });
-          writeFileSync(join(dir, 'tools/firebase-deploy-rules.mjs'), tree.read('tools/firebase-deploy-rules.mjs', 'utf8'));
-          // A fake Firebase CLI on node_modules/.bin — the script must find the project's own first.
-          writeFileSync(join(dir, 'node_modules/.bin/firebase'), `#!/bin/sh\necho "FIREBASE $*" > "${join(dir, 'called')}"\n`);
+          for (const file of ['tools/firebase-deploy-rules.mjs', 'tools/firebase-deploy.mjs']) writeFileSync(join(dir, file), tree.read(file, 'utf8'));
+          // A fake Firebase CLI on node_modules/.bin — the script must find the project's own first. FAIL=1 makes it fail.
+          writeFileSync(join(dir, 'node_modules/.bin/firebase'), `#!/bin/sh\necho "FIREBASE $*" > "${join(dir, 'called')}"\n[ -z "$FAIL" ]\n`);
           chmodSync(join(dir, 'node_modules/.bin/firebase'), 0o755);
           const copy = (file) => writeFileSync(join(dir, file), tree.read(file, 'utf8'));
-          const deploy = () => {
+          const home = join(dir, 'home');
+          mkdirSync(home);
+          const deploy = (script = 'tools/firebase-deploy-rules.mjs', args = ['--project=prod', '--non-interactive'], env = {}) => {
             rmSync(join(dir, 'called'), { force: true });
-            const r = spawnSync(process.execPath, ['tools/firebase-deploy-rules.mjs', '--project=prod', '--non-interactive'], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: '/usr/bin:/bin' } });
+            // A machine with no Firebase credentials of any kind: an empty HOME, no credential variables.
+            const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !['GOOGLE_APPLICATION_CREDENTIALS', 'FIREBASE_TOKEN', 'XDG_CONFIG_HOME'].includes(k)));
+            const r = spawnSync(process.execPath, [script, ...args], { cwd: dir, encoding: 'utf8', env: { ...clean, HOME: home, PATH: '/usr/bin:/bin', ...env } });
             let called = null;
             try {
               called = readFileSync(join(dir, 'called'), 'utf8').trim();
@@ -175,6 +182,14 @@ export default {
           // 4. A declared file is missing.
           rmSync(join(dir, 'firebase/storage.rules'));
           ctx.missing = deploy();
+          // 5. Functions through the runner; then a failing CLI on a machine with no login, then with a login but no alias.
+          ctx.functions = deploy('tools/firebase-deploy.mjs', ['--only', 'functions', '-P', 'prod']);
+          ctx.noLogin = deploy('tools/firebase-deploy.mjs', ['--only', 'functions'], { FAIL: '1' });
+          mkdirSync(join(home, '.config/configstore'), { recursive: true });
+          writeFileSync(join(home, '.config/configstore/firebase-tools.json'), JSON.stringify({ user: { email: 'dev@example.com' }, tokens: { refresh_token: 'x' } }));
+          ctx.noAlias = deploy('tools/firebase-deploy.mjs', ['--only', 'functions'], { FAIL: '1' });
+          writeFileSync(join(dir, '.firebaserc'), JSON.stringify({ projects: { default: 'acme-prod', prod: 'acme-prod' } }));
+          ctx.check = deploy('tools/firebase-deploy.mjs', ['--check']);
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }
@@ -186,6 +201,13 @@ export default {
         t.ok(ctx.seeded.out.includes('SKIPPING firestore:rules') && ctx.seeded.out.includes('SKIPPING storage'), `seeds: said (${ctx.seeded.out})`);
         t.equal(ctx.adopted.called, 'FIREBASE deploy --only firestore:rules,firestore:indexes,storage --project=prod --non-interactive', 'adopted: all three');
         t.equal([ctx.missing.status, ctx.missing.called], [1, null], `a missing declared file: refused before anything ships (${ctx.missing.out})`);
+        t.equal([ctx.functions.status, ctx.functions.called], [0, 'FIREBASE deploy --only functions -P prod'], `functions: the runner deploys, args forwarded (${ctx.functions.out})`);
+        t.ok(!ctx.functions.out.includes('road to a first deploy'), 'a successful deploy prints no road');
+        t.equal(ctx.noLogin.status, 1, 'a failed deploy keeps the CLI\'s exit code');
+        for (const step of ['no Firebase login: step 1', 'npx firebase login', 'npx firebase use --add', 'run functions:deploy -P <alias>', '/bespunky-house:add-layer ci', 'bash tools/setup-gcp.sh', 'GCP_WORKLOAD_IDENTITY_PROVIDER', 'Worked when'])
+          t.ok(ctx.noLogin.out.includes(step), `no login: the road names "${step}" (${ctx.noLogin.out})`);
+        t.ok(ctx.noAlias.out.includes('No project was named') && ctx.noAlias.out.includes('Here: dev@example.com'), `logged in, no alias: points at step 2 (${ctx.noAlias.out})`);
+        t.ok(ctx.check.status === 0 && ctx.check.called === null && /✓ 2\. Pick the Firebase project/.test(ctx.check.out) && ctx.check.out.includes('Here: default, prod'), `--check: ticks what is there, deploys nothing (${ctx.check.out})`);
       },
     },
   ],

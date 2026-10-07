@@ -100,7 +100,7 @@ Subagents are the free everyday tier. **Multi-agent Workflows need the user's ex
 
 ## Generator-first, manual last
 
-For anything this workspace can **generate** — projects, apps, libraries, modules, components, config — **use the generator or the stack's own scaffolder; never hand-create and fill the files.** Before hand-writing anything structural, check what exists: the house generators (listed in [`HOUSE.md`](HOUSE.md)), Nx's (`{{NX}} list` / `{{NX}} list <plugin>`), and the stack's own CLI. Only fall back to manual file creation when nothing covers the task. **Never guess flags** — verify against the tool's own `--help` (or its documentation) before you run it.
+For anything this workspace can **generate** — projects, apps, libraries, modules, components, config — **use the generator or the stack's own scaffolder; never hand-create and fill the files.** Before hand-writing anything structural, check what exists: the house generators (`{{NX}} list @bespunky/nx-tools`{{#js}}; the everyday ones are in [`HOUSE.md`](HOUSE.md){{/js}}), Nx's (`{{NX}} list` / `{{NX}} list <plugin>`), and the stack's own CLI. Only fall back to manual file creation when nothing covers the task. **Never guess flags** — verify against the tool's own `--help` (or its documentation) before you run it.
 
 Nx is this workspace's floor: every house generator and migration runs through it, invoked here as **`{{NX}}`** — `{{NX}} g <plugin>:<generator> --help` before a first use, and the `nx-generate` skill (the Nx plugin) for discovery.
 

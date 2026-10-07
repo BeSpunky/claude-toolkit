@@ -348,6 +348,7 @@ export default async function firebaseEmulatorsGenerator(
     functionsPaths(template('push-secrets.sh.tpl')).split('{{appEnvProdPath}}').join(clientEnv?.prod ?? ''),
   );
   tree.write('tools/seed/build-seeds.sh', substitute(template('seed-build-seeds.sh.tpl')));
+  tree.write('tools/firebase-deploy.mjs', functionsPaths(template('firebase-deploy.mjs.tpl')));
   tree.write('tools/firebase-deploy-rules.mjs', template('firebase-deploy-rules.mjs.tpl').split('{{seedMarker}}').join(RULES_SEED_MARKER));
   writeSeedTooling(tree, workspaceName);
   if (!tree.exists('tools/seed/world.mjs')) tree.write('tools/seed/world.mjs', substitute(template('seed-world.mjs.tpl')));
@@ -579,10 +580,12 @@ function ensureFunctionsProject(
         deploy: {
           executor: 'nx:run-commands',
           dependsOn: ['build', ...(lint ? ['lint'] : [])],
-          inputs: ['default', '^default', ...FIREBASE_ROOT_INPUTS],
+          inputs: ['default', '^default', ...FIREBASE_ROOT_INPUTS, '{workspaceRoot}/tools/firebase-deploy.mjs'],
           cache: false,
           parallelism: false,
-          options: { command: 'firebase deploy --only functions', cwd: '{workspaceRoot}' },
+          // `firebase deploy --only functions` through the deploy runner: on a failure it prints the road to a first
+          // deploy (login → alias → deploy → CI) instead of ending on Firebase's bare "have you run firebase login?".
+          options: { command: 'node tools/firebase-deploy.mjs --only functions', cwd: '{workspaceRoot}' },
         },
         // Push the project's .secret.local (KEY=VALUE) into Google Secret Manager for the deploy project — one
         // source of truth for which secrets exist (tools/push-secrets.sh).
@@ -684,7 +687,7 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
       // does not declare: a project whose rules live only in the console gets a no-op that says how to adopt them.
       deploy: {
         executor: 'nx:run-commands',
-        inputs: ['default', ...FIREBASE_ROOT_INPUTS, ...rootRulesInputs(suite, rulesFiles), '{workspaceRoot}/tools/firebase-deploy-rules.mjs'],
+        inputs: ['default', ...FIREBASE_ROOT_INPUTS, ...rootRulesInputs(suite, rulesFiles), '{workspaceRoot}/tools/firebase-deploy-rules.mjs', '{workspaceRoot}/tools/firebase-deploy.mjs'],
         cache: false,
         parallelism: false,
         options: { command: 'node tools/firebase-deploy-rules.mjs', cwd: '{workspaceRoot}' },

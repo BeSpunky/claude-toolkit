@@ -74,6 +74,16 @@ export function recordedHouseTargets(tree: Tree, project: string): Targets | und
   }
 }
 
+/** The house projects the record knows — the projects whose targets the house writes (sorted; none: no record). */
+export function recordedHouseProjects(tree: Tree): string[] {
+  if (!tree.exists(HOUSE_TARGETS_RECORD)) return [];
+  try {
+    return Object.keys(readJson<Record_>(tree, HOUSE_TARGETS_RECORD).projects ?? {}).sort();
+  } catch {
+    return [];
+  }
+}
+
 /** Record what the house wrote into `project`'s targets this run. Writes only when it changed (idempotence). */
 export function recordHouseTargets(tree: Tree, project: string, targets: Targets): void {
   let record: Record_ = {};

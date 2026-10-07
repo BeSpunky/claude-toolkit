@@ -13,10 +13,11 @@
 // (each key an object, or an array of them — one per database / bucket). A declared file that is missing fails the
 // deploy before anything ships. A rules file still carrying the `{{seedMarker}}` line is the house's deny-all
 // placeholder, which nobody has reviewed: its service is SKIPPED, loudly — delete the line once the rules are yours.
-import { spawnSync } from 'node:child_process';
+// The deploy itself (and, when it fails, the road to a first deploy) is tools/firebase-deploy.mjs.
 import { existsSync, readFileSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deploy } from './firebase-deploy.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = '{{seedMarker}}';
@@ -65,10 +66,4 @@ if (!only.length) {
   process.exit(0);
 }
 
-// The project's pinned Firebase CLI first — Nx puts node_modules/.bin on PATH; this keeps a direct run equal.
-const env = { ...process.env, PATH: [join(ROOT, 'node_modules', '.bin'), process.env.PATH].filter(Boolean).join(delimiter) };
-const args = ['deploy', '--only', only.join(','), ...process.argv.slice(2)];
-say(`firebase ${args.join(' ')}`);
-const result = spawnSync('firebase', args, { cwd: ROOT, stdio: 'inherit', env });
-if (result.error) fail(`could not run the Firebase CLI: ${result.error.message}`);
-process.exit(result.status ?? 1);
+process.exit(deploy(only.join(','), process.argv.slice(2), 'firebase:deploy'));
