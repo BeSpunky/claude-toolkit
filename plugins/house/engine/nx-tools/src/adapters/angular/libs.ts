@@ -4,6 +4,7 @@ import type { LibPort } from '../stack-adapter';
 import { workspaceLinking } from '../../generators/_utils/linking';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
 import { withPlatform, csvTags } from '../../platform/platform';
+import { stateAnalogTsconfig } from './analog-tsconfig';
 
 const noop: GeneratorCallback = () => {};
 
@@ -62,6 +63,9 @@ export const angularLibs: LibPort = {
         tags: withPlatform(csvTags(options.tags), options.platform).join(','),
         skipTsConfig: !ownAlias,
       } as Parameters<typeof libraryGenerator>[1]))) ?? noop;
+    // The Analog test config names its tsconfig, or every graph computation warns about a tsconfig.app.json a
+    // library never has (./analog-tsconfig).
+    stateAnalogTsconfig(tree, options.directory.replace(/\/+$/, ''));
     if (!ownAlias) {
       const libRoot = options.directory.replace(/\/+$/, '');
       linking.link(tree, { importPath: options.importPath, libRoot });

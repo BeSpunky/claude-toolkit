@@ -185,6 +185,12 @@
       "layer": "firebase",
       "description": "Close the platform firewall: each platform constraint gains onlyDependOnLibsWithTags (web/server → own + shared, shared → shared), a platform:shared constraint is added, and every untagged project is classified from evidence (reported, with the command for the ones it cannot classify) — an untagged library no longer slips firebase-admin into a web app.",
       "implementation": "./src/migrations/0.50.0/close-the-platform-firewall"
+    },
+    "state-analog-spec-tsconfig": {
+      "version": "0.50.0",
+      "layer": "angular",
+      "description": "Name tsconfig.spec.json in every Angular library's Analog test config (`angular()` → `angular({ tsconfig: './tsconfig.spec.json' })`), ending the \"Unable to resolve tsconfig at …/tsconfig.app.json\" warning Nx's graph inference triggers outside test runs.",
+      "implementation": "./src/migrations/0.50.0/state-analog-spec-tsconfig"
     }
   }
 }
