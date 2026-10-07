@@ -1043,7 +1043,7 @@ INNER_ENV=(
   "HOUSE_GIT_EMAIL=$GIT_EMAIL"
 )
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
-[ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
+[ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (pinned firebase-tools + Google Cloud CLI + emulator ports)"
 [ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (host audio bridge — WSLg or PulseAudio/PipeWire — + espeak-ng in the image + bespunky-voice plugin)"
 
 # --- devcontainer generator args ---
