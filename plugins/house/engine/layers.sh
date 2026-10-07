@@ -6,10 +6,10 @@
 # validates the layers to add before anything is installed, and the SessionStart hook, which must stay a few greps.
 # Sourcing it defines variables and functions only; it runs nothing.
 
-HOUSE_LAYERS='nx,agent,node,js,web,angular,design-system,navigation,firebase'
+HOUSE_LAYERS='nx,agent,node,js,web,angular,design-system,navigation,firebase,ci'
 HOUSE_LAYER_FLOOR='nx'
-HOUSE_LAYERS_ENSURABLE_NEW='nx,agent,node,web,angular,design-system,firebase'
-HOUSE_LAYERS_ENSURABLE_UPGRADE='nx,agent,firebase'
+HOUSE_LAYERS_ENSURABLE_NEW='nx,agent,node,web,angular,design-system,firebase,ci'
+HOUSE_LAYERS_ENSURABLE_UPGRADE='nx,agent,firebase,ci'
 HOUSE_PRESETS='agent,node,angular'
 HOUSE_PRESET_DEFAULT='agent'
 HOUSE_LAYOUTS='apps-libs,packages'
@@ -29,6 +29,7 @@ house_layer_title() {
     design-system) printf '%s\n' 'Design system' ;;
     navigation) printf '%s\n' 'Typed reactive navigation' ;;
     firebase) printf '%s\n' 'Firebase' ;;
+    ci) printf '%s\n' 'CI deploy (GitHub Actions, from the branch model)' ;;
   esac
 }
 
@@ -44,6 +45,7 @@ house_layer_requires() {
     design-system) printf '%s\n' 'nx' ;;
     navigation) printf '%s\n' 'angular' ;;
     firebase) printf '%s\n' 'nx,node' ;;
+    ci) printf '%s\n' 'nx' ;;
   esac
 }
 
@@ -59,6 +61,7 @@ house_layer_hint() {
     design-system) printf '%s\n' '`nx g @bespunky/nx-tools:design-system --scope=<scope>`' ;;
     navigation) printf '%s\n' '`nx g @bespunky/nx-tools:navigation-core`' ;;
     firebase) printf '%s\n' '`house.sh add-layer firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)' ;;
+    ci) printf '%s\n' '`house.sh add-layer ci <project>` (then give each line that should deploy a `ci` binding in the branch model)' ;;
   esac
 }
 
@@ -74,6 +77,7 @@ house_layer_brings() {
     design-system) printf '%s\n' 'the design-system config, STRUCTURE.md, and every app'\''s sass/provider wiring' ;;
     navigation) printf '%s\n' 'nothing per-sync (its generators are on-demand), but HOUSE.md gains the typed-navigation conventions' ;;
     firebase) printf '%s\n' 'the emulator wiring, the JDK step, and the forwarded emulator ports' ;;
+    ci) printf '%s\n' 'the deploy workflow driven by the branch model, and each provider'\''s human-run cloud setup' ;;
   esac
 }
 
@@ -89,6 +93,7 @@ house_layer_ensurable_new() {
     design-system) printf '%s\n' 'yes' ;;
     navigation) printf '%s\n' 'no' ;;
     firebase) printf '%s\n' 'yes' ;;
+    ci) printf '%s\n' 'yes' ;;
   esac
 }
 
@@ -104,6 +109,7 @@ house_layer_ensurable_upgrade() {
     design-system) printf '%s\n' 'no' ;;
     navigation) printf '%s\n' 'no' ;;
     firebase) printf '%s\n' 'yes' ;;
+    ci) printf '%s\n' 'yes' ;;
   esac
 }
 
@@ -144,6 +150,7 @@ project-json "executor"[[:space:]]*:[[:space:]]*"@nx/angular:' ;;
     design-system) printf '%s\n' 'project-json "type:design-system"' ;;
     navigation) printf '%s\n' 'project-json "type:navigation"' ;;
     firebase) printf '%s\n' 'file firebase.json' ;;
+    ci) printf '%s\n' 'file .bespunky/ci.json' ;;
   esac
 }
 

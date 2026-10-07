@@ -15,6 +15,7 @@ import { hostDialledPorts } from '../generators/firebase-emulators/emulator-port
 import { projectExists } from './evidence';
 import { adapterOf, applicationsWith } from '../adapters/registry';
 import { firebaseFragment } from '../generators/firebase-emulators/dev-fragment';
+import { firebaseCiProvider } from '../generators/ci/firebase-provider';
 
 /** The sync's app, when its stack can take the Firebase client. */
 const attachable = (ctx: PlanContext): boolean =>
@@ -75,6 +76,8 @@ export const firebase: LayerDescriptor = {
     ],
   },
   docSections: ['firebase'],
+  // With the `ci` layer: keyless GitHub → GCP auth, `--project=<alias>` for the deploy targets, and tools/setup-gcp.sh.
+  ciDeploy: firebaseCiProvider,
   // The emulator suite, served beside every app the dev engine runs.
   devFragment: (tree) => firebaseFragment(tree),
   // The Cloud Functions bundle lands in `dist/<functions root>`. create-nx-workspace ignores `dist`; `nx init` on an

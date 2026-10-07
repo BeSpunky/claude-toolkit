@@ -348,6 +348,24 @@ check('house-doc receives the resolved branch projection as one argument; absent
   try { plan(ctxFor(tree()), { ...STAMP, branchProjection: 'a\tb' }); } catch (error) { refused = error.message; }
   ok(/unsafe argument/.test(refused), `a TAB inside an argument is refused: ${refused}`);
 });
+// THE ci LAYER — opt-in (no preset carries it), detected by its marker, last in the registry (it composes the deploy
+// providers the layers before it contribute), and handed the SAME resolved branch model house-doc gets.
+check('ci: opt-in, detected by its marker, runs last before the stamp with the resolved model; firebase is its provider', (ok) => {
+  const { PRESETS } = require_(join(BUILD, 'src/layers/presets'));
+  ok(PRESETS.every((p) => !p.layers.includes('ci')), 'no preset ensures ci');
+  ok(registry.LAYERS.at(-1).id === 'ci', `ci is registered last (got ${registry.LAYERS.at(-1).id})`);
+  ok(registry.layer('firebase').ciDeploy?.id === 'firebase', 'the firebase layer contributes the firebase deploy provider');
+  const tree = FIXTURES['bare nx workspace']();
+  ok(!registry.detectLayers(tree).includes('ci'), 'absent without its marker');
+  tree.write('.bespunky/ci.json', '{"files":[],"cloud":{}}');
+  ok(registry.detectLayers(tree).includes('ci'), 'present with its marker');
+  const projection = JSON.stringify({ schema: 1, integration: 'main', summary: 'main (trunk)' });
+  const got = render(plan(ctxFor(FIXTURES['bare nx workspace'](), { ensured: ['nx', 'ci'] }), { ...STAMP, branchProjection: projection }));
+  ok(got.at(-2) === `ci --layers=nx,node,ci --branchProjection=${projection}`, `got ${got.at(-2)}`);
+  ok(got.at(-1).startsWith('house-doc ') && got.at(-1).includes('--layers=nx,node,ci'), `stamp ${got.at(-1)}`);
+  const standalone = render(plan(ctxFor(FIXTURES['bare nx workspace'](), { ensured: ['nx', 'ci'] }), STAMP));
+  ok(standalone.includes('ci --layers=nx,node,ci'), 'no resolved model → the generator reads the Tree');
+});
 check('voice is carried forward from the devcontainer marker', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['agent project with voice remembered']()), STAMP));
   const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';

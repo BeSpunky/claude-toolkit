@@ -407,6 +407,16 @@ silently and mention it in one clause.
   to use it: `git diff <sha>` reviews the upgrade; `git checkout <sha> -- <path>` restores one file;
   `git restore --source=<sha> --staged --worktree -- .` (then `git clean -n`) undoes it all. Never `reset --hard`.
 
+### Steps only the human may take — `HUMAN_STEP:`
+
+A generator prints `HUMAN_STEP: <line> — <why>` for something the user must do themselves — today, the `ci` layer's
+cloud setup (`! bash tools/setup-gcp.sh --environment <env>`), whenever the environments it was rendered for changed.
+**Relay each one verbatim, as a step for the user, and never attempt it yourself**: it grants IAM, which Claude Code
+refuses to agents by design — no `gcloud iam …`, no workaround, no retry. Say what to paste back (the `gh variable
+set …` lines it prints; you may run those once pasted — they are not secrets). It is not a boundary — it does not
+count against the one `UPGRADE_NEXT` below. A `[ci] No deploy workflow: …` warning is not a human step: relay its
+reason (usually *declare a `ci` binding through the branch-and-release skill*) and offer to do that.
+
 ### If the model is undeclared — the proposal and the question (3b)
 
 Unless it was settled before step 4, close the report with the branch-model proposal: the evidence that

@@ -85,6 +85,12 @@ export interface PlanContext {
   voice: boolean;
   /** --staging on this run. */
   staging: boolean;
+  /**
+   * The branch model the run RESOLVED (house-branches.sh): the projection as JSON, or `undeclared`; absent when
+   * nothing was resolved (a step then reads the Tree). Set by the planner from `StampOptions` — the same value
+   * house-doc receives — for the steps that render from the model (the `ci` layer's deploy workflow).
+   */
+  branchProjection?: string;
 }
 
 /**
@@ -162,6 +168,47 @@ export interface LayerDescriptor {
    * `.bespunky/dev.json` entry by the `dev` generator, only where the layer is present and the app is served.
    */
   devFragment?(tree: Tree, project: string): DevFragment;
+  /**
+   * This layer as a DEPLOY PROVIDER for the `ci` layer's workflow: how a CI job authenticates to it, what its
+   * `deploy` targets are told about the environment, and the setup a HUMAN runs once to create the cloud identity.
+   * The `ci` layer knows no provider — it composes the contributions of the active layers. See `CiDeployProvider`.
+   */
+  ciDeploy?: CiDeployProvider;
+}
+
+// ── THE CI DEPLOY PROVIDER ────────────────────────────────────────────────────────────────────────────────────
+//
+// The `ci` layer owns the stack-agnostic pipeline (push to a line the branch model binds → `nx affected -t deploy`
+// in that line's environment). What differs per cloud is contributed here: a line's `ci` binding names, per provider
+// id, the provider's TARGET there (`{"firebase": "prod"}` — a .firebaserc alias), and the provider turns it into
+// the arguments its deploy targets take, the steps that authenticate the job, and the one-time cloud setup.
+
+/** One environment a provider deploys into, as the `ci` layer resolved it from the branch model. */
+export interface CiEnvironment {
+  /** The deployment environment (a GitHub environment) — the binding's `ci.environment`. */
+  name: string;
+  /** This provider's target in it (the binding's `ci.providers.<id>`). */
+  target: string;
+  /** The branches that deploy into it, as names and globs. */
+  branches: string[];
+}
+
+export interface CiDeployProvider {
+  /** The provider id a binding names (`ci.providers.<id>`). */
+  id: string;
+  title: string;
+  /** Arguments forwarded to EVERY `deploy` target the run executes, for this target. */
+  deployArgs(target: string): string[];
+  /** GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. */
+  authSteps(): string;
+  /** The GitHub environment variables those steps read, and what each holds. */
+  variables: readonly { name: string; holds: string }[];
+  /**
+   * Owned files this provider adds (the human-run cloud setup), rendered from the resolved environments, and the
+   * HUMAN_STEP line for each environment — printed by the upgrade whenever what a human must re-run has changed.
+   */
+  files?(tree: Tree, environments: readonly CiEnvironment[]): { path: string; content: string; mode?: number }[];
+  humanStep?(environment: CiEnvironment): string;
 }
 
 /** A `.gitignore` block: a `#` heading (without the `#`) and the entries under it. */

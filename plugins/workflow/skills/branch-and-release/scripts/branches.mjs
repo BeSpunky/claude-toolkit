@@ -27,10 +27,12 @@ const USAGE = `usage: branches.mjs <command>
   plan <gate> [args]              the exact commands for a move — printed, never executed. Gates:
 ${Object.entries(GATES).map(([g, a]) => `                                    ${g} ${a}`).join('\n')}
   verify [--proposed <file>] [--json]   the invariants, against the model in force or a proposed one
-  evidence [--json]               the investigation's raw facts, each observed | inferred | unobservable`;
+  evidence [--json] [--app-hosting]   the investigation's raw facts, each observed | inferred | unobservable;
+                                  --app-hosting also asks Firebase which App Hosting backends each .firebaserc
+                                  project has and which branch each rolls out (slow; needs a logged-in firebase CLI)`;
 
 const EXIT = { ok: 0, fail: 1, usage: 2, undeclared: 3 };
-const BOOLEAN = new Set(['json', 'maintained', 'help']);
+const BOOLEAN = new Set(['json', 'maintained', 'help', 'app-hosting']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -219,7 +221,7 @@ const commands = {
 
   evidence(git, top, { opts }) {
     const r = resolveModel(git, top);
-    const facts = evidence(git, top, r);
+    const facts = evidence(git, top, r, { appHosting: Boolean(opts.appHosting) });
     if (opts.json) out(JSON.stringify({ state: r.state, declared: r.declared, facts }, null, 2));
     else {
       for (const area of [...new Set(facts.map((f) => f.area))]) {

@@ -13,3 +13,4 @@ The status line shows your branch in the declared model (feat/x → development 
 Compacting? The checkpoint the PreCompact hook saves pops up as a toast with its path, so you know where it went
 When Claude proposes landing your branch, a merge gate appears above the prompt: Land, Land & promote, Push, or Not yet
 Claude stops a test server by its handle (tools/dev/dev stop, TaskStop, the PID it captured) — never pkill — then checks its ports are free
+Have Firebase App Hosting? branches.mjs evidence --app-hosting shows which branch each backend rolls out from

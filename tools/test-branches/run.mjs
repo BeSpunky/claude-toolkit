@@ -49,8 +49,8 @@ function repo() {
     branch: (b, from = 'HEAD') => git('branch', b, from),
     merge: (b, msg = `Merge ${b}`) => git('merge', '-q', '--no-ff', '-m', msg, b),
     ff: (b) => git('merge', '-q', '--ff-only', b),
-    run(args, { cwd = dir } = {}) {
-      const res = spawnSync(process.execPath, [ENGINE, ...args], { cwd, env: ENV, encoding: 'utf8' });
+    run(args, { cwd = dir, env = ENV } = {}) {
+      const res = spawnSync(process.execPath, [ENGINE, ...args], { cwd, env, encoding: 'utf8' });
       return { code: res.status, out: res.stdout, err: res.stderr };
     },
     json(args) {
@@ -699,6 +699,90 @@ const cases = {
     assert.ok(facts.some((f) => f.area === 'shapes' && f.subject === 'release/2.0' && f.tag === 'observed'));
     assert.ok(facts.some((f) => f.area === 'regression' && f.subject === 'main'));
     assert.ok(facts.some((f) => f.area === 'advancement' && f.subject === 'main'));
+  },
+
+  'deploys: a note, or a structured binding (ci + appHosting) — validated, projected flat, described'() {
+    const r = repo();
+    r.branch('development');
+    const bad = r.proposed('two-line', [], (d) => {
+      d.stages[0].deploys = { ci: { environment: 'prod uction', providers: { Firebase: 'x y' } }, appHosting: [{ project: 'p', backend: 'Web', extra: 1 }], rogue: true };
+    });
+    const v = r.run(['validate', bad]);
+    assert.equal(v.code, 1);
+    for (const f of ['stages[0].deploys.rogue', 'stages[0].deploys.ci.environment', 'stages[0].deploys.ci.providers.Firebase', 'stages[0].deploys.appHosting[0].backend', 'stages[0].deploys.appHosting[0].extra']) assert.match(v.err, new RegExp(f.replace(/[[\].]/g, '\\$&')), f);
+    const empty = r.proposed('two-line', [], (d) => { d.stages[0].deploys = {}; });
+    assert.match(r.run(['validate', empty]).err, /binds nothing/);
+
+    const { decl } = r.declare('two-line', [], (d) => {
+      d.integration.deploys = { note: 'preview channel', ci: { environment: 'dev', providers: { firebase: 'dev' } } };
+      d.stages[0].deploys = { note: 'prod', ci: { environment: 'production', providers: { firebase: 'default' } }, appHosting: [{ project: 'default', backend: 'web' }] };
+    });
+    assert.deepEqual(decl.projection.deploys, [
+      { kind: 'line', line: 'development', ci: { environment: 'dev', providers: { firebase: 'dev' } } },
+      { kind: 'line', line: 'main', ci: { environment: 'production', providers: { firebase: 'default' } }, appHosting: [{ project: 'default', backend: 'web' }] },
+    ]);
+    const d = r.run(['describe']);
+    assert.equal(d.code, 0, d.err);
+    assert.match(d.out, /prod; CI → production \(firebase: default\); App Hosting: default\/web/);
+    assert.equal(r.run(['verify']).out.includes('projection matches the model'), true);
+    const st = r.json(['status', '--json']);
+    assert.equal(st.data.projection.deploys.length, 2, 'status --json carries the bindings to readers');
+  },
+
+  'deploys: a note alone projects nothing — an existing declaration does not read as drifted'() {
+    const r = repo();
+    r.branch('development');
+    const { decl } = r.declare('two-line', [], (d) => { d.stages[0].deploys = 'App Hosting auto-rollout'; });
+    assert.equal('deploys' in decl.projection, false);
+    assert.match(r.run(['describe']).out, /App Hosting auto-rollout/);
+    assert.match(r.run(['verify']).out, /projection matches the model/);
+  },
+
+  'evidence --app-hosting: backends, live branches and drift against the declared bindings; opt-in and degrading'() {
+    const r = repo();
+    r.write('.firebaserc', JSON.stringify({ projects: { default: 'acme-prod' } }));
+    r.git('add', '-A');
+    r.git('commit', '-q', '-m', 'firebase');
+    r.branch('development');
+    r.declare('two-line', [], (d) => { d.stages[0].deploys = { appHosting: [{ project: 'default', backend: 'web' }, { project: 'default', backend: 'gone' }] }; });
+    const bin = path.join(SCRATCH, `fakebin-${seq}`);
+    fs.mkdirSync(bin);
+    const backends = { status: 'success', result: [
+      { name: 'projects/acme-prod/locations/us-central1/backends/web', codebase: { repository: 'projects/acme-prod/locations/us-central1/connections/c/gitRepositoryLinks/acme-shop', rootDirectory: '/apps/shop' }, environment: 'production' },
+      { name: 'projects/acme-prod/locations/europe-west4/backends/admin', codebase: { repository: 'projects/acme-prod/locations/europe-west4/connections/c/gitRepositoryLinks/acme-shop' } },
+      { name: 'projects/acme-prod/locations/us-central1/backends/local' },
+    ] };
+    const exe = (name, body) => { fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`); fs.chmodSync(path.join(bin, name), 0o755); };
+    exe('firebase', `[ "$1" = apphosting:backends:list ] && [ "$3" = acme-prod ] && cat <<'J'\n${JSON.stringify(backends)}\nJ`);
+    const env = { ...ENV, PATH: `${bin}:${ENV.PATH}` };
+
+    // Opt-in: without the flag the CLI is never asked.
+    const off = r.json(['evidence', '--json']).data.facts;
+    assert.ok(off.some((f) => f.subject === 'App Hosting backends / console-only deploy targets' && f.tag === 'unobservable' && /--app-hosting/.test(f.value)));
+    assert.ok(!off.some((f) => f.area === 'app hosting'));
+
+    // No gcloud token: backends observed, the live branch is its own question.
+    let facts = JSON.parse(r.run(['evidence', '--json', '--app-hosting'], { env }).out).facts;
+    const web = facts.find((f) => f.subject === 'acme-prod/web');
+    assert.deepEqual(web.value, { region: 'us-central1', repository: 'acme-shop', rootDirectory: '/apps/shop', environment: 'production' });
+    assert.equal(web.tag, 'observed');
+    assert.match(facts.find((f) => f.subject === 'acme-prod/local').value.repository, /local source/);
+    assert.equal(facts.find((f) => f.subject === 'acme-prod/web live branch').tag, 'unobservable');
+    assert.match(facts.find((f) => f.area === 'drift' && f.subject === 'main → default/gone').value, /no such backend/);
+
+    // With a token, the live branch is read from the API; a backend on another branch, or undeclared, is drift.
+    exe('gcloud', 'echo tok');
+    exe('curl', 'case "$*" in *backends/web/traffic*) echo \'{"rolloutPolicy":{"codebaseBranch":"development"}}\';; *backends/admin/traffic*) echo \'{"rolloutPolicy":{"codebaseBranch":"main"}}\';; *) exit 22;; esac');
+    facts = JSON.parse(r.run(['evidence', '--json', '--app-hosting'], { env }).out).facts;
+    assert.equal(facts.find((f) => f.subject === 'acme-prod/web live branch').value, 'development');
+    assert.match(facts.find((f) => f.area === 'drift' && f.subject === 'main → default/web').value, /rolls out from development/);
+    assert.match(facts.find((f) => f.area === 'drift' && f.subject === 'acme-prod/admin').value, /no line's deploys declares it/);
+
+    // A CLI that is absent or logged out degrades to a question, never an error.
+    exe('firebase', 'echo "not logged in" >&2; exit 1');
+    const res = r.run(['evidence', '--json', '--app-hosting'], { env });
+    assert.equal(res.code, 0);
+    assert.equal(JSON.parse(res.out).facts.find((f) => f.subject === 'acme-prod').tag, 'unobservable');
   },
 
   'evidence: shipped templates are not bindings — *.tpl, node_modules, generator files/ — and the skip is stated'() {

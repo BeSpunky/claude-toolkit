@@ -94,8 +94,8 @@ const declared = (name, projection, check) => ({
     // Semantics stay with the engine — the generic deploy text, never a hard-coded binding.
     t.ok(params.includes('`branches.mjs describe`'), 'deploy bindings point at describe');
     t.ok(!/staging → staging|pushing either triggers/.test(params), 'no hard-coded deploy binding');
-    // The projection carries no deploy data, so the page must not read as if bindings exist.
-    t.ok(params.includes('if any are recorded') && !params.includes('recorded in the model (each'), 'deploy bindings are not asserted to exist');
+    // No structured binding in the projection → the page claims none (a note, if any, is the engine's to show).
+    t.ok(params.includes('none is structured in the model yet') && !params.includes('the model binds these'), 'deploy bindings are not asserted to exist');
     check(t, rules, params);
   },
 });
@@ -142,6 +142,27 @@ export default {
     // THE RESOLVED MODEL WINS OVER THE TREE. A sync resolves which copy is in force (the integration tip, local or
     // remote) and hands it in as `branchProjection`; the Tree is only the working copy, which may be stale, absent
     // (a branch cut before the declaration) or in another directory (an Nx workspace nested below the git root).
+    {
+      // STRUCTURED deploy bindings are facts the projection carries, so the page shows them — and with the ci +
+      // firebase layers, says the cloud identity is the human's to create.
+      name: 'structured deploy bindings render as a table; ci + firebase add the CI section and the IAM rule',
+      setup: () => workspace(),
+      run: generate(['nx', 'node', 'firebase', 'ci'], {
+        branchProjection: JSON.stringify({
+          schema: 1, ...TRUNK,
+          deploys: [{ kind: 'line', line: 'main', ci: { environment: 'production', providers: { firebase: 'default' } }, appHosting: [{ project: 'default', backend: 'web' }] }],
+        }),
+      }),
+      expect: (_tree, t) => {
+        const params = PARAMS(t);
+        t.ok(params.includes('| `main` | `production` (firebase: `default`) | `default/web` |'), `the binding row: ${params}`);
+        t.ok(params.includes('local-source'), 'both App Hosting modes are named');
+        const ci = section(t.read('HOUSE.md'), 'Continuous deployment (CI)');
+        t.ok(ci.includes('! bash tools/setup-gcp.sh --dry-run') && ci.includes('never Claude'), 'the human-run setup');
+        t.ok(t.read('HOUSE.rules.md').includes('Never run `tools/setup-gcp.sh`'), 'the always-on IAM rule');
+        t.ok(!/\{\{[^}]*\}\}/.test(t.read('HOUSE.md')), 'no unrendered token');
+      },
+    },
     {
       name: 'branchProjection is rendered, and a conflicting working-tree file is not read',
       setup: () => {

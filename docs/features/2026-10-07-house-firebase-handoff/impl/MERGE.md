@@ -38,3 +38,16 @@ Test-generators skips (18+) are the cases needing `@nx/angular` / `@nx/js`, whic
   edited the same line — rebuilt it from W5's text with W2's `.secret.sandbox.local` gitignore entry, and added the
   `configDir` fact W2's notes describe but the bullet did not carry.
 - test-generators 129 ok / 18 skip · test-migrations 140 ok.
+
+### w3 (stack identity, one port table)
+- `migrations.json`: union (stack-owned-dev-processes).
+- `emulator-ports.ts` `hostDialledPorts`: **judgement.** W3 replaced the `ALWAYS_ON` constant with the port table's
+  `alwaysOn` (hub + logging); W4 had replaced that same skip with "skip hub; skip logging here because it is pushed
+  once at the end, for the Emulator UI's Logs tab". Kept W4's — W3's line would skip logging and W4's trailing push
+  re-adds it anyway, but W4's states the intent (logging IS host-dialled now); the table still drives `emulatorPorts`.
+- `firebase-emulators/generator.ts`: header — W3's `tools/emulator-ports.mjs` + W2's `apply.mjs` mention, merged into
+  one sentence. Imports — W3 retired `FIREBASE_DEFAULT_PORTS` for `defaultPort`/`renderEmulatorPortsModule`; kept W3's
+  import + W7's apphosting-config import. `ensureFirebaseProject` — W5's `rulesFiles` signature + W3's "not
+  `continuous`" comment.
+- `tips.txt`: union. `local-server-isolation/SKILL.md`: W4's `?portOffset=`-free example line + W3's Teardown section.
+- test-generators 132 ok / 18 skip · test-migrations 143 ok.
