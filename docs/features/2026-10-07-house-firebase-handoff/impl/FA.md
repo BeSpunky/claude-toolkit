@@ -100,3 +100,21 @@ no renderer), which local-server-isolation already preferred.
 - Not run: the full consumer dogfood (`house.sh upgrade --local` on a real 0.49.2 consumer + a container rebuild) — the release gate's.
 
 Suites (after the last merge): test-generators 190 ok / 23 skipped · test-migrations 251 ok · test-layers 101 ok · test-scaffold 22 files ok · check-descriptions ok · check-script-modes ok.
+
+## Merge with FB, FG, FF (and FB's push-secrets fix)
+
+- Conflicts resolved with both intents: emulators.sh = FB's offline `demo-` project id + the stack claim; HOUSE.rules =
+  the claim wording + FB's never-arm rule; lint-house-apps = FG's snapshot; the new skill = FB/FG text + the claim
+  launch path. Tests moved to FB's `emulator-tools.mjs`.
+- `reap-ownership.test.sh` stays retired; its two guarantees are carried to the stack identity in emulators-stop §6b:
+  a JVM left by a crashed firebase-tools is ended by the keeper (log says so); a keeper killed outright leaves the stack
+  ORPHANED and `dev stop` ends exactly what it left; a live suite is never touched (the claim refuses — "twice").
+  `removeRecord` now keeps a record while its keeper's leftovers live.
+- The dev engine: ONE artifact, ONE owner — the `dev` generator; `web` and `firebase` list its step, the planner runs it
+  once. Said in the registry, the `brings` text (layers.sh regenerated) and HOUSE.md (Running stacks; the no-web
+  Firebase paragraph).
+- The lint-house-apps load cycle: FG's fix covers it — every 0.50.0 rung now `require`s alone (checked on the compiled payload).
+- Found on the merged branch (not from this merge): `preflight-gate.test.sh` failed (`ENSURE_LAYERS: unbound`, then a
+  silent exit) — FF's probe block ended the gate with `[ -n … ] && _refuse` as a loop's last command, which makes an
+  `eval` of the block return 1 under `set -e`. Fixed in house.sh (`if … fi`) and the test now supplies the render inputs.
+- Suites: generators 202 ok / 25 skipped · migrations 268 · layers 102 · scaffold 23 files ok.

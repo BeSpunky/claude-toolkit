@@ -56,6 +56,9 @@ eval "$model_src"
 checks_src="$(extract 'PREFLIGHT_CHECKS="')"   || exit 2
 verdict_src="$(extract 'PREFLIGHT_VERDICT="')" || exit 2
 # `--staging` is substituted at RENDER time, so a case that passes it re-renders the checks (render_checks 1).
+# The gate also runs the project-facts probe (house-probe.mts), with the ensure set and evident layers substituted at
+# render time and the engine root read at run time — none of which these branch-model cases are about: nothing ensured.
+ENSURE_LAYERS=''; EVIDENT=''; HOUSE_ENGINE_ROOT="$ROOT/plugins/house/engine"
 render_checks() { STAGING="$1"; eval "$checks_src"; }
 render_checks 0
 eval "$verdict_src"
