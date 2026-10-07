@@ -63,8 +63,9 @@ export default function update(tree: Tree): void {
   logger.warn(
     `${TAG} Emulator processes started before this upgrade are not known to the dev engine, and nothing reaps them ` +
       'any more. Once, now: stop any emulator suite still running from before the upgrade, then look for leftovers ' +
-      "(`pgrep -af 'cloud-firestore-emulator|cloud-storage-rules-runtime|firebase emulators|java'`) and stop them " +
-      '(`kill <pid>`), or rebuild the container. Otherwise they keep the emulator ports and the first suite refuses them.',
+      "(`pgrep -af 'cloud-firestore-emulator|cloud-storage-rules-runtime|firebase emulators'`) and stop each one whose " +
+      'command line shows it is this project\'s emulator (`kill <pid>` — never by name: another project\'s may be running), ' +
+      'or rebuild the container. Otherwise they keep the emulator ports and the first suite refuses them.',
   );
 }
 
