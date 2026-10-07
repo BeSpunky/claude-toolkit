@@ -58,7 +58,7 @@ mkworkspace() {   # mkworkspace <name> <emulators json>
   mkdir -p "$d/tools"
   printf '{ "emulators": %s }\n' "$2" > "$d/firebase.json"
   node "$ROOT/tools/test-scaffold/render-engine.mjs" "$d"   # the stack claim (tools/dev) every suite goes through
-  node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$d"
+  node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$d"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/emulator-data.sh"
   chmod +x "$d/tools/emulator-data.sh"
   render "$d"

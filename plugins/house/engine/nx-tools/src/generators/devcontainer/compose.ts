@@ -14,6 +14,7 @@
 //   path           ONE `remoteEnv.PATH`: every layer's directories, registry order, ahead of the image's PATH
 //   osPackages     ONE list, de-duplicated, each group commented with its `why`, embedded in the one installer
 //                  (house.packages.sh) the image build runs as a cached layer — and post-create, for what is missing
+//   archives       ONE list by id (first contributor wins), installed by that same installer after the packages
 //   postCreate     pieces run by phase (prepare → OS packages (missing only) → install → plugins → provision), registry order,
 //                  after ONE derived section that reclaims every volume's ownership (see `volumeOwnership`)
 //
@@ -23,7 +24,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseJson } from '@nx/devkit';
 import type {
-  AptRepository,
+  ArchiveTool,
   DevcontainerFragment,
   DevcontainerJson,
   DevcontainerPort,
@@ -66,7 +67,8 @@ export interface Composition {
   runArgs: ({ args: string[] } & Why)[];
   ports: ComposedPort[];
   initializeCommand: ({ name: string; command: string } & Why)[];
-  osPackages: ({ packages: string[]; repository?: AptRepository } & Why)[];
+  osPackages: ({ packages: string[] } & Why)[];
+  archives: (ArchiveTool & Why)[];
   postCreate: (PostCreatePiece & { from: string })[];
 }
 
@@ -235,9 +237,11 @@ export function compose(
     osPackages: all('osPackages')
       .filter(({ item }) => !(source.kind === 'foreign' && (item as { onHouseImageOnly?: boolean }).onHouseImageOnly))
       .map(({ item }) => {
-        const entry = item as { packages: readonly string[]; why?: string; repository?: AptRepository };
-        return { packages: [...entry.packages], why: entry.why, ...(entry.repository ? { repository: entry.repository } : {}) };
+        const entry = item as { packages: readonly string[]; why?: string };
+        return { packages: [...entry.packages], why: entry.why };
       }),
+    // Distro-neutral (a tarball, tar and curl), so a foreign image gets them too.
+    archives: unique(all('archives').map(({ item }) => ({ ...(item as ArchiveTool & Why) })), (entry) => entry.id),
     postCreate: unique(
       all('postCreate').map(({ item, from }) => ({ ...(item as PostCreatePiece), from })),
       (entry) => entry.piece,
@@ -546,9 +550,13 @@ function renderVolumeOwnership(template: string, volumes: readonly ComposedVolum
 /**
  * `.devcontainer/house.packages.sh` — the ONE installer the image build and post-create both run (see the template).
  * The house's packages are embedded, grouped by capability with each group's `why` as a comment, de-duplicated
- * across groups; the project's own list is the file it is handed.
+ * across groups; the project's own list is the file it is handed. Then the archive tools, one line per architecture.
  */
-export function renderOsPackagesScript(groups: Composition['osPackages']): string {
+export function renderOsPackagesScript({ osPackages, archives }: Pick<Composition, 'osPackages' | 'archives'>): string {
+  // An archive is fetched with curl over TLS: the mechanism's own needs, LAST — so it lists only what no layer already does.
+  const groups = archives.length
+    ? [...osPackages, { packages: ['curl', 'ca-certificates'], why: 'Fetch the versioned archives (HOUSE_ARCHIVES, below) over TLS.' }]
+    : osPackages;
   const seen = new Set<string>();
   const lines: string[] = [];
   for (const group of groups) {
@@ -558,20 +566,27 @@ export function renderOsPackagesScript(groups: Composition['osPackages']): strin
     if (group.why) lines.push(...group.why.split('\n').map((line) => `# ${line}`.trimEnd()));
     lines.push(fresh.join(' '));
   }
-  // Each third-party repository once, as `id key source` — validated here, because the installer runs it as root.
-  const repositories = new Map<string, AptRepository>();
-  for (const { repository } of groups) {
-    if (!repository) continue;
-    if (!/^[a-z0-9-]+$/.test(repository.id) || !/^https:\/\/\S+$/.test(repository.key) || !/^https:\/\/\S+( [\w.-]+)+$/.test(repository.source)) {
-      throw new Error(`[devcontainer] apt repository "${repository.id}" is malformed: ${JSON.stringify(repository)}`);
+  // `<id> <version> <arch> <sha256> <url> <bin>` per architecture — validated here, because the installer runs it as root.
+  const archiveLines: string[] = [];
+  for (const tool of archives) {
+    if (tool.why) archiveLines.push(...tool.why.split('\n').map((line) => `# ${line}`.trimEnd()));
+    for (const [arch, { url, sha256 }] of Object.entries(tool.downloads)) {
+      const line = `${tool.id} ${tool.version} ${arch} ${sha256} ${url} ${tool.bin}`;
+      if (
+        !/^[a-z0-9-]+$/.test(tool.id) || !/^[A-Za-z0-9][A-Za-z0-9.+~-]*$/.test(tool.version) || !/^(amd64|arm64)$/.test(arch) ||
+        !/^[0-9a-f]{64}$/.test(sha256) || !/^https:\/\/[A-Za-z0-9._~:/?=&%+-]+\.tar\.gz$/.test(url) ||
+        !/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(tool.bin) || tool.bin.split('/').includes('..')
+      ) {
+        throw new Error(`[devcontainer] archive tool "${tool.id}" is malformed: ${line}`);
+      }
+      archiveLines.push(line);
     }
-    repositories.set(repository.id, repository);
   }
-  // The repository machinery (the list and its installer) is rendered only when a layer declares a repository: a
+  // The archive machinery (the list and its installer) is rendered only when a layer declares an archive tool: a
   // project with none gets no empty list and no code that would loop over it.
-  const script = renderSection(readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8'), 'REPOSITORIES', repositories.size > 0)
-    .split('{{HOUSE_REPOSITORIES}}')
-    .join([...repositories.values()].map(({ id, key, source }) => `${id} ${key} ${source}`).join('\n'))
+  const script = renderSection(readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8'), 'ARCHIVES', archives.length > 0)
+    .split('{{HOUSE_ARCHIVES}}')
+    .join(archiveLines.join('\n').split("'").join("'\\''"))
     .split('{{HOUSE_PACKAGES}}')
     // The list is one single-quoted shell string: a `'` in a why would end it early, so it is closed, escaped, reopened.
     .join(lines.join('\n').split("'").join("'\\''"));

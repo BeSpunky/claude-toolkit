@@ -7,11 +7,12 @@
 // Accounts are created through the Auth emulator; Firestore docs are written with the emulator's
 // `Bearer owner` admin bypass, so the app's real security rules are irrelevant to seeding.
 //
-// IT ONLY EVER WRITES WHERE IT IS TOLD. The emulator hosts come from FIREBASE_AUTH_EMULATOR_HOST and
-// FIRESTORE_EMULATOR_HOST — set by `firebase emulators:exec`, which is how tools/seed/build-seeds.sh runs it
-// against a throwaway emulator pair. With either unset it REFUSES rather than guessing `localhost:9099` /
-// `localhost:8080`: those are the base suite's ports, so a guess would write into whichever stack happens to
-// own them (another worktree's, or a suite whose Firestore triggers then fire real side effects).
+// IT ONLY EVER WRITES WHERE IT IS TOLD — hosts AND project. The emulator hosts come from FIREBASE_AUTH_EMULATOR_HOST
+// and FIRESTORE_EMULATOR_HOST, the project from GCLOUD_PROJECT — all three set by `firebase emulators:exec`, which is
+// how tools/seed/build-seeds.sh runs it against a throwaway emulator pair. With any of them unset it REFUSES rather
+// than guessing: `localhost:9099` / `localhost:8080` are the base suite's ports, so a guessed host writes into
+// whichever stack happens to own them, and a guessed project writes where that stack's app never looks (its Auth
+// keeps accounts per project id).
 
 /** Marker: resolve to the uid of the account created under `key`. Use for ids or fields. */
 export const ref = (key) => ({ __ref: key });
@@ -23,18 +24,24 @@ export const at = (iso) => ({ __ts: iso });
 function emulatorTargets() {
   const auth = process.env.FIREBASE_AUTH_EMULATOR_HOST;
   const firestore = process.env.FIRESTORE_EMULATOR_HOST;
-  if (!auth || !firestore) {
-    const missing = [!auth && 'FIREBASE_AUTH_EMULATOR_HOST', !firestore && 'FIRESTORE_EMULATOR_HOST'].filter(Boolean);
+  const project = process.env.GCLOUD_PROJECT;
+  if (!auth || !firestore || !project) {
+    const missing = [
+      !auth && 'FIREBASE_AUTH_EMULATOR_HOST',
+      !firestore && 'FIRESTORE_EMULATOR_HOST',
+      !project && 'GCLOUD_PROJECT',
+    ].filter(Boolean);
     throw Object.assign(new Error(
-      `${missing.join(' and ')} not set — refusing to guess which emulators to write to.\n` +
+      `${missing.join(', ')} not set — refusing to guess which emulators, and which project, to write to.\n` +
         '  To rebuild the committed seeds (the usual case):  nx run firebase:seed:build\n' +
         '    — it boots its own throwaway emulators, applies every world, and exports them to tools/emulator-seeds/.\n' +
         '  To load a seed into the stack you are serving:     nx run firebase:reset, then restart the serve.\n' +
         '  To write into a RUNNING stack on purpose, name it:  FIREBASE_AUTH_EMULATOR_HOST=localhost:<auth port> \\\n' +
-        '    FIRESTORE_EMULATOR_HOST=localhost:<firestore port> GCLOUD_PROJECT=<its project> node tools/seed/build.mjs <world>',
+        '    FIRESTORE_EMULATOR_HOST=localhost:<firestore port> GCLOUD_PROJECT=<its project, from its banner> \\\n' +
+        '    node tools/seed/build.mjs <world>',
     ), { name: 'SeedTargetError' });
   }
-  return { auth, firestore, project: process.env.GCLOUD_PROJECT || 'demo-{{workspaceName}}' };
+  return { auth, firestore, project };
 }
 
 /** Create an Auth-emulator account for an email and return its uid (localId). */

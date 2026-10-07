@@ -50,6 +50,8 @@ export interface WorkflowInput {
   packageManager?: PackageManager;
   /** Yarn 2+ (`yarn install --immutable`) rather than classic (`--frozen-lockfile`). */
   yarnBerry: boolean;
+  /** The file the project declares its Node in (_utils/node-version `nodeVersionFile`) — setup-node reads each kind. */
+  nodeVersionFile: string;
 }
 
 /** The install a CI runner does: exactly the lockfile, never an update of it. */
@@ -149,7 +151,7 @@ export function renderWorkflow(input: WorkflowInput): string {
     "      # Node from the project's one declaration of it — the same file the devcontainer reads.",
     `      - uses: ${uses(ACTIONS.setupNode)}`,
     '        with:',
-    '          node-version-file: .nvmrc',
+    `          node-version-file: ${input.nodeVersionFile}`,
     ...installStep(input.packageManager, input.yarnBerry),
     '      # The base is the last SUCCESSFUL run of this workflow on this branch (not the previous commit).',
     `      - uses: ${uses(ACTIONS.nxSetShas)}`,
@@ -195,7 +197,7 @@ export function renderWorkflow(input: WorkflowInput): string {
     `      - uses: ${uses(ACTIONS.checkout)}`,
     `      - uses: ${uses(ACTIONS.setupNode)}`,
     '        with:',
-    '          node-version-file: .nvmrc',
+    `          node-version-file: ${input.nodeVersionFile}`,
     ...corepack(input.packageManager),
     `      - uses: ${uses(ACTIONS.cacheRestore)}`,
     '        with:',

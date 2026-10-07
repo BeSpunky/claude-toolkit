@@ -1,9 +1,10 @@
 // 0.50.0 — the seed applier leaves the project-owned tools/seed/world.mjs for the generator-owned apply.mjs.
 //
 // The shapes it meets: the stock 0.49 world (kept verbatim beside this case in `0.50.0-stock-0.49/` — the
-// migration recognises the applier by its exact text, so an invented fixture would test nothing), a stock applier
-// under the project's own worlds and header, a world that reads one of the stock host constants, a customised
-// applier (left exactly, reported), an already-split world, CRLF line endings, and no seed tooling at all.
+// migration recognises the applier by its tokens, so an invented fixture would test nothing), the same world after a
+// formatter (quotes, semicolons, trailing commas, comments), a stock applier under the project's own worlds and
+// header, a world that reads one of the stock host constants, a customised applier (left exactly, reported — and
+// still the one build.mjs runs), an already-split world, CRLF line endings, and no seed tooling at all.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,6 +42,30 @@ function worldsLoad(tree) {
       { cwd: dir, encoding: 'utf8' }).trim();
   } catch (error) {
     return `threw: ${error.stderr || error.message}`;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** With the house's build.mjs + apply.mjs beside `world`, run `build.mjs default` with no emulator env: which applier ran? */
+function whichApplierRuns(world) {
+  const dir = mkdtempSync(join(tmpdir(), 'seed-own-'));
+  try {
+    mkdirSync(join(dir, 'tools/seed'), { recursive: true });
+    writeFileSync(join(dir, 'tools/seed/world.mjs'), world);
+    for (const [f, tpl] of [['build.mjs', 'seed-build.mjs.tpl'], ['apply.mjs', 'seed-apply.mjs.tpl']]) {
+      writeFileSync(join(dir, 'tools/seed', f), readFileSync(join(PAYLOAD, 'src/generators/firebase-emulators', tpl), 'utf8'));
+    }
+    const env = { ...process.env };
+    for (const k of ['FIREBASE_AUTH_EMULATOR_HOST', 'FIRESTORE_EMULATOR_HOST', 'GCLOUD_PROJECT']) delete env[k];
+    // Port 1 refuses at once: the world's own applier (localhost fallbacks) fails on fetch; the house's refuses first.
+    env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:1';
+    try {
+      execFileSync(process.execPath, ['tools/seed/build.mjs', 'default'], { cwd: dir, env, encoding: 'utf8', stdio: 'pipe' });
+      return 'no';
+    } catch (error) {
+      return String(error.stderr).includes('refusing to guess') ? 'house' : 'world';
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -84,9 +109,31 @@ export default {
         t.has(WORLD, "demo: { email: 'demo@demo.test', name: 'Demo' }");
         t.has(WORLD, "const CREATED_AT = '2026-01-01T00:00:00.000Z';");
         t.has('tools/seed/apply.mjs', 'export async function applyWorld');
-        t.has('tools/seed/apply.mjs', "'demo-acme'");
+        t.has('tools/seed/apply.mjs', "!project && 'GCLOUD_PROJECT'");
         t.has('tools/seed/build.mjs', "from './apply.mjs'");
         t.ok(!/\n\n\n/.test(t.read(WORLD)), 'left a run of blank lines behind');
+        const loaded = worldsLoad(tree);
+        t.ok(loaded === 'ok', `the migrated world does not load: ${loaded}`);
+      },
+    },
+    {
+      name: 'a formatter-rewritten stock world (no semicolons, no trailing commas, double quotes, a comment): still stock',
+      setup: (tree) =>
+        tree.write(
+          WORLD,
+          stock
+            .replace(/;$/gm, '')
+            .replace(/,(\n\s*[)\]}])/g, '$1')
+            .replaceAll("'Content-Type': 'application/json'", '"Content-Type": "application/json"')
+            .replace("if (value === null) return { nullValue: null }", "// nulls first\n  if (value === null) return { nullValue: null }"),
+        ),
+      expect: (tree, t) => {
+        t.hasNot(WORLD, BANNER);
+        t.hasNot(WORLD, 'const AUTH_HOST');
+        t.hasNot(WORLD, 'const FS_HOST');
+        t.hasNot(WORLD, 'const PROJECT');
+        t.hasNot(WORLD, 'export const ref');
+        t.occurrences(WORLD, "import { ref, at } from './apply.mjs';", 1);
         const loaded = worldsLoad(tree);
         t.ok(loaded === 'ok', `the migrated world does not load: ${loaded}`);
       },
@@ -130,7 +177,10 @@ export default {
         t.has(WORLD, 'value instanceof Date');
         t.has(WORLD, BANNER);
         t.missing('tools/seed/apply.mjs');
-        t.ok(warnings.some((w) => w.includes('customised seed applier')), `no report: ${warnings.join(' | ')}`);
+        t.ok(warnings.some((w) => w.includes('customised seed applier') && w.includes('keeps running')), `no report: ${warnings.join(' | ')}`);
+        // The generator then writes the house build.mjs + apply.mjs: build.mjs must run the world's OWN applier.
+        const ran = whichApplierRuns(t.read(WORLD));
+        t.ok(ran === 'world', `build.mjs ran the ${ran} applier, not the world's own`);
       },
     },
     {

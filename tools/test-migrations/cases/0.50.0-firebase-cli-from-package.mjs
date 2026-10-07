@@ -126,6 +126,14 @@ export default {
       },
     },
     {
+      name: 'Angular 19 (@angular/fire 19 peers firebase-tools ^13): the newest inside the peer, said — npm would ERESOLVE on the house pin',
+      setup: (tree) => {
+        firebaseWorkspace(tree, { nx: '23.1.0' });
+        writeJson(tree, 'node_modules/@angular/fire/package.json', { name: '@angular/fire', version: '19.2.0' });
+      },
+      expect: (tree, t) => t.ok(/^13\.\d+\.\d+$/.test(readJson(tree, 'package.json').devDependencies['firebase-tools']), `got ${readJson(tree, 'package.json').devDependencies['firebase-tools']}`),
+    },
+    {
       name: 'adopted, the merge recorded the feature: it goes',
       setup: (tree) => {
         firebaseWorkspace(tree);

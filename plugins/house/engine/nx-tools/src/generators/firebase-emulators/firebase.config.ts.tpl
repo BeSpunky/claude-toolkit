@@ -272,5 +272,53 @@ export function provideAppFirebase(): EnvironmentProviders {
     }
   }
 
-  return makeEnvironmentProviders([provideFirebaseApp(() => initializeApp(environment.firebase))]);
+  return makeEnvironmentProviders([provideFirebaseApp(() => initializeApp(firebaseOptions()))]);
+}
+
+// ── THE PROJECT ID THIS RUNTIME USES — the emulator suite's, whenever anything is emulated ─────────────────────────
+//
+// The emulator suite runs under an OFFLINE `demo-` project id by default (tools/emulator-project.mjs — the same rule,
+// read from this app's environment.ts): `my-app` → `demo-my-app`. Google cannot have a `demo-` project, so nothing a
+// local run does can reach a real one. The browser must use the suite's id, or the emulated Auth and Functions answer
+// for a different project (Auth keeps accounts per project; Functions serves /<project>/…). The REAL id is used only
+// when environment.ts COMMITS a service to the real backend (`auth: false` in EMULATE) — then the suite runs under it
+// too — or when nothing is emulated at all (`?emulate=none`, `serve --no-emulators`).
+
+/** The services environment.ts commits to the real backend (an entry whose committed `default` is false). */
+function committedRealServices(): EmulatorService[] {
+  return (['auth', 'firestore', 'storage', 'functions'] as EmulatorService[]).filter(
+    (service) => environment.emulators?.[service]?.default === false
+  );
+}
+
+/**
+ * The project id the emulator suite runs under: the app's own when environment.ts commits a real service, else its
+ * offline twin (`demo-<id>`; an id already `demo-…` is its own). Keep in step with tools/emulator-project.mjs.
+ */
+export function emulatorProjectId(): string {
+  const id = environment.firebase.projectId;
+  if (id.startsWith('demo-')) return id;
+  return committedRealServices().length > 0 ? id : `demo-${id}`;
+}
+
+/** The options `initializeApp` gets: the suite's project (and its default bucket) while anything is emulated. */
+function firebaseOptions(): typeof environment.firebase {
+  if (!ngDevMode) return environment.firebase;
+  const emulated = (Object.keys(emulate) as EmulatorService[]).filter((service) => emulate[service]);
+  const id = emulatorProjectId();
+  if (emulated.length === 0 || id === environment.firebase.projectId) return environment.firebase;
+  const real = (Object.keys(emulate) as EmulatorService[]).filter((service) => !emulate[service]);
+  if (real.length > 0) {
+    // A per-session `?real=<service>` while the suite runs OFFLINE: one app has one project id, and it must be the
+    // suite's for the emulated services to answer — so the real service is asked about a project that cannot exist.
+    console.error(
+      `[firebase.config.ts] ${real.join(', ')} ${real.length > 1 ? 'are' : 'is'} set to the REAL backend for this ` +
+        `session, but the emulator suite runs under the offline project ${id}, which this app must share with it — so ` +
+        `${real.join(', ')} cannot reach ${environment.firebase.projectId}.\n` +
+        `  To mix a real service with emulated ones, commit it: set it to false in environment.ts's EMULATE map and ` +
+        `restart the suite (it then runs under ${environment.firebase.projectId}). Or go fully real: ?emulate=none.`
+    );
+  }
+  // The emulated Functions' Admin SDK defaults to `<project>.appspot.com`; the app's uploads must land in that bucket.
+  return { ...environment.firebase, projectId: id, storageBucket: `${id}.appspot.com` };
 }

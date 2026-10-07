@@ -98,7 +98,7 @@ export default {
       },
       expect: (tree, t) => {
         t.ok(deps(tree).firebase === 'latest' && deps(tree)['@angular/fire'] === 'latest', 'left as they are');
-        t.ok(said.some((line) => /no stable @angular\/fire supports Angular 21[\s\S]*21\.0\.0-rc\.1/i.test(line)), `reported: ${said}`);
+        t.ok(said.some((line) => /no stable @angular\/fire supported Angular 21 as of 2026-10-07[\s\S]*21\.0\.0-rc\.1/i.test(line)), `reported: ${said}`);
       },
     },
     {
@@ -179,6 +179,17 @@ export default {
         t.ok(deps(tree).lodash === 'next' && deps(tree)['@shop/ui'] === '*', 'untouched');
         t.ok(said.some((line) => /lodash is "next"/.test(line)), `lodash reported: ${said}`);
         t.ok(!said.some((line) => line.includes('@shop/ui')), 'the link was reported as a float');
+      },
+    },
+    {
+      name: 'the report judges by the seam\'s own rule: ^1, >=1, 1.x are reported too; git, file: and npm: aliases with pins are not versions that float',
+      setup: (tree) => {
+        listen();
+        pkg(tree, { a: '^1', b: '>=1.0.0', c: '1.x', d: 'github:me/d', e: 'file:../e', f: 'npm:g@^1.2.3', h: 'npm:i@latest' });
+      },
+      expect: (tree, t) => {
+        for (const name of ['a', 'b', 'c', 'h']) t.ok(said.some((line) => line.includes(`dependencies.${name} is`)), `${name} reported: ${said}`);
+        for (const name of ['d', 'e', 'f']) t.ok(!said.some((line) => line.includes(`dependencies.${name} is`)), `${name} not reported`);
       },
     },
     {

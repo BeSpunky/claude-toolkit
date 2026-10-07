@@ -9,29 +9,30 @@
 // firebase 12 at the root, firebase 11 nested under @angular/fire 20 — two SDKs, "No Firebase App '[DEFAULT]'". Freezing
 // that would seal the bug behind a pin. So the pair is DERIVED from the workspace's INSTALLED ANGULAR MAJOR:
 //   - @angular/fire: the installed one when it is the release line for that Angular major (no surprise upgrade), else the
-//     house's release for that major (generators/_utils/firebase-compat.ts — the SAME table the Angular firebase client
-//     reads every upgrade; a later toolkit running this rung knows more releases, and the installed Angular major is
-//     what decides, so the newer table only ever yields a pair that is coherent for THIS project);
+//     house's release for that major as of 0.50.0 (./firebase-compat-0.50.0.ts — FROZEN: a migration freezes the values
+//     it writes, so its fixture pins its behaviour under every later payload; the generator that runs right after it
+//     judges with the live table and names anything newer);
 //   - firebase: EXACTLY the range that @angular/fire release declares in its own dependencies — never the installed root
 //     firebase. The package manager then keeps ONE SDK, after a reinstall.
 // Where Angular's major has no stable @angular/fire (21, 22 as of 0.50.0), there is no coherent pair to write: the
 // `latest` stays, and the report NAMES each floating entry, says what is true and lists the choices, most recommended
-// first. The judging and the wording are the Angular adapter's (adapters/angular/angularfire.ts), so this rung and the
-// generator that runs right after it can never again give a project two different answers.
+// first. The judging and the wording are the Angular adapter's shared mechanics (adapters/angular/angularfire-judge.ts,
+// fed this rung's frozen table), so this rung and the generator after it never give a project two different answers.
 //
 // ONLY the literal `"latest"` is rewritten — it is what the house wrote. Any other spec is the project's own choice; a
 // floating one (`next`, `*`, …) is REPORTED with what to do, never rewritten.
 import { type Tree, getProjects, logger } from '@nx/devkit';
-import { browserSdkFindings, coherentPair, readBrowserSdkFacts, renderAdvice } from '../../adapters/angular/angularfire';
+import { browserSdkFindings, readBrowserSdkFacts } from '../../adapters/angular/angularfire';
+import { coherentPair, renderAdvice } from '../../adapters/angular/angularfire-judge';
 import { applyJsonChanges } from '../../generators/_utils/json-edits';
+import { isFloatingSpec, isPinnedSpec } from '../../generators/_utils/version-spec';
+import { ANGULARFIRE_TABLE_0_50_0 } from './firebase-compat-0.50.0';
 
 const TAG = '[0.50.0 pin-floating-dependencies]';
 
 /** @bespunky/typescript-utils as of 0.50.0 (the only published version). */
 const TYPESCRIPT_UTILS_AS_OF_0_50_0 = '0.1.0-alpha.0';
 
-const PINNED = /^[~^]?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-const FLOATING_TAG = /^(?:latest|next|canary|beta|alpha|rc|\*|x|)$/;
 const BLOCKS = ['dependencies', 'devDependencies'] as const;
 
 type Manifest = Partial<Record<(typeof BLOCKS)[number], Record<string, string>>> & Record<string, unknown>;
@@ -81,8 +82,8 @@ export default function pinFloatingDependencies(tree: Tree): void {
   // 3) @nx/esbuild moves in lockstep with Nx.
   if (spec('@nx/esbuild') === 'latest') {
     const nx = spec('nx');
-    const version = nx && PINNED.test(nx) ? nx : installed('nx')?.version ?? installed('@nx/esbuild')?.version;
-    if (version) set('@nx/esbuild', version, nx && PINNED.test(nx) ? "the workspace's declared nx" : 'the version installed');
+    const version = nx && isPinnedSpec(nx) ? nx : installed('nx')?.version ?? installed('@nx/esbuild')?.version;
+    if (version) set('@nx/esbuild', version, nx && isPinnedSpec(nx) ? "the workspace's declared nx" : 'the version installed');
     else {
       handled.add('@nx/esbuild');
       reports.push('@nx/esbuild is "latest" and neither nx nor @nx/esbuild is installed — pin it to exactly your Nx version.');
@@ -100,12 +101,13 @@ export default function pinFloatingDependencies(tree: Tree): void {
     }
   }
 
-  // 5) Every other floating spec is the project's own — named, never rewritten. A workspace package's `*` is the
-  //    npm-workspaces LINK to it (written by the linking port), not a version: it is skipped.
+  // 5) Every other floating spec is the project's own — named, never rewritten, judged by the SAME rule the dependency
+  //    seam refuses with (generators/_utils/version-spec.ts: `^1`, `>=1` and `1.x` included). A workspace package's
+  //    `*` is the npm-workspaces LINK to it (written by the linking port), not a version: it is skipped.
   const local = workspacePackageNames(tree);
   for (const block of BLOCKS) {
     for (const [name, value] of Object.entries(pkg[block] ?? {})) {
-      if (typeof value !== 'string' || PINNED.test(value) || !FLOATING_TAG.test(value.trim())) continue;
+      if (typeof value !== 'string' || !isFloatingSpec(value)) continue;
       if (handled.has(name) || local.has(name)) continue;
       reports.push(`${block}.${name} is "${value}" — a version nobody chose; it moves with no commit behind it. Pin it.`);
     }
@@ -143,13 +145,13 @@ function pinFirebasePair(
       set('firebase', carried.firebase, `the range the installed @angular/fire ${carried.version} declares`);
     }
   } else {
-    const verdict = coherentPair(before);
+    const verdict = coherentPair(before, ANGULARFIRE_TABLE_0_50_0);
     if ('pair' in verdict) {
       set('@angular/fire', verdict.pair.angularfire, verdict.pair.why);
       set('firebase', verdict.pair.firebase, `the range @angular/fire ${verdict.pair.angularfire} itself declares — never the installed root firebase`);
     }
   }
-  for (const advice of browserSdkFindings(facts())) reports.push(renderAdvice('', advice).trimStart());
+  for (const advice of browserSdkFindings(facts(), ANGULARFIRE_TABLE_0_50_0)) reports.push(renderAdvice('', advice).trimStart());
   return true;
 }
 

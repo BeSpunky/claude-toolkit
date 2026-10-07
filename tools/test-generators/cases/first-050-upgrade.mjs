@@ -56,6 +56,8 @@ export default {
           updateProjectConfiguration(tree, 'firebase', suite);
           const functions = readProjectConfiguration(tree, 'functions');
           functions.targets.build.options.assets = [{ glob: '.env', input: functions.root, output: '.' }];
+          delete functions.targets.build.options.esbuildConfig;
+          functions.targets.build.options.esbuildOptions = { outExtension: { '.js': '.js' } };
           updateProjectConfiguration(tree, 'functions', functions);
           updateJson(tree, 'firebase.json', (json) => {
             json.functions[0].predeploy = ['npx --no-install nx build functions'];
@@ -73,6 +75,8 @@ export default {
         t.ok(launchers.every(([, target]) => target.continuous === false), `continuous is not explicitly false: ${launchers.filter(([, x]) => x.continuous !== false).map(([n]) => n)}`);
         const build = readProjectConfiguration(tree, 'functions').targets.build;
         t.ok(!('assets' in build.options), `the .env asset survived: ${JSON.stringify(build.options.assets)}`);
+        t.ok(!('esbuildOptions' in build.options), `the 0.49 esbuildOptions survived beside esbuildConfig: ${JSON.stringify(build.options.esbuildOptions)}`);
+        t.equal(build.options.esbuildConfig, 'tools/functions-esbuild.config.cjs', 'esbuildConfig');
         const fn = t.json('firebase.json').functions[0];
         t.ok(!('predeploy' in fn), `predeploy survived: ${JSON.stringify(fn)}`);
         t.ok(typeof fn.configDir === 'string', 'configDir is declared');

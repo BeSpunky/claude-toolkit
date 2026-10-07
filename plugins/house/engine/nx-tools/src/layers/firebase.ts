@@ -17,6 +17,17 @@ import { adapterOf, applicationsWith } from '../adapters/registry';
 import { firebaseFragment } from '../generators/firebase-emulators/dev-fragment';
 import { firebaseCiProvider } from '../generators/ci/firebase-provider';
 import { GCLOUD_CLI_VERSION } from '../generators/_utils/versions';
+import { GCLOUD_CLI_ARCHIVE } from '../generators/_utils/gcloud-archive';
+
+/** The projected gcloud archive — refused when it was projected for another pin (re-run firebase-compat --write). */
+function gcloudArchive(): typeof GCLOUD_CLI_ARCHIVE {
+  if (GCLOUD_CLI_ARCHIVE.version !== GCLOUD_CLI_VERSION) {
+    throw new Error(
+      `[firebase] gcloud-archive.ts is for ${GCLOUD_CLI_ARCHIVE.version}, the pin is ${GCLOUD_CLI_VERSION} — run node tools/firebase-compat/project.mjs --write.`,
+    );
+  }
+  return GCLOUD_CLI_ARCHIVE;
+}
 
 /** The sync's app, when its stack can take the Firebase client. */
 const attachable = (ctx: PlanContext): boolean =>
@@ -33,7 +44,7 @@ export const firebase: LayerDescriptor = {
   ensurable: { new: true, upgrade: true },
   ensureHint:
     '`house.sh add-layer firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)',
-  brings: 'the emulator wiring, the JDK step, and the forwarded emulator ports',
+  brings: 'the emulator wiring, the dev engine its suites claim their ports through (tools/dev — one generator, shared with web), the JDK step, and the forwarded emulator ports',
   generators: {
     app: [
       {
@@ -63,7 +74,9 @@ export const firebase: LayerDescriptor = {
     ],
     // The core, after the per-app client (planner order), so the scripts it writes follow the client app. Then the
     // dev engine (tools/dev): every emulator suite — run by a serve, run on its own, a seed build's — claims its ports
-    // through it, the one stack identity (lib/stacks.mjs). A backend-only workspace has no `web` layer to bring it.
+    // through it, the one stack identity (lib/stacks.mjs), and a backend-only workspace has no `web` layer to bring
+    // it. ONE artifact, ONE owner: the `dev` generator writes tools/dev; this layer and `web` both list its STEP, and
+    // the planner runs a step two layers share once.
     workspace: [
       {
         generator: 'firebase-emulators',
@@ -96,7 +109,7 @@ export const firebase: LayerDescriptor = {
     // (_utils/versions.ts), on PATH through node_modules/.bin (the node layer, which this layer requires) — the image
     // used to install whatever version was newest on build day, a second `firebase` beside the project's. Its login
     // lives in ~/.config/configstore (persisted whole by the agent layer), its emulator downloads in ~/.cache.
-    // No gcloud feature either: gcloud is a pinned image package (osPackages below).
+    // No gcloud feature either: gcloud is a pinned archive in the image (archives below).
     extensions: ['toba.vsfire'],
     ports: [...clientDevServerPorts(tree), ...emulatorForwards(tree)],
     osPackages: [
@@ -106,16 +119,23 @@ export const firebase: LayerDescriptor = {
           'The emulator suite (Firestore / RTDB / Storage) runs on the JVM. apt, not the SDKMAN-based java feature,\n' +
           'whose build-time github.com fetch fails intermittently.',
       },
+    ],
+    archives: [
       {
-        packages: [`google-cloud-cli=${GCLOUD_CLI_VERSION}`],
-        repository: {
-          id: 'google-cloud-sdk',
-          key: 'https://packages.cloud.google.com/apt/doc/apt-key.gpg',
-          source: 'https://packages.cloud.google.com/apt cloud-sdk main',
-        },
+        id: 'google-cloud-cli',
+        ...gcloudArchive(),
+        bin: 'google-cloud-sdk/bin',
         why:
-          `The Google Cloud CLI (gcloud), pinned (${GCLOUD_CLI_VERSION}) and built into the image from Google's apt repository —\n` +
-          'not a devcontainer feature, which installed whatever was newest on build day. Its logins live in ~/.config/gcloud.',
+          `The Google Cloud CLI (gcloud), pinned (${GCLOUD_CLI_VERSION}) from Google's versioned archive, which keeps every release —\n` +
+          'not its apt repository, whose index drops a release after about a year (the image build would then fail),\n' +
+          'nor a devcontainer feature, which installed whatever was newest on build day. Its logins live in ~/.config/gcloud.',
+      },
+    ],
+    containerEnv: [
+      {
+        name: 'CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK',
+        value: 'true',
+        why: 'gcloud is pinned by the house: no "updates are available" nag, whose `gcloud components update` would move the pin.',
       },
     ],
     postCreate: [{ phase: 'provision', piece: 'firebase-banner' }],

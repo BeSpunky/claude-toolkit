@@ -219,8 +219,8 @@ function dropStack(tree, key, record) {
 
 /**
  * Remove a stack's record, state dir and TMPDIR — only if still claimed by `pid` (a newer stack may hold the key
- * by now), and never while its detached work runs: the record is then that work's only handle (`ps` shows it as
- * finishing), and the state dir holds its files. Returns whether it removed them.
+ * by now), and never while its detached work runs or what that work left behind still does: the record is then their
+ * only handle (`ps` shows it FINISHING or ORPHANED), and the state dir holds their files. Returns whether it removed them.
  */
 export function removeRecord(tree, key, pid = process.pid) {
   let record;
@@ -230,7 +230,8 @@ export function removeRecord(tree, key, pid = process.pid) {
     return false; // already gone, or unreadable — nothing of ours to remove
   }
   if (record.pid !== pid || record.machine !== machineId()) return false;
-  if (unfinished(tree, key).length) return false;
+  // Detached work still running, or what it left running when it was killed outright: the record is their handle.
+  if (unfinished(tree, key).length || survivors(record).length) return false;
   dropStack(tree, key, record);
   return true;
 }

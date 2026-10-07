@@ -78,9 +78,13 @@
 //                        the scripts read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
 //                        the seed applier (tools/seed/apply.mjs), and the declarative seed worlds
 //                        (world.mjs and the seeds README are user-owned once written).
-//   - root eslint.config.mjs — best-effort insertion of the fail-closed `platform:` firewall (src/platform):
-//                        web/server depend only on their own + shared projects, shared only on shared, each
-//                        banning the packages bound to another platform; untagged projects are classified then.
+//   - tools/emulator-project.mjs, tools/emulator-secrets.cjs, tools/functions-esbuild.config.cjs — what a local run
+//                        can reach: the suite's offline `demo-` project id (the real one only when environment.ts
+//                        commits a real service), and the Functions emulator's inert secrets — written by every
+//                        functions build (the esbuild config's plugin) and overlaid at launch.
+//   - root eslint.config.mjs — best-effort insertion of the fail-closed platform firewall (src/platform): its own
+//                        rule over `platformConstraints`; untagged code projects classified then (or reported),
+//                        and the platform sync generator registered on lint for the projects made later.
 //
 // No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (one multi-process stack — `serve`,
 // the dev engine), not of Firebase, and belongs to the generator that owns
@@ -114,14 +118,17 @@ import { rootTsconfig } from '../_utils/linking';
 import { workspaceIdentity } from '../_utils/workspace-identity';
 import { nxInvocation } from '../_utils/nx-host';
 import {
+  FIREWALL_CONFIG,
   classifyUntaggedProjects,
-  firewallBlock,
+  firewallSnippet,
   insertPlatformFirewall,
   platformCommand,
   platformExternals,
+  registerPlatformSync,
 } from '../../platform';
-import { declareDependencies, declaredSpec, isPinnedSpec } from '../_utils/dependencies';
-import { projectNodeMajor } from '../_utils/node-version';
+import { declareDependencies, declaredSpec, floatingAdditions } from '../_utils/dependencies';
+import { isPinnedSpec } from '../_utils/version-spec';
+import { nodeVersionFile, projectNodeMajor } from '../_utils/node-version';
 import { FIREBASE_ADMIN_VERSION, FIREBASE_FUNCTIONS_VERSION, FIREBASE_TOOLS_VERSION } from '../_utils/versions';
 import { FUNCTIONS_NODE_RUNTIMES } from '../_utils/firebase-compat';
 
@@ -275,10 +282,10 @@ function warnUnresolvedProjectTemplates(firebaseJson: Record<string, unknown>): 
  * exported because migration 0.50.0/split-seed-applier must leave a workspace whose world.mjs already imports
  * from apply.mjs runnable on a bare `nx migrate`, before this generator has run.
  */
-export function writeSeedTooling(tree: Tree, workspaceName: string): void {
+export function writeSeedTooling(tree: Tree): void {
   const template = (name: string) => readFileSync(join(__dirname, name), 'utf8');
   tree.write('tools/seed/build.mjs', template('seed-build.mjs.tpl'));
-  tree.write('tools/seed/apply.mjs', template('seed-apply.mjs.tpl').split('{{workspaceName}}').join(workspaceName));
+  tree.write('tools/seed/apply.mjs', template('seed-apply.mjs.tpl'));
 }
 
 export default async function firebaseEmulatorsGenerator(
@@ -314,7 +321,7 @@ export default async function firebaseEmulatorsGenerator(
   //    canonical on every run); any other top-level keys the user added are preserved.
   // How functions is linted where the workspace lints: @nx/eslint/plugin's inferred target (registered if need be), or
   // an explicit `eslint .` where inference is off — never the deprecated @nx/eslint:lint executor (_utils/lint-inference).
-  const lint = hasDependency(tree, '@nx/eslint') ? houseLintTarget(tree) : undefined;
+  const lint = hasDependency(tree, '@nx/eslint') ? houseLintTarget(tree, functions.root) : undefined;
   const firebaseJson: Record<string, unknown> = tree.exists('firebase.json') ? readJson(tree, 'firebase.json') : {};
   firebaseJson.emulators = canonicalEmulatorsBlock();
   firebaseJson.functions = canonicalFunctionsBlock(functions);
@@ -370,6 +377,12 @@ export default async function firebaseEmulatorsGenerator(
     functionsPaths(substitute(template('emulators.sh.tpl'))).split('{{appEnvPath}}').join(clientEnv?.dev ?? ''),
   );
   tree.write('tools/emulator-data.sh', template('emulator-data.sh.tpl'));
+  // The suite's project id (offline `demo-` twin unless environment.ts commits a real service) and what the Functions
+  // emulator is given as secrets — Node modules, so the build (esbuild plugin) and emulators.sh share one rule each.
+  tree.write('tools/emulator-project.mjs', template('emulator-project.mjs.tpl'));
+  tree.write('tools/emulator-secrets.cjs', template('emulator-secrets.cjs.tpl').split('{{configDirSince}}').join(CONFIG_DIR_SINCE));
+  // The functions build's esbuild options — generator-owned: the inert-secrets plugin is a guarantee, not a default.
+  tree.write(ESBUILD_CONFIG, functionsPaths(template('functions-esbuild.config.cjs.tpl')));
   tree.write(
     'tools/push-secrets.sh',
     functionsPaths(template('push-secrets.sh.tpl')).split('{{appEnvProdPath}}').join(clientEnv?.prod ?? ''),
@@ -380,7 +393,7 @@ export default async function firebaseEmulatorsGenerator(
     'tools/firebase-deploy-rules.mjs',
     template('firebase-deploy-rules.mjs.tpl').split('{{seedMarker}}').join(RULES_SEED_MARKER).split('{{suiteRoot}}').join(suite.root),
   );
-  writeSeedTooling(tree, workspaceName);
+  writeSeedTooling(tree);
   if (!tree.exists('tools/seed/world.mjs')) tree.write('tools/seed/world.mjs', substitute(template('seed-world.mjs.tpl')));
   if (!tree.exists('tools/emulator-seeds/README.md')) {
     tree.write('tools/emulator-seeds/README.md', template('emulator-seeds-README.md.tpl'));
@@ -393,26 +406,26 @@ export default async function firebaseEmulatorsGenerator(
   // not declared yet). The web layer's own seeding ran before this step on a first scaffold.
   seedServedApps(tree, 'firebase-emulators');
 
-  // 4) Best-effort: the `platform:` firewall in the root flat ESLint config (src/platform/firewall — fail closed:
-  //    each platform depends only on its own and shared projects). Firebase is what brings a second platform, so it
-  //    is what brings the firewall — and the firewall arrives over projects nobody classified. Classify them in the
-  //    same act (evidence only, every inference reported), or the first lint would fail on every untagged library.
-  //    An EXISTING firewall is project state: the old shape is migration 0.50.0's to upgrade, never re-written here.
+  // 4) Best-effort: the platform firewall in the root flat ESLint config (src/platform/firewall — fail closed, its own
+  //    rule instance). Firebase is what brings a second platform, so it is what brings the firewall — and the
+  //    firewall arrives over projects nobody classified. Classify them in the same act (evidence only, every
+  //    inference reported, what nothing settles left for a human), and register the sync generator that classifies
+  //    the projects created later, before lint judges them (generators/platform-sync).
+  //    An EXISTING firewall is project state: the 0.49 shape is migration 0.50.0's to upgrade, never re-written here.
   const externals = platformExternals(tree);
   const nx = nxInvocation(tree).command;
-  const eslintConfigPath = 'eslint.config.mjs';
-  if (tree.exists(eslintConfigPath)) {
-    const current = tree.read(eslintConfigPath, 'utf8') ?? '';
-    const patched = insertPlatformFirewall(current, eslintConfigPath, externals, nx);
+  if (tree.exists(FIREWALL_CONFIG)) {
+    const current = tree.read(FIREWALL_CONFIG, 'utf8') ?? '';
+    const patched = insertPlatformFirewall(current, FIREWALL_CONFIG, externals, nx);
     if (patched && patched !== current) {
-      tree.write(eslintConfigPath, patched);
+      tree.write(FIREWALL_CONFIG, patched);
+      registerPlatformSync(tree);
       classifyUntaggedProjects(tree, { who: 'firebase-emulators', nx, externals });
     } else if (!patched) {
       logger.warn(
-        `[firebase-emulators] Could not auto-insert the platform firewall into ${eslintConfigPath}. ` +
-          `Add these entries to the @nx/enforce-module-boundaries depConstraints array, then classify every project ` +
-          `(${platformCommand(nx, '<project>')}):\n` +
-          firewallBlock(externals, nx).map((line) => `  ${line}`).join('\n'),
+        `[firebase-emulators] Could not insert the platform firewall into ${FIREWALL_CONFIG} (it needs an \`export default [ … ]\` ` +
+          `array, and TypeScript to read it). Add it by hand, then classify every project (${platformCommand(nx, '<project>')}):\n` +
+          firewallSnippet(externals, nx),
       );
     }
   }
@@ -472,14 +485,16 @@ function nxVersion(tree: Tree, rootPkg: { dependencies?: Record<string, string>;
 }
 
 /**
- * The Node major Cloud Functions runs: the project's own (.nvmrc) when Cloud Functions offers it as a GA runtime
- * (projected from the pinned firebase-tools — _utils/firebase-compat.ts), else the newest runtime below it.
+ * The Node major Cloud Functions runs: the project's own when Cloud Functions offers it as a GA runtime (projected from
+ * the pinned firebase-tools — _utils/firebase-compat.ts), else the NEAREST one — the newest below it (code written
+ * for Node N runs on an older runtime only as far as it avoids newer APIs, so the closest), else, for a project older
+ * than every runtime, the oldest (the closest above).
  */
 function functionsRuntimeMajor(tree: Tree): { major: string; project: string } {
   const project = projectNodeMajor(tree);
   if (FUNCTIONS_NODE_RUNTIMES.includes(project)) return { major: project, project };
   const below = [...FUNCTIONS_NODE_RUNTIMES].reverse().find((major) => Number(major) < Number(project));
-  return { major: below ?? FUNCTIONS_NODE_RUNTIMES[FUNCTIONS_NODE_RUNTIMES.length - 1], project };
+  return { major: below ?? FUNCTIONS_NODE_RUNTIMES[0], project };
 }
 
 /**
@@ -543,6 +558,17 @@ function ensureFunctionsProject(
 ): void {
   const { root } = functions;
   const offset = offsetFromRoot(root);
+  const buildOptions = functions.exists ? readProjectConfiguration(tree, functions.name).targets?.build?.options : undefined;
+  const ownEsbuildOptions =
+    buildOptions !== undefined && 'esbuildOptions' in buildOptions && JSON.stringify(buildOptions.esbuildOptions) !== HOUSE_ESBUILD_OPTIONS_0_49;
+  if (ownEsbuildOptions) {
+    logger.warn(
+      `[firebase-emulators] ${functions.name}:build keeps esbuild options of its own, so it does not run the house's ` +
+        `${ESBUILD_CONFIG} (Nx refuses esbuildOptions beside esbuildConfig) — its builds carry no inert emulator secrets ` +
+        `file; tools/emulators.sh still places one at launch. Fold your options into a config that spreads the house's and ` +
+        `point esbuildConfig at it.`,
+    );
+  }
   const runtime = functionsRuntimeMajor(tree);
   const template = (name: string) =>
     render(readFileSync(join(__dirname, name), 'utf8'))
@@ -602,7 +628,11 @@ function ensureFunctionsProject(
             deleteOutputPath: true,
             // No assets: the params files (.env, .env.<projectId>, .env.local) are read in place from the
             // source dir — firebase.json `functions.configDir` — by the emulator and deploy alike.
-            esbuildOptions: { outExtension: { '.js': '.js' } },
+            // The esbuild config (generator-owned) writes the emulator's INERT `.secret.local` into every build, so a
+            // rebuild mid-session, or a raw `firebase emulators:start`, never leaves a declared secret without one.
+            // …unless the project keeps esbuild options of its own (Nx refuses both): reported by migration 0.50.0
+            // read-functions-params-in-place, and named again below on every run.
+            ...(ownEsbuildOptions ? {} : { esbuildConfig: ESBUILD_CONFIG }),
           },
         },
         // Lints via the workspace flat config — no per-project ESLint island. Only where the workspace lints, and only
@@ -633,15 +663,51 @@ function ensureFunctionsProject(
   if (!tree.exists(`${root}/package.json`) && runtime.major !== runtime.project) {
     logger.warn(
       `[firebase-emulators] Cloud Functions has no Node ${runtime.project} runtime (GA: ${FUNCTIONS_NODE_RUNTIMES.join(', ')}), ` +
-        `so ${root}/package.json declares engines.node "${runtime.major}" while the project (.nvmrc) runs ${runtime.project}.`,
+        `so ${root}/package.json declares engines.node "${runtime.major}" while the project runs Node ${runtime.project} (${nodeVersionFile(tree)}).`,
     );
   }
-  ifAbsent(`${root}/package.json`, 'functions-package.json.tpl');
+  if (!tree.exists(`${root}/package.json`)) {
+    // A rendered manifest is a manifest write like any other: no floating version through a template either.
+    const floating = floatingAdditions(tree, {}, JSON.parse(template('functions-package.json.tpl')));
+    if (floating.length) throw new Error(`[firebase-emulators] functions-package.json.tpl renders a floating version: ${floating.join(', ')}.`);
+    ifAbsent(`${root}/package.json`, 'functions-package.json.tpl');
+  }
   reportRuntimeMismatch(tree, `${root}/package.json`, runtime);
   ifAbsent(`${root}/src/main.ts`, 'functions-main.ts.tpl');
   // The committed shape doc for local Functions secrets (.secret.local itself is gitignored).
   // User-owned once written — it grows with each `defineSecret` the functions add.
   ifAbsent(`${root}/.secret.local.example`, 'functions-secret.local.example.tpl');
+  requireConfigDirSupport(tree);
+}
+
+/** The inline esbuild options the house's functions build carried until 0.50.0 (the esbuildConfig replaced them). */
+export const HOUSE_ESBUILD_OPTIONS_0_49 = JSON.stringify({ outExtension: { '.js': '.js' } });
+
+/** The functions build's esbuild config — beside the module it loads, in tools/ (never an import across projects). */
+const ESBUILD_CONFIG = 'tools/functions-esbuild.config.cjs';
+
+/** The first firebase-tools whose EMULATOR reads firebase.json `functions.configDir` (deploy: 14.1x). Checked by
+ *  version against the published packages, 2026-10 — tools/emulator-secrets.cjs refuses to launch below it. */
+export const CONFIG_DIR_SINCE = '15.25.1';
+
+/**
+ * firebase.json points the params files at the functions source (`configDir`), and the build no longer copies `.env`
+ * into the bundle — so a firebase-tools that ignores `configDir` runs every function WITHOUT its params. The house
+ * pins one that reads it; a project's own older pin is named here on every upgrade (and refused at emulator launch).
+ */
+function requireConfigDirSupport(tree: Tree): void {
+  const spec = declaredSpec(tree, 'firebase-tools');
+  const version = spec?.match(/\d+\.\d+\.\d+/)?.[0];
+  if (!version) return;
+  const [a, b] = [version, CONFIG_DIR_SINCE].map((v) => v.split('.').map(Number));
+  const below = a[0] !== b[0] ? a[0] < b[0] : a[1] !== b[1] ? a[1] < b[1] : a[2] < b[2];
+  if (!below) return;
+  logger.warn(
+    `[firebase-emulators] package.json declares firebase-tools "${spec}", but the Functions emulator reads its params ` +
+      `(.env, .env.<projectId>, .env.local) through firebase.json functions.configDir only from firebase-tools ` +
+      `${CONFIG_DIR_SINCE} — below it every function runs without them, so tools/emulators.sh refuses to start the ` +
+      `functions emulator. Raise it to "${FIREBASE_TOOLS_VERSION}" (the house's).`,
+  );
 }
 
 /**
@@ -658,9 +724,9 @@ function reportRuntimeMismatch(tree: Tree, manifest: string, runtime: { major: s
   }
   if (engines === undefined || engines === runtime.major) return;
   logger.warn(
-    `[firebase-emulators] ${manifest} deploys Cloud Functions on Node "${engines}", but the project's Node (.nvmrc) is ` +
+    `[firebase-emulators] ${manifest} deploys Cloud Functions on Node "${engines}", but the project's Node (${nodeVersionFile(tree)}) is ` +
       `${runtime.project}${runtime.major !== runtime.project ? ` (nearest Cloud Functions runtime: ${runtime.major})` : ''}. ` +
-      `Set engines.node to "${runtime.major}" there — or .nvmrc to ${engines} — so the code you run locally is the code ` +
+      `Set engines.node to "${runtime.major}" there — or the project's Node to ${engines} — so the code you run locally is the code ` +
       `that is deployed.`,
   );
 }
@@ -695,7 +761,11 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
 
   ensureHouseProject(tree, 'firebase-emulators', suite, {
     projectType: 'application',
-    tags: ['platform:server'],
+    // `tooling` like the house's other tooling projects: the suite runs the emulators and holds rules and seeds —
+    // no code a product runs, so the platform classifier and the house's lint scope leave it alone.
+    // (`platform:server` predates that and stays: its files run in Node, and dropping it would fail lint on any
+    // suite file that imports a workspace project.)
+    tags: ['platform:server', 'tooling'],
     contract: { deploy: DEPLOY_CONTRACT },
     targets: {
       // The full suite. Depends on the functions build: firebase.json points the functions

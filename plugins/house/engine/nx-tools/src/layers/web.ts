@@ -88,7 +88,8 @@ export const web: LayerDescriptor = {
       { generator: 'serve-options', args: (ctx) => [`--project=${ctx.app}`], skip: nxAppMustExist },
     ],
     // port-claim first: the shared browser, the worktree-domains proxy and the engine all consult it.
-    // `dev` last: it seeds declarations for the apps the per-app steps (and other layers) just wired.
+    // `dev` last: it seeds declarations for the apps the per-app steps (and other layers) just wired. The `dev`
+    // generator owns tools/dev; `firebase` lists the same step (its suites claim their ports through the engine).
     workspace: [{ generator: 'port-claim' }, { generator: 'shared-browser' }, { generator: 'worktree-domains' }, { generator: 'dev' }],
   },
   docSections: ['web', 'ui'],

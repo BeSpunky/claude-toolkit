@@ -225,7 +225,7 @@
     "close-the-platform-firewall": {
       "version": "0.50.0",
       "layer": "firebase",
-      "description": "Close the platform firewall: each platform constraint gains onlyDependOnLibsWithTags (web/server \u2192 own + shared, shared \u2192 shared), a platform:shared constraint is added, and every untagged project is classified from evidence (reported, with the command for the ones it cannot classify) \u2014 an untagged library no longer slips firebase-admin into a web app.",
+      "description": "Close the platform firewall: the old ban-only constraints move out of the project's own module-boundaries rule into the firewall's own (`platform/enforce-module-boundaries`, `platformConstraints` \u2014 web/server \u2192 own + shared, shared \u2192 shared; tests, tool configs and SSR server code scoped; the project's own ban edits carried), the platform sync generator is registered on lint, and every untagged code project is classified from evidence \u2014 an application by its stack \u2014 or reported with the command that states it (never defaulted to shared). An untagged library no longer slips firebase-admin into a web app.",
       "implementation": "./src/migrations/0.50.0/close-the-platform-firewall"
     },
     "state-analog-spec-tsconfig": {
@@ -243,7 +243,7 @@
     "add-design-system-a11y": {
       "version": "0.50.0",
       "layer": "design-system",
-      "description": "Give an existing design system its accessibility mechanisms \u2014 seed styles/_utils/_a11y.scss and forward ds.visually-hidden($focusable) and ds.skip-link() from the public SASS API (never over a mixin of the same name) \u2014 and report how an existing app adopts the skip link and <main> landmark new apps are born with.",
+      "description": "Give an existing design system its accessibility mechanisms \u2014 the z-skip-link layer (above modals) in its tokens, styles/_utils/_a11y.scss seeded, and ds.visually-hidden($focusable), ds.skip-link() and ds.skip-target() forwarded from the public SASS API (never over a mixin of the same name, nor from an _a11y.scss of the project's own \u2014 both reported) \u2014 and report how an existing app adopts the skip link and <main> landmark new apps get.",
       "implementation": "./src/migrations/0.50.0/add-design-system-a11y"
     },
     "pin-floating-dependencies": {
@@ -255,13 +255,13 @@
     "declare-node-version": {
       "version": "0.50.0",
       "layer": "agent",
-      "description": "The project's Node major becomes ONE declared fact, `.nvmrc`, which the devcontainer composer and the Cloud Functions manifest now read \u2014 instead of the Node of whichever machine ran the last upgrade (or the newest image on the Docker fallback). Writes `.nvmrc` from the Node the devcontainer already runs (house.Dockerfile FROM typescript-node:<n>, else devcontainer.json's image, else its Node feature), so nothing moves. An existing `.nvmrc` is kept and a disagreement with the container reported (the next upgrade follows `.nvmrc`); a functions `engines.node` that disagrees is reported, never rewritten.",
+      "description": "The project's Node major becomes ONE declared fact, `.nvmrc`, which the devcontainer composer and the Cloud Functions manifest now read \u2014 instead of the Node of whichever machine ran the last upgrade (or the newest image on the Docker fallback). Writes `.nvmrc` from the Node the devcontainer already runs (its Node feature, else the image its build.dockerfile is FROM, else its image — read with the image tag grammar, so typescript-node:1-22-bookworm is Node 22; `lts` resolved as of 0.50.0 and said), so nothing moves; a devcontainer Node it cannot read is reported, never guessed. A project that already declares Node (`.nvmrc`, `.node-version`, Volta) gets no file; a disagreement with the container is reported; a functions `engines.node` that disagrees is reported, never rewritten.",
       "implementation": "./src/migrations/0.50.0/declare-node-version"
     },
     "firebase-cli-from-package": {
       "version": "0.50.0",
       "layer": "firebase",
-      "description": "The Firebase CLI becomes the project's exact `firebase-tools` devDependency (on PATH through node_modules/.bin in the container and in every Nx target), replacing the unpinned `ghcr.io/devcontainers-extra/features/firebase-cli` feature that installed whatever was newest on image-build day. Adds the devDependency (a `latest` one is pinned to what is installed); removes the feature \u2014 and its devcontainer-lock.json pin \u2014 where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config is kept. Reminds to install and rebuild.",
+      "description": "The Firebase CLI becomes the project's exact `firebase-tools` devDependency (on PATH through node_modules/.bin in the container and in every Nx target), replacing the unpinned `ghcr.io/devcontainers-extra/features/firebase-cli` feature that installed whatever was newest on image-build day. Adds the devDependency (a `latest` one is pinned to what is installed; where the project's @angular/fire peers a firebase-tools range the house pin is outside of — Angular 17–19 — the newest inside it, said, since npm would refuse the install); removes the feature \u2014 and its devcontainer-lock.json pin \u2014 where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config is kept. Reminds to install and rebuild.",
       "implementation": "./src/migrations/0.50.0/firebase-cli-from-package"
     },
     "refresh-pre-0.39-local-stub": {
@@ -273,7 +273,7 @@
     "gcloud-cli-from-image": {
       "version": "0.50.0",
       "layer": "firebase",
-      "description": "The Google Cloud CLI becomes a PINNED image package (`google-cloud-cli=<version>` from Google's apt repository, added with a `signed-by=` keyring) in the one cached package layer, replacing the `ghcr.io/jajera/features/gcloud-cli` feature, which downloaded whatever Google served on image-build day. Removes the feature \u2014 and its devcontainer-lock.json pin \u2014 where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config/gcloud is kept. Reminds to rebuild.",
+      "description": "The Google Cloud CLI becomes a PINNED archive in the image (Google's versioned release archive, sha256-checked, linked into /usr/local/bin) in the one cached package layer, replacing the `ghcr.io/jajera/features/gcloud-cli` feature, which downloaded whatever Google served on image-build day. Removes the feature \u2014 and its devcontainer-lock.json pin \u2014 where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config/gcloud is kept. Reminds to rebuild.",
       "implementation": "./src/migrations/0.50.0/gcloud-cli-from-image"
     },
     "read-functions-params-in-place": {

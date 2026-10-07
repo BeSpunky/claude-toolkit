@@ -23,10 +23,17 @@
 //      because configDir now reads that file in place and the copy is redundant.
 // No functions block deploys this project (no firebase.json, or none whose source is its bundle) → nothing can read
 // the params in place, so the asset — the only channel they have — STAYS, and that is reported.
+//
+// THE SAME BUILD, THE SAME RELEASE: 0.50.0 also moves the build's esbuild options from the inline `esbuildOptions`
+// (`{ outExtension: { '.js': '.js' } }`) to the generator-owned `esbuildConfig` (tools/functions-esbuild.config.cjs),
+// whose plugin writes the Functions emulator's inert secrets into every build. Nx refuses a target with both, and a
+// record-less merge would KEEP the old key — so the house's own inline options are removed here. Options the project
+// changed are its own: left, and reported (the generator then leaves the build on them, without the plugin).
 import { type Tree, logger, readProjectConfiguration } from '@nx/devkit';
 import { houseProjectHome, updateProjectConfigInPlace } from '../../generators/_utils/project-files';
 import { updateJsonInPlace } from '../../generators/_utils/json-edits';
 import { resolveAppsDir } from '../../generators/_utils/workspace-layout';
+import { HOUSE_ESBUILD_OPTIONS_0_49 } from '../../generators/firebase-emulators/generator';
 
 const TAG = '[migrate 0.50.0 read-functions-params-in-place]';
 
@@ -39,7 +46,7 @@ export default function readFunctionsParamsInPlace(tree: Tree): void {
   if (!functions.exists) return;
   const config = readProjectConfiguration(tree, functions.name);
   const options = config.targets?.build?.options as { assets?: Asset[] } | undefined;
-  if (!options || !Array.isArray(options.assets)) return;
+  if (!options) return;
 
   const isHouseEntry = (asset: Asset) =>
     typeof asset === 'object' &&
@@ -52,6 +59,8 @@ export default function readFunctionsParamsInPlace(tree: Tree): void {
   const mentionsEnv = (asset: Asset) =>
     (typeof asset === 'string' ? asset : String(asset?.glob ?? '')).split('/').pop()?.startsWith('.env') ?? false;
 
+  retireHouseEsbuildOptions(tree, functions.root, functions.name);
+  if (!Array.isArray(options.assets)) return;
   const kept = options.assets.filter((asset) => !isHouseEntry(asset));
   if (kept.length !== options.assets.length && !readsParamsInPlace(tree, functions.root)) {
     logger.warn(
@@ -107,4 +116,24 @@ function readsParamsInPlace(tree: Tree, root: string): boolean {
   });
   if (wrote) logger.info(`${TAG} firebase.json → the functions block deploying ${bundle} now reads its params from ${trimSlashes(root)} (configDir).`);
   return found;
+}
+
+function retireHouseEsbuildOptions(tree: Tree, root: string, name: string): void {
+  const options = readProjectConfiguration(tree, name).targets?.build?.options as { esbuildOptions?: unknown } | undefined;
+  if (!options || !('esbuildOptions' in options)) return;
+  if (JSON.stringify(options.esbuildOptions) !== HOUSE_ESBUILD_OPTIONS_0_49) {
+    logger.warn(
+      `${TAG} ${name}:build has esbuild options of its own (${JSON.stringify(options.esbuildOptions)}) — left. The house's build ` +
+        `now runs tools/functions-esbuild.config.cjs (esbuildConfig), whose plugin writes the Functions emulator's inert ` +
+        `secrets into every build; Nx cannot take both. Fold yours into a config that spreads the house's ` +
+        `(\`{ ...require('./functions-esbuild.config.cjs'), …yours }\`), point esbuildConfig at it and drop esbuildOptions — ` +
+        `until then the build runs without that plugin (tools/emulators.sh still places the file at launch).`,
+    );
+    return;
+  }
+  updateProjectConfigInPlace(tree, root, (onDisk) => {
+    const build = onDisk.targets?.build?.options as { esbuildOptions?: unknown } | undefined;
+    if (build) delete build.esbuildOptions;
+  });
+  logger.info(`${TAG} ${name}:build: the inline esbuildOptions gave way to the house esbuildConfig (tools/functions-esbuild.config.cjs).`);
 }

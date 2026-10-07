@@ -20,7 +20,7 @@ FAILED=0
 ok() { if [ "$2" = 1 ]; then printf '  ok   %-70s\n' "$1"; else printf '  FAIL %-70s\n' "$1"; FAILED=1; fi }
 
 # ── emulator-ports.mjs, as the generator renders it ─────────────────────────────────────────────────
-node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$TMP"
+node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$TMP"
 printf '{ "emulators": { "auth": { "port": 9099 }, "firestore": { "port": 8080, "websocketPort": 9150 }, "ui": { "enabled": true, "port": 4000 } } }\n' > "$TMP/firebase.json"
 export FORCE_COLOR=1
 

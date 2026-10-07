@@ -77,6 +77,8 @@ stop() {
 trap 'stop TERM' TERM
 trap 'stop INT' INT
 echo "All emulators ready"
+# A crash that leaves its JVM behind (firebase-tools does not always wait for what it started).
+if [ -n "${FAKE_ABANDON_JVM:-}" ]; then sleep 1; echo "firebase-tools crashed"; exit 1; fi
 while :; do
   wait "$JVM"
   # The "JVM" died without us stopping it: a signal reached it directly. firebase-tools calls that fatal.
@@ -91,7 +93,7 @@ mkws() {   # mkws <name> — a workspace with the rendered script, stubs and a f
   sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}||g' -e 's|{{functionsRoot}}|apps/fn|g' -e 's|{{functionsDist}}|dist/apps/fn|g' "$TPL" > "$d/tools/emulators.sh"
   node "$ROOT/tools/test-scaffold/render-engine.mjs" "$d"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/emulator-data.sh"
-  node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$d"
+  node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$d"
   printf '{ "emulators": { "auth": { "port": 9099 }, "firestore": { "port": 8080 } } }\n' > "$d/firebase.json"
   printf '%s' "$d"
 }
@@ -185,6 +187,26 @@ for fb in $(pgrep -f "$TMP/bin/firebase"); do   # this workspace's fake firebase
 done
 gone "$P" 100; CODE="$(rc "$W")"
 ok "crash: the script exits non-zero (got $CODE) and names the suite's log" "$([ -n "$CODE" ] && [ "$CODE" -ne 0 ] && grep -q 'CRASHED.*its log: .*emulators.log' "$W/out.log" && echo 1 || echo 0)"
+
+# ── 6b. What the old reaper hunted (an orphaned emulator JVM) is never left behind, and never taken from a live suite ──
+# The reaper decided by PPID == 1 whether to kill; the stack identity replaces it. A suite's processes are all in its
+# keeper's process group: when firebase-tools dies leaving its JVM, the keeper ends the JVM itself; when the keeper is
+# killed outright, the stack's record stays ORPHANED and `tools/dev/dev stop` ends exactly those processes. A LIVE
+# suite is never touched by a second start — the claim refuses (the "twice" case above).
+fake_procs() { local p n=0; for p in $(pgrep -f "$TMP/bin/firebase|jvm"); do [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$1" ] && n=$((n + 1)); done; echo "$n"; }
+none_left() { for _ in $(seq 1 50); do [ "$(fake_procs "$1")" = 0 ] && return 0; sleep 0.1; done; return 1; }   # a SIGKILLed process takes a moment to be reaped
+W="$(mkws strand)"; P="$(FAKE_ABANDON_JVM=1 start "$W")"; STARTED+=("$P")
+ready "$W" >/dev/null
+gone "$P" 100
+ok "orphan: a JVM left by a crashed firebase-tools is ended by the keeper, and said so" "$(none_left "$W" && grep -qE 'left [0-9]+ process\(es\) running after firebase-tools exited' "$W/.bespunky/run/logs/firebase@0.emulators.log" && echo 1 || echo 0)"
+W="$(mkws keeperkill)"; P="$(start "$W")"; STARTED+=("$P")
+ready "$W" >/dev/null
+KEEPER="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$W/.bespunky/run/firebase@0/detached/emulators.json")"
+kill -KILL "$KEEPER"; gone "$P" 100
+PS="$(cd "$W" && DEV_OWNER=test node tools/dev/dev.mjs ps 2>&1)"
+ok "orphan: a keeper killed outright leaves the stack ORPHANED (its record the handle), not forgotten" "$(grep -q 'firebase@0 .*ORPHANED' <<<"$PS" && [ "$(fake_procs "$W")" -gt 0 ] && echo 1 || echo 0)"
+OUT="$(cd "$W" && DEV_OWNER=test timeout 30 node tools/dev/dev.mjs stop firebase --offset=0 2>&1)"
+ok "orphan: dev stop ends exactly what it left, and the stack is released" "$(none_left "$W" && gone_dir "$W/.bespunky/run/firebase@0" && echo 1 || echo 0)"
 
 # ── 7. Its stack's serve was killed first (Nx's force-kill after a Ctrl+C mid-export): the keeper, last one out, ──
 # removes the stack's run record and state dir — through the engine's own rule, so never a stack that is live.

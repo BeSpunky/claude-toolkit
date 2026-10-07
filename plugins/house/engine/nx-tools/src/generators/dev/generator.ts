@@ -1,5 +1,8 @@
 // House generator: the stack-free dev engine (`tools/dev/`) + the declarations of the apps the house serves.
 //
+// The ONE owner of tools/dev. Two layers list its step — `web` (the dev loop) and `firebase` (every emulator suite claims
+// its ports through the engine's stack identity) — and the planner runs a step two layers share once.
+//
 // Two jobs, both on every sync:
 //   1. WRITE THE ENGINE (owned, class A) — tools/dev/dev (a POSIX shim), dev.mjs and lib/*.mjs. Node built-ins
 //      only: it must run in a Python or Go repo with no node_modules. Rewritten every run, never edited in the
