@@ -172,8 +172,10 @@ function straysUnder(dir) {
 
 // ── the record ────────────────────────────────────────────────────────────────────────────────────────────
 const results = [];
-function record(step, check, ok, { ms = 0, detail = '', log = '' } = {}) {
-  const status = ok === null ? 'SKIP' : ok ? 'PASS' : 'FAIL';
+// BASE: a failure of the RELEASED toolkit's own output (the seeded consumer before the upgrade) — the reference the
+// toolkit under test is compared against, reported but never a failure of this run: the released code cannot be fixed.
+function record(step, check, ok, { ms = 0, detail = '', log = '', reference = false } = {}) {
+  const status = ok === null ? 'SKIP' : ok ? 'PASS' : reference ? 'BASE' : 'FAIL';
   results.push({ step, check, status, ms, detail, log });
   console.log(`  ${status.padEnd(4)}  ${step} · ${check}${detail ? ` — ${detail}` : ''}`);
   return ok;
@@ -498,7 +500,7 @@ async function verify(step, dir, prefix = '', before = null) {
         detail += fresh.length === failed.length ? ' (all new since the baseline)' : fresh.length ? ` (NEW since the baseline: ${fresh.join(', ')})` : ' (every one already failed before the upgrade)';
       }
     }
-    record(step, `${prefix}nx run-many -t ${target}`, r.code === 0, { ms: r.ms, log: r.log, detail });
+    record(step, `${prefix}nx run-many -t ${target}`, r.code === 0, { ms: r.ms, log: r.log, detail, reference: !!prefix });
   }
   return failedSets;
 }
@@ -558,7 +560,7 @@ function summary() {
   console.log(`\n${line('STEP', 'CHECK', 'RES', 'TIME', 'DETAIL')}\n${'-'.repeat(w.step + w.check + 24)}`);
   for (const r of results) console.log(line(r.step, r.check, r.status, r.ms ? fmt(r.ms) : '', r.detail));
   const n = (s) => results.filter((r) => r.status === s).length;
-  console.log(`\n${n('FAIL') ? 'FAIL' : 'PASS'} — ${n('PASS')} passed, ${n('FAIL')} failed, ${n('SKIP')} skipped in ${fmt(Date.now() - T0)}`);
+  console.log(`\n${n('FAIL') ? 'FAIL' : 'PASS'} — ${n('PASS')} passed, ${n('FAIL')} failed, ${n('SKIP')} skipped${n('BASE') ? `, ${n('BASE')} failing in the RELEASED baseline only (reference, not this run's)` : ''} in ${fmt(Date.now() - T0)}`);
   console.log(`toolkit under test: ${TOOLKIT} (nx-tools ${TOOLKIT_VERSION}); released: ${opts.released}`);
   console.log(`logs: ${LOGS}${opts.keep ? `\nkept projects: ${CONSUMERS}` : ''}`);
 }
