@@ -5,6 +5,12 @@
 // declaration as it shipped (4f01d00), a tab-indented one, a file that is not JSON (left, reported), and no file.
 // The ENGINE is the oracle: the result must be what `branches.mjs write` writes for the rewritten model, carry no
 // outdated or invalid field (model.mjs `check`), and keep a projection the engine would compute unchanged.
+//
+// No historical shapes: the rung skips only a `deploys` that is not a string, and before 0.50.0 the engine knew no
+// other non-string than `null` (git show 9bfaf41:plugins/workflow/skills/branch-and-release/scripts/lib/model.mjs —
+// presets write `deploys: null`, `check` refuses anything but a string or null, unchanged through 4f01d00). So no
+// earlier shape can carry the "already object" marker; the string a person filled in is the only input, and
+// SHIPPED below is a real one.
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO, requireFromRepo } from '../../test-support/payload.mjs';

@@ -273,6 +273,43 @@ function green(r) {
 }
 const has = (r, ref) => r.git('for-each-ref', ref) !== '';
 
+/**
+ * Fakes for `evidence --app-hosting`, on a bin dir that holds only git (so nothing else on the host answers):
+ * `exe(name, body)` writes a fake CLI (shell builtins only — nothing else is on PATH); `traffic(map)` answers the App Hosting traffic API through a fetch stub
+ * (NODE_OPTIONS --import, inherited by whatever process makes the call), backend id → live branch. The stub
+ * refuses unless the token arrives in the Authorization header and in no process's argv; every fake CLI logs its
+ * argv to `argvLog`, so a test can assert the token never reached one.
+ */
+function appHostingFakes() {
+  const bin = path.join(SCRATCH, `fakebin-${seq}`);
+  fs.mkdirSync(bin);
+  fs.symlinkSync(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim(), path.join(bin, 'git'));
+  const argvLog = path.join(bin, 'argv.log');
+  const exe = (name, body) => {
+    fs.writeFileSync(path.join(bin, name), `#!/bin/sh\necho "${name} $*" >> '${argvLog}'\n${body}\n`);
+    fs.chmodSync(path.join(bin, name), 0o755);
+  };
+  const stub = path.join(bin, 'fetch-stub.mjs');
+  fs.writeFileSync(stub, `
+const live = JSON.parse(process.env.FAKE_TRAFFIC ?? '{}');
+globalThis.fetch = async (url, init = {}) => {
+  const auth = new Headers(init.headers).get('authorization');
+  if (auth !== 'Bearer s3cr3t-bearer') return new Response('{}', { status: 401 });
+  if ([...process.argv, ...process.execArgv].some((a) => a.includes('s3cr3t-bearer'))) throw new Error('token in argv');
+  const m = /\\/backends\\/([^/]+)\\/traffic$/.exec(String(url));
+  if (!m || !(m[1] in live)) return new Response('{}', { status: 404 });
+  return new Response(JSON.stringify({ rolloutPolicy: live[m[1]] === null ? {} : { codebaseBranch: live[m[1]] } }), { status: 200 });
+};
+`);
+  const env = { ...ENV, PATH: bin, NODE_OPTIONS: `--import=${stub}` };
+  return {
+    exe,
+    env,
+    traffic: (map) => { env.FAKE_TRAFFIC = JSON.stringify(map); },
+    argv: () => (fs.existsSync(argvLog) ? fs.readFileSync(argvLog, 'utf8') : ''),
+  };
+}
+
 // -------------------------------------------------------------------------------------------------------------
 const cases = {
   'every preset expands, validates and writes the §2 projection'() {
@@ -729,6 +766,24 @@ const cases = {
     assert.equal(st.data.projection.deploys.length, 2, 'status --json carries the bindings to readers');
   },
 
+  'deploys: a ci binding only on protected, non-maintained lines, one line per environment — refused with why and what instead'() {
+    const r = repo();
+    r.branch('development');
+    const ci = (environment) => ({ ci: { environment, providers: { firebase: 'default' } } });
+    const hot = r.proposed('gitflow', [], (d) => { d.hotfixes.deploys = ci('hot'); d.tags[0].deploys = ci('tagged'); });
+    const v = r.run(['validate', hot]);
+    assert.equal(v.code, 1);
+    assert.match(v.err, /hotfixes\.deploys\.ci: hotfix lines are work branches[\s\S]*Bind `ci` on the protected line the hotfix lands on \("main"\)/);
+    assert.match(v.err, /tags\[0\]\.deploys\.ci: a tag is not a protected line[\s\S]*Bind `ci` on the line the tag is on \("main"\)/);
+    const maintained = r.proposed('maintained-releases', [], (d) => { d.releases.deploys = ci('lts'); });
+    assert.match(r.run(['validate', maintained]).err, /releases\.deploys\.ci: maintained release lines are each their own production/);
+    const twice = r.proposed('gitflow', [], (d) => { d.stages[0].deploys = ci('production'); d.releases.deploys = ci('production'); });
+    assert.match(r.run(['validate', twice]).err, /releases\.deploys\.ci\.environment: "production" is already bound by stages\[0\]\.deploys — one line per environment/);
+    const fine = r.proposed('gitflow', [], (d) => { d.integration.deploys = ci('dev'); d.stages[0].deploys = ci('production'); d.releases.deploys = ci('uat'); d.hotfixes.deploys = { note: 'deployed when landed on main' }; });
+    const ok = r.run(['validate', fine]);
+    assert.equal(ok.code, 0, ok.err);
+  },
+
   'deploys: a note alone projects nothing — a { note } declaration does not read as drifted'() {
     const r = repo();
     r.branch('development');
@@ -835,6 +890,39 @@ const cases = {
     assert.equal(r.run(['describe']).code, 0);
   },
 
+  'deploys outdated on the integration line: "lands" only for a branch carrying the exact rewrite at every outdated path, otherwise clean'() {
+    const r = repo();
+    r.branch('development');
+    r.declare('two-line');
+    const base = r.model();
+    const legacy = structuredClone(base);
+    legacy.integration.deploys = 'preview channel';
+    legacy.stages[0].deploys = 'App Hosting auto-rollout';
+    r.write('.bespunky/branches.json', `${JSON.stringify(legacy, null, 2)}\n`);
+    r.git('commit', '-qam', 'legacy notes'); // on development: two outdated paths in force
+    const remedy = (branch, edit) => {
+      r.git('switch', '-q', '-c', branch, 'development');
+      const m = structuredClone(legacy);
+      edit(m);
+      r.write('.bespunky/branches.json', `${JSON.stringify(m, null, 2)}\n`);
+      r.git('commit', '-qam', branch);
+      const st = r.json(['status', '--json']);
+      assert.equal(st.code, 0, st.err);
+      return st.data.outdated.resolution;
+    };
+    const rewritten = (m) => {
+      m.integration.deploys = { note: 'preview channel' };
+      m.stages[0].deploys = { note: 'App Hosting auto-rollout' };
+    };
+
+    assert.equal(remedy('feat/predates', (m) => { delete m.integration.deploys; delete m.stages[0].deploys; }), 'rewrite', 'no deploys at all is not the rewrite');
+    assert.equal(remedy('feat/other-note', (m) => { rewritten(m); m.stages[0].deploys = { note: 'something else' }; }), 'rewrite', 'a different note is not the rewrite');
+    assert.equal(remedy('feat/bound', (m) => { rewritten(m); m.stages[0].deploys.ci = { environment: 'production', providers: {} }; }), 'rewrite', 'more than the rewrite is not the rewrite');
+    assert.equal(remedy('feat/half', (m) => { m.stages[0].deploys = { note: 'App Hosting auto-rollout' }; }), 'rewrite', 'one of two outdated paths rewritten');
+    assert.equal(remedy('feat/broken', (m) => { rewritten(m); m.stages[0].bogus = 1; }), 'rewrite', 'a copy with other errors does not land clean');
+    assert.equal(remedy('feat/upgraded', rewritten), 'lands', 'the exact rewrite at every path, otherwise clean');
+  },
+
   'evidence --app-hosting: backends, live branches and drift against the declared bindings; opt-in and degrading'() {
     const r = repo();
     r.write('.firebaserc', JSON.stringify({ projects: { default: 'acme-prod' } }));
@@ -842,16 +930,13 @@ const cases = {
     r.git('commit', '-q', '-m', 'firebase');
     r.branch('development');
     r.declare('two-line', [], (d) => { d.stages[0].deploys = { appHosting: [{ project: 'default', backend: 'web' }, { project: 'default', backend: 'gone' }] }; });
-    const bin = path.join(SCRATCH, `fakebin-${seq}`);
-    fs.mkdirSync(bin);
     const backends = { status: 'success', result: [
       { name: 'projects/acme-prod/locations/us-central1/backends/web', codebase: { repository: 'projects/acme-prod/locations/us-central1/connections/c/gitRepositoryLinks/acme-shop', rootDirectory: '/apps/shop' }, environment: 'production' },
       { name: 'projects/acme-prod/locations/europe-west4/backends/admin', codebase: { repository: 'projects/acme-prod/locations/europe-west4/connections/c/gitRepositoryLinks/acme-shop' } },
       { name: 'projects/acme-prod/locations/us-central1/backends/local' },
     ] };
-    const exe = (name, body) => { fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`); fs.chmodSync(path.join(bin, name), 0o755); };
-    exe('firebase', `[ "$1" = apphosting:backends:list ] && [ "$3" = acme-prod ] && cat <<'J'\n${JSON.stringify(backends)}\nJ`);
-    const env = { ...ENV, PATH: `${bin}:${ENV.PATH}` };
+    const { exe, env, traffic, argv } = appHostingFakes();
+    exe('firebase', `[ "$1" = apphosting:backends:list ] && [ "$3" = acme-prod ] && printf '%s\\n' '${JSON.stringify(backends)}'`);
 
     // Opt-in: without the flag the CLI is never asked.
     const off = r.json(['evidence', '--json']).data.facts;
@@ -867,19 +952,78 @@ const cases = {
     assert.equal(facts.find((f) => f.subject === 'acme-prod/web live branch').tag, 'unobservable');
     assert.match(facts.find((f) => f.area === 'drift' && f.subject === 'main → default/gone').value, /no such backend/);
 
-    // With a token, the live branch is read from the API; a backend on another branch, or undeclared, is drift.
-    exe('gcloud', 'echo tok');
-    exe('curl', 'case "$*" in *backends/web/traffic*) echo \'{"rolloutPolicy":{"codebaseBranch":"development"}}\';; *backends/admin/traffic*) echo \'{"rolloutPolicy":{"codebaseBranch":"main"}}\';; *) exit 22;; esac');
+    // With a token, the live branch is read from the API — the token in a header, never on any command line;
+    // a backend on another branch, or undeclared, is drift.
+    exe('gcloud', 'echo s3cr3t-bearer');
+    exe('curl', 'exit 22');
+    traffic({ web: 'development', admin: 'main' });
     facts = JSON.parse(r.run(['evidence', '--json', '--app-hosting'], { env }).out).facts;
+    assert.doesNotMatch(argv(), /s3cr3t-bearer/, 'the bearer token reached a command line');
     assert.equal(facts.find((f) => f.subject === 'acme-prod/web live branch').value, 'development');
     assert.match(facts.find((f) => f.area === 'drift' && f.subject === 'main → default/web').value, /rolls out from development/);
     assert.match(facts.find((f) => f.area === 'drift' && f.subject === 'acme-prod/admin').value, /no line's deploys declares it/);
 
-    // A CLI that is absent or logged out degrades to a question, never an error.
-    exe('firebase', 'echo "not logged in" >&2; exit 1');
+    // A logged-out CLI (firebase-tools answers --json with its error on stdout, exit 1) degrades to a question.
+    exe('firebase', `echo '{ "status": "error", "error": "Failed to authenticate, have you run firebase login?" }'; exit 1`);
     const res = r.run(['evidence', '--json', '--app-hosting'], { env });
     assert.equal(res.code, 0);
     assert.equal(JSON.parse(res.out).facts.find((f) => f.subject === 'acme-prod').tag, 'unobservable');
+  },
+
+  'evidence --app-hosting: why the firebase CLI cannot see is stated — not installed, not logged in, or Firebase\'s own error'() {
+    const r = repo();
+    r.write('.firebaserc', JSON.stringify({ projects: { default: 'acme-prod' } }));
+    r.git('add', '-A');
+    r.git('commit', '-q', '-m', 'firebase');
+    const { exe, env } = appHostingFakes();
+    const why = () => {
+      const res = r.run(['evidence', '--json', '--app-hosting'], { env });
+      assert.equal(res.code, 0, res.err);
+      const f = JSON.parse(res.out).facts.find((x) => x.subject === 'acme-prod');
+      assert.equal(f.tag, 'unobservable');
+      return f.value;
+    };
+
+    const missing = why();
+    assert.match(missing, /not installed/);
+    assert.doesNotMatch(missing, /logged in|login/);
+
+    exe('firebase', `echo '{ "status": "error", "error": "Failed to authenticate, have you run firebase login?" }'; exit 1`);
+    const loggedOut = why();
+    assert.match(loggedOut, /not logged in.*firebase login/);
+    assert.doesNotMatch(loggedOut, /not installed/);
+
+    exe('firebase', `printf '%s' '{ "status": "error", "error": "Request to https://firebaseapphosting.googleapis.com/v1beta/projects/acme-prod/locations/-/backends had HTTP Error: 403, Firebase App Hosting API has not been used in project acme-prod before or it is disabled.\\nEnable it by visiting the console." }'; exit 1`);
+    const disabled = why();
+    assert.match(disabled, /HTTP Error: 403, Firebase App Hosting API has not been used in project acme-prod before or it is disabled\./);
+    assert.doesNotMatch(disabled, /Enable it|not installed|logged in/);
+
+    exe('firebase', `echo 'Error: The caller does not have permission' >&2; echo 'second line' >&2; exit 2`);
+    const denied = why();
+    assert.match(denied, /The caller does not have permission/);
+    assert.doesNotMatch(denied, /second line|not installed|logged in/);
+  },
+
+  'evidence --app-hosting: a pattern binding (release/*) matches its live branch as a glob — * never crosses /'() {
+    const r = repo();
+    r.write('.firebaserc', JSON.stringify({ projects: { default: 'acme-prod' } }));
+    r.git('add', '-A');
+    r.git('commit', '-q', '-m', 'firebase');
+    r.branch('develop');
+    r.declare('gitflow', [], (d) => { d.releases.deploys = { appHosting: [{ project: 'default', backend: 'rc' }, { project: 'default', backend: 'deep' }] }; });
+    const repoLink = 'projects/acme-prod/locations/us-central1/connections/c/gitRepositoryLinks/acme-shop';
+    const backends = { status: 'success', result: ['rc', 'deep', 'stray'].map((id) => ({ name: `projects/acme-prod/locations/us-central1/backends/${id}`, codebase: { repository: repoLink } })) };
+    const { exe, env, traffic } = appHostingFakes();
+    exe('firebase', `printf '%s\\n' '${JSON.stringify(backends)}'`);
+    exe('gcloud', 'echo s3cr3t-bearer');
+    traffic({ rc: 'release/1.4', deep: 'release/1.4/rc1', stray: 'release/2.0' });
+    const facts = JSON.parse(r.run(['evidence', '--json', '--app-hosting'], { env }).out).facts;
+    const drift = facts.filter((f) => f.area === 'drift').map((f) => f.subject);
+    assert.ok(!drift.includes('release/* → default/rc'), `release/1.4 is a release line: ${drift}`);
+    assert.ok(!drift.includes('acme-prod/rc'), `a matching pattern binding declares it: ${drift}`);
+    assert.ok(drift.includes('release/* → default/deep'), `release/1.4/rc1 is not release/*: ${drift}`);
+    assert.ok(!drift.includes('acme-prod/deep'), `declared (by release/*), its drift is the binding's own — not reported twice: ${drift}`);
+    assert.ok(drift.includes('acme-prod/stray'), `an unbound backend is still undeclared: ${drift}`);
   },
 
   'evidence: shipped templates are not bindings — *.tpl, node_modules, generator files/ — and the skip is stated'() {

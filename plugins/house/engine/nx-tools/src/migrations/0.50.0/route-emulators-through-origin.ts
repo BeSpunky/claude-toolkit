@@ -117,23 +117,41 @@ function projectAt(tree: Tree, root: string): string | undefined {
 
 // ── the house's words this change made false ────────────────────────────────────────────────────────────────
 
-/** Each: the file, the house's 0.49 lines (verbatim, any indentation), and what replaces them at that indentation. */
-const RETIRED_TEXT: Array<{ file: string; old: string[]; next: string[]; what: string }> = [
+/**
+ * Each: the file, every shape the house shipped of the retired lines (verbatim, any indentation — each shape named by
+ * the sha that wrote it), and what replaces them at that indentation. A file is appended to once and never rewritten,
+ * so the OLDEST shape lives on as long as the newest.
+ */
+const RETIRED_TEXT: Array<{ file: string; old: string[][]; next: string[]; what: string }> = [
   {
     file: '.gitignore',
     what: 'the port-offset stacks comment (the flag is --port-offset now)',
-    old: ['# Isolated port-offset stacks (`<app>:serve --portOffset`): each gets its own data dir'],
+    old: [
+      ['# Isolated port-offset stacks (`<app>:serve --portOffset`): each gets its own data dir'], // 60bd79f (0.3.0) → 0.49
+      ['# Isolated port-offset stacks (`<app>:serve-worktree --portOffset`): each gets its own data dir'], // ec7abcb (0.2.x)
+    ],
     next: ['# Isolated port-offset stacks (`nx serve <app> --port-offset=N`): each gets its own data dir'],
   },
   {
     file: '.devcontainer/devcontainer.json',
     what: 'the dev-server port comment (the app no longer needs its emulator ports on the same host number)',
     old: [
-      '// Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a',
-      '// host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.',
-      '// KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;',
-      '// real Google OAuth is pinned to whichever holds the dev-server port). The shared browser runs INSIDE the',
-      '// container and reaches them on loopback, so it works for every container.',
+      [
+        // 0.36 → 0.49
+        '// Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a',
+        '// host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.',
+        '// KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;',
+        '// real Google OAuth is pinned to whichever holds the dev-server port). The shared browser runs INSIDE the',
+        '// container and reaches them on loopback, so it works for every container.',
+      ],
+      [
+        // 7aafe46 (0.35.0 – 0.36.x): layers/firebase.ts, wrapped on `:4200`
+        '// Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a',
+        '// host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.',
+        '// KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;',
+        '// real Google OAuth is pinned to whichever holds :4200). The shared browser runs INSIDE the container and',
+        '// reaches them on loopback, so it works for every container.',
+      ],
     ],
     next: [
       "// The app reaches every Firebase emulator through the dev server's own origin (proxy.conf.mjs relays it),",
@@ -146,12 +164,13 @@ const RETIRED_TEXT: Array<{ file: string; old: string[]; next: string[]; what: s
 ];
 
 function retellRetiredText(tree: Tree): void {
-  for (const { file, old, next, what } of RETIRED_TEXT) {
+  for (const { file, old: shapes, next, what } of RETIRED_TEXT) {
     if (!tree.exists(file)) continue;
     const text = tree.read(file, 'utf8') ?? '';
     const eol = text.includes('\r\n') ? '\r\n' : '\n';
     const lines = text.split(eol);
-    const at = lines.findIndex((_, i) => old.every((line, k) => lines[i + k]?.trim() === line));
+    let old: string[] = [];
+    const at = lines.findIndex((_, i) => (old = shapes.find((shape) => shape.every((line, k) => lines[i + k]?.trim() === line)) ?? []).length > 0);
     if (at < 0) continue;
     const indent = /^[ \t]*/.exec(lines[at])![0];
     lines.splice(at, old.length, ...next.map((line) => `${indent}${line}`));

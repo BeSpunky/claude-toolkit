@@ -1,13 +1,18 @@
 // FROZEN — the house targets @bespunky/nx-tools 0.49.2 wrote, captured from a stock project it scaffolded
 // (`house.sh new --preset=angular --firebase --staging coach web`, apps/ + tools/ layout, 2026-10-07) — never edited.
 //
-// WHY. The three-way merge (./house-targets.ts) needs a base: what the house last wrote. From 0.50.0 that is the
-// committed record (.bespunky/house-targets.json). A project upgrading from 0.49.x has none, so a key the HOUSE
-// changed since looked exactly like a hand edit, and every such project was told its value was "replaced" — crying
-// wolf on the very report meant to catch a lost edit. 0.49.2 is the last release that wrote no record, so its
-// output is the base of the first record-less run: a value equal to it is the house's own, replaced silently.
-// Anything else is still reported. Keyed by the house project's canonical name.
+// DATA OF ONE RUNG: ./record-house-targets.ts reads it to write the FIRST house-targets record of a project coming
+// from before 0.50.0, and nothing else ever does. That is the whole story for later versions: from 0.50.0 the record
+// is written by the generators on every run, so no release after this one needs a baseline again — a project with no
+// record is then one whose record was deleted, and the merge says what it cannot tell instead of guessing.
+//
+// Captured in ONE layout, so the rung renders it for the project's own (CAPTURED below → where the functions
+// project actually lives and what it is called), and records a value only where the project's still equals it.
+// Keyed by the house project's canonical name.
 import type { TargetConfiguration } from '@nx/devkit';
+
+/** Where and under what name the functions project was when this was captured. */
+export const CAPTURED = { functionsRoot: 'apps/functions', functionsName: 'functions' } as const;
 
 export const HOUSE_TARGETS_AS_OF_0_49_2: Readonly<Record<string, Record<string, TargetConfiguration>>> = {
   "functions": {

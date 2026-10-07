@@ -1,7 +1,8 @@
-// THE FIRST 0.50 UPGRADE LEAVES NO RETIRED KEY BEHIND. 0.50.0 made house targets a three-way merge against a record
-// (`.bespunky/house-targets.json`) — and every existing project meets it WITHOUT a record, where a key the house no
-// longer declares cannot be told from one the project added, so it is kept. Every key a 0.50 change DROPPED from a
-// house-owned shape is therefore only gone if the generator's re-assertion removes it or a 0.50.0 rung does:
+// THE FIRST 0.50 UPGRADE LEAVES NO RETIRED KEY BEHIND, AND CRIES NO WOLF. 0.50.0 made house targets a three-way merge
+// against a record (`.bespunky/house-targets.json`) — and every existing project meets it WITHOUT a record. The
+// 0.50.0 rung record-house-targets writes the first one from 0.49.2's output, where the project still holds it, so a
+// key the house dropped since goes and a value the house changed follows it silently. Every key a 0.50 change
+// DROPPED from a house-owned shape is gone — by the merge, or by the rung that owns the element-wise removal:
 //   - `continuous` on firebase:emulators* (and the dev-server leaf)  → rung stack-owned-dev-processes
 //   - functions:build's `.env` asset (configDir reads params in place) → rung read-functions-params-in-place
 //   - firebase.json functions[0].predeploy (Nx builds through deploy) → the generator (the block is re-asserted whole)
@@ -12,7 +13,7 @@ import { workspace, SCOPE } from '../workspaces.mjs';
 
 const { readProjectConfiguration, updateProjectConfiguration, updateJson } = requireFromRepo('@nx/devkit');
 const RECORD = '.bespunky/house-targets.json';
-const RUNGS = ['migrations/0.50.0/stack-owned-dev-processes', 'migrations/0.50.0/read-functions-params-in-place'];
+const RUNGS = ['migrations/0.50.0/record-house-targets', 'migrations/0.50.0/stack-owned-dev-processes', 'migrations/0.50.0/read-functions-params-in-place'];
 const generate = (tree, ctx) => ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: SCOPE });
 
 /** A project exactly as 0.49.2 left it: its house targets are the frozen 0.49.2 output, and there is no record. */
@@ -20,7 +21,7 @@ const stock0492 = async (ctx, handEdit = () => undefined) => {
   const tree = workspace();
   await generate(tree, ctx); // the files a 0.49 project has
   tree.delete(RECORD);
-  const { HOUSE_TARGETS_AS_OF_0_49_2: before } = ctx.load('generators/_utils/house-targets-0.49.2');
+  const { HOUSE_TARGETS_AS_OF_0_49_2: before } = ctx.load('migrations/0.50.0/house-targets-0.49.2');
   for (const name of ['functions', 'firebase']) {
     const config = readProjectConfiguration(tree, name);
     config.targets = JSON.parse(JSON.stringify(before[name]));
@@ -33,8 +34,9 @@ const upgrade = async (tree, ctx) => {
   for (const rung of RUNGS) await ctx.load(rung).default(tree);
   await generate(tree, ctx);
 };
-/** What the house-targets merge reported as replaced (describeOverride's two forms). */
-const overrides = (logs) => logs.filter((line) => line.startsWith('[warn]') && /the house's (?:new |value is )/.test(line));
+/** What the house-targets merge reported (describeFinding's four forms). */
+const overrides = (logs) =>
+  logs.filter((line) => line.startsWith('[warn]') && /the house's (?:new |value .* is in place now)|Deploys rely on this value|already defines a `/.test(line));
 
 export default {
   name: 'the first 0.50 upgrade · retired keys in house-owned shapes',
