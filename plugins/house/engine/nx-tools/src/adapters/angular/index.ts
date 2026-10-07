@@ -252,7 +252,7 @@ export const angular: StackAdapter = {
 
     // The dev-server's OWN option (Angular's `proxyConfig`), so a direct `nx run <app>:dev-server` gets it too;
     // set-if-absent, so a project that points elsewhere keeps its choice. Through setLeafOption, which keeps the
-    // `serve` composer's mirror of the leaf true.
+    // `dev-stack` composer's mirror of the leaf true.
     useProxy(tree, project, proxyConfig) {
       const leaf = projectOf(tree, project)?.targets?.['dev-server'];
       if (!leaf || !DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) return false;

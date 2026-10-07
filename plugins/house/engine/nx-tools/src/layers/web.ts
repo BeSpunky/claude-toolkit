@@ -52,7 +52,7 @@ function nxServable(tree: Tree, app: string): boolean {
 }
 
 /**
- * The per-app steps wire the NX adapter (the `serve` composer target + its dev-server options) onto the sync's
+ * The per-app steps wire the NX adapter (the `dev-stack` composer target + its dev-server options) onto the sync's
  * app. "The web layer is present" and "the sync's app is served through Nx" are different claims:
  *   - the app is Nx-servable (see above)          → run.
  *   - it isn't, but some Nx project IS served     → the sync named the wrong app: SKIP and say so, partial.

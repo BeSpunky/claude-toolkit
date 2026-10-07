@@ -7,7 +7,7 @@
 // of the same tree (Claude testing beside the developer's server, as the house's local-server-isolation rule
 // requires) never started its own processes: it waited on the first stack's, listening on the OTHER ports.
 //
-// A stack's identity now lives at ONE level: the `serve` composer stays continuous (the Nx-visible stack, which an
+// A stack's identity now lives at ONE level: the composer stays continuous (the Nx-visible stack, which an
 // e2e target may depend on and share), and the targets the engine drives lose `continuous` — nothing depends on
 // them but the engine. The generators stop writing it; this rung clears it from projects on disk, including those
 // whose per-app steps an upgrade skips (UPGRADE_PARTIAL) — so the fix never depends on a re-assertion.
@@ -20,7 +20,7 @@
 //   - a continuous leaf of another executor (the project's own dev-server): a second stack of that app in one tree
 //     still waits — the line says how to fix it;
 //   - any target that `dependsOn` one of the targets it changed: it would now wait for a server to FINISH, so it
-//     must depend on `serve` (the continuous stack) instead.
+//     must depend on `dev-stack` (the continuous stack — split from `serve` by split-serve-follower) instead.
 //
 // SELF-CONTAINED by the migration contract: the executor list and target names are frozen here.
 import { type Tree, getProjects, logger } from '@nx/devkit';
@@ -89,7 +89,7 @@ export default function update(tree: Tree): void {
         if (hit) {
           logger.warn(
             `${TAG} ${name}:${targetName} depends on ${hit.project}:${hit.target}, which is no longer continuous — it would wait ` +
-              `for a server to exit. Depend on the app's \`serve\` instead (the continuous stack, which Nx shares).`,
+              `for a server to exit. Depend on the app's \`dev-stack\` instead (the continuous stack, which Nx shares).`,
           );
         }
       }

@@ -24,8 +24,10 @@ export default {
       },
       expect: (tree, t) => {
         const targets = readProjectConfiguration(tree, 'site').targets;
-        t.ok(targets.serve.continuous === true, 'the composer stays continuous (e2e shares the running stack)');
-        t.equal(targets.serve.dependsOn, [{ target: 'serve-preflight', params: 'forward' }], 'serve depends on its preflight, flags forwarded');
+        t.ok(targets['dev-stack'].continuous === true, 'the composer (dev-stack) stays continuous (e2e shares the running stack)');
+        t.equal(targets['dev-stack'].dependsOn, [{ target: 'serve-preflight', params: 'forward' }], 'dev-stack depends on its preflight, flags forwarded');
+        t.ok(!targets.serve.continuous && targets.serve.executor === '@bespunky/nx-tools:follow-stack', 'serve is the non-continuous follower');
+        t.equal(targets.serve.dependsOn, [{ target: 'dev-stack', params: 'forward' }], 'serve depends on dev-stack, flags forwarded');
         t.equal(targets['serve-preflight'], { executor: '@bespunky/nx-tools:serve-preflight', cache: false }, 'the preflight target');
       },
     },
@@ -49,6 +51,9 @@ export default {
         t.equal(runtime, generator, 'runtime and generator agree on every occupied port');
         const shifted = mod.shiftConfig(fb, 6000);
         t.equal(Object.values(mod.suitePorts(shifted.emulators)).sort(), generator.map((p) => p + 6000).sort(), 'the shift moves exactly those ports');
+        // D9: an UNDECLARED websocketPort is firebase-tools' 9150, not a floating port — every shifted suite sat on it.
+        t.ok(fb.emulators.firestore.websocketPort === undefined && generator.includes(9150), 'the undeclared Firestore websocket (9150) is an occupied port');
+        t.ok(shifted.emulators.firestore.websocketPort === 9150 + 6000, `a shifted suite pins it shifted (got ${shifted.emulators.firestore.websocketPort})`);
       },
     },
     {
@@ -67,6 +72,42 @@ export default {
         const other = ctx.preflight('web', { portOffset: 3000 }, [holder]);
         t.ok(other.refuse && other.message.includes('tools/dev/dev serve web --port-offset=3000') && other.message.includes('tools/dev/dev stop web --offset=0'), `a different offset is refused with both commands: ${other.message}`);
         t.ok(ctx.preflight('web', { worktree: 'feat/x' }, [holder]).refuse, 'another worktree is refused');
+      },
+    },
+    {
+      // D3: `nx serve` ends with the STACK's status. Nx calls a continuous task that ends "succeeded"; the follower
+      // reads the engine's exit record instead.
+      name: 'follow-stack: the run ends with the stack’s exit status, and a failure carries the engine’s account',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        ctx.follow = ctx.load('executors/follow-stack/executor');
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(ctx.follow.verdict('web', { code: 0 }).success === true, 'a stack that ended cleanly: success');
+        const failed = ctx.follow.verdict('web', {
+          code: 1,
+          report: ['[serve] ✖ the stack FAILED and was stopped:', '[serve]   emulators exited with code 1'],
+          summary: ['emulators exited with code 1', 'emulators: Error: Could not spawn `java -version`. (log /x.log)'],
+        });
+        t.ok(!failed.success && /FAILED \(exit 1\)/.test(failed.message) && /emulators exited with code 1/.test(failed.message), `a failed stack fails the run, saying why: ${failed.message}`);
+        t.ok(/^\[serve\] web's dev stack FAILED \(exit 1\): emulators exited with code 1; emulators: Error: Could not spawn/.test(failed.headline), `the invoker gets it in a line: ${failed.headline}`);
+        t.ok(ctx.follow.exitRecordPath('/r', '42', 'web') === '/r/.bespunky/run/exits/42@web.json', 'the exit record the engine writes');
+      },
+    },
+    {
+      // D6: an agent's `nx serve` got only "✖ nx run web:serve-preflight" and a log path — the refusal itself never
+      // reached it. The verdict is also said to the invoking nx exactly when Nx's renderer would hide it.
+      name: 'serve-preflight: the verdict reaches the invoker in the one Nx renderer that hides task output',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        ctx.hides = ctx.load('executors/_utils/invoker').nxHidesTaskOutput;
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(ctx.hides({ invokerIsTty: false, aiAgent: true }), 'an agent without a terminal (summary): said to the invoker');
+        t.ok(!ctx.hides({ invokerIsTty: true, aiAgent: true }), 'an agent WITH a terminal (TUI shows it): not duplicated');
+        t.ok(!ctx.hides({ invokerIsTty: false, aiAgent: false }), 'CI / a pipe (static-failures-only shows it): not duplicated');
+        t.ok(ctx.hides({ style: 'summary', invokerIsTty: true, aiAgent: false }), '--output-style=summary named: said to the invoker');
+        t.ok(!ctx.hides({ style: 'static', invokerIsTty: false, aiAgent: true }), '--output-style=static named: Nx prints it itself');
       },
     },
   ],

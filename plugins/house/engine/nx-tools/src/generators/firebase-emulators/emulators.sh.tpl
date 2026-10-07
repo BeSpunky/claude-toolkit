@@ -32,6 +32,10 @@
 # dir. Focused runs still IMPORT the cached world (handy for debugging against real data) —
 # they just don't write it back.
 #
+# STOPPING IS THE PART THAT LOSES DATA, so this script owns it (see SUPERVISION below): the suite runs
+# OUTSIDE every supervisor's process tree, gets exactly ONE stop at the firebase-tools process, and this
+# script waits for the export and says when it is done.
+#
 #   bash tools/emulators.sh                  # full suite, cached (import + export)
 #   bash tools/emulators.sh --only auth,ui   # focused, import-only (no export)
 set -euo pipefail
@@ -197,6 +201,87 @@ seed_dir() {   # seed_dir <name> — echoes the resolved seed path, or nothing w
   fi
 }
 
+# ── SUPERVISION: ONE STOP, DELIVERED ONCE, WAITED FOR ────────────────────────────────────────────────
+# The export-on-exit runs inside firebase-tools, and only when IT is told to stop while its emulators are still
+# up. A signal that reaches an emulator JVM directly kills that JVM first; firebase-tools then reads "Firestore
+# Emulator has exited with code: 143", stops everything as a FATAL error — and exports nothing. Every supervisor
+# above us does exactly that: Nx (run-commands, and `nx serve` itself) stops a task with killProcessTreeGraceful,
+# which signals the LEAVES of the tree first — the JVMs — and SIGKILLs whatever is left after ~5 s, far short of
+# the ~30 s an export takes. A terminal's Ctrl+C reaches the whole foreground group, the JVMs included. That is
+# how `tools/dev/dev stop` and Ctrl+C on `nx serve` lost every stack's data while a lone `kill <pid>` of this
+# script (one signal, exec'd straight into firebase-tools) exported fine.
+#
+# So the suite is never in a supervisor's tree. It runs under a KEEPER — this script's own code, detached: its
+# own process group (no terminal signal reaches it) and reparented away (no tree walk finds it). The keeper is
+# the ONLY thing that ever signals firebase-tools, exactly once, when the stop is asked for: by this script on
+# any TERM/INT/HUP, or by its own discovery that this script is gone (a supervisor SIGKILLed it, a terminal
+# closed). A stop can therefore never lose the data, however it arrives — at worst the export finishes after
+# whoever asked has stopped waiting. In the foreground, this script streams the suite's log (where its output
+# always went), waits for the export with progress, and says what happened. The keeper records itself in the
+# stack's state dir (`detached/emulators.json`): the dev engine waits for it before it calls a stack stopped,
+# `tools/dev/dev ps` shows it while it finishes, and the next start of this stack waits for it instead of
+# colliding with (or reaping) a suite that is still saving.
+DETACHED_DIR="$STACK_DIR/detached"
+ENTRY="$DETACHED_DIR/emulators.json"
+STOP_FILE="$DETACHED_DIR/emulators.stop"
+# Outside the state dir, which is removed with the stack: a crashed suite's log must outlive it.
+LOG_DIR="$(dirname "$STACK_DIR")/logs"
+LOG="$LOG_DIR/$(basename "$STACK_DIR").emulators.log"
+STOP_TIMEOUT="${EMULATORS_STOP_TIMEOUT:-120}"
+mkdir -p "$DETACHED_DIR" "$LOG_DIR"
+
+# A process's identity is its PID AND its kernel start time (PIDs are reused) — the dev engine's rule too.
+proc_start() { local s; s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 0; s="${s##*) }"; set -- $s; printf '%s' "${20:-}"; }
+is_proc() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null && { [ -z "${2:-}" ] || [ "$(proc_start "$1")" = "$2" ]; }; }
+# A sleep with no child process: under a tree-killer a child `sleep` is a leaf that keeps this script from ever
+# being one, and the stop would never reach it.
+exec {NAP_FD}<> <(:)
+nap() { read -r -t "$1" -u "$NAP_FD" _ || true; }
+# The keeper's entry, written atomically (the engine and the next start read it). Fields as plain strings.
+entry_write() {   # entry_write <status> [doing] [code] [result]
+  node -e '
+    const fs = require("fs");
+    const [file, pid, start, proxy, proxyStart, status, doing, log, code, result] = process.argv.slice(1);
+    const e = { id: "emulators", what: "the Firebase emulator suite", pid: Number(pid), procStart: start || null,
+      proxyPid: Number(proxy), proxyStart: proxyStart || null, status, log, at: new Date().toISOString() };
+    if (doing) e.doing = doing;
+    if (code !== "") e.code = Number(code);
+    if (result) e.result = result;
+    fs.writeFileSync(file + ".tmp", JSON.stringify(e, null, 2) + "\n");
+    fs.renameSync(file + ".tmp", file);
+  ' "$ENTRY" "$KEEPER_PID" "$KEEPER_START" "$PROXY_PID" "$PROXY_START" "$1" "${2:-}" "$LOG" "${3:-}" "${4:-}"
+}
+entry_field() {   # entry_field <name> — one field of the entry, as plain text ('' when absent)
+  node -e 'try { const v = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]]; process.stdout.write(v == null ? "" : String(v)); } catch {}' "$ENTRY" "$1"
+}
+
+# A PREVIOUS SUITE OF THIS STACK MAY STILL BE SAVING — its supervisor stopped waiting, the keeper did not. Wait for
+# it rather than start over it: the reaper would refuse its live ports, and a second suite would import a
+# half-written export. Still RUNNING with its own script alive is not a leftover; it is this stack, twice.
+if [ -f "$ENTRY" ]; then
+  PREV="$(entry_field pid)"; PREV_START="$(entry_field procStart)"
+  if is_proc "$PREV" "$PREV_START"; then
+    if [ "$(entry_field status)" = running ] && is_proc "$(entry_field proxyPid)" "$(entry_field proxyStart)"; then
+      echo "[emulators] this stack's emulator suite is already running (keeper pid $PREV, log $LOG)." >&2
+      echo "[emulators]   Use it, or stop it first: tools/dev/dev ps shows its stack and the stop command." >&2
+      exit 1
+    fi
+    echo "[emulators] the previous suite of this stack is still saving its data (pid $PREV): $(entry_field doing) — waiting for it, so nothing is lost…" >&2
+    waited=0
+    while is_proc "$PREV" "$PREV_START" && [ "$waited" -lt "$STOP_TIMEOUT" ]; do
+      nap 1; waited=$((waited + 1))
+      [ $((waited % 10)) -eq 0 ] && echo "[emulators]   …still saving (${waited}s)" >&2
+    done
+    if is_proc "$PREV" "$PREV_START"; then
+      echo "[emulators] the previous suite is STILL saving after ${STOP_TIMEOUT}s (pid $PREV, log $LOG). Not starting over it —" >&2
+      echo "[emulators]   let it finish (tools/dev/dev ps), or raise EMULATORS_STOP_TIMEOUT." >&2
+      exit 1
+    fi
+    echo "[emulators] the previous suite finished: $(entry_field result)" >&2
+  fi
+  rm -f "$ENTRY"
+fi
+
 bash "$ROOT/tools/reap-emulators.sh" "${REAP_ARGS[@]}"
 if [ "$OFFSET" = "0" ]; then
   bash "$ROOT/tools/emulator-data.sh" ensure
@@ -353,8 +438,122 @@ IMPORT_ARGS=()
 EXPORT_ARGS=()
 [ "$PERSIST" -eq 1 ] && EXPORT_ARGS=(--export-on-exit "$DATA_DIR")
 
-exec firebase "${CONFIG_ARGS[@]}" emulators:start \
-  --project="$PROJECT" \
-  "${ONLY_ARGS[@]}" \
-  "${IMPORT_ARGS[@]}" \
-  "${EXPORT_ARGS[@]}"
+FIREBASE_ARGS=("${CONFIG_ARGS[@]}" emulators:start --project="$PROJECT" "${ONLY_ARGS[@]}" "${IMPORT_ARGS[@]}" "${EXPORT_ARGS[@]}")
+if [ "$PERSIST" -eq 1 ]; then STOP_DOING="exporting emulator data to $DATA_DIR"; else STOP_DOING="stopping (a focused run exports nothing, by design)"; fi
+
+# The keeper (see SUPERVISION). Runs detached; the only process that ever signals firebase-tools.
+keep() {
+  KEEPER_PID=$BASHPID
+  KEEPER_START="$(proc_start "$BASHPID")"
+  local requested=0 signalled=0 stop_at=0 code=0 fb result
+  trap 'requested=1' TERM INT HUP
+  firebase "${FIREBASE_ARGS[@]}" </dev/null >>"$LOG" 2>&1 &
+  fb=$!
+  entry_write running
+  while kill -0 "$fb" 2>/dev/null; do
+    if [ "$signalled" -eq 0 ] && { [ "$requested" -eq 1 ] || [ -e "$STOP_FILE" ] || ! is_proc "$PROXY_PID" "$PROXY_START"; }; then
+      signalled=1
+      stop_at="$(date +%s)"
+      entry_write stopping "$STOP_DOING"
+      kill -TERM "$fb" 2>/dev/null || true
+    fi
+    nap 0.2
+  done
+  wait "$fb" || code=$?
+  if [ "$signalled" -eq 1 ] && [ "$PERSIST" -eq 1 ]; then
+    if [ -f "$DATA_DIR/firebase-export-metadata.json" ] && [ "$(stat -c %Y "$DATA_DIR/firebase-export-metadata.json" 2>/dev/null || echo 0)" -ge "$stop_at" ]; then
+      result="exported to $DATA_DIR"
+      code=0   # asked to stop, and it saved: a clean stop, whatever exit status firebase-tools chose for it
+    else
+      result="NO EXPORT was written to $DATA_DIR — firebase-tools did not complete it (exit $code); its log: $LOG"
+      [ "$code" -ne 0 ] || code=1
+    fi
+  elif [ "$signalled" -eq 1 ]; then
+    result="stopped (a focused run exports nothing, by design)"
+    code=0
+  elif [ "$code" -eq 0 ]; then
+    result="exited on its own"
+  else
+    result="CRASHED — firebase-tools exited with code $code; its log: $LOG"
+  fi
+  entry_write exited "" "$code" "$result"
+  rm -f "$STOP_FILE"
+}
+
+PROXY_PID=$$
+PROXY_START="$(proc_start $$)"
+KEEPER_PID=''
+KEEPER_START=''
+rm -f "$STOP_FILE" "$ENTRY"
+: > "$LOG"
+# `set -m` puts the keeper in its OWN process group; the subshell exits at once, so the keeper is reparented out of
+# every tree above us. All of its output goes to the log, never to our stdout — a pipe a supervisor may close.
+( set -m; keep & ) </dev/null >/dev/null 2>&1
+
+for _ in $(seq 1 100); do [ -f "$ENTRY" ] && break; nap 0.1; done
+KEEPER_PID="$(entry_field pid)"
+KEEPER_START="$(entry_field procStart)"
+if [ -z "$KEEPER_PID" ]; then
+  echo "[emulators] the emulator suite did not start (no keeper) — its log: $LOG" >&2
+  exit 1
+fi
+
+# The suite's output, here where it always appeared (and in the log, which outlives it).
+tail -n +1 -F --pid="$KEEPER_PID" "$LOG" 2>/dev/null &
+TAIL_PID=$!
+
+# ONE LINE, WHERE THE PERSON IS LOOKING, BEFORE ANYONE STOPS LISTENING. A Ctrl+C on `nx serve` makes Nx mute its own
+# output and return ~5 s later — long before an export ends — so everything this script prints from here on lands
+# in a task log nobody reads, and the stop looks like it skipped the save. Nx names the process the person invoked
+# to every task (NX_INVOCATION_ROOT_PID): its stderr is their terminal (or an agent's output). Appended, never
+# truncated (it may be a file). Without an invoker, our own stderr is where they are looking.
+say_to_invoker() {
+  local p="${NX_INVOCATION_ROOT_PID:-}"
+  if [ -n "$p" ] && [ "$p" != "$$" ] && [ -w "/proc/$p/fd/2" ] && { printf '%s\n' "$1" >> "/proc/$p/fd/2"; } 2>/dev/null; then return 0; fi
+  printf '%s\n' "$1" >&2
+}
+if [ -n "${DEV_STACK_DIR:-}" ]; then SAVING_WHERE='`tools/dev/dev ps` shows it FINISHING'; else SAVING_WHERE="the next start of this suite waits for it; its log: $LOG"; fi
+
+STOPPING=0
+STOP_SINCE=0
+LOG_AT_STOP=0
+request_stop() {
+  [ "$STOPPING" -eq 1 ] && return 0
+  STOPPING=1
+  STOP_SINCE="$(date +%s)"
+  LOG_AT_STOP="$(stat -c %s "$LOG" 2>/dev/null || echo 0)"
+  : > "$STOP_FILE"
+  [ "$PERSIST" -eq 1 ] && say_to_invoker "[emulators] saving emulator data in the background — ${SAVING_WHERE}"
+  echo "[emulators] stopping — ${STOP_DOING} (firebase-tools takes about half a minute)…" >&2
+  echo "[emulators]   If this returns before \"done\", the save still completes in the background: tools/dev/dev ps shows it, and the next start of this stack waits for it." >&2
+}
+trap request_stop TERM INT HUP
+
+while is_proc "$KEEPER_PID" "$KEEPER_START"; do
+  nap 0.5
+  if [ "$STOPPING" -eq 1 ]; then
+    elapsed=$(( $(date +%s) - STOP_SINCE ))
+    if [ "$elapsed" -ge "$STOP_TIMEOUT" ]; then
+      echo "[emulators] still ${STOP_DOING} after ${STOP_TIMEOUT}s — not waiting any longer. Nothing was killed: the suite" >&2
+      echo "[emulators]   (keeper pid $KEEPER_PID) finishes on its own; follow it in $LOG or with tools/dev/dev ps." >&2
+      exit 0
+    fi
+    [ "$elapsed" -gt 0 ] && [ $((elapsed % 5)) -eq 0 ] && [ "${LAST_TICK:-}" != "$elapsed" ] && { LAST_TICK=$elapsed; echo "[emulators]   …${STOP_DOING} (${elapsed}s)" >&2; }
+  fi
+done
+
+# Let the log stream drain; if a supervisor's stop took it down, show what the suite said since the stop.
+if kill -0 "$TAIL_PID" 2>/dev/null; then
+  for _ in $(seq 1 20); do kill -0 "$TAIL_PID" 2>/dev/null || break; nap 0.1; done
+elif [ "$STOPPING" -eq 1 ]; then
+  tail -c +"$((LOG_AT_STOP + 1))" "$LOG" 2>/dev/null || true
+fi
+
+CODE="$(entry_field code)"
+RESULT="$(entry_field result)"
+if [ "$STOPPING" -eq 1 ]; then
+  echo "[emulators] done in $(( $(date +%s) - STOP_SINCE ))s — ${RESULT:-stopped}" >&2
+else
+  echo "[emulators] the emulator suite ended without a stop being asked for: ${RESULT:-exit ${CODE:-?}}" >&2
+fi
+exit "${CODE:-1}"

@@ -317,6 +317,88 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
       }
     }
   }
+
+  console.log('detached work: a stop waits for what a process detached (an emulator export), and a crash is named');
+  {
+    // A process that, like tools/emulators.sh, runs slow shutdown work OUTSIDE the tree and registers it in the
+    // stack's state dir. The work notices its owner is gone, "saves" for 1.5 s, records its result and exits.
+    writeFileSync(
+      join(repo, 'detacher.mjs'),
+      `import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+const [port, mode] = process.argv.slice(2);
+const work = \`
+const fs = require('fs'), path = require('path');
+const dir = path.join(process.env.DEV_STACK_DIR, 'detached'); fs.mkdirSync(dir, { recursive: true });
+const file = path.join(dir, 'saver.json');
+const start = () => { const s = fs.readFileSync('/proc/self/stat', 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' ')[19]; };
+const owner = Number(process.argv[1]);
+const write = (e) => { fs.writeFileSync(file + '.tmp', JSON.stringify({ id: 'saver', pid: process.pid, procStart: start(), log: '/tmp/saver.log', ...e })); fs.renameSync(file + '.tmp', file); };
+write({ status: 'running' });
+const tick = setInterval(() => {
+  try { process.kill(owner, 0); return; } catch {}
+  clearInterval(tick);
+  write({ status: 'stopping', doing: 'saving test data' });
+  setTimeout(() => { write({ status: 'exited', code: 0, result: 'saved to the test dir' }); process.exit(0); }, 1500);
+}, 100);
+\`;
+spawn(process.execPath, ['-e', work, String(process.pid)], { detached: true, stdio: 'ignore' }).unref();
+const server = createServer((_, res) => res.end('ok')).listen(Number(port), '127.0.0.1');
+if (mode === 'crash') setTimeout(() => process.exit(3), 600);
+process.on('SIGTERM', () => { server.close(); process.exit(0); });
+`,
+    );
+    const port = await freePort();
+    const human = { DEV_OWNER: 'user:dev', CLAUDE_CODE_SESSION_ID: '' };
+    const declare = (mode) =>
+      writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd: ['node', join(repo, 'detacher.mjs'), '${PORT:app}', mode], ports: { app: port } }] } } }));
+    const run = (args, env) =>
+      new Promise((res) => {
+        const p = spawn('sh', [join(engine, 'dev'), ...args], { cwd: repo, env: { ...process.env, ...human, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        p.stdout.on('data', (d) => (out += d));
+        p.stderr.on('data', (d) => (out += d));
+        p.on('exit', (code) => res({ code, out }));
+      });
+    const entry = join(repo, '.bespunky', 'run', 'site@0', 'detached', 'saver.json');
+
+    declare('ok');
+    let eng = spawn('sh', [join(engine, 'dev'), 'serve', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...human } });
+    let served = '';
+    eng.stdout.on('data', (d) => (served += d));
+    eng.stderr.on('data', (d) => (served += d));
+    try {
+      ok('a stack with detached work came up', await until(() => listening(port), 10000) && (await until(() => existsSync(entry), 5000)));
+      const t0 = Date.now();
+      const stopped = await run(['stop']);
+      ok('dev stop returns only AFTER the detached work finished (not in 0.7 s)', stopped.code === 0 && Date.now() - t0 >= 1400 && /ports free/.test(stopped.out));
+      ok('…the serve reported the work and its result', /saver: saved to the test dir/.test(served));
+      ok('…and then removed the record and state dir', !existsSync(join(repo, '.bespunky', 'run', 'site@0.json')) && !existsSync(join(repo, '.bespunky', 'run', 'site@0')));
+
+      // The supervisor dies outright (Nx's SIGKILL after its grace): the work outlives it, and stays visible.
+      eng = spawn('sh', [join(engine, 'dev'), 'serve', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...human } });
+      await until(() => listening(port), 10000);
+      await until(() => existsSync(entry), 5000);
+      process.kill(-eng.pid, 'SIGKILL');
+      await sleep(300);
+      const ps = JSON.parse((await run(['ps', '--json'])).out);
+      ok('a stack whose serve was SIGKILLed mid-save is FINISHING — kept, not pruned', ps.length === 1 && ps[0].state === 'finishing' && ps[0].detached?.[0]?.doing === 'saving test data');
+      const waited = await run(['stop']);
+      ok('dev stop on a finishing stack signals nothing, waits for the save, reports it', waited.code === 0 && /already stopped and finishing/.test(waited.out) && /saved to the test dir/.test(waited.out));
+      ok('…and the record is gone after', JSON.parse((await run(['ps', '--json'])).out).length === 0);
+
+      // A process that dies on its own fails the stack — and the engine says WHICH, with the command it ran.
+      declare('crash');
+      const crashed = await run(['serve', '--no-shared-browser', '--port-offset=0']);
+      ok('a crashed process: the engine exits non-zero and names it, its exit code and its command', crashed.code !== 0 && /the stack FAILED/.test(crashed.out) && /app exited with code 3 — it ran: node /.test(crashed.out));
+    } finally {
+      try {
+        process.kill(-eng.pid, 'SIGKILL');
+      } catch {
+        /* already down */
+      }
+    }
+  }
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }

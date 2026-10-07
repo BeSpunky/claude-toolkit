@@ -102,8 +102,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const [verb, ...flags] = process.argv.slice(2);
   try {
     if (verb === 'install') ensureChromium({ withDeps: flags.includes('--with-deps') });
-    else if (verb === 'module') console.log(ensureModule());
-    else if (verb === 'chromium') console.log(ensureChromium());
+    else if (verb === 'module') process.stdout.write(`${ensureModule()}\n`); // a path a shell reads — plain text, never console.log's formatting
+    else if (verb === 'chromium') process.stdout.write(`${ensureChromium()}\n`);
     else {
       console.error('usage: node runtime.mjs install [--with-deps] | module | chromium');
       process.exit(2);

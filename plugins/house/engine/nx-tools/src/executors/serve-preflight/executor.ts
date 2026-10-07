@@ -4,17 +4,19 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { tellInvoker } from '../_utils/invoker';
+
 import type { ServePreflightSchema } from './schema';
 
 /**
  * `<app>:serve-preflight` — what a second `nx serve <app>` hears BEFORE Nx decides to wait.
  *
  * Nx runs one instance of a continuous task per workspace: a second `nx serve <app>` in the same tree does not
- * start a stack, it waits on the running `<app>:serve` ("Waiting for <app>:serve in another nx process") and,
- * when that one stops, reports "Successfully ran target serve" without having served anything. That sharing is
- * RIGHT for the composer — it is how an e2e target depending on `serve` reuses the developer's running stack —
- * so `serve` stays continuous, and this target (a non-continuous dependency of it, the serve's flags forwarded)
- * is the one place that runs in the colliding process before the share. It reads the stacks' run records
+ * start a stack, it waits on the running `<app>:dev-stack` ("Waiting for <app>:dev-stack in another nx process")
+ * and ends when that one stops, without having served what it asked for. That sharing is RIGHT for the composer —
+ * it is how an e2e target depending on `dev-stack` reuses the developer's running stack — so `dev-stack` stays
+ * continuous, and this target (a non-continuous dependency of it, the serve's flags forwarded) is the one place
+ * that runs in the colliding process before the share. It reads the stacks' run records
  * (`tools/dev/dev ps --json`) and:
  *
  *   - nothing of this app served by this workspace's Nx  → silent; the serve starts as always;
@@ -24,7 +26,9 @@ import type { ServePreflightSchema } from './schema';
  *   - otherwise (a plain repeat, or an e2e target's dependency) → says this run ATTACHES to the running stack
  *       and will end when it stops, and how to get a second stack instead. The share proceeds.
  *
- * It never fails a serve on its own trouble: no engine, an unreadable answer → silent success.
+ * It never fails a serve on its own trouble: no engine, an unreadable answer → silent success. And its verdict is
+ * said to the person at the command line in every Nx output mode — including the one that hides task output (see
+ * tellInvoker).
  */
 interface Stack {
   key: string;
@@ -77,7 +81,7 @@ export function preflight(
       refuse: true,
       message:
         `${project} is already served by this workspace's \`nx serve\`:\n${list}\n` +
-        `Nx runs one \`${project}:serve\` per workspace — this run would only WAIT on it, then report success without serving.\n` +
+        `Nx runs one \`${project}:dev-stack\` per workspace — this run would only WAIT on it, then end when it stops, without serving what you asked for.\n` +
         `  Start the stack you asked for beside it:  ${second}\n` +
         `  Or stop the running one first:            ${stop(holders[0])}`,
     };
@@ -86,7 +90,7 @@ export function preflight(
     refuse: false,
     message:
       `${project} is already served by this workspace's \`nx serve\`:\n${list}\n` +
-      `This run ATTACHES to it (Nx shares one \`${project}:serve\` per workspace) and ends when it stops.\n` +
+      `This run ATTACHES to it (Nx shares one \`${project}:dev-stack\` per workspace) and ends when it stops, with its exit status.\n` +
       `  A second, isolated stack instead:  ${second}`,
   };
 }
@@ -109,9 +113,11 @@ const runExecutor: PromiseExecutor<ServePreflightSchema> = async (options, conte
   if (!verdict) return { success: true };
   if (verdict.refuse) {
     logger.error(`[serve] ${verdict.message}`);
+    tellInvoker(`[serve] REFUSED — ${verdict.message}`);
     return { success: false };
   }
   logger.warn(`[serve] ${verdict.message}`);
+  tellInvoker(`[serve] ${verdict.message}`);
   return { success: true };
 };
 

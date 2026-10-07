@@ -57,7 +57,7 @@ export interface StackAdapter {
   readonly env?: EnvPort;
   readonly providers?: ProvidersPort;
   readonly styles?: StylesPort;
-  /** The app's dev-server, as an Nx `dev-server` target — what the web layer's `serve` composer drives. */
+  /** The app's dev-server, as an Nx `dev-server` target — what the web layer's `dev-stack` composer drives. */
   readonly devServer?: DevServerPort;
   /** The framework half of the design system: its runtime binding, library shape, component generator. */
   readonly designSystem?: DesignSystemPort;
@@ -145,7 +145,7 @@ export interface StylesPort {
 }
 
 /**
- * The stack's DEV-SERVER LEAF — the `dev-server` target the `serve` composer (web layer) drives by name. The
+ * The stack's DEV-SERVER LEAF — the `dev-server` target the `dev-stack` composer (web layer) drives by name. The
  * composer itself is stack-free; only the leaf is the framework's. A project that already has a dev-server of its
  * own (any executor) keeps it — the stack supplies one only when there is none.
  */

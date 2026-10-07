@@ -76,7 +76,8 @@ const sealed703ca41 = (tree) => {
 
 const composed = (tree, t) => {
   const { targets } = readProjectConfiguration(tree, 'web');
-  t.equal(targets.serve.executor, '@bespunky/nx-tools:serve', 'serve is the composer');
+  t.equal(targets['dev-stack']?.executor, '@bespunky/nx-tools:serve', 'dev-stack is the composer');
+  t.equal(targets.serve.executor, '@bespunky/nx-tools:follow-stack', 'serve follows it (recomposed onto the current shape)');
   t.equal(targets['dev-server']?.executor, '@angular/build:dev-server', 'the dev-server is the leaf');
   t.ok(!JSON.stringify(targets['dev-server']).includes('emulators'), `the leaf names no emulator target: ${JSON.stringify(targets['dev-server'])}`);
   t.ok(targets['dev-server'].defaultConfiguration !== 'no-emulators', 'the retired configuration is not the default');

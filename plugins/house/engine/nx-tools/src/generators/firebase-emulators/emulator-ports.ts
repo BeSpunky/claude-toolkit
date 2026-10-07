@@ -14,7 +14,8 @@ import { join } from 'node:path';
 interface SuitePorts {
   defaults: Record<string, number>;
   alwaysOn: string[];
-  nested: Record<string, Record<string, string>>;
+  /** emulator → { its config key → { as: the port's name, default: firebase-tools' port when undeclared } } */
+  nested: Record<string, Record<string, { as: string; default: number }>>;
 }
 let table: SuitePorts | undefined;
 /** Read on first use, not at load: the layer registry imports this module wherever it is loaded. */
@@ -26,8 +27,12 @@ export const defaultPort = (name: string): number | undefined => portTable().def
 /** The emulators the house suite enables — the canonical firebase.json block, on firebase-tools' ports. */
 export const HOUSE_EMULATORS = ['auth', 'firestore', 'storage', 'functions', 'ui'] as const;
 
-/** Firestore's WebSocket listener (the Emulator UI's live view) — its own key, `firestore.websocketPort`. */
-const FIRESTORE_WEBSOCKET_DEFAULT = 9150;
+/** The ports an emulator opens under keys of its own (`firestore.websocketPort`): declared, else firebase-tools' default. */
+function nestedPorts(name: string, entry: Record<string, unknown>): { as: string; port: number }[] {
+  return Object.entries(portTable().nested[name] ?? {})
+    .map(([key, spec]) => ({ as: spec.as, port: Number.isInteger(entry[key]) ? (entry[key] as number) : spec.default }))
+    .filter(({ port }) => Number.isInteger(port) && port > 0);
+}
 
 /** tools/emulator-ports.mjs, rendered from its template with the table (`SUITE`) — the runtime's copy of it. */
 export const renderEmulatorPortsModule = (template: string): string => {
@@ -63,7 +68,7 @@ export function emulatorPorts(tree: Tree): Record<string, number> {
   const ports: Record<string, number> = {};
   for (const { name, port, entry } of configured(tree)) {
     ports[name] = port;
-    for (const [key, as] of Object.entries(portTable().nested[name] ?? {})) if (Number.isInteger(entry[key])) ports[as] = entry[key] as number;
+    for (const { as, port: nested } of nestedPorts(name, entry)) ports[as] = nested;
   }
   for (const name of portTable().alwaysOn) ports[name] ??= defaultPort(name)!;
   return ports;
@@ -86,14 +91,12 @@ export function hostDialledPorts(tree: Tree): { name: string; port: number; labe
     if (name === 'hub') continue;
     if (name === 'logging') continue; // added once, below, whether or not firebase.json names it
     out.push({ name, port, label: name === 'ui' ? 'Firebase Emulator UI' : `${title(name)} Emulator` });
-    if (name === 'firestore') {
-      const ws = Number(entry.websocketPort ?? FIRESTORE_WEBSOCKET_DEFAULT);
-      if (Number.isInteger(ws) && ws > 0) out.push({ name: 'firestore-websocket', port: ws, label: 'Firestore WebSocket' });
-    }
+    for (const { as, port: nested } of nestedPorts(name, entry)) out.push({ name: as, port: nested, label: NESTED_LABELS[as] ?? as });
   }
   out.push({ name: 'logging', port: emulatorPorts(tree).logging, label: 'Emulator Logs (Emulator UI)' });
   return out;
 }
 
+const NESTED_LABELS: Readonly<Record<string, string>> = { 'firestore-websocket': 'Firestore WebSocket' };
 const TITLES: Readonly<Record<string, string>> = { apphosting: 'App Hosting', dataconnect: 'Data Connect', pubsub: 'Pub/Sub', database: 'Realtime Database' };
 const title = (name: string) => TITLES[name] ?? `${name[0].toUpperCase()}${name.slice(1)}`;
