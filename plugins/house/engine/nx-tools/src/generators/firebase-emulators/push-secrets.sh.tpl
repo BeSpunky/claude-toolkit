@@ -5,16 +5,29 @@
 # one source of truth: every `KEY=VALUE` in it becomes a `firebase functions:secrets:set KEY` on the
 # target project, so what exists locally and in prod can never drift.
 #
+# The file is read with Firebase's own dotenv rules (tools/emulator-secrets.cjs — the one parser the emulator side
+# uses too): `KEY="v" # note` pushes `v`, `export KEY=v` pushes KEY, escapes in double quotes are decoded. A line
+# that is not KEY=VALUE, or a key Firebase refuses, stops the push before anything is set.
+#
 # Values never touch a command line, a log, or this script's output: each one is piped into the
-# CLI on stdin (`--data-file -`). Only key NAMES are printed.
+# CLI on stdin (`--data-file -`). Only key NAMES are printed — `--dry-run` adds each value's length,
+# fingerprint and edges, so a stray quote or comment is visible without the value itself.
 #
 #   bash tools/push-secrets.sh                        # project from .firebaserc / environment.prod.ts
+#   bash tools/push-secrets.sh --dry-run              # what WOULD be pushed; pushes nothing
 #   FIREBASE_PROJECT=<id> bash tools/push-secrets.sh    # explicit override
 #
 # Nx target: `yarn nx run {{functionsProject}}:push-secrets`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    *) echo "[push-secrets] unknown argument: $arg (expected --dry-run)" >&2; exit 2 ;;
+  esac
+done
 SECRETS_FILE="$ROOT/{{functionsRoot}}/.secret.local"
 ENV_PROD="$ROOT/{{appEnvProdPath}}"
 
@@ -44,20 +57,24 @@ if [ -z "$PROJECT" ]; then
 fi
 echo "[push-secrets] project: $PROJECT"
 
-PUSHED=0
-while IFS= read -r line || [ -n "$line" ]; do
-  # Skip blanks, comments, and any non-`KEY=VALUE` line.
-  case "$line" in ''|\#*) continue ;; esac
-  case "$line" in *=*) ;; *) continue ;; esac
-  key="${line%%=*}"
-  value="${line#*=}"
-  if [ -z "$value" ] || [[ "$value" == PASTE_* ]]; then
-    echo "[push-secrets] skipping $key — value not filled in." >&2
-    continue
-  fi
-  echo "[push-secrets] setting $key …"
-  printf '%s' "$value" | firebase functions:secrets:set "$key" --project "$PROJECT" --data-file -
-  PUSHED=$((PUSHED + 1))
-done < "$SECRETS_FILE"
+# Parse first, push after: a file Firebase would misread is refused whole, before any secret is set.
+ENTRIES="$(mktemp)"
+trap 'rm -f "$ENTRIES"' EXIT
+node "$ROOT/tools/emulator-secrets.cjs" push-entries --file="$SECRETS_FILE" > "$ENTRIES" || exit 2
 
-echo "[push-secrets] done — $PUSHED secret(s) pushed. Redeploy functions for new versions to take effect."
+PUSHED=0
+while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[push-secrets] would set $key — $(printf '%s' "$value" | node "$ROOT/tools/emulator-secrets.cjs" describe)"
+  else
+    echo "[push-secrets] setting $key …"
+    printf '%s' "$value" | firebase functions:secrets:set "$key" --project "$PROJECT" --data-file -
+  fi
+  PUSHED=$((PUSHED + 1))
+done < "$ENTRIES"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "[push-secrets] dry run — $PUSHED secret(s) would be pushed to $PROJECT; nothing was set."
+else
+  echo "[push-secrets] done — $PUSHED secret(s) pushed. Redeploy functions for new versions to take effect."
+fi

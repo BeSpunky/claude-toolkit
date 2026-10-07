@@ -9,9 +9,8 @@
 //
 // Where it routes the option:
 //   - House shape — the app dev-server is the `dev-server` leaf (created by the `serve` generator) and
-//     `dev-stack` is the @bespunky/nx-tools:serve composer (`serve` follows it) → set `host` on the
-//     `dev-server` leaf AND on `dev-stack` (the composer DELEGATES host to the dev-server via `--host`, so it
-//     belongs there too).
+//     `serve` / `dev-stack` are the @bespunky/nx-tools:serve engine targets that mirror it → set `host` on the
+//     `dev-server` leaf AND on both (they DELEGATE host to the dev-server via `--host`, so it belongs there too).
 //   - Plain case — `serve` is still the raw Angular dev-server (a fresh scaffold before the `serve`
 //     generator runs) → set `host` on `serve.options`.
 //
@@ -55,16 +54,17 @@ export default async function serveOptionsGenerator(
   const targets = project.targets;
 
   const serve = targets.serve;
-  const composer = targets[STACK_TARGET]?.executor === SERVE_EXECUTOR ? targets[STACK_TARGET] : undefined;
+  // The house's engine targets — `serve` and its continuous twin `dev-stack` — mirror the leaf.
+  const engines = [targets.serve, targets[STACK_TARGET]].filter((t) => t?.executor === SERVE_EXECUTOR);
 
-  // The one canonical name for the real app dev-server — the leaf the `dev-stack` composer drives by name.
+  // The one canonical name for the real app dev-server — the leaf the dev engine drives by name.
   const devServer = targets['dev-server'];
 
   if (devServer) {
-    // House shape: the real dev-server leaf lives alongside the `dev-stack` composer.
-    // 1) The nx-tools:serve composer DELEGATES `host` to the dev-server (forwards `--host`), so `host`
-    //    belongs on it too — assert it (the `serve` generator sets it; this keeps an upgrade honest).
-    if (composer) composer.options = { ...composer.options, host };
+    // House shape: the real dev-server leaf lives alongside the engine targets.
+    // 1) The nx-tools:serve targets DELEGATE `host` to the dev-server (forward `--host`), so `host` belongs on
+    //    them too — assert it (the `serve` generator sets it; this keeps an upgrade honest).
+    for (const engine of engines) engine!.options = { ...engine!.options, host };
     // 2) Apply host to the dev-server leaf itself.
     devServer.options = { ...devServer.options, host };
   } else if (serve?.executor === RUN_COMMANDS_EXECUTOR) {

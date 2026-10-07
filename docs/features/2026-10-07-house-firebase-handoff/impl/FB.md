@@ -55,7 +55,10 @@ Scope: the emulators.sh SECRETS section, the emulator project id, seeding, `conf
 - **FA:** `emulators-stop.test.sh` "state dir is released" raced (release lands ~50 ms after `exited`); now polls,
   bounded. Two orphaned fake-suite processes from that test's `hang` case (from my two failing runs) were killed by PID.
 - **FD:** the proxy is already id-agnostic — no change needed for the demo id.
-- Observation, not fixed (not mine): `push-secrets.sh` pushes raw text after `=` (an inline comment or quotes would
-  be pushed as part of the value).
+- **push-secrets (follow-up, fixed).** Reproduced: the old script pushed `"sk_live_q" #x`, `'sk_live_s'`, the key
+  `export EXPORTED`, and undecoded escapes (`tools/test-scaffold/push-secrets.test.sh` fails 11 checks on it). It now
+  reads `.secret.local` through the ONE parser (`emulator-secrets.cjs push-entries`, NUL-separated pairs, values never
+  printed); a malformed line or a key Firebase refuses stops the whole push (exit 2) before anything is set;
+  `--dry-run` shows each key with length, sha256 prefix and edges.
 - Suites after merging `feat/house-firebase-handoff`: test-generators 200/0 (25 skip), test-migrations 252/0,
   test-layers 101/0, test-scaffold 23 files ok, firebase-tools tripwire ok.

@@ -73,9 +73,9 @@
 //   sees and what the deploy ships cannot drift apart.
 //   Both projects are HOUSE PROJECTS (_utils/project-files): found by project, created the way this workspace
 //   defines projects (a project.json, or a package.json workspace member under TS-solution linking).
-//   - tools/{emulators,emulator-data,reap-emulators,push-secrets,firebase-welcome}.sh, tools/emulator-ports.mjs,
-//                        tools/seed/* — the launch path, data lifecycle, port reclaim (and the one port table
-//                        both read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
+//   - tools/{emulators,emulator-data,push-secrets,firebase-welcome}.sh, tools/emulator-ports.mjs,
+//                        tools/seed/* — the launch path, data lifecycle (and the one port table
+//                        the scripts read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
 //                        the seed applier (tools/seed/apply.mjs), and the declarative seed worlds
 //                        (world.mjs and the seeds README are user-owned once written).
 //   - tools/emulator-project.mjs, tools/emulator-secrets.cjs, tools/functions-esbuild.config.cjs — what a local run
@@ -86,8 +86,8 @@
 //                        rule over `platformConstraints`; untagged code projects classified then (or reported),
 //                        and the platform sync generator registered on lint for the projects made later.
 //
-// No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (one multi-process stack — the
-// continuous `dev-stack` composer, which `serve` follows), not of Firebase, and belongs to the generator that owns
+// No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (one multi-process stack — `serve`,
+// the dev engine), not of Firebase, and belongs to the generator that owns
 // that loop.
 import { seedServedApps } from '../dev/generator';
 import {
@@ -371,7 +371,6 @@ export default async function firebaseEmulatorsGenerator(
   //    app added later (`nx g @bespunky/nx-tools:app`) gets its env files from firebase-client without this
   //    workspace step re-running, and the banner must still see them.
   tree.write('tools/firebase-welcome.sh', template('firebase-welcome.sh.tpl').split('{{appsDir}}').join(appsDir));
-  tree.write('tools/reap-emulators.sh', template('reap-emulators.sh.tpl'));
   tree.write('tools/emulator-ports.mjs', renderEmulatorPortsModule(template('emulator-ports.mjs.tpl')));
   tree.write(
     'tools/emulators.sh',
@@ -738,10 +737,11 @@ function reportRuntimeMismatch(tree: Tree, manifest: string, runtime: { major: s
  * @param rulesFiles what firebase.json declares — the deploy's inputs (with the conventional root locations).
  */
 function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: HouseProjectHome, rulesFiles: string[]): void {
-  // Not `continuous`: the dev engine runs one suite per STACK (each on its shifted ports, with its own hub), and Nx
-  // shares a continuous task across every invocation in the tree — a second stack's suite would only wait on the
-  // first. A second suite started by hand on the base ports now fails loudly on the bind instead.
+  // EXPLICITLY not `continuous`: the dev engine runs one suite per STACK (each on its shifted ports, with its own
+  // hub), and Nx shares a continuous task across every invocation in the tree — a second stack's suite would only
+  // wait on the first. Written `false` rather than left out: Nx fills an absent key from nx.json targetDefaults.
   const emulatorsTarget = (only?: string): TargetConfiguration => ({
+    continuous: false,
     executor: 'nx:run-commands',
     options: {
       command: `bash tools/emulators.sh${only ? ` --only ${only},ui` : ''}`,

@@ -15,9 +15,9 @@
 // 0.50.0 it declares none where the plugin infers `lint` (an explicit `eslint .` where inference is off), and
 // generators never remove a whole target — so it is converted here too.
 //
-// WHICH APPS: the house's — an Angular application behind the house composer (`serve` before split-serve-follower,
-// `dev-stack` after it; an e76c12a app is one only once recompose-pre-0.3-serve-leftovers, which runs first, has
-// recomposed it). Already linted (a `lint`
+// WHICH APPS: the house's — an Angular application whose `serve` (and, after serve-runs-its-own-stack, `dev-stack`)
+// is the house's @bespunky/nx-tools:serve; an e76c12a app is one only once recompose-pre-0.3-serve-leftovers, which
+// runs first, has recomposed it. Already linted (a `lint`
 // target, or one @nx/eslint/plugin infers from its own or the root eslint config) → nothing. @nx/angular not installed (it is
 // what created the app; a broken install) → nothing written, the command reported.
 //
@@ -48,8 +48,8 @@ export default async function lintHouseApps(tree: Tree): Promise<GeneratorCallba
   const linted = new Set(projects.filter(([, config]) => isLinted(tree, config)).map(([name]) => name));
   for (const [name, config] of projects) {
     if (linted.has(name)) continue;
-    // The composer is `serve` before split-serve-follower (this release) and `dev-stack` after it, so either order
-    // against THAT rung holds. Not so recompose-pre-0.3-serve-leftovers: it is what makes an e76c12a app a house app at
+    // `serve` is the house's before serve-runs-its-own-stack (this release) and after it, and `dev-stack` after it, so
+    // either order against THAT rung holds. Not so recompose-pre-0.3-serve-leftovers: it is what makes an e76c12a app a house app at
     // all, so it runs before this rung (migrations.json order; the reasons and the proof: tools/test-migrations/cases/
     // 0.50.0-ladder-order.mjs).
     const house = angular.ownsApp(config) && [config.targets?.serve, config.targets?.['dev-stack']].some((t) => t?.executor === HOUSE_SERVE);

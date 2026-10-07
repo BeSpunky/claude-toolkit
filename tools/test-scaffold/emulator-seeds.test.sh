@@ -34,7 +34,7 @@ MAIN="$TMP/main"
 mkdir -p "$MAIN/tools/emulator-seeds/default"
 sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}|apps/demo/src/environments/environment.ts|g' \
   "$TPL" > "$MAIN/tools/emulators.sh"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$MAIN/tools/reap-emulators.sh"
+node "$ROOT/tools/test-scaffold/render-engine.mjs" "$MAIN"   # the stack claim (tools/dev) every suite goes through
 node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$MAIN"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$MAIN/tools/emulator-data.sh"
 chmod +x "$MAIN/tools/"*.sh

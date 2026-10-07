@@ -20,25 +20,23 @@ PROJECT="demo-{{workspaceName}}"
 mapfile -t SEEDS < <(node --input-type=module -e \
   'import { WORLDS } from "./tools/seed/world.mjs"; console.log(Object.keys(WORLDS).join("\n"));')
 
-# ITS OWN STACK. A seed build is a short-lived emulator suite of its own, so it gets what every stack gets
-# (see tools/emulators.sh): its own free, SHIFTED port block — never the base ports, which belong to the
-# suite the developer may have up — and its own TMPDIR, so firebase-tools' hub locator (keyed by project
-# id alone) is not shared with a running suite. It used to reap the BASE ports and run on them: a seed
-# build could collide with, or reclaim, the developer's running suite. It touches nothing it did not start.
-OFFSET="$(node "$ROOT/tools/emulator-ports.mjs" free-offset "$ROOT/firebase.json")"
-STACK_DIR="$ROOT/.bespunky/run/seed-build@$OFFSET"
+# ITS OWN STACK. A seed build is a short-lived emulator suite of its own, so it gets what every stack gets (see
+# tools/emulators.sh): it CLAIMS a free, SHIFTED port block through the dev engine — never the base ports, which
+# belong to the suite the developer may have up, and never a block any other stack holds or is still saving on —
+# and gets the stack's own short TMPDIR, so firebase-tools' hub locator (keyed by project id alone) is not shared
+# with a running suite. `tools/dev/dev ps` shows it while it runs; it is released when this script ends. It used to
+# probe for a free block on its own, which a serve starting in the same second could take too.
+CLAIM="$(node "$ROOT/tools/dev/dev.mjs" claim seed-build --pid=$$ --shifted \
+  --ports="$(node "$ROOT/tools/emulator-ports.mjs" claim "$ROOT/firebase.json")")" || exit 1
+eval "$CLAIM"
+OFFSET="$STACK_OFFSET"
 # The shifted config sits beside firebase.json (firebase-tools resolves its relative paths — the functions
 # bundle, rules — from the config's own directory), under the ignored /.firebase.offset-*.json.
 CONFIG="$ROOT/.firebase.offset-$OFFSET-seed.json"
-mkdir -p "$STACK_DIR/tmp"
-[ -f "$ROOT/.bespunky/run/.gitignore" ] || printf '# Running dev stacks — machine-local, never committed.\n*\n' > "$ROOT/.bespunky/run/.gitignore"
-trap 'rm -rf "$STACK_DIR" "$CONFIG"' EXIT
+trap 'rm -f "$CONFIG"; node "$ROOT/tools/dev/dev.mjs" release "$STACK_KEY" --pid=$$ >/dev/null 2>&1 || true' EXIT
 node "$ROOT/tools/emulator-ports.mjs" shift "$ROOT/firebase.json" "$OFFSET" "$CONFIG"
-export TMPDIR="$STACK_DIR/tmp"
-echo "[seed] own emulator stack on port offset $OFFSET (state: $STACK_DIR)"
-
-# Orphans of an earlier crashed run only (the reap never touches a live, owned suite), on THIS block's ports.
-bash "$ROOT/tools/reap-emulators.sh" "$CONFIG"
+export TMPDIR="$STACK_TMP"
+echo "[seed] own emulator stack $STACK_KEY on port offset $OFFSET (TMPDIR $STACK_TMP)"
 
 for seed in "${SEEDS[@]}"; do
   dir="tools/emulator-seeds/$seed"

@@ -37,7 +37,7 @@ Where the tier supports a **schema** — a workflow's `agent()` call takes one �
 
 **8 — The processes clause** — whenever the unit may start a server, an emulator suite, a watcher, anything long-running. Its context ends when it returns; its processes do not, and nothing else knows their PIDs. Say so, with the mechanism:
 
-> *"If you start a server, give it its own port and keep a handle: in a house project `DEV_OWNER=<unit-id> tools/dev/dev serve <app> --port-offset=auto` (or `--owner=<unit-id>`) in a `run_in_background` Bash call; otherwise a `run_in_background` task (stopped with `TaskStop`) or the `$!` you captured at launch. Before you return, stop everything you started by that handle — `tools/dev/dev stop --all-mine`, `TaskStop`, `kill <that PID>` — never `pkill`/`killall`/`pgrep -f`, then confirm your ports are free. Return a `processes:` line — `none`, or each one with its PID/stack, port and `stopped` / `left running (why)`."*
+> *"If you start a server, give it its own port and keep a handle: in a house project `DEV_OWNER=<unit-id> tools/dev/dev serve <app>` (it claims its own free port block) in a `run_in_background` Bash call; otherwise a `run_in_background` task (stopped with `TaskStop`) or the `$!` you captured at launch. Before you return, stop everything you started by that handle — `DEV_OWNER=<unit-id> tools/dev/dev stop --all-mine`, `TaskStop`, `kill <that PID>` — never `pkill`/`killall`/`pgrep -f`, then confirm your ports are free. Return a `processes:` line — `none`, or each one with its PID/stack, port and `stopped` / `left running (why)`."*
 
 The `processes:` line belongs in the return shape too (part 5): it is what the parent's closing process roster checks against.
 

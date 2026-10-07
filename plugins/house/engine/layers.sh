@@ -76,7 +76,7 @@ house_layer_brings() {
     angular) printf '%s\n' 'the Angular editor extensions, the dev-server leaf, the Angular CLI MCP + agent skills' ;;
     design-system) printf '%s\n' 'the design-system config, STRUCTURE.md, and every app'\''s sass/provider wiring' ;;
     navigation) printf '%s\n' 'nothing per-sync (its generators are on-demand), but HOUSE.md gains the typed-navigation conventions' ;;
-    firebase) printf '%s\n' 'the emulator wiring, the JDK step, and the forwarded emulator ports' ;;
+    firebase) printf '%s\n' 'the emulator wiring, the dev engine its suites claim their ports through (tools/dev — one generator, shared with web), the JDK step, and the forwarded emulator ports' ;;
     ci) printf '%s\n' 'the deploy workflow driven by the branch model, and each provider'\''s human-run cloud setup' ;;
   esac
 }
