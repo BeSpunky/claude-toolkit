@@ -35,7 +35,7 @@ export function provideAppFunctions(): EnvironmentProviders {
       const region = (environment.firebase as { functionsRegion?: string }).functionsRegion;
       const functions = region ? getFunctions(getApp(), region) : getFunctions();
       if (ngDevMode && !emulatorConnected.has(functions)) {
-        // In the browser: the app's own origin (proxy.conf.mjs relays /<projectId>/**, where callables live);
+        // In the browser: the app's own origin (proxy.conf.mjs relays /<id>/<region>/<fn>, where callables live);
         // server-side: the container address, shifted by the stack's offset. See emulatorEndpoint().
         const e = emulatorEndpoint('functions');
         if (e) {

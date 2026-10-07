@@ -117,6 +117,10 @@ try {
   const pSkip = planApp(decl, 'web', { offset: 6000, tree: '/t', skip: ['emulators', 'nope'] });
   ok('skipped: not run, ?emulate=none, the offset url param kept', pSkip.running.length === 1 && pSkip.localUrl.endsWith('?shift=6000&emulate=none'));
   ok('an unknown --skip is reported, not fatal', pSkip.ignoredSkips.join() === 'nope');
+  // R4-3: a server rendering the app resolves what the page was opened with — the same query, as DEV_URL_QUERY.
+  ok('skipped: every process is told the URL switches (DEV_URL_QUERY)', pSkip.primary.added.DEV_URL_QUERY === 'shift=6000&emulate=none' && pSkip.primary.env.DEV_URL_QUERY === 'shift=6000&emulate=none');
+  ok('no URL switches → no DEV_URL_QUERY', !('DEV_URL_QUERY' in p0.primary.added) && p6.primary.added.DEV_URL_QUERY === 'shift=6000');
+  ok("a skipped process's advice is not given", pSkip.advice.length === 0 && p0.advice.some((a) => a.text === 'oauth'));
   ok('skipping the primary throws', await throws(() => planApp(decl, 'web', { offset: 0, tree: '/t', skip: ['app'] })));
   const py = planApp(decl, 'site', { offset: 1000, tree: '/t', passthrough: ['--bind', '0.0.0.0'] });
   ok('a string cmd runs through sh, passthrough shell-quoted', py.primary.shell && py.primary.command === 'python3 -m http.server 9000 --bind 0.0.0.0');

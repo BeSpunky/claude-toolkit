@@ -179,9 +179,10 @@ function checkTheRelay(service: EmulatorService, page: Location): void {
         ? `Emulated Firebase services will not connect: the emulator suite is not answering behind the dev server ` +
             `(HTTP ${response.status}) — is it running? \`nx serve\` starts it beside the app; served with ` +
             `--no-emulators, every service should resolve real (?emulate=none).`
-        : `Emulated Firebase services will not connect: the dev server does not relay the emulators (HTTP ` +
-            `${response.status} for the hub route). Its proxyConfig must be this app's proxy.conf.mjs — your own ` +
-            `routes go in proxy.local.mjs beside it — or a config of yours that includes its \`emulatorRoutes\`.`;
+        : `Emulated Firebase services will not connect: the dev server does not relay the emulators (the hub route ` +
+            `answered ${response.status} ${response.headers.get('content-type') ?? ''} — the app, not the emulator hub). ` +
+            `Its proxyConfig must be this app's proxy.conf.mjs — your own routes go in proxy.local.mjs beside it — or a ` +
+            `config of yours that includes its \`emulatorRoutes\`.`;
     },
     (error: unknown) => `The emulator hub could not be asked through this page's origin (${String(error)}).`,
   );
