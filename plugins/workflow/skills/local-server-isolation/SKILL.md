@@ -1,7 +1,7 @@
 ---
 name: local-server-isolation
 description: >-
-  How to launch a local server for your own testing WITHOUT colliding with a server the user is running. Use whenever you are about to start a dev server, app server, API server, database, emulator, or any long-running local process to verify a change (npm run dev, vite, nx serve, a worktree serve, python -m http.server, uvicorn/flask/rails, go run, docker compose up, a Firebase or other emulator suite, a Playwright target that boots a server, etc.). The rule — bind a RANDOM free port, never the project's default/forwarded port, because that port belongs to whatever the user launched manually; you test headless so you never need the forwarded ports anyway. Covers fixed-port backends the app hard-codes (reuse the user's running backend or shift your own — never reap theirs), with the Firebase emulator suite as the worked example, and how to point your headless browser at the ephemeral port.
+  How to run a local server for your own testing WITHOUT colliding with one the user runs, and how to STOP it without touching theirs. Use whenever you are about to start a dev server, app or API server, database, emulator suite or any long-running process to verify a change (npm run dev, vite, nx serve, tools/dev/dev serve, a worktree serve, python -m http.server, uvicorn, go run, docker compose up, a Playwright target that boots a server), AND whenever you are about to stop, kill or clean up one, or check that nothing you started is still listening. Start: bind a RANDOM free port, never the default or forwarded one, which is the user's. Fixed-port backends: reuse theirs or shift your own, never reap theirs (Firebase as the worked example). Stop: by the handle you launched with (tools/dev/dev stop, TaskStop, the captured PID), NEVER by name (pkill, killall, pgrep -f piped to kill, fuser -k), then prove your ports are free.
 ---
 
 # Local server isolation — never clobber the user's running server
@@ -16,7 +16,7 @@ You verify **headless** — Playwright (or similar) running *inside* the contain
 
 - **Pick a random free port** for the server you start (`--port 0` for an OS-assigned port where supported, or a random high port). **Read the actual bound URL/port from the server's own startup output** — don't assume it — and point your browser/tests there.
 - **Never kill or restart a server you didn't start** to free a port. If the default port is taken, that's the user's server: choose another port, don't reap theirs.
-- **Tear down** the server you started when the check is done (don't leave orphans holding a port).
+- **Tear down** the server you started when the check is done — **by its handle**, then **prove** it (see *Teardown* below). Don't leave orphans holding a port.
 - **Never *pin* a port inside `6080-6119`.** That band belongs to the shared browser's per-container noVNC allocator (`bespunky-browser-automation:shared-browser`), and a squatter there costs someone their viewer URL. An OS-assigned port (`--port 0`) is always outside it; a hand-rolled "random high port" should be too.
 
 ## Fixed-port backends — never reap the user's
@@ -25,6 +25,25 @@ Some stacks have backends the app connects to at **hard-coded** addresses — an
 
 - **Reuse an already-running backend** rather than starting a colliding one: serve the app alone on your isolated port, pointed at the backend the user already has up.
 - **Only start your own backend if none is running** — and then on a **shifted port set**, not the defaults, so you never reap or collide with theirs. The app must be told the shifted addresses (env var, query param, config) — find how *this* project does it before shifting.
-- **Shift the whole stack together.** If the project declares its processes and ports (a house project with the `web` layer does, in `.bespunky/dev.json`), `<pm> nx serve <app> --port-offset=auto` (or the stack-free `tools/dev/dev serve [app] --port-offset=auto`) moves every declared port onto one stable, verified-free block and reaps only *its own* shifted ports. Prefer it over hand-rolling an offset.
+- **Shift the whole stack together.** If the project declares its processes and ports (a house project with the `web` layer does, in `.bespunky/dev.json`), `tools/dev/dev serve [app] --port-offset=auto` moves every declared port onto one stable, verified-free block (checking every port the stack binds) and reaps only *its own* shifted ports. Prefer it over hand-rolling an offset. Use the runner directly, not `nx serve`, when the developer's serve of the same app runs in the same tree: Nx runs one `<app>:serve` per workspace, so a second `nx serve` there attaches to theirs instead of starting yours (its preflight says so).
 
 **Worked example — the Firebase emulator suite** (projects wearing the `firebase` layer): reuse vs. shift, the `?emulate=none` / `?portOffset=N` client switches, and the hub/logging ports that must move with it → [`reference/firebase-emulators.md`](reference/firebase-emulators.md).
+
+## Teardown — by handle, never by name
+
+A server you cannot name exactly, you cannot stop safely. So **launch it so you hold a handle**, and stop it by that handle — never by a name or a pattern.
+
+**Launch with a handle, in this order of preference:**
+
+1. **The house dev runner**, when the project has one (`tools/dev/dev`, a project wearing the `web` layer): `tools/dev/dev serve <app> --port-offset=auto --no-shared-browser`, as a `run_in_background` Bash call. It prints its handle at start (`Stack: <app>@<offset> · pid … · stop with: …`), writes a run record, and `tools/dev/dev stop` takes the whole stack down — every process it started, gracefully, then checks the ports. In a fan-out, give each agent its own owner label (`DEV_OWNER=<unit-id>` or `--owner=<unit-id>`) so each one's `stop --all-mine` reaches only its own stacks.
+2. **A `run_in_background` Bash task** whose *foreground* command is the server (no `&`, `nohup`, `setsid` or `disown` of its own) — then `TaskStop <id>` stops it and every child it spawned.
+3. **The PID you captured at launch** (`cmd & echo $!`), recorded the moment you start it. Before you signal it, check it is still that process — `/proc/<pid>/cwd` is your tree and `/proc/<pid>/cmdline` is your command (PIDs are reused).
+
+A detached process (`nohup … &`, `setsid`, `disown`) is in no task and has no recorded PID: never start a test server that way.
+
+**Banned — they match your own shell and other people's servers:** `pkill <name>` / `killall <name>`, `pkill --newest` / `--oldest` (the newest match *in the container*, which may be the developer's or a sibling agent's), `pgrep -f <pattern> | xargs kill` (matches the `bash -c '…<pattern>…'` that ran it), and `fuser -k <port>` / `kill $(lsof -t -i:<port>)` without first proving the holder is yours (cwd + start time after your launch). If all you have is a port and you cannot prove the holder is yours, **report it** — do not kill it.
+
+**Prove it, then say it.** "I stopped it" is a claim; a free port is the proof. After teardown, check that nothing of yours still listens — `tools/dev/dev ps` (house projects: every running stack, its owner and ports, and any ORPHANED one whose serve died and left processes) or `ss -ltnp` on the ports you used — and only then report done. A subagent stops everything it started **before it returns** and lists it (PID or stack, port, stopped / left running and why); see `bespunky-workflow:delegate-and-parallelize`.
+
+**Never stop a server you didn't start.** `tools/dev/dev stop` enforces it: another owner's stack is refused unless `--any-owner`, which is for the human who owns it — not for you clearing a port.
+
