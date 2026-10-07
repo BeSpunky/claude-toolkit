@@ -62,7 +62,12 @@ export function plan(ctx: PlanContext, stamp: StampOptions): PlanLine[] {
     lines.push({ kind: 'partial' });
   }
   // Every step reads the run through THIS context, so no step can see a layer the plan did not apply.
-  const run: PlanContext = { ...ctx, active: applied, ensured: new Set([...ctx.ensured].filter((id) => applied.has(id))) };
+  const run: PlanContext = {
+    ...ctx,
+    active: applied,
+    ensured: new Set([...ctx.ensured].filter((id) => applied.has(id))),
+    branchProjection: stamp.branchProjection,
+  };
   const eligible = [...applied];
 
   const emit = (step: GeneratorStep) => {

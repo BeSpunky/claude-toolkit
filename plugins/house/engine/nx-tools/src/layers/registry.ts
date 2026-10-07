@@ -31,6 +31,7 @@ import { angular } from './angular';
 import { designSystem } from './design-system';
 import { navigation } from './navigation';
 import { firebase } from './firebase';
+import { ci } from './ci';
 
 export type { LayerDescriptor, LayerId } from './descriptor';
 
@@ -40,7 +41,8 @@ export type { LayerDescriptor, LayerId } from './descriptor';
  * planner runs generators in. To add a layer: write `layers/<id>.ts`, add it here, regenerate the shell
  * projection (`node tools/test-layers/run.mjs --write`).
  */
-const REGISTERED: readonly LayerDescriptor[] = [nx, agent, node, js, web, angular, designSystem, navigation, firebase];
+// `ci` LAST: it composes the deploy providers the layers before it contribute (`ciDeploy`).
+const REGISTERED: readonly LayerDescriptor[] = [nx, agent, node, js, web, angular, designSystem, navigation, firebase, ci];
 
 /** The layer that is ALWAYS ensured, beneath everything else. */
 export const FLOOR: LayerId = nx.id;
