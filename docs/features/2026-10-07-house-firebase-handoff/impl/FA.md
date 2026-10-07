@@ -25,3 +25,23 @@ Path boundary for A: `src/executors/**`, `executors.json`, `src/generators/_util
 ## Ledger
 
 - A: dispatched (fork).
+
+## A — Nx shape (fork)
+
+- **Retired:** executors `follow-stack`, `serve-preflight`, `executors/_utils/{invoker,run-records}.ts`. The `serve`
+  executor spawns `tools/dev/dev.mjs`, keeps the SIGINT-waits / SIGTERM|SIGHUP-one-TERM rule, and resolves
+  `{ success: code === 0 }`. No exit records, `DEV_NX_ROOT` or `NX_INVOCATION_ROOT_PID`.
+- **Shape** (`_utils/dev-server.ts` `serveTargetsFor`): `serve` = `{ continuous: false, executor: @bespunky/nx-tools:serve,
+  cache: false, <leaf mirror> }`; `dev-stack` = `{ continuous: true, executor, <leaf mirror> }`; no `dependsOn`.
+  `serve-options` puts `host` on both. Leaf (Angular adapter) and every `tools/emulators.sh` launcher carry
+  `continuous: false` explicitly — Nx 23 `target-normalization.js:52-58` fills an absent key from the executor schema,
+  targetDefaults sit BELOW project.json in the merge (`target-defaults.js`), so an explicit value wins.
+- **Rungs:** `split-serve-follower` renamed `serve-runs-its-own-stack`: the shipped composer (4f01d00: continuous, no
+  dependsOn) → the pair; an app already in the current shape (recompose's live generator) is completed, not rebuilt;
+  every house app done by the rung alone (R9-1). Reports: `^serve`, pattern/mixed `projects`, targetDefaults depending on
+  `serve`, an own `dev-stack`. A targetDefaults `continuous` is deliberately not reported (explicit wins).
+  `stack-owned-dev-processes` writes `false` (in place) and now also reports an own leaf with NO key (schema-filled).
+- **Fixtures:** shipped shapes — 0.49.2 (4f01d00), 0.3.0 composer (60bd79f) as a `historicalShapes` entry (diverges:
+  no leaf mirror to carry), e76c12a through 0.24.0 → 0.24.1 → stack-owned → recompose → this rung beside a 0.49.2 app
+  and a two-app e2e; multi-app; current shape. first-050-upgrade expects `false`.
+- Suites: test-migrations 228 ok · test-generators 177 ok / 23 skipped · test-layers 100 ok. Commits 8e18275, 2540755.
