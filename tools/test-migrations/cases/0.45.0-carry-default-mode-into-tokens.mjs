@@ -62,7 +62,9 @@ export default {
       expect: (tree, t) => {
         t.equal(declared(tree), 'system', '$default-mode');
         t.ok(tokens(tree).indexOf('$default-mode') > tokens(tree).indexOf('$prefix:'), 'declared after $prefix, as the seed does');
-        t.ok(tokens(tree) === current('generators/design-system/files/styles/_core/_tokens.scss.tpl'), '_tokens.scss is not what 0.45.0 seeds');
+        // Today's template minus what LATER releases added to it (0.50.0: the z-skip-link layer, added by its own rung).
+        const seeded045 = current('generators/design-system/files/styles/_core/_tokens.scss.tpl').replace(/  \/\/ The skip link: above everything[^\n]*\n  'z-skip-link'[^\n]*\n/, '');
+        t.ok(tokens(tree) === seeded045, '_tokens.scss is not what 0.45.0 seeds');
         for (const [file, template] of [
           ['styles/_core/_theme.scss', 'generators/design-system/files/styles/_core/_theme.scss.tpl'],
           ['src/lib/ds-theme.service.ts', 'adapters/angular/design-system-files/src/lib/ds-theme.service.ts.tpl'],

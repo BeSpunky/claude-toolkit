@@ -2,7 +2,8 @@
 //
 // Its ports are the Angular answers to framework-neutral questions:
 //   apps       — @nx/angular:application with the house defaults (minimal, scss, routing, no e2e), and a first
-//                shell with a skip link and the <main> landmark (./app-shell);
+//                shell with the <main> landmark (./app-shell);
+//   shell      — the skip link, added by the design system with its look (./app-shell);
 //   libs       — @nx/angular:library (+ the ng-package.json normalisation a publishable lib needs);
 //   env        — Angular's environment-files pattern: src/environments/environment*.ts + build fileReplacements;
 //   providers  — the app's ApplicationConfig (src/app/app.config.ts);
@@ -27,7 +28,7 @@ import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
-import { seedAppShell } from './app-shell';
+import { addSkipLink, seedLandmark } from './app-shell';
 import { convertBareLint } from '../../generators/_utils/lint-inference';
 
 /**
@@ -129,7 +130,7 @@ export const angular: StackAdapter = {
       convertBareLint(tree, project);
       const root = readProjectConfiguration(tree, project).root;
       stateAngularCompilerContract(tree, root);
-      seedAppShell(tree, root); // the skip link and the <main> landmark, once (./app-shell)
+      seedLandmark(tree, root); // the <main> landmark, once; the skip link comes with its look (./app-shell, `shell`)
       return { project, callback };
     },
   },
@@ -186,6 +187,12 @@ export const angular: StackAdapter = {
       if (wired === current) return 'already';
       tree.write(path, wired);
       return 'wired';
+    },
+  },
+
+  shell: {
+    addSkipLink(tree, project) {
+      return addSkipLink(tree, readProjectConfiguration(tree, project).root);
     },
   },
 

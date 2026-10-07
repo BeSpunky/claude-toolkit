@@ -26,7 +26,10 @@
 //      `nx build` on any workspace whose nx.json doesn't define it. A graph edge also keeps `nx affected` right.
 //   3. the two marker blocks in the app's global stylesheet: the `@use` (prepended) and `@include ds.theme()`
 //      (appended). TWO blocks because sass requires every `@use` to precede any other rule. On the app's FIRST
-//      wiring only, a seeded `.skip-link { @include ds.skip-link(); }` rule for the shell's skip link.
+//      wiring only, the shell's skip link arrives WITH its look: the seeded `.skip-link { @include ds.skip-link(); }`
+//      and `#main { @include ds.skip-target(); }` rules, and the link itself, through the stack's `shell` port, before
+//      the `<main id="main">` landmark the stack seeded (an app whose shell has no such landmark is its own: told how).
+//      Never the link without its look — an unstyled "Skip to main content" on every page is worse than none.
 //   4. the design system's runtime provider (its binding's, e.g. provideDesignSystem()) — only into an app of
 //      the SAME stack as the binding: a framework's provider is that framework's code.
 //
@@ -58,13 +61,15 @@ export const THEME_START = '/* @bespunky/design-system:theme:start — generator
 export const THEME_END = '/* @bespunky/design-system:theme:end */';
 
 /**
- * The app shell's skip link (adapters/<stack> seeds the markup: `<a class="skip-link" href="#main">` before
- * `<main id="main">`), styled by the design system's mechanism. Seeded, not owned — no markers to re-assert.
+ * The app shell's skip link and its target — the link's look is the design system's mechanism (`ds.skip-link()`),
+ * and the landmark it moves focus to drops the outline programmatic focus would draw around the whole content
+ * (`ds.skip-target()`). Seeded, not owned — no markers to re-assert.
  */
 const SKIP_LINK_BLOCK =
   `/* The skip link — the shell's first focusable element, hidden until a keyboard user reaches it, then shown over\n` +
-  `   the page on the surface colours. Its look is the design system's (ds.skip-link()); keep the class on the link. */\n` +
-  `.skip-link {\n  @include ds.skip-link();\n}`;
+  `   the page on the surface colours — and the landmark it focuses. Their look is the design system's\n` +
+  `   (ds.skip-link(), ds.skip-target()); keep the class on the link and the id on <main>. */\n` +
+  `.skip-link {\n  @include ds.skip-link();\n}\n\n#main {\n  @include ds.skip-target();\n}`;
 
 export default async function designSystemStylesGenerator(
   tree: Tree,
@@ -123,13 +128,29 @@ export default async function designSystemStylesGenerator(
   updateProjectConfigurationInPlace(tree, options.project, { ...project, implicitDependencies: [...deps], ...(targets ? { targets } : {}) });
 
   // 3) The app's global stylesheet, as the app itself declares it.
-  wireGlobalStylesheet(tree, styles.globalStylesheet(tree, options.project), specifier, options.project);
+  const firstWiring = wireGlobalStylesheet(tree, styles.globalStylesheet(tree, options.project), specifier, options.project);
+
+  // 3b) …and on that first wiring, the skip link the look was seeded for — through the stack's shell port.
+  if (firstWiring) addSkipLink(tree, options.project);
 
   // 4) The runtime binding's provider, on the per-app path so the first app and every later one get it from ONE
   //    code path — an app with the sass but not the provider renders the tokens but never follows a mode change.
   wireDesignSystemProvider(tree, options.project, designSystem, importPath, options.wireProviders === true);
 
   if (!options.skipFormat) await formatFiles(tree);
+}
+
+/** The skip link into the app's shell (the stack's `shell` port); a shell of the app's own is told how, not edited. */
+function addSkipLink(tree: Tree, project: string): void {
+  const shell = adapterOf(tree, project)?.shell;
+  if (!shell) return;
+  if (shell.addSkipLink(tree, project) === 'no-landmark') {
+    logger.info(
+      `[design-system-styles] \`${project}\`'s shell has no \`<main id="main">\` landmark, so no skip link was added (its look is ` +
+        `seeded in the global stylesheet). To adopt it: \`<a class="skip-link" href="#main">Skip to main content</a>\` first, the ` +
+        `content in \`<main id="main" tabindex="-1">\` — HOUSE.md has the snippet.`,
+    );
+  }
 }
 
 /**
@@ -186,7 +207,8 @@ function wireDesignSystemProvider(
  * outside them survives untouched. Nothing a PROJECT decides lives inside them: the call takes no argument,
  * because the default mode is a design decision with its own home — the design system's `$default-mode`.
  */
-function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: string, projectName: string): void {
+/** Returns whether this was the app's FIRST wiring (the skip link's look was seeded with it). */
+function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: string, projectName: string): boolean {
   if (!stylesPath) {
     logger.warn(
       `[design-system-styles] Could not find a global SCSS stylesheet for \`${projectName}\`. ` +
@@ -195,7 +217,7 @@ function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: 
         `    @include ds.theme();          // anywhere after it\n` +
         `Without them the app has no design tokens at runtime.`
     );
-    return;
+    return false;
   }
 
   const current = tree.read(stylesPath, 'utf8') ?? '';
@@ -219,6 +241,7 @@ function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: 
   if (firstWiring && !/\.skip-link\b/.test(next)) next = `${next.trimEnd()}\n\n${SKIP_LINK_BLOCK}\n`;
 
   if (next !== current) tree.write(stylesPath, next);
+  return firstWiring;
 }
 
 /**

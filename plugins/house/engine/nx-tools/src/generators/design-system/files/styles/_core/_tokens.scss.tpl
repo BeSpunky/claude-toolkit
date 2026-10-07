@@ -87,6 +87,8 @@ $base: (
   'z-dropdown': 100,
   'z-overlay': 500,
   'z-modal': 1000,
+  // The skip link: above everything, modals included — a keyboard user's way past the chrome is never covered.
+  'z-skip-link': 1100,
 );
 
 /// Mode-DEPENDENT tokens. One map per mode.
