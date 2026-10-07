@@ -6,6 +6,8 @@
 // project-written `.env` asset of another shape (kept, reported), a functions project outside apps/, none at all.
 // And both halves of the move, here (R9-3): firebase.json's functions block that deploys the bundle gains `configDir`
 // before the asset goes — a configDir the project set is kept — and with no such block the asset STAYS, reported.
+// And the inline esbuild options 0.50 replaced with the house esbuildConfig: the house's own go, the project's stay
+// (reported).
 //
 // No historical shapes: the house entry shipped in ONE shape, from its introduction to its removal —
 // `{ glob: '.env', input: root, output: '.' }` (git show 6b56f49:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/generator.ts;
@@ -13,7 +15,7 @@
 // until 5a05026, the resolved project home since) — exactly HOUSE_ENTRY below.
 import { createRequire } from 'node:module';
 
-const { addProjectConfiguration, readProjectConfiguration, writeJson } = createRequire(import.meta.url)('@nx/devkit');
+const { addProjectConfiguration, readProjectConfiguration, updateProjectConfiguration, writeJson } = createRequire(import.meta.url)('@nx/devkit');
 /** firebase.json as 0.49 left it: the functions block deploys the bundle, with no configDir. */
 const firebaseJson = (tree, root = 'apps/functions', extra = {}) =>
   writeJson(tree, 'firebase.json', { functions: [{ source: `dist/${root}`, codebase: 'default', ...extra }], hosting: { public: 'x' } });
@@ -85,6 +87,29 @@ export default {
       expect: (tree, t) => {
         t.ok(!('assets' in optionsOf(tree)), JSON.stringify(optionsOf(tree).assets));
         t.equal(t.json('firebase.json').functions[0].configDir, 'packages/backend', 'configDir follows where it lives');
+      },
+    },
+    {
+      name: "the house's inline esbuildOptions: removed (the esbuildConfig replaces them; Nx refuses both)",
+      setup: (tree) => {
+        functionsApp(tree);
+        const c = readProjectConfiguration(tree, 'functions');
+        c.targets.build.options.esbuildOptions = { outExtension: { '.js': '.js' } };
+        updateProjectConfiguration(tree, 'functions', c);
+      },
+      expect: (tree, t) => t.ok(!('esbuildOptions' in optionsOf(tree)), JSON.stringify(optionsOf(tree).esbuildOptions)),
+    },
+    {
+      name: "esbuildOptions the project changed: kept, and reported",
+      setup: (tree) => {
+        functionsApp(tree, 'apps/functions', undefined);
+        const c = readProjectConfiguration(tree, 'functions');
+        c.targets.build.options.esbuildOptions = { outExtension: { '.js': '.js' }, define: { X: '1' } };
+        updateProjectConfiguration(tree, 'functions', c);
+      },
+      expect: (tree, t, logs) => {
+        t.ok(optionsOf(tree).esbuildOptions?.define?.X === '1', 'kept');
+        if (logs) t.ok(logs.some((line) => /esbuild options of its own/.test(line)), `not reported: ${logs.join(' | ')}`);
       },
     },
     {

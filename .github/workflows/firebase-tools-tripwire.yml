@@ -1,0 +1,50 @@
+# The firebase-tools TRIPWIRE (tools/test-firebase-tools/run.mjs): what the emulator safety rests on, against the REAL
+# firebase-tools the house pins — the dotenv parser tools/emulator-secrets.cjs ports, the undocumented
+# CLOUD_SECRET_MANAGER_URL sink, and the Functions emulator end to end under the offline demo- project id.
+# Network-bound (npm install), so it is NOT on every push and NOT in the pre-push hook: weekly, on demand, and
+# whenever the code that depends on it — or the pinned firebase-tools — changes.
+name: firebase-tools tripwire
+
+on:
+  schedule:
+    - cron: '41 4 * * 1' # Mondays 04:41 UTC
+  workflow_dispatch:
+  push:
+    branches: [main, development]
+    paths:
+      - 'plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulator-secrets.cjs.tpl'
+      - 'plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulator-project.mjs.tpl'
+      - 'plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl'
+      - 'plugins/house/engine/nx-tools/src/generators/firebase-emulators/generator.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts' # the pinned firebase-tools
+      - 'tools/test-firebase-tools/**'
+      - '.github/workflows/firebase-tools-tripwire.yml'
+  pull_request:
+    paths:
+      - 'plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulator-secrets.cjs.tpl'
+      - 'plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulator-project.mjs.tpl'
+      - 'plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl'
+      - 'plugins/house/engine/nx-tools/src/generators/firebase-emulators/generator.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
+      - 'tools/test-firebase-tools/**'
+      - '.github/workflows/firebase-tools-tripwire.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-tools-tripwire-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tripwire:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the emulator safety against the pinned firebase-tools
+        run: node tools/test-firebase-tools/run.mjs

@@ -9,7 +9,7 @@ const { updateJson, writeJson, getProjects } = requireFromRepo('@nx/devkit');
 const run = async (tree, ctx) => {
   await ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: SCOPE });
 };
-const TEMPLATED = ['tools/emulators.sh', 'tools/push-secrets.sh', 'tools/firebase-welcome.sh', 'tools/seed/apply.mjs', 'tools/seed/world.mjs'];
+const TEMPLATED = ['tools/emulators.sh', 'tools/push-secrets.sh', 'tools/firebase-welcome.sh', 'tools/seed/apply.mjs', 'tools/seed/world.mjs', 'tools/emulator-project.mjs', 'tools/emulator-secrets.cjs', 'tools/functions-esbuild.config.cjs'];
 
 export default {
   name: 'firebase-emulators · the functions app follows the layout',
@@ -74,6 +74,11 @@ export default {
         // The params files are read in place from the source dir — so the emulator-only .env.local works.
         t.equal(t.json('firebase.json')?.functions?.[0]?.configDir, root, 'firebase.json configDir');
         t.ok(!project?.targets?.build?.options?.assets, `build copies no params file: ${JSON.stringify(project?.targets?.build?.options?.assets)}`);
+        // The inert emulator secrets are a BUILD OUTPUT: the build runs the house esbuild config, whose plugin writes them.
+        t.equal(project?.targets?.build?.options?.esbuildConfig, 'tools/functions-esbuild.config.cjs', 'build esbuildConfig');
+        t.ok(!('esbuildOptions' in (project?.targets?.build?.options ?? {})), 'esbuildOptions beside esbuildConfig (Nx refuses both)');
+        t.has('tools/functions-esbuild.config.cjs', `path.join(__dirname, '..', '${root}')`);
+        t.has('tools/functions-esbuild.config.cjs', "require('./emulator-secrets.cjs')");
         // The seed applier is generator-owned; the worlds are not.
         t.has('tools/seed/apply.mjs', 'export async function applyWorld');
         t.has('tools/seed/build.mjs', "from './apply.mjs'");

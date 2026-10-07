@@ -41,7 +41,7 @@ chmod +x "$FAKE_DIR/fake.jar"
 
 # Render the reaper with its match pattern retargeted at our token, so it can only ever see fakes.
 sed "s|firebase/emulators/|$TOKEN/emulators/|g" "$TPL" > "$TMP/ws/tools/reap-emulators.sh"
-node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$TMP/ws"
+node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$TMP/ws"
 # A port nothing holds: the reaper exits early when no ports are configured, and would skip the sweep.
 printf '{ "emulators": { "auth": { "port": 59731 } } }\n' > "$TMP/ws/firebase.json"
 
