@@ -179,6 +179,12 @@
       "layer": "agent",
       "description": "The web layer's per-tool `<folder>-playwright-cache` volume (~/.cache/ms-playwright) folds into ONE persisted ~/.cache volume (the agent layer's `<folder>-cache`), which also keeps the shared browser's own Playwright runtime and every other tool cache across rebuilds. Removes the house-written mount (and the house comment above it) so it does not stay nested inside the new one; a project-written one is reported. The unused Docker volume lives on the host and is reported by name for `docker volume rm` — a cache, so nothing is lost.",
       "implementation": "./src/migrations/0.49.0/fold-playwright-cache-into-home-cache"
+    },
+    "correct-app-hosting-guidance": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "Corrects the App Hosting deploy guidance the house seeded into comments: apphosting.staging.yaml's `backends:create --environment staging` (no such flag — the staging backend's Environment name is a console setting, and until it is set staging builds production's config), and the 'GitHub-driven' / 'apphosting.yaml at the workspace root' claims in apphosting.yaml and environment.prod.ts (App Hosting also deploys from local source; the yaml is found by walking up from the backend's Root Directory, which an Nx app must set to the app). Rewrites only the exact comment blocks the house wrote; an edited one that still says the false thing is reported by name. No configuration changes.",
+      "implementation": "./src/migrations/0.50.0/correct-app-hosting-guidance"
     }
   }
 }
