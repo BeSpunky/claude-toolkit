@@ -74,3 +74,62 @@ Test-generators skips (18+) are the cases needing `@nx/angular` / `@nx/js`, whic
 - `skills/new/SKILL.md`: Cloud Functions bullet — W2's secrets sentences + W8's fail-closed firewall sentence; checklist
   row — W8's firewall row + W2's `apply.mjs`.
 - test-generators 146 ok / 22 skip · test-migrations 156 ok.
+
+### w1 (one versions source, .nvmrc, firebase-tools devDep, pinned gcloud) — merged last, as directed
+- `migrations.json`: union (pin-floating-dependencies, declare-node-version, firebase-cli-from-package,
+  gcloud-cli-from-image). `tips.txt`: union. `layers/firebase.ts`: both imports (W6's CI provider, W1's gcloud pin).
+- `firebase-emulators/generator.ts`: imports — W8's `../../platform` + W1's versions/dependencies/node-version;
+  W1's new `reportRuntimeMismatch()` placed before W5/W3's `ensureFirebaseProject` signature + comment.
+- `HOUSE.md.tpl` functions paragraph: W1's `engines.node` ↔ `.nvmrc` sentence inserted into the W5/W2/W8 text.
+- `skills/new/SKILL.md`, **judgement**: four lines where W1 (features → pinned image package + firebase-tools devDep;
+  the Angular-major note) and W4 (forwards are for the app's port + the Emulator UI) each edited the same sentence.
+  Rebuilt each from W4's text with W1's facts applied, so neither the retired features nor the retired same-port
+  requirement comes back.
+- No lockfile change. test-generators 162 ok / 22 skip · test-migrations 181 ok.
+
+## Integration checks
+
+1. **Retired keys on the first 0.50 upgrade (no `.bespunky/house-targets.json` yet).** With no record, a key the house
+   no longer declares is kept as the project's. Findings:
+   - `continuous` on `firebase:emulators*` / the dev-server leaf (W3): kept by the merge, but removed by rung
+     `stack-owned-dev-processes` (runs before the generator). OK.
+   - `serve-preflight` (W3): an addition — arrives. OK.
+   - firebase.json `functions[0].predeploy` (W5): the `functions` block is re-asserted whole. OK.
+   - functions:build's `.env` asset (W2): **survived** — the house dropped `options.assets` entirely, so it read as a
+     project key. Fixed: new rung `0.50.0/read-functions-params-in-place` (removes exactly the house entry, the
+     emptied key with it; a project-shaped `.env` asset kept + reported), 5 fixture cases; plus a generator case
+     `first-050-upgrade` that ages a project to 0.49 with no record and runs rungs + generator in upgrade order —
+     asserting all three retired keys are gone. Verified it FAILS without the new rung.
+2. **`portOffset` sweep.** The two skill lines were already fixed on W4's branch. Fixed: firebase-auth template comment
+   (`emulatorFor`), service-configs comment, the dev.json declaration example, the gitignore block's camelCase flag.
+   Left with reason: the serve executors' `portOffset` option (the Nx option behind `--port-offset`), frozen migration
+   texts + fixtures, the generic url-switch test in test-scaffold, `docs/shared-browser-DESIGN.md` (dated record).
+3. **presets.ts:68** — `` `new` `` inside a template literal. Fixed (`'new'`). Why no test saw it: every runner (and
+   the publisher) compiles through `compile-generators.mts` = `ts.transpileModule`, which emits best-effort JS and
+   reports nothing unless asked; the line is in a refusal branch no valid preset reaches. `compile-generators.mts` now
+   requests syntactic diagnostics and fails naming file:line (verified: the old presets.ts fails test-layers at
+   compile, `presets.ts:68:70 ',' expected`).
+4. **Projections.** `test-layers --write`: no layers.sh drift. mod-brand: 5 projections match. playwright-deps: match
+   (playwright-core 1.63.0, debian13). firebase-compat: table matches npm (firebase-tools 15.32.1); gcloud
+   588.0.0-0 published.
+5. **Everything** (after all fixes): test-generators `--strict` 185/185 (with @nx/angular + @nx/js 23.1.0 linked from a
+   scratch install, removed after; 163 ok / 22 skip without) · test-migrations 186/186 · test-layers 100/100 ·
+   test-scaffold 20 files pass · test-tips 10 · test-voice 38/38 · test-mod-brand 8 · test-branches 49 ·
+   test-standing pass · check-descriptions ok · check-script-modes ok · check-release-invariants FAILS as expected:
+   `bespunky-house` (0.47.2, unbumped), `bespunky-workflow` (0.11.0, unbumped), `@bespunky/nx-tools` ("changed since
+   0.50.0" — the shared pre-bump commit 53cb79d reads as a release; 0.50.0 is not published). `bespunky-design-system`
+   is NOT flagged. Nothing bumped.
+6. **Contradiction sweep** (`git grep` over proxied, firebase-cli, gcloud-cli/jajera, `--environment staging`,
+   nodeMajor/`--node-major`, same-port, emulatorFor/offsetUrl/resolvePortOffset, GitHub-driven, ALWAYS_ON,
+   FIREBASE_DEFAULT_PORTS, MAIN_WORKTREE, predeploy, continuous). Fixed: new skill passed the retired `--nodeMajor`
+   and said the project's Node comes from the newest image tag / running Node (W1: `.nvmrc`); README said the Docker
+   tag is "the Node source" and called the Firebase forwards "same-port forwards for the emulator suite" (W4: the app
+   needs only its port; the forwards serve the Emulator UI). Remaining hits are legitimate (migration descriptions,
+   the Docker-fallback `MAJOR` that only picks the generators' image, the seeds' MAIN_WORKTREE borrowing W2 kept,
+   the dev engine's own `resolvePortOffset`, the App Hosting skill stating `--environment` never existed).
+
+## Still owed before any release (not this integrator's)
+- Plugin bumps: bespunky-house, bespunky-workflow; payload version commit for 0.50.0.
+- Dogfood: `house.sh upgrade --local` on a Firebase fixture + a container rebuild (W1 feature removals, gcloud image
+  package, never built here) — the finish gate.
+- Open user question from W6: keep the string form of `deploys` as a note.
