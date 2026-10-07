@@ -34,6 +34,13 @@ cleanup() {
     pid="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$entry" 2>/dev/null)"
     [ -n "$pid" ] && kill -KILL -- "-$pid" 2>/dev/null
   done
+  # Each stack's TMPDIR lives in /tmp, outside the fixture: release the ones the records still name.
+  for rec in "$TMP"/*/.bespunky/run/*.json; do
+    [ -f "$rec" ] || continue
+    t="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).tmp ?? ""))' "$rec" 2>/dev/null)"
+    [[ "$t" =~ ^/tmp/bespunky-[0-9a-f]{12}$ ]] && rm -rf "$t"
+  done
+  rm -rf /tmp/bespunky-0123456789ab
   [ -n "${KEEP:-}" ] && echo "kept $TMP" || rm -rf "$TMP"
 }
 trap cleanup EXIT
