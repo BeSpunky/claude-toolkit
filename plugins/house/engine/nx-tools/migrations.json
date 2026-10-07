@@ -191,6 +191,12 @@
       "layer": "angular",
       "description": "Name tsconfig.spec.json in every Angular library's Analog test config (`angular()` → `angular({ tsconfig: './tsconfig.spec.json' })`), ending the \"Unable to resolve tsconfig at …/tsconfig.app.json\" warning Nx's graph inference triggers outside test runs.",
       "implementation": "./src/migrations/0.50.0/state-analog-spec-tsconfig"
+    },
+    "add-design-system-a11y": {
+      "version": "0.50.0",
+      "layer": "design-system",
+      "description": "Give an existing design system its accessibility mechanisms — seed styles/_utils/_a11y.scss and forward ds.visually-hidden($focusable) and ds.skip-link() from the public SASS API (never over a mixin of the same name) — and report how an existing app adopts the skip link and <main> landmark new apps are born with.",
+      "implementation": "./src/migrations/0.50.0/add-design-system-a11y"
     }
   }
 }

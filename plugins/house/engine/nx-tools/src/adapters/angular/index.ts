@@ -1,7 +1,8 @@
 // THE ANGULAR ADAPTER — everything the house generators know about Angular, in one place.
 //
 // Its ports are the Angular answers to framework-neutral questions:
-//   apps       — @nx/angular:application with the house defaults (minimal, scss, routing, no e2e);
+//   apps       — @nx/angular:application with the house defaults (minimal, scss, routing, no e2e), and a first
+//                shell with a skip link and the <main> landmark (./app-shell);
 //   libs       — @nx/angular:library (+ the ng-package.json normalisation a publishable lib needs);
 //   env        — Angular's environment-files pattern: src/environments/environment*.ts + build fileReplacements;
 //   providers  — the app's ApplicationConfig (src/app/app.config.ts);
@@ -26,6 +27,7 @@ import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
+import { seedAppShell } from './app-shell';
 
 /**
  * The executors that make a project an Angular one. Applications build with `@angular/build:` (or the legacy
@@ -118,7 +120,9 @@ export const angular: StackAdapter = {
           skipFormat: true,
         } as Parameters<typeof applicationGenerator>[1]))) ?? noop;
       const project = emittedProjectName(tree, options.directory, options.name);
-      stateAngularCompilerContract(tree, readProjectConfiguration(tree, project).root);
+      const root = readProjectConfiguration(tree, project).root;
+      stateAngularCompilerContract(tree, root);
+      seedAppShell(tree, root); // the skip link and the <main> landmark, once (./app-shell)
       return { project, callback };
     },
   },
