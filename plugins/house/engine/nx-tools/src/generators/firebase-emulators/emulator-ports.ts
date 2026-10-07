@@ -18,10 +18,10 @@ interface SuitePorts {
 }
 let table: SuitePorts | undefined;
 /** Read on first use, not at load: the layer registry imports this module wherever it is loaded. */
-const suite = (): SuitePorts => (table ??= JSON.parse(readFileSync(join(__dirname, 'suite-ports.json'), 'utf8')) as SuitePorts);
+const portTable = (): SuitePorts => (table ??= JSON.parse(readFileSync(join(__dirname, 'suite-ports.json'), 'utf8')) as SuitePorts);
 
 /** firebase-tools' own port for an emulator — what firebase.json means when it enables one without naming a port. */
-export const defaultPort = (name: string): number | undefined => suite().defaults[name];
+export const defaultPort = (name: string): number | undefined => portTable().defaults[name];
 
 /** The emulators the house suite enables — the canonical firebase.json block, on firebase-tools' ports. */
 export const HOUSE_EMULATORS = ['auth', 'firestore', 'storage', 'functions', 'ui'] as const;
@@ -31,7 +31,7 @@ const FIRESTORE_WEBSOCKET_DEFAULT = 9150;
 
 /** tools/emulator-ports.mjs, rendered from its template with the table (`SUITE`) — the runtime's copy of it. */
 export const renderEmulatorPortsModule = (template: string): string => {
-  const { defaults, alwaysOn, nested } = suite();
+  const { defaults, alwaysOn, nested } = portTable();
   return template.split('{{SUITE}}').join(JSON.stringify({ defaults, alwaysOn, nested }, null, 2));
 };
 
@@ -63,9 +63,9 @@ export function emulatorPorts(tree: Tree): Record<string, number> {
   const ports: Record<string, number> = {};
   for (const { name, port, entry } of configured(tree)) {
     ports[name] = port;
-    for (const [key, as] of Object.entries(suite().nested[name] ?? {})) if (Number.isInteger(entry[key])) ports[as] = entry[key] as number;
+    for (const [key, as] of Object.entries(portTable().nested[name] ?? {})) if (Number.isInteger(entry[key])) ports[as] = entry[key] as number;
   }
-  for (const name of suite().alwaysOn) ports[name] ??= defaultPort(name)!;
+  for (const name of portTable().alwaysOn) ports[name] ??= defaultPort(name)!;
   return ports;
 }
 
@@ -79,7 +79,7 @@ export function hostDialledPorts(tree: Tree): { name: string; port: number; labe
   // The UI first — the one a person opens; then the services in firebase.json's order.
   const suite = configured(tree).sort((a, b) => Number(b.name === 'ui') - Number(a.name === 'ui'));
   for (const { name, port, entry } of suite) {
-    if (suite().alwaysOn.includes(name)) continue;
+    if (portTable().alwaysOn.includes(name)) continue;
     out.push({ name, port, label: name === 'ui' ? 'Firebase Emulator UI' : `${title(name)} Emulator` });
     if (name === 'firestore') {
       const ws = Number(entry.websocketPort ?? FIRESTORE_WEBSOCKET_DEFAULT);
