@@ -7,3 +7,8 @@ Test-generators skips (18+) are the cases needing `@nx/angular` / `@nx/js`, whic
 
 ### w7 (App Hosting story)
 - Clean merge. test-generators 116 ok / 18 skip · test-migrations 119 ok.
+
+### w4 (emulators through the origin)
+- Conflict: `migrations.json` — both added a 0.50.0 entry at the same spot. Resolved as a union (a 3-way JSON merge
+  script over the index stages: keys either side added are kept, a key both sides changed differently would abort).
+- test-generators 116 ok / 18 skip · test-migrations 127 ok.

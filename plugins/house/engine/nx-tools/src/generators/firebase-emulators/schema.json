@@ -29,6 +29,11 @@
     "clientApp": {
       "type": "string",
       "description": "The app whose environment files the suite's scripts (tools/emulators.sh, tools/push-secrets.sh) derive project ids from, WITHOUT attaching anything to it. Defaults to --project, else the app already wired with the Firebase client, else none (the scripts then fall back to demo-<workspaceName> / .firebaserc)."
+    },
+    "seedRules": {
+      "type": "boolean",
+      "default": false,
+      "description": "Seed deny-all Firestore rules, Firestore indexes and Storage rules into the `firebase` project (and declare them in firebase.json) for each service firebase.json declares none for. TRUE ONLY WHEN ENSURING the layer (`new`, `add-layer firebase`) — never on a plain upgrade: a project with no rules in the repo keeps them in the Firebase console, and the first deploy would overwrite them. The seeds carry a marker line; `nx run firebase:deploy` skips a file that still has it. Default false."
     }
   },
   "required": []
