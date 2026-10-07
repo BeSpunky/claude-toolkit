@@ -32,12 +32,14 @@ export const PLAYWRIGHT_VERSION = '1.63.0';
 export const FIREBASE_TOOLS_VERSION = '15.32.1';
 
 /**
- * The Google Cloud CLI, as the apt package Google publishes (its repository's version string, `<release>-0`) —
- * installed into the IMAGE by the firebase layer, so a rebuild reuses it and every machine runs this one. Its state
- * (logins, application-default credentials, configurations) lives in ~/.config/gcloud — the persisted ~/.config.
- * tools/firebase-compat/project.mjs checks the pin is still in Google's repository for both architectures.
+ * The Google Cloud CLI release the firebase layer installs into the IMAGE — from Google's VERSIONED ARCHIVE
+ * (dl.google.com/…/google-cloud-cli-<v>-linux-<arch>.tar.gz, kept for every release), never its apt repository, whose
+ * index drops a release after about a year. A rebuild reuses it and every machine runs this one. Its state (logins,
+ * application-default credentials, configurations) lives in ~/.config/gcloud — the persisted ~/.config.
+ * Moving it: change this, then `node tools/firebase-compat/project.mjs --write` re-projects the archives' sha256
+ * (gcloud-archive.ts); the check fails until it has.
  */
-export const GCLOUD_CLI_VERSION = '588.0.0-0';
+export const GCLOUD_CLI_VERSION = '588.0.0';
 
 /** The Cloud Functions runtime SDKs — the workspace root AND the deploy manifest (functions/package.json) read these. */
 export const FIREBASE_ADMIN_VERSION = '^13.6.0';

@@ -317,7 +317,7 @@ function writeImageFiles(tree: Tree, composition: Composition): void {
     tree.write(path, content, mode === undefined ? undefined : { mode });
   };
   // 0o755 so the shebang/mode rule holds in the output; it is invoked as `sh <path>`, so the mode is not load-bearing.
-  owned(OS_PACKAGES_SCRIPT, renderOsPackagesScript(composition.osPackages), 0o755);
+  owned(OS_PACKAGES_SCRIPT, renderOsPackagesScript(composition), 0o755);
   if (composition.imageSource.kind === 'foreign') {
     if (tree.exists(HOUSE_DOCKERFILE_PATH) && isHouseFile(tree, HOUSE_DOCKERFILE_PATH)) tree.delete(HOUSE_DOCKERFILE_PATH);
   } else {

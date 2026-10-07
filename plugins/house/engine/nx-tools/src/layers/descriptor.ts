@@ -228,14 +228,25 @@ export interface GitignoreBlock {
 //   {{remoteUser}}  the user the container runs as
 //   {{nodeMajor}}   the Node major the image / Node feature is pinned to — the project's `.nvmrc` (_utils/node-version)
 
-/** A third-party apt repository an `osPackages` group installs from (see `DevcontainerFragment.osPackages`). */
-export interface AptRepository {
-  /** Names the keyring and the sources.list.d file: `[a-z0-9-]+`. */
+/** The Debian architectures the house images run on — what an `ArchiveTool` names its downloads by. */
+export type DebianArch = 'amd64' | 'arm64';
+
+/**
+ * A tool installed from its publisher's VERSIONED ARCHIVE (see `DevcontainerFragment.archives`) — for a tool Debian
+ * does not ship, whose publisher keeps every release downloadable. Not a third-party apt repository: a repository
+ * index is a ROLLING window (Google's drops a gcloud release after about a year), so a version pinned there expires
+ * and every cache-miss image build fails with it; and a moved pin needs a downgrade, a foreign image may already
+ * declare the same repository differently. A versioned archive is kept, so the pin lives as long as the publisher.
+ */
+export interface ArchiveTool {
+  /** Names its install root, `/opt/bespunky/<id>`: `[a-z0-9-]+`. */
   id: string;
-  /** HTTPS URL of the repository's signing key (ASCII-armored or binary). */
-  key: string;
-  /** The `deb` line after `deb [signed-by=…]`: `<https url> <suite> <component…>`. */
-  source: string;
+  /** The pinned release; each one is extracted to `/opt/bespunky/<id>/<version>`, `current` pointing at it. */
+  version: string;
+  /** The directory inside the archive whose executables are linked into /usr/local/bin — first on PATH, ahead of /usr/bin. */
+  bin: string;
+  /** Per architecture: the `.tar.gz` and its sha256 (checked before anything is extracted). Projected, never typed. */
+  downloads: Readonly<Record<DebianArch, { url: string; sha256: string }>>;
 }
 
 /** A JSON value as it may appear in devcontainer.json. */
@@ -360,14 +371,8 @@ export interface DevcontainerFragment {
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
   /** Debian packages — composed into the one installer (house.packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
   osPackages?: readonly ({
-    /** Debian package names; `name=version` pins one exactly (a tool that is a build input must not float). */
+    /** Debian package names. */
     packages: readonly string[];
-    /**
-     * The third-party apt repository these packages come from (a tool Debian does not ship, at a version Debian
-     * does not carry). The installer adds it before installing — its key dearmored into `/usr/share/keyrings/<id>.gpg`
-     * and the source line `signed-by=` it, the modern method (no `apt-key`, which Debian 13 no longer has).
-     */
-    repository?: AptRepository;
     /**
      * Names that are right only for the HOUSE images' distro (a projection for Debian 13, like Chromium's libraries):
      * left out on an adopted devcontainer's foreign image, whose distro the house cannot know — one wrong name fails
@@ -375,6 +380,12 @@ export interface DevcontainerFragment {
      */
     onHouseImageOnly?: true;
   } & Explained)[];
+  /**
+   * Tools installed from their publisher's versioned archive — by the same one installer, in the same cached image
+   * layer, after the apt packages (and, like them, by post-create where missing: an adopted image). A moved pin
+   * installs the new release beside the old one, switches `current`, and removes the old one. See `ArchiveTool`.
+   */
+  archives?: readonly (ArchiveTool & Explained)[];
   /** Post-create pieces. */
   postCreate?: readonly PostCreatePiece[];
 }
