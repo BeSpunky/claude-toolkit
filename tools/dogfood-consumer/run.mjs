@@ -4,6 +4,7 @@
  *
  *   node tools/dogfood-consumer/run.mjs [--released=<ref>] [--toolkit=<path>] [--only=<steps>]
  *                                       [--workdir=<dir>] [--no-staging] [--keep]
+ *   node tools/dogfood-consumer/run.mjs --self-test          (the upstream-cause recognisers on recorded output; offline)
  *
  * NETWORK, MINUTES (~20–40), npm registry + yarn installs. NOT CI and NOT the pre-push hook — a release gate a
  * human (or the agent doing the release) runs before bumping `engine/nx-tools/package.json`. Node built-ins only.
@@ -35,6 +36,21 @@
  * Steps (--only, comma-separated; prerequisites are pulled in): released, seed, upgrade, new-agent, new-node,
  * new-angular, new-angular-firebase; aliases `consumer` (= released,seed,upgrade) and `new` (= every new-*).
  *
+ * ── WHEN THE RELEASED BASELINE IS BROKEN UPSTREAM ───────────────────────────────────────────────────────
+ *
+ * The released side resolves whatever the registry serves TODAY, so it can break for a reason that is neither the
+ * released code's nor the change's: on 2026-10-07 firebase@13.0.0 shipped `@firebase/ai@3.0.0` with
+ * `engines.node >=24.12.0`, and the released scaffold's `"firebase": "latest"` made the released `new` die in yarn's
+ * engine check. A released-side failure is therefore CLASSIFIED by cause (UPSTREAM_CAUSES — a table of recognisers:
+ * yarn's `The engine "node" is incompatible …`, npm's `EBADENGINE`, pnpm's `ERR_PNPM_UNSUPPORTED_ENGINE`; a new
+ * upstream cause is one more entry). A recognised one is its own status, UPSTREAM — "baseline broken upstream: <pkg>
+ * requires node <expected>, this Node is <got>" — never a FAIL of this run, and never a PASS either: the steps that
+ * needed the baseline (seed, upgrade) are reported as NOT COVERED because of it, the verdict reads
+ * `PASS (incomplete: …)`, and the summary prints the rerun that works around it where one exists (for an engine
+ * break: `YARN_IGNORE_ENGINES=true node tools/dogfood-consumer/run.mjs <same args>`). Only the RELEASED side is
+ * classified: the same signature in a `new --local` is the toolkit under test failing to pin a coherent set, and stays
+ * a FAIL; an unrecognised released failure stays a FAIL too.
+ *
  * Every command's full output goes to <workdir>/logs/NN-<check>.log; the path is printed. On exit (normal,
  * failure or Ctrl+C) the released worktree is removed, every process still running under the workdir is killed,
  * and — unless --keep — the scratch projects are deleted (the logs are kept). Nothing is ever written to
@@ -62,9 +78,75 @@ for (const a of process.argv.slice(2)) {
   else if (k === '--workdir' && v) opts.workdir = resolve(v);
   else if (k === '--no-staging') opts.staging = false;
   else if (k === '--keep') opts.keep = true;
+  else if (k === '--self-test') opts.selfTest = true;
   else if (k === '--help' || k === '-h') { console.log(USAGE); process.exit(0); }
   else { console.error(`unknown argument '${a}'\n${USAGE}`); process.exit(2); }
 }
+// ── upstream causes ───────────────────────────────────────────────────────────────────────────────────────
+// Why a RELEASED-side command failed, when the reason is the registry and not the code: one recogniser per cause.
+// `match(out)` returns every instance found (deduplicated), each { pkg, expected, got }; `say` renders one; `rerun`
+// (optional) is the env that works around it, per package manager. A cause with no workaround leaves `rerun` out.
+const ENGINE_RERUN = { yarn: 'YARN_IGNORE_ENGINES=true', npm: 'npm_config_engine_strict=false', pnpm: 'npm_config_engine_strict=false' };
+const UPSTREAM_CAUSES = [
+  {
+    id: 'engine', pm: 'yarn',
+    // error @firebase/ai@3.0.0: The engine "node" is incompatible with this module. Expected version ">=24.12.0". Got "22.23.2"
+    re: /(\S+): The engine "node" is incompatible with this module\. Expected version "([^"]+)"\. Got "([^"]+)"/g,
+    pick: (m) => ({ pkg: m[1], expected: m[2], got: m[3] }),
+  },
+  {
+    id: 'engine', pm: 'npm',
+    // npm error notsup Not compatible with your version of node/npm: <pkg>
+    // npm error notsup Required: {"node":">=24.12.0"}
+    // npm error notsup Actual:   {"npm":"10.9.0","node":"v22.23.2"}
+    re: /EBADENGINE[\s\S]*?Not compatible with your version of node\/npm: (\S+)[\s\S]*?Required: (\{[^\n]*\})[\s\S]*?Actual:\s*(\{[^\n]*\})/g,
+    pick: (m) => ({ pkg: m[1], expected: jsonField(m[2], 'node'), got: jsonField(m[3], 'node') }),
+  },
+  {
+    id: 'engine', pm: 'pnpm',
+    // ERR_PNPM_UNSUPPORTED_ENGINE  Unsupported environment … Your Node version is incompatible with "<pkg>". Expected version: X Got: Y
+    re: /ERR_PNPM_UNSUPPORTED_ENGINE[\s\S]*?incompatible with "([^"]+)"[\s\S]*?Expected version: (\S+)[\s\S]*?Got: (\S+)/g,
+    pick: (m) => ({ pkg: m[1], expected: m[2], got: m[3] }),
+  },
+].map((c) => ({ ...c, rerun: c.id === 'engine' ? ENGINE_RERUN[c.pm] : undefined, say: (h) => `${h.pkg} requires node ${h.expected}, this Node is ${String(h.got).replace(/^v/, '')}` }));
+function jsonField(text, key) { try { return JSON.parse(text)[key] ?? '?'; } catch { return '?'; } }
+
+/** Every upstream cause recognised in a command's output: [{ cause, hit, text }], empty when none is. */
+function classifyUpstream(out) {
+  const found = [];
+  for (const cause of UPSTREAM_CAUSES) {
+    for (const m of out.matchAll(cause.re)) {
+      const hit = cause.pick(m);
+      const text = cause.say(hit);
+      if (!found.some((f) => f.text === text)) found.push({ cause, hit, text });
+    }
+  }
+  return found;
+}
+
+if (opts.selfTest) {
+  const cases = [
+    ['yarn', 'error @firebase/ai@3.0.0: The engine "node" is incompatible with this module. Expected version ">=24.12.0". Got "22.23.2"\nerror Found incompatible module.',
+      ['@firebase/ai@3.0.0 requires node >=24.12.0, this Node is 22.23.2'], 'YARN_IGNORE_ENGINES=true'],
+    ['npm', 'npm error code EBADENGINE\nnpm error engine Unsupported engine\nnpm error notsup Not compatible with your version of node/npm: @firebase/ai@3.0.0\nnpm error notsup Required: {"node":">=24.12.0"}\nnpm error notsup Actual:   {"npm":"10.9.0","node":"v22.23.2"}',
+      ['@firebase/ai@3.0.0 requires node >=24.12.0, this Node is 22.23.2'], 'npm_config_engine_strict=false'],
+    ['pnpm', ' ERR_PNPM_UNSUPPORTED_ENGINE  Unsupported environment (bad pnpm and/or Node.js version)\n\nYour Node version is incompatible with "@firebase/ai@3.0.0".\n\nExpected version: >=24.12.0\nGot: v22.23.2',
+      ['@firebase/ai@3.0.0 requires node >=24.12.0, this Node is 22.23.2'], 'npm_config_engine_strict=false'],
+    ['yarn, twice + dedup', 'error a@1.0.0: The engine "node" is incompatible with this module. Expected version ">=24". Got "22.1.0"\nerror a@1.0.0: The engine "node" is incompatible with this module. Expected version ">=24". Got "22.1.0"\nerror b@2.0.0: The engine "node" is incompatible with this module. Expected version "^26". Got "22.1.0"',
+      ['a@1.0.0 requires node >=24, this Node is 22.1.0', 'b@2.0.0 requires node ^26, this Node is 22.1.0'], 'YARN_IGNORE_ENGINES=true'],
+    ['unrecognised', 'NX   Cannot find module @nx/angular\nerror Command failed with exit code 1.', [], undefined],
+  ];
+  let bad = 0;
+  for (const [name, out, want, rerun] of cases) {
+    const got = classifyUpstream(out);
+    const okCase = JSON.stringify(got.map((g) => g.text)) === JSON.stringify(want) && (got[0]?.cause.rerun === rerun);
+    if (!okCase) bad++;
+    console.log(`${okCase ? 'ok  ' : 'FAIL'}  ${name}: ${JSON.stringify(got.map((g) => g.text))}${got[0]?.cause.rerun ? ` (rerun: ${got[0].cause.rerun})` : ''}`);
+  }
+  console.log(bad ? `${bad} self-test case(s) failed` : 'self-test: every upstream recogniser OK');
+  process.exit(bad ? 1 : 0);
+}
+
 if (process.env.CI === 'true' || process.env.CI === '1') {
   console.error('dogfood-consumer: not a CI tool (network, minutes, and house.sh refuses upgrades in CI). Run it by hand.');
   process.exit(2);
@@ -172,13 +254,29 @@ function straysUnder(dir) {
 
 // ── the record ────────────────────────────────────────────────────────────────────────────────────────────
 const results = [];
+const upstream = []; // every upstream cause recognised on the released side: [{ cause, hit, text, step, check }]
 // BASE: a failure of the RELEASED toolkit's own output (the seeded consumer before the upgrade) — the reference the
 // toolkit under test is compared against, reported but never a failure of this run: the released code cannot be fixed.
-function record(step, check, ok, { ms = 0, detail = '', log = '', reference = false } = {}) {
-  const status = ok === null ? 'SKIP' : ok ? 'PASS' : reference ? 'BASE' : 'FAIL';
-  results.push({ step, check, status, ms, detail, log });
-  console.log(`  ${status.padEnd(4)}  ${step} · ${check}${detail ? ` — ${detail}` : ''}`);
+// UPSTREAM: a RELEASED-side failure whose output `released` a recogniser in UPSTREAM_CAUSES explains — the registry
+// broke the baseline, not any code; reported apart, never a FAIL, and what it left uncovered is said (`lostCoverage`).
+// Only a released-side caller passes `released`: the toolkit under test never gets an upstream excuse.
+function record(step, check, ok, { ms = 0, detail = '', log = '', reference = false, released = null, notCovered = false } = {}) {
+  const causes = ok === false && released !== null ? classifyUpstream(released) : [];
+  if (causes.length) {
+    upstream.push(...causes.map((c) => ({ ...c, step, check })));
+    detail = `baseline broken upstream: ${causes.map((c) => c.text).join('; ')}`;
+  }
+  const status = ok === null ? 'SKIP' : ok ? 'PASS' : causes.length ? 'UPSTREAM' : reference ? 'BASE' : 'FAIL';
+  results.push({ step, check, status, ms, detail, log, notCovered });
+  console.log(`  ${status.padEnd(8)}  ${step} · ${check}${detail ? ` — ${detail}` : ''}`);
   return ok;
+}
+/** Why a step that needs the released baseline did not run: the upstream break when there is one (coverage LOST,
+ *  never quietly skipped), else the plain reason. */
+function skipFor(step, check, reason) {
+  return upstream.length
+    ? record(step, check, null, { detail: `NOT COVERED — baseline broken upstream (${upstream[0].text})`, notCovered: true })
+    : record(step, check, null, { detail: reason });
 }
 /** The line of a log that says why — a house.sh verdict token, an error, else the last line. */
 function why(out) {
@@ -405,14 +503,14 @@ async function stepReleased() {
   const flags = ['--preset=angular', '--firebase', ...(consumer.staging ? ['--staging'] : [])];
   const r = await run('released-new', 'bash', [HOUSE(RELEASED_TREE), 'new', ...flags, consumer.dir, consumer.app], { cwd: CONSUMERS });
   const good = r.code === 0 && /^NEW_OK /m.test(r.out) && existsSync(join(consumer.dir, 'HOUSE.md'));
-  record(step, `new ${flags.join(' ')} (nx-tools ${relVer})`, good, { ms: r.ms, log: r.log, detail: good ? '' : `exit ${r.code}: ${why(r.out)}` });
+  record(step, `new ${flags.join(' ')} (nx-tools ${relVer})`, good, { ms: r.ms, log: r.log, detail: good ? '' : `exit ${r.code}: ${why(r.out)}`, released: r.out });
   if (good) consumer.integration = gitOut(consumer.dir, 'branch', '--show-current');
   return (ok.released = good);
 }
 
 async function stepSeed() {
   const step = 'seed';
-  if (!ok.released) return record(step, 'seeds', null, { detail: 'no released consumer' });
+  if (!ok.released) return skipFor(step, 'seeds', 'no released consumer');
   let all = true;
   for (const s of SEEDS) {
     const t0 = Date.now();
@@ -445,7 +543,7 @@ function upgradeVerdict(out) {
 
 async function stepUpgrade() {
   const step = 'upgrade';
-  if (!ok.seed) return record(step, 'upgrade', null, { detail: 'the seeded consumer is not ready' });
+  if (!ok.seed) return skipFor(step, 'upgrade', 'the seeded consumer is not ready');
   const c = consumer;
   gitOut(c.dir, 'checkout', '-q', '-b', 'chore/house-upgrade'); // the preflight refuses a protected line, rightly
   const base = gitOut(c.dir, 'rev-parse', 'HEAD');
@@ -500,7 +598,7 @@ async function verify(step, dir, prefix = '', before = null) {
         detail += fresh.length === failed.length ? ' (all new since the baseline)' : fresh.length ? ` (NEW since the baseline: ${fresh.join(', ')})` : ' (every one already failed before the upgrade)';
       }
     }
-    record(step, `${prefix}nx run-many -t ${target}`, r.code === 0, { ms: r.ms, log: r.log, detail, reference: !!prefix });
+    record(step, `${prefix}nx run-many -t ${target}`, r.code === 0, { ms: r.ms, log: r.log, detail, reference: !!prefix, released: prefix ? r.out : null });
   }
   return failedSets;
 }
@@ -556,11 +654,23 @@ function fmt(ms) {
 }
 function summary() {
   const w = { step: Math.max(4, ...results.map((r) => r.step.length)), check: Math.max(5, ...results.map((r) => r.check.length)) };
-  const line = (a, b, c, d, e) => `${a.padEnd(w.step)}  ${b.padEnd(w.check)}  ${c.padEnd(4)}  ${d.padStart(7)}  ${e}`;
-  console.log(`\n${line('STEP', 'CHECK', 'RES', 'TIME', 'DETAIL')}\n${'-'.repeat(w.step + w.check + 24)}`);
+  const line = (a, b, c, d, e) => `${a.padEnd(w.step)}  ${b.padEnd(w.check)}  ${c.padEnd(8)}  ${d.padStart(7)}  ${e}`;
+  console.log(`\n${line('STEP', 'CHECK', 'RES', 'TIME', 'DETAIL')}\n${'-'.repeat(w.step + w.check + 28)}`);
   for (const r of results) console.log(line(r.step, r.check, r.status, r.ms ? fmt(r.ms) : '', r.detail));
   const n = (s) => results.filter((r) => r.status === s).length;
-  console.log(`\n${n('FAIL') ? 'FAIL' : 'PASS'} — ${n('PASS')} passed, ${n('FAIL')} failed, ${n('SKIP')} skipped${n('BASE') ? `, ${n('BASE')} failing in the RELEASED baseline only (reference, not this run's)` : ''} in ${fmt(Date.now() - T0)}`);
+  const lost = results.filter((r) => r.notCovered);
+  const broken = [...new Set(upstream.map((u) => u.text))];
+  // Lost coverage is never a clean PASS: the verdict itself names it.
+  const verdict = n('FAIL') ? 'FAIL' : broken.length ? `PASS (incomplete: baseline broken upstream — ${lost.map((r) => r.step).join(', ') || 'the released consumer'} not covered)` : 'PASS';
+  console.log(`\n${verdict} — ${n('PASS')} passed, ${n('FAIL')} failed, ${n('SKIP') - lost.length} skipped${lost.length ? `, ${lost.length} NOT COVERED (baseline broken upstream)` : ''}${n('UPSTREAM') ? `, ${n('UPSTREAM')} UPSTREAM (the released baseline broken by the registry, not by any code)` : ''}${n('BASE') ? `, ${n('BASE')} failing in the RELEASED baseline only (reference, not this run's)` : ''} in ${fmt(Date.now() - T0)}`);
+  if (broken.length) {
+    console.log(`upstream: ${broken.join('; ')}`);
+    const reruns = [...new Set(upstream.map((u) => u.cause.rerun).filter(Boolean))];
+    if (reruns.length) {
+      const args = process.argv.slice(2).map((a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`)).join(' ');
+      console.log(`rerun (engine breaks only — it tells the package manager to skip its engine check):\n  ${reruns.join(' ')} node tools/dogfood-consumer/run.mjs${args ? ` ${args}` : ''}`);
+    }
+  }
   console.log(`toolkit under test: ${TOOLKIT} (nx-tools ${TOOLKIT_VERSION}); released: ${opts.released}`);
   console.log(`logs: ${LOGS}${opts.keep ? `\nkept projects: ${CONSUMERS}` : ''}`);
 }

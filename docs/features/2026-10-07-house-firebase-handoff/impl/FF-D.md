@@ -123,3 +123,20 @@ under the scratch area, and `~/projects` did not exist.
   this correctly as a FAIL on the `released` row.
 - Seeds the tool does not carry from the hand recipes, because they are runtime observations rather than shapes:
   serve, `dev stop`, emulator export, Chromium. Those stay hand-run.
+
+## Upstream breaks of the released baseline (2026-10-07)
+
+firebase@13.0.0 (`@firebase/ai@3.0.0`, `engines.node >=24.12.0`) broke the RELEASED `new` (`"firebase": "latest"`), and
+the tool reported it as a FAIL of the change under test, with seed/upgrade silently SKIPped. Now a released-side
+failure (the released `new`, the baseline build/lint) is classified against `UPSTREAM_CAUSES` — recognisers for yarn's
+`The engine "node" is incompatible`, npm's `EBADENGINE`, pnpm's `ERR_PNPM_UNSUPPORTED_ENGINE` — and a match is its own
+status `UPSTREAM`; the dependent steps read `NOT COVERED — baseline broken upstream (…)`; the verdict is
+`PASS (incomplete: …)` (never clean, never FAIL by itself) and the summary prints the engine workaround rerun with the
+same args. The toolkit under test never gets the excuse: an engine break in `new --local` stays FAIL. Offline check:
+`node tools/dogfood-consumer/run.mjs --self-test`. Observed for real with `--only=consumer`:
+
+```
+released  new --preset=angular --firebase --staging (nx-tools 0.49.2)  UPSTREAM  1m05s  baseline broken upstream: @firebase/ai@3.0.0 requires node >=24.12.0, this Node is 22.23.2
+PASS (incomplete: baseline broken upstream — seed, upgrade not covered) — 3 passed, 0 failed, 0 skipped, 2 NOT COVERED (baseline broken upstream), 1 UPSTREAM (…) in 1m05s
+  YARN_IGNORE_ENGINES=true node tools/dogfood-consumer/run.mjs --only=consumer
+```
