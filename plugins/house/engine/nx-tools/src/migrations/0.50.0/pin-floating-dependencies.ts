@@ -23,6 +23,7 @@
 // floating one (`next`, `*`, …) is REPORTED with what to do, never rewritten.
 import { type Tree, getProjects, logger } from '@nx/devkit';
 import { browserSdkFindings, coherentPair, readBrowserSdkFacts, renderAdvice } from '../../adapters/angular/angularfire';
+import { applyJsonChanges } from '../../generators/_utils/json-edits';
 
 const TAG = '[0.50.0 pin-floating-dependencies]';
 
@@ -111,8 +112,8 @@ export default function pinFloatingDependencies(tree: Tree): void {
   }
 
   if (changed.length) {
-    const indent = /^(\s+)"/m.exec(text)?.[1] ?? '  ';
-    tree.write('package.json', `${JSON.stringify(pkg, null, indent)}\n`);
+    // In place: only the entries that changed, in the file's own form (a new one at its sorted place).
+    tree.write('package.json', applyJsonChanges(text, JSON.parse(text), pkg));
     logger.info(`${TAG} package.json:\n  ${changed.join('\n  ')}`);
     logger.info(`${TAG} REINSTALL now (yarn / npm / pnpm install) so the lockfile and node_modules follow these pins${changed.some((c) => c.includes('firebase')) ? ' — the Firebase SDK then dedupes to ONE copy' : ''}.`);
   }

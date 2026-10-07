@@ -22,7 +22,8 @@
 // still starts the stack.
 //
 // SELF-CONTAINED by the migration contract: executor ids, target names and the follower's shape are frozen here.
-import { type Tree, getProjects, logger, readNxJson, updateProjectConfiguration } from '@nx/devkit';
+import { type Tree, getProjects, logger, readNxJson } from '@nx/devkit';
+import { updateProjectConfigInPlace } from '../../generators/_utils/project-files';
 
 const TAG = '[migrate 0.50.0 split-serve-follower]';
 const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
@@ -66,18 +67,20 @@ export default function update(tree: Tree): void {
       );
       continue;
     }
-    // Rebuilt rather than re-keyed so `dev-stack` sits where `serve` was and `serve` follows it.
-    const rebuilt: Record<string, Target> = {};
-    for (const [key, value] of Object.entries(targets)) {
-      if (key === STACK) continue;
-      if (key === SERVE) {
-        const composer: Target = { ...serve, continuous: true };
-        rebuilt[STACK] = composer;
-        rebuilt[SERVE] = follower(composer);
-      } else rebuilt[key] = value;
-    }
-    config.targets = rebuilt as typeof config.targets;
-    updateProjectConfiguration(tree, name, config);
+    // Rebuilt rather than re-keyed so `dev-stack` sits where `serve` was and `serve` follows it — in place, in the
+    // file's own form: nothing but the pair changes.
+    const composer: Target = { ...serve, continuous: true };
+    updateProjectConfigInPlace(tree, config.root, (onDisk) => {
+      const rebuilt: Record<string, Target> = {};
+      for (const [key, value] of Object.entries((onDisk.targets ?? {}) as Record<string, Target>)) {
+        if (key === STACK) continue;
+        if (key === SERVE) {
+          rebuilt[STACK] = composer;
+          rebuilt[SERVE] = follower(composer);
+        } else rebuilt[key] = value;
+      }
+      onDisk.targets = rebuilt as typeof onDisk.targets;
+    });
     split.add(name);
     logger.info(`${TAG} ${name}: the composer is now \`${STACK}\` (continuous); \`serve\` follows it and ends with its exit status.`);
   }
@@ -85,8 +88,9 @@ export default function update(tree: Tree): void {
 
   // ── Every reference to a split project's `serve` ──────────────────────────────────────────────────────────
   for (const [name, config] of getProjects(tree)) {
-    let touched = false;
+    const touchedTargets = new Set<string>();
     for (const [targetName, target] of Object.entries((config.targets ?? {}) as Record<string, Target>)) {
+      let touched = false;
       if (!target || typeof target !== 'object') continue;
       if (split.has(name) && (targetName === SERVE || targetName === STACK)) continue; // the pair just written
       const where = `${name}:${targetName}`;
@@ -100,8 +104,14 @@ export default function update(tree: Tree): void {
       for (const holder of [target.options, ...Object.values(target.configurations ?? {})]) {
         if (holder && typeof holder === 'object' && retargetValues(holder, split, where)) touched = true;
       }
+      if (touched) touchedTargets.add(targetName);
     }
-    if (touched) updateProjectConfiguration(tree, name, config);
+    if (touchedTargets.size) {
+      updateProjectConfigInPlace(tree, config.root, (onDisk) => {
+        onDisk.targets ??= {};
+        for (const targetName of touchedTargets) onDisk.targets[targetName] = config.targets![targetName];
+      });
+    }
   }
 
   // nx.json targetDefaults apply by target NAME to every project: which project's `serve` they mean is not knowable

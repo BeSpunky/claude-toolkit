@@ -36,6 +36,7 @@ import {
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking } from '../_utils/linking';
 import { declareDependencies, declaredSpec } from '../_utils/dependencies';
+import { updateJsonInPlace } from '../_utils/json-edits';
 
 interface AdoptExtractedSchema {
   lib: string;
@@ -114,8 +115,9 @@ export default async function adoptExtractedGenerator(
     return typeof range === 'string' && linking.isLinkRange(tree, range);
   });
   if (linkedFields.length) {
-    for (const field of linkedFields) delete rootManifest[field][packageName];
-    writeJson(tree, 'package.json', rootManifest);
+    updateJsonInPlace(tree, 'package.json', (manifest) => {
+      for (const field of linkedFields) delete manifest[field][packageName];
+    });
   }
   // The version is a deliberate value — never `latest` (0.50.0): the one given, else the one extract-tool recorded
   // when it published (marker.ingestedPackage.version), as a caret range; with neither, ask rather than float.

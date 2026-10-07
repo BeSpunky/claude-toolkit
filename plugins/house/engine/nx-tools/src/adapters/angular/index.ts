@@ -18,8 +18,8 @@ import {
   type GeneratorCallback,
   getProjects,
   readProjectConfiguration,
-  updateProjectConfiguration,
 } from '@nx/devkit';
+import { updateProjectConfigurationInPlace } from '../../generators/_utils/project-files';
 import type { StackAdapter, CreatedApp, WireResult } from '../stack-adapter';
 import { wireProvider } from '../../generators/_utils/wire-provider';
 import { setLeafOption } from '../../generators/_utils/dev-server';
@@ -28,6 +28,7 @@ import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
 import { seedAppShell } from './app-shell';
+import { convertBareLint } from '../../generators/_utils/lint-inference';
 
 /**
  * The executors that make a project an Angular one. Applications build with `@angular/build:` (or the legacy
@@ -124,6 +125,8 @@ export const angular: StackAdapter = {
           skipFormat: true,
         } as Parameters<typeof applicationGenerator>[1]))) ?? noop;
       const project = emittedProjectName(tree, options.directory, options.name);
+      // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.
+      convertBareLint(tree, project);
       const root = readProjectConfiguration(tree, project).root;
       stateAngularCompilerContract(tree, root);
       seedAppShell(tree, root); // the skip link and the <main> landmark, once (./app-shell)
@@ -166,7 +169,7 @@ export const angular: StackAdapter = {
       const present = existing.some((entry) => entry?.replace === from && entry?.with === to);
       target.fileReplacements = present ? existing : [...existing, { replace: from, with: to }];
 
-      updateProjectConfiguration(tree, project, config);
+      updateProjectConfigurationInPlace(tree, project, config);
       return true;
     },
   },
@@ -205,7 +208,7 @@ export const angular: StackAdapter = {
       const preprocessor = { ...((options.stylePreprocessorOptions as Record<string, unknown>) ?? {}) };
       preprocessor.includePaths = [...new Set([...((preprocessor.includePaths as string[]) ?? []), loadPath])];
       options.stylePreprocessorOptions = preprocessor;
-      updateProjectConfiguration(tree, project, config);
+      updateProjectConfigurationInPlace(tree, project, config);
       return true;
     },
 
@@ -223,7 +226,7 @@ export const angular: StackAdapter = {
       if (at >= 0) styles[at] = entry;
       else styles.push(entry);
       options.styles = styles;
-      updateProjectConfiguration(tree, project, config);
+      updateProjectConfigurationInPlace(tree, project, config);
       return true;
     },
   },

@@ -42,13 +42,13 @@ import {
   type ProjectConfiguration,
   getProjects,
   readProjectConfiguration,
-  updateProjectConfiguration,
   readJson,
-  updateJson,
   installPackagesTask,
   formatFiles,
   logger,
 } from '@nx/devkit';
+import { updateJsonInPlace } from '../_utils/json-edits';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import type { PublishableLibGeneratorSchema } from './schema';
 import { requireLayer } from '../../layers/registry';
 import { adapter, ADAPTERS } from '../../adapters/registry';
@@ -108,7 +108,7 @@ export default async function publishableLibGenerator(
   // 3) Read the project back and add the per-project release baseline.
   const project = readProjectConfiguration(tree, name);
   applyReleaseConfig(project, projectRoot);
-  updateProjectConfiguration(tree, name, project);
+  updateProjectConfigurationInPlace(tree, name, project);
 
   // 4) Cross-lib deps — linked in-repo the workspace's way, ranged for the published consumer.
   if (options.workspaceDeps?.length) {
@@ -199,7 +199,7 @@ function addWorkspaceDeps(tree: Tree, projectRoot: string, deps: string[], scope
   for (const { scoped, root } of siblings) {
     if (root && root !== projectRoot) linking.link(tree, { importPath: scoped, libRoot: root, consumerRoot: projectRoot });
   }
-  updateJson(tree, pkgPath, (json: Record<string, unknown>) => {
+  updateJsonInPlace(tree, pkgPath, (json: Record<string, unknown>) => {
     const dependencies = { ...((json.dependencies as Record<string, string>) ?? {}) };
     for (const { scoped, version } of siblings) dependencies[scoped] ??= `^${version}`;
     json.dependencies = dependencies;
@@ -251,7 +251,7 @@ function markTestPeersOptional(tree: Tree, projectRoot: string): void {
     return;
   }
 
-  updateJson(tree, pkgPath, (json: Record<string, unknown>) => {
+  updateJsonInPlace(tree, pkgPath, (json: Record<string, unknown>) => {
     const peerDependencies = (json.peerDependencies as Record<string, string>) ?? {};
     const declaredTestPeers = TEST_ONLY_PEERS.filter((peer) => peer in peerDependencies);
     if (declaredTestPeers.length === 0) {

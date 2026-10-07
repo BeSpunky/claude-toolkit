@@ -5,6 +5,7 @@ import { workspaceLinking } from '../../generators/_utils/linking';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
 import { withPlatform, csvTags } from '../../platform/platform';
 import { stateAnalogTsconfig } from './analog-tsconfig';
+import { convertBareLint } from '../../generators/_utils/lint-inference';
 
 const noop: GeneratorCallback = () => {};
 
@@ -66,6 +67,8 @@ export const angularLibs: LibPort = {
     // The Analog test config names its tsconfig, or every graph computation warns about a tsconfig.app.json a
     // library never has (./analog-tsconfig).
     stateAnalogTsconfig(tree, options.directory.replace(/\/+$/, ''));
+    // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.
+    convertBareLint(tree, options.name);
     if (!ownAlias) {
       const libRoot = options.directory.replace(/\/+$/, '');
       linking.link(tree, { importPath: options.importPath, libRoot });

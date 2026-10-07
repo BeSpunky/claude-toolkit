@@ -5,14 +5,15 @@
 // `options` below `dependsOn` in every firebase target a 0.50.0 rung touched). An upgrade's diff should be its
 // MEANING — so the old and new values are compared structurally and only the members that differ are edited, as
 // text, in place:
-//   - a member that is new is placed in its container's own style (./jsonc-insert.ts);
+//   - a member that is new is placed in its container's own style (./jsonc-insert.ts), at its place in the new
+//     value — after the key it follows there (a dependency placed in a sorted block lands in sorted position);
 //   - a member that is gone is cut with its line (./jsonc-remove-member.ts);
 //   - an object present on both sides is recursed into; an array that only GAINED members at its end gains them;
-//     any other changed value is replaced where it stands.
+//     any other changed value is replaced where it stands (on one line when it was on one line).
 // Two values equal but for key order are equal: a reorder alone never writes.
 import { type Tree } from '@nx/devkit';
 import { applyEdits, findNodeAtLocation, getNodeValue, modify, parseTree } from 'jsonc-parser';
-import { insertJsoncMember } from './jsonc-insert';
+import { inline, insertJsoncMember } from './jsonc-insert';
 import { removeMemberWithLeadingComment } from './jsonc-remove-member';
 
 type Json = unknown;
@@ -26,8 +27,10 @@ export function applyJsonChanges(text: string, before: Json, after: Json, prefix
   if (isObject(before) && isObject(after)) {
     let next = text;
     for (const key of Object.keys(before)) if (!(key in after)) next = remove(next, [...prefix, key]);
+    let previous: string | null = null;
     for (const [key, value] of Object.entries(after)) {
-      next = key in before ? applyJsonChanges(next, before[key], value, [...prefix, key]) : set(next, [...prefix, key], value);
+      next = key in before ? applyJsonChanges(next, before[key], value, [...prefix, key]) : set(next, [...prefix, key], value, previous);
+      previous = key;
     }
     return next;
   }
@@ -39,8 +42,12 @@ export function applyJsonChanges(text: string, before: Json, after: Json, prefix
   return replace(text, prefix, after);
 }
 
-/** Read JSON(C) at `path`, let `update` change a copy, write back only what changed. Returns whether it wrote. */
-export function updateJsonInPlace<T = Json>(tree: Tree, path: string, update: (json: T) => T | void, prefix: Path = []): boolean {
+/**
+ * Read JSON(C) at `path`, let `update` change a copy, write back only what changed. Returns whether it wrote. The
+ * in-place counterpart of devkit's `updateJson` (same callback, same `any` default for an untyped file).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function updateJsonInPlace<T = any>(tree: Tree, path: string, update: (json: T) => T | void, prefix: Path = []): boolean {
   const text = tree.read(path, 'utf8') ?? '';
   const root = parseTree(text);
   if (!root) throw new Error(`${path} is not valid JSON — not edited.`);
@@ -74,11 +81,16 @@ function isObject(value: Json): value is Record<string, Json> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function set(text: string, path: Path, value: Json): string {
-  return insertJsoncMember(text, path, value) ?? applyEdits(text, modify(text, path, value, { formattingOptions: FORMAT }));
+function set(text: string, path: Path, value: Json, after?: string | null): string {
+  return insertJsoncMember(text, path, value, after) ?? applyEdits(text, modify(text, path, value, { formattingOptions: FORMAT }));
 }
 
+/** Replace the value at `path` where it stands — one line when the value it replaces was one line. */
 function replace(text: string, path: Path, value: Json): string {
+  const node = findNodeAtLocation(parseTree(text)!, path);
+  if (node && !text.slice(node.offset, node.offset + node.length).includes('\n') && !inline(value).includes('\n')) {
+    return `${text.slice(0, node.offset)}${inline(value)}${text.slice(node.offset + node.length)}`;
+  }
   return applyEdits(text, modify(text, path, value, { formattingOptions: FORMAT }));
 }
 

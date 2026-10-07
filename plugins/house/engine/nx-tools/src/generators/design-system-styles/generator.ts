@@ -36,10 +36,10 @@ import {
   type Tree,
   readJson,
   readProjectConfiguration,
-  updateProjectConfiguration,
   formatFiles,
   logger,
 } from '@nx/devkit';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { dirname, basename } from 'node:path';
 import { findDesignSystem } from '../_utils/design-system';
 import { adapterOf, isApplication, portOf } from '../../adapters/registry';
@@ -120,7 +120,7 @@ export default async function designSystemStylesGenerator(
   const { targets, ...project } = readProjectConfiguration(tree, options.project);
   const deps = new Set<string>([...(project.implicitDependencies ?? []), designSystem.name]);
   deps.delete(options.project);
-  updateProjectConfiguration(tree, options.project, { ...project, implicitDependencies: [...deps], ...(targets ? { targets } : {}) });
+  updateProjectConfigurationInPlace(tree, options.project, { ...project, implicitDependencies: [...deps], ...(targets ? { targets } : {}) });
 
   // 3) The app's global stylesheet, as the app itself declares it.
   wireGlobalStylesheet(tree, styles.globalStylesheet(tree, options.project), specifier, options.project);

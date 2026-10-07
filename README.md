@@ -480,7 +480,7 @@ Output lines that scripts parse changed name too: every `SYNC_*` token is now `U
 | `agent` | — | the devcontainer marker or `.vscode/.window-identity.json` | **Stack-agnostic DX**: composed devcontainer, Claude settings, window identity |
 | `node` | — | a root `package.json` | The typescript-node devcontainer base image, the `node_modules` volume, the package-manager install |
 | `js` | `nx` | `@nx/js`, or an `@nx/js:` executor | `publishable-lib --stack=js`, tool extraction, `nx release`, `@playwright/test` |
-| `web` | `agent` | `.bespunky/dev.json`, or a dev-server: a `dev-server` target, the house `serve` composer, or a dev-server executor a stack adapter recognises (never merely a target called `serve` — a backend has one) | The stack-free dev engine (`tools/dev/dev serve`), worktree domains, shared browser |
+| `web` | `agent` | `.bespunky/dev.json`, or a dev-server: a `dev-server` target, the house composer (`@bespunky/nx-tools:serve`, on `dev-stack`), or a dev-server executor a stack adapter recognises (never merely a target called `serve` — a backend has one) | The stack-free dev engine (`tools/dev/dev serve`), worktree domains, shared browser |
 | `angular` | `nx`, `node` | `@angular/core` / `@nx/angular`, or an Angular executor (`@angular/build:`, `@angular-devkit/build-angular:`, `@nx/angular:` — the adapter's own list) | The Angular adapter: `app`, the dev-server leaf, `angular-ai`, the `bespunky-angular` plugin |
 | `design-system` | `nx` | the `type:design-system` tag | `design-system`, `ds-theme`; with the **Angular** adapter also `ds-component`, `secondary-entrypoint` |
 | `navigation` | `angular` | the `type:navigation` tag | `navigation-core`, `domain-navigation` |

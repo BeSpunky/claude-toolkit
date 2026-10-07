@@ -12,11 +12,12 @@
 //      in its own order gets the name appended, and nothing already there moves. (devkit's writer re-sorts the whole
 //      block, and a hand-rolled one appends: one churns an unsorted file, the other breaks a sorted one — 0.50.0's
 //      firebase-tools landed after `vitest`.) `placeDependency` is the rule; migrations that write a manifest by hand
-//      use it too.
+//      use it too — and write it in place (./json-edits.ts), so nothing but the new entry moves.
 //
 // Versions come from ./versions.ts (the house's pins) or ./firebase-compat.ts (derived from npm) — or, for an
 // Nx-family package, from the version of Nx the workspace itself declares (they move in lockstep).
-import { type GeneratorCallback, type Tree, addDependenciesToPackageJson, readJson, writeJson } from '@nx/devkit';
+import { type GeneratorCallback, type Tree, addDependenciesToPackageJson, readJson } from '@nx/devkit';
+import { applyJsonChanges } from './json-edits';
 
 type Manifest = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
 
@@ -61,13 +62,15 @@ export function declareDependencies(
   const deps = missing(dependencies);
   const devDeps = missing(devDependencies);
   if (!Object.keys(deps).length && !Object.keys(devDeps).length) return () => undefined;
+  const text = tree.read('package.json', 'utf8') ?? '';
   const before = readJson<Manifest>(tree, 'package.json');
   const install = addDependenciesToPackageJson(tree, deps, devDeps);
   const after = readJson<Manifest>(tree, 'package.json');
   for (const block of ['dependencies', 'devDependencies'] as const) {
     if (after[block]) after[block] = keepOrder(before[block], after[block]!);
   }
-  writeJson(tree, 'package.json', after);
+  // devkit's write above re-serialized the whole file; what lands is the ORIGINAL text with only the added entries.
+  tree.write('package.json', applyJsonChanges(text, before, after));
   return install;
 }
 

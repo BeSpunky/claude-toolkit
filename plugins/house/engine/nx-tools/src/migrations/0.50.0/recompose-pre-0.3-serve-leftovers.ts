@@ -19,7 +19,8 @@
 // retired `no-emulators` configuration (the default falls back to `development`, else to none), then runs the `serve`
 // generator for the project — the same per-app step an upgrade runs: `dev-server` leaf + `dev-stack` composer (+ its `serve` follower) + its
 // `.bespunky/dev.json` entry, in the current shape. Nothing else is looked at.
-import { type Tree, getProjects, logger, updateProjectConfiguration } from '@nx/devkit';
+import { type Tree, getProjects, logger } from '@nx/devkit';
+import { updateProjectConfigInPlace } from '../../generators/_utils/project-files';
 import serveGenerator from '../../generators/serve/generator';
 
 const TAG = '[migrate 0.50.0 recompose-pre-0.3-serve-leftovers]';
@@ -64,7 +65,10 @@ export default async function recomposePre03ServeLeftovers(tree: Tree): Promise<
     }
 
     if (!found) continue;
-    updateProjectConfiguration(tree, name, config);
+    // In place: only the two targets it corrected, in the file's own form (the serve generator then owns the rest).
+    updateProjectConfigInPlace(tree, config.root, (onDisk) => {
+      for (const key of ['serve', 'dev-server']) if (targets[key] && onDisk.targets?.[key]) onDisk.targets[key] = targets[key] as never;
+    });
     leftovers.push(name);
   }
 

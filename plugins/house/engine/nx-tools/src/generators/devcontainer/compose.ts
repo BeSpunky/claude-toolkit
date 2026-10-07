@@ -567,14 +567,22 @@ export function renderOsPackagesScript(groups: Composition['osPackages']): strin
     }
     repositories.set(repository.id, repository);
   }
-  const script = readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8')
+  // The repository machinery (the list and its installer) is rendered only when a layer declares a repository: a
+  // project with none gets no empty list and no code that would loop over it.
+  const script = renderSection(readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8'), 'REPOSITORIES', repositories.size > 0)
     .split('{{HOUSE_REPOSITORIES}}')
     .join([...repositories.values()].map(({ id, key, source }) => `${id} ${key} ${source}`).join('\n'))
     .split('{{HOUSE_PACKAGES}}')
     // The list is one single-quoted shell string: a `'` in a why would end it early, so it is closed, escaped, reopened.
     .join(lines.join('\n').split("'").join("'\\''"));
+  if (/\{\{[#/]?\w+\}\}/.test(script)) throw new Error(`[devcontainer] house.packages.sh kept an unrendered placeholder: ${/\{\{[#/]?\w+\}\}/.exec(script)![0]}`);
   proveShell(script, 'sh', 'house.packages.sh');
   return script;
+}
+
+/** Keep (markers dropped) or remove every `{{#name}}` … `{{/name}}` block — each marker on a line of its own. */
+function renderSection(template: string, name: string, keep: boolean): string {
+  return template.replace(new RegExp(`^\\{\\{#${name}\\}\\}\\n([\\s\\S]*?)^\\{\\{/${name}\\}\\}\\n`, 'gm'), keep ? '$1' : '');
 }
 
 /** `.devcontainer/house.Dockerfile` — FROM the composed image, then the OS packages as one cached layer. */

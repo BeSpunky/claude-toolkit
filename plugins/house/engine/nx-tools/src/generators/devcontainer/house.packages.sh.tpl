@@ -25,6 +25,7 @@ HOUSE_PACKAGES='
 {{HOUSE_PACKAGES}}
 '
 
+{{#REPOSITORIES}}
 # Third-party apt repositories some of those packages come from, one per line: `<id> <key url> <deb source>`. Added
 # with the MODERN method — the key dearmored into /usr/share/keyrings/<id>.gpg, the source `signed-by=` it — never
 # `apt-key` (gone from Debian 13). Validated by the composer; written only when something is missing.
@@ -32,6 +33,7 @@ HOUSE_REPOSITORIES='
 {{HOUSE_REPOSITORIES}}
 '
 
+{{/REPOSITORIES}}
 # Every list: the house's, then each file given (the project's own). Comments and blanks dropped, de-duplicated in
 # order; CR stripped, so a list saved with Windows line endings still reads. A token that is not a Debian package NAME
 # (optionally pinned, `name=version`) is refused here, before it can reach a root apt-get command line.
@@ -68,6 +70,7 @@ fi
 
 as_root=""
 [ "$(id -u)" = 0 ] || as_root="sudo"
+{{#REPOSITORIES}}
 
 # Each declared repository not yet configured: its fetch tools first (Debian's own packages), then key + source.
 repositories() {
@@ -96,6 +99,7 @@ repositories() {
 if ! repositories; then
   echo "[os-packages] FAILED to add an apt repository — its packages cannot install" >&2
 fi
+{{/REPOSITORIES}}
 echo "[os-packages] installing:$missing"
 for attempt in 1 2 3; do
   # $missing is deliberately UNQUOTED: one argument per package. Safe — every member passed the name check above.

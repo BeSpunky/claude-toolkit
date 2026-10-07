@@ -99,7 +99,8 @@ try {
             id: 'emulators',
             cmd: ['nx', 'run', 'firebase:emulators'],
             ports: { ui: 4000, auth: 9099 },
-            url: [{ param: 'portOffset', value: '${OFFSET}', when: 'offset' }, { param: 'emulate', value: 'none', when: 'skipped' }],
+            // A generic url param: any name works — `shift` is an example, not a switch the house writes.
+            url: [{ param: 'shift', value: '${OFFSET}', when: 'offset' }, { param: 'emulate', value: 'none', when: 'skipped' }],
             advice: [{ when: 'contended', text: 'oauth' }],
           },
         ],
@@ -111,10 +112,10 @@ try {
   ok('base: cmd substituted, URL clean', p0.primary.display === 'nx run web:dev-server --port=4200' && p0.localUrl === 'http://localhost:4200/');
   ok('env: declared + PORT_<NAME>, no bare PORT, no PORT_OFFSET at base', p0.primary.added.NX_WORKSPACE_ROOT_PATH === '/t' && p0.primary.added.PORT_APP === '4200' && !('PORT' in p0.primary.added) && p0.primary.added.PORT_AUTH === '9099' && !('PORT_OFFSET' in p0.primary.added));
   const p6 = planApp(decl, 'web', { offset: 6000, tree: '/t', passthrough: ['--buildTarget=web:build:production'] });
-  ok('shifted: every port moves, ?portOffset added, PORT_OFFSET exported', p6.primaryPort === 10200 && p6.processes[1].ports.auth === 15099 && p6.localUrl === 'http://localhost:10200/?portOffset=6000' && p6.primary.added.PORT_OFFSET === '6000');
+  ok('shifted: every port moves, the offset url param added, PORT_OFFSET exported', p6.primaryPort === 10200 && p6.processes[1].ports.auth === 15099 && p6.localUrl === 'http://localhost:10200/?shift=6000' && p6.primary.added.PORT_OFFSET === '6000');
   ok('passthrough lands on the primary only', p6.primary.args.at(-1) === '--buildTarget=web:build:production' && !p6.processes[1].args.includes('--buildTarget=web:build:production'));
   const pSkip = planApp(decl, 'web', { offset: 6000, tree: '/t', skip: ['emulators', 'nope'] });
-  ok('skipped: not run, ?emulate=none, ?portOffset kept (as 0.34.x did)', pSkip.running.length === 1 && pSkip.localUrl.endsWith('?portOffset=6000&emulate=none'));
+  ok('skipped: not run, ?emulate=none, the offset url param kept', pSkip.running.length === 1 && pSkip.localUrl.endsWith('?shift=6000&emulate=none'));
   ok('an unknown --skip is reported, not fatal', pSkip.ignoredSkips.join() === 'nope');
   ok('skipping the primary throws', await throws(() => planApp(decl, 'web', { offset: 0, tree: '/t', skip: ['app'] })));
   const py = planApp(decl, 'site', { offset: 1000, tree: '/t', passthrough: ['--bind', '0.0.0.0'] });

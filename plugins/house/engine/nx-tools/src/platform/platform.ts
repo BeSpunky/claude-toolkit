@@ -13,7 +13,8 @@
 //
 // Why a tag and not a convention: `@nx/enforce-module-boundaries` keys every constraint on a tag. A project
 // without one matches no platform constraint, and was — before 0.50.0 — silently outside the firewall.
-import { type Tree, joinPathFragments, readProjectConfiguration, readJson, writeJson } from '@nx/devkit';
+import { type Tree, joinPathFragments, readProjectConfiguration } from '@nx/devkit';
+import { updateJsonInPlace } from '../generators/_utils/json-edits';
 
 export const PLATFORMS = ['web', 'server', 'shared'] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -65,18 +66,16 @@ export function join(a: Platform | null, b: Platform | null): Platform | null {
  * Classify a project: set its ONE platform tag in its own definition file — project.json, or package.json's `nx`
  * block. Written to the file's own `tags` and nothing else: round-tripping a package.json-defined project through
  * `updateProjectConfiguration` would write everything Nx INFERS for it (targets from scripts, `npm:` tags) back
- * into its `nx` block. Returns whether anything changed.
+ * into its `nx` block. Edited in place (../generators/_utils/json-edits.ts): a hand-written compact file keeps its form,
+ * and only the tag changes. Returns whether anything changed.
  */
 export function setProjectPlatform(tree: Tree, project: string, platform: Platform): boolean {
   const { root } = readProjectConfiguration(tree, project);
   const projectJson = joinPathFragments(root, 'project.json');
   const file = tree.exists(projectJson) ? projectJson : joinPathFragments(root, 'package.json');
   if (!tree.exists(file)) throw new Error(`\`${project}\` has no project.json or package.json at ${root} to tag.`);
-  const json = readJson<{ tags?: string[]; nx?: { tags?: string[] } }>(tree, file);
-  const holder = file === projectJson ? json : (json.nx ??= {});
-  const tags = withPlatform(holder.tags, platform);
-  if (JSON.stringify(tags) === JSON.stringify(holder.tags ?? [])) return false;
-  holder.tags = tags;
-  writeJson(tree, file, json);
-  return true;
+  return updateJsonInPlace<{ tags?: string[]; nx?: { tags?: string[] } }>(tree, file, (json) => {
+    const holder = file === projectJson ? json : (json.nx ??= {});
+    holder.tags = withPlatform(holder.tags, platform);
+  });
 }

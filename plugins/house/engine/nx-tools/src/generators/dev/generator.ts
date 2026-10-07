@@ -40,7 +40,7 @@ export function writeEngine(tree: Tree): void {
   }
 }
 
-/** Every project whose `serve` is the house composer — the projects the Nx wrapper serves through the engine. */
+/** Every project with a house composer target (`dev-stack`) — the projects the Nx wrapper serves through the engine. */
 export function servedProjects(tree: Tree): string[] {
   return [...getProjects(tree)]
     .filter(([, config]) => Object.values(config.targets ?? {}).some((t) => t && typeof t === 'object' && t.executor === SERVE_EXECUTOR))

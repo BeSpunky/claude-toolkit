@@ -19,7 +19,8 @@
 // the leaf, and anything that sets a leaf option after it (the Firebase client's proxy config, on a brand-new app
 // whose `serve` step already ran) goes through `setLeafOption`, which re-derives the composer — so a first run
 // and a re-run produce the same project.json.
-import { type Tree, type TargetConfiguration, readProjectConfiguration, updateProjectConfiguration } from '@nx/devkit';
+import { type Tree, type TargetConfiguration, readProjectConfiguration } from '@nx/devkit';
+import { updateProjectConfigurationInPlace } from './project-files';
 
 export const SERVE_EXECUTOR = '@bespunky/nx-tools:serve';
 /** The continuous composer's target — the running stack Nx shares (see the header). */
@@ -124,6 +125,6 @@ export function setLeafOption(tree: Tree, project: string, key: string, value: u
   if (leaf.options?.[key] !== undefined) return true;
   leaf.options = { ...(leaf.options ?? {}), [key]: value };
   if (config.targets![STACK_TARGET]?.executor === SERVE_EXECUTOR) Object.assign(config.targets!, serveTargetsFor(leaf));
-  updateProjectConfiguration(tree, project, config);
+  updateProjectConfigurationInPlace(tree, project, config);
   return true;
 }
