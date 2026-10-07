@@ -74,7 +74,7 @@ import { loadTypeScript, type TsArrayLiteralExpression, type TsNode } from '../_
 import { adapterOf, applicationsWith } from '../../adapters/registry';
 import { workspaceStacksWith } from '../../adapters/workspace';
 import { hasDependency } from '../../layers/evidence';
-import { FIREBASE_DEFAULT_PORTS, HOUSE_EMULATORS, renderEmulatorPortsModule } from './emulator-ports';
+import { HOUSE_EMULATORS, defaultPort, renderEmulatorPortsModule } from './emulator-ports';
 import firebaseClientGenerator from '../firebase-client/generator';
 import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
 import { resolveAppsDir } from '../_utils/workspace-layout';
@@ -104,7 +104,7 @@ function canonicalEmulatorsBlock() {
     ...Object.fromEntries(
       HOUSE_EMULATORS.map((name) => [
         name,
-        { ...(name === 'ui' ? { enabled: true } : {}), host: '0.0.0.0', port: FIREBASE_DEFAULT_PORTS[name] },
+        { ...(name === 'ui' ? { enabled: true } : {}), host: '0.0.0.0', port: defaultPort(name) },
       ]),
     ),
     singleProjectMode: true,

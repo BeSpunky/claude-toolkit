@@ -267,6 +267,56 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
     },
   });
   ok('a SIGKILLed child makes the engine exit NON-ZERO', crashed && crashed.result && crashed.result.code !== 0);
+
+  console.log('stack handles: run records, ps, stop (real processes)');
+  {
+    const { boundPorts } = await load('lib/declaration.mjs');
+    const two = { processes: [{ id: 'app', cmd: 'x', ports: { app: 4200 } }, { id: 'emulators', cmd: 'y', ports: { hub: 4400, ui: 4000 } }] };
+    ok('the free-port probe covers EVERY port the stack binds, not only the primary', JSON.stringify(boundPorts(two)) === JSON.stringify([4200, 4400, 4000]));
+    ok('…but not a --skip-ped process', JSON.stringify(boundPorts(two, ['emulators'])) === JSON.stringify([4200]));
+    const held = await resolvePortOffset('auto', { key: 'k', isMain: true, probed: boundPorts(two), block: portBlock(boundPorts(two)), probe: busy(4400) });
+    ok('the main tree does NOT take the base block when only the hub is held', held !== 0);
+
+    const dev = (env, ...args) =>
+      new Promise((res) => {
+        const p = spawn('sh', [join(engine, 'dev'), ...args], { cwd: repo, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        p.stdout.on('data', (d) => (out += d));
+        p.stderr.on('data', (d) => (out += d));
+        p.on('exit', (code) => res({ code, out }));
+      });
+    const port = await freePort();
+    const server = join(repo, 'server.mjs');
+    writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd: ['node', server, '${PORT:app}', join(repo, 'got-h')], ports: { app: port } }] } } }));
+    const human = { DEV_OWNER: 'user:dev', CLAUDE_CODE_SESSION_ID: '' };
+    const eng = spawn('sh', [join(engine, 'dev'), 'serve', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...human } });
+    try {
+      ok('the stack came up', await until(() => listening(port), 10000));
+      const rec = JSON.parse(readFileSync(join(repo, '.bespunky', 'run', 'site@0.json'), 'utf8'));
+      ok('the run record names the serve, its owner, its ports and its child', rec.pid === eng.pid && rec.owner === 'user:dev' && rec.ports.app === port && rec.processes.length === 1);
+      ok('.bespunky/run ignores itself', readFileSync(join(repo, '.bespunky', 'run', '.gitignore'), 'utf8').includes('*'));
+      const ps = JSON.parse((await dev({}, 'ps', '--json')).out);
+      ok('ps lists it as live and listening', ps.length === 1 && ps[0].state === 'live' && ps[0].portStates[0].listening === true);
+      const twin = await dev(human, 'serve', '--no-shared-browser', '--port-offset=0');
+      ok('the same stack twice is refused, naming the running one', twin.code !== 0 && twin.out.includes(`pid ${eng.pid}`));
+      const other = await dev({ DEV_OWNER: 'claude:x' }, 'stop', '--offset=0');
+      ok("another owner's stop is REFUSED (exit non-zero) and nothing is signalled", other.code !== 0 && /not yours/.test(other.out) && (await listening(port)));
+      const mine = await dev(human, 'stop');
+      ok('the owner stops it by handle: exit 0, ports confirmed free', mine.code === 0 && /ports free/.test(mine.out) && !(await listening(port)));
+      ok('…the child got ONE SIGTERM (the graceful path)', readFileSync(join(repo, 'got-h'), 'utf8') === 'SIGTERM');
+      ok('…and the record and state dir are gone', !existsSync(join(repo, '.bespunky', 'run', 'site@0.json')) && !existsSync(join(repo, '.bespunky', 'run', 'site@0')));
+      // A record whose PID now belongs to someone else (the kernel reuses PIDs) is stale, never a handle.
+      writeFileSync(join(repo, '.bespunky', 'run', 'site@9000.json'), JSON.stringify({ ...rec, key: 'site@9000', offset: 9000, pid: process.pid, procStart: 'not-this-one', processes: [] }));
+      const stale = JSON.parse((await dev({}, 'ps', '--json')).out);
+      ok('a record whose PID was reused is pruned, never trusted', stale.length === 0 && !existsSync(join(repo, '.bespunky', 'run', 'site@9000.json')));
+    } finally {
+      try {
+        process.kill(-eng.pid, 'SIGKILL');
+      } catch {
+        /* already down — the point of the test */
+      }
+    }
+  }
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }
