@@ -7,24 +7,21 @@
 // house suite — the emulators the canonical block enables, each on firebase-tools' own default port. (The
 // devcontainer is composed before the core writes that block on the run that ensures Firebase.)
 import type { Tree } from '@nx/devkit';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-/** firebase-tools' own defaults, for an emulator firebase.json enables without naming a port. */
-export const FIREBASE_DEFAULT_PORTS: Readonly<Record<string, number>> = {
-  ui: 4000,
-  hub: 4400,
-  logging: 4500,
-  hosting: 5000,
-  functions: 5001,
-  apphosting: 5002,
-  firestore: 8080,
-  pubsub: 8085,
-  database: 9000,
-  auth: 9099,
-  storage: 9199,
-  eventarc: 9299,
-  dataconnect: 9399,
-  tasks: 9499,
-};
+/** The one port table (suite-ports.json) — also projected into the runtime's tools/emulator-ports.mjs. */
+interface SuitePorts {
+  defaults: Record<string, number>;
+  alwaysOn: string[];
+  nested: Record<string, Record<string, string>>;
+}
+let table: SuitePorts | undefined;
+/** Read on first use, not at load: the layer registry imports this module wherever it is loaded. */
+const portTable = (): SuitePorts => (table ??= JSON.parse(readFileSync(join(__dirname, 'suite-ports.json'), 'utf8')) as SuitePorts);
+
+/** firebase-tools' own port for an emulator — what firebase.json means when it enables one without naming a port. */
+export const defaultPort = (name: string): number | undefined => portTable().defaults[name];
 
 /** The emulators the house suite enables — the canonical firebase.json block, on firebase-tools' ports. */
 export const HOUSE_EMULATORS = ['auth', 'firestore', 'storage', 'functions', 'ui'] as const;
@@ -32,8 +29,11 @@ export const HOUSE_EMULATORS = ['auth', 'firestore', 'storage', 'functions', 'ui
 /** Firestore's WebSocket listener (the Emulator UI's live view) — its own key, `firestore.websocketPort`. */
 const FIRESTORE_WEBSOCKET_DEFAULT = 9150;
 
-/** Always occupied by a running suite — tools/emulators.sh pins them (shifted) even when firebase.json is silent. */
-const ALWAYS_ON = ['hub', 'logging'];
+/** tools/emulator-ports.mjs, rendered from its template with the table (`SUITE`) — the runtime's copy of it. */
+export const renderEmulatorPortsModule = (template: string): string => {
+  const { defaults, alwaysOn, nested } = portTable();
+  return template.split('{{SUITE}}').join(JSON.stringify({ defaults, alwaysOn, nested }, null, 2));
+};
 
 type EmulatorsJson = Record<string, unknown>;
 
@@ -42,7 +42,7 @@ function emulatorsOf(tree: Tree): EmulatorsJson {
     ? (JSON.parse(tree.read('firebase.json', 'utf8') ?? '{}') as { emulators?: EmulatorsJson })
     : {};
   // No suite configured yet — the core asserts the canonical block on its run, so that is the suite there will be.
-  return json.emulators ?? Object.fromEntries(HOUSE_EMULATORS.map((name) => [name, { port: FIREBASE_DEFAULT_PORTS[name] }]));
+  return json.emulators ?? Object.fromEntries(HOUSE_EMULATORS.map((name) => [name, { port: defaultPort(name) }]));
 }
 
 /** The enabled emulators and their ports, by name (`firebase.json`, or the house suite). */
@@ -52,7 +52,7 @@ function configured(tree: Tree): { name: string; port: number; entry: Record<str
     if (!value || typeof value !== 'object') continue; // singleProjectMode and other settings
     const entry = value as Record<string, unknown>;
     if (entry.enabled === false) continue;
-    const port = Number(entry.port ?? FIREBASE_DEFAULT_PORTS[name]);
+    const port = Number(entry.port ?? defaultPort(name));
     if (Number.isInteger(port) && port > 0 && /^[a-z][a-z0-9_-]*$/.test(name)) out.push({ name, port, entry });
   }
   return out;
@@ -60,8 +60,12 @@ function configured(tree: Tree): { name: string; port: number; entry: Record<str
 
 /** Every port a running suite occupies, by emulator name — what the dev engine shifts as one block. */
 export function emulatorPorts(tree: Tree): Record<string, number> {
-  const ports: Record<string, number> = Object.fromEntries(configured(tree).map(({ name, port }) => [name, port]));
-  for (const name of ALWAYS_ON) ports[name] ??= FIREBASE_DEFAULT_PORTS[name];
+  const ports: Record<string, number> = {};
+  for (const { name, port, entry } of configured(tree)) {
+    ports[name] = port;
+    for (const [key, as] of Object.entries(portTable().nested[name] ?? {})) if (Number.isInteger(entry[key])) ports[as] = entry[key] as number;
+  }
+  for (const name of portTable().alwaysOn) ports[name] ??= defaultPort(name)!;
   return ports;
 }
 

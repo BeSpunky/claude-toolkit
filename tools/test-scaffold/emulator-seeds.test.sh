@@ -35,6 +35,7 @@ mkdir -p "$MAIN/tools/emulator-seeds/default"
 sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}|apps/demo/src/environments/environment.ts|g' \
   "$TPL" > "$MAIN/tools/emulators.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$MAIN/tools/reap-emulators.sh"
+node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$MAIN"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$MAIN/tools/emulator-data.sh"
 chmod +x "$MAIN/tools/"*.sh
 printf '{ "emulators": { "auth": { "port": 9099 } } }\n' > "$MAIN/firebase.json"

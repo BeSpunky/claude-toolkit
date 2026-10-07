@@ -2,26 +2,35 @@
 // sync — the project's own knowledge lives in .bespunky/dev.json, never here.
 //
 //   tools/dev/dev serve [app] [--worktree[=<branch|slug|path>]] [--port-offset=<n|auto>] [--skip=<id,…>]
-//                             [--no-shared-browser] [--no-install] [--dry-run] [-- <args for the primary>]
+//                             [--owner=<label>] [--no-shared-browser] [--no-install] [--dry-run] [-- <args for the primary>]
+//   tools/dev/dev ps    [app] [--json]
+//   tools/dev/dev stop  [app] [--worktree=<x>] [--offset=<n>] [--all-mine] [--owner=<label>] [--any-owner]
 //   tools/dev/dev list
 //
 // A serve: pick a tree → install it if its declaration says how and it needs it → resolve ONE port offset
-// for every declared port (sized from the declaration) → run every declared process under one graceful
-// Ctrl+C → register `<slug>.localhost` and drive the shared co-driven browser to the app.
+// for every port the stack will bind (sized from the declaration) → write the stack's RUN RECORD (its handle)
+// → run every declared process under one graceful Ctrl+C → register `<slug>.localhost` and drive the shared
+// co-driven browser to the app.
+//
+// `ps` lists the running stacks of every worktree (and prunes records whose process is gone); `stop` stops
+// stacks BY HANDLE — the record's PID, verified to still be that very serve — and then checks that the stack's
+// ports are actually free. Nobody needs to kill a dev server by name: see lib/stacks.mjs.
 //
 // Node built-ins only, and no project node_modules: this must serve a Python or Go repo exactly as it serves
 // an Nx one. `nx serve <app>` (the @bespunky/nx-tools:serve executor) is a thin wrapper over this file.
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { get } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { attachBrowser, detachRoute, foreignOwner, sharedBrowserUrl } from './lib/browser.mjs';
-import { DECLARATION_PATH, DeclarationError, declaredPorts, loadDeclaration, pickApp, planApp, primaryOf } from './lib/declaration.mjs';
-import { PortError, portBlock, resolvePortOffset } from './lib/ports.mjs';
-import { runStack } from './lib/stack.mjs';
+import { DECLARATION_PATH, DeclarationError, boundPorts, declaredPorts, loadDeclaration, pickApp, planApp, primaryOf } from './lib/declaration.mjs';
+import { PortError, isPortFree, portBlock, resolvePortOffset } from './lib/ports.mjs';
+import { descendants, runStack } from './lib/stack.mjs';
+import { ensureStackDir, isAlive, ownerOf, processStart, readStacks, removeRecord, stackKey, survivors, writeRecord } from './lib/stacks.mjs';
 import { collectWorktrees, matchWorktree, servedSlug, worktreeKey, worktreeLabel } from './lib/worktrees.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -42,10 +51,24 @@ class UsageError extends Error {}
 
 const USAGE = `Usage:
   tools/dev/dev serve [app] [--worktree[=<branch|slug|path>]] [--port-offset=<n|auto>] [--skip=<id,...>]
-                      [--no-shared-browser] [--no-install] [--dry-run] [-- <args for the primary process>]
+                      [--owner=<label>] [--no-shared-browser] [--no-install] [--dry-run] [-- <args for the primary process>]
+  tools/dev/dev ps    [app] [--json]
+  tools/dev/dev stop  [app] [--worktree=<branch|slug|path>] [--offset=<n>] [--all-mine] [--owner=<label>] [--any-owner]
   tools/dev/dev list
 
-Serves an app declared in ${DECLARATION_PATH}. --worktree with no value picks one interactively.`;
+serve  serves an app declared in ${DECLARATION_PATH}. --worktree with no value picks one interactively.
+ps     lists the running stacks of every worktree (app@offset, owner, pid, ports and whether each is listening).
+stop   stops stacks by their handle and confirms their ports are free. Default: your one stack in this tree.
+       --offset picks one; --all-mine every stack you own, in any tree. Another owner's stack is refused
+       unless --any-owner — never stop a server you did not start.`;
+
+/** The flags each command takes — any other flag is refused, never ignored. */
+const COMMAND_FLAGS = {
+  serve: ['worktree', 'portOffset', 'skip', 'owner', 'sharedBrowser', 'install', 'dryRun'],
+  ps: ['json'],
+  stop: ['worktree', 'offset', 'allMine', 'owner', 'anyOwner'],
+  list: [],
+};
 
 /** Is an argv item a flag's value (present, and not itself a flag or the passthrough separator)? */
 const isValue = (next) => next !== undefined && !next.startsWith('-');
@@ -53,6 +76,7 @@ const isValue = (next) => next !== undefined && !next.startsWith('-');
 /** Parse argv into `{ command, app, flags, passthrough }`. Unknown flags are refused, never ignored. */
 export function parseArgs(argv) {
   const out = { command: argv[0], app: undefined, passthrough: [], worktree: undefined, portOffset: 'auto', skip: [], sharedBrowser: true, install: true, dryRun: false };
+  const given = new Set();
   const rest = argv.slice(1);
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
@@ -69,6 +93,8 @@ export function parseArgs(argv) {
       if (got === undefined || got === '') throw new UsageError(`${flag} needs a value (${flag}=<value>)`);
       return got;
     };
+    const name = flag.replace(/^--(no-)?/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    if (flag.startsWith('--') && flag !== '--' && flag !== '--help') given.add(name);
     switch (flag) {
       // The one flag whose value is OPTIONAL: bare (or followed by another flag) it means "let me pick". The space
       // form is accepted like every other value flag — `--worktree feat/x` used to leave the value empty and turn
@@ -81,6 +107,24 @@ export function parseArgs(argv) {
         break;
       case '--skip':
         out.skip.push(...takeValue().split(',').map((s) => s.trim()).filter(Boolean));
+        break;
+      case '--offset': {
+        const n = Number(takeValue());
+        if (!Number.isInteger(n) || n < 0) throw new UsageError(`--offset must be a non-negative integer (got '${value ?? rest[i]}')`);
+        out.offset = n;
+        break;
+      }
+      case '--owner':
+        out.owner = takeValue();
+        break;
+      case '--all-mine':
+        out.allMine = true;
+        break;
+      case '--any-owner':
+        out.anyOwner = true;
+        break;
+      case '--json':
+        out.json = true;
         break;
       case '--no-shared-browser':
         out.sharedBrowser = false;
@@ -100,6 +144,12 @@ export function parseArgs(argv) {
         if (out.app !== undefined) throw new UsageError(`unexpected argument ${arg} (app is already ${out.app})`);
         out.app = arg;
     }
+  }
+  const allowed = COMMAND_FLAGS[out.command];
+  if (allowed) {
+    const stray = [...given].filter((f) => !allowed.includes(f));
+    if (stray.length) throw new UsageError(`unknown flag for ${out.command}: --${stray[0].replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`);
+    if (out.command !== 'serve' && out.passthrough.length) throw new UsageError(`${out.command} takes no '-- <args>'`);
   }
   return out;
 }
@@ -195,10 +245,21 @@ async function serve(opts) {
   const offset = await resolvePortOffset(opts.portOffset, {
     key: worktreeKey(tree),
     isMain: tree.isMain,
-    probed: Object.values(primaryOf(app).ports),
+    probed: boundPorts(app, opts.skip),
     block,
   });
-  const plan = planApp(decl, appName, { offset, tree: tree.path, skip: opts.skip, passthrough: opts.passthrough, baseEnv: process.env });
+  const key = stackKey(appName, offset);
+  // This very stack (tree + app + offset) already running is not a port question — it is the same stack twice.
+  // Say whose it is and how to stop it, rather than letting the processes fail to bind one by one.
+  const twin = readStacks([tree.path]).find((s) => s.key === key && (s.state === 'live' || s.state === 'orphaned'));
+  if (twin) {
+    throw new UsageError(
+      `${key} is already being served from this tree — pid ${twin.pid}, owner ${twin.owner}, since ${twin.startedAt}, ${twin.url}.\n` +
+        `  Use it, stop it (${stopCommand(twin, tree)}), or serve another stack beside it (--port-offset=auto).`,
+    );
+  }
+  const stackDir = opts.dryRun ? `${tree.path}/.bespunky/run/${key}` : ensureStackDir(tree.path, appName, offset);
+  const plan = planApp(decl, appName, { offset, tree: tree.path, skip: opts.skip, passthrough: opts.passthrough, baseEnv: process.env, stackDir });
   for (const id of plan.ignoredSkips) warn(`--skip=${id}: app "${appName}" declares no such process — nothing to skip.`);
   const slug = servedSlug(tree, worktrees);
   const prettyUrl = `http://${slug}.localhost/${plan.query}`;
@@ -210,6 +271,7 @@ async function serve(opts) {
     console.log(`  tree       : ${worktreeLabel(tree)}`);
     console.log(`  slug       : ${slug}.localhost`);
     console.log(`  offset     : ${offset}${offset === 0 ? '  (base/forwarded stack)' : ''}`);
+    console.log(`  stack      : ${key}  (state dir ${stackDir})`);
     console.log(`  block      : step ${block.step} × ${block.blocks}  (sized from declared ports ${block.min}..${block.max})`);
     console.log(`  app port   : ${plan.primaryPort}`);
     console.log(`  cwd        : ${tree.path}`);
@@ -230,6 +292,35 @@ async function serve(opts) {
 
   log(`Serving ${appName} from ${worktreeLabel(tree)}`);
   log(`App:    ${plan.localUrl}`);
+  for (const other of readStacks([tree.path]).filter((s) => s.state === 'live' && s.key !== key)) {
+    log(`Also serving from this tree: ${other.key} — pid ${other.pid}, owner ${other.owner}, ${other.url}`);
+  }
+
+  // THE HANDLE. Written before anything is spawned, removed when the stack is down; a stack killed so hard it
+  // never removes it (SIGKILL, a container stop) leaves a record `ps` recognises as dead and prunes.
+  const ports = Object.fromEntries(plan.running.flatMap((p) => Object.entries(p.ports)));
+  const record = {
+    version: 1,
+    key,
+    app: appName,
+    tree: tree.path,
+    offset,
+    pid: process.pid,
+    procStart: processStart(process.pid),
+    host: hostname(),
+    owner: ownerOf(process.env, opts.owner),
+    startedAt: new Date().toISOString(),
+    url: plan.localUrl,
+    ports,
+    // The workspace whose Nx runs this serve as its `serve` task (set by the @bespunky/nx-tools:serve executor) —
+    // what the `serve-preflight` target reads to tell a second `nx serve` that it would only wait on this one.
+    nxRoot: process.env.DEV_NX_ROOT || null,
+    processes: [],
+  };
+  writeRecord(record);
+  const dropRecord = () => removeRecord(tree.path, key);
+  process.on('exit', dropRecord);
+  log(`Stack:  ${key} · pid ${process.pid} · owner ${record.owner} · stop with: ${stopCommand(record, tree)}`);
   if (offset > 0) log(`Isolated on port offset ${offset} (shifted ports are not forwarded — view it in the shared browser).`);
   for (const a of plan.advice) if (a.when !== 'contended') log(a.text);
 
@@ -258,12 +349,144 @@ async function serve(opts) {
     children: plan.running,
     cwd: tree.path,
     log,
+    onSpawn: (id, pid) => {
+      record.processes.push({ id, pid, procStart: processStart(pid) });
+      writeRecord(record);
+    },
     onStop: () => {
       until.done = true;
       if (route.registered) detachRoute(tree.path, process.env, slug);
     },
   });
+  dropRecord();
   return result.success;
+}
+
+/** The exact command that stops a stack, as printed for whoever holds its handle. */
+function stopCommand(record, tree) {
+  const where = samePath(tree.path, ROOT) ? '' : ` --worktree=${tree.branch ?? tree.path}`;
+  return `tools/dev/dev stop ${record.app ?? ''} --offset=${record.offset}${where}`.replace(/\s+/g, ' ');
+}
+
+const since = (iso) => {
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  return s < 120 ? `${s}s` : s < 7200 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`;
+};
+
+/** Each port of a record, and whether something is listening on it now. */
+async function portStates(record) {
+  const out = [];
+  for (const [name, port] of Object.entries(record.ports ?? {})) out.push({ name, port, listening: !(await isPortFree(port)) });
+  return out;
+}
+
+async function ps(opts) {
+  const trees = collectWorktrees(ROOT);
+  const stacks = readStacks(trees.map((w) => w.path)).filter((s) => !opts.app || s.app === opts.app);
+  const label = (s) => {
+    const w = trees.find((t) => samePath(t.path, s.tree));
+    return w ? `${w.branch ?? w.path}${w.isMain ? ' [main]' : ''}` : s.tree;
+  };
+  const rows = [];
+  for (const s of stacks) rows.push({ ...s, treeLabel: label(s), portStates: s.state === 'foreign' ? [] : await portStates(s) });
+  if (opts.json) {
+    console.log(JSON.stringify(rows, null, 2));
+    return true;
+  }
+  if (!rows.length) {
+    console.log(`No running stacks${opts.app ? ` of ${opts.app}` : ''}.`);
+    return true;
+  }
+  const me = ownerOf(process.env, undefined);
+  for (const s of rows) {
+    const mine = s.owner === me ? ' (you)' : '';
+    const state =
+      s.state === 'live'
+        ? `up ${since(s.startedAt)}`
+        : s.state === 'orphaned'
+          ? `ORPHANED — its serve died without stopping ${survivors(s).map((p) => `${p.id} (pid ${p.pid})`).join(', ')}; stop them with: tools/dev/dev stop ${s.app} --offset=${s.offset}`
+          : `${s.state} — written on ${s.host}, cannot be checked from here`;
+    console.log(`${s.key}  ${s.treeLabel}  pid ${s.pid}  ${state}  owner ${s.owner}${mine}`);
+    console.log(`    ${s.url}`);
+    if (s.portStates.length) console.log(`    ports ${s.portStates.map((p) => `${p.name}=${p.port}${p.listening ? '' : ' (not listening)'}`).join('  ')}`);
+  }
+  return true;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Stop ONE stack by its handle: SIGTERM to the serve's own PID (its graceful path — it stops each process tree
+ * exactly once and waits for them; signalling the processes or the process GROUP as well would be the double
+ * signal that makes an emulator suite skip its export), wait for it to exit, then confirm the stack's ports are
+ * free. Never escalates to a name, a port kill or SIGKILL: what it cannot prove it owns, it reports.
+ */
+async function stopOne(record, { timeoutMs = 60000 } = {}) {
+  // An ORPHANED stack has no serve left to stop it gracefully: its surviving processes (each verified to be the
+  // very process the serve spawned) get one SIGTERM each, with their descendants — what the serve would have sent.
+  const pids =
+    record.state === 'orphaned' ? survivors(record).flatMap((p) => [...descendants(p.pid), p.pid]) : [record.pid];
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch (err) {
+      if (err?.code !== 'ESRCH') return { ok: false, why: `could not signal pid ${pid}: ${err.message}` };
+    }
+  }
+  const running = () => pids.filter((pid) => isAlive(pid));
+  const deadline = Date.now() + timeoutMs;
+  while (running().length && Date.now() < deadline) await sleep(200);
+  if (running().length) {
+    return { ok: false, why: `pid ${running().join(', ')} still shutting down after ${Math.round(timeoutMs / 1000)}s (an emulator export can be slow) — check again with tools/dev/dev ps` };
+  }
+  if (record.state === 'orphaned') removeRecord(record.tree, record.key, record.pid);
+  // The serve is gone; its children were waited for, but a socket can outlive its process by a moment.
+  let held = [];
+  for (let i = 0; i < 25; i++) {
+    held = (await portStates(record)).filter((p) => p.listening);
+    if (!held.length) break;
+    await sleep(200);
+  }
+  if (held.length) {
+    return { ok: false, why: `stopped, but still listening: ${held.map((p) => `${p.name}=${p.port}`).join(', ')} — not this stack's process any more; find the holder with: ss -ltnp 'sport = :${held[0].port}'` };
+  }
+  return { ok: true };
+}
+
+async function stop(opts) {
+  const trees = collectWorktrees(ROOT);
+  const me = ownerOf(process.env, opts.owner);
+  let scope;
+  if (opts.allMine) {
+    if (opts.worktree !== undefined || opts.offset !== undefined) throw new UsageError('--all-mine stops every stack you own, in every tree — it takes no --worktree or --offset');
+    scope = trees.map((w) => w.path);
+  } else {
+    const tree = opts.worktree === undefined ? (trees.find((w) => w.isCurrent) ?? trees[0]) : await selectWorktree(trees, opts.worktree);
+    scope = [tree.path];
+  }
+  const live = readStacks(scope).filter((s) => (s.state === 'live' || s.state === 'orphaned') && (!opts.app || s.app === opts.app) && (opts.offset === undefined || s.offset === opts.offset));
+  const others = live.filter((s) => s.owner !== me);
+  const targets = opts.anyOwner ? live : live.filter((s) => s.owner === me);
+
+  if (!opts.anyOwner) {
+    for (const s of others) console.log(`[stop] leaving ${s.key} (pid ${s.pid}) running — it is ${s.owner}'s, not yours (${me}). --any-owner stops it anyway, if that is what its owner wants.`);
+  }
+  if (!targets.length) {
+    console.log(`[stop] nothing of yours to stop${opts.offset !== undefined ? ` at offset ${opts.offset}` : ''}${opts.allMine ? '' : ' in this tree'}.`);
+    // Asked for one stack by offset and it is someone else's: that is a refusal, not a success.
+    return !(opts.offset !== undefined && others.length);
+  }
+  if (targets.length > 1 && !opts.allMine && opts.offset === undefined) {
+    throw new UsageError(`${targets.length} of your stacks run here — name one with --offset (or --all-mine):\n${targets.map((s) => `  ${s.key}  pid ${s.pid}  ${s.url}`).join('\n')}`);
+  }
+  let ok = true;
+  for (const s of targets) {
+    console.log(`[stop] stopping ${s.key} (pid ${s.pid}, ${s.tree})…`);
+    const res = await stopOne(s);
+    console.log(res.ok ? `[stop] ${s.key} stopped — ports free: ${Object.entries(s.ports ?? {}).map(([n, p]) => `${n}=${p}`).join(' ')}` : `[stop] ${s.key}: ${res.why}`);
+    ok &&= res.ok;
+  }
+  return ok;
 }
 
 function list() {
@@ -285,6 +508,10 @@ async function main(argv) {
   switch (opts.command) {
     case 'serve':
       return serve(opts);
+    case 'ps':
+      return ps(opts);
+    case 'stop':
+      return stop(opts);
     case 'list':
       return list();
     case undefined:
@@ -304,7 +531,7 @@ if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))
     (ok) => process.exit(ok ? 0 : 1),
     (err) => {
       if (err instanceof UsageError || err instanceof DeclarationError || err instanceof PortError) {
-        console.error(`[serve] ${err.message}`);
+        console.error(`[${process.argv[2] ?? "dev"}] ${err.message}`);
         if (err instanceof UsageError && /unknown|unexpected/.test(err.message)) console.error(USAGE);
       } else {
         console.error(`[serve] ${err?.stack ?? err}`);

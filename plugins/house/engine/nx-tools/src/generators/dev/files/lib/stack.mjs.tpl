@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 
 /** Every descendant of `pid`, deepest first — read from /proc (Linux; elsewhere none). */
-function descendants(pid) {
+export function descendants(pid) {
   let entries;
   try {
     entries = readdirSync('/proc').filter((e) => /^\d+$/.test(e));
@@ -63,9 +63,10 @@ function descendants(pid) {
  * together instead of leaving orphans.
  *
  * A child is `{ id, command, args, shell, env }`: `shell` runs `command` through `sh -c` (a hand-written
- * string command); otherwise `command` + `args` are spawned directly.
+ * string command); otherwise `command` + `args` are spawned directly. `onSpawn(id, pid)` hears each one start —
+ * how the stack's run record learns its processes' PIDs.
  */
-export function runStack({ children, cwd, onStop, log }) {
+export function runStack({ children, cwd, onStop, onSpawn, log }) {
   return new Promise((resolve) => {
     if (children.length === 0) {
       resolve({ success: true });
@@ -160,6 +161,13 @@ export function runStack({ children, cwd, onStop, log }) {
         ? spawn('sh', ['-c', child.command], { cwd, env: child.env, stdio: 'inherit' })
         : spawn(child.command, child.args, { cwd, env: child.env, stdio: 'inherit' });
       procs[i] = proc;
+      if (proc.pid) {
+        try {
+          onSpawn?.(child.id, proc.pid);
+        } catch {
+          /* bookkeeping only — never let it fail the serve */
+        }
+      }
       proc.on('error', (err) => {
         log?.(`failed to start ${child.id}: ${err.message}`);
         failed = true;

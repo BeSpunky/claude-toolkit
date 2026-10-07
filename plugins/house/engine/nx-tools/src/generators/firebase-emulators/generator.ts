@@ -60,8 +60,9 @@
 //   `{workspaceRoot}/…` inputs, so a change to firebase.json, .firebaserc or a root rules file marks it affected.
 //   Both projects are HOUSE PROJECTS (_utils/project-files): found by project, created the way this workspace
 //   defines projects (a project.json, or a package.json workspace member under TS-solution linking).
-//   - tools/{emulators,emulator-data,reap-emulators,push-secrets,firebase-welcome}.sh, tools/seed/* — the
-//                        launch path, data lifecycle, port reclaim, secrets push, cloud-linkage banner, and
+//   - tools/{emulators,emulator-data,reap-emulators,push-secrets,firebase-welcome}.sh, tools/emulator-ports.mjs,
+//                        tools/seed/* — the launch path, data lifecycle, port reclaim (and the one port table
+//                        both read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
 //                        the seed applier (tools/seed/apply.mjs), and the declarative seed worlds
 //                        (world.mjs and the seeds README are user-owned once written).
 //   - root eslint.config.mjs — best-effort insertion of the `platform:` dependency-constraint firewall:
@@ -93,7 +94,7 @@ import { loadTypeScript, type TsArrayLiteralExpression, type TsNode } from '../_
 import { adapterOf, applicationsWith } from '../../adapters/registry';
 import { workspaceStacksWith } from '../../adapters/workspace';
 import { hasDependency } from '../../layers/evidence';
-import { FIREBASE_DEFAULT_PORTS, HOUSE_EMULATORS } from './emulator-ports';
+import { HOUSE_EMULATORS, defaultPort, renderEmulatorPortsModule } from './emulator-ports';
 import { describeShadow, effectiveAppHostingDir, shadowedAppHostingConfigs } from './apphosting-config';
 import firebaseClientGenerator from '../firebase-client/generator';
 import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
@@ -126,7 +127,7 @@ function canonicalEmulatorsBlock() {
     ...Object.fromEntries(
       HOUSE_EMULATORS.map((name) => [
         name,
-        { ...(name === 'ui' ? { enabled: true } : {}), host: '0.0.0.0', port: FIREBASE_DEFAULT_PORTS[name] },
+        { ...(name === 'ui' ? { enabled: true } : {}), host: '0.0.0.0', port: defaultPort(name) },
       ]),
     ),
     singleProjectMode: true,
@@ -330,6 +331,7 @@ export default async function firebaseEmulatorsGenerator(
   //    workspace step re-running, and the banner must still see them.
   tree.write('tools/firebase-welcome.sh', template('firebase-welcome.sh.tpl').split('{{appsDir}}').join(appsDir));
   tree.write('tools/reap-emulators.sh', template('reap-emulators.sh.tpl'));
+  tree.write('tools/emulator-ports.mjs', renderEmulatorPortsModule(template('emulator-ports.mjs.tpl')));
   tree.write(
     'tools/emulators.sh',
     functionsPaths(substitute(template('emulators.sh.tpl'))).split('{{appEnvPath}}').join(clientEnv?.dev ?? ''),
@@ -560,8 +562,10 @@ function ensureFunctionsProject(
  * @param rulesFiles what firebase.json declares — the deploy's inputs (with the conventional root locations).
  */
 function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: HouseProjectHome, rulesFiles: string[]): void {
+  // Not `continuous`: the dev engine runs one suite per STACK (each on its shifted ports, with its own hub), and Nx
+  // shares a continuous task across every invocation in the tree — a second stack's suite would only wait on the
+  // first. A second suite started by hand on the base ports now fails loudly on the bind instead.
   const emulatorsTarget = (only?: string): TargetConfiguration => ({
-    continuous: true,
     executor: 'nx:run-commands',
     options: {
       command: `bash tools/emulators.sh${only ? ` --only ${only},ui` : ''}`,

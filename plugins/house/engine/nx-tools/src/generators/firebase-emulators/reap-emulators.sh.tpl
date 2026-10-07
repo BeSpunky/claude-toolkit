@@ -33,32 +33,22 @@
 #
 # Two passes: (0) kill orphaned emulator BINARY processes by their cache path — this catches the
 # fallback-port and alive-but-unbound orphans the port scan cannot see; then (1) reclaim, and
-# verify free, the configured ports from firebase.json (single source of truth) plus the hub
-# (4400) and logging (4500) ports firebase-tools always uses — this catches the firebase-tools
+# verify free, every port the suite occupies (tools/emulator-ports.mjs — firebase.json plus the hub
+# and logging ports firebase-tools always uses) — this catches the firebase-tools
 # node/hub process, which the cache-path sweep does not match.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Args: [config-path] [isolated]. ISOLATED mode (a port-offset stack from `<app>:serve --portOffset`)
-# reclaims ONLY the shifted ports in the given config and SKIPS the global JVM sweep below — because
-# a base emulator suite the developer is running coexists with this one, and both the sweep and the
-# base-port/hub reclaim would kill THAT suite. Default (no args) is the original single-suite reclaim.
+# Args: [config-path]. A port-offset stack passes its SHIFTED copy of firebase.json, so only the
+# shifted ports are reclaimed — a base emulator suite the developer is running coexists with it, and
+# reclaiming the base ports would kill THAT suite. Default: the base firebase.json.
 FIREBASE_JSON="${1:-$ROOT/firebase.json}"
-ISOLATED="${2:-}"
 [ -f "$FIREBASE_JSON" ] || exit 0
 
-# Extract configured emulator ports via node (always present in the devcontainer). In full mode add
-# the fixed hub/logging ports (4400/4500) firebase-tools always uses; in isolated mode the config
-# already carries the SHIFTED hub/logging, so add nothing base. De-duplicated, one per line.
-mapfile -t PORTS < <(node -e '
-  const fs = require("fs");
-  const cfg = (JSON.parse(fs.readFileSync(process.argv[1], "utf8")).emulators) || {};
-  const extra = process.argv[2] === "isolated" ? [] : [4400, 4500];
-  const ports = Object.values(cfg)
-    .filter((v) => v && typeof v === "object" && typeof v.port === "number")
-    .map((v) => v.port);
-  for (const p of new Set([...ports, ...extra])) console.log(p);
-' "$FIREBASE_JSON" "$ISOLATED" 2>/dev/null)
+# Every port the suite occupies — its emulators, any declared nested port (firestore.websocketPort)
+# and the hub/logging ports firebase-tools always runs — from tools/emulator-ports.mjs, the one port
+# table (a shifted config already carries its shifted hub/logging). De-duplicated, one per line.
+mapfile -t PORTS < <(node "$ROOT/tools/emulator-ports.mjs" ports "$FIREBASE_JSON" 2>/dev/null)
 
 [ "${#PORTS[@]}" -eq 0 ] && exit 0
 
@@ -163,7 +153,7 @@ if [ "${#live_holders[@]}" -gt 0 ]; then
   for entry in "${live_holders[@]}"; do echo "[reap-emulators]   ${entry}" >&2; done
   echo "[reap-emulators] Something is already running here — most likely an emulator suite you started." >&2
   echo "[reap-emulators] Nothing was killed. Stop it yourself, or serve on an isolated stack:" >&2
-  echo "[reap-emulators]   nx serve <app> --portOffset=auto" >&2
+  echo "[reap-emulators]   nx serve <app> --port-offset=auto   (or: tools/dev/dev serve <app>)" >&2
   exit 1
 fi
 

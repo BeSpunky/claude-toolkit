@@ -18,3 +18,4 @@ Deploying to Firebase App Hosting? Its Root Directory must be the app (--root-di
 Ship the Firebase backend with nx affected -t deploy — functions build through Nx, rules ship from what firebase.json declares
 Rules only in the Firebase console? npx firebase init firestore storage pulls the live ones into the repo, unchanged
 Your edits inside a house target (inputs, args, configurations) survive upgrades — the upgrade says if it had to replace one
+What is running, and whose? tools/dev/dev ps lists every dev stack in every worktree; tools/dev/dev stop takes yours down cleanly

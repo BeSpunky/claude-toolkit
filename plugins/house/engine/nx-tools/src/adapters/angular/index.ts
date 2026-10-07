@@ -228,8 +228,8 @@ export const angular: StackAdapter = {
     // (proxyConfig, ssl, port, …) is carried over — IN PLACE: overwriting a key keeps its position, so a re-run
     // writes the same project.json rather than reshuffling keys.
     leaf(_tree, project, preserved) {
+      // Not `continuous`: the dev engine runs one per STACK, and Nx would share one across stacks (_utils/dev-server).
       return {
-        continuous: true,
         executor: DEV_SERVER_EXECUTOR,
         options: { ...preserved, buildTarget: `${project}:build`, host: (preserved.host as string | undefined) ?? '0.0.0.0' },
         configurations: {

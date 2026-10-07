@@ -134,7 +134,7 @@ For the full architecture (registry shape, what belongs on the bus vs in the com
 - the **shared co-driven browser** — a real Chromium *inside the container* that it brings up and navigates to your app, so you and Claude watch and drive the same instance together{{#firebase}}{{#nx-serve}}, and
 - the **Firebase emulator suite** (this is a Firebase workspace — see below){{/nx-serve}}{{/firebase}}.
 
-It auto-derives a **port offset** from the tree you're in — the **main tree is always offset 0** (app on {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}its declared base port{{/angular}}); each git worktree gets its own stable, verified-free port block — and registers a pretty **`<slug>.localhost`** domain for the app.
+It auto-derives a **port offset** from the tree you're in — the **main tree prefers offset 0** (app on {{#angular}}`http://localhost:4200`{{/angular}}{{^angular}}its declared base port{{/angular}}) and takes it only when **every** port the stack binds is free; each git worktree gets its own stable, verified-free port block — and registers a pretty **`<slug>.localhost`** domain for the app.
 
 | Flag | Effect |
 | --- | --- |
@@ -145,6 +145,21 @@ It auto-derives a **port offset** from the tree you're in — the **main tree is
 | `--skip=<id,…>` | don't start these declared processes (the primary cannot be skipped). |
 {{#firebase}}{{#nx-serve}}| `--no-emulators` | the same as `--skip=emulators`: the app **alone**, every Firebase service resolved **real** (`?emulate=none`) — no suite booted. |
 {{/nx-serve}}{{/firebase}}| `--dry-run` | print the resolved tree, offset block, every process with its command, ports and env, and the URLs — run nothing. |
+
+### Running stacks — find them, stop them by handle
+
+Every serve is a **stack** — one app, from one tree, on one port offset (`<app>@<offset>`) — and it writes a **run record** (its PID, owner, ports) under the self-ignoring `.bespunky/run/`. Each process gets the stack's own state dir as `DEV_STACK_DIR`{{#firebase}} — the emulator suite keeps its hub locator there, so two suites of this repo never export each other's data{{/firebase}}.
+
+```bash
+tools/dev/dev ps                         # every running stack, in every worktree: app@offset, owner, pid, ports (listening or not)
+tools/dev/dev stop                       # your one stack in this tree — SIGTERM to the serve, then confirm its ports are free
+tools/dev/dev stop <app> --offset=<n>    # a specific stack (add --worktree=<x> for another tree)
+tools/dev/dev stop --all-mine            # every stack you own, in any tree (Claude's closing sweep)
+```
+
+`stop` refuses another owner's stack (the developer's, from Claude — and the reverse) unless `--any-owner`; the owner is `--owner=<label>` / `DEV_OWNER` when given, the Claude Code session, else your OS user. A serve whose process was killed too hard to clean up (SIGKILL, OOM) shows as **ORPHANED** with the processes it left, and `stop` stops exactly those. Nothing here ever kills by name.
+
+**A second stack of the same app in the same tree** (Claude testing beside your server, which the house rule requires): `tools/dev/dev serve <app> --port-offset=auto`.{{#nx-serve}} A second `{{NX}} serve <app>` in the same tree does not start one — Nx runs one `<app>:serve` per workspace (that is how an e2e target reuses your running stack) — so its `serve-preflight` names the running stack and either says the run attaches to it or, when you asked for a different `--port-offset`/`--worktree`, refuses with the `tools/dev/dev serve` command that starts it.{{/nx-serve}}
 
 ### Two ways to view the running app
 

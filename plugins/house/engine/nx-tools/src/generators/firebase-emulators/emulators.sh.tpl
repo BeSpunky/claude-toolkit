@@ -41,33 +41,44 @@ cd "$ROOT"
 
 DATA_DIR="$ROOT/.emulator-data"
 
-# Port-offset isolation (PORT_OFFSET, set by `<app>:serve --portOffset`): shift the WHOLE
+# Port-offset isolation (PORT_OFFSET, set by the dev engine for a shifted stack): shift the WHOLE
 # emulator suite onto a free port block so it COEXISTS with a suite the developer already has up on
 # the base ports — instead of reaping it. We generate an offset copy of firebase.json (every
-# emulator port +OFFSET, INCLUDING the hub/logging ports firebase-tools otherwise fixes at
-# 4400/4500 and would collide on), keep this stack's data in its own dir, and reap ONLY these
-# shifted ports (never the global JVM sweep, which would kill the developer's suite). OFFSET 0 (the
-# default) = the base forwarded stack, entirely unchanged.
+# emulator port +OFFSET, every DECLARED nested port such as firestore.websocketPort, and the
+# hub/logging ports firebase-tools otherwise fixes at 4400/4500 and would collide on — all from
+# tools/emulator-ports.mjs, the one port table), keep this stack's data in its own dir, and reap
+# ONLY these shifted ports. OFFSET 0 (the default) = the base forwarded stack, entirely unchanged.
 OFFSET="${PORT_OFFSET:-0}"
 CONFIG_ARGS=()
 REAP_ARGS=()
 if [ "$OFFSET" != "0" ]; then
   echo "[emulators] PORT_OFFSET=$OFFSET — isolated stack (shifted ports + own data dir)" >&2
   OFFSET_CONFIG="$ROOT/.firebase.offset-$OFFSET.json"
-  node -e '
-    const fs = require("fs"), off = Number(process.argv[2]);
-    const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const e = cfg.emulators || (cfg.emulators = {});
-    for (const k of Object.keys(e)) if (e[k] && typeof e[k].port === "number") e[k].port += off;
-    // hub/logging default to 4400/4500 when unset — pin them shifted so two suites never collide.
-    e.hub = Object.assign({ host: "0.0.0.0" }, e.hub, { port: ((e.hub && e.hub.port) || 4400) + off });
-    e.logging = Object.assign({ host: "0.0.0.0" }, e.logging, { port: ((e.logging && e.logging.port) || 4500) + off });
-    fs.writeFileSync(process.argv[3], JSON.stringify(cfg, null, 2));
-  ' "$ROOT/firebase.json" "$OFFSET" "$OFFSET_CONFIG"
+  node "$ROOT/tools/emulator-ports.mjs" shift "$ROOT/firebase.json" "$OFFSET" "$OFFSET_CONFIG"
   CONFIG_ARGS=(--config "$OFFSET_CONFIG")
-  REAP_ARGS=("$OFFSET_CONFIG" isolated)
+  REAP_ARGS=("$OFFSET_CONFIG")
   DATA_DIR="$ROOT/.emulator-data-$OFFSET"
 fi
+
+# EACH STACK ITS OWN TMPDIR — the emulator HUB LOCATOR lives there. firebase-tools finds a running
+# suite through `os.tmpdir()/hub-<projectId>.json`, keyed by the project id ALONE — and every stack of
+# this repo runs under the same id. Sharing one /tmp, a second suite never registers its own hub
+# (firebase-tools only warns "multiple instances"), and on exit its export-on-exit asks the FIRST
+# suite's hub to export: the main stack's data lands in the worktree's dir and the worktree's own is
+# lost — or, when the first suite already stopped, the export fails and nothing is saved. Both orders
+# lose data (reproduced, firebase-tools 15.32.1). A private TMPDIR per stack makes the locator the
+# stack's own. The dev engine hands every process its stack's state dir (DEV_STACK_DIR, under the
+# self-ignoring .bespunky/run/); run directly (`nx run firebase:emulators`), the suite keys its own
+# by offset. The JVM emulators use java.io.tmpdir, which TMPDIR does not move — and need not.
+if [ -n "${DEV_STACK_DIR:-}" ]; then
+  STACK_DIR="$DEV_STACK_DIR"
+else
+  STACK_DIR="$ROOT/.bespunky/run/firebase@$OFFSET"
+  mkdir -p "$ROOT/.bespunky/run"
+  [ -f "$ROOT/.bespunky/run/.gitignore" ] || printf '# Running dev stacks — machine-local, never committed.\n*\n' > "$ROOT/.bespunky/run/.gitignore"
+fi
+mkdir -p "$STACK_DIR/tmp"
+export TMPDIR="$STACK_DIR/tmp"
 
 # The emulator suite MUST run under the SAME projectId the app's client uses. The moment any
 # service is switched to real (e.g. real Auth), that real `projectId` is used for ALL services

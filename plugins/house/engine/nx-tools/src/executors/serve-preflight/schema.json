@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "version": 2,
+  "title": "Serve preflight executor",
+  "description": "Runs before `nx serve <app>` (the composer depends on it, with the serve's own flags forwarded). Nx runs ONE `<app>:serve` per workspace and makes a second invocation WAIT on the first — then report success without having served anything. When this workspace's Nx already serves the app, this names the running stack (offset, pid, URL, owner) and either refuses a request for a different stack (--port-offset / --worktree), printing the `tools/dev/dev serve` command that starts it beside the running one, or says that this run attaches to the running stack (what an e2e target depending on `serve` wants).",
+  "type": "object",
+  "properties": {
+    "project": { "type": "string", "description": "The served app. Defaults to the project this target is attached to." },
+    "portOffset": { "type": ["string", "number"], "description": "Forwarded from `nx serve` — the stack the run asks for." },
+    "worktree": { "type": "string", "description": "Forwarded from `nx serve` — the tree the run asks for." }
+  },
+  "additionalProperties": true
+}

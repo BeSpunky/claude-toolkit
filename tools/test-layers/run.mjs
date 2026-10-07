@@ -581,7 +581,11 @@ checkAsync('an Nx app wired to the house serve executor: HOUSE.md serves through
   const a = await artifacts(tree, registry.detectLayers(tree));
   ok(a.house.includes('`yarn nx serve <app>` is the one command') && a.house.includes('http://localhost:4200'), 'nx serve + the Angular base port');
   ok(a.house.includes('yarn nx serve <app> --no-emulators'), 'the Nx face keeps --no-emulators');
-  ok(!a.house.includes('tools/dev/dev serve <app> --'), 'engine commands rendered where the Nx face exists');
+  // One deliberate exception: a SECOND stack of the same app in the same tree is the engine's (Nx shares one
+  // `<app>:serve` per workspace), and *Running stacks* says so. Everywhere else the Nx face is the command.
+  const outsideStacks = a.house.replace(/### Running stacks[\s\S]*?(?=\n### |\n## )/, '');
+  ok(a.house.includes('### Running stacks') && a.house.includes('tools/dev/dev serve <app> --port-offset=auto`. A second `yarn nx serve <app>`'), 'the second-stack exception is documented, with the Nx face named');
+  ok(!outsideStacks.includes('tools/dev/dev serve <app> --'), 'engine commands rendered where the Nx face exists');
   ok(/, and\n- the \*\*shared co-driven browser/.test(a.house), 'the serve list is one list (no blank line left by a removed block)');
 });
 
