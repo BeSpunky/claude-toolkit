@@ -241,8 +241,11 @@ export const angular: StackAdapter = {
     // (proxyConfig, ssl, port, …) is carried over — IN PLACE: overwriting a key keeps its position, so a re-run
     // writes the same project.json rather than reshuffling keys.
     leaf(_tree, project, preserved) {
-      // Not `continuous`: the dev engine runs one per STACK, and Nx would share one across stacks (_utils/dev-server).
+      // EXPLICITLY not continuous: the dev engine runs one per STACK, and Nx would share one across stacks. Explicit,
+      // because Nx fills an absent key from targetDefaults / the builder's schema and @nx/angular's
+      // set-continuous-option migration sets it on a dev-server that lacks it (_utils/dev-server).
       return {
+        continuous: false,
         executor: DEV_SERVER_EXECUTOR,
         options: { ...preserved, buildTarget: `${project}:build`, host: (preserved.host as string | undefined) ?? '0.0.0.0' },
         configurations: {
@@ -255,7 +258,7 @@ export const angular: StackAdapter = {
 
     // The dev-server's OWN option (Angular's `proxyConfig`), so a direct `nx run <app>:dev-server` gets it too;
     // set-if-absent, so a project that points elsewhere keeps its choice. Through setLeafOption, which keeps the
-    // `dev-stack` composer's mirror of the leaf true.
+    // `serve` / `dev-stack` mirror of the leaf true.
     useProxy(tree, project, proxyConfig) {
       const leaf = projectOf(tree, project)?.targets?.['dev-server'];
       if (!leaf || !DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) return false;

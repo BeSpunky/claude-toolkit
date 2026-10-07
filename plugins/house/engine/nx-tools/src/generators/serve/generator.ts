@@ -8,11 +8,11 @@
 //     port — Angular's is @angular/build:dev-server, host 0.0.0.0, configurations development (default) /
 //     production) ONLY when the project has none of its own. A project that already has a dev-server — Vite,
 //     Next, anything — keeps it untouched.
-//   - `dev-stack`  — the @bespunky/nx-tools:serve executor: a THIN WRAPPER over `tools/dev/dev serve <app>`,
-//     continuous (the running stack Nx shares). Every option the wrapper does not own (buildTarget, host, …) is
-//     forwarded to the app's primary process.
-//   - `serve`      — what is typed: `nx serve <app> --worktree=… --port-offset=…` runs `dev-stack` with those flags
-//     and follows it, ending with the stack's exit status (@bespunky/nx-tools:follow-stack).
+//   - `serve`      — what is typed: the @bespunky/nx-tools:serve executor, a THIN WRAPPER over
+//     `tools/dev/dev serve <app>` (`nx serve <app> --worktree=… --port-offset=…`). NOT continuous: every
+//     `nx serve` is its own stack and ends with the stack's exit status. Every option the wrapper does not own
+//     (buildTarget, host, …) is forwarded to the app's primary process.
+//   - `dev-stack`  — the same, continuous: what an e2e target depends on for a running stack.
 // …and it SEEDS the app's entry in `.bespunky/dev.json` from the adapters that apply (the dev-server process;
 // the Firebase emulators when the workspace has them) — only what the app does not declare yet, so a later
 // `nx g @bespunky/nx-tools:app` is servable before the next sync.
@@ -45,7 +45,7 @@ import { updateJsonInPlace } from '../_utils/json-edits';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { seedFromAdapters } from '../dev/fragments';
 import { adapterOf } from '../../adapters/registry';
-import { SERVE_EXECUTOR, SERVE_PREFLIGHT_TARGET, STACK_TARGET, findExistingDevServer, preflightTarget, serveTargetsFor } from '../_utils/dev-server';
+import { SERVE_EXECUTOR, STACK_TARGET, findExistingDevServer, serveTargetsFor } from '../_utils/dev-server';
 
 interface ServeSchema {
   project: string;
@@ -99,24 +99,23 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   }
   targets['dev-server'] = leaf;
 
-  // The composer `dev-stack` — the Nx face of `tools/dev/dev serve <app>`: every process the app declares, one
-  // graceful Ctrl+C, the current worktree or any chosen one. Flags (`--worktree`, `--port-offset`, `--skip`,
-  // `--no-shared-browser`, `--configuration`) tune it. It MIRRORS the leaf. And `serve`, what people type: the
-  // follower that ends with the stack's exit status (see _utils/dev-server for why it is two targets).
+  // `serve` — the Nx face of `tools/dev/dev serve <app>`: every process the app declares, one graceful Ctrl+C, the
+  // current worktree or any chosen one. Flags (`--worktree`, `--port-offset`, `--skip`, `--no-shared-browser`,
+  // `--configuration`) tune it. It MIRRORS the leaf. And `dev-stack`, its continuous twin for e2e targets (see
+  // _utils/dev-server for why it is two targets).
   const own = targets[STACK_TARGET];
   if (own && (typeof own !== 'object' || own.executor !== SERVE_EXECUTOR)) {
     throw new Error(
-      `[serve] Project "${projectName}" has a \`${STACK_TARGET}\` target of its own — the house dev loop's composer needs that name.\n` +
+      `[serve] Project "${projectName}" has a \`${STACK_TARGET}\` target of its own — the house dev loop's continuous stack (what an e2e target depends on) needs that name.\n` +
         `  Rename yours (and anything that depends on it), then re-run this generator.`,
     );
   }
   Object.assign(targets, serveTargetsFor(leaf));
-  targets[SERVE_PREFLIGHT_TARGET] = preflightTarget();
 
   updateProjectConfigurationInPlace(tree, projectName, project);
   streamedLogs(tree);
 
-  // Declare the app for the stack-free engine the composer wraps. Only what it does not declare yet.
+  // Declare the app for the stack-free engine `serve` wraps. Only what it does not declare yet.
   for (const line of seedFromAdapters(tree, projectName)) logger.info(`[serve] ${line}`);
 
   await formatFiles(tree);

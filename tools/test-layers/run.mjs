@@ -1275,10 +1275,11 @@ checkAsync('serve: the Angular leaf comes from the adapter; the composer mirrors
   ok(t['dev-server'].executor === '@angular/build:dev-server' && t['dev-server'].options.host === '0.0.0.0', `leaf: ${JSON.stringify(t['dev-server'])}`);
   ok(t['dev-server'].options.port === 4300, 'a user-tuned leaf option survives');
   ok(t['dev-stack'].executor === '@bespunky/nx-tools:serve' && t['dev-stack'].continuous === true, 'the continuous composer on `dev-stack`');
-  ok(t.serve.executor === '@bespunky/nx-tools:follow-stack' && !t.serve.continuous, '`serve` is the follower — not continuous, so a dead stack fails `nx serve`');
+  ok(t.serve.executor === '@bespunky/nx-tools:serve' && t.serve.continuous === false, '`serve` is the engine, explicitly not continuous — its own stack, its own exit status');
+  ok(t['dev-server'].continuous === false, 'the leaf is explicitly not continuous');
   ok(JSON.stringify(t['dev-stack'].options) === JSON.stringify(t['dev-server'].options), 'composer options mirror the leaf');
   ok(JSON.stringify(t['dev-stack'].configurations) === JSON.stringify(t['dev-server'].configurations), 'composer configurations mirror the leaf');
-  ok(JSON.stringify(Object.keys(t.serve.configurations ?? {})) === JSON.stringify(Object.keys(t['dev-server'].configurations ?? {})), '`serve` takes the same -c names');
+  ok(JSON.stringify(t.serve.options) === JSON.stringify(t['dev-server'].options) && JSON.stringify(t.serve.configurations) === JSON.stringify(t['dev-server'].configurations), '`serve` mirrors the leaf too');
   ok(JSON.parse(tree.read('nx.json', 'utf8')).tui?.enabled === false, 'nx.json tui.enabled=false');
 });
 

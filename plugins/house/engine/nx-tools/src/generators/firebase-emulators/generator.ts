@@ -69,8 +69,8 @@
 //                        web/server depend only on their own + shared projects, shared only on shared, each
 //                        banning the packages bound to another platform; untagged projects are classified then.
 //
-// No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (one multi-process stack — the
-// continuous `dev-stack` composer, which `serve` follows), not of Firebase, and belongs to the generator that owns
+// No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (one multi-process stack — `serve`,
+// the dev engine), not of Firebase, and belongs to the generator that owns
 // that loop.
 import { seedServedApps } from '../dev/generator';
 import {
@@ -647,10 +647,11 @@ function reportRuntimeMismatch(tree: Tree, manifest: string, runtime: { major: s
  * @param rulesFiles what firebase.json declares — the deploy's inputs (with the conventional root locations).
  */
 function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: HouseProjectHome, rulesFiles: string[]): void {
-  // Not `continuous`: the dev engine runs one suite per STACK (each on its shifted ports, with its own hub), and Nx
-  // shares a continuous task across every invocation in the tree — a second stack's suite would only wait on the
-  // first. A second suite started by hand on the base ports now fails loudly on the bind instead.
+  // EXPLICITLY not `continuous`: the dev engine runs one suite per STACK (each on its shifted ports, with its own
+  // hub), and Nx shares a continuous task across every invocation in the tree — a second stack's suite would only
+  // wait on the first. Written `false` rather than left out: Nx fills an absent key from nx.json targetDefaults.
   const emulatorsTarget = (only?: string): TargetConfiguration => ({
+    continuous: false,
     executor: 'nx:run-commands',
     options: {
       command: `bash tools/emulators.sh${only ? ` --only ${only},ui` : ''}`,
