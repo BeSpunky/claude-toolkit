@@ -133,6 +133,23 @@ export function writeFirebaseConfigs(tree: Tree, appRoot: string): string[] {
 }
 
 /**
+ * Write the app's WHOLE generator-owned Firebase client glue: `emulator-overrides.ts`, the config set
+ * (`writeFirebaseConfigs`) and `proxy.conf.mjs`, baked with the app's dev environment file. The three move
+ * together — the configs import the overrides, and the proxy relays exactly the services the configs route
+ * through the origin — so whatever changes what they read writes all of them, the generator and a migration
+ * alike (a migration cannot rely on the per-app generator running after it: an UPGRADE_PARTIAL run skips it).
+ *
+ * @returns the proxy config's path, for the caller to wire into a dev server.
+ */
+export function writeFirebaseClientGlue(tree: Tree, appRoot: string, devEnvPath: string): string {
+  tree.write(`${appRoot}/src/app/emulator-overrides.ts`, firebaseTemplate('emulator-overrides.ts.tpl'));
+  writeFirebaseConfigs(tree, appRoot);
+  const proxy = `${appRoot}/proxy.conf.mjs`;
+  tree.write(proxy, firebaseTemplate('proxy.conf.mjs.tpl').split('{{appEnvPath}}').join(devEnvPath));
+  return proxy;
+}
+
+/**
  * The comment left in a NEW app's `app.config.ts`, directly under `provideAppFirebase()`.
  *
  * A newly scaffolded app provides the Firebase APP and no service, so its initial bundle carries none of

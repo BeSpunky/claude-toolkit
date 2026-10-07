@@ -19,6 +19,8 @@
 //     service dialled its port directly and is relayed now (there is no direct-dial option any more).
 //   - The house's "Local emulator endpoints" comment, when it is still the verbatim text, is replaced: it told the
 //     reader to keep the devcontainer's forwardPorts in step, which the browser no longer depends on.
+//   - The generator-owned client glue (firebase*.config.ts, emulator-overrides.ts, proxy.conf.mjs) is rewritten to
+//     the current templates — the 0.49 copies read `proxied`, and an UPGRADE_PARTIAL run skips the generator.
 //   - .bespunky/dev.json (project state): drops the `?portOffset=${OFFSET}` URL switch the house seeded on the
 //     emulators process — the page no longer reads it.
 // WHAT IT REPORTS, never edits: the project's own code importing what the owned files no longer export
@@ -26,20 +28,40 @@
 // served over https, where the SDK cannot reach an emulator through the page's origin.
 import { type Tree, logger, readJson, writeJson } from '@nx/devkit';
 import { findAppRoots } from '../../generators/_utils/app-roots';
+import { writeFirebaseClientGlue } from '../../generators/firebase-emulators/service-configs';
 
 const TAG = '[0.50.0 route-emulators-through-origin]';
 const DEV_JSON = '.bespunky/dev.json';
 const INTERFACE = 'environment.interface.ts';
 const RETIRED_EXPORTS = ['emulatorFor', 'portOffset', 'offsetUrl', 'resolvePortOffset'];
-/** The generator-owned client files — rewritten in full by the generator after this rung, so never scanned. */
+/** The generator-owned client files — rewritten in full by this rung (and the generator), so never scanned. */
 const OWNED = /^(firebase(-[a-z]+)?\.config|emulator-overrides)\.ts$/;
 
-/** The house's pre-0.50 comment above `emulators` — replaced only when it is still exactly this text. */
-const OLD_ENDPOINTS_COMMENT = [
-  '// Local emulator endpoints (match firebase.json at the workspace root — change a port there and',
-  "// change it here too, AND in the devcontainer's forwardPorts). Each entry's `default` comes from",
-  '// EMULATE above; the endpoint is always present so a runtime `?emulate=<service>` can switch a',
-  '// defaulted-off service back on.',
+/**
+ * The house's pre-0.50 comments above `emulators` — one is replaced only when it is still exactly its text. Both
+ * shipped and both tell the reader to keep the devcontainer's forwardPorts in step: the per-service one (703ca41 …
+ * 0.49), and the pre-toggle one (6106999 … 703ca41~1), which 0.24.3 converted the values beneath but never rewrote.
+ */
+const OLD_ENDPOINTS_COMMENTS: Array<{ old: string[]; next: () => string[] }> = [
+  {
+    next: () => NEW_ENDPOINTS_COMMENT,
+    old: [
+      '// Local emulator endpoints (match firebase.json at the workspace root — change a port there and',
+      "// change it here too, AND in the devcontainer's forwardPorts). Each entry's `default` comes from",
+      '// EMULATE above; the endpoint is always present so a runtime `?emulate=<service>` can switch a',
+      '// defaulted-off service back on.',
+    ],
+  },
+  {
+    // The pre-toggle file has no EMULATE map (0.24.3 wrote literal `default`s), so its replacement says nothing of it.
+    next: () => NEW_ENDPOINTS_COMMENT.slice(NEW_ENDPOINTS_COMMENT.indexOf('//') + 1),
+    old: [
+      '// Emulator endpoints. Match `firebase.json` at the workspace root — if you',
+      "// change a port there, change it here too, AND in the devcontainer's",
+      '// `forwardPorts` (all three speak about the same local emulator suite;',
+      "// there's no auto-sync).",
+    ],
+  },
 ];
 const NEW_ENDPOINTS_COMMENT = [
   "// Each emulated service's `default` comes from EMULATE above; the entry is always present so a runtime",
@@ -56,8 +78,12 @@ export default function routeEmulatorsThroughOrigin(tree: Tree): void {
   if (!tree.exists('firebase.json')) return;
   const apps = findAppRoots(tree, (root) => tree.exists(`${root}/src/app/firebase.config.ts`));
   for (const root of apps) {
-    migrateEnvironments(tree, `${root === '.' ? '' : `${root}/`}src/environments`);
-    reportRetiredImports(tree, `${root === '.' ? '' : `${root}/`}src`);
+    const prefix = root === '.' ? '' : `${root}/`;
+    migrateEnvironments(tree, `${prefix}src/environments`);
+    // The owned client glue is rewritten HERE, not left to the per-app generator: an UPGRADE_PARTIAL run skips that
+    // generator, and the 0.49 clients read `proxied` — with it gone they would silently dial :9099/:5001 again.
+    writeFirebaseClientGlue(tree, root === '.' ? '.' : root, `${prefix}src/environments/environment.ts`);
+    reportRetiredImports(tree, `${prefix}src`);
   }
   reportHttpsDevServers(tree, apps);
   dropPortOffsetSwitch(tree);
@@ -191,11 +217,13 @@ function dropProxiedParagraphs(content: string): string {
 
 function replaceEndpointsComment(content: string): string {
   const lines = content.split('\n');
-  for (let i = 0; i + OLD_ENDPOINTS_COMMENT.length <= lines.length; i++) {
-    if (OLD_ENDPOINTS_COMMENT.every((text, k) => lines[i + k].trim() === text)) {
-      const indent = /^\s*/.exec(lines[i])![0];
-      lines.splice(i, OLD_ENDPOINTS_COMMENT.length, ...NEW_ENDPOINTS_COMMENT.map((text) => `${indent}${text}`));
-      return lines.join('\n');
+  for (const { old, next } of OLD_ENDPOINTS_COMMENTS) {
+    for (let i = 0; i + old.length <= lines.length; i++) {
+      if (old.every((text, k) => lines[i + k].trim() === text)) {
+        const indent = /^\s*/.exec(lines[i])![0];
+        lines.splice(i, old.length, ...next().map((text) => `${indent}${text}`));
+        return lines.join('\n');
+      }
     }
   }
   return content;

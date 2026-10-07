@@ -20,7 +20,7 @@ import type { FirebaseClientPort } from '../stack-adapter';
 import {
   firebaseProvidersNote,
   firebaseTemplate,
-  writeFirebaseConfigs,
+  writeFirebaseClientGlue,
 } from '../../generators/firebase-emulators/service-configs';
 import { angular } from './index';
 import { declareBrowserSdk, pinAngularForFirebase } from './angularfire';
@@ -53,17 +53,14 @@ export const angularFirebaseClient: FirebaseClientPort = {
     }
 
     // 2) The generator-owned client glue — rewritten in full, every run.
-    tree.write(`${appRoot}/src/app/emulator-overrides.ts`, firebaseTemplate('emulator-overrides.ts.tpl'));
     if (tree.exists(`${appRoot}/src/app/firebase.config.ts`)) {
       logger.info(
         `[firebase-emulators] Rewrote ${appRoot}/src/app/firebase.config.ts to the current generator-owned shape (it holds no ` +
           `per-project values — customize via environment.ts for config, app.config.ts for providers, never this file).`,
       );
     }
-    writeFirebaseConfigs(tree, appRoot);
-    // Baked with THIS app's env path so it reads the project id from its single source of truth.
-    const proxy = `${appRoot}/proxy.conf.mjs`;
-    tree.write(proxy, firebaseTemplate('proxy.conf.mjs.tpl').split('{{appEnvPath}}').join(env.dev));
+    // The proxy is baked with THIS app's env path so it reads the project id from its single source of truth.
+    const proxy = writeFirebaseClientGlue(tree, appRoot, env.dev);
     // …and the dev-server uses it. (0.34.x appended --proxyConfig at serve time; the declare-dev-processes
     // migration moved it onto existing apps' dev-server leaf — a new app gets it here.) An app with no Angular
     // dev-server yet (no web layer) has nothing to point; a later sync wires it once one exists (this step runs

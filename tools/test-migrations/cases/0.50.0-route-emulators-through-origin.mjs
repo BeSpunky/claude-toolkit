@@ -277,6 +277,43 @@ export default {
       historicalShapes: [{ name: 'our-journey, nx-tools 0.47.0 (auth opted in by hand)', setup: journey({ opted: true }) }],
     },
     {
+      // An UPGRADE_PARTIAL run skips the per-app generator, so the rung must not leave the 0.49 client reading a
+      // `proxied` it just removed (it would silently dial :9099/:5001 again). Excerpt: a556912~1 firebase-auth.config.ts.tpl.
+      name: 'the owned client glue is rewritten by the rung itself: nothing left reading `proxied`',
+      setup: (tree) => {
+        app(tree);
+        tree.write('apps/shop/src/app/firebase-auth.config.ts', 'const proxied = (e as { proxied?: boolean }).proxied;\n');
+        tree.write('apps/shop/proxy.conf.mjs', '// 0.49: relays auth + functions only when proxied\n');
+      },
+      expect: (tree, t) => {
+        for (const file of ['firebase.config.ts', 'firebase-auth.config.ts', 'firebase-functions.config.ts', 'emulator-overrides.ts']) {
+          t.exists(`apps/shop/src/app/${file}`);
+          t.hasNot(`apps/shop/src/app/${file}`, 'proxied');
+        }
+        t.hasNot('apps/shop/proxy.conf.mjs', '0.49');
+        t.has('apps/shop/proxy.conf.mjs', 'apps/shop/src/environments/environment.ts');
+      },
+    },
+    {
+      // 6106999 … 703ca41~1 wrote this comment above the pre-toggle block; 0.24.3 converted the values, not the comment.
+      name: 'the pre-toggle endpoints comment (forwardPorts in step) is replaced too — without the EMULATE sentence',
+      setup: (tree) =>
+        app(tree, 'apps/old', {
+          iface: null,
+          env: MIGRATED_ENV.replace(
+            '  emulators: {',
+            "  // Emulator endpoints. Match `firebase.json` at the workspace root — if you\n  // change a port there, change it here too, AND in the devcontainer's\n  // `forwardPorts` (all three speak about the same local emulator suite;\n  // there's no auto-sync).\n  emulators: {",
+          ),
+        }),
+      expect: (tree, t) => {
+        const env = 'apps/old/src/environments/environment.ts';
+        t.hasNot(env, 'forwardPorts');
+        t.hasNot(env, 'EMULATE');
+        t.has(env, '  // THE BROWSER NEVER DIALS THESE ADDRESSES.');
+        t.has(env, "firestore: { host: 'localhost', port: 8081, default: true }");
+      },
+    },
+    {
       name: 'no firebase.json: nothing is touched',
       setup: (tree) => {
         app(tree);
