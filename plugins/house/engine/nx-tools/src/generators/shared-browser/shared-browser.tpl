@@ -781,10 +781,10 @@ cmd_navigate() {
   if [ "$wait" -eq 1 ]; then
     say "waiting for $url to answer (timeout ${SB_WAIT_TIMEOUT}s)…"
     if ! wait_for_url "$url"; then
-      # NON-FATAL by design: the `serve` target's shared-browser layer runs this navigate in a parallel run-commands
-      # alongside the app dev-server. A non-zero exit here would tear down the co-served dev-server. So when the app
-      # never comes up, WARN and leave the browser running — exit 0. Only a genuine hard failure (stack
-      # failing to come `up`, above) is fatal.
+      # NON-FATAL by design: the dev engine (tools/dev, lib/browser.mjs) runs this navigate beside the app's
+      # processes, and an app slow to answer is not a broken browser. So when the app never comes up, WARN and
+      # leave the browser running — exit 0. Only a genuine hard failure (stack failing to come `up`, above) is
+      # fatal.
       err "app not reachable after ${SB_WAIT_TIMEOUT}s — leaving the browser up; navigate manually when ready"
       err "  (open $NOVNC_URL, or re-run: shared-browser navigate --url=$url once the app is serving)"
       return 0

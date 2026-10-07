@@ -236,7 +236,7 @@ The capability is only as good as the seams around it. What each party actually 
 A long-lived, multi-process, human+agent-shared stack is a leak magnet. Every failure mode below is designed out, not left to discipline.
 
 ### Process leaks
-- **Orphaned daemons after an ungraceful death** (container stop/crash, closed terminal): `up` **reaps before it starts** — validates each PID file by **PID *and* matching process cmdline** (a reused PID owned by something else is never killed), and reclaims stale ports (SIGTERM→SIGKILL, poll until free) — the same verified-reclaim discipline as `reap-emulators.sh`.
+- **Orphaned daemons after an ungraceful death** (container stop/crash, closed terminal): `up` **reaps before it starts** — validates each PID file by **PID *and* matching process cmdline** (a reused PID owned by something else is never killed), and reclaims stale ports (SIGTERM→SIGKILL, poll until free).
 - **Concurrent `up` races**: an `flock` on `SB_RUNTIME/up.lock` serializes startup — two `up`s can't half-start the stack.
 - **Partial start**: if the readiness gate fails, `up` **tears down what it started** (clean slate) after dumping diagnostics — never leaves a half-up stack for the next run to trip over.
 - **`down` that doesn't fully stop**: graceful `SIGTERM` → wait → `SIGKILL`, then **verify 5900/6080/9223 are actually free** before returning (kill ≠ freed).
