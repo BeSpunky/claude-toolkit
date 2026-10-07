@@ -12,9 +12,9 @@
 // thing its PUBLIC entry point gets wrong (see `create`) and, under `workspaces`, has the linking port assert the
 // library's identity afterwards — @nx/js keys the source condition by ITS naming rule and writes none when the
 // workspace declares another, which would leave in-repo consumers reading a `dist` nobody has built.
-import { type GeneratorCallback, type Tree, getProjects, readNxJson, readProjectConfiguration, updateProjectConfiguration } from '@nx/devkit';
+import { type GeneratorCallback, type Tree, getProjects, readNxJson, readProjectConfiguration } from '@nx/devkit';
 import type { StackAdapter } from './stack-adapter';
-import { projectDefinitionFile } from '../generators/_utils/project-files';
+import { projectDefinitionFile, updateProjectConfigurationInPlace } from '../generators/_utils/project-files';
 import { workspaceLinking } from '../generators/_utils/linking';
 import { withPlatform, csvTags } from '../platform/platform';
 
@@ -92,7 +92,7 @@ export const js: StackAdapter = {
       const publish = project.targets?.['nx-release-publish'];
       if (publish?.options?.packageRoot) return;
       project.targets = { ...project.targets, 'nx-release-publish': { ...publish, options: { ...publish?.options, packageRoot: '{projectRoot}' } } };
-      updateProjectConfiguration(tree, name, project);
+      updateProjectConfigurationInPlace(tree, name, project);
     },
   },
 };

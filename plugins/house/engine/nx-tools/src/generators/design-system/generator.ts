@@ -45,20 +45,19 @@ import {
   getProjects,
   offsetFromRoot,
   readProjectConfiguration,
-  updateProjectConfiguration,
   readJson,
-  updateJson,
   writeJson,
   formatFiles,
   logger,
 } from '@nx/devkit';
+import { updateJsonInPlace } from '../_utils/json-edits';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import publishableLibGenerator from '../publishable-lib/generator';
 import designSystemStylesGenerator from '../design-system-styles/generator';
 import { findDesignSystem, DESIGN_SYSTEM_TAG } from '../_utils/design-system';
 import { resolveLibsDir, resolveWorkspaceScope, normalizeNpmScope } from '../_utils/workspace-layout';
-import { createProject } from '../_utils/project-files';
+import { createProject, updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { workspaceLinking, rootTsconfig } from '../_utils/linking';
 import { adapterOf, applicationsWith, projectRole } from '../../adapters/registry';
 import { workspaceStackWith } from '../../adapters/workspace';
@@ -130,7 +129,7 @@ export default async function designSystemGenerator(
 
   // 2) Re-assert the tag (an upgrade heals a lib whose tags were edited away; it is what makes the DS findable).
   project.tags = [...new Set([...(project.tags ?? []), DESIGN_SYSTEM_TAG])];
-  updateProjectConfiguration(tree, project.name ?? name, project);
+  updateProjectConfigurationInPlace(tree, project.name ?? name, project);
 
   // 3) On FIRST creation, purge what the framework generator emitted (a demo component, and the barrel that
   //    re-exports it) BEFORE seeding — or the seed-if-absent would keep a barrel pointing at a deleted file.
@@ -225,7 +224,7 @@ function writeProjectTsconfigs(tree: Tree, root: string): void {
 function publishStyles(tree: Tree, root: string): void {
   const pkgPath = `${root}/package.json`;
   if (!tree.exists(pkgPath)) return;
-  updateJson(tree, pkgPath, (json: Record<string, unknown>) => {
+  updateJsonInPlace(tree, pkgPath, (json: Record<string, unknown>) => {
     const exports = { ...((json.exports as Record<string, unknown>) ?? {}) };
     exports['./styles'] = { sass: './styles/_index.scss', default: './styles/_index.scss' };
     json.exports = exports;

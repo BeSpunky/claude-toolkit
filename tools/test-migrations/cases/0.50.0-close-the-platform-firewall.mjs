@@ -47,6 +47,19 @@ export default [
 ];
 `;
 
+const COMPACT_E2E = `{
+  "name": "web-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/web-e2e/src",
+  "targets": {
+    "e2e": { "executor": "@nx/playwright:playwright", "options": { "config": "apps/web-e2e/playwright.config.ts" }, "dependsOn": [{ "target": "dev-stack", "projects": ["web"] }] },
+    "lint": { "executor": "@nx/eslint:lint" }
+  },
+  "implicitDependencies": ["web"]
+}
+`;
+
 const NO_FIREWALL = OLD_FIREWALL.replace(/\n {12}\/\/ by platform[\s\S]*?(?=\n {10}\],)/, '');
 
 const project = (tree, root, json) => tree.write(`${root}/project.json`, JSON.stringify({ name: root.split('/').pop(), root, ...json }, null, 2));
@@ -138,6 +151,23 @@ export default {
         t.ok(/Classified `brand` platform:server — imports firebase-admin\/firestore/.test(text), `the inference and its reason:\n${text}`);
         t.ok(/Could not classify `mixed`.*nx g @bespunky\/nx-tools:platform mixed --platform=<web\|server\|shared>/.test(text), `the unresolved one, with its command:\n${text}`);
         t.ok(/`web` \(platform:web\) imports `brand` \(platform:server\)/.test(text), `the leak the firewall now catches:\n${text}`);
+      },
+    },
+    {
+      // The dogfood's web-e2e: a hand-written project.json, one line per target. Tagging it must add the tag and
+      // move nothing else — devkit's updateProjectConfiguration spread every target (and implicitDependencies) out.
+      name: 'a compact hand-written project.json keeps its form: only the tag is added',
+      setup: (tree) => {
+        workspace(tree);
+        tree.write('apps/web-e2e/project.json', COMPACT_E2E);
+        tree.write('apps/web-e2e/src/app.spec.ts', "import { test } from '@playwright/test';\n");
+      },
+      expect: (tree, t) => {
+        t.equal(
+          t.read('apps/web-e2e/project.json'),
+          COMPACT_E2E.replace('"implicitDependencies": ["web"]', '"implicitDependencies": ["web"],\n  "tags": ["platform:shared"]'),
+          'only the tag line differs',
+        );
       },
     },
     {

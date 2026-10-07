@@ -15,11 +15,12 @@
 // same judges (`coherentPair`, `browserSdkFindings`) and renderer (`renderAdvice`). They once disagreed: the migration
 // said "choose an @angular/fire for Angular 22 or move to 20", the generator said "set firebase to ^11.8.0" — and
 // after following the latter, a floating `@angular/fire: latest` stood with nothing left reporting it.
-import { type GeneratorCallback, type Tree, logger, readJson, writeJson } from '@nx/devkit';
+import { type GeneratorCallback, type Tree, logger, readJson } from '@nx/devkit';
 import { dirname, join } from 'node:path';
 import { ANGULARFIRE_BY_ANGULAR_MAJOR, ANGULARFIRE_TABLE_NEWEST_ANGULAR } from '../../generators/_utils/firebase-compat';
 import { FIREBASE_TOOLS_VERSION } from '../../generators/_utils/versions';
-import { declareDependencies, declaredSpec, isPinnedSpec } from '../../generators/_utils/dependencies';
+import { declareDependencies, declaredSpec, isPinnedSpec, placeDependency } from '../../generators/_utils/dependencies';
+import { updateJsonInPlace } from '../../generators/_utils/json-edits';
 
 const TAG = '[firebase-client]';
 
@@ -303,9 +304,9 @@ export function pinAngularForFirebase(tree: Tree): void {
     );
   }
   const versions = nx.versionsFor(major);
-  writeJson(tree, 'package.json', withDependency(readJson(tree, 'package.json'), '@angular/core', versions.angularVersion));
+  updateJsonInPlace(tree, 'package.json', (pkg) => withDependency(pkg, '@angular/core', versions.angularVersion));
   if (declaredSpec(tree, '@angular-devkit/core')) {
-    writeJson(tree, 'package.json', withDependency(readJson(tree, 'package.json'), '@angular-devkit/core', versions.angularDevkitVersion));
+    updateJsonInPlace(tree, 'package.json', (pkg) => withDependency(pkg, '@angular-devkit/core', versions.angularDevkitVersion));
   }
   if (major < nx.latest) {
     logger.info(
@@ -318,7 +319,7 @@ export function pinAngularForFirebase(tree: Tree): void {
 /** `pkg` with `name` set to `spec` in the block that already declares it (else `dependencies`). */
 function withDependency(pkg: Record<string, any>, name: string, spec: string): Record<string, any> {
   const block = pkg.devDependencies?.[name] !== undefined ? 'devDependencies' : 'dependencies';
-  return { ...pkg, [block]: { ...pkg[block], [name]: spec } };
+  return { ...pkg, [block]: placeDependency(pkg[block], name, spec) };
 }
 
 /**

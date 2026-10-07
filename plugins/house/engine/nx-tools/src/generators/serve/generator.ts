@@ -38,11 +38,11 @@ import {
   type Tree,
   type TargetConfiguration,
   readProjectConfiguration,
-  updateProjectConfiguration,
-  updateJson,
   formatFiles,
   logger,
 } from '@nx/devkit';
+import { updateJsonInPlace } from '../_utils/json-edits';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { seedFromAdapters } from '../dev/fragments';
 import { adapterOf } from '../../adapters/registry';
 import { SERVE_EXECUTOR, SERVE_PREFLIGHT_TARGET, STACK_TARGET, findExistingDevServer, preflightTarget, serveTargetsFor } from '../_utils/dev-server';
@@ -113,7 +113,7 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   Object.assign(targets, serveTargetsFor(leaf));
   targets[SERVE_PREFLIGHT_TARGET] = preflightTarget();
 
-  updateProjectConfiguration(tree, projectName, project);
+  updateProjectConfigurationInPlace(tree, projectName, project);
   streamedLogs(tree);
 
   // Declare the app for the stack-free engine the composer wraps. Only what it does not declare yet.
@@ -125,7 +125,7 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
 /** Nx's TUI off for the dev loop — unless the workspace already decided (either way). */
 function streamedLogs(tree: Tree): void {
   if (!tree.exists('nx.json')) return;
-  updateJson(tree, 'nx.json', (json) => {
+  updateJsonInPlace(tree, 'nx.json', (json) => {
     if (json.tui?.enabled === undefined) json.tui = { ...(json.tui ?? {}), enabled: false };
     return json;
   });

@@ -19,12 +19,12 @@
 import {
   type Tree,
   readProjectConfiguration,
-  updateProjectConfiguration,
   readJson,
   writeJson,
   joinPathFragments,
   formatFiles,
 } from '@nx/devkit';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { requireLayer } from '../../layers/registry';
 import { adapterOf, projectRole } from '../../adapters/registry';
 
@@ -80,7 +80,7 @@ export default async function markExtractableGenerator(
   // 1. Tag the project (idempotent).
   project.tags ??= [];
   if (!project.tags.includes(EXTRACTION_TAG)) project.tags.push(EXTRACTION_TAG);
-  updateProjectConfiguration(tree, options.lib, project);
+  updateProjectConfigurationInPlace(tree, options.lib, project);
 
   // 2. The kind IS the stack that owns the library. The lib's package.json feeds the marker's declared deps.
   const libPkg = readJsonSafe(tree, joinPathFragments(project.root, 'package.json'));

@@ -44,6 +44,9 @@ export default {
           t.equal(target?.options?.cwd, '{workspaceRoot}', `${name}: runs from the root`);
         }
         t.equal(functionsDeploy?.dependsOn, ['build', 'lint'], 'functions:deploy: Nx builds and lints what ships');
+        // Linted the way Nx recommends: @nx/eslint/plugin infers `lint` — never the deprecated @nx/eslint:lint executor.
+        t.ok(!projects.get('functions')?.targets?.lint, `functions:lint is inferred, not declared: ${JSON.stringify(projects.get('functions')?.targets?.lint)}`);
+        t.ok(t.json('nx.json').plugins?.some((p) => p?.plugin === '@nx/eslint/plugin' && p.options?.targetName === 'lint'), `@nx/eslint/plugin registered: ${JSON.stringify(t.json('nx.json').plugins)}`);
         t.equal(functionsDeploy?.options?.command, 'node tools/firebase-deploy.mjs --only functions', 'functions:deploy command: through the deploy runner');
         t.ok(functionsDeploy?.inputs?.includes('{workspaceRoot}/tools/firebase-deploy.mjs'), 'functions:deploy: the runner is an input');
         t.equal(suiteDeploy?.options?.command, 'node tools/firebase-deploy-rules.mjs', 'firebase:deploy command');
@@ -93,6 +96,22 @@ export default {
         t.has('firestore.rules', 'the live rules');
         t.ok(ctx.logs.some((l) => l.includes('storage.rules') && l.includes('not seeding')), `reported: ${ctx.logs}`);
         t.ok(getProjects(tree).get('firebase')?.targets?.deploy?.inputs?.includes('{workspaceRoot}/firestore.indexes.json'), 'declared root files are inputs');
+      },
+    },
+    {
+      name: 'inference turned off (useInferencePlugins: false): functions gets an explicit `eslint .` lint — still not the deprecated executor',
+      setup: () => {
+        const tree = workspace();
+        updateJson(tree, 'package.json', (json) => ({ ...json, devDependencies: { ...json.devDependencies, '@nx/eslint': '23.1.0' } }));
+        updateJson(tree, 'nx.json', (json) => ({ ...json, useInferencePlugins: false }));
+        return tree;
+      },
+      run: generate(),
+      expect: (tree, t) => {
+        const lint = getProjects(tree).get('functions')?.targets?.lint;
+        t.equal([lint?.executor, lint?.options?.command, lint?.options?.cwd], ['nx:run-commands', 'eslint .', '{projectRoot}'], `functions:lint: ${JSON.stringify(lint)}`);
+        t.ok(!(t.json('nx.json').plugins ?? []).some((p) => (p?.plugin ?? p) === '@nx/eslint/plugin'), 'no plugin registered against the workspace\'s choice');
+        t.equal(getProjects(tree).get('functions')?.targets?.deploy?.dependsOn, ['build', 'lint'], 'deploy still lints first');
       },
     },
     {

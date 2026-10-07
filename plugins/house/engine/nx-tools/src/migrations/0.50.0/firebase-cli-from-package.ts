@@ -18,6 +18,7 @@
 import { type Tree, logger } from '@nx/devkit';
 import { retireHouseFeature } from '../../generators/_utils/devcontainer-feature';
 import { placeDependency } from '../../generators/_utils/dependencies';
+import { applyJsonChanges } from '../../generators/_utils/json-edits';
 
 const TAG = '[0.50.0 firebase-cli-from-package]';
 const FEATURE = /^ghcr\.io\/devcontainers-extra\/features\/firebase-cli(?::[\w.-]+)?$/;
@@ -65,8 +66,8 @@ function declareFirebaseTools(tree: Tree): string | undefined {
   }
   const target = block ?? 'devDependencies';
   pkg[target] = placeDependency(pkg[target], 'firebase-tools', version);
-  const indent = /^(\s+)"/m.exec(text)?.[1] ?? '  ';
-  tree.write('package.json', `${JSON.stringify(pkg, null, indent)}\n`);
+  // In place: only the entries that changed, in the file's own form (a new one at its sorted place).
+  tree.write('package.json', applyJsonChanges(text, JSON.parse(text), pkg));
   logger.info(`${TAG} package.json ${target}["firebase-tools"] = "${version}"${block ? ' (was "latest")' : ''}.`);
   return version;
 }

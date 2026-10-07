@@ -29,10 +29,10 @@
 import {
   type Tree,
   readProjectConfiguration,
-  updateProjectConfiguration,
   formatFiles,
   logger,
 } from '@nx/devkit';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 
 /** The legacy orchestrator's executor — the one `serve` shape that must never be given `host`. */
 const RUN_COMMANDS_EXECUTOR = 'nx:run-commands';
@@ -86,6 +86,6 @@ export default async function serveOptionsGenerator(
     targets.serve.options = { ...targets.serve.options, host };
   }
 
-  updateProjectConfiguration(tree, options.project, project);
+  updateProjectConfigurationInPlace(tree, options.project, project);
   await formatFiles(tree);
 }

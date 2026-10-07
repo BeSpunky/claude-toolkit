@@ -7,20 +7,29 @@
 // app — the one project the web/server boundary exists for — imported whatever it liked, unchecked: a boundary
 // nobody enforces is no boundary. From 0.50.0 the Angular adapter passes `linter: 'eslint'` at creation; this rung
 // gives existing house apps the same, through @nx/angular's own public `add-linting` generator (the Angular rules,
-// the selector prefix, the project eslint.config extending the root one, where the firewall lives).
+// the selector prefix, the project eslint.config extending the root one, where the firewall lives). Its `lint` target is
+// @nx/eslint/plugin's INFERRED one (registered in nx.json if it is not yet) — add-linting still writes the deprecated
+// `@nx/eslint:lint` executor, which ../../generators/_utils/lint-inference converts the way convert-to-inferred would.
+//
+// AND THE HOUSE'S OWN: up to 0.49 firebase-emulators gave the functions project that same bare executor target. From
+// 0.50.0 it declares none where the plugin infers `lint` (an explicit `eslint .` where inference is off), and
+// generators never remove a whole target — so it is converted here too.
 //
 // WHICH APPS: the house's — an Angular application behind the house `serve` composer. Already linted (a `lint`
-// target, or an eslint config the @nx/eslint plugin infers one from) → nothing. @nx/angular not installed (it is
+// target, or one @nx/eslint/plugin infers from its own or the root eslint config) → nothing. @nx/angular not installed (it is
 // what created the app; a broken install) → nothing written, the command reported.
 //
 // ALSO REPORTED, never edited: any OTHER project that holds code (a stack builds it, or it builds/tests/serves),
 // carries a `platform:` tag and is not linted — its tag states a boundary nothing checks. (A tooling project of
 // scripts — shared-browser, the emulator suite — holds no importable code, so its tag is not news.)
-import { type GeneratorCallback, type ProjectConfiguration, type Tree, getProjects, logger, readJson } from '@nx/devkit';
+import { type GeneratorCallback, type ProjectConfiguration, type Tree, getProjects, logger } from '@nx/devkit';
 import { angular } from '../../adapters/angular';
 import { nxInvocation } from '../../generators/_utils/nx-host';
 import { holdsCode } from '../../platform';
 import { platformOf } from '../../platform/platform';
+import { convertBareLint, inferredLintTarget } from '../../generators/_utils/lint-inference';
+import { houseProjectHome } from '../../generators/_utils/project-files';
+import { resolveAppsDir } from '../../generators/_utils/workspace-layout';
 
 const TAG = '[0.50.0 lint-house-apps]';
 const HOUSE_SERVE = '@bespunky/nx-tools:serve';
@@ -31,7 +40,8 @@ export default async function lintHouseApps(tree: Tree): Promise<GeneratorCallba
   const tasks: GeneratorCallback[] = [];
   for (const [name, config] of getProjects(tree)) {
     if (isLinted(tree, config)) continue;
-    const house = angular.ownsApp(config) && config.targets?.serve?.executor === HOUSE_SERVE;
+    // The composer is `serve` before split-serve-follower (this release) and `dev-stack` after it: either order holds.
+    const house = angular.ownsApp(config) && [config.targets?.serve, config.targets?.['dev-stack']].some((t) => t?.executor === HOUSE_SERVE);
     if (!house) {
       if (platformOf(config.tags) && holdsCode(tree, name, config)) {
         logger.warn(
@@ -56,26 +66,30 @@ export default async function lintHouseApps(tree: Tree): Promise<GeneratorCallba
     }
     const prefix = typeof (config as { prefix?: unknown }).prefix === 'string' ? (config as { prefix: string }).prefix : 'app';
     tasks.push(await addLinting(tree, { projectName: name, projectRoot: config.root, prefix, linter: 'eslint', skipFormat: true }));
+    // add-linting writes the deprecated `@nx/eslint:lint` executor; the target becomes the one Nx recommends.
+    convertBareLint(tree, name);
     logger.info(
       `${TAG} \`${name}\`: lint added (${config.root}/eslint.config.mjs) — the platform firewall now checks this app's ` +
         `imports. Run \`${nx} lint ${name}\`: anything it reports crossed the boundary unseen until now. INSTALL first ` +
         `if package.json gained ESLint packages.`,
     );
   }
+  const functions = houseProjectHome(tree, 'functions', `${resolveAppsDir(tree)}/functions`);
+  if (functions.exists && convertBareLint(tree, functions.name)) {
+    logger.info(`${TAG} \`${functions.name}:lint\` no longer runs the deprecated @nx/eslint:lint executor — it is linted the way Nx recommends (@nx/eslint/plugin).`);
+  }
   if (tasks.length) return async () => {
     for (const task of tasks) await task();
   };
 }
 
-/** A `lint` target, or an eslint config the @nx/eslint plugin infers one from. */
+/**
+ * A `lint` target, or one @nx/eslint/plugin infers: the plugin lints every project under an ESLint config — its own,
+ * or (for a project with none) the workspace root's.
+ */
 function isLinted(tree: Tree, config: ProjectConfiguration): boolean {
   if (config.targets?.lint) return true;
+  if (inferredLintTarget(tree) === undefined) return false;
   const prefix = config.root === '.' ? '' : `${config.root}/`;
-  if (!ESLINT_CONFIGS.some((file) => tree.exists(`${prefix}${file}`))) return false;
-  try {
-    const plugins = (readJson(tree, 'nx.json') as { plugins?: Array<string | { plugin?: string }> }).plugins ?? [];
-    return plugins.some((entry) => (typeof entry === 'string' ? entry : entry?.plugin) === '@nx/eslint/plugin');
-  } catch {
-    return false;
-  }
+  return ESLINT_CONFIGS.some((file) => tree.exists(`${prefix}${file}`) || tree.exists(file));
 }

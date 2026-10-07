@@ -32,8 +32,54 @@ export default {
     },
     {
       name: 'a house app already linted: nothing said',
-      setup: (tree) => houseApp(tree, { lint: { executor: '@nx/eslint:lint' } }),
+      setup: (tree) => houseApp(tree, { lint: { executor: 'nx:run-commands', options: { command: 'eslint .' } } }),
       expect: (tree, t, lines) => t.ok(!said(lines, '`web`'), `silent: ${lines}`),
+    },
+    {
+      name: 'linted by inference (@nx/eslint/plugin + the root eslint config): nothing said',
+      setup: (tree) => {
+        houseApp(tree);
+        tree.write('eslint.config.mjs', 'export default [];\n');
+        tree.write('nx.json', JSON.stringify({ plugins: [{ plugin: '@nx/eslint/plugin', options: { targetName: 'lint' } }] }, null, 2));
+      },
+      expect: (tree, t, lines) => t.ok(!said(lines, '`web`'), `silent: ${lines}`),
+    },
+    {
+      name: 'the composer already split onto dev-stack (split-serve-follower ran first): still recognised as a house app',
+      setup: (tree) =>
+        houseApp(tree, {
+          'dev-stack': { executor: '@bespunky/nx-tools:serve', continuous: true },
+          serve: { executor: '@bespunky/nx-tools:follow-stack' },
+        }),
+      expect: (tree, t, lines) => t.ok(said(lines, 'g @nx/angular:add-linting --projectName=web'), `reported: ${lines}`),
+    },
+    {
+      name: "the house's functions:lint (0.49: the bare deprecated executor) becomes @nx/eslint/plugin's inferred target",
+      setup: (tree) => {
+        tree.write('eslint.config.mjs', 'export default [];\n');
+        tree.write('nx.json', `{
+  "targetDefaults": {
+    "build": { "cache": true },
+    "@nx/eslint:lint": { "cache": true }
+  }
+}
+`);
+        addProjectConfiguration(tree, 'functions', {
+          root: 'apps/functions',
+          projectType: 'application',
+          tags: ['platform:server'],
+          targets: { build: { executor: '@nx/esbuild:esbuild' }, lint: { executor: '@nx/eslint:lint' }, deploy: { executor: 'nx:run-commands', dependsOn: ['build', 'lint'] } },
+        });
+      },
+      expect: (tree, t, lines) => {
+        const project = t.json('apps/functions/project.json');
+        t.ok(!project.targets.lint, `the declared target is gone: ${JSON.stringify(project.targets)}`);
+        t.equal(project.targets.deploy.dependsOn, ['build', 'lint'], 'deploy still depends on lint (now inferred)');
+        const nx = t.json('nx.json');
+        t.equal(nx.plugins, [{ plugin: '@nx/eslint/plugin', options: { targetName: 'lint' } }], 'the plugin, as `nx add @nx/eslint` writes it');
+        t.equal(nx.targetDefaults, { build: { cache: true } }, 'the executor default nothing uses any more is gone');
+        t.ok(said(lines, '`functions:lint` no longer runs the deprecated @nx/eslint:lint executor'), `reported: ${lines}`);
+      },
     },
     {
       name: "another project's platform tag with no lint behind it is reported; an untagged one is not this rung's business",

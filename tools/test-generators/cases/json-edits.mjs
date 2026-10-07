@@ -2,6 +2,7 @@
 // the members whose value changed, in the file's own style. The dogfood that asked for them: a one-line
 // `forwardPorts` came back as nine lines for one added port, and a rung that removed `continuous` moved every
 // firebase target's `options` below its `dependsOn`.
+import { requireFromRepo } from '../../test-support/payload.mjs';
 import { workspace } from '../workspaces.mjs';
 
 const pure = (name, run, expect) => ({
@@ -40,6 +41,28 @@ const PROJECT = `{
 }
 `;
 
+const MANIFEST = `{
+  "name": "@acme/source",
+  "workspaces": ["apps/*"],
+  "dependencies": { "rxjs": "7.8.0" },
+  "devDependencies": {
+    "eslint": "9.0.0",
+    "vitest": "3.0.0"
+  }
+}
+`;
+
+const COMPACT = `{
+  "name": "web-e2e",
+  "projectType": "application",
+  "targets": {
+    "e2e": { "executor": "@nx/playwright:playwright", "options": { "config": "apps/web-e2e/playwright.config.ts" } },
+    "lint": { "executor": "@nx/eslint:lint" }
+  },
+  "implicitDependencies": ["web"]
+}
+`;
+
 export default {
   name: 'in-place JSON edits · the file keeps its form',
   cases: [
@@ -73,6 +96,41 @@ export default {
         t.ok(removed === PROJECT.replace('      "continuous": true,\n', ''), `only the member went:\n${removed}`);
       },
     ),
+    pure(
+      'a new member lands at its place in the new value (a sorted block stays sorted); a one-line value stays one line',
+      (ctx) => {
+        const { applyJsonChanges } = ctx.load('generators/_utils/json-edits');
+        const { placeDependency } = ctx.load('generators/_utils/dependencies');
+        const before = JSON.parse(MANIFEST);
+        const after = JSON.parse(MANIFEST);
+        after.devDependencies = placeDependency(after.devDependencies, 'firebase-tools', '15.32.1');
+        after.dependencies = placeDependency(after.dependencies, '@angular/core', '~21.0.0');
+        after.workspaces = ['apps/*', 'tools/*'];
+        return applyJsonChanges(MANIFEST, before, after);
+      },
+      (t, text) => {
+        t.ok(text.includes('"eslint": "9.0.0",\n    "firebase-tools": "15.32.1",\n    "vitest": "3.0.0"'), `sorted place:\n${text}`);
+        t.ok(text.includes('"dependencies": { "@angular/core": "~21.0.0", "rxjs": "7.8.0" }'), `one-line block, first place:\n${text}`);
+        t.ok(text.includes('"workspaces": ["apps/*", "tools/*"],'), `a replaced one-line array stays one line:\n${text}`);
+      },
+    ),
+    {
+      name: 'a compact project.json: the in-place devkit replacement writes only the member that changed',
+      setup: () => {
+        const tree = workspace();
+        tree.write('apps/web-e2e/project.json', COMPACT);
+        return tree;
+      },
+      run: (tree, ctx) => {
+        const { readProjectConfiguration } = requireFromRepo('@nx/devkit');
+        const { updateProjectConfigurationInPlace } = ctx.load('generators/_utils/project-files');
+        const config = readProjectConfiguration(tree, 'web-e2e');
+        config.tags = [...new Set([...(config.tags ?? []), 'platform:shared'])];
+        updateProjectConfigurationInPlace(tree, 'web-e2e', config);
+      },
+      expect: (tree, t) =>
+        t.equal(tree.read('apps/web-e2e/project.json', 'utf8'), COMPACT.replace('  "implicitDependencies"', '  "tags": ["platform:shared"],\n  "implicitDependencies"'), 'only the tag (at its place in what devkit reads)'),
+    },
     {
       name: 'a house project already current: ensureHouseProject leaves a prettier-formatted project.json byte-identical',
       setup: () => {

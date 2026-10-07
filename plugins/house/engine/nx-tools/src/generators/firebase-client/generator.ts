@@ -11,7 +11,8 @@
 //
 // Composed by the `app` generator (every later app in a Firebase workspace is wired with no flag), and run per
 // app by the `firebase` layer on a sync.
-import { type Tree, type GeneratorCallback, readProjectConfiguration, updateProjectConfiguration, formatFiles } from '@nx/devkit';
+import { type Tree, type GeneratorCallback, readProjectConfiguration, formatFiles } from '@nx/devkit';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { portOf } from '../../adapters/registry';
 
 export interface FirebaseClientSchema {
@@ -37,7 +38,7 @@ export default async function firebaseClientGenerator(
 
   const config = readProjectConfiguration(tree, options.project);
   config.tags = [...new Set([...(config.tags ?? []), 'platform:web'])];
-  updateProjectConfiguration(tree, options.project, config);
+  updateProjectConfigurationInPlace(tree, options.project, config);
 
   const install = client.attach(tree, options.project, {
     workspaceName: options.workspaceName ?? options.project,

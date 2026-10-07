@@ -92,6 +92,8 @@ import { HOUSE_EMULATORS, defaultPort, renderEmulatorPortsModule } from './emula
 import { describeShadow, effectiveAppHostingDir, shadowedAppHostingConfigs } from './apphosting-config';
 import firebaseClientGenerator from '../firebase-client/generator';
 import { ensureHouseProject, houseProjectHome, type HouseProjectHome } from '../_utils/project-files';
+import { houseLintTarget } from '../_utils/lint-inference';
+import { applyJsonChanges } from '../_utils/json-edits';
 import { resolveAppsDir } from '../_utils/workspace-layout';
 import { rootTsconfig } from '../_utils/linking';
 import { workspaceIdentity } from '../_utils/workspace-identity';
@@ -288,13 +290,17 @@ export default async function firebaseEmulatorsGenerator(
 
   // 1) firebase.json at workspace root. The `emulators` and `functions` keys are generator-owned (asserted to
   //    canonical on every run); any other top-level keys the user added are preserved.
-  const lint = hasDependency(tree, '@nx/eslint');
+  // How functions is linted where the workspace lints: @nx/eslint/plugin's inferred target (registered if need be), or
+  // an explicit `eslint .` where inference is off — never the deprecated @nx/eslint:lint executor (_utils/lint-inference).
+  const lint = hasDependency(tree, '@nx/eslint') ? houseLintTarget(tree) : undefined;
   const firebaseJson: Record<string, unknown> = tree.exists('firebase.json') ? readJson(tree, 'firebase.json') : {};
   firebaseJson.emulators = canonicalEmulatorsBlock();
   firebaseJson.functions = canonicalFunctionsBlock(functions);
   // The rules — seeded only when the layer is being CREATED, for services the project declares none for.
   if (options.seedRules) seedRules(tree, firebaseJson, suite.root, template);
-  writeJson(tree, 'firebase.json', firebaseJson);
+  // In place where it exists: the project's own keys (hosting, rules, …) keep their form; only what changed is written.
+  if (tree.exists('firebase.json')) tree.write('firebase.json', applyJsonChanges(tree.read('firebase.json', 'utf8')!, readJson(tree, 'firebase.json'), firebaseJson));
+  else writeJson(tree, 'firebase.json', firebaseJson);
   warnUnresolvedProjectTemplates(firebaseJson);
 
   // 1b) App Hosting's deploy config — seeded, never clobbered, and only for a CLIENT APP: App Hosting builds and
@@ -507,7 +513,7 @@ function resolvable(tree: Tree, pkg: string): boolean {
  */
 function ensureFunctionsProject(
   tree: Tree,
-  lint: boolean,
+  lint: { name: string; target?: TargetConfiguration } | undefined,
   functions: HouseProjectHome,
   render: (template: string) => string,
 ): void {
@@ -574,12 +580,13 @@ function ensureFunctionsProject(
             esbuildOptions: { outExtension: { '.js': '.js' } },
           },
         },
-        // Lints via the workspace flat config — no per-project ESLint island. Only where the workspace lints.
-        ...(lint ? { lint: { executor: '@nx/eslint:lint' } } : {}),
+        // Lints via the workspace flat config — no per-project ESLint island. Only where the workspace lints, and only
+        // where the target is not inferred (the plugin lints a project with no config of its own by the root config).
+        ...(lint?.target ? { [lint.name]: lint.target } : {}),
         // THE DEPLOY CONTRACT (header). Nx builds (and lints) what ships — firebase.json carries no predeploy.
         deploy: {
           executor: 'nx:run-commands',
-          dependsOn: ['build', ...(lint ? ['lint'] : [])],
+          dependsOn: ['build', ...(lint ? [lint.name] : [])],
           inputs: ['default', '^default', ...FIREBASE_ROOT_INPUTS, '{workspaceRoot}/tools/firebase-deploy.mjs'],
           cache: false,
           parallelism: false,

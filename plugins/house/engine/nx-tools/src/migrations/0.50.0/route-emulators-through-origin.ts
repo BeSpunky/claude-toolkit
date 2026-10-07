@@ -32,7 +32,8 @@
 // WHAT IT REPORTS, never edits: the project's own code importing what the owned files no longer export
 // (`emulatorFor`, `portOffset`, `offsetUrl`, `resolvePortOffset` → `emulatorEndpoint(service)`), and a dev server
 // served over https, where the SDK cannot reach an emulator through the page's origin.
-import { type Tree, logger, readJson, writeJson } from '@nx/devkit';
+import { type Tree, logger, readJson } from '@nx/devkit';
+import { applyJsonChanges } from '../../generators/_utils/json-edits';
 import { findAppRoots } from '../../generators/_utils/app-roots';
 import { writeFirebaseClientGlue } from '../../generators/firebase-emulators/service-configs';
 
@@ -428,5 +429,6 @@ function dropPortOffsetSwitch(tree: Tree): void {
       );
     }
   }
-  if (changed) writeJson(tree, DEV_JSON, decl);
+  // In place: only the url members it dropped — dev.json is the project's to edit, in its own form.
+  if (changed) tree.write(DEV_JSON, applyJsonChanges(tree.read(DEV_JSON, 'utf8')!, readJson(tree, DEV_JSON), decl));
 }

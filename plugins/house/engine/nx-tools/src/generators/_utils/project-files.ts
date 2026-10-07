@@ -7,18 +7,19 @@
 // workspace into two conventions. The answer now lives here, once:
 //
 //   - devkit's `readProjectConfiguration` reads both kinds; to CHANGE an existing project, prefer
-//     `updateProjectConfigInPlace` (below) to devkit's `updateProjectConfiguration`, which re-serializes the whole
-//     file and rebuilds the object (an upgrade that reorders keys is a diff nobody asked for);
+//     `updateProjectConfigInPlace` / `updateProjectConfigurationInPlace` (below) to devkit's
+//     `updateProjectConfiguration`, which re-serializes the whole file and rebuilds the object (an upgrade that
+//     reorders keys, or spreads a compact hand-written project.json over a hundred lines, is a diff nobody asked for);
 //   - when a generator genuinely needs the FILE (to edit it with comments preserved, to report it, to know
 //     whether a write lands in an `nx` block), `projectDefinitionFile` names it;
 //   - `createProject` creates a project the way this workspace defines them;
 //   - `houseProjectHome` / `ensureHouseProject` find and keep the projects a house generator OWNS (below).
-import { type Tree, type ProjectConfiguration, addProjectConfiguration, getProjects, updateProjectConfiguration, writeJson, logger } from '@nx/devkit';
+import { type Tree, type ProjectConfiguration, addProjectConfiguration, getProjects, readProjectConfiguration, updateProjectConfiguration, writeJson, logger } from '@nx/devkit';
 import { detectLinking, ensureWorkspaceMember, referenceFromSolution } from './linking';
 import { workspacePath } from './linking/shared';
 import { resolveWorkspaceScope } from './workspace-layout';
 import { describeOverride, mergeHouseTargets, recordHouseTargets, recordedHouseTargets } from './house-targets';
-import { updateJsonInPlace } from './json-edits';
+import { applyJsonChanges, updateJsonInPlace } from './json-edits';
 import { HOUSE_TARGETS_AS_OF_0_49_2 } from './house-targets-0.49.2';
 
 export type ProjectFileKind = 'project.json' | 'package.json';
@@ -48,6 +49,22 @@ export function projectDefinitionFile(tree: Tree, root: string): ProjectFile {
 export function updateProjectConfigInPlace(tree: Tree, root: string, update: (config: ProjectConfiguration) => void): boolean {
   const file = projectDefinitionFile(tree, root);
   return updateJsonInPlace<ProjectConfiguration>(tree, file.path, update, file.kind === 'package.json' ? ['nx'] : []);
+}
+
+/**
+ * The in-place counterpart of devkit's `updateProjectConfiguration(tree, name, config)`, for the read → change →
+ * write shape: `config` (a changed copy of `readProjectConfiguration(tree, name)`) is compared with what devkit reads
+ * now, and only the members that differ are written to the defining file — so a hand-written compact project.json
+ * keeps its form, and a package.json project's `nx` block gains nothing Nx infers. Returns whether it wrote.
+ */
+export function updateProjectConfigurationInPlace(tree: Tree, name: string, config: ProjectConfiguration): boolean {
+  const before = readProjectConfiguration(tree, name);
+  const file = projectDefinitionFile(tree, before.root);
+  const text = tree.read(file.path, 'utf8') ?? '';
+  const next = applyJsonChanges(text, before, config, file.kind === 'package.json' ? ['nx'] : []);
+  if (next === text) return false;
+  tree.write(file.path, next);
+  return true;
 }
 
 /**
