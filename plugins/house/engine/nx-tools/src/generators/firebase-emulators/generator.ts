@@ -65,9 +65,9 @@
 //                        both read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
 //                        the seed applier (tools/seed/apply.mjs), and the declarative seed worlds
 //                        (world.mjs and the seeds README are user-owned once written).
-//   - root eslint.config.mjs — best-effort insertion of the fail-closed `platform:` firewall (src/platform):
-//                        web/server depend only on their own + shared projects, shared only on shared, each
-//                        banning the packages bound to another platform; untagged projects are classified then.
+//   - root eslint.config.mjs — best-effort insertion of the fail-closed platform firewall (src/platform): its own
+//                        rule over `platformConstraints`; untagged code projects classified then (or reported),
+//                        and the platform sync generator registered on lint for the projects made later.
 //
 // No longer here: the nx.json TUI switch. It is a property of the DEV LOOP (one multi-process stack — the
 // continuous `dev-stack` composer, which `serve` follows), not of Firebase, and belongs to the generator that owns
@@ -100,11 +100,13 @@ import { rootTsconfig } from '../_utils/linking';
 import { workspaceIdentity } from '../_utils/workspace-identity';
 import { nxInvocation } from '../_utils/nx-host';
 import {
+  FIREWALL_CONFIG,
   classifyUntaggedProjects,
-  firewallBlock,
+  firewallSnippet,
   insertPlatformFirewall,
   platformCommand,
   platformExternals,
+  registerPlatformSync,
 } from '../../platform';
 import { declareDependencies, declaredSpec, isPinnedSpec } from '../_utils/dependencies';
 import { projectNodeMajor } from '../_utils/node-version';
@@ -370,26 +372,26 @@ export default async function firebaseEmulatorsGenerator(
   // not declared yet). The web layer's own seeding ran before this step on a first scaffold.
   seedServedApps(tree, 'firebase-emulators');
 
-  // 4) Best-effort: the `platform:` firewall in the root flat ESLint config (src/platform/firewall — fail closed:
-  //    each platform depends only on its own and shared projects). Firebase is what brings a second platform, so it
-  //    is what brings the firewall — and the firewall arrives over projects nobody classified. Classify them in the
-  //    same act (evidence only, every inference reported), or the first lint would fail on every untagged library.
-  //    An EXISTING firewall is project state: the old shape is migration 0.50.0's to upgrade, never re-written here.
+  // 4) Best-effort: the platform firewall in the root flat ESLint config (src/platform/firewall — fail closed, its own
+  //    rule instance). Firebase is what brings a second platform, so it is what brings the firewall — and the
+  //    firewall arrives over projects nobody classified. Classify them in the same act (evidence only, every
+  //    inference reported, what nothing settles left for a human), and register the sync generator that classifies
+  //    the projects created later, before lint judges them (generators/platform-sync).
+  //    An EXISTING firewall is project state: the 0.49 shape is migration 0.50.0's to upgrade, never re-written here.
   const externals = platformExternals(tree);
   const nx = nxInvocation(tree).command;
-  const eslintConfigPath = 'eslint.config.mjs';
-  if (tree.exists(eslintConfigPath)) {
-    const current = tree.read(eslintConfigPath, 'utf8') ?? '';
-    const patched = insertPlatformFirewall(current, eslintConfigPath, externals, nx);
+  if (tree.exists(FIREWALL_CONFIG)) {
+    const current = tree.read(FIREWALL_CONFIG, 'utf8') ?? '';
+    const patched = insertPlatformFirewall(current, FIREWALL_CONFIG, externals, nx);
     if (patched && patched !== current) {
-      tree.write(eslintConfigPath, patched);
+      tree.write(FIREWALL_CONFIG, patched);
+      registerPlatformSync(tree);
       classifyUntaggedProjects(tree, { who: 'firebase-emulators', nx, externals });
     } else if (!patched) {
       logger.warn(
-        `[firebase-emulators] Could not auto-insert the platform firewall into ${eslintConfigPath}. ` +
-          `Add these entries to the @nx/enforce-module-boundaries depConstraints array, then classify every project ` +
-          `(${platformCommand(nx, '<project>')}):\n` +
-          firewallBlock(externals, nx).map((line) => `  ${line}`).join('\n'),
+        `[firebase-emulators] Could not insert the platform firewall into ${FIREWALL_CONFIG} (it needs an \`export default [ … ]\` ` +
+          `array, and TypeScript to read it). Add it by hand, then classify every project (${platformCommand(nx, '<project>')}):\n` +
+          firewallSnippet(externals, nx),
       );
     }
   }
@@ -670,7 +672,11 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
 
   ensureHouseProject(tree, 'firebase-emulators', suite, {
     projectType: 'application',
-    tags: ['platform:server'],
+    // `tooling` like the house's other tooling projects: the suite runs the emulators and holds rules and seeds —
+    // no code a product runs, so the platform classifier and the house's lint scope leave it alone.
+    // (`platform:server` predates that and stays: its files run in Node, and dropping it would fail lint on any
+    // suite file that imports a workspace project.)
+    tags: ['platform:server', 'tooling'],
     targets: {
       // The full suite. Depends on the functions build: firebase.json points the functions
       // emulator at the functions bundle in dist/, so the backend must exist before the suite boots.

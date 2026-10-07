@@ -1,6 +1,6 @@
 // THE PLATFORM — where a project's code runs, and so which code it may reach.
 //
-// Every project in a house workspace carries exactly ONE `platform:` tag:
+// Every CODE project in a house workspace carries exactly ONE `platform:` tag (tooling carries none — ./classify):
 //
 //   platform:web     browser / SSR code (an Angular app or library, the design system, the navigation kernel)
 //   platform:server  server-only code (Cloud Functions, the emulator suite, anything on firebase-admin)
@@ -11,8 +11,9 @@
 // (firebase-admin reaching a browser bundle). `join` is that rule, and the classifier is just `join` over the
 // evidence. The ESLint firewall that enforces it is ./firewall; the classifier that infers it is ./classify.
 //
-// Why a tag and not a convention: `@nx/enforce-module-boundaries` keys every constraint on a tag. A project
-// without one matches no platform constraint, and was — before 0.50.0 — silently outside the firewall.
+// Why a tag and not a convention: `@nx/enforce-module-boundaries` keys every constraint on a tag. Before 0.50.0 a
+// project without one matched no platform constraint and was silently outside the firewall; now the firewall is its
+// own rule instance (./firewall), where a project matching no constraint may import no workspace project at all.
 import { type Tree, joinPathFragments, readProjectConfiguration } from '@nx/devkit';
 import { updateJsonInPlace } from '../generators/_utils/json-edits';
 
