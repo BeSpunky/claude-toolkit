@@ -78,7 +78,7 @@ mkws() {   # mkws <name> — a workspace with the rendered script, stubs and a f
   sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}||g' -e 's|{{functionsRoot}}|apps/fn|g' -e 's|{{functionsDist}}|dist/apps/fn|g' "$TPL" > "$d/tools/emulators.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/reap-emulators.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/emulator-data.sh"
-  node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$d"
+  node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$d"
   printf '{ "emulators": { "auth": { "port": 9099 }, "firestore": { "port": 8080 } } }\n' > "$d/firebase.json"
   printf '%s' "$d"
 }
@@ -97,6 +97,8 @@ descendants() { local c; for c in $(pgrep -P "$1"); do descendants "$c"; echo "$
 gone() { for _ in $(seq 1 "${2:-100}"); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done; return 1; }
 exported() { [ -f "$1/.emulator-data/firebase-export-metadata.json" ]; }
 signals() { grep -vx JVM-KILLED "$1/.fake-firebase-signals" | tr '\n' ' ' | sed 's/ $//'; }
+# The keeper releases the state dir just AFTER it records "exited" (a few node calls later): wait for that, bounded.
+released() { for _ in $(seq 1 50); do [ -d "$1/.bespunky/run/firebase@0" ] || return 0; sleep 0.1; done; return 1; }
 keeper_gone() {   # the detached keeper finished on its own — it records its result, and (run directly, with no script
   # left to read it) releases the state dir
   for _ in $(seq 1 100); do
@@ -120,7 +122,7 @@ for pid in "${TREE[@]}"; do kill -KILL "$pid" 2>/dev/null; done
 ok "nx: no emulator child was in the script's tree to be signalled" "$(grep -q JVM-KILLED "$W/.fake-firebase-signals" && echo 0 || echo 1)"
 ok "nx: the suite finished its save after its supervisor was SIGKILLed" "$(keeper_gone "$W" && exported "$W" && echo 1 || echo 0)"
 ok "nx: firebase-tools got exactly ONE SIGTERM (got: $(signals "$W"))" "$([ "$(signals "$W")" = TERM ] && echo 1 || echo 0)"
-ok "nx: run directly, its state dir is released once the save is done" "$([ ! -d "$W/.bespunky/run/firebase@0" ] && echo 1 || echo 0)"
+ok "nx: run directly, its state dir is released once the save is done" "$(released "$W" && echo 1 || echo 0)"
 ok "nx: the stop was announced while it ran" "$(grep -q 'stopping — exporting emulator data' "$W/out.log" && echo 1 || echo 0)"
 ok "nx: the invoker's terminal got 'saving emulator data in the background' at once" "$(grep -q 'saving emulator data in the background' "$TMP/invoker.err" && echo 1 || echo 0)"
 kill "$INVOKER" 2>/dev/null; INVOKER=''

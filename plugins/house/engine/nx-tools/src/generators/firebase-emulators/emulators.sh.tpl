@@ -127,28 +127,28 @@ if [ -z "${DEV_STACK_DIR:-}" ]; then
   trap 'with_run_lock release_direct_dir $$ || true' EXIT
 fi
 
-# The emulator suite MUST run under the SAME projectId the app's client uses. The moment any
-# service is switched to real (e.g. real Auth), that real `projectId` is used for ALL services
-# (singleProjectMode) — so a still-emulated Firestore/Storage launched under a DIFFERENT project
-# id hits a mismatch and silently falls back to offline. The projectId has ONE source of truth —
-# the app's environment.ts — so we DERIVE it here rather than hardcode a copy that drifts.
-# `demo-` is Firebase's "offline only, no cloud project needed" convention and the safe fallback
-# when no env file is found. One suite = one project (singleProjectMode), so it follows the
-# PRIMARY app this workspace was wired with; set FIREBASE_EMULATOR_PROJECT for anything unusual.
-# (Seeds are always built under demo-{{workspaceName}} — see tools/seed/build-seeds.sh — and import
-# fine under a derived real id because singleProjectMode collapses project ids.)
-#   Precedence:  FIREBASE_EMULATOR_PROJECT (override)  >  environment.ts  >  demo-{{workspaceName}}
+# ── THE PROJECT ID: OFFLINE UNLESS THE APP COMMITS A REAL SERVICE ─────────────────────────────────────
+# The suite runs under the OFFLINE twin of the app's project id (`my-app` → `demo-my-app`): Google refuses to create
+# a `demo-` project, so every Google API call the emulated code makes names a project that cannot exist —
+# firebase-tools itself turns away Secret Manager, the Admin SDK's config lookup, FCM, a non-emulated bucket. The
+# REAL id only when environment.ts commits a service to the real backend (EMULATE map), because a real service and
+# the emulated ones must share one id (singleProjectMode) — and the browser follows the same rule from the same file
+# (firebase.config.ts → emulatorProjectId), so the two always agree. The rule, and what it does not cover:
+# tools/emulator-project.mjs. One suite = one project: it follows the PRIMARY app this workspace was wired with.
 ENV_FILE="$ROOT/{{appEnvPath}}"
-derive_project() {
-  [[ -f "$ENV_FILE" ]] || return 1
-  local id
-  # Anchor to the field (line, after indent, begins with `projectId:`) so a comment that merely
-  # mentions `projectId:` — comments start with `//` — can't shadow the real value.
-  id="$(grep -oE "^[[:space:]]*projectId:[[:space:]]*[\"'][^\"']+" "$ENV_FILE" | head -1 | sed -E "s/.*[\"']//")"
-  [[ -n "$id" ]] && printf '%s' "$id"
-}
-PROJECT="${FIREBASE_EMULATOR_PROJECT:-$(derive_project || echo demo-{{workspaceName}})}"
-echo "[emulators] project: $PROJECT" >&2
+EMU_VARS="$(node "$ROOT/tools/emulator-project.mjs" resolve "$ENV_FILE" demo-{{workspaceName}})" \
+  || { echo "[emulators] could not resolve the emulator project id (tools/emulator-project.mjs) — refusing to guess." >&2; exit 2; }
+eval "$EMU_VARS"
+PROJECT="$EMU_PROJECT"
+if [ "$EMU_MODE" = real ]; then
+  echo "[emulators] project: $PROJECT — REAL. environment.ts commits ${EMU_REAL_SERVICES//,/, } to the real backend, so the" >&2
+  echo "[emulators]   whole suite runs under the real project: anything not emulated, and any code naming the project," >&2
+  echo "[emulators]   reaches production with your firebase login. Emulate every service again to run offline (demo-)." >&2
+else
+  echo "[emulators] project: $PROJECT — OFFLINE (demo-): calls to any Google service that is not emulated fail, never reach a real project." >&2
+  [ "$PROJECT" = "$EMU_APP_PROJECT" ] || echo "[emulators]   ($EMU_APP_PROJECT, environment.ts's id, is used only when it commits a service to the real backend.)" >&2
+fi
+[ -z "$EMU_UNREAD_SERVICES" ] || echo "[emulators]   could not read environment.ts's default for ${EMU_UNREAD_SERVICES//,/, } (not a literal or EMULATE entry) — taken as emulated." >&2
 
 # Pass through an optional `--only <list>` (the focused targets use it); an EXPLICIT one
 # is also what flips persistence off (see header).
@@ -343,34 +343,32 @@ elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ]; then
   fi
 fi
 
-# ── FUNCTIONS SECRETS: INERT BY DEFAULT — NOTHING RUN LOCALLY CAN REACH PRODUCTION ─────────────────
-# The Functions emulator reads `.secret.local` from the loaded bundle ({{functionsDist}}) — and for every
-# declared secret that file does not give a NON-EMPTY value, it fetches the REAL one from Google Secret
-# Manager whenever the suite runs under a real projectId (firebase-tools' functionsEmulator
-# `resolveSecretEnvs`). So "no secrets file" is not "no secrets": it is production's secrets. Two layers
-# close that, and neither depends on the app's code remembering to check FUNCTIONS_EMULATOR:
+# ── STORAGE DATA FOLLOWS THE PROJECT ID ─────────────────────────────────────────────────────────────
+# Emulator Storage keys its data by BUCKET NAME, and the bucket the app and the functions use follows the project id
+# (offline: `<demo id>.appspot.com`; real: environment.ts's storageBucket). Data a suite saved under the other mode's
+# bucket — every export from before the offline default — is moved across, so it is never silently out of sight.
+if [ -f "$DATA_DIR/firebase-export-metadata.json" ]; then
+  MOVED="$(node "$ROOT/tools/emulator-project.mjs" align-storage "$DATA_DIR" "$EMU_OTHER_BUCKET" "$EMU_BUCKET")" || MOVED=""
+  [ -z "$MOVED" ] || echo "[emulators] $MOVED" >&2
+fi
+
+# ── FUNCTIONS SECRETS: INERT BY DEFAULT ─────────────────────────────────────────────────────────────
+# The Functions emulator reads `.secret.local` from the loaded bundle ({{functionsDist}}), and asks Secret Manager for
+# any declared secret it does not find there. The offline project id above already makes that a call to a project
+# that cannot exist; tools/emulator-secrets.cjs is the defence in depth (its header has the whole of it):
+#   1. INERT PLACEHOLDERS — written by the functions BUILD (so every rebuild and a raw `firebase emulators:start`
+#      carry them), and rewritten here at launch with the production file's key NAMES added (never a value).
+#   2. A SINK — Secret Manager pointed at an address that cannot resolve, for the emulator process.
 #
-#   1. PLACEHOLDERS. This script WRITES the bundle's `.secret.local` itself, at every launch: one line per
-#      declared secret, an inert `EMULATOR_INERT_<KEY>` value by default. Declared = the keys named in
-#      {{functionsRoot}}/.secret.local.example (the committed declaration) ∪ the keys of the production
-#      file ∪ the sandbox file's keys ∪ every literal `defineSecret('KEY')` in the built bundle (so a
-#      secret someone forgot to document is still covered). Only key NAMES are ever read from the
-#      production file — never a value.
-#   2. A SINK. Secret Manager is pointed at an address that cannot resolve (`.invalid`, RFC 2606) for the
-#      emulator process, so anything the placeholders miss — a secret named dynamically, or a functions
-#      rebuild mid-session (`deleteOutputPath` wipes the bundle's file until the next launch) — fails
-#      LOUDLY in the emulator log instead of quietly acting as production. CLOUD_SECRET_MANAGER_URL is
-#      firebase-tools' own origin override (lib/api.js `secretManagerOrigin`).
+# REAL VALUES ARE AN OPT-IN, AND ONLY EVER SANDBOX ONES. {{functionsRoot}}/.secret.sandbox.local (gitignored) — creating
+# it is the opt-in, every launch says which keys are live, and a value equal to ANY production value (this tree's
+# .secret.local or the main worktree's) is refused. `EMULATOR_SECRETS=inert` disarms it for one run;
+# `EMULATOR_SECRETS=sandbox` insists on it. A rebuild mid-session puts the build's inert file back: restart to re-arm.
+# The production `.secret.local` is push-secrets' source and is NEVER fed to an emulator.
 #
-# REAL VALUES ARE AN OPT-IN, AND ONLY EVER SANDBOX ONES. A developer who needs to exercise a real
-# integration (a test bot, a sandbox payment account) puts THOSE credentials in
-# {{functionsRoot}}/.secret.sandbox.local (gitignored) — creating that file is the opt-in, and every launch
-# says which keys are live. The production `.secret.local` is push-secrets' source and is NEVER fed to an
-# emulator; a sandbox value identical to its production counterpart is refused. `EMULATOR_SECRETS=inert`
-# disarms a sandbox file for one run; `EMULATOR_SECRETS=sandbox` insists on it (and fails without one).
-#
-# NEVER BORROWED ACROSS TREES. A worktree gets its own sandbox file or none — an unattended agent's
-# worktree must never wake up armed because the main tree is.
+# NEVER BORROWED ACROSS TREES. A worktree gets its own sandbox file or none — an unattended agent's worktree must
+# never wake up armed because the main tree is. (The main tree's PRODUCTION values are read for one purpose only:
+# to refuse them.)
 FUNCTIONS_SRC="$ROOT/{{functionsRoot}}"
 FUNCTIONS_DIST="$ROOT/{{functionsDist}}"
 SANDBOX_FILE="$FUNCTIONS_SRC/.secret.sandbox.local"
@@ -398,78 +396,13 @@ if [ "${#ONLY_ARGS[@]}" -gt 0 ]; then
 fi
 
 if [ -d "$FUNCTIONS_DIST" ]; then
-  node -e '
-    const fs = require("fs"), path = require("path");
-    const [mode, dist, src, show] = process.argv.slice(1);
-    const say = (line) => { if (show === "1") console.error(`[emulators] ${line}`); };
-    const LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
-    const entries = (file) => {
-      const out = new Map();
-      let text = "";
-      try { text = fs.readFileSync(file, "utf8"); } catch { return out; }
-      for (const line of text.split(/\r?\n/)) {
-        if (/^\s*#/.test(line)) continue;
-        const m = LINE.exec(line);
-        if (m) out.set(m[1], m[2].trim());
-      }
-      return out;
-    };
-    const unquote = (v) => v.replace(/^(["\x27`])(.*)\1$/s, "$2");
-    const filled = (v) => v !== undefined && unquote(v) !== "" && !unquote(v).startsWith("PASTE_");
-
-    const example = entries(path.join(src, ".secret.local.example"));
-    const prod = entries(path.join(src, ".secret.local"));            // key NAMES; values only for the clash check
-    const sandboxFile = entries(path.join(src, ".secret.sandbox.local"));   // its keys are declarations either way
-    const sandbox = mode === "sandbox" ? sandboxFile : new Map();
-
-    // Every literal defineSecret("KEY") the bundle makes — esbuild may write it `(0, x.defineSecret)("KEY")`.
-    const bundled = new Set();
-    const walk = (dir) => {
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (e.name === "node_modules") continue;
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) walk(p);
-        else if (/\.(c|m)?js$/.test(e.name)) {
-          for (const m of fs.readFileSync(p, "utf8").matchAll(/defineSecret\)?\s*\(\s*(["\x27`])([A-Za-z_][A-Za-z0-9_]*)\1/g)) bundled.add(m[2]);
-        }
-      }
-    };
-    try { walk(dist); } catch {}
-
-    const declared = [...new Set([...example.keys(), ...prod.keys(), ...sandboxFile.keys(), ...bundled])].sort();
-    const live = [], inert = [], refused = [];
-    const lines = [`# Written by tools/emulators.sh at launch — mode: ${mode}. Regenerated every run; never edit.`];
-    for (const key of declared) {
-      const value = sandbox.get(key);
-      const isProd = filled(value) && filled(prod.get(key)) && unquote(value) === unquote(prod.get(key));
-      if (filled(value) && !isProd) { live.push(key); lines.push(`${key}=${value}`); continue; }
-      (isProd ? refused : inert).push(key);
-      lines.push(`${key}=EMULATOR_INERT_${key}`);
-    }
-    fs.writeFileSync(path.join(dist, ".secret.local"), lines.join("\n") + "\n", { mode: 0o600 });
-
-    const list = (keys) => keys.join(", ");
-    if (mode === "inert") {
-      say(declared.length
-        ? `secrets: INERT — ${declared.length} declared (${list(declared)}) get placeholder values; no real credential is loaded.`
-        : "secrets: INERT — no declared secrets (none in .secret.local.example or the bundle).");
-      say("  To exercise a real integration, put SANDBOX credentials in {{functionsRoot}}/.secret.sandbox.local and restart.");
-    } else {
-      say(`secrets: SANDBOX — LIVE from .secret.sandbox.local: ${live.length ? list(live) : "(none filled)"}. Calls using them WILL reach real services.`);
-      if (inert.length) say(`  inert (not in the sandbox file): ${list(inert)}`);
-      if (refused.length) say(`  REFUSED — identical to the production value in .secret.local: ${list(refused)}. Load a sandbox credential instead.`);
-      say("  Disarm: EMULATOR_SECRETS=inert for one run, or delete the sandbox file.");
-    }
-    const undocumented = [...bundled].filter((k) => !example.has(k)).sort();
-    if (undocumented.length) say(`  The bundle declares ${list(undocumented)}, missing from {{functionsRoot}}/.secret.local.example — document them there.`);
-    say("  Secret Manager is unreachable from the emulator: a secret it cannot find locally fails loudly, never fetched from production.");
-
-    // Firebase reads params from .env, then (emulator only) .env.local — firebase.json functions.configDir
-    // points both at the source dir, so .env.local is where local runs aim params at TEST targets.
-    const env = entries(path.join(src, ".env")), envLocal = entries(path.join(src, ".env.local"));
-    if (envLocal.size) say(`params: .env.local overrides for the emulator: ${list([...envLocal.keys()].sort())}`);
-    else if (env.size) say(`params: .env as-is (production values) — aim any at a test target in {{functionsRoot}}/.env.local (emulator-only).`);
-  ' "$SECRETS_MODE" "$FUNCTIONS_DIST" "$FUNCTIONS_SRC" "$FUNCTIONS_IN_RUN"
+  MAIN_FUNCTIONS_SRC=""
+  [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && MAIN_FUNCTIONS_SRC="$MAIN_WORKTREE/{{functionsRoot}}"
+  SHOW=()
+  [ "$FUNCTIONS_IN_RUN" -eq 1 ] && SHOW=(--show)
+  # Exit 2 (from the script) when the file would not reach the emulator intact — never a silent launch without it.
+  node "$ROOT/tools/emulator-secrets.cjs" place --mode="$SECRETS_MODE" --source="$FUNCTIONS_SRC" --dist="$FUNCTIONS_DIST" \
+    --main-source="$MAIN_FUNCTIONS_SRC" --project-mode="$EMU_MODE" "${SHOW[@]}" || exit 2
 fi
 
 # Only import when the working dir is actually primed — `--import` on a missing dir is

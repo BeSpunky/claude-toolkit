@@ -3,10 +3,12 @@
 // dropped `options.assets` entirely, and an undeclared key without a record is kept as the project's.
 //
 // The shapes it meets: the house entry alone (the key goes), beside a project asset (only the entry goes), a
-// project-written `.env` asset of another shape (kept, reported), a functions project outside apps/, none at all.
+// project-written `.env` asset of another shape (kept, reported), a functions project outside apps/, none at all —
+// and the inline esbuild options 0.50 replaced with the house esbuildConfig: the house's own go, the project's stay
+// (reported).
 import { createRequire } from 'node:module';
 
-const { addProjectConfiguration, readProjectConfiguration } = createRequire(import.meta.url)('@nx/devkit');
+const { addProjectConfiguration, readProjectConfiguration, updateProjectConfiguration } = createRequire(import.meta.url)('@nx/devkit');
 
 const build = (root, assets) => ({
   executor: '@nx/esbuild:esbuild',
@@ -49,6 +51,29 @@ export default {
       name: 'a functions project outside apps/ (packages/backend): found by name',
       setup: (tree) => functionsApp(tree, 'packages/backend'),
       expect: (tree, t) => t.ok(!('assets' in optionsOf(tree)), JSON.stringify(optionsOf(tree).assets)),
+    },
+    {
+      name: "the house's inline esbuildOptions: removed (the esbuildConfig replaces them; Nx refuses both)",
+      setup: (tree) => {
+        functionsApp(tree);
+        const c = readProjectConfiguration(tree, 'functions');
+        c.targets.build.options.esbuildOptions = { outExtension: { '.js': '.js' } };
+        updateProjectConfiguration(tree, 'functions', c);
+      },
+      expect: (tree, t) => t.ok(!('esbuildOptions' in optionsOf(tree)), JSON.stringify(optionsOf(tree).esbuildOptions)),
+    },
+    {
+      name: "esbuildOptions the project changed: kept, and reported",
+      setup: (tree) => {
+        functionsApp(tree, 'apps/functions', undefined);
+        const c = readProjectConfiguration(tree, 'functions');
+        c.targets.build.options.esbuildOptions = { outExtension: { '.js': '.js' }, define: { X: '1' } };
+        updateProjectConfiguration(tree, 'functions', c);
+      },
+      expect: (tree, t, logs) => {
+        t.ok(optionsOf(tree).esbuildOptions?.define?.X === '1', 'kept');
+        if (logs) t.ok(logs.some((line) => /esbuild options of its own/.test(line)), `not reported: ${logs.join(' | ')}`);
+      },
     },
     {
       name: 'no functions project: nothing to do',

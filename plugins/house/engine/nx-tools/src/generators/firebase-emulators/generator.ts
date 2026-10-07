@@ -253,10 +253,10 @@ function warnUnresolvedProjectTemplates(firebaseJson: Record<string, unknown>): 
  * exported because migration 0.50.0/split-seed-applier must leave a workspace whose world.mjs already imports
  * from apply.mjs runnable on a bare `nx migrate`, before this generator has run.
  */
-export function writeSeedTooling(tree: Tree, workspaceName: string): void {
+export function writeSeedTooling(tree: Tree): void {
   const template = (name: string) => readFileSync(join(__dirname, name), 'utf8');
   tree.write('tools/seed/build.mjs', template('seed-build.mjs.tpl'));
-  tree.write('tools/seed/apply.mjs', template('seed-apply.mjs.tpl').split('{{workspaceName}}').join(workspaceName));
+  tree.write('tools/seed/apply.mjs', template('seed-apply.mjs.tpl'));
 }
 
 export default async function firebaseEmulatorsGenerator(
@@ -350,6 +350,12 @@ export default async function firebaseEmulatorsGenerator(
     functionsPaths(substitute(template('emulators.sh.tpl'))).split('{{appEnvPath}}').join(clientEnv?.dev ?? ''),
   );
   tree.write('tools/emulator-data.sh', template('emulator-data.sh.tpl'));
+  // The suite's project id (offline `demo-` twin unless environment.ts commits a real service) and what the Functions
+  // emulator is given as secrets — Node modules, so the build (esbuild plugin) and emulators.sh share one rule each.
+  tree.write('tools/emulator-project.mjs', template('emulator-project.mjs.tpl'));
+  tree.write('tools/emulator-secrets.cjs', template('emulator-secrets.cjs.tpl').split('{{configDirSince}}').join(CONFIG_DIR_SINCE));
+  // The functions build's esbuild options — generator-owned: the inert-secrets plugin is a guarantee, not a default.
+  tree.write(ESBUILD_CONFIG, functionsPaths(template('functions-esbuild.config.cjs.tpl')));
   tree.write(
     'tools/push-secrets.sh',
     functionsPaths(template('push-secrets.sh.tpl')).split('{{appEnvProdPath}}').join(clientEnv?.prod ?? ''),
@@ -357,7 +363,7 @@ export default async function firebaseEmulatorsGenerator(
   tree.write('tools/seed/build-seeds.sh', substitute(template('seed-build-seeds.sh.tpl')));
   tree.write('tools/firebase-deploy.mjs', functionsPaths(template('firebase-deploy.mjs.tpl')));
   tree.write('tools/firebase-deploy-rules.mjs', template('firebase-deploy-rules.mjs.tpl').split('{{seedMarker}}').join(RULES_SEED_MARKER));
-  writeSeedTooling(tree, workspaceName);
+  writeSeedTooling(tree);
   if (!tree.exists('tools/seed/world.mjs')) tree.write('tools/seed/world.mjs', substitute(template('seed-world.mjs.tpl')));
   if (!tree.exists('tools/emulator-seeds/README.md')) {
     tree.write('tools/emulator-seeds/README.md', template('emulator-seeds-README.md.tpl'));
@@ -520,6 +526,17 @@ function ensureFunctionsProject(
 ): void {
   const { root } = functions;
   const offset = offsetFromRoot(root);
+  const buildOptions = functions.exists ? readProjectConfiguration(tree, functions.name).targets?.build?.options : undefined;
+  const ownEsbuildOptions =
+    buildOptions !== undefined && 'esbuildOptions' in buildOptions && JSON.stringify(buildOptions.esbuildOptions) !== HOUSE_ESBUILD_OPTIONS_0_49;
+  if (ownEsbuildOptions) {
+    logger.warn(
+      `[firebase-emulators] ${functions.name}:build keeps esbuild options of its own, so it does not run the house's ` +
+        `${ESBUILD_CONFIG} (Nx refuses esbuildOptions beside esbuildConfig) — its builds carry no inert emulator secrets ` +
+        `file; tools/emulators.sh still places one at launch. Fold your options into a config that spreads the house's and ` +
+        `point esbuildConfig at it.`,
+    );
+  }
   const runtime = functionsRuntimeMajor(tree);
   const template = (name: string) =>
     render(readFileSync(join(__dirname, name), 'utf8'))
@@ -578,7 +595,11 @@ function ensureFunctionsProject(
             deleteOutputPath: true,
             // No assets: the params files (.env, .env.<projectId>, .env.local) are read in place from the
             // source dir — firebase.json `functions.configDir` — by the emulator and deploy alike.
-            esbuildOptions: { outExtension: { '.js': '.js' } },
+            // The esbuild config (generator-owned) writes the emulator's INERT `.secret.local` into every build, so a
+            // rebuild mid-session, or a raw `firebase emulators:start`, never leaves a declared secret without one.
+            // …unless the project keeps esbuild options of its own (Nx refuses both): reported by migration 0.50.0
+            // read-functions-params-in-place, and named again below on every run.
+            ...(ownEsbuildOptions ? {} : { esbuildConfig: ESBUILD_CONFIG }),
           },
         },
         // Lints via the workspace flat config — no per-project ESLint island. Only where the workspace lints, and only
@@ -618,6 +639,37 @@ function ensureFunctionsProject(
   // The committed shape doc for local Functions secrets (.secret.local itself is gitignored).
   // User-owned once written — it grows with each `defineSecret` the functions add.
   ifAbsent(`${root}/.secret.local.example`, 'functions-secret.local.example.tpl');
+  requireConfigDirSupport(tree);
+}
+
+/** The inline esbuild options the house's functions build carried until 0.50.0 (the esbuildConfig replaced them). */
+export const HOUSE_ESBUILD_OPTIONS_0_49 = JSON.stringify({ outExtension: { '.js': '.js' } });
+
+/** The functions build's esbuild config — beside the module it loads, in tools/ (never an import across projects). */
+const ESBUILD_CONFIG = 'tools/functions-esbuild.config.cjs';
+
+/** The first firebase-tools whose EMULATOR reads firebase.json `functions.configDir` (deploy: 14.1x). Checked by
+ *  version against the published packages, 2026-10 — tools/emulator-secrets.cjs refuses to launch below it. */
+export const CONFIG_DIR_SINCE = '15.25.1';
+
+/**
+ * firebase.json points the params files at the functions source (`configDir`), and the build no longer copies `.env`
+ * into the bundle — so a firebase-tools that ignores `configDir` runs every function WITHOUT its params. The house
+ * pins one that reads it; a project's own older pin is named here on every upgrade (and refused at emulator launch).
+ */
+function requireConfigDirSupport(tree: Tree): void {
+  const spec = declaredSpec(tree, 'firebase-tools');
+  const version = spec?.match(/\d+\.\d+\.\d+/)?.[0];
+  if (!version) return;
+  const [a, b] = [version, CONFIG_DIR_SINCE].map((v) => v.split('.').map(Number));
+  const below = a[0] !== b[0] ? a[0] < b[0] : a[1] !== b[1] ? a[1] < b[1] : a[2] < b[2];
+  if (!below) return;
+  logger.warn(
+    `[firebase-emulators] package.json declares firebase-tools "${spec}", but the Functions emulator reads its params ` +
+      `(.env, .env.<projectId>, .env.local) through firebase.json functions.configDir only from firebase-tools ` +
+      `${CONFIG_DIR_SINCE} — below it every function runs without them, so tools/emulators.sh refuses to start the ` +
+      `functions emulator. Raise it to "${FIREBASE_TOOLS_VERSION}" (the house's).`,
+  );
 }
 
 /**

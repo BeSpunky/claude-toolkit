@@ -58,7 +58,7 @@ mkworkspace() {   # mkworkspace <name> <emulators json>
   mkdir -p "$d/tools"
   printf '{ "emulators": %s }\n' "$2" > "$d/firebase.json"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/reap-emulators.sh"
-  node "$ROOT/tools/test-scaffold/emulator-ports.mjs" "$d"
+  node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$d"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/emulator-data.sh"
   chmod +x "$d/tools/reap-emulators.sh" "$d/tools/emulator-data.sh"
   render "$d"
