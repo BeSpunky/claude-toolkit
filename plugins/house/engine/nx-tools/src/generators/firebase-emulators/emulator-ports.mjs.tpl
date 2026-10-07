@@ -4,7 +4,8 @@
 //
 // Read by tools/emulators.sh (the offset copy of firebase.json) and tools/reap-emulators.sh (the ports to reclaim).
 // They used to carry their own inline copies — literal 4400/4500, a shift that never reached a nested port like
-// `firestore.websocketPort` — and a copy is where a port goes missing.
+// `firestore.websocketPort` — and a copy is where a port goes missing. (So did "only when declared": an undeclared
+// websocketPort is firebase-tools' 9150, and every shifted suite opened it there.)
 //
 //   node tools/emulator-ports.mjs ports <firebase.json>                 every occupied port, one per line
 //   node tools/emulator-ports.mjs shift <firebase.json> <offset> <out>  write a copy with every port shifted
@@ -21,24 +22,28 @@ import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
-/** { defaults: name → firebase-tools' own port, alwaysOn: [names], nested: name → { key → port name } } */
+/** { defaults: name → firebase-tools' own port, alwaysOn: [names], nested: name → { key → { as: port name, default } } } */
 export const SUITE = {{SUITE}};
 
 const entries = (emulators) =>
   Object.entries(emulators ?? {}).filter(([, v]) => v && typeof v === 'object' && v.enabled !== false);
 
+/** A nested port's value: declared in firebase.json, else firebase-tools' default for it. */
+const nestedPort = (entry, key, spec) => (Number.isInteger(entry[key]) ? entry[key] : spec.default);
+
 /**
  * Every port a running suite occupies, by name: each enabled emulator (its `port`, else firebase-tools' default),
- * each DECLARED nested port (`firestore.websocketPort`), and the infrastructure firebase-tools always runs (hub,
- * logging). An undeclared nested port is not listed: firebase-tools lets it float to a free port.
+ * each nested port its emulator opens (`firestore.websocketPort`, declared or default — firebase-tools does not
+ * let an undeclared one float, it opens 9150), and the infrastructure firebase-tools always runs (hub, logging).
  */
 export function suitePorts(emulators) {
   const out = {};
   for (const [name, entry] of entries(emulators)) {
     const port = Number(entry.port ?? SUITE.defaults[name]);
     if (Number.isInteger(port) && port > 0) out[name] = port;
-    for (const [key, as] of Object.entries(SUITE.nested[name] ?? {})) {
-      if (Number.isInteger(entry[key])) out[as] = entry[key];
+    for (const [key, spec] of Object.entries(SUITE.nested[name] ?? {})) {
+      const nested = nestedPort(entry, key, spec);
+      if (Number.isInteger(nested)) out[spec.as] = nested;
     }
   }
   for (const name of SUITE.alwaysOn) out[name] ??= Number(emulators?.[name]?.port ?? SUITE.defaults[name]);
@@ -47,8 +52,8 @@ export function suitePorts(emulators) {
 
 /**
  * A copy of a firebase.json with the WHOLE suite moved by `offset` — exactly the ports suitePorts() lists: every
- * enabled emulator's port, every declared nested port, and the always-on infrastructure. A port firebase.json is
- * silent about is pinned shifted too, because its default would be the base stack's.
+ * enabled emulator's port, every nested port, and the always-on infrastructure. A port firebase.json is silent
+ * about is pinned shifted too, because its default would be the base stack's.
  */
 export function shiftConfig(cfg, offset) {
   const out = structuredClone(cfg);
@@ -57,7 +62,10 @@ export function shiftConfig(cfg, offset) {
     // Undeclared means firebase-tools' default — the BASE stack's port. Pin it shifted, like everything else.
     const port = Number(entry.port ?? SUITE.defaults[name]);
     if (Number.isInteger(port) && port > 0) entry.port = port + offset;
-    for (const key of Object.keys(SUITE.nested[name] ?? {})) if (Number.isInteger(entry[key])) entry[key] += offset;
+    for (const [key, spec] of Object.entries(SUITE.nested[name] ?? {})) {
+      const nested = nestedPort(entry, key, spec);
+      if (Number.isInteger(nested)) entry[key] = nested + offset;
+    }
   }
   for (const name of SUITE.alwaysOn) {
     e[name] = { host: '0.0.0.0', ...(e[name] ?? {}), port: Number(cfg.emulators?.[name]?.port ?? SUITE.defaults[name]) + offset };

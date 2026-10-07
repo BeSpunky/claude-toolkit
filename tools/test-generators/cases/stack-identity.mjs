@@ -49,6 +49,9 @@ export default {
         t.equal(runtime, generator, 'runtime and generator agree on every occupied port');
         const shifted = mod.shiftConfig(fb, 6000);
         t.equal(Object.values(mod.suitePorts(shifted.emulators)).sort(), generator.map((p) => p + 6000).sort(), 'the shift moves exactly those ports');
+        // D9: an UNDECLARED websocketPort is firebase-tools' 9150, not a floating port — every shifted suite sat on it.
+        t.ok(fb.emulators.firestore.websocketPort === undefined && generator.includes(9150), 'the undeclared Firestore websocket (9150) is an occupied port');
+        t.ok(shifted.emulators.firestore.websocketPort === 9150 + 6000, `a shifted suite pins it shifted (got ${shifted.emulators.firestore.websocketPort})`);
       },
     },
     {
