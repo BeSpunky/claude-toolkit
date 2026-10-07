@@ -81,7 +81,7 @@ on conditions (FINISHING via `dev ps`, the keeper's exit), 6/6 green runs.
 | --- | --- | --- |
 | two concurrent `nx serve web` in one tree | `web@0` + `web@14000`, both answer | same |
 | clean `tools/dev/dev stop` | exit 0, "Successfully ran target serve" | exit 0 (both) |
-| Ctrl+C (SIGINT to the group) | exit 130, stack gone, port free | — |
+| Ctrl+C (SIGINT to the group) | exit 130, stack gone, port free | exit 130, stack gone |
 | crash (a process exits 3) | exit 1; FAILED block + the cause inline (agent env, non-TTY) | exit 1; **summary renderer**: only `✖ nx run web:serve` + `full log:` |
 | e2e depending on `web:dev-stack` | exit 0, reached the server, stack stopped after | exit 0 |
 
