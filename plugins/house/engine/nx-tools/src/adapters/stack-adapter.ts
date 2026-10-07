@@ -57,6 +57,8 @@ export interface StackAdapter {
   readonly env?: EnvPort;
   readonly providers?: ProvidersPort;
   readonly styles?: StylesPort;
+  /** The app's shell markup — what a capability adds to it (the design system: the skip link it styles). */
+  readonly shell?: ShellPort;
   /** The app's dev-server, as an Nx `dev-server` target — what the web layer's `dev-stack` composer drives. */
   readonly devServer?: DevServerPort;
   /** The framework half of the design system: its runtime binding, library shape, component generator. */
@@ -142,6 +144,14 @@ export interface StylesPort {
   addLoadPath(tree: Tree, project: string, loadPath: string): boolean;
   /** Emit a standalone, NOT auto-injected stylesheet bundle from the app's build. False: no build. */
   registerStylesheet(tree: Tree, project: string, sheet: { input: string; bundleName: string }): boolean;
+}
+
+export interface ShellPort {
+  /**
+   * Add the skip link before the house `<main id="main">` landmark the stack seeded at creation. `present`: the shell
+   * has one; `no-landmark`: the shell is the app's own (no house landmark) — left alone, the caller says how.
+   */
+  addSkipLink(tree: Tree, project: string): 'added' | 'present' | 'no-landmark';
 }
 
 /**

@@ -39,5 +39,33 @@ export default {
         t.ok(ctx.logs.some((line) => line.includes('`shop`: lint added')), `said: ${ctx.logs}`);
       },
     },
+    {
+      // R8-9: the first app's add-linting registers @nx/eslint/plugin; a snapshot taken inside the loop read every LATER
+      // app as linted by inference, so only the first got the Angular rules and its own eslint.config.mjs.
+      name: 'two pre-0.50 house apps: BOTH gain the Angular lint config, not only the first',
+      needs: ['@nx/angular', '@nx/eslint'],
+      setup: async (ctx) => {
+        const tree = angularWorkspace({ layout: 'apps-libs', link: 'paths' });
+        for (const name of ['shop', 'admin']) {
+          await ctx.load('generators/app/generator').default(tree, { name, skipFormat: true });
+          const config = readProjectConfiguration(tree, name);
+          delete config.targets.lint;
+          config.targets.serve = { executor: '@bespunky/nx-tools:serve', continuous: true };
+          updateProjectConfiguration(tree, name, config);
+          for (const file of ['eslint.config.mjs', '.eslintrc.json']) if (tree.exists(`${config.root}/${file}`)) tree.delete(`${config.root}/${file}`);
+        }
+        updateJson(tree, 'nx.json', (json) => ({ ...json, plugins: (json.plugins ?? []).filter((p) => (p?.plugin ?? p) !== '@nx/eslint/plugin') }));
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        await ctx.load('migrations/0.50.0/lint-house-apps').default(tree);
+      },
+      expect: (tree, t, ctx) => {
+        for (const name of ['shop', 'admin']) {
+          t.has(`${getProjects(tree).get(name).root}/eslint.config.mjs`, 'flat/angular');
+          t.ok(ctx.logs.some((line) => line.includes(`\`${name}\`: lint added`)), `${name} said: ${ctx.logs}`);
+        }
+      },
+    },
   ],
 };

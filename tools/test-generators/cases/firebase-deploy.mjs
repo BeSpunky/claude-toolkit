@@ -33,6 +33,8 @@ export default {
       setup: () => {
         const tree = workspace();
         updateJson(tree, 'package.json', (json) => ({ ...json, devDependencies: { ...json.devDependencies, '@nx/eslint': '23.1.0' } }));
+        // The root config the inferred target lints functions by (a workspace with @nx/eslint has one).
+        tree.write('eslint.config.mjs', "import nx from '@nx/eslint-plugin';\n\nexport default [...nx.configs['flat/base']];\n");
         return tree;
       },
       run: generate(),

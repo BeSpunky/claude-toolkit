@@ -225,7 +225,7 @@
     "close-the-platform-firewall": {
       "version": "0.50.0",
       "layer": "firebase",
-      "description": "Close the platform firewall: each platform constraint gains onlyDependOnLibsWithTags (web/server \u2192 own + shared, shared \u2192 shared), a platform:shared constraint is added, and every untagged project is classified from evidence (reported, with the command for the ones it cannot classify) \u2014 an untagged library no longer slips firebase-admin into a web app.",
+      "description": "Close the platform firewall: the old ban-only constraints move out of the project's own module-boundaries rule into the firewall's own (`platform/enforce-module-boundaries`, `platformConstraints` \u2014 web/server \u2192 own + shared, shared \u2192 shared; tests, tool configs and SSR server code scoped; the project's own ban edits carried), the platform sync generator is registered on lint, and every untagged code project is classified from evidence \u2014 an application by its stack \u2014 or reported with the command that states it (never defaulted to shared). An untagged library no longer slips firebase-admin into a web app.",
       "implementation": "./src/migrations/0.50.0/close-the-platform-firewall"
     },
     "state-analog-spec-tsconfig": {
@@ -243,7 +243,7 @@
     "add-design-system-a11y": {
       "version": "0.50.0",
       "layer": "design-system",
-      "description": "Give an existing design system its accessibility mechanisms \u2014 seed styles/_utils/_a11y.scss and forward ds.visually-hidden($focusable) and ds.skip-link() from the public SASS API (never over a mixin of the same name) \u2014 and report how an existing app adopts the skip link and <main> landmark new apps are born with.",
+      "description": "Give an existing design system its accessibility mechanisms \u2014 the z-skip-link layer (above modals) in its tokens, styles/_utils/_a11y.scss seeded, and ds.visually-hidden($focusable), ds.skip-link() and ds.skip-target() forwarded from the public SASS API (never over a mixin of the same name, nor from an _a11y.scss of the project's own \u2014 both reported) \u2014 and report how an existing app adopts the skip link and <main> landmark new apps get.",
       "implementation": "./src/migrations/0.50.0/add-design-system-a11y"
     },
     "pin-floating-dependencies": {

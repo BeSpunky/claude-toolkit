@@ -11,7 +11,8 @@
 //
 // Inference is the classifier's (src/platform/classify) — the same one an upgrade uses — so `platform <project>`
 // and the migration can never disagree about a project. It refuses, with the evidence, when the project mixes web
-// and server code: no tag makes that honest; splitting the project does.
+// and server code (no tag makes that honest; splitting the project does), and when nothing binds it to a platform:
+// "imports nothing platform-bound" is the absence of evidence, so `shared` is for a human to state, never inferred.
 import { type Tree, logger, readProjectConfiguration } from '@nx/devkit';
 import { nxInvocation } from '../_utils/nx-host';
 import {
@@ -24,6 +25,7 @@ import {
   platformOf,
   platformTag,
   setProjectPlatform,
+  unresolvedReason,
   violations,
 } from '../../platform';
 
@@ -51,6 +53,13 @@ export default async function platformGenerator(tree: Tree, options: PlatformSch
       return;
     }
     const entry = classifyWorkspace(tree, externals).get(project)!;
+    if (entry.basis === 'tooling') {
+      throw new Error(
+        `[platform] \`${project}\` is tooling, not code a product runs (nothing imports it, and it is no application or library a ` +
+          `stack or a target builds) — a platform tag would describe code that does not exist. If it really is code, state it: ` +
+          platformCommand(nx, project, '<web|server|shared>'),
+      );
+    }
     if (entry.platform === null) {
       throw new Error(
         `[platform] \`${project}\` mixes web and server code — ${entry.evidence.join('; ')}. No tag makes that safe: ` +
@@ -58,8 +67,15 @@ export default async function platformGenerator(tree: Tree, options: PlatformSch
           platformCommand(nx, project, '<web|server|shared>'),
       );
     }
+    if (entry.platform === undefined) {
+      throw new Error(
+        `[platform] Cannot infer \`${project}\`'s platform: ${unresolvedReason(entry)}. State it — \`shared\` if it truly runs ` +
+          `anywhere: ${platformCommand(nx, project, '<web|server|shared>')}`,
+      );
+    }
     platform = entry.platform;
-    why = entry.evidence.length ? `inferred: ${entry.evidence.join('; ')}` : 'inferred: nothing in it is bound to a platform';
+    why = `inferred: ${entry.evidence.join('; ')}`;
+    for (const conflict of entry.conflicts) logger.warn(`[platform] \`${project}\`: ${conflict} — lint reports it under ${platformTag(platform)}.`);
   }
 
   const changed = setProjectPlatform(tree, project, platform);
@@ -69,7 +85,7 @@ export default async function platformGenerator(tree: Tree, options: PlatformSch
   for (const leak of violations(classifyWorkspace(tree, externals))) {
     if (leak.project !== project && leak.dependency !== project) continue;
     logger.warn(
-      `[platform] \`${leak.project}\` (${platformTag(leak.platform)}) imports \`${leak.dependency}\` (${platformTag(leak.dependencyPlatform)}) — ` +
+      `[platform] \`${leak.project}\` (${platformTag(leak.platform)}) imports \`${leak.dependency}\` (${leak.dependencyPlatform ? platformTag(leak.dependencyPlatform) : 'no platform'}) — ` +
         `the platform firewall fails lint there. Move what ${leak.project} needs into a library it may depend on, or re-classify one of them.`,
     );
   }

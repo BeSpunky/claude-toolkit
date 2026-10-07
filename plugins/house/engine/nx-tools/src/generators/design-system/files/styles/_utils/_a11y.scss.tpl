@@ -40,20 +40,36 @@
 
 /// The SKIP LINK: the first focusable element of the app shell, pointing at the `<main>` landmark, so a keyboard or
 /// switch user is not made to tab through the whole header and navigation on every page (WCAG 2.4.1, Bypass
-/// Blocks). Hidden until focused; focused, it lands over the top-left corner of the page, above everything the
-/// page stacks, on the surface colours and with the house focus ring.
+/// Blocks). Hidden until focused; focused, it lands over the top-left corner of the page on the `skip-link` layer
+/// (above modals — a keyboard user's way past the chrome is never covered), on the surface colours and with the
+/// house focus ring.
 ///
 ///   <a class="skip-link" href="#main">Skip to main content</a>   …   <main id="main" tabindex="-1">
 ///   .skip-link { @include ds.skip-link(); }
+///   #main { @include ds.skip-target(); }
 @mixin skip-link {
   @include visually-hidden($focusable: true);
   position: fixed;
   inset-block-start: #{fn.space(2)};
   inset-inline-start: #{fn.space(2)};
-  z-index: #{fn.z('modal')};
+  z-index: #{fn.z('skip-link')};
   padding: #{fn.space(2)} #{fn.space(3)};
   color: #{fn.color('on-surface')};
   background: #{fn.color('surface')};
   border-radius: #{fn.radius('md')};
   @include mixins.focus-ring();
+}
+
+/// The SKIP TARGET: the landmark the skip link moves focus to (`tabindex="-1"` — focusable by script, not in the tab
+/// order). Programmatic focus after a keyboard activation matches `:focus-visible`, so the browser would draw its
+/// ring around the WHOLE content area — and a mouse click inside the landmark focuses it too. The landmark is not a
+/// control: nothing on it is operated, so the focus-visible requirement (WCAG 2.4.7) is the skip link's, which keeps
+/// the house ring. The cue that focus moved is the page itself — the content is where reading continues. (The
+/// `:focus:not(:focus-visible)` idiom alone would hide only the mouse case and keep the ring this exists to drop.)
+///
+///   #main { @include ds.skip-target(); }
+@mixin skip-target {
+  &:focus {
+    outline: none;
+  }
 }
