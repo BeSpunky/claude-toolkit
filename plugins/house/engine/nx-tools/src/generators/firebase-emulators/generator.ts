@@ -33,7 +33,8 @@
 //   - apphosting.yaml (+ apphosting.staging.yaml with --staging) — only with a client app, and only if absent:
 //                        App Hosting builds and serves a web app, so a core-only repo (functions + emulators)
 //                        has nothing for it to deploy. A later sync seeds it once a client app is wired.
-//   - .gitignore        — emulator debug logs, the working data dirs, <functions root>/.secret.local.
+//   - .gitignore        — emulator debug logs, the working data dirs, <functions root>/.secret.local and the
+//                        emulator's opt-in <functions root>/.secret.sandbox.local.
 //   - <appsDir>/functions/ — Cloud Functions as a first-class Nx app, in the workspace's apps directory (or wherever
 //                        a `functions` project already lives): esbuild-bundled to dist/<functions root> with a
 //                        generated deploy-manifest package.json; runtime deps at the WORKSPACE ROOT. Source
@@ -44,7 +45,8 @@
 //   defines projects (a project.json, or a package.json workspace member under TS-solution linking).
 //   - tools/{emulators,emulator-data,reap-emulators,push-secrets,firebase-welcome}.sh, tools/seed/* — the
 //                        launch path, data lifecycle, port reclaim, secrets push, cloud-linkage banner, and
-//                        the declarative seed worlds (world.mjs and the seeds README are user-owned once written).
+//                        the seed applier (tools/seed/apply.mjs), and the declarative seed worlds
+//                        (world.mjs and the seeds README are user-owned once written).
 //   - root eslint.config.mjs — best-effort insertion of the `platform:` dependency-constraint firewall:
 //                        `platform:web` bans firebase-admin/firebase-functions; `platform:server` bans the
 //                        browser SDK and every present client framework (each adapter names its own).
@@ -115,10 +117,16 @@ function canonicalEmulatorsBlock() {
 // source points at the BUILT Nx output (dist/<functions root>, which carries a generated
 // package.json), and predeploy routes lint + build through Nx so `firebase deploy` and
 // `nx run functions:deploy` take the same path.
+//
+// `configDir` points Firebase's params files — `.env`, `.env.<projectId>`, and the emulator-only
+// `.env.local` — at the functions SOURCE directory, read in place by both the emulator and deploy.
+// Without it they are read from the built bundle, which only ever received `.env` (as a build asset):
+// the emulator-only override channel was dead, and a project could not aim a param at a test target.
 function canonicalFunctionsBlock(lint: boolean, functions: HouseProjectHome) {
   return [
     {
       source: distOf(functions),
+      configDir: functions.root,
       codebase: 'default',
       disallowLegacyRuntimeConfig: true,
       ignore: ['node_modules', '.git', 'firebase-debug.log', 'firebase-debug.*.log', '*.local'],
@@ -149,17 +157,55 @@ firebase-debug.*.log
 /** Where the Cloud Functions bundle is built to — what firebase.json deploys and the emulator loads. */
 const distOf = (functions: HouseProjectHome) => `dist/${functions.root}`;
 
-/** The gitignored local secrets file of the Cloud Functions project. */
+/** The gitignored local secrets file of the Cloud Functions project — PRODUCTION's values, push-secrets' source. */
 const secretsOf = (functions: HouseProjectHome) => `${functions.root}/.secret.local`;
+
+/** The gitignored, opt-in SANDBOX secrets the emulator may load (tools/emulators.sh) — never production's. */
+const sandboxSecretsOf = (functions: HouseProjectHome) => `${functions.root}/.secret.sandbox.local`;
 
 // Local Functions secrets ignore — kept separate from GITIGNORE_BLOCK (its own idempotency
 // marker: the secrets path itself) so a project already past the emulator block self-heals to ignore
 // .secret.local on upgrade.
 const secretGitignoreBlock = (functions: HouseProjectHome) => `# Local Cloud Functions secrets — the gitignored source for \`nx run ${functions.name}:push-secrets\`
-# (which sets them in Google Secret Manager for production) and the emulator's local injection.
+# (which sets them in Google Secret Manager for production). Never fed to the emulator.
 # The committed ${secretsOf(functions)}.example documents the shape.
 ${secretsOf(functions)}
 `;
+
+// The sandbox secrets ignore — its own block under its own marker (the path), so a project already past the
+// secrets block above still gains it on upgrade.
+const sandboxGitignoreBlock = (functions: HouseProjectHome) => `# Opt-in SANDBOX credentials for the Functions emulator (a test bot, a sandbox account — never production's).
+# Creating the file arms the emulator with them; tools/emulators.sh says so on every launch.
+${sandboxSecretsOf(functions)}
+`;
+
+/**
+ * `firebase init <feature>` run with no active project templates the literal `undefined` where the project id
+ * belongs — e.g. auth's `support@undefined.firebaseapp.com` (firebase-tools init/features/auth.js). The house
+ * ships no `.firebaserc` by design, so a house repo is exactly where that happens. Not ours to repair (the right
+ * value is the real project's, which no generator can know) — relayed, so it is fixed before it ships.
+ */
+function warnUnresolvedProjectTemplates(firebaseJson: Record<string, unknown>): void {
+  const text = JSON.stringify(firebaseJson);
+  if (!text.includes('undefined.firebaseapp.com') && !text.includes('@undefined.')) return;
+  logger.warn(
+    '[firebase-emulators] firebase.json contains "undefined.firebaseapp.com" — written by `firebase init` with no active ' +
+      'project (firebase-tools templates the missing project id as "undefined"). Replace it with your project\'s value, ' +
+      'and run `firebase use --add` before any further `firebase init <feature>`.',
+  );
+}
+
+/**
+ * The generator-owned seed tooling: the per-world entry `build.mjs` and the applier `apply.mjs` it runs a world
+ * through. One function because the two are one contract (build.mjs imports applyWorld from apply.mjs), and
+ * exported because migration 0.50.0/split-seed-applier must leave a workspace whose world.mjs already imports
+ * from apply.mjs runnable on a bare `nx migrate`, before this generator has run.
+ */
+export function writeSeedTooling(tree: Tree, workspaceName: string): void {
+  const template = (name: string) => readFileSync(join(__dirname, name), 'utf8');
+  tree.write('tools/seed/build.mjs', template('seed-build.mjs.tpl'));
+  tree.write('tools/seed/apply.mjs', template('seed-apply.mjs.tpl').split('{{workspaceName}}').join(workspaceName));
+}
 
 export default async function firebaseEmulatorsGenerator(
   tree: Tree,
@@ -198,6 +244,7 @@ export default async function firebaseEmulatorsGenerator(
   firebaseJson.emulators = canonicalEmulatorsBlock();
   firebaseJson.functions = canonicalFunctionsBlock(lint, functions);
   writeJson(tree, 'firebase.json', firebaseJson);
+  warnUnresolvedProjectTemplates(firebaseJson);
 
   // 1b) App Hosting's deploy config — seeded, never clobbered, and only for a CLIENT APP: App Hosting builds and
   //     serves a web app, so without one there is nothing for it to deploy (and the staging override, which
@@ -219,9 +266,14 @@ export default async function firebaseEmulatorsGenerator(
   if (!gitignoreNow.includes(secretsOf(functions))) {
     tree.write('.gitignore', `${gitignoreNow.trimEnd()}\n\n${secretGitignoreBlock(functions)}`);
   }
+  const gitignoreLast = tree.read('.gitignore', 'utf8') ?? '';
+  if (!gitignoreLast.includes(sandboxSecretsOf(functions))) {
+    tree.write('.gitignore', `${gitignoreLast.trimEnd()}\n\n${sandboxGitignoreBlock(functions)}`);
+  }
 
   // 2) The emulator tooling. Generator-owned (always rewritten) EXCEPT tools/seed/world.mjs and
-  //    tools/emulator-seeds/README.md, which model the APP'S data and are user-owned once written. The env paths
+  //    tools/emulator-seeds/README.md, which model the APP'S data and are user-owned once written. The applier that
+  //    turns a world into emulator writes is tools/seed/apply.mjs — owned, so its fixes reach every project. The env paths
   //    are the client app's — empty without one, which the scripts treat as "no env file" (demo-/.firebaserc).
   //    The welcome banner looks for client env files across the APPS DIRECTORY rather than a list rendered now: an
   //    app added later (`nx g @bespunky/nx-tools:app`) gets its env files from firebase-client without this
@@ -238,7 +290,7 @@ export default async function firebaseEmulatorsGenerator(
     functionsPaths(template('push-secrets.sh.tpl')).split('{{appEnvProdPath}}').join(clientEnv?.prod ?? ''),
   );
   tree.write('tools/seed/build-seeds.sh', substitute(template('seed-build-seeds.sh.tpl')));
-  tree.write('tools/seed/build.mjs', template('seed-build.mjs.tpl'));
+  writeSeedTooling(tree, workspaceName);
   if (!tree.exists('tools/seed/world.mjs')) tree.write('tools/seed/world.mjs', substitute(template('seed-world.mjs.tpl')));
   if (!tree.exists('tools/emulator-seeds/README.md')) {
     tree.write('tools/emulator-seeds/README.md', template('emulator-seeds-README.md.tpl'));
@@ -417,11 +469,8 @@ function ensureFunctionsProject(
             thirdParty: false,
             generatePackageJson: true,
             deleteOutputPath: true,
-            // Copy the committed public-params file beside the bundle. The project's .env holds PUBLIC
-            // (non-secret) function params and is a build asset (secrets go through .secret.local / Secret
-            // Manager, never here). Without this the deploy/emulator bundle ships without .env and the
-            // functions lose their params at runtime.
-            assets: [{ glob: '.env', input: root, output: '.' }],
+            // No assets: the params files (.env, .env.<projectId>, .env.local) are read in place from the
+            // source dir — firebase.json `functions.configDir` — by the emulator and deploy alike.
             esbuildOptions: { outExtension: { '.js': '.js' } },
           },
         },
