@@ -4,6 +4,11 @@
 //
 // The shapes it meets: the house entry alone (the key goes), beside a project asset (only the entry goes), a
 // project-written `.env` asset of another shape (kept, reported), a functions project outside apps/, none at all.
+//
+// No historical shapes: the house entry shipped in ONE shape, from its introduction to its removal —
+// `{ glob: '.env', input: root, output: '.' }` (git show 6b56f49:plugins/project-starter/skills/new-project/assets/nx-tools/src/generators/firebase-emulators/generator.ts;
+// `git log -G"glob: '\.env"` finds no later edit), with `root` the functions project's own root ('apps/functions'
+// until 5a05026, the resolved project home since) — exactly HOUSE_ENTRY below.
 import { createRequire } from 'node:module';
 
 const { addProjectConfiguration, readProjectConfiguration } = createRequire(import.meta.url)('@nx/devkit');
