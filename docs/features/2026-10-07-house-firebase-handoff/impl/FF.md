@@ -38,6 +38,28 @@ it was fixed. Ledger: `handoffs/20261007T070000Z-ff-fanout.md`. Sub-notes: `FF-G
   are named on every run. CI's setup-node reads the declared file. An adopted image's own Node is named when it
   disagrees. HOUSE.md says exactly this.
 
+## Proofs run (real, network)
+
+- **add-layer firebase on Angular 22** (a real `new --local --preset=angular` workspace, on a work branch):
+  `UPGRADE_REFUSED: firebase-angular-unpaired`, "NOTHING HAS BEEN WRITTEN", the judge's dated choices; git status and
+  log unchanged.
+- **new --local --preset=angular --firebase** (clean, from a HEAD snapshot): `NEW_OK`; lint/test/build as in R1-0.
+- **Scripted consumer dogfood** (`YARN_IGNORE_ENGINES=true node tools/dogfood-consumer/run.mjs --toolkit=<HEAD snapshot>`,
+  after merging feat/house-firebase-handoff): **53 pass, 4 fail, 7m31s.** Released consumer built, 9 seeds applied and
+  all survived the upgrade, upgrade OK, second upgrade a no-op, every preset's `new --local` OK (agent, node, angular,
+  angular+firebase) and builds. The 4 FAILs are all lint, none FF's:
+  - `design-system:lint` (`@nx/dependency-checks`: `@angular/common` unused) — fails in 0.49.2's baseline too;
+  - `shared-browser:lint` (8× `no-empty-function` in the generated `tools/shared-browser/*.mjs`) — NEW in 0.50.0,
+    because 0.50.0 gives that project a lint target. Needs a fix before release (owner: whoever owns lint-house-apps /
+    shared-browser).
+  - Why `YARN_IGNORE_ENGINES`: the RELEASED 0.49.2 scaffold declares `"firebase": "latest"`, which today resolves to
+    firebase 13.0.0 (published 2026-10-07, needs Node >=24.12) — the very float 0.50.0 removes; without the bypass the
+    released consumer cannot be built on Node 22 (FF-D.md).
+
 ## Not verified / left
 
-(filled in at the end of the run)
+- The image BUILD as root with the gcloud archive, and an arm64 install (FF-G.md) — no Docker here.
+- `vitest-analog` is still what a NON-buildable Angular 21+ library gets; it emits the deprecated `@nx/vitest:test`
+  executor (Nx warns) — pre-existing, not changed.
+- Pre-existing, unchanged: `design-system` has no spec, so on Angular 22 its `vitest-angular` test target fails "No tests
+  found" (jest on 20 passes with no tests).
