@@ -409,8 +409,13 @@ release_stack() {
 # the deadline the keeper ends its own process group, records `ABANDONED … after Ns` with a non-zero code, and says
 # so in the log and to whoever is waiting. SIGUSR1 is the same, at once — `tools/dev/dev stop --abandon`.
 keep() {
+  # Its identity, PID and start time, OF THIS PROCESS. Never `$(proc_start "$BASHPID")`: a command substitution is a
+  # fork, and `$BASHPID` expands INSIDE it, so that recorded the start time of a throwaway subshell — the keeper's own
+  # only when the fork fell in the same clock tick (~9 in 10). Otherwise every reader took the keeper for dead while it
+  # saved: the script quit at once, `ps` called the stack ORPHANED (and `dev stop` would kill the export), a restart
+  # never waited, and the keeper's own release left the stack behind.
   KEEPER_PID=$BASHPID
-  KEEPER_START="$(proc_start "$BASHPID")"
+  KEEPER_START="$(proc_start "$KEEPER_PID")"
   local requested=0 abandon='' signalled=0 stop_at=0 deadline=0 code=0 fb result now beat=0 abandoned=''
   trap 'requested=1' TERM INT HUP
   trap 'abandon="asked for (tools/dev/dev stop --abandon)"; requested=1' USR1

@@ -126,6 +126,17 @@ keeper_gone() {   # the detached keeper finished on its own — it records its r
 # ── 1. Nx's stop: leaf-first tree kill, then SIGKILL after a 1 s grace ─────────────────────────────
 W="$(mkws nx)"; P="$(start "$W")"; STARTED+=("$P")
 ok "nx: the suite came up" "$(ready "$W" && echo 1 || echo 0)"
+# The keeper's recorded identity IS its own: every reader (the script's wait, `dev ps`, a restart's claim, the keeper's
+# own release) trusts it. It once held a forked subshell's start time — equal to the keeper's only within one clock
+# tick, so a wrong one showed up as a flake in whichever case it struck. Compared directly, it cannot hide.
+own_identity() {
+  local entry="$1/.bespunky/run/firebase@0/detached/emulators.json" pid start s
+  pid="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$entry" 2>/dev/null)"
+  start="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).procStart))' "$entry" 2>/dev/null)"
+  s="$(cat "/proc/$pid/stat" 2>/dev/null)" || return 1; s="${s##*) }"; set -- $s
+  [ -n "$start" ] && [ "$start" = "${20:-}" ]
+}
+ok "nx: the keeper records its OWN identity (pid + kernel start time)" "$(own_identity "$W" && echo 1 || echo 0)"
 mapfile -t TREE < <(descendants "$P"; echo "$P")
 for pid in "${TREE[@]}"; do kill -TERM "$pid" 2>/dev/null; done   # deepest first, as killProcessTreeGraceful does
 sleep 1
