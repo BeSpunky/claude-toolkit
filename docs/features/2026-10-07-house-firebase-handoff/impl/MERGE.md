@@ -63,3 +63,14 @@ Test-generators skips (18+) are the cases needing `@nx/angular` / `@nx/js`, whic
   commit: "(next bullet)" → "(the `ci` bullet below)" — a sub-bullet sits between them.
 - `house/tips.txt`, `workflow/tips.txt`: union.
 - test-generators 142 ok / 18 skip · test-migrations 143 ok.
+
+### w8 (fail-closed platform firewall, skip link, Analog tsconfig)
+- `migrations.json`: union.
+- `firebase-emulators/generator.ts`: W8 moved `addPlatformBoundaries` out to `src/platform`; W5 had added
+  `existingTargets` / `rootRulesInputs` / `seedRules` right before it. Kept W5's helpers, dropped the moved function
+  (and W8's import removals stand). Header: W2/W3's tools line + W8's firewall line.
+- `HOUSE.md.tpl` functions paragraph: W5 added "(see *Deploying the backend*)", W2 added the secrets table after it, W8
+  rewrote the firewall sentence in the same line — W5's/W2's text with W8's firewall sentence.
+- `skills/new/SKILL.md`: Cloud Functions bullet — W2's secrets sentences + W8's fail-closed firewall sentence; checklist
+  row — W8's firewall row + W2's `apply.mjs`.
+- test-generators 146 ok / 22 skip · test-migrations 156 ok.
