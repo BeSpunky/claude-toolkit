@@ -300,6 +300,8 @@ async function serve(opts) {
     );
   }
   const stackDir = opts.dryRun ? `${tree.path}/.bespunky/run/${key}` : ensureStackDir(tree.path, appName, offset);
+  // A stop request left by a stack of this key that was killed before it could clean up is not about this one.
+  if (!opts.dryRun) rmSync(join(stackDir, STOP_REQUEST), { force: true });
   const plan = planApp(decl, appName, { offset, tree: tree.path, skip: opts.skip, passthrough: opts.passthrough, baseEnv: process.env, stackDir });
   for (const id of plan.ignoredSkips) warn(`--skip=${id}: app "${appName}" declares no such process — nothing to skip.`);
   const slug = servedSlug(tree, worktrees);
@@ -389,6 +391,7 @@ async function serve(opts) {
       .catch((err) => warn(`shared browser setup errored (ignored): ${err.message}`));
   }
 
+  let stopSignal;
   const result = await runStack({
     children: plan.running,
     cwd: tree.path,
@@ -397,16 +400,22 @@ async function serve(opts) {
       record.processes.push({ id, pid, procStart: processStart(pid) });
       writeRecord(record);
     },
-    onStop: () => {
+    onStop: (signal) => {
+      stopSignal = signal;
+      // A stop asked for from outside (not a process of the stack ending it) is announced, with who asked — and what
+      // the stack's processes are about to print about their own stop is read as what it is, not as a failure.
+      if (signal) log(`stopping the stack (asked by ${stoppedBy(stackDir, signal)}) — each process reports its own stop below ("stopped before finishing" included); that is the stop, not a failure.`);
       until.done = true;
       if (route.registered) detachRoute(tree.path, process.env, slug);
     },
   });
+  EXIT_STOPPED_BY = stoppedBy(stackDir, stopSignal);
   // The processes are down; what they detached (an emulator suite saving its data) may not be. The stack is not
   // stopped until that is done — and its state dir, where that work keeps its files, stays until then.
   const detached = await awaitDetached(tree.path, key, { say: log });
   for (const w of detached.finished) (w.code ? warn : log)(`${w.id}: ${w.result ?? `ended (code ${w.code ?? 0})`}`);
   if (!result.success) reportFailure(result.failures, plan, detached);
+  else if (detached.ok) log(`${key} stopped cleanly${EXIT_STOPPED_BY ? ` (asked by ${EXIT_STOPPED_BY})` : ''}.`);
   dropRecord();
   return result.success && detached.ok;
 }
@@ -445,6 +454,24 @@ function reportFailure(failures, plan, detached) {
   }
 }
 
+/**
+ * WHO STOPPED THE STACK — for whoever was following it (an attached `nx serve` says so when it ends). `dev stop` leaves
+ * a STOP REQUEST in the stack's state dir before it signals (stopOne); otherwise the signal is all there is to go by.
+ */
+const STOP_REQUEST = 'stop-request.json';
+function stoppedBy(stackDir, signal) {
+  try {
+    const req = JSON.parse(readFileSync(join(stackDir, STOP_REQUEST), 'utf8'));
+    if (req?.by) return `${req.by}, with tools/dev/dev stop`;
+  } catch {
+    /* none */
+  }
+  if (signal === 'SIGINT') return 'a Ctrl+C (SIGINT)';
+  if (signal) return `a ${signal} sent to its serve (pid ${process.pid})`;
+  return undefined;
+}
+let EXIT_STOPPED_BY;
+
 /** What the engine said about its end — carried to the Nx `serve` follower in the exit record (see writeExit). */
 const EXIT_REPORT = [];
 /** The same account in a line or two — what `nx serve` repeats where an agent reads it, beside Nx's own summary. */
@@ -465,7 +492,8 @@ function writeExit(app, code) {
     const dir = join(root, '.bespunky', 'run', 'exits');
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${invocation}@${app}.json`);
-    writeFileSync(`${file}.tmp`, `${JSON.stringify({ app, invocation, pid: process.pid, code, report: EXIT_REPORT, summary: EXIT_SUMMARY, at: new Date().toISOString() }, null, 2)}\n`);
+    const record = { app, invocation, pid: process.pid, code, report: EXIT_REPORT, summary: EXIT_SUMMARY, stoppedBy: EXIT_STOPPED_BY, at: new Date().toISOString() };
+    writeFileSync(`${file}.tmp`, `${JSON.stringify(record, null, 2)}\n`);
     renameSync(`${file}.tmp`, file);
   } catch {
     /* the follower then ends with the Nx run itself */
@@ -556,6 +584,14 @@ async function stopOne(record, { timeoutMs = DETACHED_TIMEOUT_MS + 60000 } = {})
   // An ORPHANED stack has no serve left to stop it gracefully: its surviving processes (each verified to be the
   // very process the serve spawned) get one SIGTERM each, with their descendants — what the serve would have sent.
   // A FINISHING one is already stopped: nothing is signalled, its detached work is only waited for.
+  // Who asked — read by the serve as it ends, and passed on to whoever follows the stack (see stoppedBy).
+  if (record.state === 'live') {
+    try {
+      writeFileSync(join(record.tree, RUN_DIR, record.key, STOP_REQUEST), `${JSON.stringify({ by: ownerOf(process.env), pid: process.pid, at: new Date().toISOString() })}\n`);
+    } catch {
+      /* the stop still happens; only the name is lost */
+    }
+  }
   const pids =
     record.state === 'orphaned'
       ? survivors(record).flatMap((p) => [...descendants(p.pid), p.pid])

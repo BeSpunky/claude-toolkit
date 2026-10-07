@@ -65,7 +65,8 @@ export function descendants(pid) {
  *
  * A child is `{ id, command, args, shell, env }`: `shell` runs `command` through `sh -c` (a hand-written
  * string command); otherwise `command` + `args` are spawned directly. `onSpawn(id, pid)` hears each one start —
- * how the stack's run record learns its processes' PIDs.
+ * how the stack's run record learns its processes' PIDs. `onStop(signal)` hears the stop once — with the signal
+ * that asked for it, or none when the stack's own processes ended it (how the engine says who stopped the stack).
  */
 export function runStack({ children, cwd, onStop, onSpawn, log }) {
   return new Promise((resolve) => {
@@ -82,11 +83,11 @@ export function runStack({ children, cwd, onStop, onSpawn, log }) {
     const failures = [];
     let stopHandled = false;
 
-    const runOnStop = () => {
+    const runOnStop = (signal) => {
       if (stopHandled) return;
       stopHandled = true;
       try {
-        onStop?.();
+        onStop?.(signal);
       } catch {
         /* teardown is best-effort — never let it fail the serve */
       }
@@ -114,13 +115,13 @@ export function runStack({ children, cwd, onStop, onSpawn, log }) {
     const onGroupStop = () => {
       if (stopping) return;
       stopping = true;
-      runOnStop();
+      runOnStop('SIGINT');
     };
     // Aimed at us alone: tell each child once, then wait.
-    const onDirectedStop = () => {
+    const onDirectedStop = (signal) => {
       if (stopping) return;
       stopping = true;
-      runOnStop();
+      runOnStop(signal);
       stopRemaining();
     };
     const handlers = { SIGINT: onGroupStop, SIGTERM: onDirectedStop, SIGHUP: onDirectedStop };

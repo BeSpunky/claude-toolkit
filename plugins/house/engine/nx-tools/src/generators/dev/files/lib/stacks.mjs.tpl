@@ -152,8 +152,12 @@ export function detachedWork(dir) {
   return out;
 }
 
-/** The detached work of a stack that is still running. */
-export const unfinished = (tree, key) => detachedWork(join(tree, RUN_DIR, key)).filter((w) => w.alive);
+/**
+ * The detached work of a stack that is still running. An entry that says `exited` is done, though its process may be
+ * a moment from gone: it is how the work's owner, as its last act, lets the stack's state dir go (see the keeper in
+ * tools/emulators.sh, which prunes its own stack once nothing of it is left).
+ */
+export const unfinished = (tree, key) => detachedWork(join(tree, RUN_DIR, key)).filter((w) => w.alive && w.status !== 'exited');
 
 /** The stack's recorded processes that are still the very processes it spawned. */
 export function survivors(record) {

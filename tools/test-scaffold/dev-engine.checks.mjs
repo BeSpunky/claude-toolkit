@@ -290,7 +290,9 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
     const server = join(repo, 'server.mjs');
     writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [{ id: 'app', cmd: ['node', server, '${PORT:app}', join(repo, 'got-h')], ports: { app: port } }] } } }));
     const human = { DEV_OWNER: 'user:dev', CLAUDE_CODE_SESSION_ID: '' };
-    const eng = spawn('sh', [join(engine, 'dev'), 'serve', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...human } });
+    // As under Nx: the engine leaves an exit record for the invocation (this process stands in for the invoking nx).
+    const underNx = { DEV_NX_ROOT: repo, NX_INVOCATION_ROOT_PID: String(process.pid) };
+    const eng = spawn('sh', [join(engine, 'dev'), 'serve', 'site', '--no-shared-browser', '--port-offset=0'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...human, ...underNx } });
     try {
       ok('the stack came up', await until(() => listening(port), 10000));
       const rec = JSON.parse(readFileSync(join(repo, '.bespunky', 'run', 'site@0.json'), 'utf8'));
@@ -306,6 +308,9 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => {
       ok('the owner stops it by handle: exit 0, ports confirmed free', mine.code === 0 && /ports free/.test(mine.out) && !(await listening(port)));
       ok('…the child got ONE SIGTERM (the graceful path)', readFileSync(join(repo, 'got-h'), 'utf8') === 'SIGTERM');
       ok('…and the record and state dir are gone', !existsSync(join(repo, '.bespunky', 'run', 'site@0.json')) && !existsSync(join(repo, '.bespunky', 'run', 'site@0')));
+      // NB2: a run attached to this stack says who stopped it — from the exit record.
+      const exit = JSON.parse(readFileSync(join(repo, '.bespunky', 'run', 'exits', `${process.pid}@site.json`), 'utf8'));
+      ok(`…and the exit record says it ended cleanly, and who stopped it (${exit.stoppedBy})`, exit.code === 0 && exit.stoppedBy === 'user:dev, with tools/dev/dev stop' && exit.pid === eng.pid);
       // A record whose PID now belongs to someone else (the kernel reuses PIDs) is stale, never a handle.
       writeFileSync(join(repo, '.bespunky', 'run', 'site@9000.json'), JSON.stringify({ ...rec, key: 'site@9000', offset: 9000, pid: process.pid, procStart: 'not-this-one', processes: [] }));
       const stale = JSON.parse((await dev({}, 'ps', '--json')).out);

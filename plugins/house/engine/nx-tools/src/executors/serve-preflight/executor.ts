@@ -5,6 +5,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { tellInvoker } from '../_utils/invoker';
+import { clearExit, writeExit } from '../_utils/run-records';
 
 import type { ServePreflightSchema } from './schema';
 
@@ -22,9 +23,12 @@ import type { ServePreflightSchema } from './schema';
  *   - nothing of this app served by this workspace's Nx  → silent; the serve starts as always;
  *   - the run asks for a DIFFERENT stack (an explicit --port-offset or --worktree the running one is not)
  *       → refuses, naming the running stack and printing the command that starts the asked-for one beside it
- *         (`tools/dev/dev serve`, which no Nx task lock holds) and the one that stops the running one;
+ *         (`tools/dev/dev serve`, which no Nx task lock holds) and the one that stops the running one. The
+ *         refusal is written as this run's EXIT RECORD, not as a failure of this task: the `serve` follower says it
+ *         and fails the run with exit 1 (a failed dependency would leave the follower skipped — exit 130);
  *   - otherwise (a plain repeat, or an e2e target's dependency) → says this run ATTACHES to the running stack
- *       and will end when it stops, and how to get a second stack instead. The share proceeds.
+ *       and will end when it stops, and how to get a second stack instead (`--port-offset=auto`: the asked offset
+ *       is the running stack's). The share proceeds.
  *
  * It never fails a serve on its own trouble: no engine, an unreadable answer → silent success. And its verdict is
  * said to the person at the command line in every Nx output mode — including the one that hides task output (see
@@ -69,14 +73,17 @@ export function preflight(
     (s) => (!offsetAsked || Number(options.portOffset) === s.offset) && (!worktreeAsked || namesTree(String(options.worktree), s)),
   );
   const list = holders.map((s) => `  ${s.key} · pid ${s.pid} · ${s.url} · owner ${s.owner} · since ${s.startedAt}`).join('\n');
+  // The second stack's command. Refused, it is the stack that was asked for. Attached, the request IS the running
+  // stack — its own offset would collide — so a second one takes the next free block (`auto`).
+  const refusing = (offsetAsked || worktreeAsked) && !same;
   const flags = [
-    offsetAsked ? `--port-offset=${options.portOffset}` : '--port-offset=auto',
+    refusing && offsetAsked ? `--port-offset=${options.portOffset}` : '--port-offset=auto',
     worktreeAsked ? `--worktree=${options.worktree}` : '',
   ].filter(Boolean).join(' ');
   const second = `tools/dev/dev serve ${project} ${flags}`;
   const stop = (s: Stack) => `tools/dev/dev stop ${project} --offset=${s.offset}`;
 
-  if ((offsetAsked || worktreeAsked) && !same) {
+  if (refusing) {
     return {
       refuse: true,
       message:
@@ -98,7 +105,11 @@ export function preflight(
 const runExecutor: PromiseExecutor<ServePreflightSchema> = async (options, context) => {
   const project = options.project ?? context.projectName;
   const engine = join(context.root, 'tools', 'dev', 'dev.mjs');
+  const invocation = process.env.NX_INVOCATION_ROOT_PID ?? '';
   if (!project || !existsSync(engine)) return { success: true };
+  // This task runs first in every `nx serve`: whatever an exit record of this invocation says is from an earlier run
+  // whose PID this one reuses — the follower would end on it at once.
+  if (invocation) clearExit(context.root, invocation, project);
 
   let stacks: Stack[];
   try {
@@ -112,9 +123,16 @@ const runExecutor: PromiseExecutor<ServePreflightSchema> = async (options, conte
   const verdict = preflight(project, options, holders);
   if (!verdict) return { success: true };
   if (verdict.refuse) {
-    logger.error(`[serve] ${verdict.message}`);
-    tellInvoker(`[serve] REFUSED — ${verdict.message}`);
-    return { success: false };
+    // NOT a failure of this task: a failed dependency leaves `serve` SKIPPED, and Nx exits a run with a skipped task
+    // 130, which reads as a Ctrl+C. The refusal is this run's exit record instead — dev-stack starts nothing on it,
+    // and the follower says it and fails the run: exit 1.
+    if (!invocation) {
+      logger.error(`[serve] ${verdict.message}`);
+      return { success: false };
+    }
+    writeExit(context.root, invocation, project, { code: 1, refused: true, report: [`[serve] ${verdict.message}`], summary: ['refused'] });
+    logger.warn(`[serve] REFUSED — the follower (${project}:serve) reports it.`);
+    return { success: true };
   }
   logger.warn(`[serve] ${verdict.message}`);
   tellInvoker(`[serve] ${verdict.message}`);
