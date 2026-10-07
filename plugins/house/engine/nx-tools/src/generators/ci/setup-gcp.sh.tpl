@@ -204,9 +204,16 @@ while IFS="$(printf '\t')" read -r r why; do
 done <<<"$ROLES"
 if uses functions; then
   # Deploying a function means running it AS its runtime service account: actAs on THAT account, not project-wide.
+  # Both candidates, deliberately: the compute account is what 2nd-gen functions run as, and the Firebase CLI's
+  # functions pre-deploy check demands actAs on the App Engine default account (<project>@appspot) EVEN WHEN the
+  # functions run as compute — confirmed by a house project's first CI deploy, which failed without it.
   for runtime in $RUNTIME_SAS; do
     if [ "$DRY" = 1 ] || probe iam service-accounts describe "$runtime" --project="$PROJECT" >/dev/null; then
-      say "  # roles/iam.serviceAccountUser on $runtime — deploy functions that run as it"
+      case "$runtime" in
+        *@appspot.gserviceaccount.com) why="the Firebase CLI's functions pre-deploy check requires it, even for functions that run as compute" ;;
+        *) why="deploy functions that run as it" ;;
+      esac
+      say "  # roles/iam.serviceAccountUser on $runtime — $why"
       act iam service-accounts add-iam-policy-binding "$runtime" --project="$PROJECT" --member="serviceAccount:$SA" --role=roles/iam.serviceAccountUser
     fi
   done
