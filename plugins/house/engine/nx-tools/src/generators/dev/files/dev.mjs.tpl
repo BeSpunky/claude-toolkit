@@ -413,9 +413,8 @@ async function serve(opts) {
 
 /**
  * Say, unmissably, that the stack FAILED: which process died and how, the command it ran, and where its output is.
- * On stderr — and before the engine exits non-zero, which is the whole of what an Nx run can be told: Nx reports a
- * CONTINUOUS task that ends (as `<app>:serve` is) as succeeded or stopped whatever its exit code, so these lines are
- * the only place an Nx run says it failed.
+ * On stderr, and into the exit record — which is how `nx serve` (the follower of `<app>:dev-stack`) ends with this
+ * status and repeats this account where an agent reads it.
  */
 function reportFailure(failures, plan, detached) {
   const err = (m) => {
@@ -427,6 +426,7 @@ function reportFailure(failures, plan, detached) {
     const proc = plan.running.find((p) => p.id === f.id);
     err(`  ${f.id} exited ${f.signal ? `on ${f.signal}` : `with code ${f.code}`}${proc ? ` — it ran: ${proc.display}` : ''}`);
   }
+  EXIT_SUMMARY.push(...failures.map((f) => `${f.id} exited ${f.signal ? `on ${f.signal}` : `with code ${f.code}`}`));
   err('  Its output is above (or, when Nx summarised it, in the `full log:` file Nx named for that task).');
   // The detached work's own log is the one place the cause is sure to be (an emulator suite that cannot start says
   // why there — no Java, a port in use). Its tail goes here, where every output mode shows it.
@@ -441,11 +441,14 @@ function reportFailure(failures, plan, detached) {
       /* unreadable — the path is still named */
     }
     for (const line of tail) err(`    | ${line}`);
+    if (tail.length) EXIT_SUMMARY.push(`${w.id}: ${tail[tail.length - 1]} (log ${w.log})`);
   }
 }
 
 /** What the engine said about its end — carried to the Nx `serve` follower in the exit record (see writeExit). */
 const EXIT_REPORT = [];
+/** The same account in a line or two — what `nx serve` repeats where an agent reads it, beside Nx's own summary. */
+const EXIT_SUMMARY = [];
 
 /**
  * THE EXIT RECORD — how `nx serve` learns how its stack ended. Nx runs the stack as the continuous `dev-stack` task
@@ -462,7 +465,7 @@ function writeExit(app, code) {
     const dir = join(root, '.bespunky', 'run', 'exits');
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${invocation}@${app}.json`);
-    writeFileSync(`${file}.tmp`, `${JSON.stringify({ app, invocation, pid: process.pid, code, report: EXIT_REPORT, at: new Date().toISOString() }, null, 2)}\n`);
+    writeFileSync(`${file}.tmp`, `${JSON.stringify({ app, invocation, pid: process.pid, code, report: EXIT_REPORT, summary: EXIT_SUMMARY, at: new Date().toISOString() }, null, 2)}\n`);
     renameSync(`${file}.tmp`, file);
   } catch {
     /* the follower then ends with the Nx run itself */
@@ -695,6 +698,7 @@ if (process.argv[1] && samePath(process.argv[1], fileURLToPath(import.meta.url))
       console.error(line);
       if (err instanceof UsageError && /unknown|unexpected/.test(err.message)) console.error(USAGE);
       EXIT_REPORT.push(line);
+      EXIT_SUMMARY.push(line);
       writeExit(servedApp(), 1);
       process.exit(1);
     },

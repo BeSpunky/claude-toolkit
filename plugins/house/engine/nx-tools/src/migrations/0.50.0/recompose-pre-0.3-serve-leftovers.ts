@@ -17,7 +17,7 @@
 //
 // WHAT IT CHANGES, per project carrying one of the two leftovers: drops the dangling `emulators*` dependsOn / the
 // retired `no-emulators` configuration (the default falls back to `development`, else to none), then runs the `serve`
-// generator for the project — the same per-app step an upgrade runs: `dev-server` leaf + `serve` composer + its
+// generator for the project — the same per-app step an upgrade runs: `dev-server` leaf + `dev-stack` composer (+ its `serve` follower) + its
 // `.bespunky/dev.json` entry, in the current shape. Nothing else is looked at.
 import { type Tree, getProjects, logger, updateProjectConfiguration } from '@nx/devkit';
 import serveGenerator from '../../generators/serve/generator';

@@ -55,7 +55,7 @@ export default async function serveOptionsGenerator(
   const serve = targets.serve;
   const serveIsNxToolsComposer = serve?.executor === '@bespunky/nx-tools:serve';
 
-  // The one canonical name for the real app dev-server — the leaf the `serve` composer drives by name.
+  // The one canonical name for the real app dev-server — the leaf the `dev-stack` composer drives by name.
   const devServer = targets['dev-server'];
 
   if (devServer) {

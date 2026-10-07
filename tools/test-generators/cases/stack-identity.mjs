@@ -84,8 +84,13 @@ export default {
       },
       expect: (tree, t, ctx) => {
         t.ok(ctx.follow.verdict('web', { code: 0 }).success === true, 'a stack that ended cleanly: success');
-        const failed = ctx.follow.verdict('web', { code: 1, report: ['[serve] ✖ the stack FAILED and was stopped:', '[serve]   emulators exited with code 1'] });
+        const failed = ctx.follow.verdict('web', {
+          code: 1,
+          report: ['[serve] ✖ the stack FAILED and was stopped:', '[serve]   emulators exited with code 1'],
+          summary: ['emulators exited with code 1', 'emulators: Error: Could not spawn `java -version`. (log /x.log)'],
+        });
         t.ok(!failed.success && /FAILED \(exit 1\)/.test(failed.message) && /emulators exited with code 1/.test(failed.message), `a failed stack fails the run, saying why: ${failed.message}`);
+        t.ok(/^\[serve\] web's dev stack FAILED \(exit 1\): emulators exited with code 1; emulators: Error: Could not spawn/.test(failed.headline), `the invoker gets it in a line: ${failed.headline}`);
         t.ok(ctx.follow.exitRecordPath('/r', '42', 'web') === '/r/.bespunky/run/exits/42@web.json', 'the exit record the engine writes');
       },
     },

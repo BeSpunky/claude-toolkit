@@ -28,7 +28,7 @@ export const STACK_TARGET = 'dev-stack';
 export const FOLLOW_EXECUTOR = '@bespunky/nx-tools:follow-stack';
 
 /**
- * The composer's preflight — a NON-continuous dependency of `serve`, with the serve's flags forwarded, so it runs in
+ * The composer's preflight — a NON-continuous dependency of `dev-stack`, with the serve's flags forwarded, so it runs in
  * a second `nx serve <app>` BEFORE Nx decides to make that run wait on the first (see executors/serve-preflight).
  */
 export const SERVE_PREFLIGHT_TARGET = 'serve-preflight';

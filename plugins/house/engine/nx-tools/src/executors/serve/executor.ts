@@ -98,7 +98,7 @@ const runExecutor: PromiseExecutor<ServeExecutorSchema> = async (options, contex
       for (const [signal, handler] of Object.entries(handlers)) process.off(signal, handler);
       resolve({ success });
     };
-    // DEV_NX_ROOT tells the engine that THIS workspace's Nx holds the stack as its `<app>:serve` task — recorded in
+    // DEV_NX_ROOT tells the engine that THIS workspace's Nx holds the stack as its `<app>:dev-stack` task — recorded in
     // the stack's run record, so a second `nx serve` here is told what it would be waiting on (serve-preflight).
     const env = { ...process.env, DEV_NX_ROOT: context.root };
     const child = spawn(process.execPath, [engine, ...args], { cwd: context.root, env, stdio: 'inherit' });

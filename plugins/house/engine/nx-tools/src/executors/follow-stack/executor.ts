@@ -25,7 +25,10 @@ import type { FollowStackSchema } from './schema';
  */
 interface ExitRecord {
   code: number;
+  /** The engine's full account (it streamed it too). */
   report?: string[];
+  /** The same in a line or two. */
+  summary?: string[];
 }
 interface Stack {
   app: string;
@@ -73,13 +76,20 @@ function stacksOf(engine: string, project: string, root: string): Stack[] {
   }
 }
 
-/** The run's result from a stack's exit record. Pure (exported for tests). */
-export function verdict(project: string, record: ExitRecord): { success: boolean; message?: string } {
+/**
+ * The run's result from a stack's exit record. Pure (exported for tests). `message` is the full account, for this
+ * task's log; `headline` the same in a line or two, said to the invoker — the stack's stream already printed the full
+ * block, so repeating all of it beside Nx's summary would be noise, and saying nothing there would leave an agent
+ * with "✖ nx run <app>:serve" and a file path.
+ */
+export function verdict(project: string, record: ExitRecord): { success: boolean; message?: string; headline?: string } {
   if (record.code === 0) return { success: true };
   const told = (record.report ?? []).join('\n');
+  const head = `[serve] ${project}'s dev stack FAILED (exit ${record.code})`;
   return {
     success: false,
-    message: `[serve] ${project}'s dev stack FAILED (exit ${record.code}).${told ? `\n${told}` : ' Its output is above.'}`,
+    message: `${head}.${told ? `\n${told}` : ' Its output is above.'}`,
+    headline: `${head}: ${(record.summary ?? []).join('; ') || 'see its output above'}`,
   };
 }
 
@@ -94,9 +104,9 @@ const runExecutor: PromiseExecutor<FollowStackSchema> = async (options, context)
     const v = verdict(project, record);
     if (v.message) {
       logger.error(v.message);
-      // Claude reads `nx serve` in Nx's agent renderer, which prints a failed task as a log path — the account of
-      // which process died goes where it is read.
-      tellInvoker(v.message);
+      // Claude reads `nx serve` in Nx's agent renderer, which prints a failed task as a log path — which process died,
+      // and why, goes where it is read.
+      if (v.headline) tellInvoker(v.headline);
     }
     return { success: v.success };
   };
