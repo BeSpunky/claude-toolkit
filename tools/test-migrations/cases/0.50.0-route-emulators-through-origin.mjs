@@ -85,9 +85,10 @@ export const environment: Environment = {
 `;
 
 /**
- * The our-journey bundle (INBOUND-HANDOFF-2): an interface whose every member declares `default` — the 0.7.1 repair's
- * shape, which 0.24.3 judged current and so never gave `proxied?` — with `proxied?: boolean` then hand-added on `auth`
- * ONLY, to make the documented one-word opt-in compile; the value file opted `auth` in and nothing else. The
+ * The our-journey bundle (INBOUND-HANDOFF-2): an interface whose every member declares `default` and none `proxied?`
+ * (the nx-tools 0.1.0–0.6.0 template, 703ca41 … 46d6436 — which the pre-fix 0.24.3 guard judged current, so `auth`
+ * never gained `proxied?`) — with `proxied?: boolean` then hand-added on `auth` ONLY, to make the documented one-word
+ * opt-in compile; the value file opted `auth` in and nothing else. The
  * never-opted-in version of the same project is the canonical input it must converge to.
  */
 const JOURNEY_INTERFACE = (authType) => `export interface Environment {
