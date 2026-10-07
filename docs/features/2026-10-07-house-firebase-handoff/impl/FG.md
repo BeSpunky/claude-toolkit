@@ -88,7 +88,7 @@ test-generators 200 ok / 25 skip; `--strict` **225/225** with @nx/angular, @nx/j
 files · test-angular-ts-solution pass (real Nx 23.1; the new shell builds in production AOT) · test-tips 10 ·
 test-voice 38/38 · test-mod-brand 8 · test-branches 55 · test-standing ok · check-descriptions ok ·
 check-script-modes ok · mod-brand projections match · check-release-invariants fails only for the known unbumped
-bespunky-house, bespunky-workflow and @nx/nx-tools 0.50.0. Real ESLint (scratch `lintws`, the payload's own rendered
+bespunky-house, bespunky-workflow and @bespunky/nx-tools 0.50.0. Real ESLint (scratch `lintws`, the payload's own rendered
 config): 5 expected errors, no false ones. R8's probe after the fix: `b c d f` undefined (no evidence), `e` server
 (`node:fs`), `a` server, the SSR app web by its stack.
 
