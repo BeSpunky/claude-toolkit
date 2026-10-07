@@ -23,7 +23,7 @@ import {
   writeFirebaseConfigs,
 } from '../../generators/firebase-emulators/service-configs';
 import { angular } from './index';
-import { declareBrowserSdk } from './angularfire';
+import { declareBrowserSdk, pinAngularForFirebase } from './angularfire';
 
 /** Blank the credential placeholders: a half-wired prod/staging build must fail loud, not silently use dev. */
 const blankCredentials = (source: string): string =>
@@ -32,6 +32,8 @@ const blankCredentials = (source: string): string =>
 export const angularFirebaseClient: FirebaseClientPort = {
   // The browser SDK and Angular have no place in the functions runtime.
   serverBannedImports: ['@angular/*'],
+
+  chooseFrameworkVersion: pinAngularForFirebase,
 
   isWired(tree, project) {
     return tree.exists(`${readProjectConfiguration(tree, project).root}/src/app/firebase.config.ts`);

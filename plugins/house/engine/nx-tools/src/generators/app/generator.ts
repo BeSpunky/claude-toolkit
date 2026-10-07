@@ -74,6 +74,12 @@ export default async function appGenerator(tree: Tree, options: AppGeneratorSche
   if (!isPresent(tree, stack.layer)) {
     throw new Error(`[app] The ${stack.id} stack needs the \`${stack.layer}\` layer, which this workspace does not have.`);
   }
+  // Firebase constrains the framework version a fresh workspace is created at (@angular/fire supports only some
+  // Angular majors), so it is asked BEFORE the app — and with it the framework — exists.
+  const wearsFirebase =
+    options.firebase ?? (csv(options.layers).includes('firebase') || detectLayers(tree).includes('firebase'));
+  if (wearsFirebase) stack.firebase?.chooseFrameworkVersion?.(tree);
+
   const { project, callback } = await stack.apps.create(tree, {
     directory,
     name: options.name,

@@ -8,13 +8,35 @@
 // Then the derivations that replaced the floats: @angular/fire from the INSTALLED Angular major and firebase from
 // that release's own range (refusing, with the choices, when no stable release exists); the Node major from the
 // project's .nvmrc; Cloud Functions' runtime from it; firebase-tools as the project's pinned devDependency.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireFromRepo } from '../../test-support/payload.mjs';
 import { workspace, SCOPE } from '../workspaces.mjs';
 
 const { writeJson, readJson } = requireFromRepo('@nx/devkit');
+const { FsTree } = requireFromRepo('nx/src/generators/tree');
+
+/**
+ * A real directory (the choice reads the INSTALLED @nx/angular's version table from disk) holding a fresh workspace
+ * right after `nx add @nx/angular`: no @angular/core yet, @angular-devkit/core at the latest major, and a stand-in
+ * @nx/angular laid out as Nx 23.3 ships it (dist/src/utils/{versions,backward-compatible-versions}.js).
+ */
+function freshAngularWorkspace(manifest) {
+  const dir = mkdtempSync(join(tmpdir(), 'house-angular-major-'));
+  const nx = join(dir, 'node_modules/@nx/angular');
+  mkdirSync(join(nx, 'dist/src/utils'), { recursive: true });
+  writeFileSync(join(nx, 'package.json'), JSON.stringify({ name: '@nx/angular', version: '23.3.0' }));
+  writeFileSync(join(nx, 'dist/src/utils/versions.js'), "exports.angularVersion = '~22.1.0'; exports.angularDevkitVersion = '~22.1.0';\n");
+  writeFileSync(
+    join(nx, 'dist/src/utils/backward-compatible-versions.js'),
+    "exports.supportedVersions = [22, 21, 20];\nexports.backwardCompatibleVersions = { 21: { angularVersion: '~21.2.0', angularDevkitVersion: '~21.2.0' }, 20: { angularVersion: '~20.3.0', angularDevkitVersion: '~20.3.0' } };\n",
+  );
+  writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest));
+  writeFileSync(join(dir, 'nx.json'), '{}');
+  return new FsTree(dir, false);
+}
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../../../plugins/house/engine/nx-tools/src');
 const SEAM = 'generators/_utils/dependencies.ts';
 
@@ -139,6 +161,25 @@ export default {
         t.ok(!deps(tree)['@angular/fire'] && !deps(tree).firebase, 'nothing declared');
       },
     })),
+    {
+      name: 'new + firebase: a fresh workspace is created at the newest Angular @angular/fire supports, and says why',
+      setup: () => freshAngularWorkspace({ name: 'shop', devDependencies: { '@angular-devkit/core': '~22.1.0', '@nx/angular': '23.3.0' } }),
+      run: (tree, ctx) => ctx.load('adapters/angular/angularfire').pinAngularForFirebase(tree),
+      expect: (tree, t, ctx) => {
+        const { ANGULARFIRE_BY_ANGULAR_MAJOR } = ctx.load('generators/_utils/firebase-compat');
+        const newest = Math.max(...Object.entries(ANGULARFIRE_BY_ANGULAR_MAJOR).filter(([, r]) => r.stable).map(([m]) => Number(m)));
+        t.equal(newest, 20, 'the fixture\'s @nx/angular table is keyed to today\'s answer');
+        t.equal(readJson(tree, 'package.json').dependencies?.['@angular/core'], '~20.3.0', '@nx/angular\'s own range for Angular 20');
+        t.equal(readJson(tree, 'package.json').devDependencies['@angular-devkit/core'], '~20.3.0', 'the devkit init added is realigned');
+        t.ok(ctx.logs.some((line) => /Angular 20 — the newest major @angular\/fire supports; upgrade when AngularFire ships 21\+/.test(line)), `said: ${ctx.logs}`);
+      },
+    },
+    {
+      name: 'an EXISTING workspace keeps its Angular — the choice is creation-time only (the client refuses there)',
+      setup: () => freshAngularWorkspace({ name: 'shop', dependencies: { '@angular/core': '~21.2.0' } }),
+      run: (tree, ctx) => ctx.load('adapters/angular/angularfire').pinAngularForFirebase(tree),
+      expect: (tree, t) => t.equal(readJson(tree, 'package.json').dependencies['@angular/core'], '~21.2.0', 'untouched'),
+    },
     {
       name: 'Angular 21 with the pair declared by hand: kept — the refusal is only for what the house would have to choose',
       setup: () => {

@@ -9,7 +9,8 @@
 // WHEN THERE IS NO ANSWER — an Angular major with no stable @angular/fire (21 and 22 as of 0.50.0), one newer than
 // the table, an Angular below what the release accepts — it REFUSES, naming what is true and the choices the developer
 // has. Writing something anyway would be the bug this exists to remove.
-import { type GeneratorCallback, type Tree, logger } from '@nx/devkit';
+import { type GeneratorCallback, type Tree, logger, readJson, writeJson } from '@nx/devkit';
+import { dirname, join } from 'node:path';
 import {
   ANGULARFIRE_BY_ANGULAR_MAJOR,
   ANGULARFIRE_TABLE_NEWEST_ANGULAR,
@@ -141,6 +142,93 @@ export function declareBrowserSdk(tree: Tree): GeneratorCallback {
     );
   }
   return declareDependencies(tree, 'firebase-client', { '@angular/fire': release.angularfire, firebase: release.firebase });
+}
+
+/**
+ * CREATION TIME ONLY: a workspace that will wear Firebase and has not chosen its Angular yet is created at the NEWEST
+ * Angular major that has a stable @angular/fire (and that the installed @nx/angular can create) — the flagship
+ * Angular + Firebase project must always be creatable, even while AngularFire lags Angular. A workspace that already
+ * declares @angular/core keeps its own; the client refuses there, with the choices, if it cannot follow.
+ *
+ * HOW the major is chosen is Nx's own mechanism: @nx/angular's generators pick every Angular package version from the
+ * DECLARED @angular/core major (its `versions(tree)` → `backwardCompatibleVersions[major]`). So this declares
+ * @angular/core at exactly @nx/angular's range for that major — and realigns the @angular-devkit/core its init added at
+ * the latest major — and @nx/angular's application generator does the rest.
+ */
+export function pinAngularForFirebase(tree: Tree): void {
+  if (declaredSpec(tree, '@angular/core') || !tree.exists('package.json')) return;
+  const nx = nxAngularVersionTable(tree);
+  const candidates = Object.entries(ANGULARFIRE_BY_ANGULAR_MAJOR)
+    .filter(([, { stable }]) => stable)
+    .map(([major]) => Number(major))
+    .filter((major) => nx.supported.includes(major))
+    .sort((a, b) => b - a);
+  const major = candidates[0];
+  if (major === undefined) {
+    throw new Error(
+      `${TAG} No Angular major has both a stable @angular/fire and support in the installed @nx/angular ` +
+        `(it supports ${nx.supported.join(', ')}). Install an @nx/angular that supports Angular ` +
+        `${Object.entries(ANGULARFIRE_BY_ANGULAR_MAJOR).filter(([, r]) => r.stable).map(([m]) => m).join('/')} and re-run.`,
+    );
+  }
+  const versions = nx.versionsFor(major);
+  writeJson(tree, 'package.json', withDependency(readJson(tree, 'package.json'), '@angular/core', versions.angularVersion));
+  if (declaredSpec(tree, '@angular-devkit/core')) {
+    writeJson(tree, 'package.json', withDependency(readJson(tree, 'package.json'), '@angular-devkit/core', versions.angularDevkitVersion));
+  }
+  if (major < nx.latest) {
+    logger.info(
+      `${TAG} Angular ${major} — the newest major @angular/fire supports; upgrade when AngularFire ships ${major + 1}+ ` +
+        `(\`nx migrate\`, then /bespunky-house:upgrade re-pins @angular/fire and firebase).`,
+    );
+  }
+}
+
+/** `pkg` with `name` set to `spec` in the block that already declares it (else `dependencies`). */
+function withDependency(pkg: Record<string, any>, name: string, spec: string): Record<string, any> {
+  const block = pkg.devDependencies?.[name] !== undefined ? 'devDependencies' : 'dependencies';
+  return { ...pkg, [block]: { ...pkg[block], [name]: spec } };
+}
+
+/**
+ * The installed @nx/angular's own Angular version table: which majors it can create, and the package versions it
+ * uses for each. Not on its public surface (its exports map hides src/utils since Nx 23), so it is read from the
+ * package's files — and if Nx moves them, this fails loudly, naming the path, instead of guessing versions.
+ */
+function nxAngularVersionTable(tree: Tree): {
+  supported: number[];
+  latest: number;
+  versionsFor: (major: number) => { angularVersion: string; angularDevkitVersion: string };
+} {
+  let root: string;
+  try {
+    root = dirname(require.resolve('@nx/angular/package.json', { paths: [tree.root] }));
+  } catch {
+    throw new Error(`${TAG} @nx/angular is not installed — the angular layer's Nx plugin creates the app. Run \`nx add @nx/angular\` first.`);
+  }
+  const candidates = ['dist/src/utils', 'src/utils'].map((dir) => join(root, dir));
+  let cause = '';
+  for (const dir of candidates) {
+    try {
+      const latest = require(join(dir, 'versions.js')) as { angularVersion: string; angularDevkitVersion: string };
+      const compat = require(join(dir, 'backward-compatible-versions.js')) as {
+        supportedVersions: number[];
+        backwardCompatibleVersions: Record<number, { angularVersion: string; angularDevkitVersion: string }>;
+      };
+      const latestMajor = Number(/\d+/.exec(latest.angularVersion)?.[0]);
+      return {
+        supported: compat.supportedVersions,
+        latest: latestMajor,
+        versionsFor: (major) => (major >= latestMajor ? latest : compat.backwardCompatibleVersions[major]),
+      };
+    } catch (error) {
+      cause = (error as Error).message.split('\n')[0]; // try the next layout
+    }
+  }
+  throw new Error(
+    `${TAG} Could not read @nx/angular's Angular version table (looked in ${candidates.join(', ')}: ${cause}) — this Nx moved it. ` +
+      `Declare "@angular/core" in package.json at the Angular major you want (one with a stable @angular/fire) and re-run.`,
+  );
 }
 
 /** Numeric x.y.z comparison (prerelease tails ignored — the table's minimums are releases). */
