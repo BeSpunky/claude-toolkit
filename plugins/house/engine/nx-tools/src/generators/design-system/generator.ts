@@ -140,6 +140,7 @@ export default async function designSystemGenerator(
   seedTemplates(tree, join(__dirname, 'files'), root, substitutions, []);
   const runtime = binding ?? NEUTRAL_BINDING;
   seedTemplates(tree, runtime.templates, root, substitutions, [...runtime.alwaysRewrite]);
+  if (!existing) binding?.pruneUnusedPeers?.(tree, root);
 
   // 5) Channel (2): the library's OWN component styles — the binding's packager, when it has one.
   binding?.openLibraryStyles(tree, root, specifier);

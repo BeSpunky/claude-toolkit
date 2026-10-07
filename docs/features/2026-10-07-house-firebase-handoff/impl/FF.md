@@ -63,3 +63,18 @@ it was fixed. Ledger: `handoffs/20261007T070000Z-ff-fanout.md`. Sub-notes: `FF-G
   executor (Nx warns) — pre-existing, not changed.
 - Pre-existing, unchanged: `design-system` has no spec, so on Angular 22 its `vitest-angular` test target fails "No tests
   found" (jest on 20 passes with no tests).
+
+## Follow-up (orchestrator, after merge)
+
+- **preflight-gate `ENSURE_LAYERS: unbound`** — the probe block rendered `$ENSURE_LAYERS`/`$EVIDENT` into its text;
+  they now reach the inner program as environment (INNER_ENV, like the roots), and the loop is `if … fi`. Merged with
+  FA's parallel fix (its render-time test inputs dropped as no longer needed). WHY MISSED: my earlier scaffold check
+  read `tail -3` + grep `FAIL`; an unbound-variable abort prints no FAIL line, and `run.sh`'s missing "all passed" line
+  and exit 1 went unread. Now every suite is judged by its exit code.
+- **shared-browser:lint** — the generated .mjs tools catch best-effort cleanups with a named `bestEffort` handler (class
+  A: regenerated, no migration). **design-system:lint** — a new DS drops the `@angular/*` peers nothing in it imports
+  (`pruneUnusedPeers`, at creation); existing ones get rung `0.50.0/prune-design-system-peers` (class B manifest), fixture.
+- **Dogfood rerun** (merged HEAD): **PASS — 56 passed, 0 failed**; the released 0.49.2 baseline's own design-system lint
+  failure is now reported as `BASE` (reference), not a failure of the run. All post-upgrade and every preset's lint pass.
+- `emulators-stop.test.sh` "restart: the new start waited for the previous suite's save" failed once in three full
+  `run.sh` runs (passes alone 4/4) — a timing flake, not FF's; flagged.

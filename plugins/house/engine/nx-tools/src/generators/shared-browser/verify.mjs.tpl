@@ -14,6 +14,8 @@ import fs from 'node:fs';
 // Screenshots land beside the recorder logs, under the shared-browser runtime dir. Honor
 // SB_RUNTIME (the CLI exports it) so an override never splits the stack — the CLI, the
 // recorder, and these screenshots all resolve the SAME base; fall back to the XDG default.
+// A best-effort step (closing, detaching, cleaning up): its failure changes nothing, so it is deliberately ignored.
+const bestEffort = () => undefined;
 const RUNTIME = process.env.SB_RUNTIME || `${process.env.XDG_RUNTIME_DIR || '/tmp'}/shared-browser`;
 const SCREENSHOTS = `${RUNTIME}/logs/screenshots`;
 
@@ -42,7 +44,7 @@ export async function injectStyle(page, css) {
   const handle = await page.addStyleTag({ content: css });
   return {
     async remove() {
-      await handle.evaluate((el) => el.remove()).catch(() => {});
+      await handle.evaluate((el) => el.remove()).catch(bestEffort);
     },
   };
 }
@@ -161,7 +163,7 @@ export async function pseudo(page, selector, state) {
   const { root } = await session.send('DOM.getDocument', { depth: 0 });
   const { nodeId } = await session.send('DOM.querySelector', { nodeId: root.nodeId, selector });
   if (!nodeId) {
-    await session.detach().catch(() => {});
+    await session.detach().catch(bestEffort);
     throw new Error(`pseudo: no element matches "${selector}".`);
   }
 
@@ -169,8 +171,8 @@ export async function pseudo(page, selector, state) {
 
   return {
     async reset() {
-      await session.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] }).catch(() => {});
-      await session.detach().catch(() => {});
+      await session.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] }).catch(bestEffort);
+      await session.detach().catch(bestEffort);
     },
   };
 }

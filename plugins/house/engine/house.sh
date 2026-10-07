@@ -1040,6 +1040,10 @@ INNER_ENV=(
   "HOUSE_ENGINE_ROOT=$ENGINE_ROOT"
   "HOUSE_GIT_NAME=$GIT_NAME"
   "HOUSE_GIT_EMAIL=$GIT_EMAIL"
+  # The layer sets the probe judges (validated ids). Environment, not rendered text, like the roots above: the
+  # preflight block then has no render-time inputs beyond its own, and an empty set is simply empty.
+  "HOUSE_ENSURE_LAYERS=${ENSURE_LAYERS:-}"
+  "HOUSE_EVIDENT_LAYERS=${EVIDENT:-}"
 )
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
 [ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (pinned firebase-tools + Google Cloud CLI + emulator ports)"
@@ -1482,9 +1486,10 @@ fi
 # resolve or build an image for, an Angular the firebase client cannot pair @angular/fire with. house-probe.mts reads
 # them with the payload's OWN pure modules (the same code the generators throw from), so the two cannot disagree. It
 # only reads; each line it prints is one refusal: <code><TAB><text, \\n-escaped>.
-_probe_out=\"\$(node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"\$HOUSE_ENGINE_ROOT/house-probe.mts\" --ensure='$ENSURE_LAYERS' --evident='$EVIDENT')\" \\
+_probe_out=\"\$(node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"\$HOUSE_ENGINE_ROOT/house-probe.mts\" --ensure=\"\${HOUSE_ENSURE_LAYERS:-}\" --evident=\"\${HOUSE_EVIDENT_LAYERS:-}\")\" \\
   || _refuse probe-failed \"[preflight] probe-failed: the project-facts probe (house-probe.mts) did not run — see its error above.\"
 while IFS=\"\$(printf '\\t')\" read -r _probe_code _probe_text; do
+  # if/fi, not \`[ … ] && …\`: an empty last line would leave the loop (and so this block) returning 1 under set -e.
   if [ -n \"\$_probe_code\" ]; then _refuse \"\$_probe_code\" \"\$(printf '%b' \"\$_probe_text\")\"; fi
 done <<_HOUSE_PROBE_
 \$_probe_out

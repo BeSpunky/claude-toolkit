@@ -246,6 +246,12 @@
       "description": "Give an existing design system its accessibility mechanisms \u2014 the z-skip-link layer (above modals) in its tokens, styles/_utils/_a11y.scss seeded, and ds.visually-hidden($focusable), ds.skip-link() and ds.skip-target() forwarded from the public SASS API (never over a mixin of the same name, nor from an _a11y.scss of the project's own \u2014 both reported) \u2014 and report how an existing app adopts the skip link and <main> landmark new apps get.",
       "implementation": "./src/migrations/0.50.0/add-design-system-a11y"
     },
+    "prune-design-system-peers": {
+      "version": "0.50.0",
+      "layer": "design-system",
+      "description": "Drop the @angular/* peerDependencies (other than @angular/core) an Angular design system declares and no file in it imports \u2014 @nx/angular declared them for the demo component the house prunes, and they failed the library's own lint (@nx/dependency-checks). Each removal is named.",
+      "implementation": "./src/migrations/0.50.0/prune-design-system-peers"
+    },
     "pin-floating-dependencies": {
       "version": "0.50.0",
       "layer": "node",

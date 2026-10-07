@@ -20,6 +20,8 @@ import { CDP_URL, loadPlaywright } from './runtime.mjs';
 // shared window over noVNC. Attaching to DRIVE it is refused so automation can't fight the human —
 // e.g. Claude yields for an OAuth/captcha step, then runs `shared-browser resume`. The lock lives in
 // SB_RUNTIME (the CLI exports it); resolve the SAME base so an override never splits the stack.
+// A best-effort step (closing, detaching, cleaning up): its failure changes nothing, so it is deliberately ignored.
+const bestEffort = () => undefined;
 const SB_RUNTIME = process.env.SB_RUNTIME || `${process.env.XDG_RUNTIME_DIR || '/tmp'}/shared-browser`;
 const OBSERVE_LOCK = `${SB_RUNTIME}/observe-only`;
 
@@ -84,7 +86,7 @@ export async function attach({ cdp = CDP_URL, pageUrl } = {}) {
     return { browser, context, page };
   } catch (err) {
     // Detach before propagating so a failed attach never leaks a CDP session.
-    await browser.close().catch(() => {});
+    await browser.close().catch(bestEffort);
     throw err;
   }
 }
@@ -102,7 +104,7 @@ export async function pages({ cdp = CDP_URL } = {}) {
     }
     return list;
   } finally {
-    await browser.close().catch(() => {});
+    await browser.close().catch(bestEffort);
   }
 }
 
@@ -115,6 +117,6 @@ export async function withPage(fn, { cdp = CDP_URL, pageUrl } = {}) {
   try {
     return await fn(page);
   } finally {
-    await browser.close().catch(() => {}); // detach only — shared browser stays up
+    await browser.close().catch(bestEffort); // detach only — shared browser stays up
   }
 }
