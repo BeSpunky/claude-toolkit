@@ -43,6 +43,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# A process's identity is its PID AND its kernel start time (PIDs are reused) — the dev engine's rule too.
+proc_start() { local s; s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 0; s="${s##*) }"; set -- $s; printf '%s' "${20:-}"; }
+is_proc() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null && { [ -z "${2:-}" ] || [ "$(proc_start "$1")" = "$2" ]; }; }
+
 DATA_DIR="$ROOT/.emulator-data"
 
 # Port-offset isolation (PORT_OFFSET, set by the dev engine for a shifted stack): shift the WHOLE
@@ -81,8 +85,47 @@ else
   mkdir -p "$ROOT/.bespunky/run"
   [ -f "$ROOT/.bespunky/run/.gitignore" ] || printf '# Running dev stacks — machine-local, never committed.\n*\n' > "$ROOT/.bespunky/run/.gitignore"
 fi
+# The invoker's temp dir, before this stack's own replaces it — where the postscript queue lives (say_to_invoker).
+INVOKER_TMPDIR="${TMPDIR:-/tmp}"
+INVOKER_TMPDIR="${INVOKER_TMPDIR%/}"
 mkdir -p "$STACK_DIR/tmp"
 export TMPDIR="$STACK_DIR/tmp"
+
+# RUN DIRECTLY, THE STATE DIR HAS NO RUN RECORD — so each script using it CLAIMS it (`claims/<pid>`), and the last one
+# out removes it (release_direct_dir) only when no other live script claims it: the next start of this suite may be
+# inside it already, waiting for this one's save. Claims and removal are serialised on a lock of `.bespunky/run`
+# (which is never removed). Under the dev engine the run record is the claim (release_stack_dir).
+with_run_lock() {   # with_run_lock <fn> [args] — runs <fn> holding the lock; without flock(1), does nothing
+  command -v flock >/dev/null 2>&1 || return 0
+  local fd rc=0
+  exec {fd}<"$(dirname "$STACK_DIR")" || return 0
+  flock "$fd" && { "$@" || rc=$?; }
+  exec {fd}<&-
+  return "$rc"
+}
+claim_direct_dir() {
+  mkdir -p "$STACK_DIR/tmp" "$STACK_DIR/claims"
+  printf '%s' "$(proc_start $$)" > "$STACK_DIR/claims/$$"
+}
+# Run directly: remove the state dir once the suite is over and no OTHER live script claims it. Called with the run
+# lock held, by whichever of the keeper and this script ends last (each one's call is harmless to the other's).
+# The script passes its own PID (its claim is the one being given up); the keeper claims nothing, so a live script
+# — its own included, which still reads the keeper's result there — keeps the dir.
+release_direct_dir() {   # release_direct_dir [own-pid]
+  [ -z "${DEV_STACK_DIR:-}" ] && [ -d "$STACK_DIR" ] || return 0
+  if [ -f "${ENTRY:-}" ] && [ "$(entry_field status)" != exited ] && is_proc "$(entry_field pid)" "$(entry_field procStart)"; then return 0; fi
+  local c
+  for c in "$STACK_DIR"/claims/*; do
+    [ -f "$c" ] && [ "${c##*/}" != "${1:-}" ] || continue
+    is_proc "${c##*/}" "$(cat "$c" 2>/dev/null)" && return 0
+  done
+  rm -rf "$STACK_DIR"
+}
+
+if [ -z "${DEV_STACK_DIR:-}" ]; then
+  with_run_lock claim_direct_dir
+  trap 'with_run_lock release_direct_dir $$ || true' EXIT
+fi
 
 # The emulator suite MUST run under the SAME projectId the app's client uses. The moment any
 # service is switched to real (e.g. real Auth), that real `projectId` is used for ALL services
@@ -230,9 +273,6 @@ LOG="$LOG_DIR/$(basename "$STACK_DIR").emulators.log"
 STOP_TIMEOUT="${EMULATORS_STOP_TIMEOUT:-120}"
 mkdir -p "$DETACHED_DIR" "$LOG_DIR"
 
-# A process's identity is its PID AND its kernel start time (PIDs are reused) — the dev engine's rule too.
-proc_start() { local s; s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 0; s="${s##*) }"; set -- $s; printf '%s' "${20:-}"; }
-is_proc() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null && { [ -z "${2:-}" ] || [ "$(proc_start "$1")" = "$2" ]; }; }
 # A sleep with no child process: under a tree-killer a child `sleep` is a leaf that keeps this script from ever
 # being one, and the stop would never reach it.
 exec {NAP_FD}<> <(:)
@@ -281,6 +321,9 @@ if [ -f "$ENTRY" ]; then
   fi
   rm -f "$ENTRY"
 fi
+# Whatever a previous suite's release removed while this one waited is this one's again.
+if [ -z "${DEV_STACK_DIR:-}" ]; then with_run_lock claim_direct_dir; fi
+mkdir -p "$STACK_DIR/tmp" "$DETACHED_DIR"
 
 bash "$ROOT/tools/reap-emulators.sh" "${REAP_ARGS[@]}"
 if [ "$OFFSET" = "0" ]; then
@@ -459,8 +502,7 @@ group_busy() {
 # finished; when the engine was killed first (Nx force-kills a stopping `nx serve` after a few seconds — a Ctrl+C
 # while the suite exports), the keeper is the last one out. It prunes through the engine's own rule (tools/dev
 # readStacks): only a stack whose serve and processes are all gone, so never a live one — and a stack that has
-# since restarted on this key has a live record of its own. Run directly (no engine), the suite keeps its dir:
-# the next start of the same suite may be waiting on this keeper, inside it.
+# since restarted on this key has a live record of its own. Run directly (no engine), see release_direct_dir.
 release_stack_dir() {
   [ -n "${DEV_STACK_DIR:-}" ] && [ -f "$ROOT/tools/dev/lib/stacks.mjs" ] || return 0
   node --input-type=module -e '
@@ -512,6 +554,7 @@ keep() {
   entry_write exited "" "$code" "$result"
   rm -f "$STOP_FILE"
   release_stack_dir
+  with_run_lock release_direct_dir || true
 }
 
 PROXY_PID=$$
@@ -541,9 +584,38 @@ TAIL_PID=$!
 # in a task log nobody reads, and the stop looks like it skipped the save. Nx names the process the person invoked
 # to every task (NX_INVOCATION_ROOT_PID): its stderr is their terminal (or an agent's output). Appended, never
 # truncated (it may be a file). Without an invoker, our own stderr is where they are looking.
+#
+# Into a capture file the invoker did NOT open for appending (`nx serve > log 2>&1`), a line appended now is written
+# over by Nx's own later output (its summary): Nx writes at its own offset. There it is queued instead, and one
+# detached waiter appends the queue after the invoker exits — the same postscript, same queue, as the Nx executors'
+# messages (@bespunky/nx-tools executors/_utils/invoker.ts), so they come out together and in order.
+invoker_eats() {   # invoker_eats <pid> — its stderr is a regular file it did not open O_APPEND
+  local flags
+  [ -f "/proc/$1/fd/2" ] || return 1
+  flags="$(sed -n 's/^flags:[[:space:]]*//p' "/proc/$1/fdinfo/2" 2>/dev/null)"
+  [ -n "$flags" ] && (( (8#$flags & 8#2000) == 0 ))
+}
+postscript_wait() {   # postscript_wait <pid> <start> <queue> — stdout is the invoker's stderr
+  while [ -n "$2" ] && [ "$(proc_start "$1")" = "$2" ] && [ "$(sed -n 's/^State:[[:space:]]*\(.\).*/\1/p' "/proc/$1/status" 2>/dev/null)" != Z ]; do nap 0.02; done
+  cat "$3" 2>/dev/null || true
+  rm -f "$3" "$3.lock"
+}
 say_to_invoker() {
-  local p="${NX_INVOCATION_ROOT_PID:-}"
-  if [ -n "$p" ] && [ "$p" != "$$" ] && [ -w "/proc/$p/fd/2" ] && { printf '%s\n' "$1" >> "/proc/$p/fd/2"; } 2>/dev/null; then return 0; fi
+  local p="${NX_INVOCATION_ROOT_PID:-}" start queue
+  if [ -n "$p" ] && [ "$p" != "$$" ] && [ -w "/proc/$p/fd/2" ]; then
+    if invoker_eats "$p"; then
+      start="$(proc_start "$p")"
+      queue="$INVOKER_TMPDIR/bespunky-nx-postscript-$p-$start.txt"
+      if printf '%s\n' "$1" >> "$queue" 2>/dev/null; then
+        if ( set -o noclobber; : > "$queue.lock" ) 2>/dev/null; then
+          ( set -m; postscript_wait "$p" "$start" "$queue" & ) </dev/null >> "/proc/$p/fd/2" 2>/dev/null
+        fi
+        return 0
+      fi
+    elif { printf '%s\n' "$1" >> "/proc/$p/fd/2"; } 2>/dev/null; then
+      return 0
+    fi
+  fi
   printf '%s\n' "$1" >&2
 }
 if [ -n "${DEV_STACK_DIR:-}" ]; then SAVING_WHERE='`tools/dev/dev ps` shows it FINISHING'; else SAVING_WHERE="the next start of this suite waits for it; its log: $LOG"; fi

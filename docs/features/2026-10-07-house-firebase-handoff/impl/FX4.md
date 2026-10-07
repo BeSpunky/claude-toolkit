@@ -80,6 +80,30 @@ Each upgrade's whole diff was the owned files changed here, plus the `--local` l
 ## For the orchestrator
 
 - Nothing to migrate: every change is in an owned artifact or the executor.
-- Left open:
-  - Direct (`nx run firebase:emulators`) suites keep their `firebase@<off>/` dir. A successor may be waiting inside it.
-  - The emulators' Ctrl+C line (`say_to_invoker`, bash `>>`) can still be written over under `> file`.
+- Nothing left open from this round (both former leftovers are closed below).
+
+## Follow-up: the two leftovers, closed (same branch)
+
+- **Direct `nx run firebase:emulators` keeps no run dir.** Run without the engine, the state dir
+  (`.bespunky/run/firebase@<off>/`) has no run record, so each `emulators.sh` CLAIMS it (`claims/<pid>`). The last one
+  out removes it, holding a `flock` on `.bespunky/run` (which is never removed). That is the script's EXIT trap, or the
+  keeper when the script was killed first.
+  - It never removes the dir while the suite is still running (keeper alive and its entry not `exited`).
+  - It never removes the dir while another live script claims it. A start waiting on the previous suite's save is
+    inside it.
+  - A waiting start re-claims and re-creates its dirs after the wait.
+  - Without `flock(1)` it does nothing, as before.
+  - Fixture, `PORT_OFFSET=<n> nx run firebase:emulators` + Ctrl+C: **before**, `detached/` and `tmp/` were left;
+    **after**, the dir is gone and the data was exported.
+- **The emulators' stop line under `> file`.** `say_to_invoker` uses the same postscript as the executors: the same
+  queue file and lock in the invoker's own TMPDIR, so one waiter prints both kinds of message in order. It applies
+  because the waiter is detached (`set -m`, reparented), so it outlives Nx's tree kill.
+  - Fixture, `nx serve > log 2>&1` + `dev stop`: **before**, the line was gone entirely (Nx's summary wrote over it);
+    **after**, it follows the summary.
+  - On the Ctrl+C path the line already survived before, because Nx prints nothing after a SIGINT.
+- Tests (`emulators-stop`):
+  - the dir is released after a supervisor SIGKILL and after a Ctrl+C;
+  - the dir is kept for a waiting restart;
+  - nothing is appended while a `>` invoker lives, and the line follows its exit.
+  - Three of these checks fail on the previous template.
+- Suites: 177 / 220 / 100 / 22 files, all ok.

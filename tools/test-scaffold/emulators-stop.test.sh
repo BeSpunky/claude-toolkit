@@ -97,13 +97,20 @@ descendants() { local c; for c in $(pgrep -P "$1"); do descendants "$c"; echo "$
 gone() { for _ in $(seq 1 "${2:-100}"); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done; return 1; }
 exported() { [ -f "$1/.emulator-data/firebase-export-metadata.json" ]; }
 signals() { grep -vx JVM-KILLED "$1/.fake-firebase-signals" | tr '\n' ' ' | sed 's/ $//'; }
-keeper_gone() {   # the detached keeper finished on its own — its last act is recording the result
-  for _ in $(seq 1 100); do grep -q '"status": "exited"' "$1/.bespunky/run/firebase@0/detached/emulators.json" 2>/dev/null && return 0; sleep 0.1; done; return 1
+keeper_gone() {   # the detached keeper finished on its own — it records its result, and (run directly, with no script
+  # left to read it) releases the state dir
+  for _ in $(seq 1 100); do
+    grep -q '"status": "exited"' "$1/.bespunky/run/firebase@0/detached/emulators.json" 2>/dev/null && return 0
+    [ -d "$1/.bespunky/run/firebase@0" ] || return 0
+    sleep 0.1
+  done
+  return 1
 }
 
 # ── 1. Nx's stop: leaf-first tree kill, then SIGKILL after a 1 s grace ─────────────────────────────
-# The invoking nx (NX_INVOCATION_ROOT_PID) — a stand-in whose stderr is a file, the person's terminal.
-sleep 300 2>"$TMP/invoker.err" & INVOKER=$!
+# The invoking nx (NX_INVOCATION_ROOT_PID) — a stand-in whose stderr is a file it APPENDS to (`>>`, a terminal or a
+# pipe behave the same): the line is written at once.
+sleep 300 2>>"$TMP/invoker.err" & INVOKER=$!
 W="$(mkws nx)"; P="$(start "$W")"; STARTED+=("$P")
 ok "nx: the suite came up" "$(ready "$W" && echo 1 || echo 0)"
 mapfile -t TREE < <(descendants "$P"; echo "$P")
@@ -113,10 +120,21 @@ for pid in "${TREE[@]}"; do kill -KILL "$pid" 2>/dev/null; done
 ok "nx: no emulator child was in the script's tree to be signalled" "$(grep -q JVM-KILLED "$W/.fake-firebase-signals" && echo 0 || echo 1)"
 ok "nx: the suite finished its save after its supervisor was SIGKILLed" "$(keeper_gone "$W" && exported "$W" && echo 1 || echo 0)"
 ok "nx: firebase-tools got exactly ONE SIGTERM (got: $(signals "$W"))" "$([ "$(signals "$W")" = TERM ] && echo 1 || echo 0)"
-ok "nx: the keeper's entry records the result" "$(grep -q '"result": "exported to' "$W/.bespunky/run/firebase@0/detached/emulators.json" && echo 1 || echo 0)"
+ok "nx: run directly, its state dir is released once the save is done" "$([ ! -d "$W/.bespunky/run/firebase@0" ] && echo 1 || echo 0)"
 ok "nx: the stop was announced while it ran" "$(grep -q 'stopping — exporting emulator data' "$W/out.log" && echo 1 || echo 0)"
 ok "nx: the invoker's terminal got 'saving emulator data in the background' at once" "$(grep -q 'saving emulator data in the background' "$TMP/invoker.err" && echo 1 || echo 0)"
 kill "$INVOKER" 2>/dev/null; INVOKER=''
+
+# ── 1b. The invoker's stderr is a file it did NOT open for appending (`nx serve > log 2>&1`): Nx writes at its own
+# offset, over anything appended — the line is queued and appended once the invoker has exited.
+sleep 300 2>"$TMP/invoker-trunc.err" & INVOKER=$!
+W="$(mkws capture)"; P="$(start "$W")"; STARTED+=("$P")
+ready "$W" >/dev/null
+kill -INT -- "-$P"; gone "$P" 100
+ok "> file: nothing is appended while the invoker still writes" "$(grep -q 'saving emulator data' "$TMP/invoker-trunc.err" && echo 0 || echo 1)"
+kill "$INVOKER" 2>/dev/null; INVOKER=''
+for _ in $(seq 1 50); do grep -q 'saving emulator data' "$TMP/invoker-trunc.err" && break; sleep 0.1; done
+ok "> file: the line follows the invoker's last write" "$(grep -q 'saving emulator data in the background' "$TMP/invoker-trunc.err" && echo 1 || echo 0)"
 
 # ── 2. A terminal's Ctrl+C: SIGINT to the whole process group ──────────────────────────────────────
 W="$(mkws ctrlc)"; P="$(start "$W")"; STARTED+=("$P")
@@ -125,6 +143,7 @@ kill -INT -- "-$P"
 gone "$P" 100
 ok "Ctrl+C: the script waits for the save and exits 0 (got $(rc "$W"))" "$(exported "$W" && grep -q 'done in .*exported to' "$W/out.log" && [ "$(rc "$W")" = 0 ] && echo 1 || echo 0)"
 ok "Ctrl+C: firebase-tools got exactly ONE SIGTERM, no SIGINT (got: $(signals "$W"))" "$([ "$(signals "$W")" = TERM ] && echo 1 || echo 0)"
+ok "Ctrl+C: run directly, the script read the result, then released the state dir" "$([ ! -d "$W/.bespunky/run/firebase@0" ] && echo 1 || echo 0)"
 
 # ── 3. A plain kill of the script: it waits, shows progress, says done ─────────────────────────────
 W="$(mkws kill)"; P="$(start "$W")"; STARTED+=("$P")
@@ -148,6 +167,7 @@ sleep 0.3
 mv "$W/out.log" "$W/out1.log"
 P2="$(start "$W")"; STARTED+=("$P2")
 ok "restart: the new start waited for the previous suite's save" "$(ready "$W" && grep -q 'previous suite of this stack is still saving' "$W/out.log" && grep -q 'previous suite finished: exported to' "$W/out.log" && echo 1 || echo 0)"
+ok "restart: the previous keeper, finishing, left the state dir the waiting start had claimed" "$([ -d "$W/.bespunky/run/firebase@0/tmp" ] && [ -f "$W/.bespunky/run/firebase@0/detached/emulators.json" ] && echo 1 || echo 0)"
 kill -TERM "$(script "$P2")"; gone "$P2" 100
 
 # ── 6. The suite dies on its own: the script fails, naming the log ─────────────────────────────────
