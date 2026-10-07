@@ -19,6 +19,7 @@
 // framework nobody has asked for yet.
 import type { GeneratorCallback, ProjectConfiguration, TargetConfiguration, Tree } from '@nx/devkit';
 import type { LayerId } from '../layers/descriptor';
+import type { Platform } from '../platform/platform';
 
 export interface StackAdapter {
   /** The adapter id. Also the value of publishable-lib's `--stack`. */
@@ -44,6 +45,12 @@ export interface StackAdapter {
    * two copies of it once disagreed on whether `@nx/angular:` counted.
    */
   readonly executors: readonly string[];
+  /**
+   * Where this stack's code runs (`src/platform`): the platform its apps are, and the DEFAULT for its libraries.
+   * Angular is `web`; plain TypeScript is `shared` — it runs anywhere until it imports something that doesn't.
+   * Also evidence for the platform classifier: a project this stack builds is at least this platform.
+   */
+  readonly platform: Platform;
 
   readonly apps?: AppPort;
   readonly libs?: LibPort;
@@ -74,6 +81,11 @@ export interface LibOptions {
   directory: string;
   importPath: string;
   tags?: string;
+  /**
+   * The library's platform — REQUIRED, so no library is created through a port without one (an untagged library
+   * is outside the platform firewall). The port writes it as the library's one `platform:` tag.
+   */
+  platform: Platform;
   /** Publishable (buildable to dist, releasable) vs a workspace-internal source library. */
   publishable: boolean;
   /** Framework component-selector prefix; ignored by stacks without components. */

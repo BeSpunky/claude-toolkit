@@ -16,6 +16,7 @@ import { type GeneratorCallback, type Tree, getProjects, readNxJson, readProject
 import type { StackAdapter } from './stack-adapter';
 import { projectDefinitionFile } from '../generators/_utils/project-files';
 import { workspaceLinking } from '../generators/_utils/linking';
+import { withPlatform, csvTags } from '../platform/platform';
 
 const noop: GeneratorCallback = () => {};
 
@@ -26,6 +27,7 @@ export const js: StackAdapter = {
   id: 'js',
   layer: 'js',
   executors: JS_EXECUTORS,
+  platform: 'shared',
 
   ownsProject(tree, project) {
     try {
@@ -63,7 +65,7 @@ export const js: StackAdapter = {
           unitTestRunner: 'vitest',
           strict: true,
           skipFormat: true,
-          tags: options.tags,
+          tags: withPlatform(csvTags(options.tags), options.platform).join(','),
           useProjectJson: projectDefinitionFile(tree, options.directory).kind === 'project.json',
         } as Parameters<typeof libraryGenerator>[1])) ?? noop;
       // Under `paths` @nx/js's own alias IS the link; under `workspaces` the port completes what @nx/js began

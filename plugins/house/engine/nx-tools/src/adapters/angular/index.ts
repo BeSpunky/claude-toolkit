@@ -95,6 +95,8 @@ export const angular: StackAdapter = {
     return ANGULAR_BUILDERS.some((prefix) => executor.startsWith(prefix)) || tree.exists(`${config.root}/ng-package.json`);
   },
 
+  platform: 'web',
+
   ownsApp(project) {
     return ANGULAR_APP_BUILDERS.has(project.targets?.build?.executor ?? '');
   },

@@ -27,6 +27,8 @@
  */
 export interface TsNode {
   getEnd(): number;
+  /** Where the node's own text starts (past leading trivia) — needs the source file unless parents are set. */
+  getStart(sourceFile?: TsSourceFile): number;
   readonly parent?: TsNode;
 }
 

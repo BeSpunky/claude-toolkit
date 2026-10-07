@@ -20,6 +20,11 @@ export interface PublishableLibGeneratorSchema {
   /** Comma-separated Nx tags applied to the library. */
   tags?: string;
   /**
+   * Where the library's code runs: `web`, `server` or `shared` (src/platform). Default: a `platform:` tag in
+   * `tags`, else the stack's own (angular → web, js → shared).
+   */
+  platform?: 'web' | 'server' | 'shared';
+  /**
    * Sibling package names (short names take the workspace's scope) to declare as cross-lib deps on this lib's own package.json.
    * Linked the workspace's way: under `paths` linking a real caret range (`"<scope>/<dep>": "^<sibling version>"`, the
    * published-consumer contract — in-repo resolution is the path alias); under `workspaces` linking a sibling in the

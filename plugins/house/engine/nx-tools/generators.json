@@ -111,6 +111,11 @@
       "schema": "./src/generators/publishable-lib/schema.json",
       "description": "Scaffold a BeSpunky-standard publishable library through a STACK ADAPTER (--stack: `angular` → @nx/angular:library, ng-packagr FESM2022, standalone-only, prefix bs, Vitest (vitest-angular), modern nested ng-package.json with entryFile src/index.ts and NO umdModuleIds; `js` → @nx/js with bundler tsc, no ng-package.json). Default stack: the workspace's most specific. Lands in the workspace's libs dir under the workspace's own npm scope. Post-processes to the house standard: a per-project `nx release` block (version.currentVersionResolver git-tag + fallbackCurrentVersionResolver disk) and nx-release-publish.packageRoot dist/{projectRoot}. LINKING MODEL: in-repo resolution is the tsconfig.base.json PATH ALIAS the base generator writes — NOT package-manager workspaces (`workspace:*`) and NOT TS project references. Cross-lib deps (--workspaceDeps) are declared on the lib's own package.json as REAL caret ranges (`^<sibling's current version>`) and allowed through the stack's packager (Angular: ng-package.json `allowedNonPeerDependencies`). Test-only peers (vitest) are marked optional. --nonAngular is a deprecated alias of --stack=js. Never touches nx.json."
     },
+    "platform": {
+      "factory": "./src/generators/platform/generator",
+      "schema": "./src/generators/platform/schema.json",
+      "description": "Classify a project for the ESLint platform firewall: set its one `platform:` tag — `web` (browser/SSR; may depend on web + shared), `server` (Cloud Functions/Node; server + shared) or `shared` (isomorphic; shared only, no platform-bound package). `--platform` states it; without it the platform is INFERRED from the stack that builds the project, its imports of platform-bound packages (firebase-admin, firebase, the client framework) and the platforms of the workspace projects it imports — with the reason printed, and a refusal (with the evidence) when it mixes web and server. Written to project.json or the package.json `nx` block, whichever defines it. The command the firewall's lint guidance names: `nx g @bespunky/nx-tools:platform <project>`."
+    },
     "secondary-entrypoint": {
       "factory": "./src/generators/secondary-entrypoint/generator",
       "schema": "./src/generators/secondary-entrypoint/schema.json",

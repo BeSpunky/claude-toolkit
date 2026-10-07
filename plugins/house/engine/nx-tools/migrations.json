@@ -179,6 +179,12 @@
       "layer": "agent",
       "description": "The web layer's per-tool `<folder>-playwright-cache` volume (~/.cache/ms-playwright) folds into ONE persisted ~/.cache volume (the agent layer's `<folder>-cache`), which also keeps the shared browser's own Playwright runtime and every other tool cache across rebuilds. Removes the house-written mount (and the house comment above it) so it does not stay nested inside the new one; a project-written one is reported. The unused Docker volume lives on the host and is reported by name for `docker volume rm` — a cache, so nothing is lost.",
       "implementation": "./src/migrations/0.49.0/fold-playwright-cache-into-home-cache"
+    },
+    "close-the-platform-firewall": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "Close the platform firewall: each platform constraint gains onlyDependOnLibsWithTags (web/server → own + shared, shared → shared), a platform:shared constraint is added, and every untagged project is classified from evidence (reported, with the command for the ones it cannot classify) — an untagged library no longer slips firebase-admin into a web app.",
+      "implementation": "./src/migrations/0.50.0/close-the-platform-firewall"
     }
   }
 }

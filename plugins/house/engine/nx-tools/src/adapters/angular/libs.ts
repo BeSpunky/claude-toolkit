@@ -3,6 +3,7 @@ import { type Tree, type GeneratorCallback, readJson, writeJson, updateJson, log
 import type { LibPort } from '../stack-adapter';
 import { workspaceLinking } from '../../generators/_utils/linking';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
+import { withPlatform, csvTags } from '../../platform/platform';
 
 const noop: GeneratorCallback = () => {};
 
@@ -58,7 +59,7 @@ export const angularLibs: LibPort = {
         strict: true,
         unitTestRunner: options.publishable ? 'vitest-angular' : 'vitest-analog',
         skipFormat: true,
-        tags: options.tags,
+        tags: withPlatform(csvTags(options.tags), options.platform).join(','),
         skipTsConfig: !ownAlias,
       } as Parameters<typeof libraryGenerator>[1]))) ?? noop;
     if (!ownAlias) {

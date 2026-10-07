@@ -27,6 +27,7 @@ import { attachCapabilities } from './attach';
 import { resolveAppsDir } from '../_utils/workspace-layout';
 import { joinWorkspace } from '../_utils/project-files';
 import { workspaceIdentity } from '../_utils/workspace-identity';
+import { setProjectPlatform } from '../../platform/platform';
 
 interface AppGeneratorSchema {
   // Workspace-relative directory for the app (positional arg 0). Default: `<appsDir>/<name>`.
@@ -82,6 +83,8 @@ export default async function appGenerator(tree: Tree, options: AppGeneratorSche
 
   // The framework's generator decides the app's files; the WORKSPACE decides whether that makes it a member.
   joinWorkspace(tree, directory);
+  // Classified at birth: the stack's platform is where its apps run (src/platform) — the tag the firewall keys on.
+  setProjectPlatform(tree, project, stack.platform);
 
   // 2) ATTACH every capability the workspace wears.
   const active = new Set([...detectLayers(tree), ...inRegistryOrder(csv(options.layers))]);
