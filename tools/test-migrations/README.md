@@ -55,6 +55,11 @@ export default {
 `ladder` may also be set per case, for a rung whose behaviour depends on an earlier one having run
 (`0.33.1` is written that way — the real ladder runs `0.33.0` first, and the two interact).
 
+**Order within one version is a contract this suite states.** Rungs of the same version run in
+`migrations.json` file order — held only by V8's stable sort under Nx's `lt(a, b) ? -1 : 1` comparator, not by
+any Nx guarantee. So where one rung creates input another reads, a cross-rung case reads the order straight out
+of `migrations.json` and proves it in one run, with the reasons in its header: `cases/0.50.0-ladder-order.mjs`.
+
 Assertion helpers on `t`: `ok(cond, message)`, `exists`, `missing`, `has`, `hasNot`,
 `occurrences(path, needle, n)`, `wired(path, providerFn)` / `notWired(…)` — where *wired* means called on
 a line that is not a comment.
