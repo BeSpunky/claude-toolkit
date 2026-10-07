@@ -23,6 +23,12 @@
 //     the current templates — the 0.49 copies read `proxied`, and an UPGRADE_PARTIAL run skips the generator.
 //   - .bespunky/dev.json (project state): drops the `?portOffset=${OFFSET}` URL switch the house seeded on the
 //     emulators process — the page no longer reads it.
+//   - The house's own words that this change made false, where they still stand VERBATIM (anything reworded is the
+//     project's, and stays): the .gitignore block's `<app>:serve --portOffset` (the flag is `--port-offset`), and
+//     the devcontainer's dev-server port comment that said every Firebase port must forward to the SAME host number
+//     (now only the Emulator UI wants that). Neither file is regenerated whole — the .gitignore block is appended
+//     once and the devcontainer merge never rewrites a comment — so without this they would explain a world that
+//     is gone, forever.
 // WHAT IT REPORTS, never edits: the project's own code importing what the owned files no longer export
 // (`emulatorFor`, `portOffset`, `offsetUrl`, `resolvePortOffset` → `emulatorEndpoint(service)`), and a dev server
 // served over https, where the SDK cannot reach an emulator through the page's origin.
@@ -87,6 +93,52 @@ export default function routeEmulatorsThroughOrigin(tree: Tree): void {
   }
   reportHttpsDevServers(tree, apps);
   dropPortOffsetSwitch(tree);
+  retellRetiredText(tree);
+}
+
+// ── the house's words this change made false ────────────────────────────────────────────────────────────────
+
+/** Each: the file, the house's 0.49 lines (verbatim, any indentation), and what replaces them at that indentation. */
+const RETIRED_TEXT: Array<{ file: string; old: string[]; next: string[]; what: string }> = [
+  {
+    file: '.gitignore',
+    what: 'the port-offset stacks comment (the flag is --port-offset now)',
+    old: ['# Isolated port-offset stacks (`<app>:serve --portOffset`): each gets its own data dir'],
+    next: ['# Isolated port-offset stacks (`nx serve <app> --port-offset=N`): each gets its own data dir'],
+  },
+  {
+    file: '.devcontainer/devcontainer.json',
+    what: 'the dev-server port comment (the app no longer needs its emulator ports on the same host number)',
+    old: [
+      '// Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a',
+      '// host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.',
+      '// KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;',
+      '// real Google OAuth is pinned to whichever holds the dev-server port). The shared browser runs INSIDE the',
+      '// container and reaches them on loopback, so it works for every container.',
+    ],
+    next: [
+      "// The app reaches every Firebase emulator through the dev server's own origin (proxy.conf.mjs relays it),",
+      '// so the app works on whatever host port this is forwarded to. The emulator ports below are for the',
+      '// Emulator UI: its page dials each emulator directly, so the UI is complete in a host tab only while they',
+      '// forward to the same number. Real Google OAuth is registered for one origin (the base dev-server port);',
+      '// the shared browser runs INSIDE the container and reaches everything on loopback.',
+    ],
+  },
+];
+
+function retellRetiredText(tree: Tree): void {
+  for (const { file, old, next, what } of RETIRED_TEXT) {
+    if (!tree.exists(file)) continue;
+    const text = tree.read(file, 'utf8') ?? '';
+    const eol = text.includes('\r\n') ? '\r\n' : '\n';
+    const lines = text.split(eol);
+    const at = lines.findIndex((_, i) => old.every((line, k) => lines[i + k]?.trim() === line));
+    if (at < 0) continue;
+    const indent = /^[ \t]*/.exec(lines[at])![0];
+    lines.splice(at, old.length, ...next.map((line) => `${indent}${line}`));
+    tree.write(file, lines.join(eol));
+    logger.info(`${TAG} ${file}: rewrote ${what}.`);
+  }
 }
 
 // ── environment files ────────────────────────────────────────────────────────────────────────────────────────
