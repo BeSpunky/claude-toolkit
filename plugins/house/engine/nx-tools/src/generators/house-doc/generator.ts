@@ -44,6 +44,7 @@ import { SERVE_EXECUTOR } from '../_utils/dev-server';
 import { resolveWorkspaceLayout } from '../_utils/workspace-layout';
 import { detectLinking } from '../_utils/linking';
 import { houseProjectHome } from '../_utils/project-files';
+import { recordedHouseProjects } from '../_utils/house-targets';
 import { branchModelFromOption, readBranchModel } from '../_utils/branch-model';
 import { branchDocs } from './branch-docs';
 
@@ -156,6 +157,11 @@ export default async function houseDocGenerator(
     options.branchProjection !== undefined ? branchModelFromOption(options.branchProjection) : readBranchModel(tree),
   );
   Object.assign(flags, branches.flags);
+  // THE HOUSE'S OWN PROJECTS — the ones whose targets the house re-asserts (and a project may extend). Read from the
+  // record those generators keep, never from the layer list: it is written by the very merge the doc describes, so
+  // the doc names exactly the projects it applies to, and a project with none (the `agent` floor alone) is told nothing.
+  const houseProjects = recordedHouseProjects(tree);
+  flags['house-targets'] = houseProjects.length > 0;
   const tokens: Record<string, string> = {
     ...branches.tokens,
     DS_ROOT: dsRoot,
@@ -167,6 +173,7 @@ export default async function houseDocGenerator(
     FUNCTIONS_ROOT: functions?.root ?? '',
     FUNCTIONS_PROJECT: functions?.name ?? '',
     LINKING: linking,
+    HOUSE_PROJECTS: houseProjects.map((name) => `\`${name}\``).join(', '),
     NX_TOOLS_VERSION: nxTools,
     PLUGIN_VERSION: plugin,
     // The stamp's layer list. A RECORD of what was applied, never an input to a later decision — the sync
