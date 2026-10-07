@@ -455,6 +455,22 @@ process.on('SIGTERM', () => process.exit(0));
       await dev(owner, 'release', 'firebase@0', `--lock=${scriptLock}`);
       ok('…once nothing holds it, release gives it up (record, lock, state dir)', !existsSync(join(run, 'firebase@0.json')) && !existsSync(join(run, 'firebase@0')) && !existsSync(scriptLock));
 
+      // S3-8: the old claim's last holder lets go LATE — after the key was claimed again. Its release names its own lock,
+      // which the new record does not: the new stack keeps its record, state dir and TMPDIR.
+      const lockA = join(run, 'locks', 'a.lock');
+      const a = await holder(lockA);
+      await dev(owner, 'claim', 'firebase', `--pid=${a.pid}`, `--lock=${lockA}`, `--ports=hub=${port}`);
+      process.kill(-a.pid, 'SIGKILL');
+      const lockB = join(run, 'locks', 'b.lock');
+      const b = await holder(lockB);
+      const reclaim = await dev(owner, 'claim', 'firebase', `--pid=${b.pid}`, `--lock=${lockB}`, `--ports=hub=${port}`);
+      const tmpB = /^STACK_TMP='([^']+)'$/m.exec(reclaim.out)?.[1];
+      await dev(owner, 'release', 'firebase@0', `--lock=${lockA}`);
+      ok("S3-8: a late release of the key's OLD claim leaves the new claim alone (record, state dir, TMPDIR)", reclaim.code === 0 && JSON.parse(readFileSync(join(run, 'firebase@0.json'), 'utf8')).lock === lockB && existsSync(join(run, 'firebase@0')) && tmpB && existsSync(tmpB));
+      process.kill(-b.pid, 'SIGKILL');
+      await until(() => !readStacks([repo]).length, 3000);
+      await dev(owner, 'release', 'firebase@0', `--lock=${lockB}`);
+
       // S3-9: the local-server rule, in code. Under an AI agent the base ports are never taken.
       const agent = { ...owner, CLAUDECODE: '1' };
       const zero = await dev(agent, 'serve', 'site', '--no-shared-browser', '--port-offset=0', '--dry-run');
