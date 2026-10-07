@@ -151,8 +151,8 @@ function mergeValue(base: Json, theirs: Json, ours: Json, hasRecord: boolean, pa
   if (path.length === 1 && SET_KEYS.has(path[0]) && Array.isArray(ours) && Array.isArray(theirs)) {
     return mergeSet(Array.isArray(base) && hasRecord ? base : [], theirs, ours);
   }
-  // A scalar (or an array that is one value — `commands`, `format`).
-  if (same(theirs, ours)) return clone(ours);
+  // A scalar (or an array that is one value — `commands`, `format`). Equal in meaning → the project's own form.
+  if (same(theirs, ours)) return clone(theirs);
   if (hasRecord && base !== undefined) {
     if (same(theirs, base)) return clone(ours); // the house's own previous value — follows the house
     if (same(ours, base)) return clone(theirs); // the project's edit, and the house did not change it — kept
@@ -163,12 +163,18 @@ function mergeValue(base: Json, theirs: Json, ours: Json, hasRecord: boolean, pa
   return clone(ours);
 }
 
-/** Set merge: the house's entries, minus those the project removed, plus those the project added. */
+/**
+ * Set merge: the house's entries, minus those the project removed, plus those the project added — in the PROJECT's
+ * order and in its own form (a member equal in meaning is the project's copy), the house's arrivals appended.
+ */
 function mergeSet(base: Json[], theirs: Json[], ours: Json[]): Json[] {
   const has = (list: Json[], item: Json) => list.some((other) => same(other, item));
   const removedByProject = base.filter((item) => !has(theirs, item));
-  const addedByProject = theirs.filter((item) => !has(base, item) && !has(ours, item));
-  return [...ours.filter((item) => !has(removedByProject, item)), ...addedByProject].map(clone);
+  // The project's entries the house still declares, or that the house never declared (the project's additions);
+  // one the house wrote before (in the record) and has since dropped goes.
+  const kept = theirs.filter((item) => has(ours, item) || !has(base, item));
+  const arriving = ours.filter((item) => !has(theirs, item) && !has(removedByProject, item));
+  return [...kept, ...arriving].map(clone);
 }
 
 function isPlainObject(value: Json): value is Record<string, Json> {

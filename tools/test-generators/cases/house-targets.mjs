@@ -110,7 +110,7 @@ export default {
       (t, { targets, overrides }) => {
         t.equal(targets.deploy.options, { command: HOUSE.deploy.options.command, cwd: '{workspaceRoot}', args: 'a' }, 'options');
         t.equal(targets.deploy.dependsOn, ['build', 'lint'], 'dependsOn: the house\'s set, nothing removed without a record');
-        t.equal(targets.deploy.inputs, [...HOUSE.deploy.inputs, '{workspaceRoot}/x'], 'inputs: the project\'s entry kept');
+        t.equal(targets.deploy.inputs, ['{workspaceRoot}/x', ...HOUSE.deploy.inputs], 'inputs: the project\'s entry kept, in its place; the house\'s arrive after');
         t.equal(overrides.map((o) => [o.key, o.was, o.conflict]), [['options.command', 'old', false]], 'reported, as unknowable');
       },
     ),

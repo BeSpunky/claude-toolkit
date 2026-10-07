@@ -17,8 +17,8 @@
 // name or canonical root, like the generator finds it), and the `assets` key when that leaves it empty. Any other
 // asset is the project's: kept. A `.env` asset of another shape is the project's too — kept, and reported, because
 // configDir now reads that file in place and the copy is redundant.
-import { type Tree, logger, readProjectConfiguration, updateProjectConfiguration } from '@nx/devkit';
-import { houseProjectHome } from '../../generators/_utils/project-files';
+import { type Tree, logger, readProjectConfiguration } from '@nx/devkit';
+import { houseProjectHome, updateProjectConfigInPlace } from '../../generators/_utils/project-files';
 import { resolveAppsDir } from '../../generators/_utils/workspace-layout';
 
 const TAG = '[migrate 0.50.0 read-functions-params-in-place]';
@@ -56,9 +56,13 @@ export default function readFunctionsParamsInPlace(tree: Tree): void {
   }
   if (kept.length === options.assets.length) return;
 
-  if (kept.length) options.assets = kept;
-  else delete options.assets;
-  updateProjectConfiguration(tree, functions.name, config);
+  // In place: only the house entry goes (the emptied key with it) — nothing else in project.json moves.
+  updateProjectConfigInPlace(tree, functions.root, (onDisk) => {
+    const build = onDisk.targets?.build?.options as { assets?: Asset[] } | undefined;
+    if (!build?.assets) return;
+    build.assets = build.assets.filter((asset) => !isHouseEntry(asset));
+    if (!build.assets.length) delete build.assets;
+  });
   logger.info(
     `${TAG} ${functions.name}:build no longer copies .env into the bundle — the emulator and deploy read the params ` +
       `files from ${functions.root} in place (firebase.json → functions.configDir).`,
