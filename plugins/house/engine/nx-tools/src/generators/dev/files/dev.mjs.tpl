@@ -19,7 +19,7 @@
 // Node built-ins only, and no project node_modules: this must serve a Python or Go repo exactly as it serves
 // an Nx one. `nx serve <app>` (the @bespunky/nx-tools:serve executor) is a thin wrapper over this file.
 import { execFileSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { get } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
@@ -30,7 +30,7 @@ import { attachBrowser, detachRoute, foreignOwner, sharedBrowserUrl } from './li
 import { DECLARATION_PATH, DeclarationError, boundPorts, declaredPorts, loadDeclaration, pickApp, planApp, primaryOf } from './lib/declaration.mjs';
 import { PortError, isPortFree, portBlock, resolvePortOffset } from './lib/ports.mjs';
 import { descendants, runStack } from './lib/stack.mjs';
-import { ensureStackDir, isAlive, ownerOf, processStart, readStacks, removeRecord, stackKey, survivors, writeRecord } from './lib/stacks.mjs';
+import { ensureStackDir, isAlive, ownerOf, processStart, readStacks, removeRecord, stackKey, survivors, unfinished, writeRecord } from './lib/stacks.mjs';
 import { collectWorktrees, matchWorktree, servedSlug, worktreeKey, worktreeLabel } from './lib/worktrees.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -48,6 +48,54 @@ const log = (m) => console.log(`[serve] ${m}`);
 const warn = (m) => console.error(`[serve] WARNING: ${m}`);
 
 class UsageError extends Error {}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * How long a stop waits for a stack's DETACHED work (an emulator suite saving its data) before it says so and
+ * stops waiting. Nothing is killed when it runs out — the work finishes on its own, and `ps` shows it.
+ */
+const DETACHED_TIMEOUT_MS = (Number(process.env.DEV_STOP_TIMEOUT) || 180) * 1000;
+
+/** What a piece of detached work is doing right now, in words. */
+const doing = (w) => `${w.id}: ${w.doing ?? w.status}`;
+
+/**
+ * Wait for a stack's detached work to finish, saying what it is doing every few seconds. Resolves
+ * `{ ok, finished, pending }`: `finished` the entries that ended (with their `result`), `pending` what still runs
+ * when the wait ran out. `ok` is false when work is still pending or any of it ended in failure (`code` non-zero).
+ */
+async function awaitDetached(tree, key, { say, timeoutMs = DETACHED_TIMEOUT_MS, every = 5000 } = {}) {
+  const watched = new Map();
+  const start = Date.now();
+  let next = start + every;
+  for (;;) {
+    const running = unfinished(tree, key);
+    for (const w of running) watched.set(w.file, w);
+    if (!running.length) break;
+    if (Date.now() - start >= timeoutMs) {
+      for (const w of running) {
+        say(`${doing(w)} — still running after ${Math.round(timeoutMs / 1000)}s; not waiting any longer. Nothing was killed: it finishes on its own (pid ${w.pid}${w.log ? `, log ${w.log}` : ''}); tools/dev/dev ps shows it.`);
+      }
+      return { ok: false, finished: [], pending: running };
+    }
+    if (Date.now() >= next) {
+      next += every;
+      for (const w of running) say(`…${doing(w)} (${Math.round((Date.now() - start) / 1000)}s)`);
+    }
+    await sleep(250);
+  }
+  // Re-read what each watched entry ended with (its owner writes the result as its last act).
+  const finished = [];
+  for (const file of watched.keys()) {
+    try {
+      finished.push(JSON.parse(readFileSync(file, 'utf8')));
+    } catch {
+      /* removed by its owner — nothing to report */
+    }
+  }
+  return { ok: finished.every((w) => !w.code), finished, pending: [] };
+}
 
 const USAGE = `Usage:
   tools/dev/dev serve [app] [--worktree[=<branch|slug|path>]] [--port-offset=<n|auto>] [--skip=<id,...>]
@@ -358,8 +406,31 @@ async function serve(opts) {
       if (route.registered) detachRoute(tree.path, process.env, slug);
     },
   });
+  // The processes are down; what they detached (an emulator suite saving its data) may not be. The stack is not
+  // stopped until that is done — and its state dir, where that work keeps its files, stays until then.
+  const detached = await awaitDetached(tree.path, key, { say: log });
+  for (const w of detached.finished) (w.code ? warn : log)(`${w.id}: ${w.result ?? `ended (code ${w.code ?? 0})`}`);
+  if (!result.success) reportFailure(result.failures, plan, detached);
   dropRecord();
-  return result.success;
+  return result.success && detached.ok;
+}
+
+/**
+ * Say, unmissably, that the stack FAILED: which process died and how, the command it ran, and where its output is.
+ * On stderr — and before the engine exits non-zero, which is the whole of what an Nx run can be told: Nx reports a
+ * CONTINUOUS task that ends (as `<app>:serve` is) as succeeded or stopped whatever its exit code, so these lines are
+ * the only place an Nx run says it failed.
+ */
+function reportFailure(failures, plan, detached) {
+  const err = (m) => console.error(`[serve] ${m}`);
+  err('✖ the stack FAILED and was stopped:');
+  for (const f of failures) {
+    const proc = plan.running.find((p) => p.id === f.id);
+    err(`  ${f.id} exited ${f.signal ? `on ${f.signal}` : `with code ${f.code}`}${proc ? ` — it ran: ${proc.display}` : ''}`);
+  }
+  err('  Its output is above.');
+  for (const w of detached.finished) if (w.log) err(`  ${w.id} log: ${w.log}`);
+  if (process.env.DEV_NX_ROOT) err('  (Nx will list `serve` as succeeded/stopped — it reports any end of a continuous task that way; this exit code is 1.)');
 }
 
 /** The exact command that stops a stack, as printed for whoever holds its handle. */
@@ -388,7 +459,9 @@ async function ps(opts) {
     return w ? `${w.branch ?? w.path}${w.isMain ? ' [main]' : ''}` : s.tree;
   };
   const rows = [];
-  for (const s of stacks) rows.push({ ...s, treeLabel: label(s), portStates: s.state === 'foreign' ? [] : await portStates(s) });
+  for (const s of stacks) {
+    rows.push({ ...s, treeLabel: label(s), portStates: s.state === 'foreign' ? [] : await portStates(s), detached: s.state === 'foreign' ? [] : unfinished(s.tree, s.key) });
+  }
   if (opts.json) {
     console.log(JSON.stringify(rows, null, 2));
     return true;
@@ -405,15 +478,16 @@ async function ps(opts) {
         ? `up ${since(s.startedAt)}`
         : s.state === 'orphaned'
           ? `ORPHANED — its serve died without stopping ${survivors(s).map((p) => `${p.id} (pid ${p.pid})`).join(', ')}; stop them with: tools/dev/dev stop ${s.app} --offset=${s.offset}`
-          : `${s.state} — written on ${s.host}, cannot be checked from here`;
+          : s.state === 'finishing'
+            ? 'FINISHING — stopped, but still completing work it detached (below); nothing to stop, it ends on its own'
+            : `${s.state} — written on ${s.host}, cannot be checked from here`;
     console.log(`${s.key}  ${s.treeLabel}  pid ${s.pid}  ${state}  owner ${s.owner}${mine}`);
     console.log(`    ${s.url}`);
     if (s.portStates.length) console.log(`    ports ${s.portStates.map((p) => `${p.name}=${p.port}${p.listening ? '' : ' (not listening)'}`).join('  ')}`);
+    for (const w of s.detached ?? []) console.log(`    ${doing(w)} (pid ${w.pid}${w.log ? `, log ${w.log}` : ''})`);
   }
   return true;
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Stop ONE stack by its handle: SIGTERM to the serve's own PID (its graceful path — it stops each process tree
@@ -421,11 +495,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * signal that makes an emulator suite skip its export), wait for it to exit, then confirm the stack's ports are
  * free. Never escalates to a name, a port kill or SIGKILL: what it cannot prove it owns, it reports.
  */
-async function stopOne(record, { timeoutMs = 60000 } = {}) {
+async function stopOne(record, { timeoutMs = DETACHED_TIMEOUT_MS + 60000 } = {}) {
+  const say = (m) => console.log(`[stop] ${record.key}: ${m}`);
   // An ORPHANED stack has no serve left to stop it gracefully: its surviving processes (each verified to be the
   // very process the serve spawned) get one SIGTERM each, with their descendants — what the serve would have sent.
+  // A FINISHING one is already stopped: nothing is signalled, its detached work is only waited for.
   const pids =
-    record.state === 'orphaned' ? survivors(record).flatMap((p) => [...descendants(p.pid), p.pid]) : [record.pid];
+    record.state === 'orphaned'
+      ? survivors(record).flatMap((p) => [...descendants(p.pid), p.pid])
+      : record.state === 'finishing'
+        ? []
+        : [record.pid];
   for (const pid of pids) {
     try {
       process.kill(pid, 'SIGTERM');
@@ -433,13 +513,28 @@ async function stopOne(record, { timeoutMs = 60000 } = {}) {
       if (err?.code !== 'ESRCH') return { ok: false, why: `could not signal pid ${pid}: ${err.message}` };
     }
   }
+  // The serve waits for its detached work (an emulator export, ~30 s) before it exits — say what it is waiting on,
+  // so a stop that takes half a minute reads as progress, not as a hang.
   const running = () => pids.filter((pid) => isAlive(pid));
-  const deadline = Date.now() + timeoutMs;
-  while (running().length && Date.now() < deadline) await sleep(200);
-  if (running().length) {
-    return { ok: false, why: `pid ${running().join(', ')} still shutting down after ${Math.round(timeoutMs / 1000)}s (an emulator export can be slow) — check again with tools/dev/dev ps` };
+  const start = Date.now();
+  let next = start + 5000;
+  while (running().length && Date.now() - start < timeoutMs) {
+    await sleep(200);
+    if (Date.now() >= next) {
+      next += 5000;
+      const work = unfinished(record.tree, record.key);
+      say(`…${work.length ? work.map(doing).join('; ') : 'waiting for its processes to stop'} (${Math.round((Date.now() - start) / 1000)}s)`);
+    }
   }
-  if (record.state === 'orphaned') removeRecord(record.tree, record.key, record.pid);
+  if (running().length) {
+    return { ok: false, why: `pid ${running().join(', ')} still shutting down after ${Math.round(timeoutMs / 1000)}s — nothing was killed; check again with tools/dev/dev ps` };
+  }
+  // The serve reported its own detached work; one that died without waiting for it (or a finishing stack) has not.
+  const detached = await awaitDetached(record.tree, record.key, { say });
+  for (const w of detached.finished) say(w.result ?? `${w.id} ended (code ${w.code ?? 0})`);
+  if (detached.pending.length) return { ok: false, why: 'stopped, but its detached work is still finishing (above)' };
+  if (!detached.ok) return { ok: false, why: `stopped, but ${detached.finished.filter((w) => w.code).map((w) => w.id).join(', ')} did not finish cleanly (above)` };
+  if (record.state !== 'live') removeRecord(record.tree, record.key, record.pid);
   // The serve is gone; its children were waited for, but a socket can outlive its process by a moment.
   let held = [];
   for (let i = 0; i < 25; i++) {
@@ -464,7 +559,7 @@ async function stop(opts) {
     const tree = opts.worktree === undefined ? (trees.find((w) => w.isCurrent) ?? trees[0]) : await selectWorktree(trees, opts.worktree);
     scope = [tree.path];
   }
-  const live = readStacks(scope).filter((s) => (s.state === 'live' || s.state === 'orphaned') && (!opts.app || s.app === opts.app) && (opts.offset === undefined || s.offset === opts.offset));
+  const live = readStacks(scope).filter((s) => ['live', 'orphaned', 'finishing'].includes(s.state) && (!opts.app || s.app === opts.app) && (opts.offset === undefined || s.offset === opts.offset));
   const others = live.filter((s) => s.owner !== me);
   const targets = opts.anyOwner ? live : live.filter((s) => s.owner === me);
 
@@ -481,7 +576,7 @@ async function stop(opts) {
   }
   let ok = true;
   for (const s of targets) {
-    console.log(`[stop] stopping ${s.key} (pid ${s.pid}, ${s.tree})…`);
+    console.log(s.state === 'finishing' ? `[stop] ${s.key} is already stopped and finishing its detached work — waiting for it…` : `[stop] stopping ${s.key} (pid ${s.pid}, ${s.tree})…`);
     const res = await stopOne(s);
     console.log(res.ok ? `[stop] ${s.key} stopped — ports free: ${Object.entries(s.ports ?? {}).map(([n, p]) => `${n}=${p}`).join(' ')}` : `[stop] ${s.key}: ${res.why}`);
     ok &&= res.ok;

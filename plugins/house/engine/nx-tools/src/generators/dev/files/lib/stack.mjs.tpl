@@ -36,7 +36,8 @@ export function descendants(pid) {
 
 /**
  * Run the declared processes as parallel children in OUR foreground process group, and resolve when all
- * have exited: `{ success }`.
+ * have exited: `{ success, failures }` — `failures` names each child whose own exit failed the stack
+ * (`{ id, code, signal }`), so whoever reports the stack can say WHICH process died, not only that one did.
  *
  * Signal discipline (the reason this is bespoke rather than N independent runs) — the rule is decided by WHO
  * delivered the signal, and the signal's name says who that almost always is:
@@ -69,7 +70,7 @@ export function descendants(pid) {
 export function runStack({ children, cwd, onStop, onSpawn, log }) {
   return new Promise((resolve) => {
     if (children.length === 0) {
-      resolve({ success: true });
+      resolve({ success: true, failures: [] });
       return;
     }
 
@@ -78,6 +79,7 @@ export function runStack({ children, cwd, onStop, onSpawn, log }) {
     let remaining = children.length;
     let stopping = false;
     let failed = false;
+    const failures = [];
     let stopHandled = false;
 
     const runOnStop = () => {
@@ -137,7 +139,10 @@ export function runStack({ children, cwd, onStop, onSpawn, log }) {
       // shape it takes: a non-zero exit, a SIGKILL from the OOM killer, a segfault. Reading every signal as a
       // clean stop made `nx serve` report success for a stack that had crashed.
       const interrupted = signal === 'SIGINT' || code === 130;
-      if (!stopping && !interrupted && code !== 0) failed = true;
+      if (!stopping && !interrupted && code !== 0) {
+        failed = true;
+        failures.push({ id: children[i].id, code, signal });
+      }
       // An interrupted child means the terminal stopped the GROUP: every sibling got the same SIGINT. Treat it as
       // the group stop it is (onGroupStop) — signalling the siblings again here would be the double signal.
       if (interrupted && !stopping) onGroupStop();
@@ -152,7 +157,7 @@ export function runStack({ children, cwd, onStop, onSpawn, log }) {
       if (--remaining === 0) {
         cleanup();
         runOnStop();
-        resolve({ success: !failed });
+        resolve({ success: !failed, failures });
       }
     };
 
