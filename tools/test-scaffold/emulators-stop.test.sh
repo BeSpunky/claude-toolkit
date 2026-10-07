@@ -156,7 +156,9 @@ ok "SIGKILL of the script: the keeper notices, stops the suite once, and it save
 W="$(mkws restart)"; P="$(start "$W")"; STARTED+=("$P")
 ready "$W" >/dev/null
 kill -KILL -- "-$P"          # the supervisor gave up at once; the save is still running
-sleep 0.3
+# Deterministic, never a sleep: the restart comes once the stack is FINISHING (its script gone, its keeper saving).
+finishing() { for _ in $(seq 1 100); do (cd "$1" && DEV_OWNER=test node tools/dev/dev.mjs ps 2>/dev/null) | grep -q 'firebase@0 .*FINISHING' && return 0; sleep 0.1; done; return 1; }
+ok "restart: the killed run's stack is FINISHING (its keeper still saving)" "$(finishing "$W" && echo 1 || echo 0)"
 mv "$W/out.log" "$W/out1.log"
 P2="$(start "$W")"; STARTED+=("$P2")
 ok "restart: the new start's claim waited for the previous suite's save" "$(ready "$W" && grep -q "firebase@0 — this stack's previous run — is still finishing" "$W/out.log" && exported "$W" && echo 1 || echo 0)"
@@ -203,10 +205,9 @@ ok "serve gone: the keeper saves, then removes the stack's record and state dir"
 bash -c 'exec -a "node dev.mjs serve" sleep 300' & LIVE=$!
 W="$(mkws spared)"; P="$(under_engine "$W" "$LIVE")"; STARTED+=("$P")
 ready "$W" >/dev/null
+KEEPER="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$W/.bespunky/run/app@0/detached/emulators.json" 2>/dev/null)"
 kill -KILL -- "-$P"
-sleep 0.5
-for _ in $(seq 1 100); do exported "$W" && grep -q '"status": "exited"' "$W/.bespunky/run/app@0/detached/emulators.json" 2>/dev/null && break; sleep 0.1; done
-sleep 1
+gone "$KEEPER" 100   # the keeper's last act is its prune: once it is gone, whatever it was going to remove is removed
 ok "serve live (or a new stack on the key): the keeper leaves its record and state dir" "$([ -f "$W/.bespunky/run/app@0.json" ] && [ -d "$W/.bespunky/run/app@0" ] && echo 1 || echo 0)"
 kill "$LIVE" 2>/dev/null
 

@@ -163,11 +163,25 @@ export interface DevServerPort {
   /** The leaf for `project`, carrying `preserved` (the options a user tuned on the previous leaf). */
   leaf(tree: Tree, project: string, preserved: Record<string, unknown>): TargetConfiguration;
   /**
-   * Point the app's dev-server at a dev proxy config (workspace-relative). True when set (or already set); false
-   * when the app has no dev-server of this stack's to configure — the caller reports it.
+   * Point the app's dev-server at a dev proxy config (workspace-relative) — set when it names none. What became of
+   * it is the answer, never a guess: the caller reports every outcome but `wired` (see ProxyWiring).
    */
-  useProxy(tree: Tree, project: string, proxyConfig: string): boolean;
+  useProxy(tree: Tree, project: string, proxyConfig: string): ProxyWiring;
 }
+
+/**
+ * Whether an app's dev-server serves through a given proxy config. Only `wired` means it does; each other case
+ * carries what a person needs to make it so:
+ *   - `foreign`: the dev-server already names a proxy config of the project's own — kept, because it is theirs;
+ *     `where` is the option's path (`options`, or `configurations.<name>`), `proxyConfig` the file it names;
+ *   - `unconfigurable`: the app's dev-server runs an executor this stack does not configure;
+ *   - `none`: the app has no dev-server at all (yet — a later sync wires it once one exists).
+ */
+export type ProxyWiring =
+  | { status: 'wired' }
+  | { status: 'foreign'; target: string; where: string; proxyConfig: string }
+  | { status: 'unconfigurable'; target: string; executor: string }
+  | { status: 'none' };
 
 /**
  * The library itself is created by `publishable-lib` through the SAME adapter's `libs` port — a design system

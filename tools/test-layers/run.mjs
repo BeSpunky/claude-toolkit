@@ -613,11 +613,9 @@ checkAsync('an Nx app wired to the house serve executor: HOUSE.md serves through
   const a = await artifacts(tree, registry.detectLayers(tree));
   ok(a.house.includes('`yarn nx serve <app>` is the one command') && a.house.includes('http://localhost:4200'), 'nx serve + the Angular base port');
   ok(a.house.includes('yarn nx serve <app> --no-emulators'), 'the Nx face keeps --no-emulators');
-  // One deliberate exception: a SECOND stack of the same app in the same tree is the engine's (Nx shares one
-  // `<app>:serve` per workspace), and *Running stacks* says so. Everywhere else the Nx face is the command.
-  const outsideStacks = a.house.replace(/### Running stacks[\s\S]*?(?=\n### |\n## )/, '');
-  ok(a.house.includes('### Running stacks') && a.house.includes('tools/dev/dev serve <app> --port-offset=auto`. A second `yarn nx serve <app>`'), 'the second-stack exception is documented, with the Nx face named');
-  ok(!outsideStacks.includes('tools/dev/dev serve <app> --'), 'engine commands rendered where the Nx face exists');
+  // A SECOND stack of the same app in the same tree is just a second serve: every `nx serve` is its own stack.
+  ok(a.house.includes('### Running stacks') && a.house.includes('just serve it again — `yarn nx serve <app>` claims the next free block'), 'a second stack is the Nx face again');
+  ok(!a.house.includes('tools/dev/dev serve <app> --'), 'engine serve commands never rendered where the Nx face exists');
   ok(/, and\n- the \*\*shared co-driven browser/.test(a.house), 'the serve list is one list (no blank line left by a removed block)');
 });
 
@@ -1338,6 +1336,29 @@ checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-serv
   await generator('serve')(tree, { project: 'shop' });
   angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: false });
   ok(tree.read('apps/shop/project.json', 'utf8') === once, 'a re-run changed project.json');
+});
+
+checkAsync('firebase client on an app whose dev server has its own proxy config: kept, and told what to add (R4-1)', async (ok) => {
+  const tree = angularShop();
+  tree.write('apps/shop/src/app/app.config.ts', "import { ApplicationConfig } from '@angular/core';\nexport const appConfig: ApplicationConfig = { providers: [] };\n");
+  await generator('serve')(tree, { project: 'shop' });
+  const config = JSON.parse(tree.read('apps/shop/project.json', 'utf8'));
+  config.targets['dev-server'].options.proxyConfig = 'apps/shop/proxy.api.mjs';
+  tree.write('apps/shop/project.json', JSON.stringify(config));
+  const { angular } = require_(join(BUILD, 'src/adapters/angular'));
+  const { logger } = require_('@nx/devkit');
+  const warned = [];
+  const warn = logger.warn;
+  logger.warn = (message) => warned.push(String(message));
+  try {
+    angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: true });
+  } finally {
+    logger.warn = warn;
+  }
+  const t = JSON.parse(tree.read('apps/shop/project.json', 'utf8')).targets;
+  ok(t['dev-server'].options.proxyConfig === 'apps/shop/proxy.api.mjs', `the project's choice kept: ${t['dev-server'].options.proxyConfig}`);
+  ok(tree.exists('apps/shop/proxy.local.mjs'), 'the proxy.local.mjs seam is seeded');
+  ok(warned.some((w) => w.includes('uses a proxy config of its own') && w.includes("import { emulatorRoutes } from './proxy.conf.mjs';")), `warned: ${warned.join(' | ') || '(nothing)'}`);
 });
 
 checkAsync('a first scaffold: the Firebase core, arriving after the web seeding, still declares the emulators for served apps', async (ok) => {

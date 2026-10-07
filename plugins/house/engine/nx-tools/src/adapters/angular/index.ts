@@ -257,12 +257,24 @@ export const angular: StackAdapter = {
     },
 
     // The dev-server's OWN option (Angular's `proxyConfig`), so a direct `nx run <app>:dev-server` gets it too;
-    // set-if-absent, so a project that points elsewhere keeps its choice. Through setLeafOption, which keeps the
-    // `serve` / `dev-stack` mirror of the leaf true.
+    // set-if-absent, so a project that points elsewhere keeps its choice — and is TOLD, by the caller: a proxy config
+    // of its own, in the leaf's options or any configuration, is a dev server that does not serve this one. Through
+    // setLeafOption, which keeps the `serve` / `dev-stack` mirror of the leaf true.
     useProxy(tree, project, proxyConfig) {
-      const leaf = projectOf(tree, project)?.targets?.['dev-server'];
-      if (!leaf || !DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) return false;
-      return setLeafOption(tree, project, 'proxyConfig', proxyConfig);
+      const target = 'dev-server';
+      const leaf = projectOf(tree, project)?.targets?.[target];
+      if (!leaf) return { status: 'none' };
+      if (!DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) {
+        return { status: 'unconfigurable', target, executor: leaf.executor ?? '(none — a command target)' };
+      }
+      const named = [
+        ['options', leaf.options?.proxyConfig],
+        ...Object.entries(leaf.configurations ?? {}).map(([name, c]) => [`configurations.${name}`, c?.proxyConfig]),
+      ] as const;
+      const foreign = named.find(([, value]) => value !== undefined && value !== proxyConfig);
+      if (foreign) return { status: 'foreign', target, where: foreign[0], proxyConfig: String(foreign[1]) };
+      setLeafOption(tree, project, 'proxyConfig', proxyConfig);
+      return { status: 'wired' };
     },
   },
 

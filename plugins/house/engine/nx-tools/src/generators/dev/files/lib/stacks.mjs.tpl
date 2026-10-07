@@ -167,8 +167,19 @@ export function isAlive(pid) {
   }
 }
 
+/** A process that has exited but not been reaped yet — a zombie answers `kill -0`, and is nobody's stack any more. */
+function isZombie(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2)[0] === 'Z';
+  } catch {
+    return false;
+  }
+}
+
 /** Is `pid` still the very process that was recorded (alive, and started at the recorded kernel time)? */
-export const isSameProcess = (pid, start) => Number.isInteger(pid) && pid > 0 && isAlive(pid) && (!start || processStart(pid) === start);
+export const isSameProcess = (pid, start) =>
+  Number.isInteger(pid) && pid > 0 && isAlive(pid) && !isZombie(pid) && (!start || processStart(pid) === start);
 
 /** The live members of process group `pgid` (Linux; elsewhere none). */
 export function groupMembers(pgid) {
