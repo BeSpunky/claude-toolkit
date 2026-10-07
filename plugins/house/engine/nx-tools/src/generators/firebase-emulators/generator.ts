@@ -65,6 +65,10 @@
 //                        both read, projected from emulator-ports.ts), secrets push, cloud-linkage banner, and
 //                        the seed applier (tools/seed/apply.mjs), and the declarative seed worlds
 //                        (world.mjs and the seeds README are user-owned once written).
+//   - tools/emulator-project.mjs, tools/emulator-secrets.cjs, tools/functions-esbuild.config.cjs — what a local run
+//                        can reach: the suite's offline `demo-` project id (the real one only when environment.ts
+//                        commits a real service), and the Functions emulator's inert secrets — written by every
+//                        functions build (the esbuild config's plugin) and overlaid at launch.
 //   - root eslint.config.mjs — best-effort insertion of the fail-closed `platform:` firewall (src/platform):
 //                        web/server depend only on their own + shared projects, shared only on shared, each
 //                        banning the packages bound to another platform; untagged projects are classified then.
