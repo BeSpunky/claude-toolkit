@@ -155,10 +155,37 @@ const PROVIDER = /^[a-z][a-z0-9-]*$/;
 const TARGET = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const BACKEND = /^[a-z0-9][a-z0-9-]*$/;
 
-/** The message for an outdated (bare-string) `deploys` — it carries its own fix. */
-export const outdatedDeploys = (field, note) =>
-  `${field}: a bare string is no longer a deploys value — replace it with "deploys": { "note": ${JSON.stringify(note)} } ` +
-  '(same meaning: a note binds nothing). The house upgrade (/bespunky-house:upgrade, @bespunky/nx-tools 0.50.0+) migrates it automatically.';
+/**
+ * An outdated (bare-string) `deploys`: the field, what is wrong, and its one exact rewrite. What to DO about it is
+ * not the problem's to say — it depends on where the fix stands (`outdatedRemedy` below), so it is rendered apart.
+ */
+export const outdatedDeploys = (field, note) => ({
+  field,
+  problem: 'a bare string is no longer a deploys value',
+  rewrite: `"deploys": { "note": ${JSON.stringify(note)} }`,
+});
+
+/**
+ * Where an outdated copy's fix stands — the one concept every outdated message is rendered through:
+ *   - `rewrite`: nothing has rewritten it yet → the house upgrade's migration applies it, or a human approves the
+ *     exact edit;
+ *   - `lands`: this branch's copy already carries the rewrite and the copy IN FORCE (the integration line's) does
+ *     not yet → it resolves when this branch lands on `line`; there is nothing else to do.
+ */
+export const outdatedRemedy = {
+  rewrite: () => ({ resolution: 'rewrite', line: null }),
+  lands: (line) => ({ resolution: 'lands', line }),
+};
+
+/** One outdated problem as the line a human or Claude reads, its remedy included. */
+export function outdatedMessage(o, remedy = outdatedRemedy.rewrite()) {
+  if (remedy.resolution === 'lands') {
+    return `${o.field}: ${o.problem} on the integration line's copy — this branch's copy already has the object form (${o.rewrite}); ` +
+      `it resolves when this branch lands on "${remedy.line}". Nothing else to do: no upgrade, no edit.`;
+  }
+  return `${o.field}: ${o.problem} — replace it with ${o.rewrite} (same meaning: a note binds nothing). ` +
+    'Run the house upgrade (/bespunky-house:upgrade, @bespunky/nx-tools 0.50.0+), whose migration applies it, or propose this exact rewrite to the human.';
+}
 
 /** Problems with one `deploys` value (`field` names it in the messages); a bare string goes to `outdated`. */
 function deploysErrors(field, d, err, outdated) {
@@ -199,18 +226,19 @@ function deploysErrors(field, d, err, outdated) {
 /** Every problem with a declaration, as `field: message` strings. Empty = valid. */
 export function validate(m) {
   const { errors, outdated } = check(m);
-  return [...errors, ...outdated];
+  return [...errors, ...outdated.map((o) => outdatedMessage(o))];
 }
 
 /**
- * A declaration's problems, split: `errors` make it no model at all; `outdated` are format-only problems with an
- * exact rewrite (see `deploys` above) — the model they describe, and its projection, are unaffected.
+ * A declaration's problems, split: `errors` make it no model at all (`field: message` strings); `outdated` are
+ * format-only problems with an exact rewrite (`{ field, problem, rewrite }`, see `deploys` above, rendered by
+ * `outdatedMessage`) — the model they describe, and its projection, are unaffected.
  */
 export function check(m) {
   const errors = [];
   const outdatedErrors = [];
   const err = (field, msg) => errors.push(`${field}: ${msg}`);
-  const outdated = (msg) => outdatedErrors.push(msg);
+  const outdated = (o) => outdatedErrors.push(o);
   if (!isObj(m)) return { errors: ['(root): the declaration must be a JSON object'], outdated: [] };
 
   for (const k of Object.keys(m)) if (!TOP_KEYS.includes(k)) err(k, 'unknown field (the vocabulary is closed)');

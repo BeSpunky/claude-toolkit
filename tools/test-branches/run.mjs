@@ -372,7 +372,7 @@ const cases = {
     assert.match(res.out, /main, development/);
     const j = r.json(['status', '--json']);
     assert.equal(j.code, 3);
-    assert.deepEqual(j.data, { state: 'undeclared', source: null, projection: null, protected: ['main', 'development'], protectedPatterns: [], notes: [], reason: 'no .bespunky/branches.json on the integration line' });
+    assert.deepEqual(j.data, { state: 'undeclared', source: null, projection: null, protected: ['main', 'development'], protectedPatterns: [], notes: [], reason: 'no .bespunky/branches.json on the integration line', outdated: null });
     for (const cmd of [['describe'], ['plan', 'promote', 'staging'], ['verify']]) assert.equal(r.run(cmd).code, 3, cmd.join(' '));
   },
 
@@ -747,19 +747,22 @@ const cases = {
     legacy.stages[0].deploys = 'publishes "pkg" to npm';
     r.write('.bespunky/branches.json', `${JSON.stringify(legacy, null, 2)}\n`);
     r.git('commit', '-qam', 'legacy note');
-    const fix = /stages\[0\]\.deploys: a bare string .*"deploys": \{ "note": "publishes \\"pkg\\" to npm" \}.*house upgrade.*migrates it automatically/;
+    const fix = /stages\[0\]\.deploys: a bare string .*replace it with "deploys": \{ "note": "publishes \\"pkg\\" to npm" \}.*Run the house upgrade \(\/bespunky-house:upgrade.*propose this exact rewrite/;
 
     const st = r.json(['status', '--json']);
     assert.equal(st.code, 0, st.err);
     assert.equal(st.data.state, 'declared', 'the projection is unaffected by the format, so the model stays in force');
     assert.equal('deploys' in st.data.projection, false);
     assert.ok(st.data.notes.some((n) => fix.test(n)), `status notes carry the fix: ${st.data.notes}`);
+    assert.equal(st.data.outdated.resolution, 'rewrite', 'nothing has migrated it: the remedy is the rewrite');
+    assert.deepEqual(st.data.outdated.problems.map((o) => o.field), ['stages[0].deploys']);
     const pl = r.run(['plan', 'start', 'feat', 'x']);
     assert.equal(pl.code, 0, `plan still reads it: ${pl.err}`);
     for (const args of [['describe'], ['verify']]) {
       const res = r.run(args);
       assert.equal(res.code, 1, `${args} refuses`);
       assert.match(res.err, fix, `${args} prints the rewrite`);
+      assert.match(res.err, /Refusing until it is rewritten as shown — run the house upgrade/);
     }
     const file = path.join(SCRATCH, `legacy-${seq}.json`);
     fs.writeFileSync(file, JSON.stringify(legacy));
@@ -776,6 +779,60 @@ const cases = {
     assert.equal(r.run(['describe']).code, 0);
     assert.match(r.run(['verify']).out, /projection matches the model/);
     assert.deepEqual(r.json(['status', '--json']).data.notes, []);
+  },
+
+  'deploys outdated on the integration line: a branch that already carries the rewrite resolves on landing; one that does not is told to rewrite'() {
+    const r = repo();
+    r.branch('development');
+    r.declare('two-line');
+    const legacy = r.model();
+    legacy.stages[0].deploys = 'App Hosting auto-rollout';
+    r.write('.bespunky/branches.json', `${JSON.stringify(legacy, null, 2)}\n`);
+    r.git('commit', '-qam', 'legacy note'); // on development: the copy in force is outdated
+    const rewrite = /stages\[0\]\.deploys: .*replace it with "deploys": \{ "note": "App Hosting auto-rollout" \}.*\/bespunky-house:upgrade/;
+    const lands = /stages\[0\]\.deploys: a bare string is no longer a deploys value on the integration line's copy — this branch's copy already has the object form \("deploys": \{ "note": "App Hosting auto-rollout" \}\); it resolves when this branch lands on "development"\. Nothing else to do: no upgrade, no edit\./;
+
+    // (b) a feature branch that has NOT migrated it: same guidance as on the line itself.
+    r.git('switch', '-q', '-c', 'feat/untouched', 'development');
+    let st = r.json(['status', '--json']);
+    assert.equal(st.code, 0, st.err);
+    assert.deepEqual({ ...st.data.outdated, problems: undefined }, { resolution: 'rewrite', line: null, problems: undefined });
+    assert.ok(st.data.notes.some((n) => rewrite.test(n)), `rewrite guidance: ${st.data.notes}`);
+    assert.match(r.run(['status']).err, rewrite, 'plain status prints the same note');
+    for (const args of [['describe'], ['verify']]) {
+      const res = r.run(args);
+      assert.equal(res.code, 1, `${args} refuses`);
+      assert.match(res.err, rewrite);
+      assert.doesNotMatch(res.err, /lands on/);
+    }
+
+    // (a) a branch whose own copy already has the object form (the house upgrade ran here): it resolves on landing.
+    r.git('switch', '-q', '-c', 'feat/upgraded', 'development');
+    legacy.stages[0].deploys = { note: legacy.stages[0].deploys };
+    r.write('.bespunky/branches.json', `${JSON.stringify(legacy, null, 2)}\n`);
+    r.git('commit', '-qam', 'house upgrade: deploys object form');
+    st = r.json(['status', '--json']);
+    assert.equal(st.code, 0, st.err);
+    assert.equal(st.data.source, 'refs/heads/development', 'the integration line still holds the copy in force');
+    assert.deepEqual({ ...st.data.outdated, problems: undefined }, { resolution: 'lands', line: 'development', problems: undefined });
+    assert.ok(st.data.notes.some((n) => lands.test(n)), `lands note: ${st.data.notes}`);
+    assert.ok(!st.data.notes.some((n) => /house upgrade|replace it with/.test(n)), `no upgrade/edit advice: ${st.data.notes}`);
+    assert.equal(r.run(['plan', 'start', 'feat', 'y']).code, 0, 'plan still reads it');
+    for (const args of [['describe'], ['verify']]) {
+      const res = r.run(args);
+      assert.equal(res.code, 1, `${args} still refuses — the model in force is unchanged`);
+      assert.match(res.err, lands);
+      assert.match(res.err, /Refusing until this branch lands on "development" — it already carries the rewrite; nothing else to do/);
+      assert.doesNotMatch(res.err, /house upgrade|replace it with/);
+    }
+
+    // Landing it is the whole fix.
+    r.sw('development');
+    r.merge('feat/upgraded');
+    st = r.json(['status', '--json']);
+    assert.equal(st.data.outdated, null);
+    assert.deepEqual(st.data.notes, []);
+    assert.equal(r.run(['describe']).code, 0);
   },
 
   'evidence --app-hosting: backends, live branches and drift against the declared bindings; opt-in and degrading'() {
@@ -1110,7 +1167,7 @@ const cases = {
   },
 
   'status --json: exactly the Amendment 2 shape in every state, protected always effective'() {
-    const KEYS = ['state', 'source', 'projection', 'protected', 'protectedPatterns', 'notes', 'reason'];
+    const KEYS = ['state', 'source', 'projection', 'protected', 'protectedPatterns', 'notes', 'reason', 'outdated'];
     const r = withOrigin(repo());
     r.git('push', '-q', 'origin', 'main:develop'); // a §3 name that exists only on the remote
     let j = r.json(['status', '--json']);

@@ -16,10 +16,13 @@
 // A chosen copy must itself be readable AND valid; one that is not is UNREADABLE (never guessed around). The one
 // exception is a copy whose only problems are OUTDATED (model.mjs `check`: a format with one exact rewrite that
 // leaves the projection unchanged — a bare-string `deploys`): it is the declared model it always was, and each
-// problem goes into `notes`, fix included, so every reader of `status` sees what to rewrite.
+// problem goes into `notes`, remedy included, so every reader of `status` sees what to do. That remedy depends on
+// WHERE the fix stands (model.mjs `outdatedRemedy`): when the working tree's own copy already has no outdated
+// problem but the integration line's still does, this branch carries the rewrite and it resolves on landing —
+// telling such a branch to "run the upgrade" again would be wrong. The resolution rides in `outdated`.
 import fs from 'node:fs';
 import path from 'node:path';
-import { FILE, canonical, UNDECLARED_PROTECTED, isSchemaMajor1, check } from './model.mjs';
+import { FILE, canonical, UNDECLARED_PROTECTED, isSchemaMajor1, check, outdatedMessage, outdatedRemedy } from './model.mjs';
 
 function parse(text) {
   try {
@@ -45,8 +48,10 @@ const uniq = (xs) => [...new Set(xs)];
 /**
  * @returns {{ state: 'declared'|'undeclared'|'unreadable', declared: boolean, model: object|null,
  *             source: string|null, projection: object|null, protected: string[], protectedPatterns: string[],
- *             notes: string[], reason: string|null }}
- * `protected` / `protectedPatterns` are always the EFFECTIVE set for the state.
+ *             notes: string[], reason: string|null,
+ *             outdated: null|{ resolution: 'rewrite'|'lands', line: string|null, problems: object[] } }}
+ * `protected` / `protectedPatterns` are always the EFFECTIVE set for the state. `outdated` is set only on a declared
+ * copy in an outdated format: its problems and where their fix stands (model.mjs `outdatedRemedy`).
  */
 export function resolveModel(git, top) {
   const notes = [];
@@ -60,14 +65,19 @@ export function resolveModel(git, top) {
     return text === null ? null : { ref, model: parse(text), sha: git.sha(ref) };
   };
 
-  const declared = (model, source) => {
+  /** `migratedHere`: the integration line a working-tree copy WITHOUT outdated problems would land on, if any. */
+  const declared = (model, source, migratedHere = null) => {
     const why = unreadableWhy(model, source);
     if (why) return unreadable(why, source);
     const { errors, outdated } = check(model);
-    if (errors.length) return unreadable(`${source}: ${errors.length} validation error(s): ${[...errors, ...outdated].join('; ')}`, source, model.projection);
-    for (const o of outdated) notes.push(`${source}: ${o}`);
+    if (errors.length) return unreadable(`${source}: ${errors.length} validation error(s): ${[...errors, ...outdated.map((o) => outdatedMessage(o))].join('; ')}`, source, model.projection);
+    const remedy = migratedHere ? outdatedRemedy.lands(migratedHere) : outdatedRemedy.rewrite();
+    for (const o of outdated) notes.push(`${source}: ${outdatedMessage(o, remedy)}`);
     const p = model.projection;
-    return { state: 'declared', declared: true, model, source, projection: p, protected: [...(p.protected ?? [])], protectedPatterns: [...(p.protectedPatterns ?? [])], notes, reason: null };
+    return {
+      state: 'declared', declared: true, model, source, projection: p, protected: [...(p.protected ?? [])], protectedPatterns: [...(p.protectedPatterns ?? [])], notes, reason: null,
+      outdated: outdated.length ? { ...remedy, problems: outdated } : null,
+    };
   };
   // Unreadable protects the whole §3 list — plus, when the copy's projection is itself readable, its own list
   // (never fewer protections than a copy declares).
@@ -75,13 +85,13 @@ export function resolveModel(git, top) {
     state: 'unreadable', declared: false, model: null, source: source ?? null, projection: null,
     protected: uniq([...UNDECLARED_PROTECTED, ...(Array.isArray(projection?.protected) ? projection.protected : [])]),
     protectedPatterns: uniq(Array.isArray(projection?.protectedPatterns) ? projection.protectedPatterns : []),
-    notes, reason,
+    notes, reason, outdated: null,
   });
   const undeclared = (reason, { remotes = ['origin'], extra = null } = {}) => ({
     state: 'undeclared', declared: false, model: null, source: null, projection: null,
     protected: uniq([...existing(remotes), ...(extra?.protected ?? [])]),
     protectedPatterns: uniq(extra?.protectedPatterns ?? []),
-    notes, reason,
+    notes, reason, outdated: null,
   });
 
   /** Among copies of the SAME line (local and remote-tracking), the one in force. */
@@ -115,7 +125,10 @@ export function resolveModel(git, top) {
     }
     const chosen = pick(copies, I);
     if (chosen.model !== undefined && canonical(chosen.model) !== canonical(local)) notes.push(`this tree's copy of ${FILE} differs from the one on "${I}" — the integration line's copy is the model in force`);
-    return declared(chosen.model, chosen.ref);
+    // This tree already carries the rewrite (it reads as a model with no outdated problem) → the in-force copy's
+    // outdated format resolves when this branch lands on I.
+    const migratedHere = check(local).outdated.length === 0 ? I : null;
+    return declared(chosen.model, chosen.ref, migratedHere);
   }
 
   for (const name of UNDECLARED_PROTECTED) {
