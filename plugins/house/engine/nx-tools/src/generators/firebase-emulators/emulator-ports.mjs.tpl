@@ -12,8 +12,9 @@
 //                                                                       (a one-off suite's own — tools/seed/build-seeds.sh)
 //
 // Node built-ins only.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { fileURLToPath } from 'node:url';
 
 /** { defaults: name → firebase-tools' own port, alwaysOn: [names], nested: name → { key → port name } } */
 export const SUITE = {{SUITE}};
@@ -90,8 +91,16 @@ export async function freeOffset(emulators) {
   return null;
 }
 
-const [command, ...args] = process.argv.slice(2);
-if (command) {
+// Run as a program, never when imported. Compared by REAL path (a symlinked or logical spelling of the same file).
+const isMain = (() => {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+const [command, ...args] = isMain ? process.argv.slice(2) : [];
+if (isMain) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
   if (command === 'ports') {
     for (const port of new Set(Object.values(suitePorts(read(args[0]).emulators)))) console.log(port);
@@ -110,7 +119,7 @@ if (command) {
     }
     console.log(offset);
   } else {
-    console.error(`emulator-ports.mjs: unknown command ${command} (ports | shift | free-offset)`);
+    console.error(`emulator-ports.mjs: unknown command ${command ?? '(none)'} (ports | shift | free-offset)`);
     process.exit(2);
   }
 }
