@@ -38,9 +38,17 @@
 // targetOf() shifts every target by the same offset.
 import { existsSync, readFileSync } from 'node:fs';
 
-// The stack's port offset (0 for the base stack; the dev engine sets it only for a shifted one).
+// The stack's port offset — set by the dev engine for every process of a stack (0 on the base stack).
 const rawOffset = Number(process.env.PORT_OFFSET ?? 0);
 const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
+// A dev server the engine did not start (`nx run <app>:dev-server`, the leaf, run by hand) belongs to no stack: it
+// relays to the BASE ports' suite — in a worktree, ANOTHER tree's emulators, holding another tree's data. Said loudly.
+if (!process.env.DEV_STACK_DIR) {
+  console.error(
+    '[proxy] This dev server is not part of a dev stack (no DEV_STACK_DIR): its emulator relay targets the BASE ports' +
+      `${offset ? ` + ${offset}` : ''} — whichever suite holds them, which in a worktree is another tree's. Serve with \`nx serve <app>\` (or tools/dev/dev serve).`,
+  );
+}
 
 // Emulator ports — single-sourced from firebase.json at the workspace root (the dev-server's cwd), so changing a
 // port in one place is enough. Falls back to the house default if unreadable.

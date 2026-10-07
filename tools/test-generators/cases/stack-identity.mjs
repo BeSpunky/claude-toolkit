@@ -14,6 +14,20 @@ export default {
   name: 'stack identity · serve is its own stack, dev-stack the shared one, the runtime port table',
   cases: [
     {
+      // S3-5: an e2e against a dev-stack is told where ITS stack's emulators are — the fragment declares them as exports.
+      name: "the Firebase dev fragment exports the suite's emulator hosts, at the stack's ports",
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        await ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: 'acme' });
+        ctx.fragment = ctx.load('generators/firebase-emulators/dev-fragment').firebaseFragment(tree);
+      },
+      expect: (tree, t, ctx) => {
+        const emulators = ctx.fragment.processes.find((p) => p.id === 'emulators');
+        t.ok(emulators?.exports?.FIREBASE_AUTH_EMULATOR_HOST === '127.0.0.1:${PORT:auth}' && emulators.exports.FIRESTORE_EMULATOR_HOST === '127.0.0.1:${PORT:firestore}', JSON.stringify(emulators?.exports));
+        t.ok(Object.values(emulators.exports).every((v) => Object.keys(emulators.ports).includes(/PORT:([a-z0-9_-]+)/.exec(v)[1])), 'every export names a port the process declares');
+      },
+    },
+    {
       // serve-options must reach BOTH engine targets: `serve` (what is typed) and `dev-stack` (what e2e depends on).
       name: 'serve-options puts host on the dev-server leaf, serve and dev-stack',
       setup: () => {
