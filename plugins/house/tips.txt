@@ -14,3 +14,4 @@ A dark-first design? Set $default-mode: 'dark' in the design system's _tokens.sc
 After an upgrade, UPGRADE_VERIFY names the one command that builds, lints and tests what it rewrote
 House containers keep your logins across rebuilds — Claude, and every tool that logs in under ~/.config (gh, git through it, firebase)
 Need a system package in the container? Add it to .devcontainer/os-packages.txt — it is built into the image, so rebuilds reuse it
+Deploying to Firebase App Hosting? Its Root Directory must be the app (--root-dir <the app's dir>) — ask Claude, it knows both deploy modes
