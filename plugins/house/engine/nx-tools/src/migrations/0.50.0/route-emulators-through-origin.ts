@@ -20,9 +20,15 @@
 //   - The house's "Local emulator endpoints" comment, when it is still the verbatim text, is replaced: it told the
 //     reader to keep the devcontainer's forwardPorts in step, which the browser no longer depends on.
 //   - The generator-owned client glue (firebase*.config.ts, emulator-overrides.ts, proxy.conf.mjs) is rewritten to
-//     the current templates — the 0.49 copies read `proxied`, and an UPGRADE_PARTIAL run skips the generator.
+//     the current templates — the 0.49 copies read `proxied`, and an UPGRADE_PARTIAL run skips the generator — and
+//     proxy.local.mjs, the project's own routes that proxy.conf.mjs merges, is seeded beside it (once, never again).
+//   - The app's dev server is pointed at proxy.conf.mjs when it names no proxy config. Before 0.50 only callables
+//     depended on that relay; now EVERY emulated service does, so a dev server that does not use it is reported by
+//     name with exactly what to add: one with a proxy config of its own (kept — it is theirs), or one the house
+//     cannot configure.
 //   - .bespunky/dev.json (project state): drops the `?portOffset=${OFFSET}` URL switch the house seeded on the
-//     emulators process — the page no longer reads it.
+//     emulators process — the page no longer reads it — and gives that process the banner advice a new app gets:
+//     where this stack's Emulator UI works (a host tab only on the base stack with same-number forwards).
 //   - The house's own words that this change made false, where they still stand VERBATIM (anything reworded is the
 //     project's, and stays): the .gitignore block's `<app>:serve --portOffset` (the flag is `--port-offset`), and
 //     the devcontainer's dev-server port comment that said every Firebase port must forward to the SAME host number
@@ -30,12 +36,16 @@
 //     once and the devcontainer merge never rewrites a comment — so without this they would explain a world that
 //     is gone, forever.
 // WHAT IT REPORTS, never edits: the project's own code importing what the owned files no longer export
-// (`emulatorFor`, `portOffset`, `offsetUrl`, `resolvePortOffset` → `emulatorEndpoint(service)`), and a dev server
-// served over https, where the SDK cannot reach an emulator through the page's origin.
-import { type Tree, logger, readJson } from '@nx/devkit';
+// (`emulatorFor`, `portOffset`, `offsetUrl`, `resolvePortOffset` → `emulatorEndpoint(service)`), a dev server
+// served over https, where the SDK cannot reach an emulator through the page's origin, and a dev server that does
+// not relay (above).
+import { type Tree, getProjects, logger, readJson } from '@nx/devkit';
 import { applyJsonChanges } from '../../generators/_utils/json-edits';
 import { findAppRoots } from '../../generators/_utils/app-roots';
 import { writeFirebaseClientGlue } from '../../generators/firebase-emulators/service-configs';
+import { reportProxyWiring } from '../../generators/firebase-emulators/proxy-wiring';
+import { EMULATOR_UI_ADVICE } from '../../generators/firebase-emulators/dev-fragment';
+import { angular } from '../../adapters/angular';
 
 const TAG = '[0.50.0 route-emulators-through-origin]';
 const DEV_JSON = '.bespunky/dev.json';
@@ -89,12 +99,20 @@ export default function routeEmulatorsThroughOrigin(tree: Tree): void {
     migrateEnvironments(tree, `${prefix}src/environments`);
     // The owned client glue is rewritten HERE, not left to the per-app generator: an UPGRADE_PARTIAL run skips that
     // generator, and the 0.49 clients read `proxied` — with it gone they would silently dial :9099/:5001 again.
-    writeFirebaseClientGlue(tree, root === '.' ? '.' : root, `${prefix}src/environments/environment.ts`);
+    const proxy = writeFirebaseClientGlue(tree, root === '.' ? '.' : root);
+    const project = projectAt(tree, root);
+    if (project) reportProxyWiring(TAG, project, proxy, angular.devServer!.useProxy(tree, project, proxy));
     reportRetiredImports(tree, `${prefix}src`);
   }
   reportHttpsDevServers(tree, apps);
-  dropPortOffsetSwitch(tree);
+  migrateDevDeclaration(tree);
   retellRetiredText(tree);
+}
+
+/** The project whose root is `root` — the app the dev server belongs to — or undefined when Nx knows none there. */
+function projectAt(tree: Tree, root: string): string | undefined {
+  for (const [name, config] of getProjects(tree)) if ((config.root || '.') === root) return name;
+  return undefined;
 }
 
 // ── the house's words this change made false ────────────────────────────────────────────────────────────────
@@ -379,9 +397,9 @@ function reportHttpsDevServers(tree: Tree, roots: string[]): void {
       if (targets[name]?.options?.ssl === true) {
         logger.warn(
           `${TAG} ${projectJson}: \`${name}\` serves over https (\`ssl: true\`). The browser now reaches every emulator ` +
-            `through the page's own origin, and the Firebase SDK can dial an emulator over plain http only — so an ` +
-            `emulated service stops at bootstrap with an error saying this. Drop \`ssl\` for local development, or ` +
-            `open the app with ?emulate=none to use the real backend.`,
+            `through the page's own origin, and the Firebase SDK can dial an emulator over plain http only — so the ` +
+            `emulated services will not connect (the console says so at bootstrap). Drop \`ssl\` for local ` +
+            `development, or open the app with ?emulate=none to use the real backend.`,
         );
       }
     }
@@ -396,9 +414,22 @@ interface UrlSwitch {
   when?: unknown;
 }
 
-function dropPortOffsetSwitch(tree: Tree): void {
+interface DeclaredProcess {
+  id?: string;
+  cmd?: unknown;
+  ports?: Record<string, unknown>;
+  url?: UrlSwitch[];
+  advice?: Array<{ text?: unknown; when?: unknown }>;
+}
+
+/** The emulators process the house seeded: its id, and a command that runs the workspace's `firebase:emulators`. */
+const isHouseEmulators = (process: DeclaredProcess): boolean =>
+  process?.id === 'emulators' &&
+  (Array.isArray(process.cmd) ? process.cmd.join(' ') : String(process.cmd ?? '')).includes('firebase:emulators');
+
+function migrateDevDeclaration(tree: Tree): void {
   if (!tree.exists(DEV_JSON)) return;
-  let decl: { apps?: Record<string, { processes?: Array<{ id?: string; url?: UrlSwitch[] }> }> };
+  let decl: { apps?: Record<string, { processes?: DeclaredProcess[] }> };
   try {
     decl = readJson(tree, DEV_JSON);
   } catch {
@@ -407,28 +438,49 @@ function dropPortOffsetSwitch(tree: Tree): void {
   let changed = false;
   for (const [app, entry] of Object.entries(decl.apps ?? {})) {
     for (const process of entry?.processes ?? []) {
-      if (!Array.isArray(process?.url)) continue;
-      const kept = process.url.filter(
-        (u) => !(u?.param === 'portOffset' && u.value === '${OFFSET}' && u.when === 'offset'),
-      );
-      if (kept.length === process.url.length) {
-        if (process.url.some((u) => u?.param === 'portOffset')) {
-          logger.info(
-            `${TAG} ${DEV_JSON}: apps.${app}.${process.id ?? '?'} declares a \`portOffset\` URL switch of its own shape — ` +
-              `left as declared. The house's Firebase client no longer reads ?portOffset=.`,
-          );
-        }
-        continue;
-      }
-      if (kept.length) process.url = kept;
-      else delete process.url;
-      changed = true;
-      logger.info(
-        `${TAG} ${DEV_JSON}: apps.${app}.${process.id ?? '?'} — dropped the ?portOffset= URL switch; the page reaches a ` +
-          `shifted stack's emulators through the dev server, which relays them with the stack's PORT_OFFSET.`,
-      );
+      changed = dropPortOffsetSwitch(app, process) || changed;
+      changed = adviseOnTheEmulatorUi(app, process) || changed;
     }
   }
-  // In place: only the url members it dropped — dev.json is the project's to edit, in its own form.
+  // In place: only the members it changed — dev.json is the project's to edit, in its own form.
   if (changed) tree.write(DEV_JSON, applyJsonChanges(tree.read(DEV_JSON, 'utf8')!, readJson(tree, DEV_JSON), decl));
+}
+
+function dropPortOffsetSwitch(app: string, process: DeclaredProcess): boolean {
+  if (!Array.isArray(process?.url)) return false;
+  const kept = process.url.filter((u) => !(u?.param === 'portOffset' && u.value === '${OFFSET}' && u.when === 'offset'));
+  if (kept.length === process.url.length) {
+    if (process.url.some((u) => u?.param === 'portOffset')) {
+      logger.info(
+        `${TAG} ${DEV_JSON}: apps.${app}.${process.id ?? '?'} declares a \`portOffset\` URL switch of its own shape — ` +
+          `left as declared. The house's Firebase client no longer reads ?portOffset=.`,
+      );
+    }
+    return false;
+  }
+  if (kept.length) process.url = kept;
+  else delete process.url;
+  logger.info(
+    `${TAG} ${DEV_JSON}: apps.${app}.${process.id ?? '?'} — dropped the ?portOffset= URL switch; the page reaches a ` +
+      `shifted stack's emulators through the dev server, which relays them with the stack's PORT_OFFSET.`,
+  );
+  return true;
+}
+
+/**
+ * The serve banner's word on where this stack's Emulator UI works — what a new app's emulators process is seeded
+ * with. Only on the house's own process, only with a `ui` port to name (the advice substitutes it: without one the
+ * engine would refuse the declaration), and never twice.
+ */
+function adviseOnTheEmulatorUi(app: string, process: DeclaredProcess): boolean {
+  if (!isHouseEmulators(process) || process.ports?.ui === undefined) return false;
+  const advice = Array.isArray(process.advice) ? process.advice : [];
+  const missing = EMULATOR_UI_ADVICE.filter(({ text }) => !advice.some((a) => a?.text === text));
+  if (!missing.length) return false;
+  process.advice = [...advice, ...missing];
+  logger.info(
+    `${TAG} ${DEV_JSON}: apps.${app}.emulators — the serve banner now says where this stack's Emulator UI works ` +
+      `(its page dials each emulator directly, so a host tab is complete only on the base stack).`,
+  );
+  return true;
 }

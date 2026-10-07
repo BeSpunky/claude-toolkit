@@ -142,6 +142,21 @@ const journey = ({ opted }) => (tree) => {
   writeJson(tree, '.bespunky/dev.json', journeyDevJson(opted));
 };
 
+/** An app's project.json with an Angular dev-server leaf. */
+const DEV_SERVER = (options = {}, configurations) => ({
+  name: 'shop',
+  root: 'apps/shop',
+  targets: { 'dev-server': { executor: '@angular/build:dev-server', options: { buildTarget: 'shop:build', ...options }, ...(configurations ? { configurations } : {}) } },
+});
+/** The emulators process as the house seeds it. */
+const HOUSE_EMULATORS = (extraPorts) => ({
+  id: 'emulators',
+  cmd: ['node_modules/.bin/nx', 'run', 'firebase:emulators'],
+  ports: { auth: 9099, firestore: 8080, ...extraPorts },
+  url: [{ param: 'emulate', value: 'none', when: 'skipped' }],
+  advice: [{ when: 'contended', text: 'Real Google OAuth sign-in is registered for that base origin only.' }],
+});
+
 function app(tree, root = 'apps/shop', { env = STOCK_ENV, iface = STOCK_INTERFACE } = {}) {
   tree.write('firebase.json', '{ "emulators": {} }\n');
   tree.write(`${root}/src/app/firebase.config.ts`, '// generator-owned\n');
@@ -337,7 +352,84 @@ export default {
           t.hasNot(`apps/shop/src/app/${file}`, 'proxied');
         }
         t.hasNot('apps/shop/proxy.conf.mjs', '0.49');
-        t.has('apps/shop/proxy.conf.mjs', 'apps/shop/src/environments/environment.ts');
+        // Composable, and keyed on no project id (so whatever id the client runs under, emulated or real, is relayed).
+        t.has('apps/shop/proxy.conf.mjs', 'export const emulatorRoutes');
+        t.hasNot('apps/shop/proxy.conf.mjs', 'environment.ts');
+        t.has('apps/shop/proxy.local.mjs', 'export default {};');
+      },
+    },
+    {
+      name: "a project's own proxy.local.mjs is never rewritten",
+      setup: (tree) => {
+        app(tree);
+        tree.write('apps/shop/proxy.local.mjs', "export default { '/api/': { target: 'http://localhost:3000' } };\n");
+      },
+      expect: (tree, t) => t.equal(t.read('apps/shop/proxy.local.mjs'), "export default { '/api/': { target: 'http://localhost:3000' } };\n", 'proxy.local.mjs'),
+    },
+    {
+      // Before 0.50 only callables depended on the relay; now every emulated service does.
+      name: 'an Angular dev server naming no proxy config is pointed at proxy.conf.mjs',
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, 'apps/shop/project.json', DEV_SERVER());
+      },
+      expect: (tree, t) => {
+        t.equal(readJson(tree, 'apps/shop/project.json').targets['dev-server'].options.proxyConfig, 'apps/shop/proxy.conf.mjs', 'proxyConfig');
+      },
+    },
+    {
+      name: "R4-1 — a dev server with a JSON proxy config of its own: kept, and told exactly what to do (it can't import)",
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, 'apps/shop/project.json', DEV_SERVER({ proxyConfig: 'apps/shop/proxy.conf.json' }));
+      },
+      expect: (tree, t, log) => {
+        t.equal(readJson(tree, 'apps/shop/project.json').targets['dev-server'].options.proxyConfig, 'apps/shop/proxy.conf.json', 'kept');
+        t.ok(logged(log, '`shop:dev-server` uses a proxy config of its own (options.proxyConfig: apps/shop/proxy.conf.json)'), `reported: ${log.join(' | ')}`);
+        t.ok(logged(log, 'move your routes into apps/shop/proxy.local.mjs'), 'the seam is named');
+        t.ok(logged(log, 'is not a module, so it cannot import them'), 'no import advice for JSON');
+      },
+    },
+    {
+      name: 'R4-1 — an ES-module proxy config in a configuration: kept, and handed the one-line import',
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, 'apps/shop/project.json', DEV_SERVER({}, { development: { proxyConfig: 'apps/shop/dev/proxy.mjs' } }));
+      },
+      expect: (tree, t, log) => {
+        const leaf = readJson(tree, 'apps/shop/project.json').targets['dev-server'];
+        t.equal(leaf.options.proxyConfig, undefined, 'not set beside a configuration that overrides it');
+        t.ok(logged(log, "import { emulatorRoutes } from '../proxy.conf.mjs';"), `the import, relative to that file: ${log.join(' | ')}`);
+      },
+    },
+    {
+      name: 'R4-1 — a dev server the house cannot configure: told which export to use',
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, 'apps/shop/project.json', { name: 'shop', root: 'apps/shop', targets: { 'dev-server': { executor: '@nx/vite:dev-server' } } });
+      },
+      expect: (tree, t, log) => {
+        t.ok(logged(log, 'runs `@nx/vite:dev-server`'), `reported: ${log.join(' | ')}`);
+        t.ok(logged(log, '`viteEmulatorRoutes`'), 'the Vite export is named');
+      },
+    },
+    {
+      name: "R4-5 — the house's emulators process gains the Emulator UI banner advice; one without a ui port does not",
+      setup: (tree) => {
+        app(tree);
+        writeJson(tree, '.bespunky/dev.json', {
+          apps: {
+            shop: { processes: [{ id: 'app', cmd: 'x', ports: { app: 4200 }, primary: true }, HOUSE_EMULATORS({ ui: 4000 })] },
+            noui: { processes: [{ id: 'app', cmd: 'x', ports: { app: 4300 }, primary: true }, HOUSE_EMULATORS({})] },
+          },
+        });
+      },
+      expect: (tree, t) => {
+        const d = readJson(tree, '.bespunky/dev.json');
+        const advice = d.apps.shop.processes[1].advice;
+        t.equal(advice.map((a) => a.when), ['contended', 'base', 'offset'], 'the OAuth advice kept, the UI advice appended');
+        t.ok(advice[2].text.includes('${PORT:ui}') && advice[2].text.includes('shared browser'), advice[2].text);
+        t.equal(d.apps.noui.processes[1].advice.length, 1, 'no ui port: nothing to name');
       },
     },
     {
