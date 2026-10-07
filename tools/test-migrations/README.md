@@ -63,6 +63,13 @@ a line that is not a comment.
 the tree, so no fixture needs to remember it. The claim is per *rung*, not per ladder: re-running a whole
 ladder legitimately is not idempotent, because a later rung can create the anchor an earlier one looks for.
 
+**So is honesty.** A second run that changed nothing must not *claim* a change — and the harness does not guess
+which verbs mean "changed" (a verb list once matched none of the lines the 0.50 ladder logged). Every `info`
+line from a no-op re-run fails the case, except the forms listed in `REPORTED_EVERY_RUN` in `run.mjs`, each with
+its reason: the layout resolver's inference, and a leftover the rung reports on every run (`Left … alone`,
+`— left as is`). Warnings are reports by definition and are not checked. The log is reset per ladder run, so a
+case's `expect` (and a diverging shape's) sees only what its own run reported.
+
 **Historical shapes converge — or say why not.** Idempotence re-runs a rung on its *own* output, so it cannot
 catch an "already current" guard keyed on one marker of the new shape and fooled by an intermediate shape an
 *earlier* release wrote (0.24.3 judged a 0.7.1-repaired interface current because every member had `default:`,

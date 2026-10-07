@@ -54,8 +54,19 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compilePayload, requireInstalled, requireFromRepo, snapshot, snapshotDiff, unparseable, captureDevkitLogger, treeAssertions } from '../test-support/payload.mjs';
 
-/** A log line that says the tree changed — false on a run that changed nothing. */
-const CLAIMS_A_CHANGE = /\b(?:Rewrote|Rewrites|Wrote|Updated|Created|Added|Removed|Seeded|Pinned|Moved|Replaced|Wired|Retargeted|Adopted)\b/;
+/**
+ * What a NO-OP re-run may still say. A second run that changed nothing must not claim a change — and rather than
+ * guess which verbs mean "changed" (a case-sensitive verb list once matched none of the 37 lines the 0.50 ladder
+ * logged: the rungs say "removed", "wrote", "is no longer continuous"…), EVERY info line from such a run fails,
+ * except these forms, each of which is legitimately re-stated on every run. Warnings are reports by definition and
+ * are never checked. Add a form here only with its reason.
+ */
+const REPORTED_EVERY_RUN = [
+  { form: /^\[info\] \[workspace-layout\] /, why: 'the layout resolver saying what it inferred — a read, not a change' },
+  { form: /^\[info\] (?:\[[^\]]*\] )?Left\b/, why: 'a leftover the rung deliberately does not touch, reported every run (CLAUDE.md: report what is left)' },
+  { form: / — left as (?:is|declared)\b/, why: 'the same kind of report, phrased after the subject' },
+];
+const claimsAChange = (line) => line.startsWith('[info]') && !REPORTED_EVERY_RUN.some(({ form }) => form.test(line));
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const only = process.argv[2];
@@ -100,9 +111,11 @@ async function main() {
 
       const failures = [];
       const notes = [];
-      log.reset();
-      // One ladder run on a fresh fixture: idempotence and parse-ability checked per run, by the harness.
+      const printed = []; // every run's lines, for a failing case's printout
+      // One ladder run on a fresh fixture: idempotence and parse-ability checked per run, by the harness. The log is
+      // reset per run, so each run's `expect` sees only what THAT run reported — never a line another run logged.
       const run = async (setup, label) => {
+        log.reset();
         const tree = createTreeWithEmptyWorkspace();
         setup(tree);
         const beforeLadder = snapshot(tree);
@@ -115,26 +128,27 @@ async function main() {
           if (snapshot(tree) !== afterFirst) failures.push(`${label}rung ${rung} is not idempotent — a second run changed ${snapshotDiff(afterFirst, snapshot(tree)).join(', ')}`);
           // …and so is honesty: a re-run that changed nothing must not CLAIM a change.
           else {
-            const claims = log.lines.slice(said).filter((line) => CLAIMS_A_CHANGE.test(line.split('\n')[0]));
+            const claims = log.lines.slice(said).filter((line) => claimsAChange(line.split('\n')[0]));
             if (claims.length) failures.push(`${label}rung ${rung}: a no-op second run claims a change: ${claims.map((l) => l.split('\n')[0]).join(' | ')}`);
           }
         }
         for (const error of unparseable(beforeLadder, snapshot(tree))) failures.push(`${label}wrote a file that does not parse: ${error}`);
-        return tree;
+        printed.push(...log.lines.map((line) => `${label}${line}`));
+        return { tree, lines: [...log.lines] };
       };
       try {
-        const tree = await run(testCase.setup, '');
-        testCase.expect(tree, treeAssertions(tree, failures), log.lines); // log.lines: what the ladder reported
+        const { tree, lines } = await run(testCase.setup, '');
+        testCase.expect(tree, treeAssertions(tree, failures), lines); // lines: what this ladder run reported
         const canonical = snapshot(tree);
         // Every shape an earlier release really wrote must land where the canonical input lands. See the header.
         for (const shape of testCase.historicalShapes ?? []) {
           const label = `historical shape "${shape.name}": `;
-          const historical = await run(shape.setup, label);
+          const { tree: historical, lines: historicalLines } = await run(shape.setup, label);
           const differs = snapshotDiff(canonical, snapshot(historical));
           if (shape.diverges) {
             if (differs.length === 0) failures.push(`${label}declares it diverges (${shape.diverges}) but converged — drop the reason`);
             else notes.push(`${shape.name} diverges by design: ${shape.diverges}`);
-            shape.expect?.(historical, treeAssertions(historical, failures), log.lines);
+            shape.expect?.(historical, treeAssertions(historical, failures), historicalLines);
           } else if (differs.length > 0) {
             failures.push(`${label}did not converge with the canonical input — differs in ${differs.join(', ')}`);
           }
@@ -152,7 +166,7 @@ async function main() {
         failed++;
         console.log(`  FAIL ${testCase.name}`);
         for (const failure of failures) console.log(`         ${failure}`);
-        for (const line of log.lines) console.log(`         ${line.replace(/\n/g, '\n         ')}`);
+        for (const line of printed.length ? printed : log.lines) console.log(`         ${line.replace(/\n/g, '\n         ')}`);
       }
     }
   }
