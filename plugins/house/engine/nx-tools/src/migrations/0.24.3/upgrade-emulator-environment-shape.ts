@@ -255,6 +255,22 @@ function declaresDefault(value: string): boolean {
   return /\bdefault\s*:/.test(value);
 }
 
+/** Every key of each service's member in the 0.24.3 interface — the target `interfaceMemberText` writes. */
+const TARGET_MEMBER_KEYS: Record<Service, string[]> = {
+  auth: ['url', 'default', 'proxied'],
+  firestore: ['host', 'port', 'default'],
+  storage: ['host', 'port', 'default'],
+  functions: ['host', 'port', 'default', 'proxied'],
+};
+
+/** Does this interface member declare the WHOLE target member — not merely `default`? See `planInterfaceFile`. */
+function isCurrentMember(entry: { name: string; value: string }): boolean {
+  const target = TARGET_MEMBER_KEYS[entry.name as Service];
+  if (!target) return declaresDefault(entry.value); // Not a service this rung writes — `unknown` below speaks for it.
+  const keys = topLevelKeys(entry.value.trim().replace(/^\{|\}$/g, ''));
+  return target.every((key) => keys.includes(key));
+}
+
 /**
  * The top-level members of the `emulators` block, or `null` when the file has no such block.
  *
@@ -436,14 +452,25 @@ function planInterfaceFile(source: string, path: string): FilePlan | null | unde
   if (close < 0) return undefined; // Unbalanced — not something to splice blind.
 
   const body = masked.slice(open + 1, close);
-  // ALREADY THE PER-SERVICE SHAPE — the idempotency check, and PER MEMBER for the same reason the value
-  // files' pre-filter is: "the word `default:` appears somewhere in this block" also answers yes to an
-  // interface where a human upgraded ONE service by hand, leaving the other three typed as bare endpoints
-  // while their values gain the flag. Every declared member must carry it, or the block is not current.
+  // ALREADY THE CURRENT SHAPE — the idempotency check, PER MEMBER, and against the WHOLE target member, never one
+  // marker of it. "Every member declares `default:`" was the original test, and two shapes that SHIPPED carry
+  // that marker without the rest: the 0.1.0–0.6.0 template (no `proxied?` anywhere) and the 0.7.x one (`proxied?`
+  // on functions only). Both were judged current, so `auth` never gained `proxied?` and the documented one-word
+  // opt-in was a compile error (TS2353) for good. A member is current only when it declares every key the target
+  // member declares — `default`, and `proxied` where the target types it.
   const members = topLevelMembers(body);
-  if (members.length > 0 && members.every((entry) => declaresDefault(entry.value))) return undefined;
+  if (members.length > 0 && members.every(isCurrentMember)) return undefined;
 
   const unknown = topLevelKeys(body).filter((key) => !SERVICES.includes(key as Service));
+  // A member typed with a key the target member does not declare is the project's own (a tenant id, a
+  // region…) — replacing the block would delete it, exactly like an unknown service.
+  for (const entry of members) {
+    const known = TARGET_MEMBER_KEYS[entry.name as Service];
+    if (!known) continue;
+    for (const key of topLevelKeys(entry.value.trim().replace(/^\{|\}$/g, ''))) {
+      if (!known.includes(key)) unknown.push(`${entry.name}.${key}`);
+    }
+  }
   if (unknown.length > 0) {
     logger.warn(
       `[migrate 0.24.3] ${path}: the \`emulators\` type declares ${unknown.join(', ')}, which this migration ` +

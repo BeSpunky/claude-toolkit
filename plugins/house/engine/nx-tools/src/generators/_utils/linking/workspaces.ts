@@ -13,6 +13,7 @@
 //   4. DEPENDENCY   the consumer DECLARES it (`workspace:*` / `*`) — pnpm links nothing undeclared, and npm or
 //                   yarn only by the accident of hoisting.
 import { type Tree, getProjects, readJson, updateJson, writeJson, logger } from '@nx/devkit';
+import { updateManifest } from '../dependencies';
 import { dirname, posix } from 'node:path';
 import type { Linking, LinkRequest, LinkedLibrary } from './linking';
 import { sourceCondition, referenceFromSolution, SOLUTION_TSCONFIG } from './tsconfig-roots';
@@ -64,7 +65,7 @@ export const workspacesLinking: Linking = {
       for (const root of roots) {
         const manifest = root === '.' ? 'package.json' : `${root}/package.json`;
         if (root === library.libRoot || !tree.exists(manifest)) continue;
-        updateJson(tree, manifest, (json) => {
+        updateManifest(tree, manifest, 'linking', (json) => {
           for (const field of DEPENDENCY_FIELDS) {
             const range = json[field]?.[library.importPath];
             if (typeof range !== 'string') continue;
@@ -97,7 +98,7 @@ function declareIdentity(tree: Tree, request: LinkRequest): void {
   const key = request.subpath ? `./${request.subpath}` : '.';
   const source = `./${posix.relative(request.libRoot, request.entry ?? defaultEntry(request))}`;
   const condition = sourceCondition(tree);
-  updateJson(tree, manifest, (json) => {
+  updateManifest(tree, manifest, 'linking', (json) => {
     json.name ??= request.importPath;
     const exportsMap: Record<string, unknown> =
       json.exports && typeof json.exports === 'object' && !Array.isArray(json.exports) ? json.exports : {};
@@ -126,7 +127,7 @@ function declareDependency(tree: Tree, consumerRoot: string, request: LinkReques
     return;
   }
   if (manifest === `${request.libRoot}/package.json`) return; // A library does not depend on itself.
-  updateJson(tree, manifest, (json) => {
+  updateManifest(tree, manifest, 'linking', (json) => {
     if (!DEPENDENCY_FIELDS.some((field) => json[field]?.[request.importPath] !== undefined)) {
       json.dependencies = { ...json.dependencies, [request.importPath]: workspaceDependencySpec(tree) };
     }

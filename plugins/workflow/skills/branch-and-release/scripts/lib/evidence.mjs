@@ -5,11 +5,12 @@
 //   observed     — read directly (refs, history, files, an authenticated API answer)
 //   inferred     — derived by a heuristic that can be wrong (a crude YAML read, a history pattern)
 //   unobservable — cannot be known from here; it becomes a question to the user, never an assumption
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { verify } from './verify.mjs';
-import { SCHEMA } from './model.mjs';
+import { SCHEMA, deployBindings } from './model.mjs';
+import { match } from './patterns.mjs';
 import { detectLongLived } from './long-lived.mjs';
 import { WORKFLOW, triggerScope, deploySignals, workflowTriggers } from './workflows.mjs';
 
@@ -17,7 +18,7 @@ const HISTORY = 400; // first-parent commits examined per line
 const RECENT_DAYS = 90; // direct commits older than this are history, not a live practice
 const DAY = 86400;
 
-export function evidence(git, top, resolved) {
+export function evidence(git, top, resolved, { appHosting = false } = {}) {
   const facts = [];
   const fact = (area, subject, value, tag) => facts.push({ area, subject, value, tag });
   const model = resolved.declared ? resolved.model : null;
@@ -148,7 +149,8 @@ export function evidence(git, top, resolved) {
   }
   for (const f of files.filter((x) => ENV_FILE.test(x) && /(staging|production|prod)/i.test(path.basename(x)))) fact('bindings', f, 'environment file', 'observed');
   if (skipped.length) fact('bindings', '(shipped templates skipped)', { count: skipped.length, examples: skipped.slice(0, 3), rule: SHIPPED_RULE }, 'observed');
-  fact('bindings', 'App Hosting backends / console-only deploy targets', 'live in the cloud console — ask', 'unobservable');
+  if (appHosting) appHostingFacts(fact, top, files, model);
+  else fact('bindings', 'App Hosting backends / console-only deploy targets', 'live in the cloud console — re-run with `evidence --app-hosting` (a logged-in firebase CLI) to observe them, or ask', 'unobservable');
 
   // ---- remote side ---------------------------------------------------------------------------------------
   remoteFacts(fact, longLived);
@@ -234,4 +236,182 @@ function remoteFacts(fact, longLived) {
     fact('remote', 'GitHub environments', 'not visible to this token', 'unobservable');
   }
   fact('remote', 'who pushes to protected lines', 'not in git history — ask', 'unobservable');
+}
+
+// ---- App Hosting (opt-in: `evidence --app-hosting`) ----------------------------------------------------------
+//
+// The one binding the repo cannot show: a GitHub-linked App Hosting backend rolls out on a push to its live branch,
+// and that link lives in Firebase. Asked the same way `remoteFacts` asks GitHub — an authenticated CLI, read-only,
+// degrading to `unobservable` (→ a question) when it cannot see. OPT-IN, because every call is a network round trip
+// of seconds and needs a login; the investigation turns it on when the repo has Firebase.
+//
+// What it reports per backend: id, region, linked repository (none → it deploys from local source,
+// `firebase deploy --only apphosting`), root directory, environment name — `apphosting:backends:list --json`. The
+// LIVE BRANCH is not on the backend: it is the backend's traffic `rolloutPolicy.codebaseBranch`, which no firebase
+// command prints, so it is read from the App Hosting API with a gcloud access token when one is available (sent in a
+// header from a child process that receives it on stdin — never on a command line, where `ps` shows it), and is
+// otherwise its own `unobservable` fact. When the CLI cannot list backends, WHY is the fact: not installed, not
+// logged in, or Firebase's own first error line (an API not enabled, a permission denied) — each asks something else. With a declared model, each declared `appHosting` binding is checked against
+// what was observed (`drift`) — the case that once went stale silently: auto-rollout switched on, `deploys` unchanged.
+const APPHOSTING_API = 'https://firebaseapphosting.googleapis.com/v1beta';
+
+function appHostingFacts(fact, top, files, model) {
+  let projects = [];
+  if (files.includes('.firebaserc')) {
+    try {
+      projects = [...new Set(Object.values(JSON.parse(fs.readFileSync(path.join(top, '.firebaserc'), 'utf8')).projects ?? {}))].filter((p) => typeof p === 'string' && p);
+    } catch {
+      /* reported as unparseable above */
+    }
+  }
+  if (!projects.length) return fact('app hosting', 'backends', 'no project in .firebaserc to ask — name the Firebase project, or ask', 'unobservable');
+
+  const firebase = firebaseCli(top);
+  const token = accessToken();
+  const observed = []; // { project, backend, branch|undefined }
+  for (const project of projects) {
+    const listed = listBackends(firebase, project);
+    if (listed.unobservable) {
+      fact('app hosting', project, `${listed.unobservable} — ask`, 'unobservable');
+      continue;
+    }
+    const { backends } = listed;
+    if (!backends.length) fact('app hosting', project, 'no App Hosting backends', 'observed');
+    for (const b of backends) {
+      const m = /^projects\/([^/]+)\/locations\/([^/]+)\/backends\/([^/]+)$/.exec(b.name ?? '');
+      if (!m) continue;
+      const [, , region, id] = m;
+      const repository = b.codebase?.repository ? b.codebase.repository.split('/').pop() : null;
+      fact(
+        'app hosting',
+        `${project}/${id}`,
+        {
+          region,
+          repository: repository ?? 'none — deploys from local source (`firebase deploy --only apphosting`)',
+          rootDirectory: b.codebase?.rootDirectory ?? '/',
+          environment: b.environment || '(none — reads only apphosting.yaml)',
+        },
+        'observed',
+      );
+      let branch;
+      if (repository) {
+        branch = liveBranch(token, project, region, id);
+        if (branch === undefined) fact('app hosting', `${project}/${id} live branch`, 'not printed by the firebase CLI, and no gcloud token to read it from the API — ask (backend settings → Deployment)', 'unobservable');
+        else fact('app hosting', `${project}/${id} live branch`, branch ?? 'none — automatic rollouts are off', 'observed');
+      }
+      observed.push({ project, backend: id, linked: Boolean(repository), branch });
+    }
+  }
+
+  // Declared vs observed — only for the projects that were actually observed.
+  if (!model) return;
+  const seen = new Set(observed.map((o) => o.project));
+  const aliases = firebaseAliases(top);
+  const bindings = deployBindings(model);
+  for (const binding of bindings) {
+    for (const want of binding.appHosting ?? []) {
+      const project = aliases[want.project] ?? want.project;
+      if (!seen.has(project)) continue;
+      const got = observed.find((o) => o.project === project && o.backend === want.backend);
+      const subject = `${binding.line} → ${want.project}/${want.backend}`;
+      if (!got) fact('drift', subject, 'declared, but no such backend exists', 'observed');
+      else if (!got.linked) fact('drift', subject, 'declared as rolling out from this line, but the backend has no linked repository (local-source deploys)', 'observed');
+      else if (got.branch !== undefined && !(got.branch && covers(binding, got.branch))) fact('drift', subject, `declared on ${binding.line}, but it rolls out from ${got.branch ?? 'no branch (automatic rollouts off)'}`, 'observed');
+    }
+  }
+  for (const o of observed.filter((x) => x.linked && typeof x.branch === 'string')) {
+    const declared = bindings.some((b) => (b.appHosting ?? []).some((w) => (aliases[w.project] ?? w.project) === o.project && w.backend === o.backend));
+    if (!declared) fact('drift', `${o.project}/${o.backend}`, `rolls out from ${o.branch}, but no line's deploys declares it — propose an appHosting binding`, 'observed');
+  }
+}
+
+/**
+ * Whether a deploy binding covers a concrete branch: a line by name, a pattern binding by its glob (as GitHub's branch
+ * filter reads it — a `*` never crosses `/`; read through patterns.mjs by naming each `*` a one-segment placeholder),
+ * and a tag series never (App Hosting rolls out from a branch).
+ */
+function covers(binding, branch) {
+  if (binding.kind === 'line') return binding.line === branch;
+  if (binding.kind === 'pattern') return match(binding.line.replaceAll('*', '{part}'), branch) !== null;
+  return false;
+}
+
+/**
+ * `apphosting:backends:list` for one project: `{ backends }`, or `{ unobservable }` — why it could not be read. With
+ * `--json`, firebase-tools prints its error on stdout as `{ status: 'error', error }` and exits non-zero.
+ */
+function listBackends(firebase, project) {
+  const res = spawnSync(firebase[0], [...firebase.slice(1), 'apphosting:backends:list', '--project', project, '--json', '--non-interactive'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 90000, env: { ...process.env, NO_UPDATE_NOTIFIER: '1', CI: process.env.CI ?? '1' },
+  });
+  if (res.error?.code === 'ENOENT') return { unobservable: 'the firebase CLI is not installed (no node_modules/.bin/firebase, none on PATH)' };
+  if (res.error) return { unobservable: `the firebase CLI could not list backends: ${res.error.message}` };
+  let out = null;
+  try {
+    out = JSON.parse(res.stdout);
+  } catch {
+    /* no JSON answer — its stderr says why */
+  }
+  if (res.status === 0 && out && (!out.status || out.status === 'success')) {
+    return { backends: Array.isArray(out.result) ? out.result : (out.result?.backends ?? []) };
+  }
+  const said = typeof out?.error === 'string' ? out.error : (out?.error?.message ?? res.stderr ?? res.stdout ?? '');
+  const first = said.split('\n').map((l) => l.trim()).find(Boolean) ?? `exit ${res.status}`;
+  if (/firebase login/.test(said)) return { unobservable: 'the firebase CLI is not logged in (`firebase login`)' };
+  return { unobservable: `the firebase CLI could not list backends: ${first}` };
+}
+
+/** The project's pinned firebase CLI when it has one (house projects do), else whatever is on PATH. */
+function firebaseCli(top) {
+  const local = path.join(top, 'node_modules', '.bin', 'firebase');
+  return [fs.existsSync(local) ? local : 'firebase'];
+}
+
+function firebaseAliases(top) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(top, '.firebaserc'), 'utf8')).projects ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function accessToken() {
+  try {
+    return run('gcloud', ['auth', 'print-access-token', '--quiet'], 20000) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The backend's live branch: a string, `null` (rollouts off), or `undefined` (could not read it). */
+function liveBranch(token, project, region, backend) {
+  if (!token) return undefined;
+  try {
+    const traffic = JSON.parse(authorizedGet(`${APPHOSTING_API}/projects/${project}/locations/${region}/backends/${backend}/traffic`, token));
+    const policy = traffic.rolloutPolicy;
+    if (!policy || policy.disabled || !policy.codebaseBranch) return null;
+    return policy.codebaseBranch;
+  } catch {
+    return undefined;
+  }
+}
+
+// `evidence` is a synchronous read, like every other probe here (git, gh, firebase — each a child process), so the
+// API call runs in a child too: Node's own fetch, the token handed over on STDIN, so it appears in no argv.
+const AUTHORIZED_GET = `
+let input = '';
+for await (const chunk of process.stdin) input += chunk;
+const { url, token } = JSON.parse(input);
+const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(20000) });
+if (!res.ok) process.exit(1);
+process.stdout.write(await res.text());
+`;
+
+/** GET `url` with a bearer token; the body, or throws. */
+function authorizedGet(url, token) {
+  return execFileSync(process.execPath, ['--input-type=module', '-e', AUTHORIZED_GET], { input: JSON.stringify({ url, token }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 25000 });
+}
+
+function run(cmd, args, timeout) {
+  return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout, env: { ...process.env, NO_UPDATE_NOTIFIER: '1', CI: process.env.CI ?? '1' } }).trim();
 }

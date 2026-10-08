@@ -8,21 +8,25 @@
 //   - src/app/firebase.config.ts + one file per SDK service + emulator-overrides.ts — GENERATOR-OWNED, rewritten
 //     in full every run (they hold no per-project values: config lives in environment.ts, providers in
 //     app.config.ts) — see ../../generators/firebase-emulators/service-configs;
-//   - proxy.conf.mjs — the dev-server proxy relaying Functions callables through the app's own origin;
+//   - proxy.conf.mjs — the dev-server proxy relaying every emulator through the app's own origin (generator-owned),
+//     and proxy.local.mjs beside it — the project's own routes, which it merges (seeded once);
 //   - the per-env build configurations (through this adapter's `env` port) and provideAppFirebase() (through
 //     its `providers` port);
 //   - the browser SDK: `firebase` + `@angular/fire`.
 //
 // The TEMPLATES stay beside the firebase-emulators generator on purpose: shipped migrations (0.24.2) resolve
 // them by that path, and a migration must keep finding what it was written against.
-import { type Tree, addDependenciesToPackageJson, readJson, readProjectConfiguration, logger } from '@nx/devkit';
+import { readProjectConfiguration, logger } from '@nx/devkit';
 import type { FirebaseClientPort } from '../stack-adapter';
 import {
   firebaseProvidersNote,
   firebaseTemplate,
-  writeFirebaseConfigs,
+  writeFirebaseClientGlue,
 } from '../../generators/firebase-emulators/service-configs';
 import { angular } from './index';
+import { declareBrowserSdk, pinAngularForFirebase } from './angularfire';
+import { rewrittenBy } from '../../generators/_utils/changed-files';
+import { reportProxyWiring } from '../../generators/firebase-emulators/proxy-wiring';
 
 /** Blank the credential placeholders: a half-wired prod/staging build must fail loud, not silently use dev. */
 const blankCredentials = (source: string): string =>
@@ -31,6 +35,8 @@ const blankCredentials = (source: string): string =>
 export const angularFirebaseClient: FirebaseClientPort = {
   // The browser SDK and Angular have no place in the functions runtime.
   serverBannedImports: ['@angular/*'],
+
+  chooseFrameworkVersion: pinAngularForFirebase,
 
   isWired(tree, project) {
     return tree.exists(`${readProjectConfiguration(tree, project).root}/src/app/firebase.config.ts`);
@@ -49,25 +55,21 @@ export const angularFirebaseClient: FirebaseClientPort = {
       tree.write(env.staging, blankCredentials(firebaseTemplate('environment.staging.ts.tpl')));
     }
 
-    // 2) The generator-owned client glue — rewritten in full, every run.
-    tree.write(`${appRoot}/src/app/emulator-overrides.ts`, firebaseTemplate('emulator-overrides.ts.tpl'));
-    if (tree.exists(`${appRoot}/src/app/firebase.config.ts`)) {
+    // 2) The generator-owned client glue — re-asserted in full, every run; said only when it actually changed.
+    const config = `${appRoot}/src/app/firebase.config.ts`;
+    const { result: proxy, rewritten } = rewrittenBy(tree, [config], () => writeFirebaseClientGlue(tree, appRoot));
+    if (rewritten.length) {
       logger.info(
-        `[firebase-emulators] Rewrote ${appRoot}/src/app/firebase.config.ts to the current generator-owned shape (it holds no ` +
+        `[firebase-emulators] Rewrote ${config} to the current generator-owned shape (it holds no ` +
           `per-project values — customize via environment.ts for config, app.config.ts for providers, never this file).`,
       );
     }
-    writeFirebaseConfigs(tree, appRoot);
-    // Baked with THIS app's env path so it reads the project id from its single source of truth.
-    const proxy = `${appRoot}/proxy.conf.mjs`;
-    tree.write(proxy, firebaseTemplate('proxy.conf.mjs.tpl').split('{{appEnvPath}}').join(env.dev));
     // …and the dev-server uses it. (0.34.x appended --proxyConfig at serve time; the declare-dev-processes
     // migration moved it onto existing apps' dev-server leaf — a new app gets it here.) An app with no Angular
     // dev-server yet (no web layer) has nothing to point; a later sync wires it once one exists (this step runs
-    // after the web layer's serve step, every sync).
-    if (!angular.devServer!.useProxy(tree, project, proxy)) {
-      logger.info(`[firebase-emulators] \`${project}\` has no Angular dev-server target — ${proxy} is not wired to one.`);
-    }
+    // after the web layer's serve step, every sync). A dev server with a proxy config of its own, or one this stack
+    // cannot configure, is told exactly what to add — every emulated service depends on the relay.
+    reportProxyWiring('firebase-emulators', project, proxy, angular.devServer!.useProxy(tree, project, proxy));
 
     // 3) Per-env build configuration: production (and, opted in, staging) swap the dev env file.
     if (!angular.env!.selectFor(tree, project, 'production', env.dev, env.prod)) {
@@ -95,16 +97,9 @@ export const angularFirebaseClient: FirebaseClientPort = {
       );
     }
 
-    // 5) The browser SDK. Existing entries are never overwritten (preserves user pins on upgrade).
-    const rootPkg = readJson<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(
-      tree,
-      'package.json',
-    );
-    const missing = Object.fromEntries(
-      Object.entries({ firebase: 'latest', '@angular/fire': 'latest' }).filter(
-        ([name]) => !rootPkg.dependencies?.[name] && !rootPkg.devDependencies?.[name],
-      ),
-    );
-    return addDependenciesToPackageJson(tree, missing, {});
+    // 5) The browser SDK — @angular/fire for THIS workspace's Angular major, and firebase as exactly the range that
+    //    release declares (./angularfire.ts): one SDK, never two. Baseline only — what the project declares stays.
+    return declareBrowserSdk(tree);
   },
 };
+

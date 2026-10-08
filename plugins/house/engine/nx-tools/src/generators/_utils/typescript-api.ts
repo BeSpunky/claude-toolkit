@@ -26,7 +26,11 @@
  * shape alone.
  */
 export interface TsNode {
+  /** The node's SyntaxKind — compared only against the `SyntaxKind` members declared below. */
+  readonly kind: number;
   getEnd(): number;
+  /** Where the node's own text starts (past leading trivia) — needs the source file unless parents are set. */
+  getStart(sourceFile?: TsSourceFile): number;
   readonly parent?: TsNode;
 }
 
@@ -64,6 +68,22 @@ export interface TsPropertyAssignment extends TsNode {
 
 export interface TsCallExpression extends TsNode {
   readonly expression: TsNode;
+  readonly arguments: TsNodeArray<TsNode>;
+}
+
+export interface TsPropertyAccessExpression extends TsNode {
+  readonly expression: TsNode;
+  readonly name: TsNamedNode;
+}
+
+/** `export default <expression>` (and `export = …`). */
+export interface TsExportAssignment extends TsNode {
+  readonly expression: TsNode;
+}
+
+export interface TsExportDeclaration extends TsNode {
+  /** The `'…'` an `export … from` re-exports; absent on a local `export { a }`. */
+  readonly moduleSpecifier?: TsNode;
 }
 
 export interface TsImportSpecifier extends TsNode {
@@ -75,7 +95,7 @@ export interface TsNamedImports extends TsNode {
 }
 
 export interface TsImportDeclaration extends TsNode {
-  readonly importClause?: { readonly namedBindings?: TsNode };
+  readonly importClause?: { readonly name?: TsNamedNode; readonly namedBindings?: TsNode };
   /** The `'…'` a declaration imports FROM — how a caller derives a sibling module's path from a known one. */
   readonly moduleSpecifier: TsNode;
 }
@@ -94,7 +114,8 @@ export interface ClassicTypeScript {
   ): TsSourceFile;
 
   readonly ScriptTarget: { readonly Latest: number };
-  readonly ScriptKind: { readonly TS: number; readonly JS: number };
+  readonly ScriptKind: { readonly TS: number; readonly JS: number; readonly TSX: number; readonly JSX: number };
+  readonly SyntaxKind: { readonly ImportKeyword: number };
 
   forEachChild(node: TsNode, cbNode: (node: TsNode) => void): void;
 
@@ -106,6 +127,9 @@ export interface ClassicTypeScript {
   isArrayLiteralExpression(node: TsNode): node is TsArrayLiteralExpression;
   isCallExpression(node: TsNode): node is TsCallExpression;
   isImportDeclaration(node: TsNode): node is TsImportDeclaration;
+  isExportDeclaration(node: TsNode): node is TsExportDeclaration;
+  isExportAssignment(node: TsNode): node is TsExportAssignment;
+  isPropertyAccessExpression(node: TsNode): node is TsPropertyAccessExpression;
   isNamedImports(node: TsNode): node is TsNamedImports;
 }
 

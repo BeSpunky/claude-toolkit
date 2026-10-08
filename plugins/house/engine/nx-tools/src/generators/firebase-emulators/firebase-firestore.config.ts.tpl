@@ -18,7 +18,7 @@ import { getApp } from '@angular/fire/app';
 import { connectFirestoreEmulator, getFirestore, provideFirestore } from '@angular/fire/firestore';
 
 import { environment } from '../environments/environment';
-import { emulatorFor, portOffset } from './firebase.config';
+import { emulatorEndpoint } from './firebase.config';
 
 declare const ngDevMode: boolean;
 
@@ -41,9 +41,11 @@ export function provideAppFirestore(): EnvironmentProviders {
       const databaseId = (environment.firebase as { databaseId?: string }).databaseId;
       const db = databaseId ? getFirestore(getApp(), databaseId) : getFirestore();
       if (ngDevMode && !emulatorConnected.has(db)) {
-        const e = emulatorFor('firestore');
+        // In the browser: the app's own origin (proxy.conf.mjs relays Firestore's WebChannel streams and its
+        // REST calls); server-side: the container address, shifted by the stack's offset. See emulatorEndpoint().
+        const e = emulatorEndpoint('firestore');
         if (e) {
-          connectFirestoreEmulator(db, e.host, e.port + portOffset);
+          connectFirestoreEmulator(db, e.host, e.port);
           emulatorConnected.add(db);
         }
       }

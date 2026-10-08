@@ -79,8 +79,8 @@
 // GENERATOR-OWNED — this file (and every firebase-*.config.ts sibling) is rewritten IN FULL on every
 // an upgrade, so never edit them by hand: a future sync silently reverts it. They carry no per-project
 // values by design, so everything you'd want to change lives elsewhere:
-//   • per-environment CONFIG (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`,
-//     functions `proxied`) → environment.ts / environment.<env>.ts;
+//   • per-environment CONFIG (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`)
+//     → environment.ts / environment.<env>.ts;
 //   • WHICH services are provided, and WHERE → app.config.ts and your lazy routes.
 // Because they hold no config, they are safe to always rewrite — which is exactly what keeps them from
 // silently drifting behind template improvements (there is no "is it customized?" guess to get wrong).
@@ -88,7 +88,7 @@ import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
 
 import { environment } from '../environments/environment';
-import { resolveEmulated, resolvePortOffset, type EmulatorService } from './emulator-overrides';
+import { resolveEmulated, type EmulatorService } from './emulator-overrides';
 
 // Angular's dev-mode flag. The optimizer folds it to a literal `false` in production builds, which
 // is what makes everything emulator-related below tree-shakeable out of prod. Declared locally —
@@ -110,36 +110,106 @@ const emulate: Record<EmulatorService, boolean> = ngDevMode
     })
   : { auth: false, firestore: false, storage: false, functions: false };
 
-/**
- * The emulator endpoint to connect a service to, or `undefined` for the real backend. Called only from
- * inside `if (ngDevMode)` blocks (here and in the per-service siblings), so it — and `emulate` — tree-shake
- * out of production along with the callers.
- */
-export function emulatorFor<S extends EmulatorService>(service: S): EmulatorEndpoints[S] | undefined {
-  return emulate[service] ? environment.emulators?.[service] : undefined;
+/** Where THIS runtime reaches an emulator — what each `connect*Emulator(...)` call is handed. */
+export interface EmulatorEndpoint {
+  host: string;
+  port: number;
+  /** `http://host:port` — Auth is connected by URL, the other services by host + port. */
+  origin: string;
 }
 
 /**
- * Per-session emulator PORT OFFSET (0 unless the app was opened with `?portOffset=`). It shifts every
- * emulator port so the app connects to an ISOLATED stack (started by `<app>:serve --portOffset`) rather
- * than the base ports. DEV ONLY — `ngDevMode` folds to `false` in prod, collapsing this to 0 and
- * tree-shaking `resolvePortOffset` out with the rest.
+ * The endpoint to connect a service's emulator to, or `undefined` for the real backend. Called only from inside
+ * `if (ngDevMode)` blocks (in the per-service siblings), so it — and `emulate` — tree-shake out of production.
+ *
+ * WHERE AN EMULATOR IS REACHED FROM DEPENDS ON WHERE THE CALLER RUNS, not on the service:
+ *   • IN THE BROWSER — through the page's OWN origin. The dev server's proxy.conf.mjs relays every emulator's
+ *     paths to the suite inside the container (shifted for a worktree's stack), so the browser needs no emulator
+ *     port and no offset: only the address the app loaded on, whatever port the editor forwarded it to.
+ *   • ON THE SERVER (SSR) — directly, at the container address in environment.ts, shifted by the stack's
+ *     PORT_OFFSET, which the dev engine exports to every process of a shifted stack.
+ * WHETHER a service is emulated is decided once, the same way in both (see emulator-overrides.ts): the browser
+ * reads the URL the dev engine opened (`?emulate=none` when the suite is skipped), the server the same query from
+ * the engine's DEV_URL_QUERY — so a server render and the page it hydrates talk to the same backend.
  */
-export const portOffset: number = ngDevMode ? resolvePortOffset() : 0;
+export function emulatorEndpoint(service: EmulatorService): EmulatorEndpoint | undefined {
+  const entry = emulate[service] ? environment.emulators?.[service] : undefined;
+  if (!entry) return undefined;
+  if (typeof window === 'undefined') return containerEndpoint(entry);
+  checkTheRelay(service, window.location);
+  return { host: window.location.hostname, port: Number(window.location.port) || 80, origin: window.location.origin };
+}
 
 /**
- * Shift the port inside an emulator URL (Auth is configured by URL, not host+port). Only reached from
- * inside `if (ngDevMode)` blocks, so it tree-shakes out of prod.
+ * What the emulator hub says, through the page's origin, about the running suite: the emulators it runs, or the
+ * sentence that explains why it could not be asked. Asked once per page load, by the first emulated service.
  */
-export function offsetUrl(url: string, offset: number): string {
-  if (!offset) return url;
-  try {
-    const u = new URL(url);
-    if (u.port) u.port = String(Number(u.port) + offset);
-    return u.toString();
-  } catch {
-    return url;
+let hubAnswer: Promise<string[] | string> | undefined;
+/** Each sentence is said once, however many services it concerns. */
+const said = new Set<string>();
+
+/**
+ * Check, for one emulated service, the relay it depends on — and say out loud, in the console, the three ways it
+ * goes quiet otherwise: the page is served over https (the SDK dials an emulator over http only), the dev server
+ * does not relay (its proxy config leaves proxy.conf.mjs's routes out: Firestore would hang offline, Auth fail with
+ * a network error), or the suite does not run that emulator. A console error, never a throw — the same policy as
+ * the dev guard in provideAppFirebase(): one broken service must not brick the dev app, and the error names the fix.
+ */
+function checkTheRelay(service: EmulatorService, page: Location): void {
+  const say = (sentence: string): void => {
+    if (said.has(sentence)) return;
+    said.add(sentence);
+    console.error(`[firebase.config.ts] ${sentence}`);
+  };
+  if (page.protocol !== 'http:') {
+    say(
+      `Emulated Firebase services will not connect: this page is served over ${page.protocol.replace(':', '')}, the ` +
+        `browser reaches every emulator through the page's own origin, and the Firebase SDK reaches an emulator over ` +
+        `plain http only.\n  Serve the dev server over http locally (drop \`ssl\` from its dev-server target), or open ` +
+        `the app with ?emulate=none to use the real backend for every service.`,
+    );
+    return;
   }
+  hubAnswer ??= fetch(`${page.origin}/__bespunky/emulator-hub/emulators`, { cache: 'no-store' }).then(
+    async (response) => {
+      if (response.ok && (response.headers.get('content-type') ?? '').includes('json')) {
+        return Object.keys((await response.json()) as Record<string, unknown>);
+      }
+      return response.status >= 500
+        ? `Emulated Firebase services will not connect: the emulator suite is not answering behind the dev server ` +
+            `(HTTP ${response.status}) — is it running? \`nx serve\` starts it beside the app; served with ` +
+            `--no-emulators, every service should resolve real (?emulate=none).`
+        : `Emulated Firebase services will not connect: the dev server does not relay the emulators (the hub route ` +
+            `answered ${response.status} ${response.headers.get('content-type') ?? ''} — the app, not the emulator hub). ` +
+            `Its proxyConfig must be this app's proxy.conf.mjs — your own routes go in proxy.local.mjs beside it — or a ` +
+            `config of yours that includes its \`emulatorRoutes\`.`;
+    },
+    (error: unknown) => `The emulator hub could not be asked through this page's origin (${String(error)}).`,
+  );
+  void hubAnswer.then((answer) => {
+    if (typeof answer === 'string') say(answer);
+    else if (!answer.includes(service)) {
+      say(
+        `${service} is emulated, but the running suite has no ${service} emulator (it runs: ${answer.join(', ')}). ` +
+          `Enable it in firebase.json, or use the real ${service} with ?real=${service}.`,
+      );
+    }
+  });
+}
+
+/** Server-side code's route: the container address from environment.ts, shifted by the stack's PORT_OFFSET. */
+function containerEndpoint(entry: { url: string } | { host: string; port: number }): EmulatorEndpoint {
+  const base = 'url' in entry ? new URL(entry.url) : { hostname: entry.host, port: String(entry.port) };
+  const host = base.hostname;
+  const port = Number(base.port) + serverPortOffset();
+  return { host, port, origin: `http://${host}:${port}` };
+}
+
+/** The stack's PORT_OFFSET from the server's environment (0 for the base stack, and wherever there is no `process`). */
+function serverPortOffset(): number {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const offset = Number(env?.['PORT_OFFSET'] ?? 0);
+  return Number.isInteger(offset) && offset > 0 ? offset : 0;
 }
 
 /**
@@ -202,5 +272,53 @@ export function provideAppFirebase(): EnvironmentProviders {
     }
   }
 
-  return makeEnvironmentProviders([provideFirebaseApp(() => initializeApp(environment.firebase))]);
+  return makeEnvironmentProviders([provideFirebaseApp(() => initializeApp(firebaseOptions()))]);
+}
+
+// ── THE PROJECT ID THIS RUNTIME USES — the emulator suite's, whenever anything is emulated ─────────────────────────
+//
+// The emulator suite runs under an OFFLINE `demo-` project id by default (tools/emulator-project.mjs — the same rule,
+// read from this app's environment.ts): `my-app` → `demo-my-app`. Google cannot have a `demo-` project, so nothing a
+// local run does can reach a real one. The browser must use the suite's id, or the emulated Auth and Functions answer
+// for a different project (Auth keeps accounts per project; Functions serves /<project>/…). The REAL id is used only
+// when environment.ts COMMITS a service to the real backend (`auth: false` in EMULATE) — then the suite runs under it
+// too — or when nothing is emulated at all (`?emulate=none`, `serve --no-emulators`).
+
+/** The services environment.ts commits to the real backend (an entry whose committed `default` is false). */
+function committedRealServices(): EmulatorService[] {
+  return (['auth', 'firestore', 'storage', 'functions'] as EmulatorService[]).filter(
+    (service) => environment.emulators?.[service]?.default === false
+  );
+}
+
+/**
+ * The project id the emulator suite runs under: the app's own when environment.ts commits a real service, else its
+ * offline twin (`demo-<id>`; an id already `demo-…` is its own). Keep in step with tools/emulator-project.mjs.
+ */
+export function emulatorProjectId(): string {
+  const id = environment.firebase.projectId;
+  if (id.startsWith('demo-')) return id;
+  return committedRealServices().length > 0 ? id : `demo-${id}`;
+}
+
+/** The options `initializeApp` gets: the suite's project (and its default bucket) while anything is emulated. */
+function firebaseOptions(): typeof environment.firebase {
+  if (!ngDevMode) return environment.firebase;
+  const emulated = (Object.keys(emulate) as EmulatorService[]).filter((service) => emulate[service]);
+  const id = emulatorProjectId();
+  if (emulated.length === 0 || id === environment.firebase.projectId) return environment.firebase;
+  const real = (Object.keys(emulate) as EmulatorService[]).filter((service) => !emulate[service]);
+  if (real.length > 0) {
+    // A per-session `?real=<service>` while the suite runs OFFLINE: one app has one project id, and it must be the
+    // suite's for the emulated services to answer — so the real service is asked about a project that cannot exist.
+    console.error(
+      `[firebase.config.ts] ${real.join(', ')} ${real.length > 1 ? 'are' : 'is'} set to the REAL backend for this ` +
+        `session, but the emulator suite runs under the offline project ${id}, which this app must share with it — so ` +
+        `${real.join(', ')} cannot reach ${environment.firebase.projectId}.\n` +
+        `  To mix a real service with emulated ones, commit it: set it to false in environment.ts's EMULATE map and ` +
+        `restart the suite (it then runs under ${environment.firebase.projectId}). Or go fully real: ?emulate=none.`
+    );
+  }
+  // The emulated Functions' Admin SDK defaults to `<project>.appspot.com`; the app's uploads must land in that bucket.
+  return { ...environment.firebase, projectId: id, storageBucket: `${id}.appspot.com` };
 }

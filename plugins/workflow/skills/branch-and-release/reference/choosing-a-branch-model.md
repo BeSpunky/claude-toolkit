@@ -9,8 +9,10 @@ The user's rule is absolute: **no declaration means asking.** This procedure end
 ## 1. Gather the evidence
 
 ```bash
-node "<base>/scripts/branches.mjs" evidence --json
+node "<base>/scripts/branches.mjs" evidence --json [--app-hosting]
 ```
+
+**Add `--app-hosting` whenever the repo has Firebase** (a `.firebaserc`): it asks the Firebase CLI which App Hosting backends each project has — region, linked repository (none → it deploys from local source), root directory, environment name — and, with a `gcloud` login, **which branch each one rolls out from**. It is opt-in because every call takes seconds and needs `firebase login`; without a login every one of those facts is `unobservable`, which makes it a question.
 
 It returns the raw facts, each tagged **`observed`** (read directly), **`inferred`** (read heuristically — e.g. a crude YAML read of a CI trigger) or **`unobservable`** (it could not see — e.g. branch protection without an authenticated `gh`, an App Hosting backend that lives only in the console, a squash-deleted branch). Read it all before judging; supplement with the repo's own docs (`CLAUDE.md`, README deploy notes) where they say what a branch is for.
 
@@ -35,7 +37,7 @@ Reading the evidence for those verdicts:
 - **A CI trigger justifies a line only if it is exclusive to that line or deploys/publishes.** A test workflow whose `branches:` lists every long-lived line (or runs on every push) fires on all of them alike and justifies none of them.
 - **"Ahead for real stretches" is the `lag` facts** (`<upstream> → <line>`: `promotionEvents` (reflog moves only), median and max seconds between the upstream receiving a commit and this line receiving it; a median under ten minutes reads *back-to-back*). They come from the **local reflog** only, so on a fresh clone, or wherever the reflog has expired, the fact is `unobservable` — then **ask** how promotions actually happened; don't infer a gate or its absence.
 - **`directCommits` on a protected line are dated history, not a verdict.** If most of them are old (before a workflow existed, or from the scaffold), report the **date split** the fact already carries (`directCommits: {total, last90Days, older, newest}`) — *"41 direct commits on `main`, 39 before 2025-03, 2 since"* — rather than reading them as a live violation; `git log --first-parent --no-merges <line>` shows them.
-- **`deploys` in the model is free-text documentation** of what a push fires — the engine never verifies it. Fill it from the bindings evidence and the user's answers; it doesn't make a line justified.
+- **`deploys` records what a push to a line fires** — it doesn't make a line justified, it says what the line is bound to. Fill it from the bindings evidence and the user's answers, as a **binding** wherever the evidence is structured (see §4), as a **`note`** (free text — `"deploys": { "note": "…" }`; `deploys` is always an object) for anything else (a Vercel preview, a manual release ritual).
 
 Then look for **shapes** beyond the chain: live `release/*` / `hotfix/*` branches, or their names in merge messages (→ release or hotfix lines); a tag series, and which line carries it (two series on two lines → maintained releases); `(cherry picked from commit …)` trailers (→ upstream-first fix flow); "Merge pull request #" merges or required-PR protection (→ `landing: pr`, and its merge style); direct commits on a protected line (→ the old model was not being followed — say so, don't judge it). **Tags that no long-lived line contains** (the `tags` fact's empty `containedIn`) are **reported, not modelled**: they mark something off the chain — a deleted branch, an abandoned candidate, or `sync-backup-*` tags, restore points a toolkit sync left behind, and say nothing about the branch model. Name them; don't invent a line to hold them.
 
@@ -53,7 +55,20 @@ Start from the closest preset and adjust it — `presets` lists them (`trunk`, `
 node "<base>/scripts/branches.mjs" expand --preset <id> [--integration <b>] [--stages a,b] [--release-pattern p] [--maintained] [--fix-flow f] [--landing merge|pr] [--pr-style s] > "<scratch>/branches.proposed.json"
 ```
 
-Edit the expansion to fit (real line names, `deploys` documenting what each binding fires, `landing` matching the protection rules), then check it against today's repo:
+Edit the expansion to fit (real line names, `deploys` for what each line fires, `landing` matching the protection rules), then check it against today's repo.
+
+**Propose the deploy bindings from the evidence — never invent one.** The engine reports facts; you draft the binding, and the user confirms it with the rest of the model:
+
+| Evidence | Proposed `deploys` on that line |
+| --- | --- |
+| `app hosting` `<project>/<backend>` with a repository, and its `live branch` = the line | `"appHosting": [{ "project": "<.firebaserc alias or id>", "backend": "<backend>" }]` |
+| a backend with **no** repository (local-source deploys) | nothing for App Hosting — it deploys only when someone runs `firebase deploy --only apphosting`; say so |
+| a `live branch` that is `unobservable` | a question: *"Does backend `web` roll out from `main`?"* — never a guess |
+| a workflow that deploys on push to the line (`bindings`, `deploys: true`) | a `note` naming it; a `ci` binding only if the project adopts the house `ci` layer (it owns its own workflow) |
+| the user wants CI to deploy the line (house projects: the `ci` layer) | `"ci": { "environment": "<name>", "providers": { "firebase": "<.firebaserc alias>" } }` — one environment per Firebase project the line ships to. **Only on a protected line** (integration, a stage, a non-maintained release line) and **one line per environment**: the engine refuses it on hotfix lines and tags (anyone who can push creates one — bind the line they land on) and on maintained release lines (each is its own production) |
+
+A `drift` fact (with `--app-hosting` on a declared model) is a binding that no longer matches the cloud — a backend that moved branch, lost its repository, or exists undeclared. Each one is a model change to propose (`changing-the-model.md`), not a note to ignore.
+
 
 ```bash
 node "<base>/scripts/branches.mjs" validate "<scratch>/branches.proposed.json"

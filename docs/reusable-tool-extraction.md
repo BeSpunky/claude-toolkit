@@ -117,7 +117,7 @@ Lift a candidate from a project into the shared workspace as a publishable packa
 
 Replace the local lib with the published public-npm package; close the loop. Runs as a normal generator inside the project's own workspace. Honours **verify-then-delete** (decision #3) as a **two-step** flow, since a generator can't install-build-then-conditionally-delete in one pass:
 
-- **Options:** `lib` (required), `package` (default from the marker's `ingestedPackage`/`proposedPackage`), `version` (default `latest`), `finalize` (the delete step), `keepShim`.
+- **Options:** `lib` (required), `package` (default from the marker's `ingestedPackage`/`proposedPackage`), `version` (default `^<the version extract-tool recorded>`; without one it asks — never `latest`), `finalize` (the delete step), `keepShim`.
 - **Step 1** — `adopt-extracted <lib>`: adds the package dependency (`yarn add @bespunky/<name>` from public npm — no registry wiring, per the `nx-enso` precedent §6), **rewrites imports** from the local TS path alias → the package (best-effort module-specifier codemod), and **keeps the local lib**; marker → `adopting`.
 - **Verify** — build the project to confirm the package works.
 - **Step 2** — `adopt-extracted <lib> --finalize`: confirms the dep is present, then **removes the local lib** (project, files, tsconfig path alias). Loop closed.

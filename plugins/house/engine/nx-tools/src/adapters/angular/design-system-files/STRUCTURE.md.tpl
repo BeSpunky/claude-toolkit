@@ -47,6 +47,7 @@ can freely rename, reshape, or delete.
 │   │   └── _theme.scss              theme() — the one emission; mode() — structural mode branches
 │   └── _utils/                      the AUTHORING TOOLKIT (private)
 │       ├── _mixins.scss             media() container() focus-ring() elevation() transition() reduced-motion()
+│       ├── _a11y.scss               visually-hidden($focusable) skip-link() skip-target()
 │       └── _placeholders.scss       %visually-hidden %reset-button %truncate %overlay-surface
 ├── src/
 │   ├── index.ts                     ★ THE PUBLIC API of the primary entry point ({{importPath}})

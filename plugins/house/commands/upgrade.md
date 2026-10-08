@@ -336,7 +336,8 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 
 ### The rest
 
-- **`BACKUP_ABORT: … is not a git repository`** — very common on a first retrofit. The upgrade **refused to
+- **`BACKUP_ABORT: … is not versioned by git`** — very common on a first retrofit (no repository at all, or a
+  folder its enclosing repository ignores, whose `HEAD` holds none of its files). The upgrade **refused to
   change anything** rather than rewrite files with no restore point. Relay the two ways out it printed:
   `git init && git add -A && git commit` in the project, or `--no-backup`. Prefer the first, and only pass
   `--no-backup` if the user asks for it — see the rule above. (In a git repository there is no backup step to
@@ -388,6 +389,16 @@ generator-owned file locally (the next upgrade rewrites it); the fix belongs ups
 A target that already failed before the upgrade (check it at the restore point if unsure) is not the upgrade's —
 report it as pre-existing.
 
+### Relay what needs a human — `UPGRADE_ATTENTION`
+
+If the output carries an `UPGRADE_ATTENTION:` block, **relay every line under it** in your report, as it is — each
+names a project target, what the run did to the project's own value there, and what to do. They are the house-target
+merge's findings (`.bespunky/house-targets.json`): a value of the project's replaced because the house changed the
+same key, a value with no record to tell an edit from an older house value, a deploy-contract value re-asserted, or
+a target of the project's own kept over the house's. None of them failed the run, and none is yours to "fix" by
+editing the targets on the user's behalf: whether an edit is re-applied, or a target of their own renamed so the
+house's applies, is their call.
+
 ### First, close the gap the run left open — `UPGRADE_RELOAD`
 
 If the output carries a `UPGRADE_RELOAD:` line, **Read every file it names** (`HOUSE.rules.md`, `HOUSE.md`,
@@ -406,6 +417,17 @@ silently and mention it in one clause.
 - the restore point from the `BACKUP_OK` line (also `backup=` in `UPGRADE_OK`) — the clean pre-upgrade `HEAD` — and how
   to use it: `git diff <sha>` reviews the upgrade; `git checkout <sha> -- <path>` restores one file;
   `git restore --source=<sha> --staged --worktree -- .` (then `git clean -n`) undoes it all. Never `reset --hard`.
+
+### Steps only the human may take — `HUMAN_STEP:`
+
+A generator prints `HUMAN_STEP: <line> — <why>` for something the user must do themselves — today, the `ci` layer's
+cloud setup (`! bash tools/setup-gcp.sh --environment <env>`) whenever the environments it was rendered for changed, and
+its `--rollback` while a removed binding's setup is still recorded.
+**Relay each one verbatim, as a step for the user, and never attempt it yourself**: it grants IAM, which Claude Code
+refuses to agents by design — no `gcloud iam …`, no workaround, no retry. Say what to paste back (the `gh variable
+set …` lines it prints; you may run those once pasted — they are not secrets). It is not a boundary — it does not
+count against the one `UPGRADE_NEXT` below. A `[ci] No deploy workflow: …` warning is not a human step: relay its
+reason (usually *declare a `ci` binding through the branch-and-release skill*) and offer to do that.
 
 ### If the model is undeclared — the proposal and the question (3b)
 

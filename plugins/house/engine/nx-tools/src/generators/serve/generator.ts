@@ -2,15 +2,17 @@
 // and declare it in `.bespunky/dev.json`.
 //
 // The dev loop itself is stack-free: `tools/dev/dev serve` runs what `.bespunky/dev.json` declares. This
-// generator is how an Nx project joins it. It parks two targets on the app, one composing the other — on
+// generator is how an Nx project joins it. It parks the targets on the app, one composing the other — on
 // OPPOSITE sides of the layer line (see THE SEAM in the generator body):
 //   - `dev-server` — the app's real dev-server. Supplied by the project's STACK (its adapter's `devServer`
 //     port — Angular's is @angular/build:dev-server, host 0.0.0.0, configurations development (default) /
 //     production) ONLY when the project has none of its own. A project that already has a dev-server — Vite,
 //     Next, anything — keeps it untouched.
-//   - `serve`      — the @bespunky/nx-tools:serve executor: a THIN WRAPPER over `tools/dev/dev serve <app>`.
-//     `nx serve <app> --worktree=… --port-offset=…` is the engine with Nx's option parsing in front; every
-//     option the wrapper does not own (buildTarget, host, …) is forwarded to the app's primary process.
+//   - `serve`      — what is typed: the @bespunky/nx-tools:serve executor, a THIN WRAPPER over
+//     `tools/dev/dev serve <app>` (`nx serve <app> --worktree=… --port-offset=…`). NOT continuous: every
+//     `nx serve` is its own stack and ends with the stack's exit status. Every option the wrapper does not own
+//     (buildTarget, host, …) is forwarded to the app's primary process.
+//   - `dev-stack`  — the same, continuous: what an e2e target depends on for a running stack.
 // …and it SEEDS the app's entry in `.bespunky/dev.json` from the adapters that apply (the dev-server process;
 // the Firebase emulators when the workspace has them) — only what the app does not declare yet, so a later
 // `nx g @bespunky/nx-tools:app` is servable before the next sync.
@@ -25,7 +27,7 @@
 // Idempotent + upgrade-safe: re-running re-asserts the same targets (reclaiming the raw @nx/angular `serve`
 // slot into the `dev-server` leaf).
 //
-// It also turns Nx's interactive TUI off (nx.json `tui.enabled: false`, set-if-absent): the composer streams
+// It also turns Nx's interactive TUI off (nx.json `tui.enabled: false`, set-if-absent): the dev engine streams
 // every process's prefixed logs under one Ctrl+C, and the TUI would re-wrap that stream in a redrawing pane that
 // humans and agents alike read worse. That is a property of THIS dev loop, so it lives with it (it used to be
 // written by the Firebase generator, back when the emulators were the only reason a run had several streams).
@@ -36,14 +38,14 @@ import {
   type Tree,
   type TargetConfiguration,
   readProjectConfiguration,
-  updateProjectConfiguration,
-  updateJson,
   formatFiles,
   logger,
 } from '@nx/devkit';
+import { updateJsonInPlace } from '../_utils/json-edits';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { seedFromAdapters } from '../dev/fragments';
 import { adapterOf } from '../../adapters/registry';
-import { composerFor, findExistingDevServer } from '../_utils/dev-server';
+import { SERVE_EXECUTOR, STACK_TARGET, findExistingDevServer, serveTargetsFor } from '../_utils/dev-server';
 
 interface ServeSchema {
   project: string;
@@ -59,7 +61,7 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   // THE SEAM. This generator writes two things with genuinely different preconditions, and conflating them
   // is what pinned the whole dev loop to Angular:
   //
-  //   the COMPOSER (`serve`)      — runs the app's declared processes under one Ctrl+C. It drives a TARGET BY
+  //   the COMPOSER (`dev-stack`)  — runs the app's declared processes under one Ctrl+C. It drives a TARGET BY
   //                                 NAME and never learns what produced it. Framework-agnostic; the `web` layer's.
   //   the LEAF     (`dev-server`) — the actual server: the project's own, or its STACK's (the adapter's
   //                                 `devServer` port — src/adapters). This file names no framework.
@@ -97,15 +99,23 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
   }
   targets['dev-server'] = leaf;
 
-  // The composing `serve` — the Nx face of `tools/dev/dev serve <app>`: every process the app declares, one
-  // graceful Ctrl+C, the current worktree or any chosen one. Flags (`--worktree`, `--port-offset`, `--skip`,
-  // `--no-shared-browser`, `--configuration`) tune it. It MIRRORS the leaf (see _utils/dev-server).
-  targets.serve = composerFor(leaf);
+  // `serve` — the Nx face of `tools/dev/dev serve <app>`: every process the app declares, one graceful Ctrl+C, the
+  // current worktree or any chosen one. Flags (`--worktree`, `--port-offset`, `--skip`, `--no-shared-browser`,
+  // `--configuration`) tune it. It MIRRORS the leaf. And `dev-stack`, its continuous twin for e2e targets (see
+  // _utils/dev-server for why it is two targets).
+  const own = targets[STACK_TARGET];
+  if (own && (typeof own !== 'object' || own.executor !== SERVE_EXECUTOR)) {
+    throw new Error(
+      `[serve] Project "${projectName}" has a \`${STACK_TARGET}\` target of its own — the house dev loop's continuous stack (what an e2e target depends on) needs that name.\n` +
+        `  Rename yours (and anything that depends on it), then re-run this generator.`,
+    );
+  }
+  Object.assign(targets, serveTargetsFor(leaf));
 
-  updateProjectConfiguration(tree, projectName, project);
+  updateProjectConfigurationInPlace(tree, projectName, project);
   streamedLogs(tree);
 
-  // Declare the app for the stack-free engine the composer wraps. Only what it does not declare yet.
+  // Declare the app for the stack-free engine `serve` wraps. Only what it does not declare yet.
   for (const line of seedFromAdapters(tree, projectName)) logger.info(`[serve] ${line}`);
 
   await formatFiles(tree);
@@ -114,7 +124,7 @@ export default async function serveGenerator(tree: Tree, options: ServeSchema): 
 /** Nx's TUI off for the dev loop — unless the workspace already decided (either way). */
 function streamedLogs(tree: Tree): void {
   if (!tree.exists('nx.json')) return;
-  updateJson(tree, 'nx.json', (json) => {
+  updateJsonInPlace(tree, 'nx.json', (json) => {
     if (json.tui?.enabled === undefined) json.tui = { ...(json.tui ?? {}), enabled: false };
     return json;
   });

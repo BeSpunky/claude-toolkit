@@ -75,16 +75,26 @@ export interface PlanContext {
   active: ReadonlySet<LayerId>;
   /** Only what this run was explicitly asked to create — the baseline acts (provider wiring) key off it. */
   ensured: ReadonlySet<LayerId>;
+  /**
+   * What the workspace had BEFORE this run (detected from it, never declared). `ensured` also holds a layer the
+   * project already has (`add-layer firebase` on a Firebase project), so an act that writes a layer's STARTING
+   * CONTENT — seeding what the project then owns — keys off ensured AND not detected: the run that creates it.
+   */
+  detected: ReadonlySet<LayerId>;
   /** The project (workspace) name. */
   project: string;
   /** The app the per-app generators target. */
   app: string;
-  /** Node major the devcontainer image is pinned to. */
-  nodeMajor: string;
   /** --voice on this run (the devcontainer also carries a previous answer forward from its marker). */
   voice: boolean;
   /** --staging on this run. */
   staging: boolean;
+  /**
+   * The branch model the run RESOLVED (house-branches.sh): the projection as JSON, or `undeclared`; absent when
+   * nothing was resolved (a step then reads the Tree). Set by the planner from `StampOptions` — the same value
+   * house-doc receives — for the steps that render from the model (the `ci` layer's deploy workflow).
+   */
+  branchProjection?: string;
 }
 
 /**
@@ -162,6 +172,59 @@ export interface LayerDescriptor {
    * `.bespunky/dev.json` entry by the `dev` generator, only where the layer is present and the app is served.
    */
   devFragment?(tree: Tree, project: string): DevFragment;
+  /**
+   * This layer as a DEPLOY PROVIDER for the `ci` layer's workflow: how a CI job authenticates to it, what its
+   * `deploy` targets are told about the environment, and the setup a HUMAN runs once to create the cloud identity.
+   * The `ci` layer knows no provider — it composes the contributions of the active layers. See `CiDeployProvider`.
+   */
+  ciDeploy?: CiDeployProvider;
+}
+
+// ── THE CI DEPLOY PROVIDER ────────────────────────────────────────────────────────────────────────────────────
+//
+// The `ci` layer owns the stack-agnostic pipeline (push to a line the branch model binds → deploy what changed, in
+// that line's environment). What differs per cloud is contributed here: a line's `ci` binding names, per provider
+// id, the provider's TARGET there (`{"firebase": "prod"}` — a .firebaserc alias), and the provider turns it into
+// the options ITS OWN deploy targets take in that environment, the steps that authenticate the job, and the
+// one-time cloud setup. A provider's options reach only its own targets (a `ci-<environment>` Nx configuration on
+// each), so several providers — and a project's own deploy targets — compose without seeing each other's flags.
+
+/** One environment a provider deploys into, as the `ci` layer resolved it from the branch model. */
+export interface CiEnvironment {
+  /** The deployment environment (a GitHub environment) — the binding's `ci.environment`. */
+  name: string;
+  /** This provider's target in it (the binding's `ci.providers.<id>`). */
+  target: string;
+  /** The branches that deploy into it, as names and globs. */
+  branches: string[];
+  /**
+   * No binding names it any more, but its cloud setup is still recorded as applied: rendered only so a human can
+   * roll it back (`retireStep`), never set up again.
+   */
+  retired?: boolean;
+}
+
+export interface CiDeployProvider {
+  /** The provider id a binding names (`ci.providers.<id>`). */
+  id: string;
+  title: string;
+  /** The deploy targets this provider's layer owns in this workspace — the ONLY targets its options reach. */
+  deployTargets(tree: Tree): { project: string; target: string }[];
+  /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
+  deployOptions(target: string): Record<string, unknown>;
+  /** GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. */
+  authSteps(): string;
+  /**
+   * Owned files this provider adds (the human-run cloud setup), rendered from the resolved environments — retired
+   * ones included, so the tool that undoes their setup outlives their binding.
+   */
+  files?(tree: Tree, environments: readonly CiEnvironment[]): { path: string; content: string; mode?: number }[];
+  /** Whether the environment's cloud setup is recorded as applied (and not rolled back) in this workspace. */
+  isSetUp?(tree: Tree, environment: string): boolean;
+  /** The HUMAN_STEP that (re-)applies an environment's cloud setup — printed when what it was rendered for changed. */
+  humanStep?(environment: CiEnvironment): string;
+  /** The HUMAN_STEP that undoes a retired environment's cloud setup — printed on every upgrade until it is done. */
+  retireStep?(environment: CiEnvironment): string;
 }
 
 /** A `.gitignore` block: a `#` heading (without the `#`) and the entries under it. */
@@ -181,7 +244,28 @@ export interface GitignoreBlock {
 // STRING TOKENS, substituted by the composer in every string a fragment contributes:
 //   {{home}}        the remote user's home (`/home/<remoteUser>` — it follows the image, never hard-coded)
 //   {{remoteUser}}  the user the container runs as
-//   {{nodeMajor}}   the Node major the image / Node feature is pinned to
+//   {{nodeMajor}}   the Node major the image / Node feature is pinned to — the project's declared Node (.nvmrc / .node-version / volta.node — _utils/node-version)
+
+/** The Debian architectures the house images run on — what an `ArchiveTool` names its downloads by. */
+export type DebianArch = 'amd64' | 'arm64';
+
+/**
+ * A tool installed from its publisher's VERSIONED ARCHIVE (see `DevcontainerFragment.archives`) — for a tool Debian
+ * does not ship, whose publisher keeps every release downloadable. Not a third-party apt repository: a repository
+ * index is a ROLLING window (Google's drops a gcloud release after about a year), so a version pinned there expires
+ * and every cache-miss image build fails with it; and a moved pin needs a downgrade, a foreign image may already
+ * declare the same repository differently. A versioned archive is kept, so the pin lives as long as the publisher.
+ */
+export interface ArchiveTool {
+  /** Names its install root, `/opt/bespunky/<id>`: `[a-z0-9-]+`. */
+  id: string;
+  /** The pinned release; each one is extracted to `/opt/bespunky/<id>/<version>`, `current` pointing at it. */
+  version: string;
+  /** The directory inside the archive whose executables are linked into /usr/local/bin — first on PATH, ahead of /usr/bin. */
+  bin: string;
+  /** Per architecture: the `.tar.gz` and its sha256 (checked before anything is extracted). Projected, never typed. */
+  downloads: Readonly<Record<DebianArch, { url: string; sha256: string }>>;
+}
 
 /** A JSON value as it may appear in devcontainer.json. */
 export type DevcontainerJson =
@@ -305,6 +389,7 @@ export interface DevcontainerFragment {
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
   /** Debian packages — composed into the one installer (house.packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
   osPackages?: readonly ({
+    /** Debian package names. */
     packages: readonly string[];
     /**
      * Names that are right only for the HOUSE images' distro (a projection for Debian 13, like Chromium's libraries):
@@ -313,6 +398,12 @@ export interface DevcontainerFragment {
      */
     onHouseImageOnly?: true;
   } & Explained)[];
+  /**
+   * Tools installed from their publisher's versioned archive — by the same one installer, in the same cached image
+   * layer, after the apt packages (and, like them, by post-create where missing: an adopted image). A moved pin
+   * installs the new release beside the old one, switches `current`, and removes the old one. See `ArchiveTool`.
+   */
+  archives?: readonly (ArchiveTool & Explained)[];
   /** Post-create pieces. */
   postCreate?: readonly PostCreatePiece[];
 }

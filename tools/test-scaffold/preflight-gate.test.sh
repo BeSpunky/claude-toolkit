@@ -50,6 +50,16 @@ HOUSE_MOUNTS_FNS="$(declare -f house_mount_points house_unwritable_mounts house_
 # shellcheck source=../../plugins/house/engine/house-branches.sh
 . "$ROOT/plugins/house/engine/house-branches.sh"
 HOUSE_BRANCHES_FNS="$(house_branches_fns)"
+# The gate asks `_git_versions` whether git versions the project at all — rendered into the program's prelude from
+# house.sh's own definition (UPGRADE_GIT_FNS), so it is lifted from there and defined here the same way. Missing, the
+# gate would see "not a repository" and every git case below would pass vacuously — hence the check.
+git_versions_src="$(awk '/^_git_versions\(\) /{f=1} f{print} f&&/^}/{exit}' "$HOUSE_SH")"
+[ -n "$git_versions_src" ] || { echo "FATAL: could not extract _git_versions from house.sh." >&2; exit 2; }
+eval "$git_versions_src"
+# The gate RUNS inside the inner program, whose environment house.sh sets (INNER_ENV): the engine root (the gate's
+# project-facts probe, house-probe.mts, lives there) and the layer sets the probe judges — empty here, as for a repo with
+# no layers, so the probe has nothing to refuse and these cases test the gate's own checks.
+export HOUSE_ENGINE_ROOT="$ROOT/plugins/house/engine" HOUSE_ENSURE_LAYERS='' HOUSE_EVIDENT_LAYERS=''
 # The branch model is resolved once, above the gate, and the gate embeds that block — so it is extracted first.
 model_src="$(extract 'BRANCH_MODEL_BLOCK="' 'esac"')" || exit 2
 eval "$model_src"

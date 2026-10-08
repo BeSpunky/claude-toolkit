@@ -3,6 +3,10 @@ import { type Tree, type GeneratorCallback, readJson, writeJson, updateJson, log
 import type { LibPort } from '../stack-adapter';
 import { workspaceLinking } from '../../generators/_utils/linking';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
+import { withPlatform, csvTags } from '../../platform/platform';
+import { stateAnalogTsconfig } from './analog-tsconfig';
+import { convertBareLint } from '../../generators/_utils/lint-inference';
+import { libraryUnitTestRunner } from './workspace-angular';
 
 const noop: GeneratorCallback = () => {};
 
@@ -37,11 +41,8 @@ export const angularLibs: LibPort = {
     const linking = workspaceLinking(tree);
     const ownAlias = linking.kind === 'paths';
     // Option NAMES verified against @nx/angular 23 (`nx g @nx/angular:library --help`): standalone-only suite,
-    // no NgModule entry, Vitest, eslint as a string (the enum is deprecated). WHICH Vitest follows from the build:
-    // `vitest-angular` (the Angular-native `@nx/angular:unit-test` executor) runs through the library's own
-    // build, so @nx/angular REFUSES it for a library that has none (validate-options: "requires the library to
-    // be buildable or publishable") — a workspace-internal library (navigation-core) gets `vitest-analog`,
-    // @nx/angular's own Vitest choice for exactly that case.
+    // no NgModule entry, Vitest, eslint as a string (the enum is deprecated). WHICH Vitest depends on the build AND
+    // the workspace's Angular major — chosen where every major-dependent choice is (./workspace-angular).
     const { libraryGenerator } = await import('@nx/angular/generators');
     const callback =
       (await angularGeneratorCall(tree, () => libraryGenerator(tree, {
@@ -56,11 +57,16 @@ export const angularLibs: LibPort = {
         style: options.style ?? 'scss',
         linter: 'eslint',
         strict: true,
-        unitTestRunner: options.publishable ? 'vitest-angular' : 'vitest-analog',
+        unitTestRunner: libraryUnitTestRunner(tree, !!options.publishable),
         skipFormat: true,
-        tags: options.tags,
+        tags: withPlatform(csvTags(options.tags), options.platform).join(','),
         skipTsConfig: !ownAlias,
       } as Parameters<typeof libraryGenerator>[1]))) ?? noop;
+    // The Analog test config names its tsconfig, or every graph computation warns about a tsconfig.app.json a
+    // library never has (./analog-tsconfig).
+    stateAnalogTsconfig(tree, options.directory.replace(/\/+$/, ''));
+    // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.
+    convertBareLint(tree, options.name);
     if (!ownAlias) {
       const libRoot = options.directory.replace(/\/+$/, '');
       linking.link(tree, { importPath: options.importPath, libRoot });

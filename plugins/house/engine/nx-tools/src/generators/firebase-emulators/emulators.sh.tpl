@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Launch the local Firebase emulator suite for development — the single launch path
-# the Nx `firebase:emulators*` targets all funnel through (so the reap → prime → start
+# the Nx `firebase:emulators*` targets all funnel through (so the claim → prime → start
 # recipe lives in exactly one place instead of being copy-pasted across five targets).
 #
 # Three steps, in order:
-#   1. reap   — clear any stale emulator processes/ports from an ungraceful prior exit
-#               (tools/reap-emulators.sh — see its header for the root cause).
+#   1. claim  — the suite's ports, as a stack (tools/dev — see STACK IDENTITY below): run by the dev engine,
+#               its serve already claimed them; run on its own, this script claims them itself.
 #   2. prime  — make sure the working data dir exists (from the default seed on a fresh
 #               clone), so --import has something to load (tools/emulator-data.sh).
 #   3. start  — boot the suite, IMPORTING the working dir and, on the full run only,
@@ -32,65 +32,118 @@
 # dir. Focused runs still IMPORT the cached world (handy for debugging against real data) —
 # they just don't write it back.
 #
+# STOPPING IS THE PART THAT LOSES DATA, so this script owns it (see SUPERVISION below): the suite runs
+# OUTSIDE every supervisor's process tree, gets exactly ONE stop at the firebase-tools process, and this
+# script waits for the export and says when it is done.
+#
 #   bash tools/emulators.sh                  # full suite, cached (import + export)
 #   bash tools/emulators.sh --only auth,ui   # focused, import-only (no export)
 set -euo pipefail
+ORIG_ARGS=("$@")   # how this run was asked for — the restart command repeats it
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# A process's identity is its PID AND its kernel start time (PIDs are reused) — the dev engine's rule too.
+proc_start() { local s; s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 0; s="${s##*) }"; set -- $s; printf '%s' "${20:-}"; }
+is_proc() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null && { [ -z "${2:-}" ] || [ "$(proc_start "$1")" = "$2" ]; }; }
+
 DATA_DIR="$ROOT/.emulator-data"
 
-# Port-offset isolation (PORT_OFFSET, set by `<app>:serve --portOffset`): shift the WHOLE
-# emulator suite onto a free port block so it COEXISTS with a suite the developer already has up on
-# the base ports — instead of reaping it. We generate an offset copy of firebase.json (every
-# emulator port +OFFSET, INCLUDING the hub/logging ports firebase-tools otherwise fixes at
-# 4400/4500 and would collide on), keep this stack's data in its own dir, and reap ONLY these
-# shifted ports (never the global JVM sweep, which would kill the developer's suite). OFFSET 0 (the
-# default) = the base forwarded stack, entirely unchanged.
-OFFSET="${PORT_OFFSET:-0}"
+# ── STACK IDENTITY: ONE CLAIM FOR EVERYTHING THAT BINDS THIS PROJECT'S PORTS ──────────────────────────────────
+# A suite is a STACK: it holds a block of ports, it has a state dir, a TMPDIR and a handle (`tools/dev/dev ps`,
+# `tools/dev/dev stop`). Run by the dev engine (`nx serve <app>`, `tools/dev/dev serve`), the serve CLAIMED the block
+# for its whole stack before it started anything, and hands the suite its state dir (DEV_STACK_DIR), its TMPDIR
+# (DEV_STACK_TMP) and its offset (PORT_OFFSET). Run on its own (`nx run firebase:emulators`), this script claims
+# `firebase@<offset>` itself, through the same engine — so a direct run and a serve see each other, and the second
+# of them is refused naming the first, instead of the two colliding port by port. The claim is atomic; a block whose
+# previous suite is still SAVING is waited for (nothing is lost). Run directly by an AI agent (CLAUDECODE=1), the
+# suite never lands on the base ports (`auto`), and PORT_OFFSET=0 is refused.
+#
+# THE STACK LIVES WHILE ITS LOCK IS HELD (tools/dev/lib/stacks.mjs): a SHARED flock this script takes — on the lock the
+# serve passed (DEV_STACK_LOCK), or on a fresh one of its own before it claims — and that everything it starts
+# inherits, the detached keeper above all. So the stack stays claimed while the suite saves after this script is gone,
+# and is free the instant the last of them exits, however it exits: the kernel releases it.
+#
+# Port-offset isolation (PORT_OFFSET): the WHOLE suite moves onto one block, so it COEXISTS with a suite on the base
+# ports. We generate an offset copy of firebase.json (every emulator port +OFFSET, every nested port such as
+# firestore.websocketPort, and the hub/logging ports firebase-tools otherwise fixes at 4400/4500 — all from
+# tools/emulator-ports.mjs, the one port table) and keep this stack's data in its own dir. OFFSET 0 (the default) =
+# the base forwarded stack, entirely unchanged.
+#
+# EACH STACK ITS OWN SHORT TMPDIR. firebase-tools finds a running suite through `os.tmpdir()/hub-<projectId>.json`,
+# keyed by the project id alone: sharing one /tmp, a second suite's export-on-exit asks the FIRST suite's hub to export
+# (data lands in the wrong dir, or nothing is saved — reproduced, firebase-tools 15.32.1). And every Cloud Functions
+# worker listens on `os.tmpdir()/fire_emu_<16 hex>.sock`: a Unix socket path is cut at 107 bytes, so a TMPDIR deep in
+# a worktree silently cut the random part away — every worker bound ONE name and a call to one function was answered
+# by another's worker. The stack's TMPDIR is `/tmp/bespunky-<hash>` (tools/dev/lib/stacks.mjs stackTmp), removed with
+# the stack. The JVM emulators use java.io.tmpdir, which TMPDIR does not move — and need not.
+[ -f "$ROOT/tools/dev/dev.mjs" ] || { echo "[emulators] the dev engine (tools/dev) is missing — it claims this suite's ports. Run the house upgrade." >&2; exit 1; }
+if [ -n "${DEV_STACK_DIR:-}" ]; then
+  STACK_DIR="$DEV_STACK_DIR"
+  STACK_TMP="${DEV_STACK_TMP:?the dev engine that started this suite gave it no TMPDIR (DEV_STACK_TMP) — run the house upgrade}"
+  STACK_LOCK="${DEV_STACK_LOCK:?the dev engine that started this suite gave it no stack lock (DEV_STACK_LOCK) — run the house upgrade}"
+  exec {STACK_LOCK_FD}<"$STACK_LOCK"
+  flock -s -w 30 "$STACK_LOCK_FD" || { echo "[emulators] could not join the stack's lock $STACK_LOCK" >&2; exit 1; }
+  OFFSET="${PORT_OFFSET:-0}"
+  DIRECT=0
+else
+  mkdir -p "$ROOT/.bespunky/run/locks"
+  STACK_LOCK="$ROOT/.bespunky/run/locks/$$-$RANDOM$RANDOM.lock"
+  exec {STACK_LOCK_FD}>"$STACK_LOCK"
+  flock -s -n "$STACK_LOCK_FD"
+  STACK_KEY=''
+  # Given up when this script ends: our descriptor closed, then the record removed — unless the suite is still saving
+  # (its keeper holds the lock): then the keeper, the last one out, removes it. A claim that never happened: the lock file.
+  trap 'exec {STACK_LOCK_FD}>&-; if [ -n "$STACK_KEY" ]; then node "$ROOT/tools/dev/dev.mjs" release "$STACK_KEY" --lock="$STACK_LOCK" >/dev/null 2>&1 || true; else rm -f "$STACK_LOCK"; fi' EXIT
+  CLAIM="$(node "$ROOT/tools/dev/dev.mjs" claim firebase --pid=$$ --lock="$STACK_LOCK" ${PORT_OFFSET:+--port-offset="$PORT_OFFSET"} \
+    --ports="$(node "$ROOT/tools/emulator-ports.mjs" claim "$ROOT/firebase.json")")" || exit 1
+  eval "$CLAIM"
+  OFFSET="$STACK_OFFSET"
+  DIRECT=1
+  echo "[emulators] stack $STACK_KEY claimed — tools/dev/dev ps shows it; stop it with Ctrl+C or: tools/dev/dev stop firebase --offset=$OFFSET" >&2
+fi
+mkdir -p "$STACK_DIR" "$STACK_TMP"
+export TMPDIR="$STACK_TMP"
+
 CONFIG_ARGS=()
-REAP_ARGS=()
 if [ "$OFFSET" != "0" ]; then
   echo "[emulators] PORT_OFFSET=$OFFSET — isolated stack (shifted ports + own data dir)" >&2
   OFFSET_CONFIG="$ROOT/.firebase.offset-$OFFSET.json"
-  node -e '
-    const fs = require("fs"), off = Number(process.argv[2]);
-    const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const e = cfg.emulators || (cfg.emulators = {});
-    for (const k of Object.keys(e)) if (e[k] && typeof e[k].port === "number") e[k].port += off;
-    // hub/logging default to 4400/4500 when unset — pin them shifted so two suites never collide.
-    e.hub = Object.assign({ host: "0.0.0.0" }, e.hub, { port: ((e.hub && e.hub.port) || 4400) + off });
-    e.logging = Object.assign({ host: "0.0.0.0" }, e.logging, { port: ((e.logging && e.logging.port) || 4500) + off });
-    fs.writeFileSync(process.argv[3], JSON.stringify(cfg, null, 2));
-  ' "$ROOT/firebase.json" "$OFFSET" "$OFFSET_CONFIG"
+  node "$ROOT/tools/emulator-ports.mjs" shift "$ROOT/firebase.json" "$OFFSET" "$OFFSET_CONFIG"
   CONFIG_ARGS=(--config "$OFFSET_CONFIG")
-  REAP_ARGS=("$OFFSET_CONFIG" isolated)
   DATA_DIR="$ROOT/.emulator-data-$OFFSET"
 fi
 
-# The emulator suite MUST run under the SAME projectId the app's client uses. The moment any
-# service is switched to real (e.g. real Auth), that real `projectId` is used for ALL services
-# (singleProjectMode) — so a still-emulated Firestore/Storage launched under a DIFFERENT project
-# id hits a mismatch and silently falls back to offline. The projectId has ONE source of truth —
-# the app's environment.ts — so we DERIVE it here rather than hardcode a copy that drifts.
-# `demo-` is Firebase's "offline only, no cloud project needed" convention and the safe fallback
-# when no env file is found. One suite = one project (singleProjectMode), so it follows the
-# PRIMARY app this workspace was wired with; set FIREBASE_EMULATOR_PROJECT for anything unusual.
-# (Seeds are always built under demo-{{workspaceName}} — see tools/seed/build-seeds.sh — and import
-# fine under a derived real id because singleProjectMode collapses project ids.)
-#   Precedence:  FIREBASE_EMULATOR_PROJECT (override)  >  environment.ts  >  demo-{{workspaceName}}
+# ── THE PROJECT ID: OFFLINE UNLESS THE APP COMMITS A REAL SERVICE ─────────────────────────────────────
+# The suite runs under the OFFLINE twin of the app's project id (`my-app` → `demo-my-app`): Google refuses to create
+# a `demo-` project, so every Google API call the emulated code makes names a project that cannot exist —
+# firebase-tools itself turns away Secret Manager, the Admin SDK's config lookup, FCM, a non-emulated bucket. The
+# REAL id only when environment.ts commits a service to the real backend (EMULATE map), because a real service and
+# the emulated ones must share one id (singleProjectMode) — and the browser follows the same rule from the same file
+# (firebase.config.ts → emulatorProjectId), so the two always agree. The rule, and what it does not cover:
+# tools/emulator-project.mjs, which EVALUATES environment.ts (never reads it as text): the browser decides from the
+# values the file exports, so the suite does too — and a file that cannot be evaluated is a refusal, never a guess.
+# One suite = one project: it follows the PRIMARY app this workspace was wired with.
 ENV_FILE="$ROOT/{{appEnvPath}}"
-derive_project() {
-  [[ -f "$ENV_FILE" ]] || return 1
-  local id
-  # Anchor to the field (line, after indent, begins with `projectId:`) so a comment that merely
-  # mentions `projectId:` — comments start with `//` — can't shadow the real value.
-  id="$(grep -oE "^[[:space:]]*projectId:[[:space:]]*[\"'][^\"']+" "$ENV_FILE" | head -1 | sed -E "s/.*[\"']//")"
-  [[ -n "$id" ]] && printf '%s' "$id"
-}
-PROJECT="${FIREBASE_EMULATOR_PROJECT:-$(derive_project || echo demo-{{workspaceName}})}"
-echo "[emulators] project: $PROJECT" >&2
+resolve_project() { node "$ROOT/tools/emulator-project.mjs" resolve "$ENV_FILE" demo-{{workspaceName}}; }
+EMU_VARS="$(resolve_project)" \
+  || { echo "[emulators] not started: the suite's project id could not be decided (tools/emulator-project.mjs, above)." >&2; exit 2; }
+eval "$EMU_VARS"
+PROJECT="$EMU_PROJECT"
+if [ "$EMU_MODE" = real ]; then
+  echo "[emulators] project: $PROJECT — REAL. environment.ts commits ${EMU_REAL_SERVICES//,/, } to the real backend, so the" >&2
+  echo "[emulators]   whole suite runs under the real project: anything not emulated, and any code naming the project," >&2
+  echo "[emulators]   reaches production with your firebase login. Emulate every service again to run offline (demo-)." >&2
+  echo "[emulators]   ${EMU_REAL_SERVICES//,/, }: NOT emulated — the suite leaves them to the real backend, as the browser does." >&2
+  if [ "$EMU_STORAGE_BUCKET_UNSET" = 1 ]; then
+    echo "[emulators]   environment.ts's firebase block names no storageBucket: under the real id the browser has no default" >&2
+    echo "[emulators]   Storage bucket, and emulated Storage data is not moved to one. Set firebase.storageBucket (firebase apps:sdkconfig WEB)." >&2
+  fi
+else
+  echo "[emulators] project: $PROJECT — OFFLINE (demo-): calls to any Google service that is not emulated fail, never reach a real project." >&2
+  [ "$PROJECT" = "$EMU_APP_PROJECT" ] || echo "[emulators]   ($EMU_APP_PROJECT, environment.ts's id, is used only when it commits a service to the real backend.)" >&2
+fi
 
 # Pass through an optional `--only <list>` (the focused targets use it); an EXPLICIT one
 # is also what flips persistence off (see header).
@@ -161,11 +214,30 @@ if [ "$EXPLICIT_ONLY" -eq 0 ]; then
   fi
 fi
 
+# ── A SERVICE COMMITTED TO THE REAL BACKEND IS NOT EMULATED ─────────────────────────────────────────────────────
+# The browser talks to the real backend for it, so an emulator of it would be a second, empty copy that only the
+# emulated code sees: firebase-tools hands emulated Functions FIREBASE_AUTH_EMULATOR_HOST / STORAGE_EMULATOR_HOST
+# whenever those emulators run, and a user signed in with real Auth is then unknown to them. Dropped from every
+# run's list — the derived one and an explicit one alike — so the suite and the browser agree on each service.
+if [ -n "$EMU_REAL_SERVICES" ] && [ "${#ONLY_ARGS[@]}" -gt 0 ]; then
+  KEPT="$(node -e '
+    const real = new Set(process.argv[2].split(","));
+    process.stdout.write(process.argv[1].split(",").filter((n) => n && !real.has(n)).join(","));
+  ' "${ONLY_ARGS[1]}" "$EMU_REAL_SERVICES")"
+  if [ "$KEPT" != "${ONLY_ARGS[1]}" ]; then
+    if [ -z "$KEPT" ]; then
+      echo "[emulators] --only ${ONLY_ARGS[1]}: environment.ts commits all of it to the real backend — nothing is left to emulate." >&2
+      exit 2
+    fi
+    echo "[emulators] not emulating ${EMU_REAL_SERVICES//,/, } (committed to the real backend in environment.ts): starting $KEPT" >&2
+    ONLY_ARGS=(--only "$KEPT")
+  fi
+fi
+
 # ── CLONE-LEVEL RESOURCES, RESOLVED ONCE ───────────────────────────────────────────────────────
-# Two things the emulators need are gitignored, so they exist per CLONE and never arrive in a
-# freshly-created git worktree: the built emulator SEEDS and `.secret.local`. Both resolve the same
-# way — this tree's own copy wins, else the main worktree's — so resolve the main worktree once here
-# rather than twice by hand further down, which is how the two would drift apart.
+# The built emulator SEEDS are gitignored, so they exist per CLONE and never arrive in a freshly-created
+# git worktree. A worktree resolves them this tree first, else the main worktree's — resolve the main
+# worktree once here. (Secrets are deliberately NOT resolved this way: see FUNCTIONS SECRETS below.)
 #
 # `|| true` under `set -euo pipefail`: outside a repository `git worktree list` exits 128, and
 # pipefail would propagate that into an errexit kill. Not being in a repo is ordinary here.
@@ -187,7 +259,61 @@ seed_dir() {   # seed_dir <name> — echoes the resolved seed path, or nothing w
   fi
 }
 
-bash "$ROOT/tools/reap-emulators.sh" "${REAP_ARGS[@]}"
+# ── SUPERVISION: ONE STOP, DELIVERED ONCE, WAITED FOR ────────────────────────────────────────────────
+# The export-on-exit runs inside firebase-tools, and only when IT is told to stop while its emulators are still
+# up. A signal that reaches an emulator JVM directly kills that JVM first; firebase-tools then reads "Firestore
+# Emulator has exited with code: 143", stops everything as a FATAL error — and exports nothing. Every supervisor
+# above us does exactly that: Nx (run-commands, and `nx serve` itself) stops a task with killProcessTreeGraceful,
+# which signals the LEAVES of the tree first — the JVMs — and SIGKILLs whatever is left after ~5 s, far short of
+# the ~30 s an export takes. A terminal's Ctrl+C reaches the whole foreground group, the JVMs included. That is
+# how `tools/dev/dev stop` and Ctrl+C on `nx serve` lost every stack's data while a lone `kill <pid>` of this
+# script (one signal, exec'd straight into firebase-tools) exported fine.
+#
+# So the suite is never in a supervisor's tree. It runs under a KEEPER — this script's own code, detached: its
+# own process group (no terminal signal reaches it) and reparented away (no tree walk finds it). The keeper is
+# the ONLY thing that ever signals firebase-tools, exactly once, when the stop is asked for: by this script on
+# any TERM/INT/HUP, or by its own discovery that this script is gone (a supervisor SIGKILLed it, a terminal
+# closed). A stop can therefore never lose the data, however it arrives — at worst the export finishes after
+# whoever asked has stopped waiting. In the foreground, this script streams the suite's log (where its output
+# always went), waits for the export with progress, and says what happened. The keeper records itself in the
+# stack's state dir (`detached/emulators.json`): the dev engine waits for it before it calls a stack stopped,
+# `tools/dev/dev ps` shows it while it finishes, and the next claim of this stack's ports waits for it instead of
+# colliding with a suite that is still saving. It owns a deadline (see keep), so nothing waits on it forever.
+DETACHED_DIR="$STACK_DIR/detached"
+ENTRY="$DETACHED_DIR/emulators.json"
+STOP_FILE="$DETACHED_DIR/emulators.stop"
+# Outside the state dir, which is removed with the stack: a crashed suite's log must outlive it.
+LOG_DIR="$(dirname "$STACK_DIR")/logs"
+LOG="$LOG_DIR/$(basename "$STACK_DIR").emulators.log"
+STOP_TIMEOUT="${EMULATORS_STOP_TIMEOUT:-120}"
+mkdir -p "$DETACHED_DIR" "$LOG_DIR"
+
+# A sleep with no child process: under a tree-killer a child `sleep` is a leaf that keeps this script from ever
+# being one, and the stop would never reach it.
+exec {NAP_FD}<> <(:)
+nap() { read -r -t "$1" -u "$NAP_FD" _ || true; }
+# The keeper's entry, written atomically (the engine and the next start read it). Fields as plain strings.
+entry_write() {   # entry_write <status> [doing] [code] [result] [deadline]
+  node -e '
+    const fs = require("fs");
+    const [file, pid, start, proxy, proxyStart, status, doing, log, code, result, deadline] = process.argv.slice(1);
+    const e = { id: "emulators", what: "the Firebase emulator suite", pid: Number(pid), procStart: start || null,
+      proxyPid: Number(proxy), proxyStart: proxyStart || null, status, log, at: new Date().toISOString() };
+    if (doing) e.doing = doing;
+    if (code !== "") e.code = Number(code);
+    if (result) e.result = result;
+    if (deadline) e.deadline = Number(deadline);
+    fs.writeFileSync(file + ".tmp", JSON.stringify(e, null, 2) + "\n");
+    fs.renameSync(file + ".tmp", file);
+  ' "$ENTRY" "$KEEPER_PID" "$KEEPER_START" "$PROXY_PID" "$PROXY_START" "$1" "${2:-}" "$LOG" "${3:-}" "${4:-}" "${5:-}"
+}
+entry_field() {   # entry_field <name> — one field of the entry, as plain text ('' when absent)
+  node -e 'try { const v = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]]; process.stdout.write(v == null ? "" : String(v)); } catch {}' "$ENTRY" "$1"
+}
+
+# No previous suite of this stack can still be running or saving here: the claim waited for one that was saving, and
+# refused one that was running. What it left in the state dir is history.
+mkdir -p "$DETACHED_DIR"
 if [ "$OFFSET" = "0" ]; then
   bash "$ROOT/tools/emulator-data.sh" ensure
 elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ]; then
@@ -205,30 +331,67 @@ elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ]; then
   fi
 fi
 
-# Local Functions secrets: the Functions emulator reads `.secret.local` from the loaded bundle
-# (firebase.json → {{functionsDist}}), but the file lives with the app source
-# ({{functionsRoot}}/.secret.local, gitignored). It is deliberately NOT a build asset — Nx skips
-# gitignored assets anyway, and routing a secret through build outputs would persist it into the
-# Nx cache. Copy it into place at launch, so it stays a runtime concern of the emulator alone.
-# (Re-run the suite after a functions rebuild — `deleteOutputPath` wipes dist.)
-#
-# `.secret.local` is a CLONE-level resource, not a per-worktree one: it's gitignored, so a
-# freshly-created git worktree never receives a copy — and its emulated functions would then
-# launch WITHOUT the secret (failing e.g. an OAuth code→token exchange with "client_secret is
-# missing"). Resolve it as a cascade: the current tree's own file wins (a worktree may still drop
-# in its own), else fall back to the MAIN worktree's copy (git lists it first). So serving ANY
-# worktree — `nx serve` here or `<app>:serve --worktree` — reuses the one secret the main tree
-# holds, with no per-worktree setup.
-SECRETS_FILE="$ROOT/{{functionsRoot}}/.secret.local"
-if [ ! -f "$SECRETS_FILE" ]; then
-  # Same cascade as the seeds above, off the same resolved MAIN_WORKTREE.
-  if [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && [ -f "$MAIN_WORKTREE/{{functionsRoot}}/.secret.local" ]; then
-    echo "[emulators] .secret.local absent in this worktree; using the main worktree's copy: $MAIN_WORKTREE" >&2
-    SECRETS_FILE="$MAIN_WORKTREE/{{functionsRoot}}/.secret.local"
-  fi
+# ── STORAGE DATA FOLLOWS THE PROJECT ID ─────────────────────────────────────────────────────────────
+# Emulator Storage keys its data by BUCKET NAME, and the bucket the app and the functions use follows the project id
+# (offline: `<demo id>.appspot.com`; real: environment.ts's storageBucket). Data a suite saved under the other mode's
+# bucket — every export from before the offline default — is moved across, so it is never silently out of sight.
+if [ -f "$DATA_DIR/firebase-export-metadata.json" ]; then
+  # A failure is said by the script itself (and nothing moved); the run goes on, with the data where it was.
+  MOVED="$(node "$ROOT/tools/emulator-project.mjs" align-storage "$DATA_DIR" "$EMU_OTHER_BUCKETS" "$EMU_BUCKET")" || MOVED=""
+  [ -z "$MOVED" ] || echo "[emulators] $MOVED" >&2
 fi
-if [ -f "$SECRETS_FILE" ] && [ -d "$ROOT/{{functionsDist}}" ]; then
-  cp "$SECRETS_FILE" "$ROOT/{{functionsDist}}/.secret.local"
+
+# ── FUNCTIONS SECRETS: INERT BY DEFAULT ─────────────────────────────────────────────────────────────
+# The Functions emulator reads `.secret.local` from the loaded bundle ({{functionsDist}}), and asks Secret Manager for
+# any declared secret it does not find there. The offline project id above already makes that a call to a project
+# that cannot exist; tools/emulator-secrets.cjs is the defence in depth (its header has the whole of it):
+#   1. INERT PLACEHOLDERS — written by the functions BUILD (so every rebuild and a raw `firebase emulators:start`
+#      carry them), and rewritten here at launch with the production file's key NAMES added (never a value).
+#   2. A SINK — Secret Manager pointed at an address that cannot resolve, for the emulator process.
+#
+# REAL VALUES ARE AN OPT-IN, AND ONLY EVER SANDBOX ONES. {{functionsRoot}}/.secret.sandbox.local (gitignored) — creating
+# it is the opt-in, every launch says which keys are live, and a value equal to ANY production value (this tree's
+# .secret.local or the main worktree's) is refused. `EMULATOR_SECRETS=inert` disarms it for one run;
+# `EMULATOR_SECRETS=sandbox` insists on it. A rebuild mid-session puts the build's inert file back: restart to re-arm.
+# The production `.secret.local` is push-secrets' source and is NEVER fed to an emulator.
+#
+# NEVER BORROWED ACROSS TREES. A worktree gets its own sandbox file or none — an unattended agent's worktree must
+# never wake up armed because the main tree is. (The main tree's PRODUCTION values are read for one purpose only:
+# to refuse them.)
+FUNCTIONS_SRC="$ROOT/{{functionsRoot}}"
+FUNCTIONS_DIST="$ROOT/{{functionsDist}}"
+SANDBOX_FILE="$FUNCTIONS_SRC/.secret.sandbox.local"
+export CLOUD_SECRET_MANAGER_URL="https://secret-manager.disabled-for-emulators.invalid"
+
+SECRETS_MODE="${EMULATOR_SECRETS:-}"
+case "$SECRETS_MODE" in
+  '') if [ -f "$SANDBOX_FILE" ]; then SECRETS_MODE=sandbox; else SECRETS_MODE=inert; fi ;;
+  inert|sandbox) ;;
+  *)
+    echo "[emulators] EMULATOR_SECRETS=$SECRETS_MODE — expected 'inert' or 'sandbox'." >&2
+    exit 2
+    ;;
+esac
+if [ "$SECRETS_MODE" = sandbox ] && [ ! -f "$SANDBOX_FILE" ]; then
+  echo "[emulators] EMULATOR_SECRETS=sandbox, but there is no {{functionsRoot}}/.secret.sandbox.local in this tree." >&2
+  echo "[emulators]   Create it (KEY=VALUE lines, SANDBOX credentials only — never production's) or drop the flag." >&2
+  exit 2
+fi
+
+# Functions run in this launch? (No `--only` at all = firebase-tools' own selection, which includes them.)
+FUNCTIONS_IN_RUN=1
+if [ "${#ONLY_ARGS[@]}" -gt 0 ]; then
+  case ",${ONLY_ARGS[1]}," in *,functions,*) ;; *) FUNCTIONS_IN_RUN=0 ;; esac
+fi
+
+if [ -d "$FUNCTIONS_DIST" ]; then
+  MAIN_FUNCTIONS_SRC=""
+  [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] && MAIN_FUNCTIONS_SRC="$MAIN_WORKTREE/{{functionsRoot}}"
+  SHOW=()
+  [ "$FUNCTIONS_IN_RUN" -eq 1 ] && SHOW=(--show)
+  # Exit 2 (from the script) when the file would not reach the emulator intact — never a silent launch without it.
+  node "$ROOT/tools/emulator-secrets.cjs" place --mode="$SECRETS_MODE" --source="$FUNCTIONS_SRC" --dist="$FUNCTIONS_DIST" \
+    --main-source="$MAIN_FUNCTIONS_SRC" --project-mode="$EMU_MODE" "${SHOW[@]}" || exit 2
 fi
 
 # Only import when the working dir is actually primed — `--import` on a missing dir is
@@ -240,8 +403,242 @@ IMPORT_ARGS=()
 EXPORT_ARGS=()
 [ "$PERSIST" -eq 1 ] && EXPORT_ARGS=(--export-on-exit "$DATA_DIR")
 
-exec firebase "${CONFIG_ARGS[@]}" emulators:start \
-  --project="$PROJECT" \
-  "${ONLY_ARGS[@]}" \
-  "${IMPORT_ARGS[@]}" \
-  "${EXPORT_ARGS[@]}"
+FIREBASE_ARGS=("${CONFIG_ARGS[@]}" emulators:start --project="$PROJECT" "${ONLY_ARGS[@]}" "${IMPORT_ARGS[@]}" "${EXPORT_ARGS[@]}")
+if [ "$PERSIST" -eq 1 ]; then STOP_DOING="exporting emulator data to $DATA_DIR"; else STOP_DOING="stopping (a focused run exports nothing, by design)"; fi
+
+# The live members of the keeper's group (the suite: firebase-tools, its JVMs, whatever they started), the keeper
+# itself excepted. Builtins only: a `$(…)` here would be a member of the group too.
+group_members() {   # group_members <array-name>
+  local -n _out="$1"
+  local f stat pid
+  _out=()
+  for f in /proc/[0-9]*/stat; do
+    pid="${f#/proc/}"; pid="${pid%/stat}"
+    [ "$pid" = "$BASHPID" ] || [ "$pid" = "$KEEPER_PID" ] && continue
+    read -r stat < "$f" 2>/dev/null || continue
+    stat="${stat##*) }"
+    set -- $stat
+    if [ "${3:-}" = "$KEEPER_PID" ] && [ "${1:-}" != Z ]; then _out+=("$pid"); fi
+  done
+  return 0
+}
+# End what is left of the keeper's group — its own processes, and only those (the group is the suite's: nothing
+# else can be in it). SIGKILL: this runs only once the suite is past asking (its deadline, an abandon, stragglers).
+kill_group() {
+  local members
+  group_members members
+  [ "${#members[@]}" -eq 0 ] && return 0
+  kill -KILL "${members[@]}" 2>/dev/null || true
+}
+
+# THE STACK'S RECORD GOES WITH THE LAST ONE OUT. Each holder of the stack's lock lets go of it as it leaves and asks
+# for the record to be removed; the engine removes it only once the kernel says nobody holds the lock — so the
+# claimer (the dev engine, or this script run directly) leaves it to a keeper still saving, and the keeper, when it is
+# the last one out (Nx force-kills a stopping task after a few seconds — a Ctrl+C while the suite exports), removes it.
+# A stack since claimed again under the same key names another lock, and is never touched.
+release_stack() {
+  exec {STACK_LOCK_FD}>&-
+  node "$ROOT/tools/dev/dev.mjs" release "$(basename "$STACK_DIR")" --lock="$STACK_LOCK" >/dev/null 2>&1 || true
+}
+
+# The keeper (see SUPERVISION). Runs detached; the only process that ever signals firebase-tools.
+#
+# IT OWNS A DEADLINE. Asked to stop, firebase-tools gets STOP_TIMEOUT seconds to export and exit. A hung export used
+# to wedge the stack for good: the keeper waited forever, `tools/dev/dev ps` said FINISHING forever, and every restart
+# waited and then refused — the only way out a kill by PID, the very thing the house steers everyone away from. Past
+# the deadline the keeper ends its own process group, records `ABANDONED … after Ns` with a non-zero code, and says
+# so in the log and to whoever is waiting. SIGUSR1 is the same, at once — `tools/dev/dev stop --abandon`.
+keep() {
+  # Its identity, PID and start time, OF THIS PROCESS. Never `$(proc_start "$BASHPID")`: a command substitution is a
+  # fork, and `$BASHPID` expands INSIDE it, so that recorded the start time of a throwaway subshell — the keeper's own
+  # only when the fork fell in the same clock tick (~9 in 10). Otherwise every reader took the keeper for dead while it
+  # saved: the script quit at once, `ps` called the stack ORPHANED (and `dev stop` would kill the export), a restart
+  # never waited, and the keeper's own release left the stack behind.
+  KEEPER_PID=$BASHPID
+  KEEPER_START="$(proc_start "$KEEPER_PID")"
+  local requested=0 abandon='' signalled=0 stop_at=0 deadline=0 code=0 fb result now abandoned='' partial
+  trap 'requested=1' TERM INT HUP
+  trap 'abandon="asked for (tools/dev/dev stop --abandon)"; requested=1' USR1
+  firebase "${FIREBASE_ARGS[@]}" </dev/null >>"$LOG" 2>&1 &
+  fb=$!
+  entry_write running
+  while kill -0 "$fb" 2>/dev/null; do
+    if [ "$signalled" -eq 0 ] && { [ "$requested" -eq 1 ] || [ -e "$STOP_FILE" ] || ! is_proc "$PROXY_PID" "$PROXY_START"; }; then
+      signalled=1
+      stop_at="$(date +%s)"
+      deadline=$((stop_at + STOP_TIMEOUT))
+      entry_write stopping "$STOP_DOING" "" "" "$deadline"
+      kill -TERM "$fb" 2>/dev/null || true
+    fi
+    if [ "$signalled" -eq 1 ]; then
+      now="$(date +%s)"
+      [ -z "$abandon" ] && [ "$now" -ge "$deadline" ] && abandon="its ${STOP_TIMEOUT}s deadline passed (EMULATORS_STOP_TIMEOUT)"
+      if [ -n "$abandon" ]; then
+        abandoned="$abandon"
+        echo "[emulators] ABANDONING the stop — ${abandoned}; firebase-tools had not finished after $((now - stop_at))s. Killing the suite's processes." >>"$LOG"
+        kill_group
+        break
+      fi
+    fi
+    nap 0.2
+  done
+  wait "$fb" 2>/dev/null || code=$?
+  if [ -n "$abandoned" ]; then
+    # What is left on disk, said as it is: firebase-tools writes an export into a firebase-export-* dir in the project
+    # root, then DELETES the data dir and moves the new export in. Killed before that swap, the data dir is as it was;
+    # during it, partly deleted; and a staged export may be left behind (gitignored) holding the newest data.
+    partial="$(find "$ROOT" -maxdepth 1 -type d -name 'firebase-export-*' -newermt "@$stop_at" 2>/dev/null | head -n 3 | tr '\n' ' ')"
+    result="ABANDONED after $(( $(date +%s) - stop_at ))s — ${abandoned}. firebase-tools had not finished ${STOP_DOING}; its processes were killed. ${DATA_DIR} holds what it held before only if the export had not yet begun to replace it — it may be partly deleted.${partial:+ A staged export it left: ${partial}(the newest data, possibly incomplete — check it before copying it over ${DATA_DIR}).} Its log: $LOG"
+    code=1
+  elif [ "$signalled" -eq 1 ] && [ "$PERSIST" -eq 1 ]; then
+    if [ -f "$DATA_DIR/firebase-export-metadata.json" ] && [ "$(stat -c %Y "$DATA_DIR/firebase-export-metadata.json" 2>/dev/null || echo 0)" -ge "$stop_at" ]; then
+      result="exported to $DATA_DIR"
+      code=0   # asked to stop, and it saved: a clean stop, whatever exit status firebase-tools chose for it
+    else
+      result="NO EXPORT was written to $DATA_DIR — firebase-tools did not complete it (exit $code); its log: $LOG"
+      [ "$code" -ne 0 ] || code=1
+    fi
+  elif [ "$signalled" -eq 1 ]; then
+    result="stopped (a focused run exports nothing, by design)"
+    code=0
+  elif [ "$code" -eq 0 ]; then
+    result="exited on its own"
+  else
+    result="CRASHED — firebase-tools exited with code $code; its log: $LOG"
+  fi
+  # The suite is over when EVERY process of it is: firebase-tools does not always wait for what it started (a JVM
+  # outlives a crashed firebase-tools), and a straggler still writes into this stack's TMPDIR as it exits. They are all
+  # in the keeper's group: given a few seconds, then ended — they are this suite's, and nobody else will ever stop them.
+  local waited=0 members
+  group_members members
+  while [ "${#members[@]}" -gt 0 ] && [ "$waited" -lt 50 ]; do nap 0.2; waited=$((waited + 1)); group_members members; done
+  if [ "${#members[@]}" -gt 0 ]; then
+    echo "[emulators] the suite left ${#members[@]} process(es) running after firebase-tools exited (${members[*]}) — ending them." >>"$LOG"
+    kill_group
+  fi
+  entry_write exited "" "$code" "$result"
+  # Also in the log, which outlives the state dir: whoever was waiting may read it after the stack is released.
+  echo "[emulators] result (code $code): $result" >>"$LOG"
+  rm -f "$STOP_FILE"
+  release_stack
+}
+
+PROXY_PID=$$
+PROXY_START="$(proc_start $$)"
+KEEPER_PID=''
+KEEPER_START=''
+rm -f "$STOP_FILE" "$ENTRY"
+: > "$LOG"
+# `set -m` puts the keeper in its OWN process group; the subshell exits at once, so the keeper is reparented out of
+# every tree above us. All of its output goes to the log, never to our stdout — a pipe a supervisor may close.
+( set -m; keep & ) </dev/null >/dev/null 2>&1
+
+for _ in $(seq 1 100); do [ -f "$ENTRY" ] && break; nap 0.1; done
+KEEPER_PID="$(entry_field pid)"
+KEEPER_START="$(entry_field procStart)"
+if [ -z "$KEEPER_PID" ]; then
+  echo "[emulators] the emulator suite did not start (no keeper) — its log: $LOG" >&2
+  exit 1
+fi
+
+# The suite's output, here where it always appeared (and in the log, which outlives it).
+tail -n +1 -F --pid="$KEEPER_PID" "$LOG" 2>/dev/null &
+TAIL_PID=$!
+
+if [ "$DIRECT" -eq 0 ]; then SAVING_WHERE='`tools/dev/dev ps` shows it FINISHING'; else SAVING_WHERE="\`tools/dev/dev ps\` shows $STACK_KEY FINISHING; its log: $LOG"; fi
+
+STOPPING=0
+STOP_SINCE=0
+LOG_AT_STOP=0
+request_stop() {
+  [ "$STOPPING" -eq 1 ] && return 0
+  STOPPING=1
+  STOP_SINCE="$(date +%s)"
+  LOG_AT_STOP="$(stat -c %s "$LOG" 2>/dev/null || echo 0)"
+  : > "$STOP_FILE"
+  kill -TERM "$KEEPER_PID" 2>/dev/null || true
+  echo "[emulators] stopping — ${STOP_DOING} (firebase-tools takes about half a minute; it is given ${STOP_TIMEOUT}s)…" >&2
+  if [ "$PERSIST" -eq 1 ]; then echo "[emulators]   If this returns before \"done\", the save still completes in the background: ${SAVING_WHERE}." >&2; fi
+}
+trap request_stop TERM INT HUP
+
+# ── THE COMMITTED CHOICE MOVED UNDER A RUNNING SUITE ───────────────────────────────────────────────────────────────
+# Flipping a service in environment.ts's EMULATE map hot-reloads the BROWSER at once — onto the real id when a service
+# is now committed real, back onto `demo-` when none is — but this suite's project id (and which services it
+# emulates) were decided at launch, and firebase-tools cannot change them while it runs (singleProjectMode). From that
+# save on, every emulated call the app makes names the other project and fails. So the file is watched, re-evaluated
+# the way launch evaluated it, and a mismatch is said — with the exact command that restarts this stack.
+restart_command() {
+  if [ "$DIRECT" -eq 1 ]; then
+    local args='' a
+    for a in "${ORIG_ARGS[@]}"; do args+=" $(printf '%q' "$a")"; done
+    printf 'cd %q && tools/dev/dev stop firebase --offset=%s && PORT_OFFSET=%s bash tools/emulators.sh%s' "$ROOT" "$OFFSET" "$OFFSET" "$args"
+  else
+    local app
+    app="$(node -e 'try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).app ?? "")); } catch {}' "$RECORD" 2>/dev/null || true)"
+    [ -n "$app" ] || app='<app>'
+    printf 'cd %q && tools/dev/dev stop %s --offset=%s && tools/dev/dev serve %s --port-offset=%s' "$ROOT" "$app" "$OFFSET" "$app" "$OFFSET"
+  fi
+}
+env_stamp() { if [ -f "$ENV_FILE" ]; then stat -c '%y:%s' "$ENV_FILE" 2>/dev/null || echo gone; else echo none; fi; }
+ENV_STAMP="$(env_stamp)"
+ENV_SAID=''
+check_committed_choice() {
+  local stamp vars now said real_now
+  stamp="$(env_stamp)"
+  [ "$stamp" = "$ENV_STAMP" ] && return 0
+  ENV_STAMP="$stamp"
+  if ! vars="$(resolve_project 2>/dev/null)"; then
+    said="environment.ts changed and cannot be evaluated now (run: node tools/emulator-project.mjs resolve $ENV_FILE x) — this suite keeps running under $PROJECT."
+  else
+    now="$(eval "$vars"; printf '%s|%s' "$EMU_PROJECT" "$EMU_REAL_SERVICES")"
+    if [ "$now" = "$PROJECT|$EMU_REAL_SERVICES" ]; then
+      [ -n "$ENV_SAID" ] && echo "[emulators] environment.ts is back in step with this suite ($PROJECT) — no restart needed." >&2
+      ENV_SAID=''
+      return 0
+    fi
+    real_now="${now#*|}"
+    said="environment.ts now commits ${real_now//,/, } to the real backend — the app runs under ${now%%|*}, but this suite was started under $PROJECT${EMU_REAL_SERVICES:+ with ${EMU_REAL_SERVICES//,/, } real}. Until it restarts, the app's emulated calls name the other project and fail."
+    [ -n "$real_now" ] || said="environment.ts now emulates every service — the app runs under ${now%%|*}, but this suite was started under $PROJECT${EMU_REAL_SERVICES:+ with ${EMU_REAL_SERVICES//,/, } real}. Until it restarts, the app's emulated calls name the other project and fail."
+  fi
+  [ "$said" = "$ENV_SAID" ] && return 0
+  ENV_SAID="$said"
+  echo "[emulators] RESTART NEEDED: $said" >&2
+  echo "[emulators]   Ctrl+C here and start it again, or from any terminal: $(restart_command)" >&2
+}
+
+# Waiting for the keeper: past its own deadline it ends the suite itself, so this wait is bounded by it (plus the
+# few seconds the keeper takes to record that).
+TICK=0
+while is_proc "$KEEPER_PID" "$KEEPER_START"; do
+  nap 0.5
+  TICK=$((TICK + 1))
+  [ "$STOPPING" -eq 0 ] && [ $((TICK % 4)) -eq 0 ] && check_committed_choice
+  if [ "$STOPPING" -eq 1 ]; then
+    elapsed=$(( $(date +%s) - STOP_SINCE ))
+    if [ "$elapsed" -ge $((STOP_TIMEOUT + 30)) ]; then
+      echo "[emulators] the keeper (pid $KEEPER_PID) is still ending the suite after ${elapsed}s — not waiting any longer;" >&2
+      echo "[emulators]   tools/dev/dev ps shows it, and tools/dev/dev stop --abandon ends it. Its log: $LOG" >&2
+      exit 1
+    fi
+    [ "$elapsed" -gt 0 ] && [ $((elapsed % 5)) -eq 0 ] && [ "${LAST_TICK:-}" != "$elapsed" ] && { LAST_TICK=$elapsed; echo "[emulators]   …${STOP_DOING} (${elapsed}s)" >&2; }
+  fi
+done
+
+# Let the log stream drain (it ends with the keeper). If a supervisor's stop took it down first (a signal, not its
+# own end), show what the suite said since the stop.
+for _ in $(seq 1 20); do kill -0 "$TAIL_PID" 2>/dev/null || break; nap 0.1; done
+TAIL_STATUS=0
+wait "$TAIL_PID" 2>/dev/null || TAIL_STATUS=$?
+if [ "$STOPPING" -eq 1 ] && [ "$TAIL_STATUS" -gt 128 ]; then
+  tail -c +"$((LOG_AT_STOP + 1))" "$LOG" 2>/dev/null || true
+fi
+
+CODE="$(entry_field code)"
+RESULT="$(entry_field result)"
+if [ "$STOPPING" -eq 1 ]; then
+  echo "[emulators] done in $(( $(date +%s) - STOP_SINCE ))s — ${RESULT:-stopped}" >&2
+else
+  echo "[emulators] the emulator suite ended without a stop being asked for: ${RESULT:-exit ${CODE:-?}}" >&2
+fi
+exit "${CODE:-1}"

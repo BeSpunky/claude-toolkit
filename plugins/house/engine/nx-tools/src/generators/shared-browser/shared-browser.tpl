@@ -19,7 +19,7 @@
 # ROBUSTNESS (why this file is long): a long-lived, multi-process, human+agent-shared stack is a leak
 # magnet. Every lifecycle failure is designed OUT, not left to discipline:
 #   • idempotent `up` that REAPS stale leftovers before starting — validated by PID *and* cmdline, so a
-#     reused PID owned by something else is NEVER killed (mirrors tools/reap-emulators.sh discipline);
+#     reused PID owned by something else is NEVER killed (the house's stop-by-handle discipline, tools/dev);
 #   • an flock so two `up`s can't half-start the stack;
 #   • a readiness gate on all three ports, with a diagnostic dump + self-teardown on timeout (no half-up);
 #   • a `down` that kills exactly this stack by PID file and VERIFIES the ports are actually free;
@@ -410,7 +410,7 @@ kill_component() {
 
 # Reclaim a port ONLY if every holder is provably ours (cmdline matches the signature). A FOREIGN
 # holder → clear error, return non-zero, and we do NOT kill it. When ours: SIGTERM → poll → SIGKILL,
-# and (like reap-emulators.sh) do not return until the port is actually FREE — "sent a kill" ≠ "freed".
+# and do not return until the port is actually FREE — "sent a kill" ≠ "freed".
 reclaim_port_if_ours() {
   local port="$1" sig="$2" pid holders t
   holders="$(port_holders "$port")"
@@ -781,10 +781,10 @@ cmd_navigate() {
   if [ "$wait" -eq 1 ]; then
     say "waiting for $url to answer (timeout ${SB_WAIT_TIMEOUT}s)…"
     if ! wait_for_url "$url"; then
-      # NON-FATAL by design: the `serve` target's shared-browser layer runs this navigate in a parallel run-commands
-      # alongside the app dev-server. A non-zero exit here would tear down the co-served dev-server. So when the app
-      # never comes up, WARN and leave the browser running — exit 0. Only a genuine hard failure (stack
-      # failing to come `up`, above) is fatal.
+      # NON-FATAL by design: the dev engine (tools/dev, lib/browser.mjs) runs this navigate beside the app's
+      # processes, and an app slow to answer is not a broken browser. So when the app never comes up, WARN and
+      # leave the browser running — exit 0. Only a genuine hard failure (stack failing to come `up`, above) is
+      # fatal.
       err "app not reachable after ${SB_WAIT_TIMEOUT}s — leaving the browser up; navigate manually when ready"
       err "  (open $NOVNC_URL, or re-run: shared-browser navigate --url=$url once the app is serving)"
       return 0

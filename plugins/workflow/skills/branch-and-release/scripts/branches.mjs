@@ -27,10 +27,12 @@ const USAGE = `usage: branches.mjs <command>
   plan <gate> [args]              the exact commands for a move — printed, never executed. Gates:
 ${Object.entries(GATES).map(([g, a]) => `                                    ${g} ${a}`).join('\n')}
   verify [--proposed <file>] [--json]   the invariants, against the model in force or a proposed one
-  evidence [--json]               the investigation's raw facts, each observed | inferred | unobservable`;
+  evidence [--json] [--app-hosting]   the investigation's raw facts, each observed | inferred | unobservable;
+                                  --app-hosting also asks Firebase which App Hosting backends each .firebaserc
+                                  project has and which branch each rolls out (slow; needs a logged-in firebase CLI)`;
 
 const EXIT = { ok: 0, fail: 1, usage: 2, undeclared: 3 };
-const BOOLEAN = new Set(['json', 'maintained', 'help']);
+const BOOLEAN = new Set(['json', 'maintained', 'help', 'app-hosting']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -79,12 +81,25 @@ const statusShape = (r) => ({
   protectedPatterns: r.protectedPatterns,
   notes: r.notes,
   reason: r.reason,
+  outdated: r.outdated, // null, or { resolution: 'rewrite'|'lands', line, problems } — what an outdated format awaits
 });
 const STATE_EXIT = { declared: EXIT.ok, undeclared: EXIT.undeclared, unreadable: EXIT.fail };
 
-/** The model in force — or the exit code of a state no command may act under (undeclared, unreadable). */
-function inForce(git, top) {
+/**
+ * The model in force — or the exit code of a state no command may act under (undeclared, unreadable). `current`:
+ * the command reads the declaration itself (describe, verify), so an OUTDATED copy (model.mjs `check`) is refused
+ * until it is rewritten; `plan` reads only names and moves, which an outdated format leaves intact.
+ */
+function inForce(git, top, { current = false } = {}) {
   const r = resolveModel(git, top);
+  if (r.state === 'declared' && current && r.outdated) {
+    for (const n of r.notes) err(`note: ${n}`);
+    err(`${FILE} on ${r.source} is in an outdated format (${r.outdated.problems.map((o) => o.field).join(', ')}) — see the note(s) above.`);
+    err(r.outdated.resolution === 'lands'
+      ? `Refusing until this branch lands on "${r.outdated.line}" — it already carries the rewrite; nothing else to do. status and plan still read the model meanwhile.`
+      : 'Refusing until it is rewritten as shown — run the house upgrade, whose migration applies it, or propose the exact rewrite to a human (it changes no binding). status and plan still read the model meanwhile.');
+    return { code: EXIT.fail, resolved: r };
+  }
   for (const n of r.notes) err(`note: ${n}`);
   if (r.state === 'declared') return { model: r.model, source: r.source, resolved: r };
   if (r.state === 'unreadable') {
@@ -120,7 +135,7 @@ const commands = {
   },
 
   describe(git, top) {
-    const r = inForce(git, top);
+    const r = inForce(git, top, { current: true });
     if (r.code !== undefined) return r.code;
     out(describe(r.model));
     return EXIT.ok;
@@ -199,7 +214,7 @@ const commands = {
       if (errors.length) return reportErrors(errors, opts.proposed);
       source = `${opts.proposed} (proposed)`;
     } else {
-      const r = inForce(git, top);
+      const r = inForce(git, top, { current: true });
       if (r.code !== undefined) return r.code;
       ({ model, source } = r);
     }
@@ -219,7 +234,7 @@ const commands = {
 
   evidence(git, top, { opts }) {
     const r = resolveModel(git, top);
-    const facts = evidence(git, top, r);
+    const facts = evidence(git, top, r, { appHosting: Boolean(opts.appHosting) });
     if (opts.json) out(JSON.stringify({ state: r.state, declared: r.declared, facts }, null, 2));
     else {
       for (const area of [...new Set(facts.map((f) => f.area))]) {

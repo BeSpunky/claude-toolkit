@@ -15,6 +15,19 @@ import { hostDialledPorts } from '../generators/firebase-emulators/emulator-port
 import { projectExists } from './evidence';
 import { adapterOf, applicationsWith } from '../adapters/registry';
 import { firebaseFragment } from '../generators/firebase-emulators/dev-fragment';
+import { firebaseCiProvider } from '../generators/ci/firebase-provider';
+import { GCLOUD_CLI_VERSION } from '../generators/_utils/versions';
+import { GCLOUD_CLI_ARCHIVE } from '../generators/_utils/gcloud-archive';
+
+/** The projected gcloud archive — refused when it was projected for another pin (re-run firebase-compat --write). */
+function gcloudArchive(): typeof GCLOUD_CLI_ARCHIVE {
+  if (GCLOUD_CLI_ARCHIVE.version !== GCLOUD_CLI_VERSION) {
+    throw new Error(
+      `[firebase] gcloud-archive.ts is for ${GCLOUD_CLI_ARCHIVE.version}, the pin is ${GCLOUD_CLI_VERSION} — run node tools/firebase-compat/project.mjs --write.`,
+    );
+  }
+  return GCLOUD_CLI_ARCHIVE;
+}
 
 /** The sync's app, when its stack can take the Firebase client. */
 const attachable = (ctx: PlanContext): boolean =>
@@ -31,7 +44,7 @@ export const firebase: LayerDescriptor = {
   ensurable: { new: true, upgrade: true },
   ensureHint:
     '`house.sh add-layer firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)',
-  brings: 'the emulator wiring, the JDK step, and the forwarded emulator ports',
+  brings: 'the emulator wiring, the dev engine its suites claim their ports through (tools/dev — one generator, shared with web), the JDK step, and the forwarded emulator ports',
   generators: {
     app: [
       {
@@ -59,7 +72,11 @@ export const firebase: LayerDescriptor = {
         },
       },
     ],
-    // The core, after the per-app client (planner order), so the scripts it writes follow the client app.
+    // The core, after the per-app client (planner order), so the scripts it writes follow the client app. Then the
+    // dev engine (tools/dev): every emulator suite — run by a serve, run on its own, a seed build's — claims its ports
+    // through it, the one stack identity (lib/stacks.mjs), and a backend-only workspace has no `web` layer to bring
+    // it. ONE artifact, ONE owner: the `dev` generator writes tools/dev; this layer and `web` both list its STEP, and
+    // the planner runs a step two layers share once.
     workspace: [
       {
         generator: 'firebase-emulators',
@@ -67,11 +84,18 @@ export const firebase: LayerDescriptor = {
           `--workspaceName=${ctx.project}`,
           ...(ctx.staging ? ['--staging=true'] : []),
           ...(attachable(ctx) ? [`--clientApp=${ctx.app}`] : []),
+          // Seeding rules is a CREATION act — only the run that brings Firebase into the workspace. Never an upgrade
+          // (the console holds the live rules), and never a re-ensure of a project that already has Firebase: its
+          // emulators run open today, and deny-all seeds would break every local read and write.
+          ...(ctx.ensured.has('firebase') && !ctx.detected.has('firebase') ? ['--seedRules'] : []),
         ],
       },
+      { generator: 'dev' },
     ],
   },
   docSections: ['firebase'],
+  // With the `ci` layer: keyless GitHub → GCP auth, a `ci-<environment>` configuration on its deploy targets, and tools/setup-gcp.sh.
+  ciDeploy: firebaseCiProvider,
   // The emulator suite, served beside every app the dev engine runs.
   devFragment: (tree) => firebaseFragment(tree),
   // The Cloud Functions bundle lands in `dist/<functions root>`. create-nx-workspace ignores `dist`; `nx init` on an
@@ -81,7 +105,11 @@ export const firebase: LayerDescriptor = {
   // A function of the workspace: the forwarded ports are the suite's as firebase.json configures it, and the
   // dev-server port of each app the Firebase client can attach to — never a hand-copied list.
   devcontainer: (tree) => ({
-    features: [{ id: 'ghcr.io/devcontainers-extra/features/firebase-cli' }, { id: 'ghcr.io/jajera/features/gcloud-cli' }],
+    // NO firebase-cli feature: the Firebase CLI is the project's pinned `firebase-tools` devDependency
+    // (_utils/versions.ts), on PATH through node_modules/.bin (the node layer, which this layer requires) — the image
+    // used to install whatever version was newest on build day, a second `firebase` beside the project's. Its login
+    // lives in ~/.config/configstore (persisted whole by the agent layer), its emulator downloads in ~/.cache.
+    // No gcloud feature either: gcloud is a pinned archive in the image (archives below).
     extensions: ['toba.vsfire'],
     ports: [...clientDevServerPorts(tree), ...emulatorForwards(tree)],
     osPackages: [
@@ -92,16 +120,33 @@ export const firebase: LayerDescriptor = {
           'whose build-time github.com fetch fails intermittently.',
       },
     ],
+    archives: [
+      {
+        id: 'google-cloud-cli',
+        ...gcloudArchive(),
+        bin: 'google-cloud-sdk/bin',
+        why:
+          `The Google Cloud CLI (gcloud), pinned (${GCLOUD_CLI_VERSION}) from Google's versioned archive, which keeps every release —\n` +
+          'not its apt repository, whose index drops a release after about a year (the image build would then fail),\n' +
+          'nor a devcontainer feature, which installed whatever was newest on build day. Its logins live in ~/.config/gcloud.',
+      },
+    ],
+    containerEnv: [
+      {
+        name: 'CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK',
+        value: 'true',
+        why: 'gcloud is pinned by the house: no "updates are available" nag, whose `gcloud components update` would move the pin.',
+      },
+    ],
     postCreate: [{ phase: 'provision', piece: 'firebase-banner' }],
   }),
 };
 
 /**
- * The dev-server of every app the Firebase client can attach to, forwarded to the SAME host port: the page loads
- * over it, then the Firebase SDK INSIDE it calls the emulators at hardcoded localhost:<port> addresses
- * (environment.ts), which only resolve from a host browser if those ports are forwarded to the identical number.
- * The port is the app's own (its dev-server leaf's `port`), else its stack's default — so a backend-only Firebase
- * forwards no dev-server at all.
+ * The dev-server of every app the Firebase client can attach to: the one port a host browser needs for the app.
+ * The Firebase SDK inside the page reaches every emulator through that same origin (the dev server's proxy.conf.mjs
+ * relays it), so it works on whatever host port the editor forwards it to. The port is the app's own (its
+ * dev-server leaf's `port`), else its stack's default — so a backend-only Firebase forwards no dev-server at all.
  */
 function clientDevServerPorts(tree: Tree): DevcontainerPort[] {
   const ports = new Set<number>();
@@ -118,17 +163,17 @@ function clientDevServerPorts(tree: Tree): DevcontainerPort[] {
     ...(index === 0
       ? {
           why:
-            'Firebase forwards the dev server + emulator ports to the SAME host port: the Firebase SDK inside a\n' +
-            'host-loaded page dials hardcoded localhost:<port> addresses that only resolve if the port is identical.\n' +
-            'KNOWN LIMITATION: several Firebase devcontainers in parallel collide on these host ports (first come wins;\n' +
-            'real Google OAuth is pinned to whichever holds the dev-server port). The shared browser runs INSIDE the\n' +
-            'container and reaches them on loopback, so it works for every container.',
+            'The app reaches every Firebase emulator through the dev server\'s own origin (proxy.conf.mjs relays it),\n' +
+            'so the app works on whatever host port this is forwarded to. The emulator ports below are for the\n' +
+            'Emulator UI: its page dials each emulator directly, so the UI is complete in a host tab only while they\n' +
+            'forward to the same number. Real Google OAuth is registered for one origin (the base dev-server port);\n' +
+            'the shared browser runs INSIDE the container and reaches everything on loopback.',
         }
       : {}),
   }));
 }
 
-/** The emulator suite's host-dialled ports (firebase.json, else the house suite), forwarded at the same number. */
+/** The ports the Emulator UI's page dials (firebase.json, else the house suite), forwarded at the same number. */
 function emulatorForwards(tree: Tree): DevcontainerPort[] {
   return hostDialledPorts(tree).map(({ name, port, label }) => ({
     port,

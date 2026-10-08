@@ -15,6 +15,8 @@
 # random high proxy port — nothing touches :80 or this workspace, and everything started is torn down.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/text.sh"  # in_text: grep captured output without a SIGPIPE race
 set -uo pipefail
+# A human runs these: under an AI agent (CLAUDECODE=1) the engine never takes the base ports.
+unset CLAUDECODE
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GEN="$ROOT/plugins/house/engine/nx-tools/src/generators"

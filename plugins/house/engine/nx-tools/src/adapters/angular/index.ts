@@ -1,7 +1,9 @@
 // THE ANGULAR ADAPTER — everything the house generators know about Angular, in one place.
 //
 // Its ports are the Angular answers to framework-neutral questions:
-//   apps       — @nx/angular:application with the house defaults (minimal, scss, routing, no e2e);
+//   apps       — @nx/angular:application with the house defaults (minimal, scss, routing, no e2e), and a first
+//                shell with the <main> landmark (./app-shell);
+//   shell      — the skip link, added by the design system with its look (./app-shell);
 //   libs       — @nx/angular:library (+ the ng-package.json normalisation a publishable lib needs);
 //   env        — Angular's environment-files pattern: src/environments/environment*.ts + build fileReplacements;
 //   providers  — the app's ApplicationConfig (src/app/app.config.ts);
@@ -17,8 +19,8 @@ import {
   type GeneratorCallback,
   getProjects,
   readProjectConfiguration,
-  updateProjectConfiguration,
 } from '@nx/devkit';
+import { updateProjectConfigurationInPlace } from '../../generators/_utils/project-files';
 import type { StackAdapter, CreatedApp, WireResult } from '../stack-adapter';
 import { wireProvider } from '../../generators/_utils/wire-provider';
 import { setLeafOption } from '../../generators/_utils/dev-server';
@@ -26,6 +28,8 @@ import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
+import { addSkipLink, seedLandmark } from './app-shell';
+import { convertBareLint } from '../../generators/_utils/lint-inference';
 
 /**
  * The executors that make a project an Angular one. Applications build with `@angular/build:` (or the legacy
@@ -95,6 +99,8 @@ export const angular: StackAdapter = {
     return ANGULAR_BUILDERS.some((prefix) => executor.startsWith(prefix)) || tree.exists(`${config.root}/ng-package.json`);
   },
 
+  platform: 'web',
+
   ownsApp(project) {
     return ANGULAR_APP_BUILDERS.has(project.targets?.build?.executor ?? '');
   },
@@ -113,10 +119,18 @@ export const angular: StackAdapter = {
           routing: true,
           minimal: true,
           e2eTestRunner: 'none',
+          // Stated, never left to Nx: given no linter, @nx/angular follows the workspace, and a first app in a fresh
+          // workspace has nothing to follow, so it chose `none` — and the platform firewall (an ESLint rule) never
+          // checked the app's imports. Libraries (./libs) and the js stack state it the same way.
+          linter: 'eslint',
           skipFormat: true,
         } as Parameters<typeof applicationGenerator>[1]))) ?? noop;
       const project = emittedProjectName(tree, options.directory, options.name);
-      stateAngularCompilerContract(tree, readProjectConfiguration(tree, project).root);
+      // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.
+      convertBareLint(tree, project);
+      const root = readProjectConfiguration(tree, project).root;
+      stateAngularCompilerContract(tree, root);
+      seedLandmark(tree, root); // the <main> landmark, once; the skip link comes with its look (./app-shell, `shell`)
       return { project, callback };
     },
   },
@@ -156,7 +170,7 @@ export const angular: StackAdapter = {
       const present = existing.some((entry) => entry?.replace === from && entry?.with === to);
       target.fileReplacements = present ? existing : [...existing, { replace: from, with: to }];
 
-      updateProjectConfiguration(tree, project, config);
+      updateProjectConfigurationInPlace(tree, project, config);
       return true;
     },
   },
@@ -173,6 +187,12 @@ export const angular: StackAdapter = {
       if (wired === current) return 'already';
       tree.write(path, wired);
       return 'wired';
+    },
+  },
+
+  shell: {
+    addSkipLink(tree, project) {
+      return addSkipLink(tree, readProjectConfiguration(tree, project).root);
     },
   },
 
@@ -195,7 +215,7 @@ export const angular: StackAdapter = {
       const preprocessor = { ...((options.stylePreprocessorOptions as Record<string, unknown>) ?? {}) };
       preprocessor.includePaths = [...new Set([...((preprocessor.includePaths as string[]) ?? []), loadPath])];
       options.stylePreprocessorOptions = preprocessor;
-      updateProjectConfiguration(tree, project, config);
+      updateProjectConfigurationInPlace(tree, project, config);
       return true;
     },
 
@@ -213,7 +233,7 @@ export const angular: StackAdapter = {
       if (at >= 0) styles[at] = entry;
       else styles.push(entry);
       options.styles = styles;
-      updateProjectConfiguration(tree, project, config);
+      updateProjectConfigurationInPlace(tree, project, config);
       return true;
     },
   },
@@ -228,8 +248,11 @@ export const angular: StackAdapter = {
     // (proxyConfig, ssl, port, …) is carried over — IN PLACE: overwriting a key keeps its position, so a re-run
     // writes the same project.json rather than reshuffling keys.
     leaf(_tree, project, preserved) {
+      // EXPLICITLY not continuous: the dev engine runs one per STACK, and Nx would share one across stacks. Explicit,
+      // because Nx fills an absent key from targetDefaults / the builder's schema and @nx/angular's
+      // set-continuous-option migration sets it on a dev-server that lacks it (_utils/dev-server).
       return {
-        continuous: true,
+        continuous: false,
         executor: DEV_SERVER_EXECUTOR,
         options: { ...preserved, buildTarget: `${project}:build`, host: (preserved.host as string | undefined) ?? '0.0.0.0' },
         configurations: {
@@ -241,12 +264,24 @@ export const angular: StackAdapter = {
     },
 
     // The dev-server's OWN option (Angular's `proxyConfig`), so a direct `nx run <app>:dev-server` gets it too;
-    // set-if-absent, so a project that points elsewhere keeps its choice. Through setLeafOption, which keeps the
-    // `serve` composer's mirror of the leaf true.
+    // set-if-absent, so a project that points elsewhere keeps its choice — and is TOLD, by the caller: a proxy config
+    // of its own, in the leaf's options or any configuration, is a dev server that does not serve this one. Through
+    // setLeafOption, which keeps the `serve` / `dev-stack` mirror of the leaf true.
     useProxy(tree, project, proxyConfig) {
-      const leaf = projectOf(tree, project)?.targets?.['dev-server'];
-      if (!leaf || !DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) return false;
-      return setLeafOption(tree, project, 'proxyConfig', proxyConfig);
+      const target = 'dev-server';
+      const leaf = projectOf(tree, project)?.targets?.[target];
+      if (!leaf) return { status: 'none' };
+      if (!DEV_SERVER_EXECUTORS.includes(leaf.executor ?? '')) {
+        return { status: 'unconfigurable', target, executor: leaf.executor ?? '(none — a command target)' };
+      }
+      const named = [
+        ['options', leaf.options?.proxyConfig],
+        ...Object.entries(leaf.configurations ?? {}).map(([name, c]) => [`configurations.${name}`, c?.proxyConfig]),
+      ] as const;
+      const foreign = named.find(([, value]) => value !== undefined && value !== proxyConfig);
+      if (foreign) return { status: 'foreign', target, where: foreign[0], proxyConfig: String(foreign[1]) };
+      setLeafOption(tree, project, 'proxyConfig', proxyConfig);
+      return { status: 'wired' };
     },
   },
 

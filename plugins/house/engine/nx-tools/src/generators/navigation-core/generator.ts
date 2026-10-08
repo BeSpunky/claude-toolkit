@@ -14,7 +14,9 @@
 //
 // Re-runnable: an existing navigation library (found by its tag) gets the kernel rewritten in place — the files
 // are vendored, so they are owned, byte-for-byte, never formatted.
-import { type Tree, type GeneratorCallback, addDependenciesToPackageJson, getProjects } from '@nx/devkit';
+import { type Tree, type GeneratorCallback, getProjects } from '@nx/devkit';
+import { declareDependencies } from '../_utils/dependencies';
+import { TYPESCRIPT_UTILS_VERSION } from '../_utils/versions';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { requireLayer } from '../../layers/registry';
@@ -52,7 +54,8 @@ export default async function navigationCoreGenerator(
       importPath: options.importPath ?? `@${resolveWorkspaceScope(tree)}/${name}`,
       publishable: false,
       style: 'none',
-      tags: `${NAVIGATION_TAG},platform:web`,
+      tags: NAVIGATION_TAG,
+      platform: 'web', // Angular source: inject(), signals, the Router
     });
     // The base generator's demo component is not part of the kernel.
     if (tree.exists(`${root}/src/lib`)) tree.delete(`${root}/src/lib`);
@@ -66,7 +69,7 @@ export default async function navigationCoreGenerator(
   }
 
   // The vendored navigation-x kernel imports type utilities from this package.
-  const install = addDependenciesToPackageJson(tree, { '@bespunky/typescript-utils': 'latest' }, {});
+  const install = declareDependencies(tree, 'navigation-core', { '@bespunky/typescript-utils': TYPESCRIPT_UTILS_VERSION });
   return () => {
     callback();
     install();

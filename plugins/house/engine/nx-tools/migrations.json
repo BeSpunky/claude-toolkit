@@ -27,7 +27,7 @@
     "upgrade-emulator-environment-shape": {
       "version": "0.24.3",
       "layer": "firebase",
-      "description": "Upgrade a pre-toggle environment bundle (bare emulator endpoints, and the interface that typed them) to the per-service `default` shape firebase.config.ts reads — otherwise every service silently resolves to the real Firebase backend.",
+      "description": "Upgrade a pre-toggle environment bundle (bare emulator endpoints, and the interface that typed them) to the per-service `default` shape firebase.config.ts reads \u2014 otherwise every service silently resolves to the real Firebase backend.",
       "implementation": "./src/migrations/0.24.3/upgrade-emulator-environment-shape"
     },
     "claim-legacy-devcontainer-ownership": {
@@ -51,19 +51,19 @@
     "retire-inline-house-sections": {
       "version": "0.25.0",
       "layer": "nx",
-      "description": "Delete the frozen house sections still inline in CLAUDE.md from before 0.5.0 moved them into the generated HOUSE.md — now actively misleading, because 0.25.0 imports the live directives into the same file.",
+      "description": "Delete the frozen house sections still inline in CLAUDE.md from before 0.5.0 moved them into the generated HOUSE.md \u2014 now actively misleading, because 0.25.0 imports the live directives into the same file.",
       "implementation": "./src/migrations/0.25.0/retire-inline-house-sections"
     },
     "convert-target-comment-keys": {
       "version": "0.27.0",
       "layer": "nx",
-      "description": "Move `\"//name\": \"…\"` documentation keys out of `targets` onto the target's `metadata.description`. Inside `targets` Nx reads every value as a TargetConfiguration, so such a key throws on Nx 23 and silently spreads into a character-indexed object on older Nx.",
+      "description": "Move `\"//name\": \"\u2026\"` documentation keys out of `targets` onto the target's `metadata.description`. Inside `targets` Nx reads every value as a TargetConfiguration, so such a key throws on Nx 23 and silently spreads into a character-indexed object on older Nx.",
       "implementation": "./src/migrations/0.27.0/convert-target-comment-keys"
     },
     "report-duplicate-house-providers": {
       "version": "0.27.0",
       "layer": "angular",
-      "description": "Report a house provider (provideAppFirebase / provideWorktreeTabLabel / provideDesignSystem) called in more than one app config — the residue of those providers being re-asserted into app.config.ts on every sync. Reports only: which copy is correct is a question about the app, and for provideAppFirebase a copy in the shared config initialises Firebase during SSR.",
+      "description": "Report a house provider (provideAppFirebase / provideWorktreeTabLabel / provideDesignSystem) called in more than one app config \u2014 the residue of those providers being re-asserted into app.config.ts on every sync. Reports only: which copy is correct is a question about the app, and for provideAppFirebase a copy in the shared config initialises Firebase during SSR.",
       "implementation": "./src/migrations/0.27.0/report-duplicate-house-providers"
     },
     "migrate-window-identity-surface-to-both": {
@@ -81,43 +81,43 @@
     "split-firebase-service-providers": {
       "version": "0.33.0",
       "layer": "firebase",
-      "description": "provideAppFirebase() now provides the Firebase APP only — Auth, Firestore, Storage and Functions each got their own generated file, so an app can provide each where it is used instead of pinning all four into the initial bundle. Adds the four service providers at every real provideAppFirebase() call site (wherever the project put it), preserving today's behaviour exactly, with import paths COMPUTED from the app root rather than derived from what it finds. Rewrites the whole generated config set so a bare `nx migrate`, a partial sync and every app in a multi-app workspace still compile. Decides `already wired` by identity, not by name, and reports a name collision instead of wiring somebody else's function.",
+      "description": "provideAppFirebase() now provides the Firebase APP only \u2014 Auth, Firestore, Storage and Functions each got their own generated file, so an app can provide each where it is used instead of pinning all four into the initial bundle. Adds the four service providers at every real provideAppFirebase() call site (wherever the project put it), preserving today's behaviour exactly, with import paths COMPUTED from the app root rather than derived from what it finds. Rewrites the whole generated config set so a bare `nx migrate`, a partial sync and every app in a multi-app workspace still compile. Decides `already wired` by identity, not by name, and reports a name collision instead of wiring somebody else's function.",
       "implementation": "./src/migrations/0.33.0/split-firebase-service-providers"
     },
     "wire-missing-baseline-providers": {
       "version": "0.33.1",
       "layer": "angular",
-      "description": "Wire the house providers the `app` generator generated files for and then never wired. Composing serve/design-system-styles/firebase-emulators, it passed the baseline `wireProviders` flag to the design-system call ALONE, so every app scaffolded on 0.26.0-0.32.x carries worktree-tab-label.ts and firebase.config.ts on disk with nothing calling either — Firebase is generated and never initialised, failing at the app's first inject(Auth). Adds each call only where the generated file exists AND nothing in the app already calls it, so a hand-wired or deliberately relocated provider is left alone; reports where the app config's shape is unrecognised.",
+      "description": "Wire the house providers the `app` generator generated files for and then never wired. Composing serve/design-system-styles/firebase-emulators, it passed the baseline `wireProviders` flag to the design-system call ALONE, so every app scaffolded on 0.26.0-0.32.x carries worktree-tab-label.ts and firebase.config.ts on disk with nothing calling either \u2014 Firebase is generated and never initialised, failing at the app's first inject(Auth). Adds each call only where the generated file exists AND nothing in the app already calls it, so a hand-wired or deliberately relocated provider is left alone; reports where the app config's shape is unrecognised.",
       "implementation": "./src/migrations/0.33.1/wire-missing-baseline-providers"
     },
     "retire-wslg-audio-bridge": {
       "version": "0.34.0",
       "layer": "agent",
-      "description": "Remove the WSLg-only audio bridge `--voice` wrote into .devcontainer/devcontainer.json — the `source=/mnt/wslg,target=/mnt/wslg,type=bind` mount and `remoteEnv.PULSE_SERVER: unix:/mnt/wslg/PulseServer`. Docker refuses a bind whose source is missing, so off WSL2 the container did not start; and an adopted devcontainer, merged additively by mount target, would keep the old bind beside the new host-agnostic bridge while the old PULSE_SERVER scalar won. Removes only those exact house values (and the house comments above them) with comment-preserving splices, on owned and adopted devcontainers alike; reports any other WSLg mount or PULSE_SERVER as the project's own. The next sync with voice on adds the new bridge.",
+      "description": "Remove the WSLg-only audio bridge `--voice` wrote into .devcontainer/devcontainer.json \u2014 the `source=/mnt/wslg,target=/mnt/wslg,type=bind` mount and `remoteEnv.PULSE_SERVER: unix:/mnt/wslg/PulseServer`. Docker refuses a bind whose source is missing, so off WSL2 the container did not start; and an adopted devcontainer, merged additively by mount target, would keep the old bind beside the new host-agnostic bridge while the old PULSE_SERVER scalar won. Removes only those exact house values (and the house comments above them) with comment-preserving splices, on owned and adopted devcontainers alike; reports any other WSLg mount or PULSE_SERVER as the project's own. The next sync with voice on adds the new bridge.",
       "implementation": "./src/migrations/0.34.0/retire-wslg-audio-bridge"
     },
     "retarget-nx-cache-volume": {
       "version": "0.35.0",
       "layer": "agent",
-      "description": "Replace the house devcontainer volume over the WHOLE .nx/ folder (`source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume`) with two volumes at .nx/cache and .nx/workspace-data. On the Nx wrapper host (new in 0.35.0) .nx/ carries the committed nxw.js, which a whole-folder volume hides, so ./nx stops working inside the container — and the generator's additive merge would never remove the old mount by itself. Replaces only the exact house value, in place (position and comments kept), on owned and adopted devcontainers alike; reports any other whole-.nx mount as the project's own.",
+      "description": "Replace the house devcontainer volume over the WHOLE .nx/ folder (`source=${localWorkspaceFolderBasename}-nx,target=${containerWorkspaceFolder}/.nx,type=volume`) with two volumes at .nx/cache and .nx/workspace-data. On the Nx wrapper host (new in 0.35.0) .nx/ carries the committed nxw.js, which a whole-folder volume hides, so ./nx stops working inside the container \u2014 and the generator's additive merge would never remove the old mount by itself. Replaces only the exact house value, in place (position and comments kept), on owned and adopted devcontainers alike; reports any other whole-.nx mount as the project's own.",
       "implementation": "./src/migrations/0.35.0/retarget-nx-cache-volume"
     },
     "declare-dev-processes": {
       "version": "0.35.0",
       "layer": "web",
-      "description": "Write `.bespunky/dev.json` reproducing what the 0.34.x serve executor ran for every project whose `serve` is the house composer — the `app` process (`<nx> run <app>:dev-server --port=${PORT:app}`, base 4200, NX_DAEMON=false + NX_WORKSPACE_ROOT_PATH pinned to the served tree), the `emulators` process in a Firebase workspace (ports from firebase.json, `?portOffset` on a shifted stack, `?emulate=none` when skipped, the OAuth-origin advice) and the install step — because `nx serve` is now a thin wrapper over the stack-free engine that runs exactly what the declaration says. Moves the sniffed `<app>/proxy.conf.mjs` into the Angular dev-server leaf's `proxyConfig`. Adds only missing processes; project.json's serve target is unchanged.",
+      "description": "Write `.bespunky/dev.json` reproducing what the 0.34.x serve executor ran for every project whose `serve` is the house composer \u2014 the `app` process (`<nx> run <app>:dev-server --port=${PORT:app}`, base 4200, NX_DAEMON=false + NX_WORKSPACE_ROOT_PATH pinned to the served tree), the `emulators` process in a Firebase workspace (ports from firebase.json, `?portOffset` on a shifted stack, `?emulate=none` when skipped, the OAuth-origin advice) and the install step \u2014 because `nx serve` is now a thin wrapper over the stack-free engine that runs exactly what the declaration says. Moves the sniffed `<app>/proxy.conf.mjs` into the Angular dev-server leaf's `proxyConfig`. Adds only missing processes; project.json's serve target is unchanged.",
       "implementation": "./src/migrations/0.35.0/declare-dev-processes"
     },
     "relocate-port-claim": {
       "version": "0.35.0",
       "layer": "web",
-      "description": "Move host-port arbitration from tools/shared-browser/port-claim(.test).mjs to its own home, tools/port-claim/ (the shared browser, the worktree-domains proxy and the dev engine all consult it), and re-point every reference — including the house CLIs a bare `nx migrate` leaves in place until the next sync. A file at the old path without the house stamp is left and reported.",
+      "description": "Move host-port arbitration from tools/shared-browser/port-claim(.test).mjs to its own home, tools/port-claim/ (the shared browser, the worktree-domains proxy and the dev engine all consult it), and re-point every reference \u2014 including the house CLIs a bare `nx migrate` leaves in place until the next sync. A file at the old path without the house stamp is left and reported.",
       "implementation": "./src/migrations/0.35.0/relocate-port-claim"
     },
     "pin-playwright": {
       "version": "0.35.0",
       "layer": "js",
-      "description": "Pin a `\"@playwright/test\": \"latest\"` the playwright generator wrote to the version installed in node_modules (no upgrade, no downgrade — what the lockfile already says), else the house version. Any other spec is the project's own and stays.",
+      "description": "Pin a `\"@playwright/test\": \"latest\"` the playwright generator wrote to the version installed in node_modules (no upgrade, no downgrade \u2014 what the lockfile already says), else the house version. Any other spec is the project's own and stays.",
       "implementation": "./src/migrations/0.35.0/pin-playwright"
     },
     "tag-navigation-library": {
@@ -129,19 +129,19 @@
     "rename-house-plugin": {
       "version": "0.39.0",
       "layer": "agent",
-      "description": "The plugin that ships these generators was renamed from `bespunky-project-starter` to `bespunky-house`. Renames the `bespunky-project-starter@claude-toolkit` key in `enabledPlugins` of .claude/settings.json (and .claude/settings.local.json, machine-local) to `bespunky-house@claude-toolkit` in place, keeping its value, position and the rest of the file — because the claude-settings generator preserves keys it does not declare, so the old plugin would otherwise stay enabled forever. Where the new key already exists the old one is removed and the new value wins (a disagreement is reported); an unparseable file is left and named.",
+      "description": "The plugin that ships these generators was renamed from `bespunky-project-starter` to `bespunky-house`. Renames the `bespunky-project-starter@claude-toolkit` key in `enabledPlugins` of .claude/settings.json (and .claude/settings.local.json, machine-local) to `bespunky-house@claude-toolkit` in place, keeping its value, position and the rest of the file \u2014 because the claude-settings generator preserves keys it does not declare, so the old plugin would otherwise stay enabled forever. Where the new key already exists the old one is removed and the new value wins (a disagreement is reported); an unparseable file is left and named.",
       "implementation": "./src/migrations/0.39.0/rename-house-plugin"
     },
     "rename-upgrade-lock": {
       "version": "0.39.0",
       "layer": "nx",
-      "description": "The upgrade's transient lock directory was renamed from `.bespunky-sync.lock/` to `.bespunky-upgrade.lock/` with the `sync` → `upgrade` command. Retargets the project's .gitignore line (any spelling of it) and the house heading above it in place, because the gitignore generator only appends and would otherwise leave the dead line forever; where the new name is already ignored the old line is removed. A `.bespunky-sync.lock/` directory still in the project may belong to an older upgrade that is running, so it and its line are left and reported, never deleted.",
+      "description": "The upgrade's transient lock directory was renamed from `.bespunky-sync.lock/` to `.bespunky-upgrade.lock/` with the `sync` \u2192 `upgrade` command. Retargets the project's .gitignore line (any spelling of it) and the house heading above it in place, because the gitignore generator only appends and would otherwise leave the dead line forever; where the new name is already ignored the old line is removed. A `.bespunky-sync.lock/` directory still in the project may belong to an older upgrade that is running, so it and its line are left and reported, never deleted.",
       "implementation": "./src/migrations/0.39.0/rename-upgrade-lock"
     },
     "retire-claude-code-feature": {
       "version": "0.40.0",
       "layer": "agent",
-      "description": "Claude Code is installed once, natively (post-create), instead of also by the `ghcr.io/devcontainers-extra/features/claude-code` feature, whose build-time copy in /usr/local/bin shadowed the one `claude update` and the auto-updater keep current — freezing every house container at its build-day version. Removes that feature (and the house comment above it) from a house-OWNED devcontainer.json; reports it, untouched, in an adopted one. Retargets the one `remoteEnv.PATH` the house ever wrote (the node layer's) to put ${containerEnv:HOME}/.local/bin first; any other PATH is reported, never edited.",
+      "description": "Claude Code is installed once, natively (post-create), instead of also by the `ghcr.io/devcontainers-extra/features/claude-code` feature, whose build-time copy in /usr/local/bin shadowed the one `claude update` and the auto-updater keep current \u2014 freezing every house container at its build-day version. Removes that feature (and the house comment above it) from a house-OWNED devcontainer.json; reports it, untouched, in an adopted one. Retargets the one `remoteEnv.PATH` the house ever wrote (the node layer's) to put ${containerEnv:HOME}/.local/bin first; any other PATH is reported, never edited.",
       "implementation": "./src/migrations/0.40.0/retire-claude-code-feature"
     },
     "resolve-claude-path-home": {
@@ -153,13 +153,13 @@
     "remove-superseded-claude-code-feature": {
       "version": "0.43.0",
       "layer": "agent",
-      "description": "Removes the `ghcr.io/devcontainers-extra/features/claude-code` feature (with the `//` lines explaining it) from devcontainer.json in EVERY workspace that wears the agent layer — owned or adopted. 0.40.0 removed it only from owned devcontainers; but the agent layer's post-create installs the same Claude Code natively and first on PATH, so the feature can no longer be depended on: it only adds a stale second copy. Without the agent layer it may be the only copy, and stays. Its pin in devcontainer-lock.json goes with it.",
+      "description": "Removes the `ghcr.io/devcontainers-extra/features/claude-code` feature (with the `//` lines explaining it) from devcontainer.json in EVERY workspace that wears the agent layer \u2014 owned or adopted. 0.40.0 removed it only from owned devcontainers; but the agent layer's post-create installs the same Claude Code natively and first on PATH, so the feature can no longer be depended on: it only adds a stale second copy. Without the agent layer it may be the only copy, and stays. Its pin in devcontainer-lock.json goes with it.",
       "implementation": "./src/migrations/0.43.0/remove-superseded-claude-code-feature"
     },
     "prune-orphaned-feature-locks": {
       "version": "0.44.0",
       "layer": "agent",
-      "description": "Removes every pin in .devcontainer/devcontainer-lock.json whose feature devcontainer.json no longer declares — nothing reads such a pin, and the next build drops it anyway, leaving an uncommitted diff. Cleans up after 0.40.0/0.43.0, which removed the claude-code feature from devcontainer.json but not from the lock. Skipped when devcontainer.json is missing or unreadable.",
+      "description": "Removes every pin in .devcontainer/devcontainer-lock.json whose feature devcontainer.json no longer declares \u2014 nothing reads such a pin, and the next build drops it anyway, leaving an uncommitted diff. Cleans up after 0.40.0/0.43.0, which removed the claude-code feature from devcontainer.json but not from the lock. Skipped when devcontainer.json is missing or unreadable.",
       "implementation": "./src/migrations/0.44.0/prune-orphaned-feature-locks"
     },
     "carry-default-mode-into-tokens": {
@@ -171,14 +171,140 @@
     "build-from-house-dockerfile": {
       "version": "0.48.0",
       "layer": "agent",
-      "description": "A house-written devcontainer.json stops pulling its image and builds it from .devcontainer/house.Dockerfile (FROM the same image, with the OS packages as one cached Docker layer, so a rebuild reinstalls nothing that has not changed). Removes the house-written `image` (and the comment above it) so it does not linger beside the `build` the generator now composes — refusing, and reporting, if the removal would not leave the file intact; an `image` not recorded as house-written is left and reported. Reports any apt install in the project's own post-create.local.sh (or a post-create.sh the house did not write): it now reinstalls on every rebuild and no longer gets the house's per-create `apt-get update` — move it into .devcontainer/os-packages.txt. Refreshes a post-create.local.sh that is still the untouched 0.47 stub.",
+      "description": "A house-written devcontainer.json stops pulling its image and builds it from .devcontainer/house.Dockerfile (FROM the same image, with the OS packages as one cached Docker layer, so a rebuild reinstalls nothing that has not changed). Removes the house-written `image` (and the comment above it) so it does not linger beside the `build` the generator now composes \u2014 refusing, and reporting, if the removal would not leave the file intact; an `image` not recorded as house-written is left and reported. Reports any apt install in the project's own post-create.local.sh (or a post-create.sh the house did not write): it now reinstalls on every rebuild and no longer gets the house's per-create `apt-get update` \u2014 move it into .devcontainer/os-packages.txt. Refreshes a post-create.local.sh that is still an untouched stub a release seeded (0.15, 0.16–0.38 or 0.39–0.47).",
       "implementation": "./src/migrations/0.48.0/build-from-house-dockerfile"
     },
     "fold-playwright-cache-into-home-cache": {
       "version": "0.49.0",
       "layer": "agent",
-      "description": "The web layer's per-tool `<folder>-playwright-cache` volume (~/.cache/ms-playwright) folds into ONE persisted ~/.cache volume (the agent layer's `<folder>-cache`), which also keeps the shared browser's own Playwright runtime and every other tool cache across rebuilds. Removes the house-written mount (and the house comment above it) so it does not stay nested inside the new one; a project-written one is reported. The unused Docker volume lives on the host and is reported by name for `docker volume rm` — a cache, so nothing is lost.",
+      "description": "The web layer's per-tool `<folder>-playwright-cache` volume (~/.cache/ms-playwright) folds into ONE persisted ~/.cache volume (the agent layer's `<folder>-cache`), which also keeps the shared browser's own Playwright runtime and every other tool cache across rebuilds. Removes the house-written mount (and the house comment above it) so it does not stay nested inside the new one; a project-written one is reported. The unused Docker volume lives on the host and is reported by name for `docker volume rm` \u2014 a cache, so nothing is lost.",
       "implementation": "./src/migrations/0.49.0/fold-playwright-cache-into-home-cache"
+    },
+    "record-house-targets": {
+      "version": "0.50.0",
+      "layer": "nx",
+      "description": "Writes the first .bespunky/house-targets.json \u2014 the record of what the house last wrote into each house project's targets (functions, firebase, shared-browser, worktree-domains), which upgrades from 0.50.0 merge against three-way so a project's own edits inside a house target survive. Records 0.49.2's values (the last release before the record; house targets were then replaced whole, so every project got the same) only where the project still holds them, rendered for where its projects live: a differing key is left out and reported by the next merge instead of guessed, a set is recorded only while every member 0.49.2 wrote is still there, and a target 0.49.2 did not write stays the project's own. Never overwrites a record.",
+      "implementation": "./src/migrations/0.50.0/record-house-targets"
+    },
+    "correct-app-hosting-guidance": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "Corrects the App Hosting deploy guidance the house seeded into comments: apphosting.staging.yaml's `backends:create --environment staging` (no such flag \u2014 the staging backend's Environment name is a console setting, and until it is set staging builds production's config), and the 'GitHub-driven' / 'apphosting.yaml at the workspace root' claims in apphosting.yaml and environment.prod.ts (App Hosting also deploys from local source; the yaml is found by walking up from the backend's Root Directory, which an Nx app must set to the app). Rewrites only the exact comment blocks the house wrote; an edited one that still says the false thing is reported by name. No configuration changes.",
+      "implementation": "./src/migrations/0.50.0/correct-app-hosting-guidance"
+    },
+    "route-emulators-through-origin": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The browser reaches every Firebase emulator (Auth, Firestore, Storage, Functions) through the dev server's own origin, so a host browser needs only the app's port \u2014 whatever host port the editor forwarded it to \u2014 and a worktree's stack needs no ?portOffset=. Removes the retired per-service `proxied` switch from each Firebase app's src/environments files and its type (surgically, a directory whole or not at all), with the house's comments about it (both shipped endpoint comments, which told the reader to keep forwardPorts in step, are replaced), and rewrites the app's generator-owned client glue (firebase*.config.ts, emulator-overrides.ts, proxy.conf.mjs) itself, so a run that skips the per-app generator never leaves a 0.49 client reading the removed switch; reports a `proxied: false` service (it is relayed now), project code importing the retired emulatorFor/portOffset/offsetUrl/resolvePortOffset, and an https dev server (the SDK dials emulators over http only). Drops the house-seeded ?portOffset= URL switch from .bespunky/dev.json.",
+      "implementation": "./src/migrations/0.50.0/route-emulators-through-origin"
+    },
+    "split-seed-applier": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The seed applier (encoder, REST calls, banner, emulator hosts) moves out of the project-owned tools/seed/world.mjs into the generator-owned tools/seed/apply.mjs, regenerated on every upgrade \u2014 so its fixes reach existing projects: it now refuses to run without emulator hosts (no more fallback to the base ports, which wrote into whichever suite owned them) and handles a world without accounts. A world.mjs whose applier is still the stock one loses it, imports ref/at from apply.mjs, and drops the host constants nothing else reads (a constant its worlds still read is kept and reported). A customised applier is left exactly as it is and reported: build.mjs no longer runs it.",
+      "implementation": "./src/migrations/0.50.0/split-seed-applier"
+    },
+    "retell-secrets-example": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The committed <functions>/.secret.local.example stops claiming tools/emulators.sh places .secret.local beside the bundle: from 0.50.0 the emulator never reads production secrets (inert placeholders for every declared key; sandbox values only from an opt-in .secret.sandbox.local). Replaces only the stock 0.49 header comment \u2014 every key the project added stays byte-for-byte; a header of the project's own that still makes the retired claim is left and reported.",
+      "implementation": "./src/migrations/0.50.0/retell-secrets-example"
+    },
+    "recompose-pre-0.3-serve-leftovers": {
+      "version": "0.50.0",
+      "layer": "web",
+      "description": "Recomposes two pre-0.3.0 serve shapes that 0.24.0/0.24.1 left half-migrated: an app whose `serve` was itself the Angular dev-server depending on `emulators` (e76c12a) \u2014 after the suite moved to the `firebase` project that dependsOn dangled and `nx serve` ran without emulators \u2014 and a `dev-server` whose default configuration was the retired `no-emulators` (703ca41), which served a production build. Drops the leftover and runs the serve generator for the app: the dev-server leaf, `serve` (the dev engine as a non-continuous task, so every `nx serve` is its own stack) with its continuous twin `dev-stack` for e2e, and its .bespunky/dev.json entry (with the workspace `install` step when none is declared). Every other project is left alone.",
+      "implementation": "./src/migrations/0.50.0/recompose-pre-0.3-serve-leftovers"
+    },
+    "stack-owned-dev-processes": {
+      "version": "0.50.0",
+      "layer": "web",
+      "description": "The processes a dev stack composes are explicitly NOT `continuous` Nx tasks: the house `dev-server` leaf of every house app, and every `firebase` target that launches tools/emulators.sh, get `continuous: false` (explicit, because Nx fills an absent key from targetDefaults or the executor schema, and @nx/angular's set-continuous-option migration re-adds it). Nx shares one instance of a continuous task per workspace, so a second stack of the same tree (another port offset) waited on the first stack's dev-server and emulators instead of starting its own. A dev-server of the project's own that is not `continuous: false`, and any target that depends on one of the changed targets, are reported.",
+      "implementation": "./src/migrations/0.50.0/stack-owned-dev-processes"
+    },
+    "close-the-platform-firewall": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "Close the platform firewall in the project's own module-boundaries rule: the old ban-only constraints are replaced by `platformConstraints` (web/server \u2192 own + shared, shared \u2192 shared; the project's own ban edits carried), its options are hoisted into `moduleBoundaryOptions` so every exemption it wrote holds in every block, Nx's stock catch-all is removed so an untagged project is checked, tests, tool configs and SSR server code are scoped by file, the platform sync generator is registered as a global one (`nx sync`), and every untagged code project is classified from evidence \u2014 an application by its stack \u2014 or reported with the command that states it (never defaulted to shared). An untagged library no longer slips firebase-admin into a web app.",
+      "implementation": "./src/migrations/0.50.0/close-the-platform-firewall"
+    },
+    "state-analog-spec-tsconfig": {
+      "version": "0.50.0",
+      "layer": "angular",
+      "description": "Name tsconfig.spec.json in every Angular library's Analog test config (`angular()` \u2192 `angular({ tsconfig: './tsconfig.spec.json' })`), ending the \"Unable to resolve tsconfig at \u2026/tsconfig.app.json\" warning Nx's graph inference triggers outside test runs.",
+      "implementation": "./src/migrations/0.50.0/state-analog-spec-tsconfig"
+    },
+    "lint-house-apps": {
+      "version": "0.50.0",
+      "layer": "angular",
+      "description": "Give every house Angular app a lint target (through @nx/angular's own add-linting), so the platform firewall checks its imports \u2014 house apps were created with none, leaving the web app outside the boundary it exists for. Also converts the house's own `functions:lint` (the deprecated @nx/eslint:lint executor up to 0.49) to @nx/eslint/plugin's inferred target. Reports any other platform-tagged project that is not linted.",
+      "implementation": "./src/migrations/0.50.0/lint-house-apps"
+    },
+    "add-design-system-a11y": {
+      "version": "0.50.0",
+      "layer": "design-system",
+      "description": "Give an existing design system its accessibility mechanisms \u2014 the z-skip-link layer (above modals) in its tokens, styles/_utils/_a11y.scss seeded, and ds.visually-hidden($focusable), ds.skip-link() and ds.skip-target() forwarded from the public SASS API (never over a mixin of the same name, nor from an _a11y.scss of the project's own \u2014 both reported) \u2014 and report how an existing app adopts the skip link and <main> landmark new apps get.",
+      "implementation": "./src/migrations/0.50.0/add-design-system-a11y"
+    },
+    "prune-design-system-peers": {
+      "version": "0.50.0",
+      "layer": "design-system",
+      "description": "Drop the @angular/* peerDependencies (other than @angular/core) an Angular design system declares and no file in it imports \u2014 @nx/angular declared them for the demo component the house prunes, and they failed the library's own lint (@nx/dependency-checks). Each removal is named.",
+      "implementation": "./src/migrations/0.50.0/prune-design-system-peers"
+    },
+    "pin-floating-dependencies": {
+      "version": "0.50.0",
+      "layer": "node",
+      "description": "Pin every `\"latest\"` a house generator wrote \u2014 firebase + @angular/fire, @bespunky/typescript-utils, @nx/esbuild, an adopt-extracted package \u2014 to a COHERENT version. The Firebase pair is derived from the INSTALLED ANGULAR MAJOR, never from the installed root firebase (which, in the two-SDK bug state, is the wrong one): @angular/fire is the installed release when it belongs to that major, else the house release for it, and firebase is exactly the range that @angular/fire release declares. An Angular major with no stable @angular/fire (21, 22) is left and reported with the choices. Any other floating spec is the project's own and is reported, never rewritten. Reminds to reinstall.",
+      "implementation": "./src/migrations/0.50.0/pin-floating-dependencies"
+    },
+    "declare-node-version": {
+      "version": "0.50.0",
+      "layer": "agent",
+      "description": "The project's Node major becomes ONE declared fact, `.nvmrc`, which the devcontainer composer and the Cloud Functions manifest now read \u2014 instead of the Node of whichever machine ran the last upgrade (or the newest image on the Docker fallback). Writes `.nvmrc` from the Node the devcontainer already runs (its Node feature, else the image its build.dockerfile is FROM, else its image — read with the image tag grammar, so typescript-node:1-22-bookworm is Node 22; `lts` resolved as of 0.50.0 and said), so nothing moves; a devcontainer Node it cannot read is reported, never guessed. A project that already declares Node (`.nvmrc`, `.node-version`, Volta) gets no file; a disagreement with the container is reported; a functions `engines.node` that disagrees is reported, never rewritten.",
+      "implementation": "./src/migrations/0.50.0/declare-node-version"
+    },
+    "firebase-cli-from-package": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The Firebase CLI becomes the project's exact `firebase-tools` devDependency (on PATH through node_modules/.bin in the container and in every Nx target), replacing the unpinned `ghcr.io/devcontainers-extra/features/firebase-cli` feature that installed whatever was newest on image-build day. Adds the devDependency (a `latest` one is pinned to what is installed; where the project's @angular/fire peers a firebase-tools range the house pin is outside of — Angular 17–19 — the newest inside it, said, since npm would refuse the install); removes the feature \u2014 and its devcontainer-lock.json pin \u2014 where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config is kept. Reminds to install and rebuild.",
+      "implementation": "./src/migrations/0.50.0/firebase-cli-from-package"
+    },
+    "refresh-pre-0.39-local-stub": {
+      "version": "0.50.0",
+      "layer": "agent",
+      "description": "Refreshes .devcontainer/post-create.local.sh when it is still the untouched stub seeded by 0.15 (scaffold.sh --repair) or 0.16\u20130.38 (scaffold.sh --sync): 0.48.0 recognised only the 0.39\u20130.47 stub, so these older seeds kept the apt-get example the image build retired and named a command that no longer exists. Any other content is the project's and is not touched.",
+      "implementation": "./src/migrations/0.50.0/refresh-pre-0.39-local-stub"
+    },
+    "gcloud-cli-from-image": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The Google Cloud CLI becomes a PINNED archive in the image (Google's versioned release archive, sha256-checked, linked into /usr/local/bin) in the one cached package layer, replacing the `ghcr.io/jajera/features/gcloud-cli` feature, which downloaded whatever Google served on image-build day. Removes the feature \u2014 and its devcontainer-lock.json pin \u2014 where the house wrote it (owned devcontainer, or recorded by the adopted merge); a project-added one is reported. The login in ~/.config/gcloud is kept. Reminds to rebuild.",
+      "implementation": "./src/migrations/0.50.0/gcloud-cli-from-image"
+    },
+    "read-functions-params-in-place": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "The Cloud Functions build stops copying .env into the bundle: firebase.json \u2192 functions.configDir now points the emulator and deploy at the functions source, where .env, .env.<projectId> and the emulator-only .env.local are read in place. Removes exactly the house's `{ glob: '.env', input: <functions root>, output: '.' }` asset from functions:build (and the `assets` key when that empties it) \u2014 owed as a migration because the house-targets merge (record-house-targets) treats `assets` as ONE value: beside an asset of the project's own the whole array is the project's, and the house's `.env` entry inside it would survive every upgrade. Adds `configDir` first, and keeps the asset (reported) when no functions block deploys the project. A .env asset of another shape is the project's: kept and reported. Also removes the house's 0.49 inline `esbuildOptions`, which the generator-owned `esbuildConfig` replaces (Nx refuses both); options the project changed are kept and reported.",
+      "implementation": "./src/migrations/0.50.0/read-functions-params-in-place"
+    },
+    "deploys-object-form": {
+      "version": "0.50.0",
+      "layer": "nx",
+      "description": "A branch model's `deploys` is an object only: every bare-string note in .bespunky/branches.json (integration, a stage, releases, hotfixes, a tag series) becomes { \"note\": <the same text> }, edited in place so every other byte is kept. Format only, as decided for 0.50.0 \u2014 a note binds nothing, so no binding changes and the projection is left as it is. The branch-and-release engine reports the string form as outdated (describe, verify, validate and write refuse it). A declaration that is not JSON is left and reported.",
+      "implementation": "./src/migrations/0.50.0/deploys-object-form"
+    },
+    "serve-runs-its-own-stack": {
+      "version": "0.50.0",
+      "layer": "web",
+      "description": "`nx serve <app>` is its own stack and ends with its exit status. Nx completes a continuous task that ends while nothing depends on it as succeeded whatever its exit code, and shares a continuous task between invocations \u2014 so `serve` (the continuous composer) exited 0 for a dead stack, and a second `nx serve` only waited on the first. `serve` keeps its executor, options and configurations but becomes explicitly `continuous: false` (`cache: false`); its continuous twin `dev-stack` is what an e2e target depends on. Every unambiguous reference to a house app's `serve` is retargeted to `dev-stack` (dependsOn in every project.json, and option values such as devServerTarget \"web:serve\"), because a dependent of `serve` would now wait for the stack to end. `^serve`, project patterns, nx.json targetDefaults and a project's own `dev-stack` target are reported and left.",
+      "implementation": "./src/migrations/0.50.0/serve-runs-its-own-stack"
+    },
+    "retire-reap-emulators": {
+      "version": "0.50.0",
+      "layer": "firebase",
+      "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev claim) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
+      "implementation": "./src/migrations/0.50.0/retire-reap-emulators"
     }
   }
 }

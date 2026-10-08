@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyPlatform",
+  "title": "Classify a project's platform (web, server or shared) for the platform firewall",
+  "description": "Set a project's one `platform:` tag — what the ESLint platform firewall keys on. With --platform it states it; without, it infers it from the project's evidence (the stack that builds it, its imports of packages bound to one platform, the platforms of the workspace projects it imports) and says why — an application takes its stack's platform — refusing, with the evidence, when the project mixes web and server code or nothing binds it to a platform (state `shared` yourself: it is never inferred from an absence of evidence).",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The project to classify.",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "Which project should be classified?",
+      "x-dropdown": "projects"
+    },
+    "platform": {
+      "type": "string",
+      "description": "Where the project's code runs: `web` (browser/SSR — may depend on web and shared projects), `server` (Cloud Functions/Node — server and shared), `shared` (isomorphic — shared only, and imports no package bound to one platform). Omit to infer it from the project's imports.",
+      "enum": ["web", "server", "shared"]
+    }
+  },
+  "required": ["project"]
+}

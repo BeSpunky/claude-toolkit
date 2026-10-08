@@ -6,16 +6,21 @@
 // projects through `addProjectConfiguration` (which always writes project.json), silently forked a TS-solution
 // workspace into two conventions. The answer now lives here, once:
 //
-//   - devkit's `readProjectConfiguration` / `updateProjectConfiguration` already work on both kinds (update
-//     merges into the package.json `nx` block) — prefer them to touching either file;
+//   - devkit's `readProjectConfiguration` reads both kinds; to CHANGE an existing project, prefer
+//     `updateProjectConfigInPlace` / `updateProjectConfigurationInPlace` (below) to devkit's
+//     `updateProjectConfiguration`, which re-serializes the whole file and rebuilds the object (an upgrade that
+//     reorders keys, or spreads a compact hand-written project.json over a hundred lines, is a diff nobody asked for);
 //   - when a generator genuinely needs the FILE (to edit it with comments preserved, to report it, to know
 //     whether a write lands in an `nx` block), `projectDefinitionFile` names it;
 //   - `createProject` creates a project the way this workspace defines them;
 //   - `houseProjectHome` / `ensureHouseProject` find and keep the projects a house generator OWNS (below).
-import { type Tree, type ProjectConfiguration, addProjectConfiguration, getProjects, updateProjectConfiguration, updateJson, writeJson, logger } from '@nx/devkit';
+import { type Tree, type ProjectConfiguration, addProjectConfiguration, getProjects, readProjectConfiguration, updateProjectConfiguration, writeJson, logger } from '@nx/devkit';
 import { detectLinking, ensureWorkspaceMember, referenceFromSolution } from './linking';
 import { workspacePath } from './linking/shared';
 import { resolveWorkspaceScope } from './workspace-layout';
+import { type TargetContract, describeFinding, houseTargetsProvenance, mergeHouseTargets, recordHouseTargets } from './house-targets';
+import { applyJsonChanges, updateJsonInPlace } from './json-edits';
+import { reportToUpgrade } from './upgrade-report';
 
 export type ProjectFileKind = 'project.json' | 'package.json';
 
@@ -35,6 +40,31 @@ export function projectDefinitionFile(tree: Tree, root: string): ProjectFile {
   if (tree.exists(at('project.json').path)) return at('project.json');
   if (tree.exists(at('package.json').path)) return at('package.json');
   return at(detectLinking(tree) === 'workspaces' ? 'package.json' : 'project.json');
+}
+
+/**
+ * Change the configuration of the project at `root` IN PLACE: `update` edits a copy, and only the members that
+ * differ are written (./json-edits.ts) — in project.json, or in package.json's `nx` block. Returns whether it wrote.
+ */
+export function updateProjectConfigInPlace(tree: Tree, root: string, update: (config: ProjectConfiguration) => void): boolean {
+  const file = projectDefinitionFile(tree, root);
+  return updateJsonInPlace<ProjectConfiguration>(tree, file.path, update, file.kind === 'package.json' ? ['nx'] : []);
+}
+
+/**
+ * The in-place counterpart of devkit's `updateProjectConfiguration(tree, name, config)`, for the read → change →
+ * write shape: `config` (a changed copy of `readProjectConfiguration(tree, name)`) is compared with what devkit reads
+ * now, and only the members that differ are written to the defining file — so a hand-written compact project.json
+ * keeps its form, and a package.json project's `nx` block gains nothing Nx infers. Returns whether it wrote.
+ */
+export function updateProjectConfigurationInPlace(tree: Tree, name: string, config: ProjectConfiguration): boolean {
+  const before = readProjectConfiguration(tree, name);
+  const file = projectDefinitionFile(tree, before.root);
+  const text = tree.read(file.path, 'utf8') ?? '';
+  const next = applyJsonChanges(text, before, config, file.kind === 'package.json' ? ['nx'] : []);
+  if (next === text) return false;
+  tree.write(file.path, next);
+  return true;
 }
 
 /**
@@ -102,8 +132,13 @@ export function joinWorkspace(tree: Tree, root: string): string | null {
 //                  linked by `paths`, a package.json workspace member where they are `workspaces`-linked. Writing
 //                  `<root>/project.json` by hand forked a TS-solution workspace into two conventions.
 //   WHAT IS OURS?  The house's targets and tags — re-asserted on every run, into whichever file defines the
-//                  project (`projectDefinitionFile`); anything the project added itself is left alone. Removing a
-//                  target the house no longer ships is a migration's job, never a generator's (project state).
+//                  project (`projectDefinitionFile`). Re-asserted by a THREE-WAY MERGE against a record of what the
+//                  house last wrote (_utils/house-targets.ts): the project's own targets, and its own edits and
+//                  additions INSIDE a house target (an input, an option, a configuration), survive an upgrade unless
+//                  the house changed the same key — and then the upgrade's summary says what it replaced. A target
+//                  the house introduces that the project already defines stays the project's, whole. The few values
+//                  other machinery relies on (`contract`) are re-asserted. Removing a target the house no longer
+//                  ships is a migration's job, never a generator's (project state).
 //
 // A house project created as a PACKAGE is named under the workspace's npm scope (`@acme/firebase`) while its Nx
 // name stays the bare one — `createProject`'s rule, which every creator gets.
@@ -119,8 +154,13 @@ export interface HouseProjectHome {
   canonical: { name: string; root: string };
 }
 
-/** What the house owns in a house project: its targets and tags (plus what a NEW project is created with). */
-export type HouseProjectConfig = Omit<ProjectConfiguration, 'name' | 'root'> & { tags: string[] };
+/**
+ * What the house owns in a house project: its targets and tags (plus what a NEW project is created with) — and its
+ * CONTRACT: per target, the values other machinery relies on (`nx affected -t deploy` relies on a deploy never being
+ * cached, never running beside another task, and building what it ships), re-asserted on every run and reported
+ * when the project's differed. Never written into the project as a key of its own.
+ */
+export type HouseProjectConfig = Omit<ProjectConfiguration, 'name' | 'root'> & { tags: string[]; contract?: TargetContract };
 
 /**
  * Where house project `name` lives (see WHERE IS IT? above) — a pure LOOKUP: it reads, never writes, and says
@@ -160,11 +200,14 @@ export function ensureHouseProject(
   owned: HouseProjectConfig,
   manifest: Record<string, unknown> = {},
 ): void {
+  const { contract, ...config } = owned;
+  const ownedTargets = config.targets ?? {};
   if (!home.exists) {
     // The package's name is never the seed's: a house project is always named the way `createProject` scopes
     // one (a template manifest's bare `"name": "functions"` is exactly the shadowing that rule prevents).
     const { name: _seedName, ...seed } = manifest;
-    createProject(tree, home.name, { root: home.root, ...owned }, { private: true, ...seed });
+    createProject(tree, home.name, { root: home.root, ...config }, { private: true, ...seed });
+    recordHouseTargets(tree, home.canonical.name, { project: home.name, root: home.root }, ownedTargets);
     return;
   }
   if (home.root !== home.canonical.root || home.name !== home.canonical.name) {
@@ -173,12 +216,15 @@ export function ensureHouseProject(
         `there instead of into a new project at ${home.canonical.root} — two projects under one name break every \`nx\` command.`,
     );
   }
-  const file = projectDefinitionFile(tree, home.root);
-  updateJson(tree, file.path, (json) => {
-    // A package.json-defined project keeps its Nx configuration under `nx`; a project.json at the top level.
-    const config = file.kind === 'package.json' ? (json.nx ??= {}) : json;
-    config.tags = [...new Set([...(config.tags ?? []), ...owned.tags])];
-    config.targets = { ...(config.targets ?? {}), ...owned.targets };
-    return json;
+  const provenance = houseTargetsProvenance(tree, home.canonical.name);
+  let recorded = ownedTargets;
+  // In place: only what the merge changed is written — the project's formatting and key order stay.
+  updateProjectConfigInPlace(tree, home.root, (onDisk) => {
+    onDisk.tags = [...new Set([...(onDisk.tags ?? []), ...config.tags])];
+    const merged = mergeHouseTargets(onDisk.targets, ownedTargets, provenance, contract);
+    onDisk.targets = merged.targets;
+    recorded = merged.recorded;
+    for (const finding of merged.findings) reportToUpgrade(who, describeFinding(home.name, finding));
   });
+  recordHouseTargets(tree, home.canonical.name, { project: home.name, root: home.root }, recorded);
 }

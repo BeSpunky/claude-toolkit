@@ -24,7 +24,7 @@
  * Needs `yarn install`.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, readlinkSync, lstatSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ASSETS, PAYLOAD, compilePayload, requireFromRepo, requireInstalled } from '../test-support/payload.mjs';
@@ -307,9 +307,9 @@ const ctxFor = (tree, overrides = {}) => {
     mode: 'upgrade',
     active: ordered([...detected, ...ensured]),
     ensured: new Set(ensured),
+    detected: new Set(detected),
     project: 'shop',
     app: 'shop',
-    nodeMajor: '22',
     voice: false,
     staging: false,
     ...overrides,
@@ -323,7 +323,7 @@ check('bare repo, add-layer agent: the floor\'s gitignore, the agent trio, then 
   const got = render(plan(ctxFor(FIXTURES['bare nx workspace'](), { ensured: ['nx', 'agent'] }), STAMP));
   const want = [
     'gitignore --layers=nx,agent,node',
-    'devcontainer --name=shop --nodeMajor=22 --layers=nx,agent,node',
+    'devcontainer --name=shop --layers=nx,agent,node',
     'claude-settings --layers=nx,agent,node',
     'window-identity --name=shop',
     'house-doc --nxToolsVersion=9.9.9 --pluginVersion=1.0.0 --packageManager=yarn --layers=nx,agent,node',
@@ -348,6 +348,24 @@ check('house-doc receives the resolved branch projection as one argument; absent
   try { plan(ctxFor(tree()), { ...STAMP, branchProjection: 'a\tb' }); } catch (error) { refused = error.message; }
   ok(/unsafe argument/.test(refused), `a TAB inside an argument is refused: ${refused}`);
 });
+// THE ci LAYER — opt-in (no preset carries it), detected by its marker, last in the registry (it composes the deploy
+// providers the layers before it contribute), and handed the SAME resolved branch model house-doc gets.
+check('ci: opt-in, detected by its marker, runs last before the stamp with the resolved model; firebase is its provider', (ok) => {
+  const { PRESETS } = require_(join(BUILD, 'src/layers/presets'));
+  ok(PRESETS.every((p) => !p.layers.includes('ci')), 'no preset ensures ci');
+  ok(registry.LAYERS.at(-1).id === 'ci', `ci is registered last (got ${registry.LAYERS.at(-1).id})`);
+  ok(registry.layer('firebase').ciDeploy?.id === 'firebase', 'the firebase layer contributes the firebase deploy provider');
+  const tree = FIXTURES['bare nx workspace']();
+  ok(!registry.detectLayers(tree).includes('ci'), 'absent without its marker');
+  tree.write('.bespunky/ci.json', '{"files":[],"cloud":{}}');
+  ok(registry.detectLayers(tree).includes('ci'), 'present with its marker');
+  const projection = JSON.stringify({ schema: 1, integration: 'main', summary: 'main (trunk)' });
+  const got = render(plan(ctxFor(FIXTURES['bare nx workspace'](), { ensured: ['nx', 'ci'] }), { ...STAMP, branchProjection: projection }));
+  ok(got.at(-2) === `ci --layers=nx,node,ci --branchProjection=${projection}`, `got ${got.at(-2)}`);
+  ok(got.at(-1).startsWith('house-doc ') && got.at(-1).includes('--layers=nx,node,ci'), `stamp ${got.at(-1)}`);
+  const standalone = render(plan(ctxFor(FIXTURES['bare nx workspace'](), { ensured: ['nx', 'ci'] }), STAMP));
+  ok(standalone.includes('ci --layers=nx,node,ci'), 'no resolved model → the generator reads the Tree');
+});
 check('voice is carried forward from the devcontainer marker', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['agent project with voice remembered']()), STAMP));
   const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';
@@ -364,7 +382,18 @@ check('full house sync: per-app steps first, then workspace steps in registry or
   // Phase 4: the Firebase CLIENT attaches per app (through the app's stack adapter), the neutral CORE is a
   // workspace step that runs after it and follows the client app.
   ok(got.includes('firebase-client --project=shop --workspaceName=shop --staging=true --wireProviders'), 'firebase client args');
+  // R5-3: seeding rules is a CREATION act. This workspace already has Firebase (detected), so ensuring it again
+  // (`add-layer firebase` on it) must not seed: its emulators run open today, and deny-all would break them.
   ok(got.includes('firebase-emulators --workspaceName=shop --staging=true --clientApp=shop'), 'firebase core args');
+  ok(!got.some((l) => l.startsWith('firebase-emulators ') && l.includes('--seedRules')), `a re-ensure of a detected layer seeds no rules: ${got.find((l) => l.startsWith('firebase-emulators '))}`);
+  // An upgrade that merely DETECTS firebase never seeds either (the console may hold the live rules).
+  const detected = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { ensured: ['nx'] }), STAMP));
+  ok(detected.some((l) => l.startsWith('firebase-emulators ') && !l.includes('--seedRules')), `a detect-only sync seeds no rules: ${detected.find((l) => l.startsWith('firebase-emulators '))}`);
+  // The run that CREATES it — ensured, not detected — seeds.
+  const fresh = FIXTURES['angular web app with firebase and a design system']();
+  fresh.delete('firebase.json');
+  const created = render(plan(ctxFor(fresh, { ensured: ['nx', 'firebase'] }), STAMP));
+  ok(created.some((l) => l.startsWith('firebase-emulators ') && l.includes('--seedRules')), `creating the layer seeds rules: ${created.find((l) => l.startsWith('firebase-emulators '))}`);
   const devcontainer = got.find((l) => l.startsWith('devcontainer ')) ?? '';
   ok(devcontainer.endsWith('--layers=nx,agent,node,js,web,angular,design-system,firebase'), `devcontainer layers: ${devcontainer}`);
 });
@@ -436,6 +465,8 @@ check('firebase and the design system on the Nx floor alone: core steps run, not
   ok(!got.some((l) => l.startsWith('firebase-client ')), 'no client attached — there is no app');
   ok(got.includes('firebase-emulators --workspaceName=shop'), `core without a client app: ${got.join(' | ')}`);
   ok(got.includes('design-system --scope=shop'), 'the design-system core runs without a framework');
+  // Every emulator suite claims its ports through the dev engine (tools/dev/lib/stacks.mjs) — with or without `web`.
+  ok(got.includes('dev') && got.indexOf('dev') > got.indexOf('firebase-emulators --workspaceName=shop'), `the dev engine is written for a backend-only Firebase too: ${got.join(' | ')}`);
 });
 check('firebase with apps the client could go into, but the named app missing: partial', (ok) => {
   const got = render(plan(ctxFor(FIXTURES['angular web app with firebase and a design system'](), { app: 'nope' }), STAMP));
@@ -474,7 +505,9 @@ console.log('\nagent artifacts (composed from the layers)');
 const { parse: parseJsonc } = require_('jsonc-parser');
 const generator = (name) => require_(join(BUILD, `src/generators/${name}/generator`)).default;
 const artifacts = async (tree, layers, extra = {}) => {
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers, ...extra });
+  // The project's Node major is its .nvmrc (_utils/node-version) — these fixtures declare 22.
+  if (!tree.exists('.nvmrc')) tree.write('.nvmrc', '22\n');
+  await generator('devcontainer')(tree, { name: 'shop', layers, ...extra });
   await generator('claude-settings')(tree, { layers });
   await generator('gitignore')(tree, { layers });
   await generator('house-doc')(tree, { layers, nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', ...(extra.packageManager ? { packageManager: extra.packageManager } : {}) });
@@ -543,6 +576,8 @@ checkAsync('wrapper-hosted repo (no package.json), nx+agent: neutral base, Node 
   ok(bashParses(a.post), 'post-create.sh does not parse');
   ok(!/tigervnc|playwright install|PM_INSTALL|default-jdk|angular\/skills/.test(a.post + a.osScript), 'post-create or the package list carries a step for a layer this repo does not have');
   ok(a.post.includes('.nx/nxw.js') && /^tmux$/m.test(a.osScript) && /^curl$/m.test(a.osScript), 'the wrapper install + the agent OS packages');
+  // No layer here declares an archive tool: no empty HOUSE_ARCHIVES list, no installer looping over nothing.
+  ok(!/HOUSE_ARCHIVES|install_archive|archive tools? to install|\{\{/.test(a.osScript) && shParses(a.osScript), 'the archive machinery (or a placeholder) rendered with no archive tool to install');
   ok(a.post.includes('sh .devcontainer/house.packages.sh .devcontainer/os-packages.txt'), 'post-create does not run the one package installer');
   ok(a.post.includes('Generated by @bespunky/nx-tools:devcontainer'), 'post-create provenance line');
   const enabled = Object.keys(a.settings.enabledPlugins);
@@ -578,7 +613,9 @@ checkAsync('an Nx app wired to the house serve executor: HOUSE.md serves through
   const a = await artifacts(tree, registry.detectLayers(tree));
   ok(a.house.includes('`yarn nx serve <app>` is the one command') && a.house.includes('http://localhost:4200'), 'nx serve + the Angular base port');
   ok(a.house.includes('yarn nx serve <app> --no-emulators'), 'the Nx face keeps --no-emulators');
-  ok(!a.house.includes('tools/dev/dev serve <app> --'), 'engine commands rendered where the Nx face exists');
+  // A SECOND stack of the same app in the same tree is just a second serve: every `nx serve` is its own stack.
+  ok(a.house.includes('### Running stacks') && a.house.includes('just serve it again — `yarn nx serve <app>` claims the next free block'), 'a second stack is the Nx face again');
+  ok(!a.house.includes('tools/dev/dev serve <app> --'), 'engine serve commands never rendered where the Nx face exists');
   ok(/, and\n- the \*\*shared co-driven browser/.test(a.house), 'the serve list is one list (no blank line left by a removed block)');
 });
 
@@ -644,7 +681,7 @@ checkAsync('full house shape (angular+firebase+design system, web): the 0.34 con
   const layers = registry.detectLayers(tree);
   const a = await artifacts(tree, layers);
   ok(/^FROM mcr\.microsoft\.com\/devcontainers\/typescript-node:22$/m.test(a.dockerfile), 'house.Dockerfile is not FROM typescript-node:22');
-  ok(JSON.stringify(a.dc.forwardPorts) === '[80,4200,4000,9099,8080,9150,9199,5001]', `forwardPorts ${JSON.stringify(a.dc.forwardPorts)}`);
+  ok(JSON.stringify(a.dc.forwardPorts) === '[80,4200,4000,9099,8080,9150,9199,5001,4500]', `forwardPorts ${JSON.stringify(a.dc.forwardPorts)}`);
   ok(a.dc.portsAttributes['4200'].label === 'Angular Dev Server', '4200 label');
   ok(a.dc.portsAttributes['6080'].requireLocalPort === true && a.dc.portsAttributes['6119'], 'the noVNC band');
   for (const ext of ['nrwl.angular-console', 'Angular.ng-template', 'toba.vsfire', 'dbaeumer.vscode-eslint', 'formulahendry.auto-rename-tag']) {
@@ -742,6 +779,9 @@ const runInstaller = (script, { present = [], aptFails = false, projectList } = 
   return { status, calls, installs: calls.filter((c) => c.startsWith('install')), output };
 };
 
+const readlinkSafe = (path) => { try { return readlinkSync(path); } catch { return null; } };
+const lexists = (path) => { try { lstatSync(path); return true; } catch { return false; } };
+
 checkAsync('image: built from house.Dockerfile — one cached package layer; the installer installs only what is missing', async (ok) => {
   const a = await artifacts(wrapperRepo(), ['nx', 'agent'], { voice: true });
   ok(/^COPY house\.packages\.sh os-packages\.tx\[t\] /m.test(a.dockerfile) && /RUN sh \/tmp\/bespunky-os-packages\/house\.packages\.sh \/tmp\/bespunky-os-packages\/os-packages\.txt/.test(a.dockerfile), 'the Dockerfile does not install both lists through the one installer');
@@ -765,6 +805,73 @@ checkAsync('image: built from house.Dockerfile — one cached package layer; the
 
   const failing = runInstaller(a.osScript, { aptFails: true, projectList: '' });
   ok(failing.status !== 0 && failing.calls.filter((c) => c === 'update').length === 3, `a failing install must retry 3x then exit non-zero (status ${failing.status}, ${JSON.stringify(failing.calls)})`);
+});
+
+// An ARCHIVE TOOL (a fragment's `archives`): the same one installer, run against a re-rooted filesystem
+// (HOUSE_PACKAGES_ROOT) with curl and uname stubbed — install, no-op when current, a moved pin switching cleanly
+// (old release and its dangling links gone), a bad checksum refused, a foreign file never clobbered.
+checkAsync('image: an archive tool installs at its pin, is a no-op when current, and a moved pin switches cleanly', async (ok) => {
+  const { createHash } = await import('node:crypto');
+  const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const dir = mkdtempSync(join(tmpdir(), 'archive-tool-'));
+  const bin = join(dir, 'bin');
+  const root = join(dir, 'root');
+  mkdirSync(bin);
+  mkdirSync(join(root, 'usr/local/bin'), { recursive: true });
+  const tarball = (version, tools) => {
+    const src = join(dir, `src-${version}`);
+    mkdirSync(join(src, 'tool/bin'), { recursive: true });
+    for (const name of tools) writeFileSync(join(src, 'tool/bin', name), `#!/bin/sh\necho ${name} ${version}\n`, { mode: 0o755 });
+    const file = join(dir, `tool-${version}.tar.gz`);
+    execFileSync('tar', ['-czf', file, '-C', src, 'tool']);
+    return { file, sha256: createHash('sha256').update(readFileSync(file)).digest('hex') };
+  };
+  const v1 = tarball('1.0.0', ['hello', 'only-v1']);
+  const v2 = tarball('2.0.0', ['hello']);
+  const log = join(dir, 'curl.log');
+  // curl: "download" https://archives.test/<file> from the local dir.
+  writeFileSync(join(bin, 'curl'), `#!/bin/sh\nfor a; do case "$a" in https://*) url="$a" ;; esac; done\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done\necho "$url" >> '${log}'\ncp '${dir}'/"\${url##*/}" "$out"\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'uname'), '#!/bin/sh\necho x86_64\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'dpkg-query'), "#!/bin/sh\nprintf 'install ok installed'\n", { mode: 0o755 });
+  writeFileSync(join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+  const script = (version, { sha256 }, arch = 'amd64') =>
+    renderOsPackagesScript(compose([{ id: 'x', fragment: { image: { ref: 'img', remoteUser: 'node' }, archives: [{ id: 'tool', version, bin: 'tool/bin', downloads: { [arch]: { url: `https://archives.test/tool-${version}.tar.gz`, sha256 } } }] } }], { nodeMajor: '22' }));
+  const runIt = (text) => {
+    writeFileSync(join(dir, 'house.packages.sh'), text);
+    rmSync(log, { force: true });
+    try {
+      const output = execFileSync('sh', ['-c', 'sh "$0" 2>&1', join(dir, 'house.packages.sh')], { env: { PATH: `${bin}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: root }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { status: 0, output, fetched: existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [] };
+    } catch (error) {
+      return { status: error.status, output: `${error.stdout}${error.stderr}`, fetched: existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [] };
+    }
+  };
+  const home = join(root, 'opt/bespunky/tool');
+  const links = join(root, 'usr/local/bin');
+  const say = (name) => execFileSync(join(links, name), { encoding: 'utf8' }).trim();
+  try {
+    ok(script('1.0.0', v1).includes('curl ca-certificates'), 'an archive tool did not bring its fetch tools (curl, ca-certificates) into the package list');
+    const first = runIt(script('1.0.0', v1));
+    ok(first.status === 0 && first.fetched.length === 1, `fresh install: ${JSON.stringify(first)}`);
+    ok(readlinkSafe(join(home, 'current')) === '1.0.0' && say('hello') === 'hello 1.0.0' && say('only-v1') === 'only-v1 1.0.0', 'the pinned release is not current, or its executables are not linked');
+    const again = runIt(script('1.0.0', v1));
+    ok(again.status === 0 && again.fetched.length === 0 && /all present/.test(again.output), `at the pin, the installer still fetched: ${JSON.stringify(again)}`);
+    const moved = runIt(script('2.0.0', v2));
+    ok(moved.status === 0 && moved.fetched.length === 1 && readlinkSafe(join(home, 'current')) === '2.0.0' && say('hello') === 'hello 2.0.0', `a moved pin did not switch: ${JSON.stringify(moved)}`);
+    ok(!existsSync(join(home, '1.0.0')) && !lexists(join(links, 'only-v1')), 'a moved pin left the old release or its dangling link behind');
+    const back = runIt(script('1.0.0', v1));
+    ok(back.status === 0 && readlinkSafe(join(home, 'current')) === '1.0.0' && say('hello') === 'hello 1.0.0', 'moving the pin BACK did not switch (no downgrade dance should be needed)');
+    const tampered = runIt(script('2.0.0', { sha256: 'f'.repeat(64) }));
+    ok(tampered.status !== 0 && /does not match its pinned sha256/.test(tampered.output) && readlinkSafe(join(home, 'current')) === '1.0.0', `a checksum mismatch was installed (or switched current): ${JSON.stringify(tampered)}`);
+    rmSync(join(links, 'hello'));
+    writeFileSync(join(links, 'hello'), 'theirs\n');
+    const foreign = runIt(script('2.0.0', v2));
+    ok(foreign.status === 0 && readFileSync(join(links, 'hello'), 'utf8') === 'theirs\n' && /not tool's — left alone/.test(foreign.output), `a file the installer did not make was clobbered: ${JSON.stringify(foreign)}`);
+    const otherArch = runIt(script('3.0.0', v2, 'arm64'));
+    ok(otherArch.status !== 0 && /no archive for this architecture \(amd64\)/.test(otherArch.output), `an archive missing for this architecture did not fail loudly: ${JSON.stringify(otherArch)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 checkAsync('image: an adopted devcontainer gets no second image source — and one that builds from house.Dockerfile is the house\'s', async (ok) => {
@@ -842,7 +949,7 @@ checkAsync('image: LF in every checkout, CRLF lists still read, a quote in a why
 
   const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
   const c = compose([{ id: 'x', fragment: { image: { ref: 'img', remoteUser: 'node' }, osPackages: [{ packages: ['jq'], why: "it's $HOME `x` \\ — quoted" }] } }], { nodeMajor: '22' });
-  const quoted = runInstaller(renderOsPackagesScript(c.osPackages), { projectList: '' });
+  const quoted = runInstaller(renderOsPackagesScript(c), { projectList: '' });
   ok(quoted.status === 0 && quoted.installs[0]?.trim() === 'install -y jq', `a quote in a why broke the embedded list: ${JSON.stringify(quoted)}`);
 
   // Parked earlier (the project's postCreateCommand ran something else); now the house takes post-create.sh.
@@ -991,7 +1098,7 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
   const OURS = 'ghcr.io/example/features/ours';
   const tree = wrapperRepo();
   tree.write(DC, `{\n  "image": "python:3.12",\n  "features": { "${OURS}": {} },\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n`);
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  await generator('devcontainer')(tree, { name: 'shop', layers: ['nx', 'agent'] });
   const recorded = () => JSON.parse(tree.read(MARKER, 'utf8')).adopted.houseAdded;
   const has = (entry) => recorded().some((e) => JSON.stringify(e) === JSON.stringify(entry));
   ok(has({ path: ['features', GH], value: {} }), `the house feature it added is recorded: ${JSON.stringify(recorded())}`);
@@ -1004,13 +1111,13 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
 
   // A second run adds nothing new: the record neither grows nor loses what the FIRST run added.
   const before = recorded().length;
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  await generator('devcontainer')(tree, { name: 'shop', layers: ['nx', 'agent'] });
   ok(recorded().length === before && has({ path: ['features', GH], value: {} }), `a re-run keeps the record as it was: ${before} -> ${recorded().length}`);
 
   // The project edits a value the house added: it is theirs now — out of the record, and houseWrote says no.
   const text = tree.read(DC, 'utf8').replace(pathEntry.value, '/opt/ours/bin:${containerEnv:PATH}');
   tree.write(DC, text);
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  await generator('devcontainer')(tree, { name: 'shop', layers: ['nx', 'agent'] });
   ok(!recorded().some((e) => e.path.join('.') === 'remoteEnv.PATH'), 'a value the project changed left the record');
   ok(!prov.houseWrote(tree, pathEntry), 'houseWrote refuses a value the file no longer holds');
   ok(has({ path: ['features', GH], value: {} }), 'everything else the house added is still recorded');
@@ -1019,7 +1126,7 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
 checkAsync('owned devcontainer: no provenance record — ownership already answers it', async (ok) => {
   const prov = require_(join(BUILD, 'src/generators/_utils/devcontainer-provenance'));
   const tree = createTreeWithEmptyWorkspace();
-  await generator('devcontainer')(tree, { name: 'shop', nodeMajor: '22', layers: ['nx', 'agent'] });
+  await generator('devcontainer')(tree, { name: 'shop', layers: ['nx', 'agent'] });
   const marker = JSON.parse(tree.read('.devcontainer/.bespunky-devcontainer.json', 'utf8'));
   ok(marker.owned === true && !marker.adopted, `owned marker: ${JSON.stringify(marker)}`);
   ok(prov.houseWrote(tree, { path: ['features', 'anything'], value: {} }), 'an owned file is the house\'s');
@@ -1037,7 +1144,7 @@ checkAsync('post-create: web provisions the shared browser through its own runti
   ok((both.osScript.match(/(^| )libnss3( |$)/gm) ?? []).length === 1, 'js+web: Chromium\'s libraries listed twice (the composer must de-duplicate)');
   const js = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js']);
   ok(/(^| )libnss3( |$)/m.test(js.osScript), 'js (no web): @playwright/test\'s Chromium libraries are not image packages');
-  const { PLAYWRIGHT_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright'));
+  const { PLAYWRIGHT_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
   const { CHROMIUM_OS_PACKAGES_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright-deps'));
   ok(CHROMIUM_OS_PACKAGES_VERSION === PLAYWRIGHT_VERSION, `Chromium's OS packages were projected from playwright-core@${CHROMIUM_OS_PACKAGES_VERSION}, the pin is ${PLAYWRIGHT_VERSION} — run: node tools/playwright-deps/project.mjs --write`);
   ok(bashParses(both.post), 'js+web post-create does not parse');
@@ -1146,6 +1253,45 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   rmSync(dir, { recursive: true, force: true });
 });
 
+// The Firebase CLI is the PROJECT's pinned devDependency (0.50.0), not an image feature: no second `firebase` on PATH,
+// and nothing new to persist — firebase-tools keeps its login in ~/.config/configstore (configstore's XDG home) and its
+// emulator downloads in ~/.cache/firebase, both inside the agent layer's persisted volumes asserted above. gcloud keeps
+// its logins and application-default credentials in ~/.config/gcloud (googlecloudsdk/core/config.py) — persisted too.
+checkAsync('firebase: the CLI comes from node_modules/.bin, gcloud is a pinned archive in the image — no unpinned features; their state lives in the persisted XDG homes', async (ok) => {
+  const tree = createTreeWithEmptyWorkspace();
+  writeJson(tree, 'firebase.json', {});
+  const a = await artifacts(tree, ['nx', 'agent', 'node', 'firebase']);
+  const features = Object.keys(a.dc.features ?? {});
+  ok(!features.some((id) => id.includes('firebase-cli')), `the image still installs a Firebase CLI of its own: ${features}`);
+  // gcloud: Google's VERSIONED archive of the pin, per architecture with its projected sha256 — never the unpinned
+  // feature, never Google's apt repository (a rolling index: the pin would expire and fail every cache-miss build).
+  const { GCLOUD_CLI_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const { GCLOUD_CLI_ARCHIVE } = require_(join(BUILD, 'src/generators/_utils/gcloud-archive'));
+  ok(!features.some((id) => id.includes('gcloud')), `gcloud still comes from a feature: ${features}`);
+  ok(GCLOUD_CLI_ARCHIVE.version === GCLOUD_CLI_VERSION, `gcloud-archive.ts is for ${GCLOUD_CLI_ARCHIVE.version}, the pin is ${GCLOUD_CLI_VERSION} (node tools/firebase-compat/project.mjs --write)`);
+  for (const [arch, { url, sha256 }] of Object.entries(GCLOUD_CLI_ARCHIVE.downloads)) {
+    ok(a.osScript.includes(`google-cloud-cli ${GCLOUD_CLI_VERSION} ${arch} ${sha256} ${url} google-cloud-sdk/bin`), `the installer lacks gcloud's ${arch} archive line`);
+  }
+  ok(!/packages\.cloud\.google\.com|google-cloud-cli=|apt-key|signed-by/.test(a.osScript), 'gcloud still comes (partly) from Google\'s apt repository');
+  ok(/^curl ca-certificates$|(^| )ca-certificates( |$)/m.test(a.osScript) && /install_archive "\$id"/.test(a.osScript) && /archive tools to install/.test(a.osScript) && !a.osScript.includes('{{') && shParses(a.osScript), 'with an archive tool, its fetch tools and installer are rendered (markers gone) and the script parses');
+  ok(a.dc.containerEnv?.CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK === 'true', 'the pinned gcloud would nag to `gcloud components update` (moving the pin)');
+  ok((a.dc.remoteEnv?.PATH ?? '').includes('${containerWorkspaceFolder}/node_modules/.bin'), 'node_modules/.bin is not on PATH — the pinned `firebase` would not resolve');
+  const home = `/home/${a.dc.remoteUser ?? 'node'}`;
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.config,type=volume`)), 'firebase login (~/.config/configstore) would not survive a rebuild');
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.cache,type=volume`)), 'the emulator downloads (~/.cache/firebase) would not survive a rebuild');
+});
+
+// Version truth: the derived table must have been projected from the CLI the house pins, and the seed Node must be one
+// Cloud Functions runs (offline; tools/firebase-compat/project.mjs re-asks npm in CI).
+check('versions: the Firebase table was projected from the pinned firebase-tools, and the house Node seed is a live Functions runtime', (ok) => {
+  const { FIREBASE_TOOLS_VERSION, HOUSE_NODE_MAJOR } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const { FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS, FUNCTIONS_NODE_RUNTIMES } = require_(join(BUILD, 'src/generators/_utils/firebase-compat'));
+  ok(FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS === FIREBASE_TOOLS_VERSION, `projected from firebase-tools@${FUNCTIONS_RUNTIMES_FROM_FIREBASE_TOOLS}, the pin is ${FIREBASE_TOOLS_VERSION} — run: node tools/firebase-compat/project.mjs --write`);
+  ok(FUNCTIONS_NODE_RUNTIMES.includes(HOUSE_NODE_MAJOR), `HOUSE_NODE_MAJOR ${HOUSE_NODE_MAJOR} is not a GA Cloud Functions runtime (${FUNCTIONS_NODE_RUNTIMES})`);
+  const { TYPESCRIPT_NODE_IMAGE_MAJORS } = require_(join(BUILD, 'src/generators/_utils/node-facts'));
+  ok(TYPESCRIPT_NODE_IMAGE_MAJORS.includes(Number(HOUSE_NODE_MAJOR)), `HOUSE_NODE_MAJOR ${HOUSE_NODE_MAJOR} has no typescript-node image (${TYPESCRIPT_NODE_IMAGE_MAJORS}) — a new project's container could not be built`);
+});
+
 checkAsync('volume ownership: a wrapper-hosted repo (no node) reclaims only the Nx volumes, ~/.config, ~/.local and ~/.cache; a rebuild reclaims nothing', async (ok) => {
   const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
   expectCalls(ok, 'wrapper', reclaimed(a.post).calls, [
@@ -1193,7 +1339,8 @@ check('volume ownership: a volume outside the workspace and home must DECLARE it
 const ts_ = require_('typescript');
 const angularShop = () => {
   const tree = createTreeWithEmptyWorkspace();
-  writeJson(tree, 'package.json', { name: 'shop', devDependencies: { '@nx/angular': '23.1.0' } });
+  // What an Angular house workspace declares: Nx exactly (house.sh pins it), Angular (which @angular/fire follows).
+  writeJson(tree, 'package.json', { name: 'shop', dependencies: { '@angular/core': '~20.3.0' }, devDependencies: { '@nx/angular': '23.1.0', nx: '23.1.0' } });
   addProjectConfiguration(tree, 'shop', {
     root: 'apps/shop',
     projectType: 'application',
@@ -1213,9 +1360,12 @@ checkAsync('serve: the Angular leaf comes from the adapter; the composer mirrors
   const t = targetsOf(tree, 'shop');
   ok(t['dev-server'].executor === '@angular/build:dev-server' && t['dev-server'].options.host === '0.0.0.0', `leaf: ${JSON.stringify(t['dev-server'])}`);
   ok(t['dev-server'].options.port === 4300, 'a user-tuned leaf option survives');
-  ok(t.serve.executor === '@bespunky/nx-tools:serve', 'composer on `serve`');
-  ok(JSON.stringify(t.serve.options) === JSON.stringify(t['dev-server'].options), 'composer options mirror the leaf');
-  ok(JSON.stringify(t.serve.configurations) === JSON.stringify(t['dev-server'].configurations), 'composer configurations mirror the leaf');
+  ok(t['dev-stack'].executor === '@bespunky/nx-tools:serve' && t['dev-stack'].continuous === true, 'the continuous composer on `dev-stack`');
+  ok(t.serve.executor === '@bespunky/nx-tools:serve' && t.serve.continuous === false, '`serve` is the engine, explicitly not continuous — its own stack, its own exit status');
+  ok(t['dev-server'].continuous === false, 'the leaf is explicitly not continuous');
+  ok(JSON.stringify(t['dev-stack'].options) === JSON.stringify(t['dev-server'].options), 'composer options mirror the leaf');
+  ok(JSON.stringify(t['dev-stack'].configurations) === JSON.stringify(t['dev-server'].configurations), 'composer configurations mirror the leaf');
+  ok(JSON.stringify(t.serve.options) === JSON.stringify(t['dev-server'].options) && JSON.stringify(t.serve.configurations) === JSON.stringify(t['dev-server'].configurations), '`serve` mirrors the leaf too');
   ok(JSON.parse(tree.read('nx.json', 'utf8')).tui?.enabled === false, 'nx.json tui.enabled=false');
 });
 
@@ -1245,7 +1395,7 @@ checkAsync('serve: an existing non-Angular dev-server is composed as-is', async 
   await generator('serve')(tree, { project: 'site' });
   const t = targetsOf(tree, 'site');
   ok(t['dev-server'].executor === '@nx/vite:dev-server' && !('buildTarget' in t['dev-server'].options), `leaf touched: ${JSON.stringify(t['dev-server'])}`);
-  ok(t.serve.options.port === 5173 && !('buildTarget' in t.serve.options), `composer: ${JSON.stringify(t.serve)}`);
+  ok(t['dev-stack'].options.port === 5173 && !('buildTarget' in t['dev-stack'].options), `composer: ${JSON.stringify(t['dev-stack'])}`);
 });
 
 checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-server proxyConfig, on the leaf AND its mirror; idempotent', async (ok) => {
@@ -1258,11 +1408,34 @@ checkAsync('firebase client on a new Angular app: proxy.conf.mjs is the dev-serv
   const t = JSON.parse(once).targets;
   ok(tree.exists('apps/shop/proxy.conf.mjs'), 'proxy.conf.mjs written');
   ok(t['dev-server'].options.proxyConfig === 'apps/shop/proxy.conf.mjs', `leaf: ${JSON.stringify(t['dev-server'].options)}`);
-  ok(t.serve.options.proxyConfig === 'apps/shop/proxy.conf.mjs', 'the composer mirror carries it too');
+  ok(t['dev-stack'].options.proxyConfig === 'apps/shop/proxy.conf.mjs', 'the composer mirror carries it too');
   // the next sync's order: serve, then the client again — nothing may move
   await generator('serve')(tree, { project: 'shop' });
   angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: false });
   ok(tree.read('apps/shop/project.json', 'utf8') === once, 'a re-run changed project.json');
+});
+
+checkAsync('firebase client on an app whose dev server has its own proxy config: kept, and told what to add (R4-1)', async (ok) => {
+  const tree = angularShop();
+  tree.write('apps/shop/src/app/app.config.ts', "import { ApplicationConfig } from '@angular/core';\nexport const appConfig: ApplicationConfig = { providers: [] };\n");
+  await generator('serve')(tree, { project: 'shop' });
+  const config = JSON.parse(tree.read('apps/shop/project.json', 'utf8'));
+  config.targets['dev-server'].options.proxyConfig = 'apps/shop/proxy.api.mjs';
+  tree.write('apps/shop/project.json', JSON.stringify(config));
+  const { angular } = require_(join(BUILD, 'src/adapters/angular'));
+  const { logger } = require_('@nx/devkit');
+  const warned = [];
+  const warn = logger.warn;
+  logger.warn = (message) => warned.push(String(message));
+  try {
+    angular.firebase.attach(tree, 'shop', { workspaceName: 'shop', staging: false, wireProviders: true });
+  } finally {
+    logger.warn = warn;
+  }
+  const t = JSON.parse(tree.read('apps/shop/project.json', 'utf8')).targets;
+  ok(t['dev-server'].options.proxyConfig === 'apps/shop/proxy.api.mjs', `the project's choice kept: ${t['dev-server'].options.proxyConfig}`);
+  ok(tree.exists('apps/shop/proxy.local.mjs'), 'the proxy.local.mjs seam is seeded');
+  ok(warned.some((w) => w.includes('uses a proxy config of its own') && w.includes("import { emulatorRoutes } from './proxy.conf.mjs';")), `warned: ${warned.join(' | ') || '(nothing)'}`);
 });
 
 checkAsync('a first scaffold: the Firebase core, arriving after the web seeding, still declares the emulators for served apps', async (ok) => {
@@ -1322,8 +1495,13 @@ checkAsync('firebase core on an old-shaped eslint.config.mjs (no trailing comma)
   const sf = ts_.createSourceFile('eslint.config.mjs', out, ts_.ScriptTarget.Latest, true, ts_.ScriptKind.JS);
   ok(sf.parseDiagnostics.length === 0, `does not parse: ${sf.parseDiagnostics.map((d) => d.messageText).join('; ')}`);
   ok(!/^\s*,\s*$/m.test(out) && !/},\]/.test(out), `malformed splice:\n${out}`);
-  ok(/\n {24}},\n {24}\/\/ by platform:/.test(out), `not at the neighbours' indentation:\n${out}`);
-  ok(/sourceTag: 'platform:server'[\s\S]*\n {24}}\n {20}\]/.test(out), `closing bracket not on its own line:\n${out}`);
+  ok(/\n {4}},\n {4}\/\/ THE PLATFORM FIREWALL/.test(out), `not at the neighbours' indentation:\n${out}`);
+  ok(/\n {4}}\n\];\n$/.test(out), `closing bracket not on its own line:\n${out}`);
+  ok(/';\n\n\/\/ THE PLATFORM FIREWALL[\s\S]*\n\];\n\n[\s\S]*\nconst moduleBoundaries = [^\n]*\n\nexport default \[\n {4}\/\/ THE PLATFORM FIREWALL/.test(out), `the declarations, set apart above the export; the coverage block first:\n${out}`);
+  // ONE rule instance: the project's options hoisted (dedented to the top level, its stock catch-all gone, in its own
+  // style), its entry replaced in place.
+  ok(/\nconst moduleBoundaryOptions = \{\n {4}depConstraints: \[\]\n\};\n/.test(out), `the project's options, hoisted:\n${out}`);
+  ok(/\n {12}'@nx\/enforce-module-boundaries': moduleBoundaries\(platformConstraints\)\n {8}}/.test(out), `the project's entry, in place:\n${out}`);
   await generator('firebase-emulators')(tree, {});
   ok(tree.read('eslint.config.mjs', 'utf8') === out, 'a re-run changed eslint.config.mjs');
 });
@@ -1333,11 +1511,16 @@ checkAsync('firebase devcontainer ports come from firebase.json and the client a
   const backend = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
   const a = await artifacts(backend, [...registry.detectLayers(backend), 'agent']);
   ok(!(a.dc.forwardPorts ?? []).includes(4200), `a backend-only Firebase forwards a dev-server port: ${JSON.stringify(a.dc.forwardPorts)}`);
-  ok(JSON.stringify(a.dc.forwardPorts) === '[4000,9099,8080,9150,9199,5001]', `no firebase.json suite yet → the house suite: ${JSON.stringify(a.dc.forwardPorts)}`);
+  ok(JSON.stringify(a.dc.forwardPorts) === '[4000,9099,8080,9150,9199,5001,4500]', `no firebase.json suite yet → the house suite: ${JSON.stringify(a.dc.forwardPorts)}`);
   const custom = FIXTURES['plain npm repo wearing firebase and a neutral design system']();
   writeJson(custom, 'firebase.json', { emulators: { auth: { port: 19099 }, firestore: { port: 18080, websocketPort: 19150 }, ui: { enabled: false }, singleProjectMode: true } });
   const b = await artifacts(custom, [...registry.detectLayers(custom), 'agent']);
-  ok(JSON.stringify(b.dc.forwardPorts) === '[19099,18080,19150]', `firebase.json's own ports: ${JSON.stringify(b.dc.forwardPorts)}`);
+  // The forwarded emulator ports serve a PERSON — the Emulator UI's page dials them; the app reaches every emulator
+  // through its own origin. So no UI, no emulator forward at all.
+  ok((b.dc.forwardPorts ?? []).length === 0, `the UI is disabled, so no emulator port is forwarded: ${JSON.stringify(b.dc.forwardPorts)}`);
+  writeJson(custom, 'firebase.json', { emulators: { auth: { port: 19099 }, firestore: { port: 18080, websocketPort: 19150 }, ui: { port: 14000 }, logging: { port: 14500 }, singleProjectMode: true } });
+  const c = await artifacts(custom, [...registry.detectLayers(custom), 'agent']);
+  ok(JSON.stringify(c.dc.forwardPorts) === '[14000,19099,18080,19150,14500]', `firebase.json's own ports, for the UI: ${JSON.stringify(c.dc.forwardPorts)}`);
 });
 
 // A6 — the package-manager rule is rendered into post-create from the one table, and behaves like the TS rule.

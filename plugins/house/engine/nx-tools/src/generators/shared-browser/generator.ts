@@ -24,7 +24,7 @@ import { ensureHouseProject, houseProjectHome, type HouseProjectConfig } from '.
 import { readFileSync } from 'node:fs';
 import { NOVNC_BAND_SIZE, NOVNC_BAND_START } from './novnc-band';
 import { join } from 'node:path';
-import { PLAYWRIGHT_VERSION } from '../_utils/playwright';
+import { PLAYWRIGHT_VERSION } from '../_utils/versions';
 
 // Workspace-level: no inputs today. Kept as a named type for parity with the sibling generators
 // (and a place to grow options into) without tripping the no-empty-interface lint rule.

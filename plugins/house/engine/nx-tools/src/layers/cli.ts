@@ -3,7 +3,7 @@
 //   node <nx-tools>/src/layers/cli.js detect
 //       The layers present in the workspace at cwd, comma-separated, in registry order.
 //   node <nx-tools>/src/layers/cli.js plan --mode=new|upgrade --active=<csv> --ensured=<csv> --project=<p>
-//       --app=<a> --node-major=<n> --voice=0|1 --staging=0|1 --nx-tools-version=<v> --plugin-version=<v>
+//       --app=<a> --voice=0|1 --staging=0|1 --nx-tools-version=<v> --plugin-version=<v>
 //       --package-manager=<pm> [--branch-projection=<projection JSON>|undeclared]
 //       The generator sequence for this run, one TAB-separated line per step (see PlanLine):
 //         gen<TAB><generator>[<TAB><arg>]…        (each argument one field — it may hold spaces, never a TAB)
@@ -43,15 +43,16 @@ function main(argv: string[]): void {
       return;
     case 'plan': {
       const csv = (key: string) => (flags[key] ?? '').split(',').filter(Boolean);
+      const tree = workspace();
       const lines = plan(
         {
-          tree: workspace(),
+          tree,
           mode: runMode(flags.mode),
           active: new Set(inRegistryOrder(csv('active'))),
           ensured: new Set(inRegistryOrder(csv('ensured'))),
+          detected: new Set(detectLayers(tree)),
           project: required(flags, 'project'),
           app: required(flags, 'app'),
-          nodeMajor: flags['node-major'] ?? '22',
           voice: flags.voice === '1',
           staging: flags.staging === '1',
         },

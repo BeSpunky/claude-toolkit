@@ -56,14 +56,16 @@ if _fb_setup_pending; then
   printf '  When you are ready to wire a real Firebase project (App Hosting — the framework-aware product):\n'
   printf '    1) \033[1mfirebase login\033[0m\n'
   printf '    2) \033[1mfirebase use --add\033[0m                                            (picks a project from your account; writes .firebaserc)\n'
-  printf '    3) \033[1mfirebase apphosting:backends:create --project <projectId>\033[0m       (one-time: creates the App Hosting backend; interactive — LINK THIS REPO so deploys auto-run on push)\n'
+  printf '    3) \033[1mfirebase apphosting:backends:create --project <projectId> --root-dir {{appsDir}}/<app>\033[0m   (one-time: creates the App Hosting backend; interactive — links a GitHub repo + live branch)\n'
   printf '    4) \033[1mfirebase apps:sdkconfig WEB <appId> --project <projectId>\033[0m       (prints the real web config for client-side SDK init)\n'
   if _fb_has_client; then
     printf '    5) Paste the returned firebaseConfig fields into `firebase` in {{appsDir}}/<app>/src/environments/environment.prod.ts\n'
   fi
-  printf '  Linking the repo at step 3 is the deploy CI: Firebase wires its own Cloud Build pipeline (no workflow file in this repo).\n'
-  printf '  After that, App Hosting deploys are GitHub-driven — push to the configured branch and it builds + deploys.\n'
-  printf '  Or just ask Claude to walk you through it.\n\n'
+  printf '  Then each push to the live branch rolls out (Firebase runs the build; no workflow file here) — or deploy from local\n'
+  printf '  source instead (\033[1mfirebase init apphosting\033[0m once, then \033[1mfirebase deploy --only apphosting\033[0m). Either way the Root Directory is the app, never /.\n'
+  printf '  Cloud Functions and the Firestore / Storage rules deploy through Nx, not App Hosting — the road from login to the\n'
+  printf '  first deploy (and to CI), with what this machine already has ticked: \033[1mnode tools/firebase-deploy.mjs --check\033[0m\n'
+  printf '  Or just ask Claude to walk you through it (staging, deploy modes, account moves: bespunky-house:firebase-app-hosting).\n\n'
 fi
 
 unset -f _fb_setup_pending _fb_has_client

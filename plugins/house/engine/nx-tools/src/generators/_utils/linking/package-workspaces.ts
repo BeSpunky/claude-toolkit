@@ -11,7 +11,8 @@
 // required peer. They are resolved from devkit's own location (so pnpm's strict layout, where a peer's
 // dependencies are not ours to `require`, still finds them), which keeps this payload's dependency list at
 // two and guarantees we read these files exactly as Nx does.
-import { type Tree, readJson, updateJson, logger } from '@nx/devkit';
+import { type Tree, readJson, logger } from '@nx/devkit';
+import { updateManifest } from '../dependencies';
 import { dirname } from 'node:path';
 import { detectPackageManager } from '../package-manager';
 import { workspacePath } from './shared';
@@ -92,7 +93,7 @@ export function ensureWorkspaceMember(tree: Tree, root: string): string | null {
     parsed.packages = [...asPatterns(parsed.packages), pattern];
     tree.write(PNPM_WORKSPACE, yaml().dump(parsed, { indent: 2, quotingType: '"', forceQuotes: true }));
   } else {
-    updateJson(tree, 'package.json', (json) => {
+    updateManifest(tree, 'package.json', 'linking', (json) => {
       if (json.workspaces && !Array.isArray(json.workspaces)) json.workspaces.packages = [...asPatterns(json.workspaces.packages), pattern];
       else json.workspaces = [...asPatterns(json.workspaces), pattern];
       return json;
@@ -112,7 +113,7 @@ export function dropExactWorkspacePattern(tree: Tree, root: string): void {
     parsed.packages = parsed.packages.filter((p) => !exact(p));
     tree.write(PNPM_WORKSPACE, yaml().dump(parsed, { indent: 2, quotingType: '"', forceQuotes: true }));
   } else if (tree.exists('package.json')) {
-    updateJson(tree, 'package.json', (json) => {
+    updateManifest(tree, 'package.json', 'linking', (json) => {
       if (Array.isArray(json.workspaces)) json.workspaces = json.workspaces.filter((p: unknown) => !exact(p));
       else if (Array.isArray(json.workspaces?.packages)) json.workspaces.packages = json.workspaces.packages.filter((p: unknown) => !exact(p));
       return json;

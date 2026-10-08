@@ -157,6 +157,7 @@ The anatomy of a prompt that works, and the failure modes each part prevents, is
 - **The return shape** — explicitly. *"Return the file:line of each call site and one sentence on whether it needs changing. No file contents."* Where the tier supports it, a schema is better than a sentence, because it is enforced rather than requested.
 - **Permission to recurse, with its budget share** — if this splits, split it; your subtree may create up to *N* more agents, carve your children's shares from that, and report what you spent. An allowance, never a ban (see *The agent budget*).
 - **The duty to leave traces** — write durable output to the package as you go and return a summary of what you wrote, not the only copy of it; keep your own ledger if you fan out.
+- **The processes clause**, whenever it may start a server, emulator or watcher — start it on its own port with a handle, stop it by that handle before returning, and list in the return every process it started (stack / PID, port, stopped or deliberately left running). A child's context ends when it returns; its processes do not.
 
 ---
 
@@ -193,6 +194,7 @@ This is an orchestration judgment, so it belongs to whoever is doing the orchest
 ### And the rest of the shared world
 
 - **Same port, same server → not fine.** See [[local-server-isolation]] — parallel agents each starting a dev server is exactly the collision that skill exists to prevent, multiplied by N.
+- **Processes outlive the agent that started them.** A server a child launched keeps listening after the child's context is gone, and nobody else knows its PID — six leaked dev servers after a fan-out, then a `pkill --newest` that could have hit the developer's, is how this was learned. So a child **stops what it started before it returns, by the handle it launched with** (`tools/dev/dev stop`, `TaskStop`, its captured PID — never a name), checks its ports are free, and **lists what it started** in its return. Give each child an owner label (`DEV_OWNER=<unit-id>` on its serve and its stop) so its `stop --all-mine` reaches its own stacks and not a sibling's — the Claude Code session alone is one owner shared by every agent in it, so without a label `stop` only takes a stack it NAMES.
 - **Git is single-threaded here.** Branching, merging, promoting, releasing — one actor, the main thread, under [[branch-and-release]]. Never fan out a promotion.
 
 ---
@@ -232,6 +234,8 @@ Between checks, do the work that does not depend on them. Idle waiting is the on
 - **Failed or returned nothing** — say so in the report. A dropped agent is a hole in the coverage, and an unmentioned hole reads as coverage.
 - **Still running when the goal is already settled** — its answer no longer changes anything, so **stop it deliberately** rather than leaving it to run out. Stopping is a decision you make and state; drifting away from it is not.
 - **Never assume an outcome you were not told.** A child you did not hear back from has not "probably finished". If a result has not arrived, you do not have it — and you never write the notification yourself.
+
+**Then the process roster — the agents are not the only thing a fan-out leaves running.** Check what is still listening against what the children reported starting: `tools/dev/dev ps` in a house project (every stack, its owner and ports; orphans included), else `ss -ltnp` on the ports they named. A listener nobody reported is an unaccounted child: stop it by its handle if it is provably the tree's own (`tools/dev/dev stop <app> --offset=<n>` — by name: the session is every agent's owner), and **report** anything you cannot prove is yours rather than killing it.
 
 `Workflow` handles most of this for you by construction: every `agent()` call is awaited, and a stage cannot outlive the script that owns it. That is a reason to prefer it for large fan-outs — supervision is structural there, rather than something you must remember.
 

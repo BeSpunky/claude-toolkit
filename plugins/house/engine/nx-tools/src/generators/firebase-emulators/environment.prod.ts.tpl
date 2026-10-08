@@ -7,13 +7,15 @@
 // === To wire a real Firebase project (App Hosting — the framework-aware product) ===
 //   1) Log in:                          firebase login
 //   2) Link the project:                firebase use --add                                            (picks from your account; writes .firebaserc)
-//   3) Create the App Hosting backend:  firebase apphosting:backends:create --project <projectId>     (one-time; interactive)
+//   3) Create the App Hosting backend:  firebase apphosting:backends:create --project <projectId> --root-dir <this app's directory>     (one-time; interactive)
 //   4) Fetch the web config:            firebase apps:sdkconfig WEB <appId> --project <projectId>     (prints the real web config for client-side SDK init)
 //   5) Paste the returned firebaseConfig fields below into `firebase`.
 //
-// After the backend exists, App Hosting deploys are GitHub-driven (push to the
-// configured branch). App Hosting build/runtime config lives in
-// `apphosting.yaml` at the workspace root.
+// The backend then deploys from GitHub (a rollout on every push to its live
+// branch) or from local source (`firebase deploy --only apphosting:<backendId>`).
+// Build/runtime config: the nearest `apphosting.yaml` walking up from the app's
+// directory (the house seeds it at the workspace root). The full story — and
+// moving accounts — is the bespunky-house:firebase-app-hosting skill.
 //
 // Do NOT hand-fabricate this. The CLI is the source of truth for cloud state.
 // The placeholders below are intentionally empty so a half-wired prod build

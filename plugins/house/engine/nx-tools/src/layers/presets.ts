@@ -65,7 +65,7 @@ function validated(list: readonly Preset[]): readonly Preset[] {
     for (const id of entry.layers) {
       const descriptor = layer(id);
       const spec = descriptor.ensurable.new;
-      if (spec === false) throw new Error(`[presets] "${entry.id}": `new` cannot ensure "${id}".`);
+      if (spec === false) throw new Error(`[presets] "${entry.id}": 'new' cannot ensure "${id}".`);
       if (typeof spec === 'object' && !set.has(spec.via)) {
         throw new Error(`[presets] "${entry.id}": "${id}" is created only via "${spec.via}", which the preset lacks.`);
       }

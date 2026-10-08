@@ -15,9 +15,16 @@
 //   localStorage.setItem('emulate','firestore');  localStorage.setItem('real','auth');   // persists per browser
 //   localStorage.removeItem('emulate');  // drop the override, fall back to the committed defaults
 //
-// Browser/SSR-safe: with no `window` it returns the committed defaults unchanged. It ships only in
-// the dev bundle — firebase.config.ts calls it behind the `environment.production` literal, so the
-// production build tree-shakes this whole module away.
+// ON THE SERVER (SSR) there is no URL of the page's and no localStorage, so the server applies the one per-session
+// choice it can share with the browser: the STACK's. The dev engine opens the app with its URL switches
+// (`?emulate=none` when the suite is skipped — `serve --no-emulators`) and exports the same query to every process
+// of the stack as DEV_URL_QUERY, which the server reads exactly as the browser reads its URL. So a server render and
+// the page it hydrates resolve the same services. What a person types into one tab (`?real=auth`, localStorage) is
+// that tab's alone: a server instance serves every tab, and an SDK instance connected to an emulator cannot be
+// disconnected per request — so for a per-tab choice the server keeps the stack's, and the two can differ.
+//
+// It ships only in the dev bundle — firebase.config.ts calls it behind `ngDevMode`, which the optimizer folds to
+// `false` in production builds, so the production build tree-shakes this whole module away.
 export type EmulatorService = 'auth' | 'firestore' | 'storage' | 'functions';
 
 const SERVICES: readonly EmulatorService[] = ['auth', 'firestore', 'storage', 'functions'];
@@ -41,6 +48,14 @@ function fromQuery(win: Window): { emulate: string | null; real: string | null }
   }
 }
 
+/** The stack's URL switches, as the dev engine exports them to a server process (no `process` → none). */
+function fromStack(): { emulate: string | null; real: string | null } {
+  const query = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.['DEV_URL_QUERY'];
+  if (!query) return { emulate: null, real: null };
+  const q = new URLSearchParams(query);
+  return { emulate: q.get('emulate'), real: q.get('real') };
+}
+
 function fromStorage(win: Window): { emulate: string | null; real: string | null } {
   try {
     return {
@@ -57,15 +72,14 @@ function fromStorage(win: Window): { emulate: string | null; real: string | null
  * Resolve the effective on/off per service from the committed defaults and any per-session override.
  *
  * `emulate` REPLACES the on-set with exactly the listed services; `real` then forces the listed
- * services off. localStorage is applied first, then the URL query (so the query wins).
+ * services off. In the browser localStorage is applied first, then the URL query (so the query wins); on the
+ * server (no `win`), the stack's query from DEV_URL_QUERY.
  */
 export function resolveEmulated(
   defaults: Record<EmulatorService, boolean>,
   win: Window | undefined = typeof window === 'undefined' ? undefined : window
 ): Record<EmulatorService, boolean> {
   const result: Record<EmulatorService, boolean> = { ...defaults };
-  if (!win) return result;
-
   const apply = (src: { emulate: string | null; real: string | null }): void => {
     if (src.emulate != null) {
       const on = parseList(src.emulate);
@@ -77,35 +91,11 @@ export function resolveEmulated(
     }
   };
 
+  if (!win) {
+    apply(fromStack()); // the server: the stack's switches, the ones the browser was opened with
+    return result;
+  }
   apply(fromStorage(win)); // localStorage
   apply(fromQuery(win)); // URL query — wins
   return result;
-}
-
-/**
- * Resolve the emulator PORT OFFSET for this session — the amount added to every emulator port so
- * the app connects to an ISOLATED stack (started by `<app>:serve --portOffset`) instead
- * of the base ports. Read from `?portOffset=<n>` (or localStorage `portOffset`); 0 when absent or
- * invalid. Precedence: URL query > localStorage > 0. Browser/SSR-safe (no `window` → 0), and — like
- * the emulate resolver — only consulted behind `ngDevMode`, so it tree-shakes out of prod.
- */
-export function resolvePortOffset(
-  win: Window | undefined = typeof window === 'undefined' ? undefined : window
-): number {
-  if (!win) return 0;
-  const read = (v: string | null | undefined): number => {
-    const n = Number((v ?? '').trim());
-    return Number.isInteger(n) && n > 0 ? n : 0;
-  };
-  try {
-    const fromUrl = read(new URLSearchParams(win.location?.search ?? '').get('portOffset'));
-    if (fromUrl) return fromUrl;
-  } catch {
-    // location/URLSearchParams can throw in exotic embeddings — fall through to storage.
-  }
-  try {
-    return read(win.localStorage?.getItem('portOffset'));
-  } catch {
-    return 0;
-  }
 }

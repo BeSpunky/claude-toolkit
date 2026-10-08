@@ -52,7 +52,7 @@ function nxServable(tree: Tree, app: string): boolean {
 }
 
 /**
- * The per-app steps wire the NX adapter (the `serve` composer target + its dev-server options) onto the sync's
+ * The per-app steps wire the NX adapter (the `dev-stack` composer target + its dev-server options) onto the sync's
  * app. "The web layer is present" and "the sync's app is served through Nx" are different claims:
  *   - the app is Nx-servable (see above)          → run.
  *   - it isn't, but some Nx project IS served     → the sync named the wrong app: SKIP and say so, partial.
@@ -88,7 +88,8 @@ export const web: LayerDescriptor = {
       { generator: 'serve-options', args: (ctx) => [`--project=${ctx.app}`], skip: nxAppMustExist },
     ],
     // port-claim first: the shared browser, the worktree-domains proxy and the engine all consult it.
-    // `dev` last: it seeds declarations for the apps the per-app steps (and other layers) just wired.
+    // `dev` last: it seeds declarations for the apps the per-app steps (and other layers) just wired. The `dev`
+    // generator owns tools/dev; `firebase` lists the same step (its suites claim their ports through the engine).
     workspace: [{ generator: 'port-claim' }, { generator: 'shared-browser' }, { generator: 'worktree-domains' }, { generator: 'dev' }],
   },
   docSections: ['web', 'ui'],

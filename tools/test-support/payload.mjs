@@ -108,6 +108,39 @@ export function snapshotDiff(before, after) {
 }
 
 /**
+ * The dependency entries a run WROTE into any package.json (added or changed between two `snapshot`s) that float —
+ * judged by `isFloating`, the payload's own rule (generators/_utils/version-spec.ts), so the harness and the seam
+ * cannot disagree. A workspace link (`*` / `workspace:*` to a package of the workspace) is not a version. This is the
+ * class guard over EVERY write path a fixture exercises — devkit helpers, in-place edits, rendered templates alike.
+ */
+export function floatingWrites(before, after, isFloating) {
+  const a = JSON.parse(before);
+  const b = JSON.parse(after);
+  const parse = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+  };
+  const local = new Set(Object.entries(b).filter(([path]) => /(^|\/)package\.json$/.test(path)).map(([, text]) => parse(text)?.name).filter(Boolean));
+  const found = [];
+  for (const [path, text] of Object.entries(b)) {
+    if (!/(^|\/)package\.json$/.test(path) || a[path] === text || path.startsWith('node_modules/')) continue;
+    const was = parse(a[path] ?? '{}') ?? {};
+    const now = parse(text) ?? {};
+    for (const block of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+      for (const [name, spec] of Object.entries(now[block] ?? {})) {
+        if (typeof spec !== 'string' || was[block]?.[name] === spec || !isFloating(spec)) continue;
+        if ((spec === '*' || spec.startsWith('workspace:')) && local.has(name)) continue;
+        found.push(`${path} ${block}.${name}: "${spec}"`);
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * The files a run WROTE (changed between two `snapshot`s) that do not even PARSE, each with its first syntax error.
  *
  * Every other assertion here reads generated output as TEXT, so a template that renders `'this app's …'` into a
@@ -125,9 +158,12 @@ export function unparseable(before, after) {
     if (a[path] === text) continue;
     const diagnostics = /\.json$/.test(path)
       ? ts.parseJsonText(path, text).parseDiagnostics
-      : /\.(m|c)?(t|j)sx?$/.test(path)
-        ? ts.transpileModule(text, { fileName: path, reportDiagnostics: true }).diagnostics
-        : [];
+      : /\.d\.(m|c)?ts$/.test(path)
+        ? // A declaration file has no output, and transpileModule asserts on that ("Output generation failed") — parse it.
+          ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS).parseDiagnostics
+        : /\.(m|c)?(t|j)sx?$/.test(path)
+          ? ts.transpileModule(text, { fileName: path, reportDiagnostics: true }).diagnostics
+          : [];
     const first = diagnostics?.[0];
     if (!first) continue;
     const at = first.file && first.start !== undefined ? first.file.getLineAndCharacterOfPosition(first.start) : null;

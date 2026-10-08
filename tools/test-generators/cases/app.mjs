@@ -25,6 +25,11 @@ export default {
         expect: (tree, t, ctx) => {
           const root = `${RESOLVED[layout].appsDir}/shop`;
           t.equal(getProjects(tree).get('shop')?.root, root, 'the app root');
+          // Linted at birth — the platform firewall is an ESLint rule, and an unlinted app is outside it.
+          t.ok(tree.exists(`${root}/eslint.config.mjs`), 'the app is linted');
+          // …by @nx/eslint/plugin's inferred target, the way Nx recommends — never the deprecated @nx/eslint:lint executor.
+          t.ok(!JSON.stringify(getProjects(tree).get('shop')?.targets ?? {}).includes('@nx/eslint:lint'), `no deprecated executor: ${JSON.stringify(getProjects(tree).get('shop')?.targets?.lint)}`);
+          t.ok(JSON.parse(tree.read('nx.json', 'utf8')).plugins?.some((p) => (p?.plugin ?? p) === '@nx/eslint/plugin'), '@nx/eslint/plugin registered');
           // In a TS-solution workspace the app states its own compiler contract over the tsc-oriented base.
           if (link !== 'paths') {
             const options = JSON.parse(tree.read(`${root}/tsconfig.json`, 'utf8')).compilerOptions;

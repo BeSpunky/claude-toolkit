@@ -9,7 +9,7 @@ const { updateJson, writeJson, getProjects } = requireFromRepo('@nx/devkit');
 const run = async (tree, ctx) => {
   await ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: SCOPE });
 };
-const TEMPLATED = ['tools/emulators.sh', 'tools/push-secrets.sh', 'tools/firebase-welcome.sh'];
+const TEMPLATED = ['tools/emulators.sh', 'tools/push-secrets.sh', 'tools/firebase-welcome.sh', 'tools/seed/apply.mjs', 'tools/seed/world.mjs', 'tools/emulator-project.mjs', 'tools/emulator-secrets.cjs', 'tools/functions-esbuild.config.cjs'];
 
 export default {
   name: 'firebase-emulators · the functions app follows the layout',
@@ -25,6 +25,35 @@ export default {
       },
       expect: (tree, t, ctx) => t.ok(ctx.written?.[0] === 'apps/web/src/app/firebase.config.ts', `written: ${ctx.written}`),
     },
+    {
+      // App Hosting reads the NEAREST directory holding any apphosting*.yaml, walking up from a backend's Root
+      // Directory. The seed follows that rule (never a second, shadowed home) and a shadow is reported.
+      name: 'apphosting*.yaml: the effective home walks up; a nearer file shadows the root one and is reported',
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'apps/web/project.json', { name: 'web', root: 'apps/web', projectType: 'application' });
+        writeJson(tree, 'apps/admin/project.json', { name: 'admin', root: 'apps/admin', projectType: 'application' });
+        tree.write('apphosting.yaml', '# root\n');
+        tree.write('apphosting.staging.yaml', '# root staging\n');
+        tree.write('apps/admin/apphosting.yaml', '# admin\n');
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        const m = ctx.load('generators/firebase-emulators/apphosting-config');
+        ctx.homes = { web: m.effectiveAppHostingDir(tree, 'apps/web'), admin: m.effectiveAppHostingDir(tree, 'apps/admin'), none: m.effectiveAppHostingDir(tree, 'apps/none') };
+        ctx.shadows = m.shadowedAppHostingConfigs(tree);
+        ctx.text = ctx.shadows.map(m.describeShadow).join('\n');
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(ctx.homes, { web: '.', admin: 'apps/admin', none: '.' }, 'effective homes');
+        t.equal(
+          ctx.shadows.map((s) => [s.by, s.byFiles, s.shadowed, s.shadowedFiles]),
+          [['apps/admin', ['apphosting.yaml'], '.', ['apphosting.staging.yaml', 'apphosting.yaml']]],
+          'exactly one shadow: admin over the root',
+        );
+        t.ok(ctx.text.includes('apps/admin/apphosting.yaml SHADOW apphosting.staging.yaml, apphosting.yaml'), ctx.text);
+      },
+    },
     ...MATRIX.map((m) => ({
       name: `${m.label}: functions in <appsDir>/functions, every path derived from it`,
       setup: () => workspace(m),
@@ -39,7 +68,24 @@ export default {
         t.equal(project?.targets?.build?.options?.outputPath, `dist/${root}`, 'build output');
         t.equal(t.json(`${root}/tsconfig.json`)?.extends, '../../tsconfig.base.json', 'tsconfig extends, two levels up');
         t.has('.gitignore', `\n${root}/.secret.local\n`);
-        t.has('tools/emulators.sh', `$ROOT/${root}/.secret.local`);
+        t.has('.gitignore', `\n${root}/.secret.sandbox.local\n`);
+        // firebase-tools stages every export in the workspace root; one cut short is left there, holding emulator data.
+        t.has('.gitignore', '\n/firebase-export-*\n');
+        t.has('tools/emulators.sh', `FUNCTIONS_SRC="$ROOT/${root}"`);
+        t.has('tools/emulators.sh', `FUNCTIONS_DIST="$ROOT/dist/${root}"`);
+        // The params files are read in place from the source dir — so the emulator-only .env.local works.
+        t.equal(t.json('firebase.json')?.functions?.[0]?.configDir, root, 'firebase.json configDir');
+        t.ok(!project?.targets?.build?.options?.assets, `build copies no params file: ${JSON.stringify(project?.targets?.build?.options?.assets)}`);
+        // The inert emulator secrets are a BUILD OUTPUT: the build runs the house esbuild config, whose plugin writes them.
+        t.equal(project?.targets?.build?.options?.esbuildConfig, 'tools/functions-esbuild.config.cjs', 'build esbuildConfig');
+        t.ok(!('esbuildOptions' in (project?.targets?.build?.options ?? {})), 'esbuildOptions beside esbuildConfig (Nx refuses both)');
+        t.has('tools/functions-esbuild.config.cjs', `path.join(__dirname, '..', '${root}')`);
+        t.has('tools/functions-esbuild.config.cjs', "require('./emulator-secrets.cjs')");
+        // The seed applier is generator-owned; the worlds are not.
+        t.has('tools/seed/apply.mjs', 'export async function applyWorld');
+        t.has('tools/seed/build.mjs', "from './apply.mjs'");
+        t.has('tools/seed/world.mjs', "import { ref, at } from './apply.mjs';");
+        t.hasNot('tools/seed/world.mjs', 'localhost:8080');
         t.has('tools/firebase-welcome.sh', `"$_fb_root"/${appsDir}/*/src/environments`);
         for (const file of [...TEMPLATED, `${root}/package.json`, `${root}/tsconfig.json`, `${root}/src/main.ts`]) {
           t.ok(!/\{\{\s*\w+\s*\}\}/.test(t.read(file)), `leftover {{…}} in ${file}`);
@@ -55,6 +101,54 @@ export default {
         }
       },
     })),
+    {
+      // A project already past every earlier block (0.49's .gitignore) gains the export-staging block on upgrade —
+      // once (the harness re-runs the generator on its own output and asserts nothing more changes).
+      name: '.gitignore: a 0.49 project gains /firebase-export-* once; the earlier blocks are not repeated',
+      setup: () => {
+        const tree = workspace();
+        tree.write(
+          '.gitignore',
+          'node_modules\n\n/.emulator-data\n/.emulator-data-*\n\napps/functions/.secret.local\n\napps/functions/.secret.sandbox.local\n',
+        );
+        return tree;
+      },
+      run,
+      expect: (tree, t) => {
+        const lines = t.read('.gitignore').split('\n');
+        const count = (line) => lines.filter((l) => l === line).length;
+        t.equal(
+          ['/.emulator-data', 'apps/functions/.secret.local', 'apps/functions/.secret.sandbox.local', '/firebase-export-*'].map(count),
+          [1, 1, 1, 1],
+          'each marker exactly once',
+        );
+      },
+    },
+    {
+      // firebase-tools' `init auth` with no active project writes `support@undefined.firebaseapp.com`. Not ours to
+      // repair (the right value is the real project's), but the upgrade says so — and must not touch the key.
+      name: "firebase.json from `firebase init` without a project: the undefined support email is reported, kept",
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'firebase.json', { auth: { providers: { googleSignIn: { supportEmail: 'support@undefined.firebaseapp.com' } } } });
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        const logger = requireFromRepo('@nx/devkit').logger;
+        const previous = logger.warn;
+        ctx.warnings = [];
+        logger.warn = (...args) => (ctx.warnings.push(args.join(' ')), previous(...args));
+        try {
+          await run(tree, ctx);
+        } finally {
+          logger.warn = previous;
+        }
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(ctx.warnings.some((w) => w.includes('undefined.firebaseapp.com') && w.includes('firebase use --add')), `warnings: ${ctx.warnings}`);
+        t.equal(t.json('firebase.json')?.auth?.providers?.googleSignIn?.supportEmail, 'support@undefined.firebaseapp.com', 'auth block untouched');
+      },
+    },
     {
       name: 'a deeper appsDir (src/apps): the tsconfig climbs three levels, not a hard-coded two',
       setup: () => {

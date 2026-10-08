@@ -11,6 +11,7 @@
 import { join } from 'node:path';
 import { type Tree, updateJson, logger } from '@nx/devkit';
 import type { DesignSystemPort } from '../stack-adapter';
+import { updateManifest } from '../../generators/_utils/dependencies';
 
 /** The runtime files this binding owns; anything else under src/lib is the base generator's demo output. */
 const RUNTIME_FILES = new Set(['design-system.providers.ts', 'ds-theme.service.ts', 'ds-runtime-theme.service.ts']);
@@ -52,4 +53,43 @@ export const angularDesignSystem: DesignSystemPort = {
       tree.delete(`${libDir}/${child}`);
     }
   },
+
+  pruneUnusedPeers(tree: Tree, root: string) {
+    const unused = unusedAngularPeers(tree, root);
+    if (!unused.length) return;
+    updateManifest(tree, `${root}/package.json`, 'design-system', (json) => {
+      for (const name of unused) delete json.peerDependencies[name];
+      return json;
+    });
+    logger.info(`[design-system] ${root}/package.json no longer peers ${unused.join(', ')} — only the pruned demo used it.`);
+  },
 };
+
+/**
+ * The `@angular/*` peers (other than @angular/core, which every Angular library needs) a library's manifest declares
+ * and no source file under it imports — what @nx/angular's library generator declared for its demo component. The
+ * rule @nx/dependency-checks applies, so the library passes its own lint.
+ */
+export function unusedAngularPeers(tree: Tree, root: string): string[] {
+  const manifest = `${root}/package.json`;
+  if (!tree.exists(manifest)) return [];
+  let peers: Record<string, string> = {};
+  try {
+    peers = JSON.parse(tree.read(manifest, 'utf8') ?? '').peerDependencies ?? {};
+  } catch {
+    return [];
+  }
+  const candidates = Object.keys(peers).filter((name) => name.startsWith('@angular/') && name !== '@angular/core');
+  if (!candidates.length) return [];
+  const sources: string[] = [];
+  const walk = (dir: string) => {
+    for (const child of tree.children(dir)) {
+      const path = `${dir}/${child}`;
+      if (tree.isFile(path)) {
+        if (/\.[cm]?[jt]sx?$/.test(child)) sources.push(tree.read(path, 'utf8') ?? '');
+      } else if (child !== 'node_modules') walk(path);
+    }
+  };
+  walk(root);
+  return candidates.filter((name) => !sources.some((text) => new RegExp(`['"]${name.replace(/[/]/g, '\\/')}(?:/[^'"]*)?['"]`).test(text)));
+}

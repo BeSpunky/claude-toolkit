@@ -127,11 +127,160 @@ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isName = (v) => typeof v === 'string' && /^[A-Za-z0-9._\-/]+$/.test(v) && !v.startsWith('/') && !v.endsWith('/') && !v.includes('..') && !v.includes('//');
 const isSha = (v) => v === null || v === undefined || (typeof v === 'string' && /^[0-9a-f]{7,64}$/.test(v));
 
+// ---- deploy bindings -------------------------------------------------------------------------------------
+//
+// `deploys` says what a push to a line (or a line pattern, or a tag series) DEPLOYS. ONE form, an object —
+//       { "note"?: "…",
+//         "ci"?: { "environment": "production", "providers": { "firebase": "prod" } },
+//         "appHosting"?: [{ "project": "my-project-id", "backend": "web" }] }
+//     `ci`         — the project's own CI deploys on a push here, into this ENVIRONMENT (a deployment environment:
+//                    the GitHub environment the house `ci` layer's workflow runs in), with one parameter per deploy
+//                    PROVIDER (provider id → its target there: for `firebase`, the `.firebaserc` alias or project id).
+//                    The engine knows no provider; the layer that contributes one gives its value its meaning.
+//     `appHosting` — Firebase App Hosting backends that roll out on a push here (GitHub-linked). Not CI: Firebase's
+//                    own integration deploys them, and `evidence --app-hosting` can observe them, so a declared one
+//                    can be checked against the cloud.
+//     `note`       — documentation only: read by humans, never by a machine.
+// A bare string (the note alone, the form `deploys` had before bindings existed) is NOT a deploys value. It is
+// reported as OUTDATED rather than plainly invalid, because it has one exact, meaning-preserving rewrite —
+// `{ "note": <the string> }` — which the house upgrade's migration applies (nx-tools 0.50.0
+// `deploys-object-form`) and every message prints. A note binds nothing, so the projection is the same before and
+// after that rewrite: the resolver keeps reading such a copy as declared (with the fix in its notes), while the
+// commands a human or Claude reads — validate, write, verify, describe — refuse it until it is rewritten.
+// A binding is a FACT the model declares, like every other line in it — written only by `write`, after a human
+// decision. Nothing reads the note; tooling reads the projection's `deploys` (`project` below).
+export const DEPLOY_KEYS = ['note', 'ci', 'appHosting'];
+const ENVIRONMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
+const PROVIDER = /^[a-z][a-z0-9-]*$/;
+const TARGET = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const BACKEND = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * An outdated (bare-string) `deploys`: the field, what is wrong, and its one exact rewrite. What to DO about it is
+ * not the problem's to say — it depends on where the fix stands (`outdatedRemedy` below), so it is rendered apart.
+ */
+export const outdatedDeploys = (field, note) => ({
+  field,
+  problem: 'a bare string is no longer a deploys value',
+  rewrite: `"deploys": { "note": ${JSON.stringify(note)} }`,
+});
+
+/**
+ * Where an outdated copy's fix stands — the one concept every outdated message is rendered through:
+ *   - `rewrite`: nothing has rewritten it yet → the house upgrade's migration applies it, or a human approves the
+ *     exact edit;
+ *   - `lands`: this branch's copy already carries the rewrite and the copy IN FORCE (the integration line's) does
+ *     not yet → it resolves when this branch lands on `line`; there is nothing else to do.
+ */
+export const outdatedRemedy = {
+  rewrite: () => ({ resolution: 'rewrite', line: null }),
+  lands: (line) => ({ resolution: 'lands', line }),
+};
+
+/** One outdated problem as the line a human or Claude reads, its remedy included. */
+export function outdatedMessage(o, remedy = outdatedRemedy.rewrite()) {
+  if (remedy.resolution === 'lands') {
+    return `${o.field}: ${o.problem} on the integration line's copy — this branch's copy already has the object form (${o.rewrite}); ` +
+      `it resolves when this branch lands on "${remedy.line}". Nothing else to do: no upgrade, no edit.`;
+  }
+  return `${o.field}: ${o.problem} — replace it with ${o.rewrite} (same meaning: a note binds nothing). ` +
+    'Run the house upgrade (/bespunky-house:upgrade, @bespunky/nx-tools 0.50.0+), whose migration applies it, or propose this exact rewrite to the human.';
+}
+
+/** Problems with one `deploys` value (`field` names it in the messages); a bare string goes to `outdated`. */
+function deploysErrors(field, d, err, outdated) {
+  if (d === undefined || d === null) return;
+  if (typeof d === 'string') return outdated(outdatedDeploys(field, d));
+  if (!isObj(d)) return err(field, 'must be null or { note, ci, appHosting }');
+  for (const k of Object.keys(d)) if (!DEPLOY_KEYS.includes(k)) err(`${field}.${k}`, `unknown field (a binding has ${DEPLOY_KEYS.join(', ')})`);
+  if (d.note !== undefined && typeof d.note !== 'string') err(`${field}.note`, 'must be a string');
+  if (d.ci !== undefined) {
+    if (!isObj(d.ci)) err(`${field}.ci`, 'must be { environment, providers }');
+    else {
+      for (const k of Object.keys(d.ci)) if (!['environment', 'providers'].includes(k)) err(`${field}.ci.${k}`, 'unknown field');
+      if (typeof d.ci.environment !== 'string' || !ENVIRONMENT.test(d.ci.environment)) err(`${field}.ci.environment`, 'must name a deployment environment (letters, digits, . _ -), e.g. "production"');
+      if (d.ci.providers !== undefined) {
+        if (!isObj(d.ci.providers)) err(`${field}.ci.providers`, 'must map a deploy provider id to its target, e.g. { "firebase": "prod" }');
+        else
+          for (const [id, target] of Object.entries(d.ci.providers)) {
+            if (!PROVIDER.test(id)) err(`${field}.ci.providers.${id}`, 'a provider id is lowercase (e.g. "firebase")');
+            if (typeof target !== 'string' || !TARGET.test(target)) err(`${field}.ci.providers.${id}`, 'must be the provider\'s target there (an alias or project id)');
+          }
+      }
+    }
+  }
+  if (d.appHosting !== undefined) {
+    if (!Array.isArray(d.appHosting) || !d.appHosting.length) err(`${field}.appHosting`, 'must be a non-empty array of { project, backend }');
+    else
+      d.appHosting.forEach((b, i) => {
+        const f = `${field}.appHosting[${i}]`;
+        if (!isObj(b)) return err(f, 'must be { project, backend }');
+        for (const k of Object.keys(b)) if (!['project', 'backend'].includes(k)) err(`${f}.${k}`, 'unknown field');
+        if (typeof b.project !== 'string' || !TARGET.test(b.project)) err(`${f}.project`, 'must be a Firebase project id or .firebaserc alias');
+        if (typeof b.backend !== 'string' || !BACKEND.test(b.backend)) err(`${f}.backend`, 'must be an App Hosting backend id');
+      });
+  }
+  if (d.note === undefined && d.ci === undefined && d.appHosting === undefined) err(field, 'binds nothing — give it a note, a ci binding or appHosting backends (or make it null)');
+}
+
+/**
+ * WHERE a `ci` binding may sit — a security rule, not a style one. A `ci` binding hands the line a cloud identity
+ * that deploys whatever is pushed to it, so:
+ *   - only a PROTECTED line may hold one (integration, a stage, a non-maintained release line). A hotfix line is a
+ *     work branch: anyone who can push opens one and nothing reviews it, so a binding there deploys unreviewed code
+ *     into the environment. A tag is not a line at all: anyone with push access creates one.
+ *   - never a MAINTAINED release line: each is its own production, so one environment bound to all of them is rolled
+ *     back to whichever old line was pushed last.
+ *   - ONE line per environment: two lines deploying into one environment race, and `affected` (whose base is per
+ *     branch) leaves it running code that matches neither.
+ * Each message says why and what to do instead. The house `ci` generator re-checks the same rules on the
+ * projection (defence in depth for a hand-edited one).
+ */
+function ciBindingErrors(m, err) {
+  const ciOf = (d) => (isObj(d) && isObj(d.ci) ? d.ci : null);
+  const holders = []; // [field, ci]
+  const production = isObj(m.integration) && Array.isArray(m.stages) ? [m.integration.branch, ...m.stages.map((s) => s?.branch)].filter(Boolean).at(-1) : null;
+  if (isObj(m.integration) && ciOf(m.integration.deploys)) holders.push(['integration.deploys', ciOf(m.integration.deploys)]);
+  if (Array.isArray(m.stages)) m.stages.forEach((s, i) => isObj(s) && ciOf(s.deploys) && holders.push([`stages[${i}].deploys`, ciOf(s.deploys)]));
+  if (isObj(m.releases) && ciOf(m.releases.deploys)) {
+    if (m.releases.maintained === true) {
+      err('releases.deploys.ci', 'maintained release lines are each their own production — one environment bound to all of them would be rolled back to whichever old line was pushed last. Deploy a maintained line by hand (or from your own pipeline per line); bind `ci` only on a non-maintained line');
+    } else holders.push(['releases.deploys', ciOf(m.releases.deploys)]);
+  }
+  if (isObj(m.hotfixes) && ciOf(m.hotfixes.deploys)) {
+    err('hotfixes.deploys.ci', `hotfix lines are work branches — anyone who can push opens one and nothing reviews it, so a \`ci\` binding there deploys unreviewed code. Bind \`ci\` on the protected line the hotfix lands on${production ? ` ("${production}")` : ''}: it deploys when the hotfix lands there`);
+  }
+  if (Array.isArray(m.tags)) {
+    m.tags.forEach((t, i) => {
+      if (isObj(t) && ciOf(t.deploys)) err(`tags[${i}].deploys.ci`, `a tag is not a protected line — anyone with push access creates one — and CI deploys from branches only. Bind \`ci\` on the line the tag is on${typeof t.on === 'string' ? ` ("${t.on}")` : ''}`);
+    });
+  }
+  const seen = new Map();
+  for (const [field, ci] of holders) {
+    if (typeof ci.environment !== 'string') continue;
+    const first = seen.get(ci.environment);
+    if (first) err(`${field}.ci.environment`, `"${ci.environment}" is already bound by ${first} — one line per environment: two lines deploying into one environment race, and each leaves it running code the other line never had. Give this line its own environment, or drop one of the two bindings`);
+    else seen.set(ci.environment, field);
+  }
+}
+
 /** Every problem with a declaration, as `field: message` strings. Empty = valid. */
 export function validate(m) {
+  const { errors, outdated } = check(m);
+  return [...errors, ...outdated.map((o) => outdatedMessage(o))];
+}
+
+/**
+ * A declaration's problems, split: `errors` make it no model at all (`field: message` strings); `outdated` are
+ * format-only problems with an exact rewrite (`{ field, problem, rewrite }`, see `deploys` above, rendered by
+ * `outdatedMessage`) — the model they describe, and its projection, are unaffected.
+ */
+export function check(m) {
   const errors = [];
+  const outdatedErrors = [];
   const err = (field, msg) => errors.push(`${field}: ${msg}`);
-  if (!isObj(m)) return ['(root): the declaration must be a JSON object'];
+  const outdated = (o) => outdatedErrors.push(o);
+  if (!isObj(m)) return { errors: ['(root): the declaration must be a JSON object'], outdated: [] };
 
   for (const k of Object.keys(m)) if (!TOP_KEYS.includes(k)) err(k, 'unknown field (the vocabulary is closed)');
   if (!isSchemaMajor1(m.schema)) err('schema', `must be schema major ${SCHEMA}`);
@@ -144,6 +293,7 @@ export function validate(m) {
   else {
     if (!isName(m.integration.branch)) err('integration.branch', 'must be a branch name');
     if (!isSha(m.integration.baseline)) err('integration.baseline', 'must be a commit SHA or null');
+    deploysErrors('integration.deploys', m.integration.deploys, err, outdated);
   }
   const integration = m.integration?.branch;
 
@@ -161,7 +311,7 @@ export function validate(m) {
       if (!PROMOTE.includes(s.promote)) err(`${f}.promote`, `must be one of ${PROMOTE.join(' | ')}`);
       if (s.promote === 'pr' && !PR_STYLES.includes(m.landing?.prStyle)) err(`${f}.promote`, '"pr" promotion needs landing.prStyle (the style the PR merges with)');
       if (!isSha(s.baseline)) err(`${f}.baseline`, 'must be a commit SHA or null');
-      if (s.deploys !== undefined && s.deploys !== null && typeof s.deploys !== 'string') err(`${f}.deploys`, 'must be a string or null');
+      deploysErrors(`${f}.deploys`, s.deploys, err, outdated);
     });
   const named = [integration, ...stageNames].filter(Boolean);
 
@@ -205,6 +355,7 @@ export function validate(m) {
       } else if (!stageNames.includes(r.shipsTo)) err('releases.shipsTo', `must name a stage (${stageNames.join(', ') || 'none declared'}) or be null`);
       if (r.allowDirect !== undefined && (!Array.isArray(r.allowDirect) || r.allowDirect.some((a) => !ALLOW_DIRECT.includes(a)))) err('releases.allowDirect', `may only contain ${ALLOW_DIRECT.join(', ')}`);
       if (r.baselines !== undefined && (!isObj(r.baselines) || Object.values(r.baselines).some((v) => !isSha(v)))) err('releases.baselines', 'must map release-line names to SHAs or null');
+      deploysErrors('releases.deploys', r.deploys, err, outdated);
     }
   }
 
@@ -220,6 +371,7 @@ export function validate(m) {
         if (!ph.includes('line') || !ph.includes('slug')) err('hotfixes.pattern', 'must contain {line} (the production line it targets) and {slug}');
         patterns.push(['hotfixes.pattern', h.pattern, {}]);
       }
+      deploysErrors('hotfixes.deploys', h.deploys, err, outdated);
     }
   }
 
@@ -237,7 +389,10 @@ export function validate(m) {
       if (!isWellFormed(t.pattern)) err(`${f}.pattern`, 'must be a tag pattern like "v{version}"');
       const lines = [...named, ...(isObj(r) && r.pattern ? [r.pattern] : [])];
       if (!lines.includes(t.on)) err(`${f}.on`, `must name a declared line or the release pattern (${lines.join(', ')})`);
+      deploysErrors(`${f}.deploys`, t.deploys, err, outdated);
     });
+
+  ciBindingErrors(m, err);
 
   // patterns: no overlap with each other, never match a named line
   for (let i = 0; i < patterns.length; i++) {
@@ -249,7 +404,7 @@ export function validate(m) {
     }
   }
 
-  return errors;
+  return { errors, outdated: outdatedErrors };
 }
 
 // ---- derived facts ------------------------------------------------------------------------------------
@@ -271,6 +426,7 @@ export function project(m) {
   let summary = m.stages.length ? chain.join(' → ') : `${chain[0]} (trunk)`;
   if (r) summary += r.maintained ? ` · maintained ${toGlob(r.pattern)} cut from ${r.cutFrom}` : ` · ${toGlob(r.pattern)} cut from ${r.cutFrom}, shipped to ${r.shipsTo}`;
   if (m.hotfixes) summary += ` · hotfixes ${toGlob(m.hotfixes.pattern)}`;
+  const deploys = deployBindings(m);
   return {
     schema: PROJECTION_SCHEMA,
     remote: m.remote || 'origin',
@@ -282,7 +438,47 @@ export function project(m) {
     protectedPatterns: r ? [toGlob(r.pattern)] : [],
     workBase: chain[0],
     summary,
+    // Present only when something is bound: a model with notes alone (or none) projects exactly as it always did,
+    // so no existing declaration reads as drifted (verify, invariant 5) the day this field appeared.
+    ...(deploys.length ? { deploys } : {}),
   };
+}
+
+/**
+ * The structured deploy bindings, flat — what readers (the house `ci` layer) may parse: one entry per line, line
+ * pattern or tag series whose `deploys` is a binding with `ci` or `appHosting`. `kind`: `line` (a named branch),
+ * `pattern` (a branch glob — release or hotfix lines) or `tag` (a tag glob). The note stays in the declaration.
+ */
+export function deployBindings(m) {
+  const out = [];
+  const add = (kind, line, d) => {
+    if (!isObj(d) || (d.ci === undefined && d.appHosting === undefined)) return;
+    out.push({
+      kind,
+      line,
+      ...(d.ci ? { ci: { environment: d.ci.environment, providers: { ...(d.ci.providers ?? {}) } } } : {}),
+      ...(d.appHosting ? { appHosting: d.appHosting.map(({ project, backend }) => ({ project, backend })) } : {}),
+    });
+  };
+  add('line', m.integration.branch, m.integration.deploys);
+  for (const s of m.stages) add('line', s.branch, s.deploys);
+  if (m.releases) add('pattern', toGlob(m.releases.pattern), m.releases.deploys);
+  if (m.hotfixes) add('pattern', toGlob(m.hotfixes.pattern), m.hotfixes.deploys);
+  for (const t of m.tags) add('tag', toGlob(t.pattern), t.deploys);
+  return out;
+}
+
+/** A `deploys` value in words — the note, then what is bound. */
+export function deploysText(d) {
+  if (d === undefined || d === null) return null;
+  const parts = [];
+  if (d.note) parts.push(d.note);
+  if (d.ci) {
+    const providers = Object.entries(d.ci.providers ?? {}).map(([id, target]) => `${id}: ${target}`);
+    parts.push(`CI → ${d.ci.environment}${providers.length ? ` (${providers.join(', ')})` : ''}`);
+  }
+  if (d.appHosting) parts.push(`App Hosting: ${d.appHosting.map((b) => `${b.project}/${b.backend}`).join(', ')}`);
+  return parts.join('; ');
 }
 
 /** Canonical JSON (sorted keys) for comparisons that must ignore key order. */

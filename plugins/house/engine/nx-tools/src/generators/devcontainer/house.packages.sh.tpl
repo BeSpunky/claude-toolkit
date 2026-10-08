@@ -25,6 +25,16 @@ HOUSE_PACKAGES='
 {{HOUSE_PACKAGES}}
 '
 
+{{#ARCHIVES}}
+# Tools installed from their publisher's VERSIONED ARCHIVE — kept for every release, unlike an apt repository's rolling
+# index — one line per architecture: `<id> <version> <arch> <sha256> <url> <bin>`. Each is extracted into
+# /opt/bespunky/<id>/<version> (`current` points at it), its <bin> executables linked into /usr/local/bin — first on
+# PATH, ahead of an apt copy in /usr/bin. Validated by the composer; the download is checked against its sha256.
+HOUSE_ARCHIVES='
+{{HOUSE_ARCHIVES}}
+'
+
+{{/ARCHIVES}}
 # Every list: the house's, then each file given (the project's own). Comments and blanks dropped, de-duplicated in
 # order; CR stripped, so a list saved with Windows line endings still reads. A token that is not a Debian package NAME
 # is refused here, before it can reach a root apt-get command line.
@@ -43,33 +53,125 @@ missing=""
 for name in $(wanted "$@"); do
   dpkg-query -W -f='${Status}' "$name" 2>/dev/null | grep -q ' installed$' || missing="$missing $name"
 done
-if [ -z "$missing" ]; then
+{{#ARCHIVES}}
+# The archive tools to install (found below).
+{{/ARCHIVES}}
+pending=""
+{{#ARCHIVES}}
+
+# Where the archives go. HOUSE_PACKAGES_ROOT re-roots both directories — for the toolkit's own tests, never set in a build.
+archive_home="${HOUSE_PACKAGES_ROOT:-}/opt/bespunky"
+archive_links="${HOUSE_PACKAGES_ROOT:-}/usr/local/bin"
+
+# This machine's architecture, as Debian names it — the one the archive lines are keyed by.
+case "$(uname -m)" in
+  x86_64 | amd64) arch=amd64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  *) arch="$(uname -m)" ;;
+esac
+
+# The archive lines for this architecture (comments and blanks dropped).
+archives() { printf '%s\n' "$HOUSE_ARCHIVES" | sed 's/#.*//' | awk -v arch="$arch" 'NF == 6 && $3 == arch'; }
+
+# Pending: each archive tool not installed AT its pinned version (`current` names it — a pin moved in the toolkit
+# installs the new release), and, as `!<id>`, each with no archive for this architecture (reported, and the exit fails).
+for id in $(printf '%s\n' "$HOUSE_ARCHIVES" | sed 's/#.*//' | awk 'NF == 6 { print $1 }' | awk '!seen[$0]++'); do
+  version="$(archives | awk -v id="$id" '$1 == id { print $2 }')"
+  if [ -z "$version" ]; then
+    echo "[os-packages] '$id' has no archive for this architecture ($arch) — it cannot be installed here" >&2
+    pending="$pending !$id"
+  elif [ "$(readlink "$archive_home/$id/current" 2>/dev/null)" != "$version" ] || [ ! -d "$archive_home/$id/$version" ]; then
+    pending="$pending $id"
+  fi
+done
+{{/ARCHIVES}}
+if [ -z "$missing$pending" ]; then
   echo "[os-packages] all present — nothing to install"
   exit 0
 fi
 
 as_root=""
 [ "$(id -u)" = 0 ] || as_root="sudo"
-echo "[os-packages] installing:$missing"
-for attempt in 1 2 3; do
-  # $missing is deliberately UNQUOTED: one argument per package. Safe — every member passed the name check above.
-  # shellcheck disable=SC2086
-  if $as_root apt-get update && $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $missing; then
-    echo "[os-packages] installed"
-    exit 0
+
+# The apt packages: ONE transaction, retried (apt mirrors are occasionally flaky over Docker DNS).
+install_packages() {
+  echo "[os-packages] installing:$missing"
+  for attempt in 1 2 3; do
+    # $missing is deliberately UNQUOTED: one argument per package. Safe — every member passed the name check above.
+    # shellcheck disable=SC2086
+    if $as_root apt-get update && $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $missing; then
+      echo "[os-packages] installed"
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "[os-packages] attempt $attempt/3 failed (apt mirrors are occasionally flaky over Docker DNS); retrying in $((attempt * 10))s..."
+      sleep $((attempt * 10))
+    fi
+  done
+  # One unknown or broken name fails the whole transaction above — and with it every package that was fine. So install
+  # what CAN be installed, one by one, and name exactly what could not: a typo in os-packages.txt must not take the
+  # house's packages (or the rest of the project's) down with it.
+  echo "[os-packages] the batch failed 3 times — installing one by one to find the package at fault"
+  failed=""
+  for name in $missing; do
+    $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$name" > /dev/null 2>&1 || failed="$failed $name"
+  done
+  echo "[os-packages] FAILED:$failed" >&2
+  return 1
+}
+{{#ARCHIVES}}
+
+# One archive tool at its pinned version: download, check the sha256, extract BESIDE any other release, switch
+# `current`, link its executables, then drop the release it replaced and any link left dangling.
+install_archive() {
+  set -- $(archives | awk -v id="$1" '$1 == id')
+  id="$1" version="$2" sha256="$4" url="$5" bin="$6"
+  home="$archive_home/$id"
+  echo "[os-packages] installing $id $version ($arch) from $url"
+  download="$(mktemp -d)" || return 1
+  if ! curl -fsSL --retry 3 --retry-delay 5 -o "$download/archive.tar.gz" "$url"; then
+    rm -rf "$download"; echo "[os-packages] FAILED to download $url" >&2; return 1
   fi
-  if [ "$attempt" -lt 3 ]; then
-    echo "[os-packages] attempt $attempt/3 failed (apt mirrors are occasionally flaky over Docker DNS); retrying in $((attempt * 10))s..."
-    sleep $((attempt * 10))
+  if ! echo "$sha256  $download/archive.tar.gz" | sha256sum -c - > /dev/null 2>&1; then
+    rm -rf "$download"; echo "[os-packages] FAILED: $url does not match its pinned sha256 — refusing to install it" >&2; return 1
   fi
+  $as_root mkdir -p "$home" "$archive_links" &&
+    $as_root rm -rf "$home/.partial" && $as_root mkdir "$home/.partial" &&
+    $as_root tar -xzf "$download/archive.tar.gz" -C "$home/.partial" --no-same-owner &&
+    $as_root rm -rf "$home/$version" && $as_root mv "$home/.partial" "$home/$version" &&
+    $as_root ln -sfn "$version" "$home/current" || { rm -rf "$download"; echo "[os-packages] FAILED to unpack $id" >&2; return 1; }
+  rm -rf "$download"
+  for tool in "$home/$version/$bin"/*; do
+    [ -f "$tool" ] && [ -x "$tool" ] || continue
+    link="$archive_links/${tool##*/}"
+    # Never over somebody else's file: only a free name, or a link this installer made, is (re)pointed.
+    if [ -e "$link" ] && ! { [ -L "$link" ] && case "$(readlink "$link")" in "$home"/*) true ;; *) false ;; esac; }; then
+      echo "[os-packages] $link exists and is not $id's — left alone; $id's ${tool##*/} is at $home/current/$bin" >&2
+      continue
+    fi
+    $as_root ln -sfn "$home/current/$bin/${tool##*/}" "$link" || return 1
+  done
+  for link in "$archive_links"/*; do
+    [ -L "$link" ] && [ ! -e "$link" ] && case "$(readlink "$link")" in "$home"/*) $as_root rm -f "$link" ;; esac
+  done
+  for old in "$home"/*; do
+    [ "${old##*/}" = "$version" ] || [ "${old##*/}" = current ] || $as_root rm -rf "$old"
+  done
+  echo "[os-packages] $id $version installed"
+}
+{{/ARCHIVES}}
+
+status=0
+if [ -n "$missing" ]; then
+  install_packages || status=1
+fi
+{{#ARCHIVES}}
+for id in $pending; do
+  case "$id" in
+    !*) status=1 ;;
+    *) install_archive "$id" || status=1 ;;
+  esac
 done
-# One unknown or broken name fails the whole transaction above — and with it every package that was fine. So install
-# what CAN be installed, one by one, and name exactly what could not: a typo in os-packages.txt must not take the
-# house's packages (or the rest of the project's) down with it. Still non-zero: the image build fails loudly.
-echo "[os-packages] the batch failed 3 times — installing one by one to find the package at fault"
-failed=""
-for name in $missing; do
-  $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$name" > /dev/null 2>&1 || failed="$failed $name"
-done
-echo "[os-packages] FAILED:$failed" >&2
-exit 1
+{{/ARCHIVES}}
+# Non-zero when anything failed: the image build fails loudly; post-create reports it and carries on.
+exit $status

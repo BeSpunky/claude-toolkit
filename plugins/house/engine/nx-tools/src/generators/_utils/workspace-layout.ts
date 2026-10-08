@@ -21,7 +21,8 @@
 //
 // A scaffold CHOOSES a named layout (`LAYOUTS`) and records it; a sync never chooses, it only detects — the
 // same detect/ensure split the layers keep.
-import { type Tree, type ProjectConfiguration, getProjects, readJson, readNxJson, updateNxJson, logger } from '@nx/devkit';
+import { type Tree, type ProjectConfiguration, getProjects, readJson, logger } from '@nx/devkit';
+import { updateJsonInPlace } from './json-edits';
 import { projectRole, type ProjectRole } from '../../adapters/registry';
 import { workspaceIdentity } from './workspace-identity';
 
@@ -97,9 +98,10 @@ export function resolveAppsDir(tree: Tree): string {
  * workspace infers the default, not the choice.
  */
 export function writeWorkspaceLayout(tree: Tree, layout: WorkspaceLayout): void {
-  const nxJson = readNxJson(tree) ?? {};
-  nxJson.workspaceLayout = { ...nxJson.workspaceLayout, appsDir: clean(layout.appsDir)!, libsDir: clean(layout.libsDir)! };
-  updateNxJson(tree, nxJson);
+  if (!tree.exists('nx.json')) tree.write('nx.json', '{}\n');
+  updateJsonInPlace(tree, 'nx.json', (nxJson) => {
+    nxJson.workspaceLayout = { ...nxJson.workspaceLayout, appsDir: clean(layout.appsDir)!, libsDir: clean(layout.libsDir)! };
+  });
 }
 
 /** (2) What nx.json declares, half by half. */

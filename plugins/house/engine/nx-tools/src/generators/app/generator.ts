@@ -27,6 +27,7 @@ import { attachCapabilities } from './attach';
 import { resolveAppsDir } from '../_utils/workspace-layout';
 import { joinWorkspace } from '../_utils/project-files';
 import { workspaceIdentity } from '../_utils/workspace-identity';
+import { setProjectPlatform } from '../../platform/platform';
 
 interface AppGeneratorSchema {
   // Workspace-relative directory for the app (positional arg 0). Default: `<appsDir>/<name>`.
@@ -74,6 +75,12 @@ export default async function appGenerator(tree: Tree, options: AppGeneratorSche
   if (!isPresent(tree, stack.layer)) {
     throw new Error(`[app] The ${stack.id} stack needs the \`${stack.layer}\` layer, which this workspace does not have.`);
   }
+  // Firebase constrains the framework version a fresh workspace is created at (@angular/fire supports only some
+  // Angular majors), so it is asked BEFORE the app — and with it the framework — exists.
+  const wearsFirebase =
+    options.firebase ?? (csv(options.layers).includes('firebase') || detectLayers(tree).includes('firebase'));
+  if (wearsFirebase) stack.firebase?.chooseFrameworkVersion?.(tree);
+
   const { project, callback } = await stack.apps.create(tree, {
     directory,
     name: options.name,
@@ -82,6 +89,8 @@ export default async function appGenerator(tree: Tree, options: AppGeneratorSche
 
   // The framework's generator decides the app's files; the WORKSPACE decides whether that makes it a member.
   joinWorkspace(tree, directory);
+  // Classified at birth: the stack's platform is where its apps run (src/platform) — the tag the firewall keys on.
+  setProjectPlatform(tree, project, stack.platform);
 
   // 2) ATTACH every capability the workspace wears.
   const active = new Set([...detectLayers(tree), ...inRegistryOrder(csv(options.layers))]);

@@ -11,6 +11,8 @@
 # Both halves fail silently if they regress — an empty world looks like a fresh start, and a worktree
 # quietly reading main's seeds looks fine right up until it edits them.
 set -uo pipefail
+# A human runs these: under an AI agent (CLAUDECODE=1) the engine never takes the base ports.
+unset CLAUDECODE
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TPL="$ROOT/plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl"
@@ -34,7 +36,8 @@ MAIN="$TMP/main"
 mkdir -p "$MAIN/tools/emulator-seeds/default"
 sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}|apps/demo/src/environments/environment.ts|g' \
   "$TPL" > "$MAIN/tools/emulators.sh"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$MAIN/tools/reap-emulators.sh"
+node "$ROOT/tools/test-scaffold/render-engine.mjs" "$MAIN"   # the stack claim (tools/dev) every suite goes through
+node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$MAIN"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$MAIN/tools/emulator-data.sh"
 chmod +x "$MAIN/tools/"*.sh
 printf '{ "emulators": { "auth": { "port": 9099 } } }\n' > "$MAIN/firebase.json"

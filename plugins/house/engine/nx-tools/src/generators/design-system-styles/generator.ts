@@ -25,7 +25,11 @@
 //      OVERRIDES the inferred/targetDefault inputs wholesale, and a hardcoded named input hard-fails
 //      `nx build` on any workspace whose nx.json doesn't define it. A graph edge also keeps `nx affected` right.
 //   3. the two marker blocks in the app's global stylesheet: the `@use` (prepended) and `@include ds.theme()`
-//      (appended). TWO blocks because sass requires every `@use` to precede any other rule.
+//      (appended). TWO blocks because sass requires every `@use` to precede any other rule. On the app's FIRST
+//      wiring only, the shell's skip link arrives WITH its look: the seeded `.skip-link { @include ds.skip-link(); }`
+//      and `#main { @include ds.skip-target(); }` rules, and the link itself, through the stack's `shell` port, before
+//      the `<main id="main">` landmark the stack seeded (an app whose shell has no such landmark is its own: told how).
+//      Never the link without its look — an unstyled "Skip to main content" on every page is worse than none.
 //   4. the design system's runtime provider (its binding's, e.g. provideDesignSystem()) — only into an app of
 //      the SAME stack as the binding: a framework's provider is that framework's code.
 //
@@ -35,10 +39,10 @@ import {
   type Tree,
   readJson,
   readProjectConfiguration,
-  updateProjectConfiguration,
   formatFiles,
   logger,
 } from '@nx/devkit';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { dirname, basename } from 'node:path';
 import { findDesignSystem } from '../_utils/design-system';
 import { adapterOf, isApplication, portOf } from '../../adapters/registry';
@@ -55,6 +59,17 @@ const USE_START = '/* @bespunky/design-system:use:start — generator-owned. */'
 const USE_END = '/* @bespunky/design-system:use:end */';
 export const THEME_START = '/* @bespunky/design-system:theme:start — generator-owned. */';
 export const THEME_END = '/* @bespunky/design-system:theme:end */';
+
+/**
+ * The app shell's skip link and its target — the link's look is the design system's mechanism (`ds.skip-link()`),
+ * and the landmark it moves focus to drops the outline programmatic focus would draw around the whole content
+ * (`ds.skip-target()`). Seeded, not owned — no markers to re-assert.
+ */
+const SKIP_LINK_BLOCK =
+  `/* The skip link — the shell's first focusable element, hidden until a keyboard user reaches it, then shown over\n` +
+  `   the page on the surface colours — and the landmark it focuses. Their look is the design system's\n` +
+  `   (ds.skip-link(), ds.skip-target()); keep the class on the link and the id on <main>. */\n` +
+  `.skip-link {\n  @include ds.skip-link();\n}\n\n#main {\n  @include ds.skip-target();\n}`;
 
 export default async function designSystemStylesGenerator(
   tree: Tree,
@@ -110,16 +125,32 @@ export default async function designSystemStylesGenerator(
   const { targets, ...project } = readProjectConfiguration(tree, options.project);
   const deps = new Set<string>([...(project.implicitDependencies ?? []), designSystem.name]);
   deps.delete(options.project);
-  updateProjectConfiguration(tree, options.project, { ...project, implicitDependencies: [...deps], ...(targets ? { targets } : {}) });
+  updateProjectConfigurationInPlace(tree, options.project, { ...project, implicitDependencies: [...deps], ...(targets ? { targets } : {}) });
 
   // 3) The app's global stylesheet, as the app itself declares it.
-  wireGlobalStylesheet(tree, styles.globalStylesheet(tree, options.project), specifier, options.project);
+  const firstWiring = wireGlobalStylesheet(tree, styles.globalStylesheet(tree, options.project), specifier, options.project);
+
+  // 3b) …and on that first wiring, the skip link the look was seeded for — through the stack's shell port.
+  if (firstWiring) addSkipLink(tree, options.project);
 
   // 4) The runtime binding's provider, on the per-app path so the first app and every later one get it from ONE
   //    code path — an app with the sass but not the provider renders the tokens but never follows a mode change.
   wireDesignSystemProvider(tree, options.project, designSystem, importPath, options.wireProviders === true);
 
   if (!options.skipFormat) await formatFiles(tree);
+}
+
+/** The skip link into the app's shell (the stack's `shell` port); a shell of the app's own is told how, not edited. */
+function addSkipLink(tree: Tree, project: string): void {
+  const shell = adapterOf(tree, project)?.shell;
+  if (!shell) return;
+  if (shell.addSkipLink(tree, project) === 'no-landmark') {
+    logger.info(
+      `[design-system-styles] \`${project}\`'s shell has no \`<main id="main">\` landmark, so no skip link was added (its look is ` +
+        `seeded in the global stylesheet). To adopt it: \`<a class="skip-link" href="#main">Skip to main content</a>\` first, the ` +
+        `content in \`<main id="main" tabindex="-1">\` — HOUSE.md has the snippet.`,
+    );
+  }
 }
 
 /**
@@ -176,7 +207,8 @@ function wireDesignSystemProvider(
  * outside them survives untouched. Nothing a PROJECT decides lives inside them: the call takes no argument,
  * because the default mode is a design decision with its own home — the design system's `$default-mode`.
  */
-function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: string, projectName: string): void {
+/** Returns whether this was the app's FIRST wiring (the skip link's look was seeded with it). */
+function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: string, projectName: string): boolean {
   if (!stylesPath) {
     logger.warn(
       `[design-system-styles] Could not find a global SCSS stylesheet for \`${projectName}\`. ` +
@@ -185,7 +217,7 @@ function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: 
         `    @include ds.theme();          // anywhere after it\n` +
         `Without them the app has no design tokens at runtime.`
     );
-    return;
+    return false;
   }
 
   const current = tree.read(stylesPath, 'utf8') ?? '';
@@ -199,10 +231,17 @@ function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: 
     `@include ds.theme();\n` +
     `${THEME_END}`;
 
+  // The FIRST wiring of this app (no `@use` block yet: a new app, or an existing one meeting the design system) is
+  // also when its shell's skip link gets its look — seeded once after the theme, then the app's to keep or edit.
+  // Never on a later sync: an app wired before carries its own shell, which a rule it never asked for could clash with.
+  const firstWiring = !current.includes(USE_START) && !current.includes(USE_END);
+
   let next = upsert(current, USE_START, USE_END, useBlock, 'prepend');
   next = upsert(next, THEME_START, THEME_END, themeBlock, 'append');
+  if (firstWiring && !/\.skip-link\b/.test(next)) next = `${next.trimEnd()}\n\n${SKIP_LINK_BLOCK}\n`;
 
   if (next !== current) tree.write(stylesPath, next);
+  return firstWiring;
 }
 
 /**

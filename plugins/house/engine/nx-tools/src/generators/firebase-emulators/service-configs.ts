@@ -108,10 +108,10 @@ export const FIREBASE_ROOT_CONFIG = {
  * Write the WHOLE generated Firebase config set under `<appRoot>/src/app/` — `firebase.config.ts` and
  * every per-service sibling.
  *
- * ALL FIVE OR NONE, and that is the point rather than a convenience. The siblings import
- * `emulatorFor` / `portOffset` / `offsetUrl` from `firebase.config.ts`, and those symbols are only
- * EXPORTED from 0.33.0 onwards — before that they were module-private. So writing the siblings beside an
- * older root file produces four files importing symbols that do not exist: the project stops compiling,
+ * ALL FIVE OR NONE, and that is the point rather than a convenience. The siblings import their shared
+ * helpers from `firebase.config.ts` (today `emulatorEndpoint`; in 0.33.0–0.49 `emulatorFor` / `portOffset` /
+ * `offsetUrl`, which were module-private before 0.33.0). So writing the siblings beside an older root file
+ * produces four files importing symbols that do not exist: the project stops compiling,
  * at `tsc`, nowhere near whatever wrote them. The migration hits exactly that if it writes only the
  * siblings — on a bare `nx migrate`, on an `UPGRADE_PARTIAL` run where the per-app generators are skipped,
  * and in any multi-app workspace, since the sync runs the generator against ONE app while the migration
@@ -131,6 +131,32 @@ export function writeFirebaseConfigs(tree: Tree, appRoot: string): string[] {
   };
   return [write(FIREBASE_ROOT_CONFIG), ...FIREBASE_SERVICE_CONFIGS.map(write)];
 }
+
+/**
+ * Write the app's WHOLE generator-owned Firebase client glue: `emulator-overrides.ts`, the config set
+ * (`writeFirebaseConfigs`) and `proxy.conf.mjs`. The three move together — the configs import the overrides, and
+ * the proxy relays exactly the paths the configs send through the origin (and the hub route their startup check
+ * asks) — so whatever changes what they read writes all of them, the generator and a migration alike (a migration
+ * cannot rely on the per-app generator running after it: an UPGRADE_PARTIAL run skips it).
+ *
+ * Beside the proxy it SEEDS `proxy.local.mjs` — the project's own routes, which proxy.conf.mjs merges — once, and
+ * never again: that file is the seam a project's dev-server proxy lives in, so it is the project's from birth.
+ *
+ * @returns the proxy config's path, for the caller to wire into a dev server.
+ */
+export function writeFirebaseClientGlue(tree: Tree, appRoot: string): string {
+  tree.write(`${appRoot}/src/app/emulator-overrides.ts`, firebaseTemplate('emulator-overrides.ts.tpl'));
+  writeFirebaseConfigs(tree, appRoot);
+  const proxy = `${appRoot}/${PROXY_CONFIG}`;
+  tree.write(proxy, firebaseTemplate('proxy.conf.mjs.tpl'));
+  const local = `${appRoot}/${PROXY_LOCAL}`;
+  if (!tree.exists(local)) tree.write(local, firebaseTemplate('proxy.local.mjs.tpl'));
+  return proxy;
+}
+
+/** The generator-owned dev proxy, and the project's own routes it merges — both at the app's root. */
+export const PROXY_CONFIG = 'proxy.conf.mjs';
+export const PROXY_LOCAL = 'proxy.local.mjs';
 
 /**
  * The comment left in a NEW app's `app.config.ts`, directly under `provideAppFirebase()`.

@@ -26,7 +26,6 @@ import {
   type GeneratorCallback,
   readProjectConfiguration,
   removeProjectConfiguration,
-  addDependenciesToPackageJson,
   readJson,
   writeJson,
   visitNotIgnoredFiles,
@@ -36,6 +35,7 @@ import {
 } from '@nx/devkit';
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking } from '../_utils/linking';
+import { declareDependencies, declaredSpec, updateManifest } from '../_utils/dependencies';
 
 interface AdoptExtractedSchema {
   lib: string;
@@ -114,14 +114,24 @@ export default async function adoptExtractedGenerator(
     return typeof range === 'string' && linking.isLinkRange(tree, range);
   });
   if (linkedFields.length) {
-    for (const field of linkedFields) delete rootManifest[field][packageName];
-    writeJson(tree, 'package.json', rootManifest);
+    updateManifest(tree, 'package.json', 'adopt-extracted', (manifest) => {
+      for (const field of linkedFields) delete manifest[field][packageName];
+    });
   }
-  const installCallback = addDependenciesToPackageJson(
-    tree,
-    { [packageName]: options.version ?? 'latest' },
-    {}
-  );
+  // The version is a deliberate value — never `latest` (0.50.0): the one given, else the one extract-tool recorded
+  // when it published (marker.ingestedPackage.version), as a caret range; with neither, ask rather than float.
+  const recorded: unknown = marker.ingestedPackage?.version;
+  const version =
+    options.version ?? (typeof recorded === 'string' && /^\d+\.\d+\.\d+/.test(recorded) ? `^${recorded}` : undefined);
+  if (!version) {
+    throw new Error(
+      `adopt-extracted: which version of ${packageName} should "${options.lib}" adopt? The extraction marker records ` +
+        `none it can use${typeof recorded === 'string' ? ` ("${recorded}")` : ''}. Pass --version=^<published version> ` +
+        `(\`npm view ${packageName} version\` names the newest) — the house never declares a dist-tag like latest.`
+    );
+  }
+  const alreadyDeclared = declaredSpec(tree, packageName) !== undefined;
+  const installCallback = declareDependencies(tree, 'adopt-extracted', { [packageName]: version });
 
   const entry = project.sourceRoot
     ? joinPathFragments(project.sourceRoot, 'index.ts')
@@ -172,7 +182,11 @@ export default async function adoptExtractedGenerator(
         changed++;
       }
     });
-    logger.info(`Rewrote imports (${rewriteAliases.join(', ')}) → "${packageName}" in ${changed} file(s).`);
+    logger.info(
+      changed
+        ? `Rewrote imports (${rewriteAliases.join(', ')}) → "${packageName}" in ${changed} file(s).`
+        : `No file imports ${rewriteAliases.join(', ')} — nothing to rewrite.`,
+    );
   } else {
     logger.warn(
       `Could not determine the local import specifier for "${options.lib}" — rewrite skipped. Update imports to "${packageName}" by hand.`
@@ -184,7 +198,7 @@ export default async function adoptExtractedGenerator(
   await formatFiles(tree);
 
   logger.info(
-    `Added ${packageName} and rewrote imports. Next: build to verify the package works, then ` +
+    `${alreadyDeclared ? `${packageName} is declared` : `Declared ${packageName}`}; imports point at it. Next: build to verify the package works, then ` +
       `re-run with --finalize to remove the local library "${options.lib}".`
   );
   return installCallback;

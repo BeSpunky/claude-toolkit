@@ -1,0 +1,21 @@
+{
+  "//": "THE EMULATOR SUITE'S PORT TABLE — the one source. Read by emulator-ports.ts (the generator: firebase.json, the dev declaration, the devcontainer) and projected into the owned tools/emulator-ports.mjs (the runtime: emulators.sh, build-seeds.sh, and the stack claim through tools/dev). defaults: firebase-tools' own port per emulator. alwaysOn: infrastructure a running suite always occupies (pinned, shifted, even when firebase.json is silent). nested: ports an emulator opens under a key of its own, with firebase-tools' default for each — occupied, listed and shifted whether or not firebase.json declares them: undeclared, firebase-tools does NOT let them float, it opens its default (a shifted suite's Firestore websocket sat on the base 9150).",
+  "defaults": {
+    "ui": 4000,
+    "hub": 4400,
+    "logging": 4500,
+    "hosting": 5000,
+    "functions": 5001,
+    "apphosting": 5002,
+    "firestore": 8080,
+    "pubsub": 8085,
+    "database": 9000,
+    "auth": 9099,
+    "storage": 9199,
+    "eventarc": 9299,
+    "dataconnect": 9399,
+    "tasks": 9499
+  },
+  "alwaysOn": ["hub", "logging"],
+  "nested": { "firestore": { "websocketPort": { "as": "firestore-websocket", "default": 9150 } } }
+}

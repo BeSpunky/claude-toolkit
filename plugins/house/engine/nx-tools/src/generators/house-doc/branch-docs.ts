@@ -5,8 +5,8 @@
 // depends on the declared model — plus the one flag that picks between the declared and undeclared wording.
 //
 // ROLE WORDS PLUS NAMES, NEVER SEMANTICS. The projection says which lines exist and which role each plays
-// (integration, stage, production, protected pattern); it does not say how a line advances, what a release line
-// is for, or where anything deploys — and neither may these docs. Those are the model's semantics, owned by the
+// (integration, stage, production, protected pattern), and its STRUCTURED deploy bindings (`deploys`); it does not
+// say how a line advances or what a release line is for — and neither may these docs. Those are the model's semantics, owned by the
 // skill's engine (`branches.mjs describe`), which auto-updates; a doc that restated them would be a second,
 // pinned copy that drifts the first time the model changes.
 import { type BranchModel, BRANCH_MODEL_FILE, UNDECLARED_PROTECTED } from '../_utils/branch-model';
@@ -61,8 +61,20 @@ export function branchDocs(model: BranchModel): BranchDocs {
     rows.push(`| ${code(glob)} | ${roles.join(' · ')} |`);
   }
 
+  // The STRUCTURED deploy bindings (projection.deploys) — facts the model states and tooling reads (the `ci` layer's
+  // workflow is rendered from them), so this page may show them. A free-text note stays the engine's to describe.
+  const bound = p.deploys.filter((binding) => binding.ci || binding.appHosting);
+  const deployRows = bound.map((binding) => {
+    const where = binding.kind === 'tag' ? `tags ${code(binding.line)}` : code(binding.line);
+    const ci = binding.ci
+      ? `${code(binding.ci.environment)}${Object.keys(binding.ci.providers).length ? ` (${Object.entries(binding.ci.providers).map(([id, target]) => `${id}: ${code(target)}`).join(', ')})` : ''}`
+      : '—';
+    const appHosting = binding.appHosting?.map((b) => code(`${b.project}/${b.backend}`)).join(', ') ?? '—';
+    return `| ${where} | ${ci} | ${appHosting} |`;
+  });
+
   return {
-    flags: { 'branches-declared': true },
+    flags: { 'branches-declared': true, 'deploys-bound': bound.length > 0 },
     tokens: {
       BRANCH_MODEL_FILE,
       BRANCH_SUMMARY: p.summary,
@@ -71,6 +83,7 @@ export function branchDocs(model: BranchModel): BranchDocs {
       BRANCH_PROTECTED: namesAndPatterns(p.protected, p.protectedPatterns),
       BRANCH_PRODUCTION: namesAndPatterns(p.production, p.productionPatterns),
       BRANCH_TABLE: ['| Line | Role |', '| --- | --- |', ...rows].join('\n'),
+      BRANCH_DEPLOYS: ['| Line | CI deploys into (provider: target) | App Hosting auto-rollout |', '| --- | --- | --- |', ...deployRows].join('\n'),
     },
   };
 }

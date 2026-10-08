@@ -63,27 +63,24 @@ export async function isPortFree(port) {
   return true;
 }
 
-async function allFree(ports, offset, probe) {
+export async function allFree(ports, offset, probe) {
   for (const port of ports) if (!(await probe(port + offset))) return false;
   return true;
 }
 
 /**
- * Resolve the offset for a serve.
+ * The offsets a serve may take, in the order it should try them — the port-block rule, without the probing.
  *
  *   spec      `--port-offset`: '0' → 0 (base stack); a non-negative integer → pinned; 'auto' → derived.
  *   key       the tree's stable identity (branch, else path) — its natural block.
  *   isMain    the repository's primary worktree.
- *   probed    the ports whose freedom decides a block (the PRIMARY process's ports — the app's own).
  *   block     portBlock() of every declared port.
- *   probe     injected so the rule is testable without sockets.
  *
- * auto: the MAIN tree PREFERS offset 0 — the forwarded ports are the developer's, and an OAuth origin may be
- * registered on them — but takes it only when FREE. Occupied means a stack is already serving there, and a
- * preference is not a licence to evict it, so the run shifts like any other. A worktree takes its natural
- * block, verified free, walking to the next free block on a collision. All busy → throw, never collide.
+ * An explicit offset is the one candidate (`pinned: true`). auto: the MAIN tree PREFERS offset 0 — the forwarded
+ * ports are the developer's, and an OAuth origin may be registered on them — but takes it only when free; a
+ * worktree prefers its natural block; then every other block in turn. The first candidate is the PREFERRED one.
  */
-export async function resolvePortOffset(spec, { key, isMain = false, probed, block, probe = isPortFree }) {
+export function offsetCandidates(spec, { key, isMain = false, block }) {
   const s = String(spec ?? '').trim().toLowerCase();
 
   if (s !== 'auto') {
@@ -92,26 +89,45 @@ export async function resolvePortOffset(spec, { key, isMain = false, probed, blo
       throw new PortError(`--port-offset must be 'auto', 0, or a positive integer (got '${spec}')`);
     }
     if (block.max + n > MAX_PORT) throw new PortError(`--port-offset=${n} pushes declared port ${block.max} past ${MAX_PORT}`);
-    return n;
+    return { pinned: true, offsets: [n] };
   }
 
-  if (isMain && (await allFree(probed, 0, probe))) return 0;
-  if (block.blocks < 1) {
+  const offsets = isMain ? [0] : [];
+  if (block.blocks < 1 && !isMain) {
     throw new PortError(
-      `declared ports ${block.min}..${block.max} leave no room to shift by a block under ${MAX_PORT}` +
-        `${isMain ? ', and the base ports are in use' : ''}. Serve the base stack (--port-offset=0)${isMain ? ' once they are free' : ''}, ` +
-        'or declare lower ports in .bespunky/dev.json.',
+      `declared ports ${block.min}..${block.max} leave no room to shift by a block under ${MAX_PORT}. ` +
+        'Serve the base stack (--port-offset=0), or declare lower ports in .bespunky/dev.json.',
     );
   }
-
-  const start = blockForKey(key, block.blocks);
-  for (let i = 0; i < block.blocks; i++) {
-    const index = ((start - 1 + i) % block.blocks) + 1;
-    const offset = index * block.step;
-    if (await allFree(probed, offset, probe)) return offset;
+  if (block.blocks >= 1) {
+    const start = blockForKey(key, block.blocks);
+    for (let i = 0; i < block.blocks; i++) offsets.push((((start - 1 + i) % block.blocks) + 1) * block.step);
   }
-  throw new PortError(
-    `no free port block for an isolated serve — all ${block.blocks} blocks are in use. ` +
-      `Stop an existing isolated serve, or pass an explicit free --port-offset.`,
+  return { pinned: false, offsets };
+}
+
+/**
+ * Resolve the offset for a serve by probing alone: the first candidate whose `probed` ports are all free (see
+ * offsetCandidates). An explicit offset is honoured unprobed. All busy → throw, never collide. The engine claims
+ * through lib/stacks.mjs claimStack, which applies the same candidates against the run records as well.
+ */
+export async function resolvePortOffset(spec, { key, isMain = false, probed, block, probe = isPortFree }) {
+  const { pinned, offsets } = offsetCandidates(spec, { key, isMain, block });
+  if (pinned) return offsets[0];
+  for (const offset of offsets) if (await allFree(probed, offset, probe)) return offset;
+  throw noFreeBlock(block, isMain);
+}
+
+/** Every block is in use. */
+export function noFreeBlock(block, isMain) {
+  if (block.blocks < 1) {
+    return new PortError(
+      `declared ports ${block.min}..${block.max} leave no room to shift by a block under ${MAX_PORT}, and the base ports are in use. ` +
+        'Serve the base stack (--port-offset=0) once they are free, or declare lower ports in .bespunky/dev.json.',
+    );
+  }
+  return new PortError(
+    `no free port block for an isolated serve — all ${block.blocks} blocks${isMain ? ' and the base ports' : ''} are in use. ` +
+      'Stop an existing isolated serve, or pass an explicit free --port-offset.',
   );
 }

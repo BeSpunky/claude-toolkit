@@ -1,7 +1,8 @@
 // The project's DECLARED BRANCH MODEL, as the generators may see it.
 //
 // The model lives in `.bespunky/branches.json` and is written by ONE thing only: the branch-and-release skill's
-// engine (`branches.mjs write`), after a human decision. That engine is the only code that INTERPRETS the model —
+// engine (`branches.mjs write`), after a human decision. (A migration may re-spell a declared fact in a format the
+// user approved — 0.50.0 `deploys-object-form` — but never changes what the model declares or its projection.) That engine is the only code that INTERPRETS the model —
 // how a line advances, what a release or hotfix line means, which fix flow applies. Everything else reads the
 // flat, derived `projection` block the engine writes beside it (the same arrangement as `layers.sh` beside the
 // layer registry): names and globs, nothing to interpret. This module is that reader for the payload, so it
@@ -59,6 +60,24 @@ export interface BranchProjection {
   workBase: string;
   /** One human line describing the model, used verbatim. */
   summary: string;
+  /**
+   * The STRUCTURED deploy bindings — what a push to a line (a branch name), a line pattern (a branch glob) or a tag
+   * series (a tag glob) deploys. Optional in the file (the engine writes the key only when something is bound, so
+   * every projection written before bindings existed still reads); always an array here.
+   */
+  deploys: DeployBinding[];
+}
+
+/** One structured deploy binding, as the engine projects it (`branches.mjs`, model.mjs `deployBindings`). */
+export interface DeployBinding {
+  /** `line` — a named branch; `pattern` — a branch glob (release / hotfix lines); `tag` — a tag glob. */
+  kind: 'line' | 'pattern' | 'tag';
+  /** The branch name, or the glob. */
+  line: string;
+  /** The project's own CI deploys a push here into `environment`, with each provider's target there. */
+  ci?: { environment: string; providers: Record<string, string> };
+  /** Firebase App Hosting backends that roll out on a push here (Firebase's own integration, not CI). */
+  appHosting?: { project: string; backend: string }[];
 }
 
 export type BranchModel =
@@ -134,8 +153,46 @@ function parseProjection(projection: Record<string, unknown>, source: string): B
       protectedPatterns: strings('protectedPatterns'),
       workBase: string('workBase'),
       summary: string('summary'),
+      deploys: deployBindings(projection['deploys'], refuse),
     },
   };
+}
+
+const KINDS: readonly DeployBinding['kind'][] = ['line', 'pattern', 'tag'];
+const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const GLOB = /^[A-Za-z0-9._\-/*]+$/;
+
+/** `projection.deploys`, validated — absent reads as none; anything malformed is refused like the rest. */
+function deployBindings(value: unknown, refuse: (why: string) => Error): DeployBinding[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw refuse('`projection.deploys` must be an array of deploy bindings');
+  return value.map((entry, index) => {
+    const at = `\`projection.deploys[${index}]\``;
+    if (!isRecord(entry)) throw refuse(`${at} must be an object`);
+    const kind = entry['kind'];
+    const line = entry['line'];
+    if (!KINDS.includes(kind as DeployBinding['kind'])) throw refuse(`${at}.kind must be one of ${KINDS.join(', ')}`);
+    if (typeof line !== 'string' || !GLOB.test(line)) throw refuse(`${at}.line must be a branch name or glob`);
+    const binding: DeployBinding = { kind: kind as DeployBinding['kind'], line };
+    const ci = entry['ci'];
+    if (ci !== undefined) {
+      const environment = isRecord(ci) ? ci['environment'] : undefined;
+      const providers = isRecord(ci) ? (ci['providers'] ?? {}) : undefined;
+      if (typeof environment !== 'string' || !TOKEN.test(environment)) throw refuse(`${at}.ci.environment must name an environment`);
+      if (!isRecord(providers) || Object.values(providers).some((target) => typeof target !== 'string' || !TOKEN.test(target))) {
+        throw refuse(`${at}.ci.providers must map provider ids to targets`);
+      }
+      binding.ci = { environment, providers: providers as Record<string, string> };
+    }
+    const appHosting = entry['appHosting'];
+    if (appHosting !== undefined) {
+      if (!Array.isArray(appHosting) || appHosting.some((b) => !isRecord(b) || typeof b['project'] !== 'string' || typeof b['backend'] !== 'string')) {
+        throw refuse(`${at}.appHosting must be a list of { project, backend }`);
+      }
+      binding.appHosting = appHosting.map((b) => ({ project: String(b['project']), backend: String(b['backend']) }));
+    }
+    return binding;
+  });
 }
 
 function refusal(source: string, why: string): Error {

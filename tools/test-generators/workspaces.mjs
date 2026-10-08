@@ -61,7 +61,8 @@ export function workspace({ layout = 'hybrid', link = 'paths', pm } = {}) {
   const { linking, pm: defaultPm } = LINKINGS[link];
   const manager = pm ?? defaultPm;
 
-  updateJson(tree, 'package.json', (json) => ({ ...json, name: `@${SCOPE}/source` }));
+  // A house node host declares Nx exactly (house.sh pins it) — what an Nx-lockstep package (@nx/esbuild) follows.
+  updateJson(tree, 'package.json', (json) => ({ ...json, name: `@${SCOPE}/source`, devDependencies: { ...json.devDependencies, nx: '23.1.0' } }));
   if (LAYOUTS[layout]) updateJson(tree, 'nx.json', (json) => ({ ...json, workspaceLayout: { ...LAYOUTS[layout] } }));
 
   if (manager === 'npm') tree.write('package-lock.json', '{}');

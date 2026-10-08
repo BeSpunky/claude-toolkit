@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkyCi",
+  "title": "Continuous deployment from the branch model",
+  "description": "The `ci` layer: an OWNED GitHub Actions deploy workflow (.github/workflows/deploy.yml) that, on a push to a PROTECTED line the branch model binds with `ci` (one line per environment), deploys every affected project's `deploy` target (base = the last successful run, via nx-set-shas; workflow_dispatch scope=all, or a line pattern, deploys all) with `-c ci-<environment>` in that line's GitHub environment — each deploy provider's targets carry that configuration, nobody else's. Install runs in a job without id-token; only the deploy job authenticates (Firebase: keyless Workload Identity Federation in a house-owned pool); actions pinned by SHA. Plus each provider's human-run cloud setup (tools/setup-gcp.sh), which records what it creates for an exact rollback. Undeclared model or no binding → no workflow, and says what to do. Never overwrites a file the house did not write, never a second deploy workflow.",
+  "type": "object",
+  "properties": {
+    "layers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The layers this run applies — the deploy providers are theirs. Defaults to detecting them."
+    },
+    "branchProjection": {
+      "type": "string",
+      "description": "The branch model the caller RESOLVED: its projection as JSON, or 'undeclared'. Passed by house.sh; absent on a direct call, which reads the workspace's .bespunky/branches.json."
+    }
+  },
+  "required": []
+}

@@ -143,6 +143,9 @@ const HOUSE_SECTIONS: ReadonlyArray<{ heading: string; phrases: readonly string[
     phrases: [
       'Then open the app at the printed `?portOffset=N` URL.',
       '`tools/emulators.sh` **reaps existing emulator processes** on launch',
+      // Outside the `{{#firebase}}` block in every revision (ec7abcb … 296d706): the two above are Firebase-only,
+      // so a project scaffolded WITHOUT Firebase rendered neither, and its frozen section was never retired.
+      'Those belong to whatever server the developer launched manually; grabbing them fails, silently attaches, or forces a disruptive restart.',
     ],
   },
 ];

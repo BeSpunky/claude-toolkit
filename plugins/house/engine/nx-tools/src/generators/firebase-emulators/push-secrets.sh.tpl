@@ -1,20 +1,35 @@
 #!/usr/bin/env bash
-# Push the local Functions secrets file into Google Secret Manager — the PRODUCTION counterpart
-# of the emulator's `.secret.local` (tools/emulators.sh injects the same file locally). One
-# command, one source of truth: every `KEY=VALUE` in {{functionsRoot}}/.secret.local becomes a
-# `firebase functions:secrets:set KEY` on the target project, so local and prod can never drift
-# on WHICH secrets exist.
+# Push the local Functions secrets file into Google Secret Manager. {{functionsRoot}}/.secret.local
+# holds PRODUCTION's values and exists for this script alone — the emulator never reads it
+# (tools/emulators.sh gives the emulator inert placeholders, or opt-in sandbox values). One command,
+# one source of truth: every `KEY=VALUE` in it becomes a `firebase functions:secrets:set KEY` on the
+# target project, so what exists locally and in prod can never drift.
 #
-# Values never touch a command line, a log, or this script's output: each one is piped into the
-# CLI on stdin (`--data-file -`). Only key NAMES are printed.
+# The file is read with Firebase's own dotenv rules (tools/emulator-secrets.cjs — the one parser the emulator side
+# uses too), and a value those rules would REINTERPRET is refused, never pushed: an unquoted `#` (Firebase cuts the
+# value there), quotes Firebase strips, escapes it decodes, `export`. Each refusal names the key and the shape to
+# write instead. So what is set in Secret Manager is exactly what the line says. A line that is not KEY=VALUE, or a
+# key Firebase refuses, stops the push too — all before anything is set.
+#
+# Values never touch a command line, a file, a log, or this script's output: they travel from the parser to this
+# script on a pipe, are held in memory, and each one is piped into the CLI on stdin (`--data-file -`). Only key
+# NAMES are printed — `--dry-run` adds each value's length class and nothing else.
 #
 #   bash tools/push-secrets.sh                        # project from .firebaserc / environment.prod.ts
+#   bash tools/push-secrets.sh --dry-run              # what WOULD be pushed; pushes nothing
 #   FIREBASE_PROJECT=<id> bash tools/push-secrets.sh    # explicit override
 #
 # Nx target: `yarn nx run {{functionsProject}}:push-secrets`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    *) echo "[push-secrets] unknown argument: $arg (expected --dry-run)" >&2; exit 2 ;;
+  esac
+done
 SECRETS_FILE="$ROOT/{{functionsRoot}}/.secret.local"
 ENV_PROD="$ROOT/{{appEnvProdPath}}"
 
@@ -44,20 +59,26 @@ if [ -z "$PROJECT" ]; then
 fi
 echo "[push-secrets] project: $PROJECT"
 
-PUSHED=0
-while IFS= read -r line || [ -n "$line" ]; do
-  # Skip blanks, comments, and any non-`KEY=VALUE` line.
-  case "$line" in ''|\#*) continue ;; esac
-  case "$line" in *=*) ;; *) continue ;; esac
-  key="${line%%=*}"
-  value="${line#*=}"
-  if [ -z "$value" ] || [[ "$value" == PASTE_* ]]; then
-    echo "[push-secrets] skipping $key — value not filled in." >&2
-    continue
-  fi
-  echo "[push-secrets] setting $key …"
-  printf '%s' "$value" | firebase functions:secrets:set "$key" --project "$PROJECT" --data-file -
-  PUSHED=$((PUSHED + 1))
-done < "$SECRETS_FILE"
+# Parse first, push after: a file Firebase would misread is refused whole, before any secret is set. The entries
+# come over a pipe into memory (NUL-separated key, value pairs) — never a temp file a SIGKILL would leave behind.
+mapfile -d '' ENTRIES < <(node "$ROOT/tools/emulator-secrets.cjs" push-entries --file="$SECRETS_FILE")
+wait "$!" || exit 2
 
-echo "[push-secrets] done — $PUSHED secret(s) pushed. Redeploy functions for new versions to take effect."
+PUSHED=0
+for ((i = 0; i + 1 < ${#ENTRIES[@]}; i += 2)); do
+  key="${ENTRIES[i]}"
+  value="${ENTRIES[i + 1]}"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[push-secrets] would set $key — $(printf '%s' "$value" | node "$ROOT/tools/emulator-secrets.cjs" describe)"
+  else
+    echo "[push-secrets] setting $key …"
+    printf '%s' "$value" | firebase functions:secrets:set "$key" --project "$PROJECT" --data-file -
+  fi
+  PUSHED=$((PUSHED + 1))
+done
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "[push-secrets] dry run — $PUSHED secret(s) would be pushed to $PROJECT; nothing was set."
+else
+  echo "[push-secrets] done — $PUSHED secret(s) pushed. Redeploy functions for new versions to take effect."
+fi

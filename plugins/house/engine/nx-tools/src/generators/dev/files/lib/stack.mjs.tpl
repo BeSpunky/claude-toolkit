@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 
 /** Every descendant of `pid`, deepest first — read from /proc (Linux; elsewhere none). */
-function descendants(pid) {
+export function descendants(pid) {
   let entries;
   try {
     entries = readdirSync('/proc').filter((e) => /^\d+$/.test(e));
@@ -36,7 +36,8 @@ function descendants(pid) {
 
 /**
  * Run the declared processes as parallel children in OUR foreground process group, and resolve when all
- * have exited: `{ success }`.
+ * have exited: `{ success, failures }` — `failures` names each child whose own exit failed the stack
+ * (`{ id, code, signal }`), so whoever reports the stack can say WHICH process died, not only that one did.
  *
  * Signal discipline (the reason this is bespoke rather than N independent runs) — the rule is decided by WHO
  * delivered the signal, and the signal's name says who that almost always is:
@@ -63,12 +64,16 @@ function descendants(pid) {
  * together instead of leaving orphans.
  *
  * A child is `{ id, command, args, shell, env }`: `shell` runs `command` through `sh -c` (a hand-written
- * string command); otherwise `command` + `args` are spawned directly.
+ * string command); otherwise `command` + `args` are spawned directly. `onSpawn(id, pid)` hears each one start —
+ * how the stack's run record learns its processes' PIDs. `onStop(signal)` hears the stop once — with the signal
+ * that asked for it, or none when the stack's own processes ended it (how the engine says who stopped the stack).
+ * `lockFd`, the stack's lock (lib/stacks.mjs), is every child's fd 3: each one keeps the stack alive while it runs —
+ * so a serve killed outright leaves an ORPHANED stack `dev stop` can still end, not a dead record over live servers.
  */
-export function runStack({ children, cwd, onStop, log }) {
+export function runStack({ children, cwd, onStop, onSpawn, log, lockFd }) {
   return new Promise((resolve) => {
     if (children.length === 0) {
-      resolve({ success: true });
+      resolve({ success: true, failures: [] });
       return;
     }
 
@@ -77,13 +82,14 @@ export function runStack({ children, cwd, onStop, log }) {
     let remaining = children.length;
     let stopping = false;
     let failed = false;
+    const failures = [];
     let stopHandled = false;
 
-    const runOnStop = () => {
+    const runOnStop = (signal) => {
       if (stopHandled) return;
       stopHandled = true;
       try {
-        onStop?.();
+        onStop?.(signal);
       } catch {
         /* teardown is best-effort — never let it fail the serve */
       }
@@ -111,13 +117,13 @@ export function runStack({ children, cwd, onStop, log }) {
     const onGroupStop = () => {
       if (stopping) return;
       stopping = true;
-      runOnStop();
+      runOnStop('SIGINT');
     };
     // Aimed at us alone: tell each child once, then wait.
-    const onDirectedStop = () => {
+    const onDirectedStop = (signal) => {
       if (stopping) return;
       stopping = true;
-      runOnStop();
+      runOnStop(signal);
       stopRemaining();
     };
     const handlers = { SIGINT: onGroupStop, SIGTERM: onDirectedStop, SIGHUP: onDirectedStop };
@@ -136,7 +142,10 @@ export function runStack({ children, cwd, onStop, log }) {
       // shape it takes: a non-zero exit, a SIGKILL from the OOM killer, a segfault. Reading every signal as a
       // clean stop made `nx serve` report success for a stack that had crashed.
       const interrupted = signal === 'SIGINT' || code === 130;
-      if (!stopping && !interrupted && code !== 0) failed = true;
+      if (!stopping && !interrupted && code !== 0) {
+        failed = true;
+        failures.push({ id: children[i].id, code, signal });
+      }
       // An interrupted child means the terminal stopped the GROUP: every sibling got the same SIGINT. Treat it as
       // the group stop it is (onGroupStop) — signalling the siblings again here would be the double signal.
       if (interrupted && !stopping) onGroupStop();
@@ -151,15 +160,23 @@ export function runStack({ children, cwd, onStop, log }) {
       if (--remaining === 0) {
         cleanup();
         runOnStop();
-        resolve({ success: !failed });
+        resolve({ success: !failed, failures });
       }
     };
 
     children.forEach((child, i) => {
+      const stdio = lockFd === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', lockFd];
       const proc = child.shell
-        ? spawn('sh', ['-c', child.command], { cwd, env: child.env, stdio: 'inherit' })
-        : spawn(child.command, child.args, { cwd, env: child.env, stdio: 'inherit' });
+        ? spawn('sh', ['-c', child.command], { cwd, env: child.env, stdio })
+        : spawn(child.command, child.args, { cwd, env: child.env, stdio });
       procs[i] = proc;
+      if (proc.pid) {
+        try {
+          onSpawn?.(child.id, proc.pid);
+        } catch {
+          /* bookkeeping only — never let it fail the serve */
+        }
+      }
       proc.on('error', (err) => {
         log?.(`failed to start ${child.id}: ${err.message}`);
         failed = true;

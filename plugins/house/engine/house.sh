@@ -33,11 +33,10 @@
 #                  create a repository nobody asked for). This runs host-side AFTER the Docker scaffold
 #                  (gh auth lives on the host, not in the bare base image). Skipped gracefully (local repo
 #                  only) when gh is missing/unauthenticated. Upgrade mode never touches the remote.
-#                  Why offer it at all: Firebase App Hosting deploys are GitHub-driven — linking the repo
-#                  at `firebase apphosting:backends:create` is what makes Firebase provision its own
-#                  Cloud Build CI/CD. We generate NO deploy workflow; a repo existing from minute one
-#                  is what lets Firebase's native mechanism take over (so we never track its evolving
-#                  deploy methodology). Non-Firebase projects still benefit from having a remote.
+#                  Why offer it at all: App Hosting's recommended mode rolls out every push to a linked
+#                  repo's live branch (linked at `firebase apphosting:backends:create`), so the repo must
+#                  exist; we generate NO deploy workflow. (Local-source `firebase deploy` needs no remote.)
+#                  Non-Firebase projects still benefit from having a remote.
 #
 # Usage:
 #   house.sh new       [--preset=<id>] [--add-layer=<layers>] [--layout=<id>] [--linking=<id>] [--firebase] [--staging] [--voice] [--github] [--docker] [--local] <project-name|path> [app-name]
@@ -444,6 +443,54 @@ if [ "$#" -eq 0 ]; then
   echo "ERROR: no project given." >&2
   exit 1
 fi
+
+# --- WHICH REPOSITORY IS THE PROJECT'S: never the first one git finds walking up -----------------------------------
+# Every bare `git` call resolves its repository by walking UP from the working directory, and so does every tool
+# that shells out to git (create-nx-workspace, nx init). A directory created INSIDE another repository therefore
+# answers with that OUTER repository: create-nx-workspace saw "already under version control" and skipped its
+# `git init`, and the scaffold's closing `git add -A && git commit` then committed into the enclosing checkout —
+# the whole new project, plus anything the outer repo had staged, onto whatever branch it had out, a protected
+# line included. It surfaced as a scaffold under .claude/worktrees/ committing into this toolkit's own checkout,
+# harmless only because that folder is gitignored. So the question is never "is there a repository here?" but
+# "is the repository here THIS directory's?", answered by these functions alone:
+#
+#   _is_own_repository <dir>  <dir> is the top of a work tree — a repository of its own, not a folder in another.
+#   _own_repository           (scaffold) make the current directory its own repository: `git init` unless it
+#                             already is one. On `main`, explicitly: nx.json's defaultBase is main on both hosts,
+#                             so the branch must not follow a machine's init.defaultBranch.
+#   _commit_scaffold <msg>    (scaffold) the one commit, into the project's own repository and nowhere else —
+#                             it refuses rather than commit into a repository the directory merely sits inside.
+#   _git_versions <dir>       (upgrade) git versions <dir>'s files: inside a work tree AND not ignored by it. A
+#                             project in a SUBDIRECTORY of its repository is versioned (a supported layout); a
+#                             project in a directory its enclosing repository IGNORES is not — that repository's
+#                             HEAD holds none of its files, so it is no restore point, and committing migrations
+#                             into it would land on the outer repo's branch. Such a directory is not a git
+#                             repository for every purpose of an upgrade.
+_is_own_repository() {   # <dir>
+  local _here _top
+  _here="$(cd "$1" && pwd -P)" || return 1
+  _top="$(git -C "$_here" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ "$(cd "$_top" && pwd -P)" = "$_here" ]
+}
+_own_repository() {
+  _is_own_repository . && return 0
+  echo "[git] $(pwd -P): git init (the project's own repository)"
+  git -C "$(pwd -P)" init -q   # the developer's init.defaultBranch names the first branch — the toolkit never assumes a branch name
+}
+_commit_scaffold() {   # <message>
+  local _here
+  _here="$(pwd -P)"
+  if ! _is_own_repository "$_here"; then
+    echo "ERROR: $_here is not the top of its own git repository — refusing to commit the scaffold into" >&2
+    echo "       $(git -C "$_here" rev-parse --show-toplevel 2>/dev/null || echo 'no repository')." >&2
+    return 1
+  fi
+  git -C "$_here" add -A
+  git -C "$_here" commit -q -m "$1" || true
+}
+_git_versions() {   # <dir>
+  git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1 && ! git -C "$1" check-ignore -q . 2>/dev/null
+}
 
 # The identity of an EXISTING project directory: the name the same directory has in the repository's MAIN
 # worktree. `--git-common-dir` is shared by every worktree of a repository and, for an ordinary layout, is the main
@@ -862,6 +909,10 @@ _pm_add_dev() {   # <package manager> <spec>...
 # program that carried an add it can never call would only invite one.
 PM_ADD_FN=""
 [ "$HOST" = "node" ] && PM_ADD_FN="$(declare -f _pm_add_dev)"
+# The repository functions each program calls (see _is_own_repository): rendered, not re-typed, so the program and
+# the host decide "whose repository is this?" with one definition.
+NEW_GIT_FNS="$(declare -f _is_own_repository _own_repository _commit_scaffold)"
+UPGRADE_GIT_FNS="$(declare -f _git_versions)"
 if [ "$HOST" = "wrapper" ] && [ "$MODE" = "new" ]; then
   echo "Nx host: the Nx wrapper (./nx) — the new project has no package.json (ensure the node layer, or --preset=node, for one)"
 elif [ "$MODE" = "upgrade" ]; then
@@ -1005,7 +1056,6 @@ if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
   echo "Node $(node -v) is new enough — running the generators natively (no Docker)."
   WORK_ROOT="$PROJECTS_DIR"          # where the <project> dir lives (host path)
   ENGINE_ROOT="$ENGINE_DIR"          # nx-tools + compile-generators.mts (host path)
-  MAJOR="$(node -p 'process.versions.node.split(".")[0]')"   # generated devcontainer's nodeMajor = this Node's
   RUNTIME_DESC="native node $(node -v)"
 else
   RUNTIME="docker"
@@ -1018,6 +1068,8 @@ else
   docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
   command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
   echo "Resolving latest typescript-node base image..."
+  # The image the GENERATORS run in — nothing more. The project's own Node (its devcontainer image, its functions
+  # runtime) is the project's own Node file (.nvmrc, .node-version or volta.node), which the generators read; this runner's Node never leaks into the output.
   MAJOR="$(base_image_node_major)"
   IMAGE="$(base_image_for_major "$MAJOR")"
   echo "Base image: $IMAGE"
@@ -1040,9 +1092,13 @@ INNER_ENV=(
   "HOUSE_ENGINE_ROOT=$ENGINE_ROOT"
   "HOUSE_GIT_NAME=$GIT_NAME"
   "HOUSE_GIT_EMAIL=$GIT_EMAIL"
+  # The layer sets the probe judges (validated ids). Environment, not rendered text, like the roots above: the
+  # preflight block then has no render-time inputs beyond its own, and an empty set is simply empty.
+  "HOUSE_ENSURE_LAYERS=${ENSURE_LAYERS:-}"
+  "HOUSE_EVIDENT_LAYERS=${EVIDENT:-}"
 )
 [ -n "$NX_CHANNEL" ] && echo "Nx channel: $NX_CHANNEL (Nx-lag rule — beta toolchain accepted)"
-[ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (Firebase CLI + Google Cloud CLI + emulator ports)"
+[ "$FIREBASE" = "1" ] && echo "Firebase: opt-in ENABLED (pinned firebase-tools + Google Cloud CLI + emulator ports)"
 [ "$VOICE" = "1" ] && echo "Voice: opt-in ENABLED (host audio bridge — WSLg or PulseAudio/PipeWire — + espeak-ng in the image + bespunky-voice plugin)"
 
 # --- devcontainer generator args ---
@@ -1063,7 +1119,8 @@ INNER_ENV=(
 #     set, which --firebase populates) — firebase.json does not exist yet at first-app time to be detected.
 #   Upgrade mode: the app already exists; the `firebase` layer's per-app step re-applies the client to it.
 # --staging (opt-in) requires Firebase; it adds environment.staging.ts + a `staging` build config +
-# apphosting.staging.yaml so the workflow's staging App Hosting backend builds its own config/database.
+# apphosting.staging.yaml, which the App Hosting backend whose Environment name is `staging` merges over
+# apphosting.yaml (set in the console; there is no CLI flag) so it builds its own config/database.
 [ "$STAGING" = "1" ] && [ "$FIREBASE" != "1" ] && { echo "ERROR: --staging requires the firebase layer (new: --firebase; add-layer: firebase among the layers)." >&2; exit 1; }
 APP_STAGING_FLAG=""
 [ "$STAGING" = "1" ] && APP_STAGING_FLAG=" --staging=true"
@@ -1341,7 +1398,7 @@ if [ -n \"\$_um\" ]; then
 fi
 # Not a git repository at all: there is no history to damage and no branch to land on, so none of the git
 # preconditions have anything to say. Silence here is correct, not a skipped check.
-if git rev-parse --git-dir >/dev/null 2>&1; then
+if _git_versions .; then
   # 'git status --porcelain' rather than three diff invocations: it is the one command that also works in a
   # repository with no commits, where 'git diff --cached' has no HEAD to compare against and errors out.
   # Column 1 is the INDEX status, column 2 the WORKTREE status, '??' is untracked.
@@ -1476,7 +1533,19 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
            skill's change procedure: verify, risks, confirm), then re-run.\"
     fi
   fi
-fi"
+fi
+# PROJECT FACTS the generators would otherwise trip on mid-run, after the migrations committed: a Node the house cannot
+# resolve or build an image for, an Angular the firebase client cannot pair @angular/fire with. house-probe.mts reads
+# them with the payload's OWN pure modules (the same code the generators throw from), so the two cannot disagree. It
+# only reads; each line it prints is one refusal: <code><TAB><text, \\n-escaped>.
+_probe_out=\"\$(node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"\$HOUSE_ENGINE_ROOT/house-probe.mts\" --ensure=\"\${HOUSE_ENSURE_LAYERS:-}\" --evident=\"\${HOUSE_EVIDENT_LAYERS:-}\")\" \\
+  || _refuse probe-failed \"[preflight] probe-failed: the project-facts probe (house-probe.mts) did not run — see its error above.\"
+while IFS=\"\$(printf '\\t')\" read -r _probe_code _probe_text; do
+  # if/fi, not \`[ … ] && …\`: an empty last line would leave the loop (and so this block) returning 1 under set -e.
+  if [ -n \"\$_probe_code\" ]; then _refuse \"\$_probe_code\" \"\$(printf '%b' \"\$_probe_text\")\"; fi
+done <<_HOUSE_PROBE_
+\$_probe_out
+_HOUSE_PROBE_"
 
 # The single verdict. Runs AFTER MIGRATE_PROBE so the report can name the ladder that would have run — the
 # probe writes nothing, it only reads node_modules and HOUSE.md, so composing the full picture first costs
@@ -1737,7 +1806,7 @@ else
   #      files landing in someone's history as a side effect of a version bump is far worse than losing the
   #      per-migration granularity, so check first and drop the flag rather than the repo's history.
   _do_commits=0
-  if git rev-parse --git-dir >/dev/null 2>&1; then
+  if _git_versions .; then
     # NO COMMITTER IDENTITY = NO COMMITS, and Nx does not treat that as fatal: it reports that it could not
     # create the checkpoint commit, prints a git fatal per migration, and carries on -- after which this
     # script prints UPGRADE_OK. The migrations are applied and stamped, but the commit ladder the user was
@@ -1955,7 +2024,7 @@ RESTORE_SHA=""
 UPGRADE_BASE=""
 RESTORE_BLOCK=""
 if [ "$MODE" = "upgrade" ]; then
-  if git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if _git_versions "$TARGET"; then
     if RESTORE_SHA="$(git -C "$TARGET" rev-parse --verify -q HEAD 2>/dev/null)"; then
       BACKUP_REF="HEAD(${RESTORE_SHA:0:7})"
       UPGRADE_BASE="$RESTORE_SHA"
@@ -1969,7 +2038,8 @@ echo '  Review this upgrade: git diff $RESTORE_SHA ; restore a file: git checkou
       UPGRADE_BASE="$(git -C "$TARGET" hash-object -t tree /dev/null)"
     fi
   elif [ "$BACKUP" = "1" ]; then
-    echo "BACKUP_ABORT: '$TARGET' is not a git repository, so an upgrade would change files with no way back." >&2
+    echo "BACKUP_ABORT: '$TARGET' is not versioned by git (no repository, or one that ignores it), so an upgrade" >&2
+    echo "  would change files with no way back." >&2
     echo "  Create a restore point first:  (cd \"$TARGET\" && git init && git add -A && git commit -m 'pre-upgrade')" >&2
     echo "  …or re-run with --no-backup to upgrade without one." >&2
     exit 1
@@ -2065,7 +2135,12 @@ echo \"[layers] active (union)        : \${ACTIVE:-none}\""
 # fd 9, not stdin: nx g may read stdin, and would swallow the rest of the plan.
 PLAN_RUN_BLOCK="
 _UPGRADE_PARTIAL=\${_UPGRADE_PARTIAL:-0}
-_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --node-major=$MAJOR --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM --branch-projection=\"\${_bm_projection:-}\")\" || {
+# THE ATTENTION LIST (nx-tools _utils/upgrade-report.ts): a generator that replaced a value in the project's own
+# targets (or kept a target of the project's over the house's) names it in this file too, and the outer summary
+# prints every line under UPGRADE_ATTENTION — the warning alone drowns in the generators' output. Inside the
+# self-ignoring upgrade lock, so it crosses the Docker boundary and goes with the lock.
+[ -d .bespunky-upgrade.lock ] && export BESPUNKY_UPGRADE_REPORT=\"\$PWD/.bespunky-upgrade.lock/report\"
+_plan=\"\$(node '$NXT_DIR/src/layers/cli.js' plan --mode=$MODE --active=\"\$ACTIVE\" --ensured=\"\$ENSURED\" --project=$PROJECT --app=\"\$APP\" --voice=$VOICE --staging=$STAGING --nx-tools-version=$NX_TOOLS_VERSION --plugin-version=$PLUGIN_VERSION --package-manager=$PM --branch-projection=\"\${_bm_projection:-}\")\" || {
   echo 'ERROR: the layer planner failed — no house generators were run, and nothing has been stamped.' >&2
   exit 1
 }
@@ -2083,6 +2158,22 @@ while IFS=\"\$_tab\" read -r -u 9 _kind _gen _args; do
       _UPGRADE_PARTIAL=1 ;;
   esac
 done 9<<< \"\$_plan\""
+
+# --- THE CONTAINER VERDICT: does the container this run leaves differ from the one running? ----------------------
+# Asked of CONTENT, by the one definition of "what the container is built from" (nx-tools
+# generators/devcontainer/container-inputs.ts): every file under .devcontainer/ minus the house's records, each
+# reduced to what its consumer reads — so a layer list in the ownership marker or a comment naming the layers is not
+# a rebuild. Computed HERE, inside the program, because this is where Node and the installed payload are guaranteed
+# (the outer script may have neither, on the Docker fallback); handed over through the upgrade lock, which
+# _upgrade_next reads. Best effort by design: no verdict means the reporter falls back to "any .devcontainer/
+# change rebuilds" — an over-report, never a needed rebuild swallowed.
+CONTAINER_VERDICT_BLOCK=""
+if [ "$MODE" = "upgrade" ] && [ -n "$UPGRADE_BASE" ]; then
+  CONTAINER_VERDICT_BLOCK="if [ -d .bespunky-upgrade.lock ]; then
+  node '$NXT_DIR/src/generators/devcontainer/container-inputs.js' '$UPGRADE_BASE' > .bespunky-upgrade.lock/container 2>/dev/null \\
+    || rm -f .bespunky-upgrade.lock/container
+fi"
+fi
 
 # --- the SCAFFOLD bootstrap: what creates the ensured layers from an empty directory ---
 # Derived from the ENSURE set, never hard-wired: scaffold is upgrade with an ensure set against an empty directory.
@@ -2125,13 +2216,19 @@ if [ "$HOST" = "node" ]; then
 #
 # Scoped to this invocation deliberately. These variables are true — an agent IS running this — and other
 # tools may reasonably key off them. What is not acceptable is one command redefining the workspace shape.
-env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' $CREATE_WORKSPACE_PRESET --packageManager=yarn --nxCloud=skip --no-interactive
-cd \"\$HOUSE_PROJECT_DIR_NAME\""
+#
+# --skipGit: the repository is ours to create, not create-nx-workspace's. Its own git step asks 'git rev-parse
+# --is-inside-work-tree' and, inside ANY enclosing repository, skips the init — leaving the project a folder of
+# someone else's repo for every git call after it. _own_repository asks the right question instead.
+env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' $CREATE_WORKSPACE_PRESET --packageManager=yarn --nxCloud=skip --skipGit=true --no-interactive
+cd \"\$HOUSE_PROJECT_DIR_NAME\"
+_own_repository"
 else
   # No package.json: an empty repository, then the SAME wrapper floor an upgrade lays on a Python or Go repo.
   NEW_FLOOR_BLOCK="mkdir \"\$HOUSE_PROJECT_DIR_NAME\"
 cd \"\$HOUSE_PROJECT_DIR_NAME\"
-git init -q
+# Before nx init: it reads the repository (its default-base guess), and the one it must read is this one.
+_own_repository
 $NX_INIT_BLOCK"
 fi
 
@@ -2172,6 +2269,7 @@ NEW_APP_BLOCK=""
 if [ "$MODE" = "new" ]; then
   INNER="set -e
 $PM_ADD_FN
+$NEW_GIT_FNS
 mkdir -p \"\$HOUSE_WORK_ROOT\"
 cd \"\$HOUSE_WORK_ROOT\"
 $ENSURED_BLOCK
@@ -2180,7 +2278,6 @@ $ENSURED_BLOCK
 # this must not clobber it — hence the conditional. Same result on both paths, no drift.
 git config --global user.name >/dev/null 2>&1 || git config --global user.name \"\$HOUSE_GIT_NAME\"
 git config --global user.email >/dev/null 2>&1 || git config --global user.email \"\$HOUSE_GIT_EMAIL\"
-git config --global init.defaultBranch >/dev/null 2>&1 || git config --global init.defaultBranch main
 $NEW_FLOOR_BLOCK
 $NEW_PLUGINS_BLOCK
 $INSTALL_NX_TOOLS
@@ -2195,14 +2292,14 @@ $PLAN_RUN_BLOCK
 # --local only: correct the manifest's temp-dir tarball spec back to the plain version BEFORE the commit, or
 # the scaffold's one commit records a file: path that exists on no machine (and is deleted moments later).
 $FINALIZE_LOCAL
-# Commit the full scaffold. The floor may have made an initial commit (create-nx-workspace does), but the
-# house generators + dep installs ran after it — capture them so the host-side push (gh repo
-# create --source --push) ships a clean, complete tree on main.
-git add -A
-git commit -m 'chore: scaffold BeSpunky project (layers: $NEW_COMMIT_LAYERS)' || true"
+# Commit the full scaffold — the project's ONE commit (the floor makes none: create-nx-workspace runs with
+# --skipGit), into the project's own repository only, so the host-side push (gh repo create --source --push)
+# ships a clean, complete tree on main.
+_commit_scaffold 'chore: scaffold BeSpunky project (layers: $NEW_COMMIT_LAYERS)'"
 else
   INNER="set -e
 $PM_ADD_FN
+$UPGRADE_GIT_FNS
 cd \"\$HOUSE_WORK_ROOT/\$HOUSE_PROJECT_DIR_NAME\"
 $ENSURED_BLOCK
 # PREFLIGHT AND THE PROBE COME FIRST — before nx init, not merely before the install. Both only READ (git
@@ -2236,6 +2333,7 @@ $CHECK_NAME_FN
 _resolve_upgrade_app '$NXT_DIR' '$APP' '$PROJECT'
 $PLAN_RUN_BLOCK
 $FINALIZE_LOCAL
+$CONTAINER_VERDICT_BLOCK
 # A run that skipped generators is not a clean run, and the outer summary prints UPGRADE_OK either way.
 # Say so here, while the reason is still on screen, so neither a human nor a model reads that final
 # line as everything-was-applied.
@@ -2315,7 +2413,7 @@ fi
 # --- the repository has to be in a state where committing means what it says ----------------------------------
 # The migration ladder commits, and Nx builds every one of those commits with `git add -A`. That is fine in a
 # normal working tree and actively destructive in two states git can legitimately be in.
-if [ "$MODE" = "upgrade" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ "$MODE" = "upgrade" ] && _git_versions "$TARGET"; then
   # --absolute-git-dir, not --git-dir: the plain form answers RELATIVE to the repository ("`.git`"), and this
   # script's own working directory is not the project, so every `-e "$_gd/MERGE_HEAD"` below silently missed.
   _gd="$(git -C "$TARGET" rev-parse --absolute-git-dir 2>/dev/null || echo '')"
@@ -2387,9 +2485,9 @@ fi
 
 # --- create + push a private GitHub repo (scaffold mode only; gh auth lives on the host) ---
 # Runs OUTSIDE Docker: the bare typescript-node base image has neither `gh` nor the host's
-# auth. The repo is what lets Firebase App Hosting take over CI/CD — linking it at
-# `firebase apphosting:backends:create` makes Firebase provision its own Cloud Build deploys
-# (so we generate no workflow files). Non-Firebase projects just get a remote to push to.
+# auth. A linked repo is what App Hosting's GitHub mode rolls out from (linked at
+# `firebase apphosting:backends:create`; we generate no workflow files). Non-Firebase projects
+# just get a remote to push to.
 # Never fail the scaffold over a missing/unauthenticated gh — the local repo already exists.
 GITHUB_RESULT=""
 if [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ]; then
@@ -2495,8 +2593,8 @@ fi
 # between these markers against real git fixtures; keep them intact and keep the function self-contained
 # (no globals beyond its arguments), or the test silently covers nothing.
 # --->8--- UPGRADE_NEXT
-_upgrade_next() {   # <target> <base-sha|''> — sets UPGRADE_NEXT and UPGRADE_RELOAD
-  local target="$1" base="$2" changed=""
+_upgrade_next() {   # <target> <base-sha|''> [container verdict: same|changed|''] — sets UPGRADE_NEXT and UPGRADE_RELOAD
+  local target="$1" base="$2" container="${3-}" changed=""
   UPGRADE_NEXT="unknown"
   UPGRADE_RELOAD=""
   [ -n "$base" ] || return 0
@@ -2520,7 +2618,12 @@ _upgrade_next() {   # <target> <base-sha|''> — sets UPGRADE_NEXT and UPGRADE_R
   # everyone learns to ignore, which is exactly what this line exists to prevent. `.claude/data/` is also
   # gitignored, so this is belt and braces; the anchor is the half that does not depend on a project having
   # been upgraded yet.
-  if printf '%s\n' "$changed" | grep -q '^\.devcontainer/'; then
+  # A REBUILD IS DECIDED BY WHAT THE CONTAINER IS BUILT FROM, not by which paths moved: `.devcontainer/` also holds
+  # the house's ownership record (its `layers` list moves with every layer added) and prose comments, and neither is
+  # read by a container build. The program's content comparison (CONTAINER_VERDICT_BLOCK) says `same` when every
+  # change under `.devcontainer/` is of that kind. Without a verdict — an older payload, a failed comparison — any
+  # change there still rebuilds: an over-report is recoverable, a swallowed rebuild is not.
+  if [ "$container" != "same" ] && printf '%s\n' "$changed" | grep -q '^\.devcontainer/'; then
     UPGRADE_NEXT="rebuild-container"
   elif printf '%s\n' "$changed" | grep -qE '^(\.claude/settings\.json|\.mcp\.json)$'; then
     UPGRADE_NEXT="restart-session"
@@ -2535,8 +2638,23 @@ _upgrade_next() {   # <target> <base-sha|''> — sets UPGRADE_NEXT and UPGRADE_R
 }
 # ---8<--- UPGRADE_NEXT
 
+# What the generators need a HUMAN to look at (nx-tools _utils/upgrade-report.ts): a value of the project's replaced
+# inside a house target, a value with no record to tell an edit from an older house value, a deploy-contract value
+# re-asserted, a target of the project's own kept over the house's. Generators append one line each to the report
+# file in the upgrade lock (BESPUNKY_UPGRADE_REPORT, exported by the plan runner); their warnings alone drown in the
+# run's output. Each line says what happened and what to do; none of it failed the run. Silent when there is none.
+# --->8--- UPGRADE_ATTENTION
+_upgrade_attention() {   # <upgrade lock dir, or ''>
+  [ -n "$1" ] && [ -s "$1/report" ] || return 0
+  echo "UPGRADE_ATTENTION: $(grep -c . "$1/report") thing(s) this run changed or kept in the project's own targets — read each:"
+  sed 's/^/  /' "$1/report"
+}
+# ---8<--- UPGRADE_ATTENTION
+
 if [ "$MODE" = "upgrade" ]; then
-  _upgrade_next "$TARGET" "$UPGRADE_BASE"
+  _container_verdict=""
+  [ -n "${UPGRADE_LOCK:-}" ] && _container_verdict="$(sed -n 1p "$UPGRADE_LOCK/container" 2>/dev/null || true)"
+  _upgrade_next "$TARGET" "$UPGRADE_BASE" "$_container_verdict"
   echo "UPGRADE_NEXT: $UPGRADE_NEXT"
   case "$UPGRADE_NEXT" in
     rebuild-container)
@@ -2589,4 +2707,5 @@ else
   if [ -n "$RESTORE_SHA" ] && printf ',%s,' "${_final_layers:-}" | grep -q ',node,'; then
     echo "UPGRADE_VERIFY: nothing was built, linted or tested. Before landing it: $NX_RUN affected -t build lint test --base=$RESTORE_SHA"
   fi
+  _upgrade_attention "${UPGRADE_LOCK:-}"
 fi

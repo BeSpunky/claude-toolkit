@@ -19,6 +19,7 @@
 // framework nobody has asked for yet.
 import type { GeneratorCallback, ProjectConfiguration, TargetConfiguration, Tree } from '@nx/devkit';
 import type { LayerId } from '../layers/descriptor';
+import type { Platform } from '../platform/platform';
 
 export interface StackAdapter {
   /** The adapter id. Also the value of publishable-lib's `--stack`. */
@@ -44,13 +45,21 @@ export interface StackAdapter {
    * two copies of it once disagreed on whether `@nx/angular:` counted.
    */
   readonly executors: readonly string[];
+  /**
+   * Where this stack's code runs (`src/platform`): the platform its apps are, and the DEFAULT for its libraries.
+   * Angular is `web`; plain TypeScript is `shared` — it runs anywhere until it imports something that doesn't.
+   * Also evidence for the platform classifier: a project this stack builds is at least this platform.
+   */
+  readonly platform: Platform;
 
   readonly apps?: AppPort;
   readonly libs?: LibPort;
   readonly env?: EnvPort;
   readonly providers?: ProvidersPort;
   readonly styles?: StylesPort;
-  /** The app's dev-server, as an Nx `dev-server` target — what the web layer's `serve` composer drives. */
+  /** The app's shell markup — what a capability adds to it (the design system: the skip link it styles). */
+  readonly shell?: ShellPort;
+  /** The app's dev-server, as an Nx `dev-server` target — what the web layer's `dev-stack` composer drives. */
   readonly devServer?: DevServerPort;
   /** The framework half of the design system: its runtime binding, library shape, component generator. */
   readonly designSystem?: DesignSystemPort;
@@ -74,6 +83,11 @@ export interface LibOptions {
   directory: string;
   importPath: string;
   tags?: string;
+  /**
+   * The library's platform — REQUIRED, so no library is created through a port without one (an untagged library
+   * is outside the platform firewall). The port writes it as the library's one `platform:` tag.
+   */
+  platform: Platform;
   /** Publishable (buildable to dist, releasable) vs a workspace-internal source library. */
   publishable: boolean;
   /** Framework component-selector prefix; ignored by stacks without components. */
@@ -132,8 +146,16 @@ export interface StylesPort {
   registerStylesheet(tree: Tree, project: string, sheet: { input: string; bundleName: string }): boolean;
 }
 
+export interface ShellPort {
+  /**
+   * Add the skip link before the house `<main id="main">` landmark the stack seeded at creation. `present`: the shell
+   * has one; `no-landmark`: the shell is the app's own (no house landmark) — left alone, the caller says how.
+   */
+  addSkipLink(tree: Tree, project: string): 'added' | 'present' | 'no-landmark';
+}
+
 /**
- * The stack's DEV-SERVER LEAF — the `dev-server` target the `serve` composer (web layer) drives by name. The
+ * The stack's DEV-SERVER LEAF — the `dev-server` target the `dev-stack` composer (web layer) drives by name. The
  * composer itself is stack-free; only the leaf is the framework's. A project that already has a dev-server of its
  * own (any executor) keeps it — the stack supplies one only when there is none.
  */
@@ -151,11 +173,25 @@ export interface DevServerPort {
   /** The leaf for `project`, carrying `preserved` (the options a user tuned on the previous leaf). */
   leaf(tree: Tree, project: string, preserved: Record<string, unknown>): TargetConfiguration;
   /**
-   * Point the app's dev-server at a dev proxy config (workspace-relative). True when set (or already set); false
-   * when the app has no dev-server of this stack's to configure — the caller reports it.
+   * Point the app's dev-server at a dev proxy config (workspace-relative) — set when it names none. What became of
+   * it is the answer, never a guess: the caller reports every outcome but `wired` (see ProxyWiring).
    */
-  useProxy(tree: Tree, project: string, proxyConfig: string): boolean;
+  useProxy(tree: Tree, project: string, proxyConfig: string): ProxyWiring;
 }
+
+/**
+ * Whether an app's dev-server serves through a given proxy config. Only `wired` means it does; each other case
+ * carries what a person needs to make it so:
+ *   - `foreign`: the dev-server already names a proxy config of the project's own — kept, because it is theirs;
+ *     `where` is the option's path (`options`, or `configurations.<name>`), `proxyConfig` the file it names;
+ *   - `unconfigurable`: the app's dev-server runs an executor this stack does not configure;
+ *   - `none`: the app has no dev-server at all (yet — a later sync wires it once one exists).
+ */
+export type ProxyWiring =
+  | { status: 'wired' }
+  | { status: 'foreign'; target: string; where: string; proxyConfig: string }
+  | { status: 'unconfigurable'; target: string; executor: string }
+  | { status: 'none' };
 
 /**
  * The library itself is created by `publishable-lib` through the SAME adapter's `libs` port — a design system
@@ -172,6 +208,11 @@ export interface DesignSystemPort {
   openLibraryStyles(tree: Tree, root: string, specifier: string): void;
   /** Delete what the framework generator emitted that the DS does not ship (demo components). */
   pruneGenerated(tree: Tree, root: string): void;
+  /**
+   * On creation, AFTER the runtime is seeded: drop the manifest peers the framework generator declared for the demo it
+   * pruned and nothing the library now holds uses (or the library fails its own @nx/dependency-checks lint).
+   */
+  pruneUnusedPeers?(tree: Tree, root: string): void;
 }
 
 export interface FirebaseClientPort {
@@ -179,6 +220,12 @@ export interface FirebaseClientPort {
   readonly serverBannedImports: readonly string[];
   /** Has this app already been given the Firebase client? (the suite's scripts follow the wired app) */
   isWired(tree: Tree, project: string): boolean;
+  /**
+   * Called before the FIRST app of this stack is created in a workspace that will wear Firebase: the framework's
+   * version is not chosen yet, so choose one the Firebase client supports (a creation-time choice — a workspace that
+   * already declares its framework keeps it, and the client refuses there with the choices if it cannot follow).
+   */
+  chooseFrameworkVersion?(tree: Tree): void;
   /** Attach the Firebase client to the app. Returns the post-commit install callback. */
   attach(
     tree: Tree,

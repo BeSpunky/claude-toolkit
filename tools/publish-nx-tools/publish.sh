@@ -126,6 +126,20 @@ if [ -f "$ASSETS_DIR/nx-tools/migrations.json" ]; then
   " || exit 1
 fi
 
+# --- the upstream tables are current -----------------------------------------------------------------------------
+# What the payload KNOWS about upstream (generators/_utils/firebase-compat.ts: Angular → @angular/fire → firebase,
+# firebase-tools' peers, Cloud Functions' runtimes, gcloud's archive; node-facts.ts: Node's LTS lines and the
+# typescript-node images that exist) is a projection frozen into every project that installs this version. Publishing
+# a stale one ships stale advice to every consumer for as long as they stay on it — so a publish re-asks upstream
+# first and stops on drift. (The per-push test job deliberately does NOT: an upstream release would turn every
+# unrelated PR red. A weekly schedule raises the alarm instead — .github/workflows/upstream-tables.yml.)
+for table in firebase-compat node-facts; do
+  node "$REPO_ROOT/tools/$table/project.mjs" || {
+    echo "ERROR: the $table projection is stale — run: node tools/$table/project.mjs --write, review, commit, re-run." >&2
+    exit 1
+  }
+done
+
 if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
   echo "Node $(node -v) is new enough — publishing locally (no Docker)."
   bash -c "$(render_steps "$ASSETS_DIR" "$(mktemp -d)")"

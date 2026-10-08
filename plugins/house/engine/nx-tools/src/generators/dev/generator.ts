@@ -1,5 +1,8 @@
 // House generator: the stack-free dev engine (`tools/dev/`) + the declarations of the apps the house serves.
 //
+// The ONE owner of tools/dev. Two layers list its step — `web` (the dev loop) and `firebase` (every emulator suite claims
+// its ports through the engine's stack identity) — and the planner runs a step two layers share once.
+//
 // Two jobs, both on every sync:
 //   1. WRITE THE ENGINE (owned, class A) — tools/dev/dev (a POSIX shim), dev.mjs and lib/*.mjs. Node built-ins
 //      only: it must run in a Python or Go repo with no node_modules. Rewritten every run, never edited in the
@@ -13,7 +16,7 @@
 import { type Tree, formatFiles, getProjects, logger } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { requireLayer } from '../../layers/registry';
+import { detectLayers, requireLayer } from '../../layers/registry';
 import { seedFromAdapters } from './fragments';
 import { SERVE_EXECUTOR } from '../_utils/dev-server';
 
@@ -25,6 +28,7 @@ export const ENGINE_FILES = [
   'lib/declaration.mjs',
   'lib/ports.mjs',
   'lib/stack.mjs',
+  'lib/stacks.mjs',
   'lib/worktrees.mjs',
 ] as const;
 
@@ -39,7 +43,7 @@ export function writeEngine(tree: Tree): void {
   }
 }
 
-/** Every project whose `serve` is the house composer — the projects the Nx wrapper serves through the engine. */
+/** Every project with a house composer target (`dev-stack`) — the projects the Nx wrapper serves through the engine. */
 export function servedProjects(tree: Tree): string[] {
   return [...getProjects(tree)]
     .filter(([, config]) => Object.values(config.targets ?? {}).some((t) => t && typeof t === 'object' && t.executor === SERVE_EXECUTOR))
@@ -60,7 +64,8 @@ export function seedServedApps(tree: Tree, tag: string): void {
 }
 
 export default async function devGenerator(tree: Tree, _options: DevSchema = {}): Promise<void> {
-  requireLayer(tree, 'web', 'dev');
+  // The web layer's dev loop — and the firebase layer's stack identity: its emulator suites claim their ports here.
+  if (!detectLayers(tree).includes('firebase')) requireLayer(tree, 'web', 'dev');
   writeEngine(tree);
   seedServedApps(tree, 'dev');
   await formatFiles(tree);

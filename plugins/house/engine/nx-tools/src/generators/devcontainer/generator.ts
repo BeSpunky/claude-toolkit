@@ -22,6 +22,7 @@
 // write is treated as the user's, and we only ADD what's missing — of the ACTIVE layers' fragments only.
 import { type Tree, logger, parseJson } from '@nx/devkit';
 import { applyEdits, modify } from 'jsonc-parser';
+import { insertJsoncMember } from '../_utils/jsonc-insert';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 
@@ -45,12 +46,13 @@ import {
   reconcileHouseAdded,
   recordedHouseAdded,
 } from '../_utils/devcontainer-provenance';
+import { assertNodeImage, nodeVersionFile, projectNodeMajor, LIVE_NODE_FACTS } from '../_utils/node-version';
+import { devcontainerNode } from '../_utils/node-spec';
 
 type Json = Record<string, unknown>;
 
 interface DevcontainerSchema {
   name: string;
-  nodeMajor?: string | number;
   /** The layers this devcontainer serves. Default: DETECTED from the workspace. */
   layers?: string[] | string;
   /**
@@ -120,8 +122,8 @@ export default async function devcontainerGenerator(
   if (!options.name) {
     throw new Error('devcontainer generator requires --name (the devcontainer / project name).');
   }
-  // Default the image tag to the Node major we are running under, if not given.
-  const nodeMajor = String(options.nodeMajor ?? process.versions.node.split('.')[0]);
+  // The image tag / Node feature version: the PROJECT's declared Node (_utils/node-version) — never the machine running this.
+  const nodeMajor = projectNodeMajor(tree);
   const voice = !!options.voice;
   const layers = activeLayers(tree, options.layers);
   const layerIds = layers.map((entry) => entry.id);
@@ -136,6 +138,11 @@ export default async function devcontainerGenerator(
   // that user at all — a container that cannot start is the worst thing an additive merge could produce.
   const imageSource = adoptedImageSource(tree, houseComposition.image.ref);
   const composition = imageSource.kind === 'build' ? houseComposition : compose(contributors, { nodeMajor, imageSource });
+  // The image is tagged with the project's Node where the house's image is actually USED (built from house.Dockerfile,
+  // or referenced as is) — so a major mcr publishes no image for is refused by name here, not at image pull.
+  if (imageSource.kind !== 'foreign' && /\/typescript-node:/.test(houseComposition.image.ref)) assertNodeImage(tree, nodeMajor);
+  // An image of the project's own runs ITS Node, which the project's Node file does not set — so a disagreement is named.
+  else if (imageSource.kind === 'foreign') reportForeignNode(tree, nodeMajor);
   const rendered = renderDevcontainerJson(options.name, layerIds, composition);
 
   // OWNERSHIP. The marker separates "regenerate the file we maintain" from "adopt somebody else's" — and it
@@ -316,7 +323,7 @@ function writeImageFiles(tree: Tree, composition: Composition): void {
     tree.write(path, content, mode === undefined ? undefined : { mode });
   };
   // 0o755 so the shebang/mode rule holds in the output; it is invoked as `sh <path>`, so the mode is not load-bearing.
-  owned(OS_PACKAGES_SCRIPT, renderOsPackagesScript(composition.osPackages), 0o755);
+  owned(OS_PACKAGES_SCRIPT, renderOsPackagesScript(composition), 0o755);
   if (composition.imageSource.kind === 'foreign') {
     if (tree.exists(HOUSE_DOCKERFILE_PATH) && isHouseFile(tree, HOUSE_DOCKERFILE_PATH)) tree.delete(HOUSE_DOCKERFILE_PATH);
   } else {
@@ -615,7 +622,8 @@ function mergeIntoExisting(
 
   const write = (path: (string | number)[], value: unknown, bucket: string[]) => {
     if (isNoise(path, value)) return;
-    text = applyEdits(text, modify(text, path, value, { formattingOptions: JSONC_FORMAT }));
+    // A NEW member is placed in its container's own style (../_utils/jsonc-insert.ts); a changed value is edited in place.
+    text = insertJsoncMember(text, path, value) ?? applyEdits(text, modify(text, path, value, { formattingOptions: JSONC_FORMAT }));
     bucket.push(path.join('.'));
     if (bucket === added) houseAdded.push(...asRecorded(path.map(String), value));
   };
@@ -654,17 +662,17 @@ function mergeIntoExisting(
    * Append missing array members ONE AT A TIME, in place.
    *
    * Replacing the whole array would re-serialize it — and take out every comment written BETWEEN its
-   * members, which in a devcontainer.json is where people explain why a mount exists. jsonc-parser's
-   * array insertion splices a single element at an index and leaves the rest of the text untouched.
+   * members, which in a devcontainer.json is where people explain why a mount exists. Each member is placed as
+   * text in the array's own style (one-line arrays stay one line — ../_utils/jsonc-insert.ts); jsonc-parser's
+   * formatted insertion reflowed every line it touched, which spread a one-line forwardPorts over nine.
    */
   const appendMissing = (path: (string | number)[], house: unknown[], current: unknown[]) => {
     const missing = house.filter((item) => !current.some((have) => sameMember(have, item)));
     let at = current.length;
     for (const item of missing) {
-      text = applyEdits(
-        text,
-        modify(text, [...path, at], item, { formattingOptions: JSONC_FORMAT, isArrayInsertion: true })
-      );
+      text =
+        insertJsoncMember(text, [...path, at], item) ??
+        applyEdits(text, modify(text, [...path, at], item, { formattingOptions: JSONC_FORMAT, isArrayInsertion: true }));
       added.push(`${path.join('.')}[+${JSON.stringify(item).slice(0, 40)}]`);
       houseAdded.push({ path: path.map(String), member: item });
       at++;
@@ -696,6 +704,8 @@ function mergeIntoExisting(
     }
   }
 
+  // Say what changed only when something did: a re-sync of a complete file writes nothing and claims nothing.
+  if (text === existingText) return { skipped, houseAdded };
   tree.write(DEVCONTAINER, text);
 
   if (mode === 'assert') {
@@ -886,4 +896,15 @@ function tryParse(source: string): Json | undefined {
 
 function isPlainObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The Node a devcontainer with an image of its own runs, named when it is not the project's declared one. */
+function reportForeignNode(tree: Tree, nodeMajor: string): void {
+  const running = devcontainerNode((path) => (tree.exists(path) ? tree.read(path, 'utf8') ?? '' : undefined), LIVE_NODE_FACTS);
+  if (!running || 'unknown' in running || String(running.major) === nodeMajor) return;
+  logger.warn(
+    `[devcontainer] ${nodeVersionFile(tree)} says Node ${nodeMajor}, but this devcontainer keeps an image of its own that runs ` +
+      `Node ${running.major} (${running.from}) — the project's Node file does not set it. Make them agree, so the container ` +
+      'runs what CI and Cloud Functions are told to.',
+  );
 }
