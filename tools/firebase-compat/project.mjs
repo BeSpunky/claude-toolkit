@@ -11,7 +11,12 @@
 //   - the @angular/fire packument → for every Angular major (17 … the newest @angular/core), the newest STABLE
 //     @angular/fire whose peer admits it, with its firebase range; else the newest prerelease (named in the refusal
 //     so a developer can choose it deliberately);
-//   - firebase-tools@<FIREBASE_TOOLS_VERSION>'s own runtime table → the GA `nodejsNN` runtimes.
+//   - firebase-tools@<FIREBASE_TOOLS_VERSION>'s own runtime table → the GA `nodejsNN` runtimes;
+//   - for every firebase range a row names, and for what `firebase@latest` is today: the NODE that firebase needs — the
+//     `engines.node` of its whole dependency closure, as the package manager resolves it (the newest release inside each
+//     range). firebase itself declares no engines; its packages do (`@firebase/ai@3.0.0`: `>=24.12.0`, in firebase 13),
+//     and yarn refuses the install on any other Node (npm and pnpm warn). So a firebase the project's Node cannot install is a fact
+//     the table carries, and the judges never choose it (adapters/angular/angularfire-judge.ts).
 // And for the pinned GCLOUD_CLI_VERSION it projects the sha256 of Google's versioned archive per architecture
 // (gcloud-archive.ts, with --write — the archives are downloaded and hashed), and CHECKS that the projection is for the
 // pin and that both archives are still served.
@@ -41,11 +46,94 @@ const GCLOUD = VERSIONS.match(/GCLOUD_CLI_VERSION = '([^']+)'/)[1];
 const OUT = join(UTILS, 'firebase-compat.ts');
 /** The oldest Angular major the table covers: older majors' @angular/fire predates the modular API the house uses. */
 const FIRST_MAJOR = 17;
+/**
+ * The Node majors a firebase's needs are judged against: from the oldest still in Cloud Functions' and the house
+ * images' range to the newest Node there is (node-facts.ts — projected beside this, from nodejs.org).
+ */
+const FIRST_NODE_MAJOR = 18;
+const NEWEST_NODE_MAJOR = Number(/NODE_NEWEST_MAJOR = (\d+)/.exec(readFileSync(join(UTILS, 'node-facts.ts'), 'utf8'))[1]);
+const NODE_MAJORS = Array.from({ length: NEWEST_NODE_MAJOR - FIRST_NODE_MAJOR + 1 }, (_, i) => FIRST_NODE_MAJOR + i);
 
 async function packument(name) {
   const response = await fetch(`https://registry.npmjs.org/${name.replace('/', '%2F')}`);
   if (!response.ok) throw new Error(`npm registry: ${name} → HTTP ${response.status}`);
   return response.json();
+}
+
+/** npm's abbreviated packument (versions with dependencies and engines only) — one fetch per package per run. */
+const abbreviated = new Map();
+function installDocument(name) {
+  if (!abbreviated.has(name)) {
+    abbreviated.set(
+      name,
+      fetch(`https://registry.npmjs.org/${name.replace('/', '%2F')}`, { headers: { accept: 'application/vnd.npm.install-v1+json' } }).then(
+        (response) => {
+          if (!response.ok) throw new Error(`npm registry: ${name} → HTTP ${response.status}`);
+          return response.json();
+        },
+      ),
+    );
+  }
+  return abbreviated.get(name);
+}
+
+/** The release a package manager installs for `range`: `latest` when it satisfies, else the newest release inside. */
+async function resolveRelease(name, range) {
+  const doc = await installDocument(name);
+  const latest = doc['dist-tags']?.latest;
+  const version =
+    range === 'latest' ? latest : latest && semver.satisfies(latest, range) ? latest : semver.maxSatisfying(Object.keys(doc.versions), range);
+  if (!version) throw new Error(`npm registry: no ${name} release satisfies "${range}" — the projection's premise is gone`);
+  return doc.versions[version];
+}
+
+/**
+ * What `firebase@<range>` needs of Node: the release it resolves to, the Node majors its WHOLE dependency closure
+ * accepts (every `engines.node`; yarn refuses an install outside one, npm and pnpm warn), and the constraints that exclude any
+ * major in NODE_MAJORS (`>=24.12.0`, stated by `@firebase/ai@3.0.0`) — for the messages.
+ */
+const nodeNeeds = new Map();
+function firebaseNodeNeed(range) {
+  if (!nodeNeeds.has(range)) nodeNeeds.set(range, computeNodeNeed(range));
+  return nodeNeeds.get(range);
+}
+async function computeNodeNeed(range) {
+  const root = await resolveRelease('firebase', range);
+  const seen = new Set();
+  const constraints = [];
+  let level = [root];
+  while (level.length) {
+    const next = [];
+    for (const manifest of level) {
+      const id = `${manifest.name}@${manifest.version}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const engine = manifest.engines?.node;
+      if (typeof engine === 'string' && engine.trim()) {
+        if (!semver.validRange(engine)) throw new Error(`${id}: engines.node "${engine}" is not a range semver reads — the projection's premise is gone`);
+        constraints.push({ id, range: engine });
+      }
+      for (const [dep, depRange] of Object.entries(manifest.dependencies ?? {})) {
+        if (!semver.validRange(depRange)) throw new Error(`${id}: dependency ${dep}@"${depRange}" is not a registry range — the projection's premise is gone`);
+        next.push(resolveRelease(dep, depRange));
+      }
+    }
+    level = await Promise.all(next);
+  }
+  const admits = (constraint, major) => semver.intersects(constraint.range, `>=${major}.0.0 <${major + 1}.0.0-0`);
+  return {
+    firebase: root.version,
+    nodeMajors: NODE_MAJORS.filter((major) => constraints.every((c) => admits(c, major))),
+    // Grouped by range: one entry per distinct requirement, with the majors it admits and the packages that state it.
+    nodeNeeds: [...new Set(constraints.map((c) => c.range))]
+      .map((range) => ({
+        range,
+        nodeMajors: NODE_MAJORS.filter((major) => admits({ range }, major)),
+        packages: [...new Set(constraints.filter((c) => c.range === range).map((c) => c.id))].sort(),
+      }))
+      .filter((need) => need.nodeMajors.length < NODE_MAJORS.length)
+      .sort((a, b) => (a.range < b.range ? -1 : a.range > b.range ? 1 : 0)),
+  };
 }
 
 /**
@@ -111,6 +199,7 @@ async function angularFireRows() {
     return {
       angularfire: version,
       firebase,
+      firebaseResolves: firebaseNodeNeed(firebase), // awaited below
       angularCore,
       // The lowest Angular this @angular/fire accepts INSIDE the major (a peer like ^21.2.0 refuses 21.0.x).
       minAngular,
@@ -126,7 +215,10 @@ async function angularFireRows() {
     const prerelease = versions.find(([version, manifest]) => semver.prerelease(version) && admits(manifest, major));
     rows[major] = stable ? { stable: row(stable, major), prerelease: null } : { stable: null, prerelease: prerelease ? row(prerelease, major) : null };
   }
-  return { rows, newestMajor, typescript: await typescriptByMajor(newestMajor) };
+  for (const release of Object.values(rows).flatMap(({ stable, prerelease }) => [stable, prerelease]).filter(Boolean)) {
+    release.firebaseResolves = await release.firebaseResolves;
+  }
+  return { rows, newestMajor, typescript: await typescriptByMajor(newestMajor), byTag: { latest: await firebaseNodeNeed('latest') } };
 }
 
 function functionsRuntimes(version) {
@@ -146,10 +238,14 @@ function functionsRuntimes(version) {
   }
 }
 
-function render({ rows, newestMajor, typescript }, runtimes, asOf) {
-  const literal = (row) => (row ? JSON.stringify(row, null, 2).replace(/\n/g, '\n    ') : 'null');
+function render({ rows, newestMajor, typescript, byTag }, runtimes, asOf) {
+  // JSON, with a list of plain values (majors, package ids) kept on one line.
+  const pretty = (value) =>
+    JSON.stringify(value, null, 2).replace(/\[\s*([^[\]{}]*?)\s*\]/g, (_, items) => `[${items.split(/,\s*/).filter(Boolean).join(', ')}]`);
+  const literal = (row) => (row ? pretty(row).replace(/\n/g, '\n    ') : 'null');
   return `// GENERATED by tools/firebase-compat/project.mjs from the npm registry — never hand-edit; re-run it with --write
-// (the scheduled check fails when npm has moved on: a new @angular/fire, or FIREBASE_TOOLS_VERSION moved).
+// (the scheduled check fails when npm has moved on: a new @angular/fire or firebase, a new engines.node in firebase's
+// dependency closure, or FIREBASE_TOOLS_VERSION moved).
 //
 // Read by the Angular adapter's Firebase client (@angular/fire + firebase follow the INSTALLED Angular major) and the
 // functions manifest (engines.node must be a live Cloud Functions runtime). See the script for the derivation.
@@ -161,12 +257,27 @@ function render({ rows, newestMajor, typescript }, runtimes, asOf) {
  */
 export const ANGULARFIRE_TABLE_AS_OF = '${asOf}';
 
+/**
+ * What a firebase spec installs, and what that install needs of Node: the \`engines.node\` of firebase's WHOLE dependency
+ * closure (firebase declares none itself; its packages do — and yarn refuses an install on any other Node; npm and pnpm warn).
+ */
+export interface FirebaseResolution {
+  /** The firebase release the spec resolves to on npm (the newest inside the range; \`latest\`'s target). */
+  firebase: string;
+  /** The Node majors (${FIRST_NODE_MAJOR}–${NEWEST_NODE_MAJOR}) every package in that closure accepts. */
+  nodeMajors: number[];
+  /** Each distinct \`engines.node\` in the closure that excludes one of those majors: the majors it admits, who states it. */
+  nodeNeeds: Array<{ range: string; nodeMajors: number[]; packages: string[] }>;
+}
+
 /** One @angular/fire release, with what it requires. */
 export interface AngularFireRelease {
   /** Exact: firebase below is THIS release's own range, so a floating @angular/fire would break the pairing. */
   angularfire: string;
   /** @angular/fire's own \`dependencies.firebase\` — the root declares exactly this, so the package manager keeps ONE SDK. */
   firebase: string;
+  /** What that range installs today, and the Node it needs — a release the project's Node cannot install is never chosen. */
+  firebaseResolves: FirebaseResolution;
   /** Its peer on @angular/core. */
   angularCore: string;
   /** The lowest @angular/core it accepts within the major. */
@@ -189,6 +300,12 @@ ${Object.entries(rows)
 
 /** The newest Angular major npm knew when this was projected — a newer one is a major this table has never seen. */
 export const ANGULARFIRE_TABLE_NEWEST_ANGULAR = ${newestMajor};
+
+/**
+ * What a firebase declared by npm dist-tag installed as of this table — and the Node it needs. A floating tag moves with
+ * no commit behind it, so the house never writes one; this is what it says to a project that still declares one.
+ */
+export const FIREBASE_BY_DIST_TAG: Readonly<Record<string, FirebaseResolution>> = ${pretty(byTag).replace(/^  "([a-z]+)":/gm, '  $1:')};
 
 /**
  * Per Angular major: the TypeScript range its newest compiler-cli peers, and the TypeScript the house declares when it
@@ -271,7 +388,7 @@ if (process.argv.includes('--write')) {
   console.log(`${unchanged ? 'unchanged' : 'wrote'} ${OUT} (firebase-tools@${FIREBASE_TOOLS})`);
 } else if (!unchanged) {
   console.error(
-    `DRIFT: ${OUT} is not what npm says today (a new @angular/fire, or FIREBASE_TOOLS_VERSION moved) — run: ` +
+    `DRIFT: ${OUT} is not what npm says today (a new @angular/fire or firebase, a new Node requirement, or FIREBASE_TOOLS_VERSION moved) — run: ` +
       `node tools/firebase-compat/project.mjs --write, review the diff, and decide whether existing projects need a migration.`,
   );
   process.exit(1);

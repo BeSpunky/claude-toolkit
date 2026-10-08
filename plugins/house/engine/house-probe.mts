@@ -33,6 +33,9 @@ const constant = (name: string) => new RegExp(`${name} = '([^']+)'`).exec(versio
 const refusals: Array<[string, string]> = [];
 const refuse = (code: string, text: string) => refusals.push([code, `[preflight] ${code}: ${text}`]);
 
+// The project's Node as this probe resolved it (and where from) — the Firebase judge never chooses a firebase it cannot install.
+let projectNodeFact: { major: number; from: string } | null = null;
+
 // ---- Node: the generators tag the image (and the functions runtime) with the project's major --------------------
 if (layers.has('agent') || layers.has('node') || layers.has('firebase')) {
   const facts = factsOf(NODE_FACTS);
@@ -56,6 +59,7 @@ if (layers.has('agent') || layers.has('node') || layers.has('firebase')) {
     );
   } else if (node.state === 'declared') {
     major = node.major;
+    projectNodeFact = { major, from: node.from };
   } else {
     const running = devcontainerNode(read, facts);
     if (running && 'unknown' in running) {
@@ -65,7 +69,10 @@ if (layers.has('agent') || layers.has('node') || layers.has('firebase')) {
           `Node cannot be read (${running.from}: ${running.unknown}).\n           The house will not guess it (the next upgrade ` +
           `would move your container): write the major it runs (\`node -v\` inside it) into .nvmrc, then re-run.`,
       );
-    } else major = running?.major ?? Number(constant('HOUSE_NODE_MAJOR'));
+    } else {
+      major = running?.major ?? Number(constant('HOUSE_NODE_MAJOR'));
+      projectNodeFact = { major, from: running ? `${running.from}, which .nvmrc will record` : 'the house default, which .nvmrc will record' };
+    }
   }
   // The typescript-node image is tagged with it where the house's image is used: the node layer, on a devcontainer the
   // house owns or creates, or one already built from (or referencing) the house's image.
@@ -101,6 +108,8 @@ if (layers.has('firebase') && layers.has('angular')) {
         angular: version ? { version, major: majorOf(version), from: typeof installed === 'string' ? 'installed' : 'declared' } : null,
         declared: { fire: undefined, firebase: declared('firebase') },
         installedFire: null,
+        node: projectNodeFact,
+        installedFirebase: null,
       },
       table,
     );

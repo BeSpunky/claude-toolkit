@@ -242,9 +242,77 @@ export default {
       run: (tree, ctx) => ctx.load('adapters/angular/angularfire').declareBrowserSdk(tree),
       expect: (tree, t, ctx) => {
         const report = ctx.logs.find((line) => line.includes('"@angular/fire": "latest" and "firebase": "latest"')) ?? '';
-        t.ok(/1\. Pin what is installed[\s\S]*2\. Move to Angular 20[\s\S]*3\. Declare another/.test(report), `ordered choices: ${ctx.logs}`);
+        t.ok(/1\. Pin the installed @angular\/fire 20\.1\.0[\s\S]*2\. Move to Angular 20[\s\S]*3\. Declare another/.test(report), `ordered choices: ${ctx.logs}`);
         t.ok(!ctx.logs.some((line) => /two Firebase SDKs/.test(line)), 'no half-advice');
         t.equal(deps(tree)['@angular/fire'], 'latest', 'a generator reports, never rewrites a declared spec');
+      },
+    },
+    {
+      // FINAL-GATE §1: on firebase 13's release day the advice read "Pin what is installed: firebase ^11.8.0" while the
+      // ROOT firebase installed was 13.0.0 — which the project's Node 22 cannot even install (@firebase/ai@3.0.0 needs
+      // >=24.12.0). The advice now describes the real installed state and what the pin does to it.
+      name: 'Angular 22, @angular/fire 20 + firebase 13 installed on Node 22, both "latest": the advice names the REAL root firebase and the Node it needs',
+      setup: () => {
+        const tree = workspace();
+        tree.write('.nvmrc', '22\n');
+        writeJson(tree, 'package.json', { name: 'x', dependencies: { '@angular/core': '~22.1.0', '@angular/fire': 'latest', firebase: 'latest' } });
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, '@angular/fire', { version: '20.1.0', dependencies: { firebase: '^11.8.0' } });
+        installed(tree, 'firebase', { version: '13.0.0', dependencies: { '@firebase/ai': '3.0.0', '@firebase/util': '1.15.3' } });
+        installed(tree, '@firebase/ai', { version: '3.0.0', engines: { node: '>=24.12.0' }, dependencies: { '@firebase/util': '1.15.3' } });
+        installed(tree, '@firebase/util', { version: '1.15.3', engines: { node: '>=20.0.0' } });
+        return tree;
+      },
+      run: (tree, ctx) => ctx.load('adapters/angular/angularfire').declareBrowserSdk(tree),
+      expect: (tree, t, ctx) => {
+        const { ANGULARFIRE_BY_ANGULAR_MAJOR } = ctx.load('generators/_utils/firebase-compat');
+        const report = ctx.logs.find((line) => line.includes('"@angular/fire": "latest" and "firebase": "latest"')) ?? '';
+        t.ok(!/Pin what is installed/.test(report), `no claim that ^11.8.0 is what is installed: ${report}`);
+        t.ok(
+          /already moved: the installed firebase 13\.0\.0 needs Node >=24\.12\.0 \(@firebase\/ai@3\.0\.0\); this project's Node is 22 \(\.nvmrc\)/.test(report),
+          `the drift is named, with the requirement, who states it, and the project's Node: ${report}`,
+        );
+        const resolves = ANGULARFIRE_BY_ANGULAR_MAJOR[20].stable.firebaseResolves.firebase;
+        t.ok(
+          new RegExp(`1\\. Pin the installed @angular/fire 20\\.1\\.0 with the firebase range it carries: "@angular/fire": "20\\.1\\.0", "firebase": "\\^11\\.8\\.0"[^\\n]*root firebase installed today is 13\\.0\\.0 \\(outside that range, and needs a newer Node than this project's\\): the reinstall replaces it with firebase ${resolves.replace(/\./g, '\\.')}`).test(report),
+          `choice 1 says what is really installed and what the pin does to it: ${report}`,
+        );
+        t.ok(/2\. Move to Angular 20[\s\S]*3\. Declare another/.test(report), `then the other choices, in order: ${report}`);
+      },
+    },
+    {
+      name: 'Node is part of the pair: a release whose firebase the project\'s Node cannot install is NEVER chosen — the refusal says why and how to move',
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'package.json', { name: 'x' });
+        return tree;
+      },
+      run: () => undefined,
+      expect: (tree, t, ctx) => {
+        const judge = ctx.load('adapters/angular/angularfire-judge');
+        const compat = ctx.load('generators/_utils/firebase-compat');
+        const live = judge.tableOf(compat, '15.32.1');
+        // The live table, with Angular 20's firebase moved to one that needs Node 24 (as firebase 13 does).
+        const needs24 = { firebase: '13.0.0', nodeMajors: [24, 25, 26], nodeNeeds: [{ range: '>=24.12.0', nodeMajors: [24, 25, 26], packages: ['@firebase/ai@3.0.0'] }] };
+        const table = { ...live, byMajor: { ...live.byMajor, 20: { stable: { ...live.byMajor[20].stable, firebaseResolves: needs24 }, prerelease: null } } };
+        const facts = (major) => ({
+          angular: { version: '20.3.4', major: 20, from: 'installed' },
+          declared: {},
+          installedFire: null,
+          node: { major, from: '.nvmrc' },
+          installedFirebase: null,
+        });
+        const refused = judge.coherentPair(facts(22), table);
+        t.ok('refusal' in refused, 'Node 22: no pair chosen');
+        const text = 'refusal' in refused ? judge.renderAdvice('', refused.refusal) : '';
+        t.ok(/firebase 13\.0\.0 needs Node >=24\.12\.0 \(@firebase\/ai@3\.0\.0\); this project's Node is 22 \(\.nvmrc\)/.test(text), `the refusal names the Node: ${text}`);
+        t.ok(/1\. Move this project to Node 24 or later/.test(text), `and how to move: ${text}`);
+        t.ok('pair' in judge.coherentPair(facts(24), table), 'Node 24: the same release is chosen');
+        t.ok('pair' in judge.coherentPair({ ...facts(22), node: null }, table), 'no declared Node: nothing to judge against, the release stands');
+        // A floating "latest" with nothing installed: what it installs as of the table, and whether this Node can.
+        const tagged = live.firebaseByTag.latest;
+        const gap = judge.firebaseNodeGap(tagged, { major: 22, from: '.nvmrc' });
+        t.ok(tagged.nodeMajors.includes(22) ? gap === undefined : /this project's Node is 22/.test(gap ?? ''), `the latest tag (${tagged.firebase}) judged: ${gap}`);
       },
     },
     {

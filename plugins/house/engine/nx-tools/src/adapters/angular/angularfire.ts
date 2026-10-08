@@ -24,14 +24,19 @@ import { isFloatingSpec } from '../../generators/_utils/version-spec';
 import {
   type AngularFireTable,
   type BrowserSdkFacts,
+  type NodeNeed,
   type Pair,
   type SdkAdvice,
   coherentPair,
+  firebaseNodeGap,
   firebaseToolsAdvice,
   majorOf,
+  nodeRefusal,
   renderAdvice,
   tableOf,
 } from './angularfire-judge';
+import { projectNode } from '../../generators/_utils/node-version';
+import { rangeAdmitsMajor } from '../../generators/_utils/node-spec';
 import { declareDependencies, declaredSpec, placeDependency, updateManifest } from '../../generators/_utils/dependencies';
 import { installedManifest, workspaceAngular } from './workspace-angular';
 
@@ -46,6 +51,9 @@ export function readBrowserSdkFacts(
 ): BrowserSdkFacts {
   const angular = workspaceAngular(tree, declared);
   const fire = installedManifest(tree, '@angular/fire');
+  const declaredNode = projectNode(tree);
+  const node = declaredNode.state === 'declared' ? { major: declaredNode.major, from: declaredNode.from } : null;
+  const root = installedManifest(tree, 'firebase');
   return {
     angular,
     declared: { fire: declared('@angular/fire'), firebase: declared('firebase') },
@@ -53,7 +61,44 @@ export function readBrowserSdkFacts(
       typeof fire?.version === 'string'
         ? { version: fire.version, major: majorOf(fire.version), firebase: fire.dependencies?.firebase ?? null }
         : null,
+    node,
+    installedFirebase: typeof root?.version === 'string' ? { version: root.version, refusedBy: node ? installedNodeRefusals(tree, node.major) : [] } : null,
   };
+}
+
+/**
+ * Every `engines.node` in the INSTALLED root firebase's dependency closure that refuses `major` — read from
+ * node_modules as Node resolves it (a package's own node_modules first, then each parent's, up to the root).
+ */
+function installedNodeRefusals(tree: Tree, major: number): NodeNeed[] {
+  const byRange = new Map<string, string[]>();
+  const seen = new Set<string>();
+  const visit = (dir: string) => {
+    if (seen.has(dir)) return;
+    seen.add(dir);
+    let manifest: { name?: string; version?: string; engines?: { node?: unknown }; dependencies?: Record<string, string> };
+    try {
+      manifest = JSON.parse(tree.read(`${dir}/package.json`, 'utf8') ?? '');
+    } catch {
+      return; // not installed (an optional or platform-specific dependency): nothing to judge
+    }
+    const range = manifest.engines?.node;
+    if (typeof range === 'string' && rangeAdmitsMajor(range, major) === false) {
+      byRange.set(range, [...(byRange.get(range) ?? []), `${manifest.name}@${manifest.version}`]);
+    }
+    for (const dep of Object.keys(manifest.dependencies ?? {})) {
+      // node_modules/a/node_modules/b → look in a's own node_modules, then each enclosing one.
+      const candidates: string[] = [];
+      for (let base = dir; base.includes('node_modules/'); base = base.slice(0, base.lastIndexOf('/node_modules/'))) {
+        candidates.push(`${base}/node_modules/${dep}`);
+      }
+      candidates.push(`node_modules/${dep}`);
+      const found = candidates.find((candidate) => tree.exists(`${candidate}/package.json`));
+      if (found) visit(found);
+    }
+  };
+  visit('node_modules/firebase');
+  return [...byRange].map(([range, packages]) => ({ range, packages: packages.sort() }));
 }
 
 /**
@@ -78,6 +123,7 @@ export function browserSdkFindings(facts: BrowserSdkFacts, table: AngularFireTab
       what:
         `package.json declares ${floating.join(' and ')} — ${floating.length > 1 ? 'versions nobody chose; they move' : 'a version nobody chose; it moves'} with no commit behind it, and ` +
         `firebase drifting from the range @angular/fire carries is the two-SDK crash ("No Firebase App '[DEFAULT]'").` +
+        floatingFirebaseNote(facts, table) +
         ('refusal' in verdict ? ` There is no coherent pair to pin for you: ${verdict.refusal.what}` : ''),
       choices: fix,
     });
@@ -118,6 +164,23 @@ export function browserSdkFindings(facts: BrowserSdkFacts, table: AngularFireTab
     });
   }
   return findings;
+}
+
+/**
+ * Where a floating firebase has ALREADY drifted, or is about to: the root firebase installed today (and whether the
+ * project's Node can run it), else what `latest` installs as of the table — so "it moves" is never abstract.
+ */
+function floatingFirebaseNote({ declared, installedFirebase, node }: BrowserSdkFacts, table: AngularFireTable): string {
+  if (!declared.firebase || !isFloatingSpec(declared.firebase)) return '';
+  if (installedFirebase) {
+    return installedFirebase.refusedBy.length && node
+      ? ` It has already moved: ${nodeRefusal(`the installed firebase ${installedFirebase.version}`, installedFirebase.refusedBy, node)}.`
+      : ` The root firebase installed today is ${installedFirebase.version}.`;
+  }
+  const tagged = Object.prototype.hasOwnProperty.call(table.firebaseByTag, declared.firebase) ? table.firebaseByTag[declared.firebase] : undefined;
+  if (!tagged) return '';
+  const gap = firebaseNodeGap(tagged, node);
+  return ` As of ${table.asOf}, "${declared.firebase}" installs firebase ${tagged.firebase}${gap ? `, and ${gap}` : ''}.`;
 }
 
 /**
@@ -173,17 +236,25 @@ export function declareBrowserSdk(tree: Tree): GeneratorCallback {
 export function pinAngularForFirebase(tree: Tree): void {
   if (declaredSpec(tree, '@angular/core') || !tree.exists('package.json')) return;
   const nx = nxAngularVersionTable(tree);
+  // A major whose @angular/fire carries a firebase this project's Node cannot install is not a candidate.
+  const { node } = readBrowserSdkFacts(tree);
+  const unrunnable = Object.entries(LIVE_ANGULARFIRE_TABLE.byMajor)
+    .map(([major, { stable }]) => ({ major: Number(major), gap: stable ? firebaseNodeGap(stable.firebaseResolves, node) : undefined }))
+    .filter(({ gap }) => gap);
   const candidates = Object.entries(LIVE_ANGULARFIRE_TABLE.byMajor)
     .filter(([, { stable }]) => stable)
     .map(([major]) => Number(major))
-    .filter((major) => nx.supported.includes(major))
+    .filter((major) => nx.supported.includes(major) && !unrunnable.some((u) => u.major === major))
     .sort((a, b) => b - a);
   const major = candidates[0];
   if (major === undefined) {
     throw new Error(
-      `${TAG} No Angular major has both a stable @angular/fire and support in the installed @nx/angular ` +
-        `(it supports ${nx.supported.join(', ')}). Install an @nx/angular that supports Angular ` +
-        `${Object.entries(LIVE_ANGULARFIRE_TABLE.byMajor).filter(([, r]) => r.stable).map(([m]) => m).join('/')} and re-run.`,
+      `${TAG} No Angular major has a stable @angular/fire, support in the installed @nx/angular ` +
+        `(it supports ${nx.supported.join(', ')}) and a firebase this project's Node can install. ` +
+        (unrunnable.length ? `Not offered: ${unrunnable.map(({ major: m, gap }) => `Angular ${m} — ${gap}`).join('; ')}. ` : '') +
+        `Install an @nx/angular that supports Angular ` +
+        `${Object.entries(LIVE_ANGULARFIRE_TABLE.byMajor).filter(([, r]) => r.stable).map(([m]) => m).join('/')}` +
+        `${unrunnable.length ? ', or move the project\'s Node (.nvmrc),' : ''} and re-run.`,
     );
   }
   // ALL of Angular's runtime, not @angular/core alone: @nx/angular's ensureAngularDependencies adds the runtime set ONLY

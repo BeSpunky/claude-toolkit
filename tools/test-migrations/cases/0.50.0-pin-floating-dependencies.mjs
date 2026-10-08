@@ -114,7 +114,7 @@ export default {
         t.ok(deps(tree).firebase === 'latest' && deps(tree)['@angular/fire'] === 'latest', 'no coherent pair: left as they are');
         const report = said.find((line) => line.includes('"@angular/fire": "latest" and "firebase": "latest"')) ?? '';
         t.ok(report, `both floating entries named: ${said}`);
-        const order = ['1. Pin what is installed and runs today: "@angular/fire": "20.1.0", "firebase": "^11.8.0"', '2. Move to Angular 20', '3. Declare another'];
+        const order = ['1. Pin the installed @angular/fire 20.1.0 with the firebase range it carries: "@angular/fire": "20.1.0", "firebase": "^11.8.0"', '2. Move to Angular 20', '3. Declare another'];
         t.ok(order.every((step, i) => report.indexOf(step) > (i ? report.indexOf(order[i - 1]) : -1)), `choices in order: ${report}`);
         t.ok(!said.some((line) => /Set "firebase": "\^11\.8\.0"/.test(line)), 'never the half-advice (firebase alone) on a mismatched Angular');
       },
@@ -129,7 +129,7 @@ export default {
       },
       expect: (tree, t) => {
         t.ok(deps(tree)['@angular/fire'] === 'latest', 'left');
-        t.ok(said.some((line) => /declares "@angular\/fire": "latest" —[\s\S]*1\. Pin what is installed/.test(line)), `reported: ${said}`);
+        t.ok(said.some((line) => /declares "@angular\/fire": "latest" —[\s\S]*1\. Pin the installed @angular\/fire/.test(line)), `reported: ${said}`);
       },
     },
     {
