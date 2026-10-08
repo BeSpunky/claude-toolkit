@@ -1,7 +1,21 @@
 ---
 effort: house-firebase-handoff
-summary: Triage and plan the gaps a consumer Firebase + Angular SSR house project hit (shir-halili-coaching handoff, 2026-10-07)
+status: concluded
+concluded: 2026-10-08
+summary: Fixed every verified gap two consumer Firebase projects reported (nx-tools 0.50.0) — pinned versions, emulators that cannot reach production or lose data, one stack identity per dev server, deploy targets + opt-in CI, true App Hosting docs, a fail-closed platform firewall — through two adversarial review rounds and real-container checks
+tags: [house, nx-tools, firebase, emulators, dev-loop, ci, migrations, firewall, dogfood, review]
+born-as: Triage and plan the gaps a consumer Firebase + Angular SSR house project hit (shir-halili-coaching handoff, 2026-10-07)
 ---
+
+## Conclusion (2026-10-08, at the merge gate)
+
+Delivered as `@bespunky/nx-tools` 0.50.0, `bespunky-house` 0.48.0, `bespunky-workflow` 0.12.0 (bumped at landing; publishing waits on the move to `main`). The trail below is untouched; the per-unit records are `impl/`, the two review rounds `review/`, the ledgers `handoffs/`.
+
+- **What changed shape during the effort**, each recorded where it happened: the C1 premise was refuted (App Hosting walks up from the root dir) and the real bug was a non-existent `--environment` flag; `serve` became the engine as a non-continuous task after R3 showed the follower design was patch-on-patch; emulator safety became structural (the `demo-` twin id) after R2; the stack lock became a kernel `flock` after S3; the firewall returned to one rule instance after S2.
+- **What the gates caught that fixtures did not:** a blocker in `new --preset=angular --firebase` (R1-0), a data-loss race in the export keeper (S1), seed builds broken under Nx's FORCE_COLOR, `new` committing into an enclosing repo — all found by running, not reading.
+- **User decisions:** no compat layers anywhere; `deploys` object-only with a migration; `FIREBASE_EMULATOR_PROJECT` removed (refused when set).
+- **Left outside the toolkit, with reasons:** E1 (a firebase-tools init bug — warned about), E2/E3 (upstream Nx/Analog — `nx migrate` guidance); the setup-gcp script is verified against a gcloud simulator and firebase-tools source, not a live GCP project.
+
 
 ## Decisions
 
