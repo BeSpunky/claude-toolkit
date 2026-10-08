@@ -475,7 +475,7 @@ _is_own_repository() {   # <dir>
 _own_repository() {
   _is_own_repository . && return 0
   echo "[git] $(pwd -P): git init (the project's own repository)"
-  git -C "$(pwd -P)" init -q -b main
+  git -C "$(pwd -P)" init -q   # the developer's init.defaultBranch names the first branch — the toolkit never assumes a branch name
 }
 _commit_scaffold() {   # <message>
   local _here
