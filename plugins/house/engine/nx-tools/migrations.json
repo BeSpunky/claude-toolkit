@@ -201,7 +201,7 @@
     "split-seed-applier": {
       "version": "0.50.0",
       "layer": "firebase",
-      "description": "The seed applier (encoder, REST calls, banner, emulator hosts) moves out of the project-owned tools/seed/world.mjs into the generator-owned tools/seed/apply.mjs, regenerated on every upgrade \u2014 so its fixes reach existing projects: it now refuses to run without emulator hosts (no more fallback to the base ports, which wrote into whichever suite owned them) and handles a world without accounts. A world.mjs whose applier is still the stock one loses it, imports ref/at from apply.mjs, and drops the host constants nothing else reads (a constant its worlds still read is kept and reported). A customised applier is left exactly as it is and reported: build.mjs no longer runs it.",
+      "description": "The seed applier (encoder, REST calls, banner, emulator hosts) moves out of the project-owned tools/seed/world.mjs into the generator-owned tools/seed/apply.mjs, regenerated on every upgrade \u2014 so its fixes reach existing projects: it now refuses to run without emulator hosts (no more fallback to the base ports, which wrote into whichever suite owned them) and handles a world without accounts. A world.mjs whose applier is still the stock one loses it, imports ref/at from apply.mjs, and drops the host constants nothing else reads (a constant its worlds still read is kept and reported). A customised applier is left exactly as it is and keeps running (build.mjs applies a world through world.mjs's own applyWorld whenever it exports one); the report compares it with the house applier, which now refuses to write without emulator hosts.",
       "implementation": "./src/migrations/0.50.0/split-seed-applier"
     },
     "retell-secrets-example": {
