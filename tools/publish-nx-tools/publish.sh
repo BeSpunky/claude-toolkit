@@ -135,7 +135,8 @@ fi
 # unrelated PR red. A weekly schedule raises the alarm instead — .github/workflows/upstream-tables.yml.)
 for table in firebase-compat node-facts; do
   node "$REPO_ROOT/tools/$table/project.mjs" || {
-    echo "ERROR: the $table projection is stale — run: node tools/$table/project.mjs --write, review, commit, re-run." >&2
+    echo "ERROR: the $table upstream check did not pass — its own message above says why (drift → run it with --write," >&2
+    echo "       review, commit, re-run; a crash → fix the cause, e.g. run \`yarn install\` if a module is missing)." >&2
     exit 1
   }
 done

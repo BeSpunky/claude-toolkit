@@ -25,6 +25,8 @@ on:
       - 'plugins/house/engine/nx-tools/**'
       - 'plugins/house/engine/compile-generators.mts'
       - 'tools/publish-nx-tools/**'
+      - 'tools/firebase-compat/**'
+      - 'tools/node-facts/**'
       - '.github/workflows/publish-nx-tools.yml'
   workflow_dispatch:
     inputs:
@@ -54,6 +56,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+          cache: yarn
 
       # Is package.json's version already on npm? If yes, this push didn't bump — nothing to publish.
       # Deliberately NOT using setup-node's registry-url: it redirects npm at a temp .npmrc, but
@@ -104,6 +107,13 @@ jobs:
             }
             console.log('migrations reachable: max <= '+pkg.version);
           "
+
+      # publish.sh re-asks upstream (tools/firebase-compat, tools/node-facts) before publishing, and those tools
+      # require the repo's own devDependencies (semver) — so the job installs them, exactly as the weekly
+      # upstream-tables job does. Without this, a clean runner crashed there and nothing was published (0.50.0).
+      - name: Install the repo's tooling dependencies
+        if: ${{ steps.ver.outputs.publish == 'true' || github.event.inputs.dry_run == 'true' }}
+        run: yarn install --frozen-lockfile
 
       # Publish on a real bump, or validate-only when dispatched with dry_run.
       - name: Publish (or dry-run)

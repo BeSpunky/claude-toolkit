@@ -18,6 +18,12 @@ if [ "${#tests[@]}" -eq 0 ]; then
   exit 2
 fi
 
+# The machine's git config must not decide a result. CI's runner defaults new repos to `master`, a developer's
+# machine often to `main` — a test that leaned on that passed locally and failed in CI (0.50.0). So every test
+# here runs with a default branch name nobody uses: anything that only works because of the machine's default
+# fails HERE, first. (Tests that need a branch name pass `-b` explicitly, as fixtures should.)
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch GIT_CONFIG_VALUE_0=not-a-default-branch
+
 status=0
 for t in "${tests[@]}"; do
   echo "── $t"
