@@ -11,7 +11,9 @@
       "branch": "main",
       "promote": "ff",
       "baseline": "7af334125a239f5b117d0a2805dd95d12dd29d7a",
-      "deploys": "publish-nx-tools.yml publishes @bespunky/nx-tools to npm; origin's default branch — what marketplace consumers pull"
+      "deploys": {
+        "note": "publish-nx-tools.yml publishes @bespunky/nx-tools to npm; origin's default branch — what marketplace consumers pull"
+      }
     }
   ],
   "releases": null,
