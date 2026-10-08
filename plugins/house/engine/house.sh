@@ -444,6 +444,54 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
+# --- WHICH REPOSITORY IS THE PROJECT'S: never the first one git finds walking up -----------------------------------
+# Every bare `git` call resolves its repository by walking UP from the working directory, and so does every tool
+# that shells out to git (create-nx-workspace, nx init). A directory created INSIDE another repository therefore
+# answers with that OUTER repository: create-nx-workspace saw "already under version control" and skipped its
+# `git init`, and the scaffold's closing `git add -A && git commit` then committed into the enclosing checkout —
+# the whole new project, plus anything the outer repo had staged, onto whatever branch it had out, a protected
+# line included. It surfaced as a scaffold under .claude/worktrees/ committing into this toolkit's own checkout,
+# harmless only because that folder is gitignored. So the question is never "is there a repository here?" but
+# "is the repository here THIS directory's?", answered by these functions alone:
+#
+#   _is_own_repository <dir>  <dir> is the top of a work tree — a repository of its own, not a folder in another.
+#   _own_repository           (scaffold) make the current directory its own repository: `git init` unless it
+#                             already is one. On `main`, explicitly: nx.json's defaultBase is main on both hosts,
+#                             so the branch must not follow a machine's init.defaultBranch.
+#   _commit_scaffold <msg>    (scaffold) the one commit, into the project's own repository and nowhere else —
+#                             it refuses rather than commit into a repository the directory merely sits inside.
+#   _git_versions <dir>       (upgrade) git versions <dir>'s files: inside a work tree AND not ignored by it. A
+#                             project in a SUBDIRECTORY of its repository is versioned (a supported layout); a
+#                             project in a directory its enclosing repository IGNORES is not — that repository's
+#                             HEAD holds none of its files, so it is no restore point, and committing migrations
+#                             into it would land on the outer repo's branch. Such a directory is not a git
+#                             repository for every purpose of an upgrade.
+_is_own_repository() {   # <dir>
+  local _here _top
+  _here="$(cd "$1" && pwd -P)" || return 1
+  _top="$(git -C "$_here" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ "$(cd "$_top" && pwd -P)" = "$_here" ]
+}
+_own_repository() {
+  _is_own_repository . && return 0
+  echo "[git] $(pwd -P): git init (the project's own repository)"
+  git -C "$(pwd -P)" init -q -b main
+}
+_commit_scaffold() {   # <message>
+  local _here
+  _here="$(pwd -P)"
+  if ! _is_own_repository "$_here"; then
+    echo "ERROR: $_here is not the top of its own git repository — refusing to commit the scaffold into" >&2
+    echo "       $(git -C "$_here" rev-parse --show-toplevel 2>/dev/null || echo 'no repository')." >&2
+    return 1
+  fi
+  git -C "$_here" add -A
+  git -C "$_here" commit -q -m "$1" || true
+}
+_git_versions() {   # <dir>
+  git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1 && ! git -C "$1" check-ignore -q . 2>/dev/null
+}
+
 # The identity of an EXISTING project directory: the name the same directory has in the repository's MAIN
 # worktree. `--git-common-dir` is shared by every worktree of a repository and, for an ordinary layout, is the main
 # worktree's `.git` — so its parent is the main worktree, whatever this linked one happens to be called. Only the
@@ -861,6 +909,10 @@ _pm_add_dev() {   # <package manager> <spec>...
 # program that carried an add it can never call would only invite one.
 PM_ADD_FN=""
 [ "$HOST" = "node" ] && PM_ADD_FN="$(declare -f _pm_add_dev)"
+# The repository functions each program calls (see _is_own_repository): rendered, not re-typed, so the program and
+# the host decide "whose repository is this?" with one definition.
+NEW_GIT_FNS="$(declare -f _is_own_repository _own_repository _commit_scaffold)"
+UPGRADE_GIT_FNS="$(declare -f _git_versions)"
 if [ "$HOST" = "wrapper" ] && [ "$MODE" = "new" ]; then
   echo "Nx host: the Nx wrapper (./nx) — the new project has no package.json (ensure the node layer, or --preset=node, for one)"
 elif [ "$MODE" = "upgrade" ]; then
@@ -1346,7 +1398,7 @@ if [ -n \"\$_um\" ]; then
 fi
 # Not a git repository at all: there is no history to damage and no branch to land on, so none of the git
 # preconditions have anything to say. Silence here is correct, not a skipped check.
-if git rev-parse --git-dir >/dev/null 2>&1; then
+if _git_versions .; then
   # 'git status --porcelain' rather than three diff invocations: it is the one command that also works in a
   # repository with no commits, where 'git diff --cached' has no HEAD to compare against and errors out.
   # Column 1 is the INDEX status, column 2 the WORKTREE status, '??' is untracked.
@@ -1754,7 +1806,7 @@ else
   #      files landing in someone's history as a side effect of a version bump is far worse than losing the
   #      per-migration granularity, so check first and drop the flag rather than the repo's history.
   _do_commits=0
-  if git rev-parse --git-dir >/dev/null 2>&1; then
+  if _git_versions .; then
     # NO COMMITTER IDENTITY = NO COMMITS, and Nx does not treat that as fatal: it reports that it could not
     # create the checkpoint commit, prints a git fatal per migration, and carries on -- after which this
     # script prints UPGRADE_OK. The migrations are applied and stamped, but the commit ladder the user was
@@ -1972,7 +2024,7 @@ RESTORE_SHA=""
 UPGRADE_BASE=""
 RESTORE_BLOCK=""
 if [ "$MODE" = "upgrade" ]; then
-  if git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if _git_versions "$TARGET"; then
     if RESTORE_SHA="$(git -C "$TARGET" rev-parse --verify -q HEAD 2>/dev/null)"; then
       BACKUP_REF="HEAD(${RESTORE_SHA:0:7})"
       UPGRADE_BASE="$RESTORE_SHA"
@@ -1986,7 +2038,8 @@ echo '  Review this upgrade: git diff $RESTORE_SHA ; restore a file: git checkou
       UPGRADE_BASE="$(git -C "$TARGET" hash-object -t tree /dev/null)"
     fi
   elif [ "$BACKUP" = "1" ]; then
-    echo "BACKUP_ABORT: '$TARGET' is not a git repository, so an upgrade would change files with no way back." >&2
+    echo "BACKUP_ABORT: '$TARGET' is not versioned by git (no repository, or one that ignores it), so an upgrade" >&2
+    echo "  would change files with no way back." >&2
     echo "  Create a restore point first:  (cd \"$TARGET\" && git init && git add -A && git commit -m 'pre-upgrade')" >&2
     echo "  …or re-run with --no-backup to upgrade without one." >&2
     exit 1
@@ -2163,13 +2216,19 @@ if [ "$HOST" = "node" ]; then
 #
 # Scoped to this invocation deliberately. These variables are true — an agent IS running this — and other
 # tools may reasonably key off them. What is not acceptable is one command redefining the workspace shape.
-env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' $CREATE_WORKSPACE_PRESET --packageManager=yarn --nxCloud=skip --no-interactive
-cd \"\$HOUSE_PROJECT_DIR_NAME\""
+#
+# --skipGit: the repository is ours to create, not create-nx-workspace's. Its own git step asks 'git rev-parse
+# --is-inside-work-tree' and, inside ANY enclosing repository, skips the init — leaving the project a folder of
+# someone else's repo for every git call after it. _own_repository asks the right question instead.
+env -u CLAUDECODE -u OPENCODE $CREATE_WORKSPACE '$PROJECT' $CREATE_WORKSPACE_PRESET --packageManager=yarn --nxCloud=skip --skipGit=true --no-interactive
+cd \"\$HOUSE_PROJECT_DIR_NAME\"
+_own_repository"
 else
   # No package.json: an empty repository, then the SAME wrapper floor an upgrade lays on a Python or Go repo.
   NEW_FLOOR_BLOCK="mkdir \"\$HOUSE_PROJECT_DIR_NAME\"
 cd \"\$HOUSE_PROJECT_DIR_NAME\"
-git init -q
+# Before nx init: it reads the repository (its default-base guess), and the one it must read is this one.
+_own_repository
 $NX_INIT_BLOCK"
 fi
 
@@ -2210,6 +2269,7 @@ NEW_APP_BLOCK=""
 if [ "$MODE" = "new" ]; then
   INNER="set -e
 $PM_ADD_FN
+$NEW_GIT_FNS
 mkdir -p \"\$HOUSE_WORK_ROOT\"
 cd \"\$HOUSE_WORK_ROOT\"
 $ENSURED_BLOCK
@@ -2218,7 +2278,6 @@ $ENSURED_BLOCK
 # this must not clobber it — hence the conditional. Same result on both paths, no drift.
 git config --global user.name >/dev/null 2>&1 || git config --global user.name \"\$HOUSE_GIT_NAME\"
 git config --global user.email >/dev/null 2>&1 || git config --global user.email \"\$HOUSE_GIT_EMAIL\"
-git config --global init.defaultBranch >/dev/null 2>&1 || git config --global init.defaultBranch main
 $NEW_FLOOR_BLOCK
 $NEW_PLUGINS_BLOCK
 $INSTALL_NX_TOOLS
@@ -2233,14 +2292,14 @@ $PLAN_RUN_BLOCK
 # --local only: correct the manifest's temp-dir tarball spec back to the plain version BEFORE the commit, or
 # the scaffold's one commit records a file: path that exists on no machine (and is deleted moments later).
 $FINALIZE_LOCAL
-# Commit the full scaffold. The floor may have made an initial commit (create-nx-workspace does), but the
-# house generators + dep installs ran after it — capture them so the host-side push (gh repo
-# create --source --push) ships a clean, complete tree on main.
-git add -A
-git commit -m 'chore: scaffold BeSpunky project (layers: $NEW_COMMIT_LAYERS)' || true"
+# Commit the full scaffold — the project's ONE commit (the floor makes none: create-nx-workspace runs with
+# --skipGit), into the project's own repository only, so the host-side push (gh repo create --source --push)
+# ships a clean, complete tree on main.
+_commit_scaffold 'chore: scaffold BeSpunky project (layers: $NEW_COMMIT_LAYERS)'"
 else
   INNER="set -e
 $PM_ADD_FN
+$UPGRADE_GIT_FNS
 cd \"\$HOUSE_WORK_ROOT/\$HOUSE_PROJECT_DIR_NAME\"
 $ENSURED_BLOCK
 # PREFLIGHT AND THE PROBE COME FIRST — before nx init, not merely before the install. Both only READ (git
@@ -2354,7 +2413,7 @@ fi
 # --- the repository has to be in a state where committing means what it says ----------------------------------
 # The migration ladder commits, and Nx builds every one of those commits with `git add -A`. That is fine in a
 # normal working tree and actively destructive in two states git can legitimately be in.
-if [ "$MODE" = "upgrade" ] && git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ "$MODE" = "upgrade" ] && _git_versions "$TARGET"; then
   # --absolute-git-dir, not --git-dir: the plain form answers RELATIVE to the repository ("`.git`"), and this
   # script's own working directory is not the project, so every `-e "$_gd/MERGE_HEAD"` below silently missed.
   _gd="$(git -C "$TARGET" rev-parse --absolute-git-dir 2>/dev/null || echo '')"

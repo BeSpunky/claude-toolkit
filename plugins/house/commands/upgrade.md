@@ -336,7 +336,8 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 
 ### The rest
 
-- **`BACKUP_ABORT: … is not a git repository`** — very common on a first retrofit. The upgrade **refused to
+- **`BACKUP_ABORT: … is not versioned by git`** — very common on a first retrofit (no repository at all, or a
+  folder its enclosing repository ignores, whose `HEAD` holds none of its files). The upgrade **refused to
   change anything** rather than rewrite files with no restore point. Relay the two ways out it printed:
   `git init && git add -A && git commit` in the project, or `--no-backup`. Prefer the first, and only pass
   `--no-backup` if the user asks for it — see the rule above. (In a git repository there is no backup step to
