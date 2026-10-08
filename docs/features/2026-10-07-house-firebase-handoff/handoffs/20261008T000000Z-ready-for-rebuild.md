@@ -17,3 +17,11 @@ The feature branch does NOT change this repo's container; the regenerated `.devc
 
 User: in the main folder `git checkout chore/hfh-rebuild-check` → VS Code *Rebuild Container*. Next session (Claude) verifies: `node -v` (22) vs `.nvmrc`; `which -a gcloud firebase` empty; `tmux -V`, `espeak-ng --version`, `sox --version`; post-create log "all present"; `gh auth status`; Claude logged in; `.devcontainer` package layer reinstalled once. Then `git checkout development` (no rebuild needed back — the script only reinstalls what is present).
 Not covered by this rebuild: the firebase layer's container changes (gcloud from Google's archive, firebase-cli feature removal) — needs a Firebase project's container (option offered to the user).
+
+## Rebuild result (2026-10-08, container started 04:54Z from chore/hfh-rebuild-check) — PASS
+- Node v22.23.2 (matches the 22 the self-upgrade writes to `.nvmrc`).
+- `which -a gcloud firebase` empty — the gcloud W1 had hand-installed is gone, as expected for a layer without firebase.
+- tmux 3.5a, espeak-ng 1.52.0, sox 14.4.2 installed in the image; re-running `house.packages.sh` → "all present — nothing to install" (exit 0).
+- Claude Code 2.1.293 logged in; session state survived (`.claude` host bind).
+- `gh`: **"Failed to log in to github.com account BeSpunky"** — NOT caused by the rebuild: the same 401 "Bad credentials" was already seen before it (verifier V4's `gh api` call). The token in the persisted `~/.config/gh/hosts.yml` is expired/revoked → user re-runs `gh auth login`.
+- Main folder switched back to `development`.
