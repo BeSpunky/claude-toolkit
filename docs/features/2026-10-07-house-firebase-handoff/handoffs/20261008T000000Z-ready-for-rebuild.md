@@ -25,3 +25,10 @@ Not covered by this rebuild: the firebase layer's container changes (gcloud from
 - Claude Code 2.1.293 logged in; session state survived (`.claude` host bind).
 - `gh`: **"Failed to log in to github.com account BeSpunky"** — NOT caused by the rebuild: the same 401 "Bad credentials" was already seen before it (verifier V4's `gh api` call). The token in the persisted `~/.config/gh/hosts.yml` is expired/revoked → user re-runs `gh auth login`.
 - Main folder switched back to `development`.
+
+## Firebase container check (2026-10-08) — PASS, 15/15
+A real Firebase+Angular project created with this branch (`.claude/worktrees/fb-container-check`, vendored 0.50.0 tarball), opened by the user in its own dev container. Result copied to `impl/FIREBASE-CONTAINER-CHECK.md`: Node 24 = .nvmrc; `firebase` only from node_modules/.bin at the pinned 15.32.1; gcloud 588.0.0 from Google's archive, no apt source, config in persisted ~/.config; Java 21; packages all present; no firebase-cli/gcloud feature; logins on persisted volumes; full dev loop — isolated offset, app answers, `dev ps`, emulators under `demo-`, Firestore write, `dev stop` exports the doc, no process left.
+A first run reported 3 FAILs only because it ran before post-create finished installing — not a defect; the fixture's script now says so instead.
+Also fixed during this step: `new` inside another git repo committed into the OUTER repo (59fc9f25 + branch-name follow-up).
+
+**Remaining:** user re-runs `gh auth login` (token expired, pre-existing); then land + release on the user's signal.
