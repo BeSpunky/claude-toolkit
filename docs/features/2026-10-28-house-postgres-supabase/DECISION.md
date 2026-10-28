@@ -1,0 +1,10 @@
+---
+effort: house-postgres-supabase
+summary: Make Postgres and Supabase first-class house layers, so a project can choose them over Firebase and get the same local dev, seed, safety and deploy story.
+---
+
+## Decisions (as they happened)
+
+- **2026-10-28 — scope.** The user, from the concept session for a new consumer project (`INBOUND-HANDOFF.md`): *"I want the toolkit to support Supabase and Postgres correctly and officially"*.
+- **2026-10-28 — two layers, not one.** The user asked: *"If we incorporate a new layer into our toolkit, it won't just be Postgres then. It would be a Supabase layer, isn't that so?"* The session agreed and gave the reasoning: a neutral `postgres` core, plus a `supabase` layer that `requires` it. This follows the house's capability model and the consumer's own rule that a vendor is a provider, not infrastructure.
+- **2026-10-28 — the bar is the Firebase layer, without its history.** The user: *"Looking at the home layer for Firebase, do you think we can easily replicate something similar for Postgres? The home layer for Firebase took a lot of iterations to get right"*. The session's answer, recorded in `INBOUND-HANDOFF.md` § 4, was that most of Firebase's iterations came from its client-dials-emulators architecture, which a backend-held connection removes. The lessons still carry over, and so do the safety guarantees.
