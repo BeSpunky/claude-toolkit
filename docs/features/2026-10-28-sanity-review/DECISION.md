@@ -24,6 +24,19 @@ summary: Ship a sanity-review agent + skill + always-on directive so Claude crit
 
 The review of this very change, run by the method, found its own most important bug: the reviewer launched its lens reviewers in the background (the subagent default) and returned before any came back. Root-caused into the method — every reviewer and verifier dispatched with `run_in_background: false`, in one message. The four lens reports (prompt design, architecture, completeness, DX/UX) produced ~25 findings; the verified ones are applied in the commit after this record. Ledger: `reviews/`.
 
+## Second run — the shipped agent, end to end
+
+Run headlessly (`claude -p --plugin-dir plugins/workflow`) as the real `bespunky-workflow:sanity-reviewer`, in `report` mode, over round one's fix commit. Confirmed what the design rests on: a plugin agent dispatches nested subagents synchronously and gets their results back. Its 14 findings were mostly contradictions round one introduced between the skill, the agent and branch-and-release; all applied (ledger `reviews/20261028T1955-sanity-review.md`). Decided along the way:
+
+- **One order:** final diff (after any rebase — conflict resolutions are code) → review → fixes committed → end-to-end verification once → land or release.
+- **Default mode is `report`** when a brief names none; the directive names `fix` for the session's own work.
+- **`reviews/` is a sanctioned package folder**, beside `handoffs/` and `mocks/`.
+- **Other fan-out ledgers stay in `handoffs/`.** Whether they too should leave it (resume reads the newest `handoffs/` file as the baton) is a separate question; a mid-flight fan-out ledger is arguably resume state, a finished review's is not.
+
+## An incident worth keeping
+
+The first self-upgrade dogfood (`house.sh upgrade --local .` from the worktree) wrote `HOUSE.md` and `post-create.sh` into the **main** checkout: this shell carries `NX_WORKSPACE_ROOT_PATH=/workspaces/claude-toolkit`, and the run omitted the `NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$PWD"` prefix that `/bespunky-house:upgrade` documents. Restored at once (main was clean before). Operator error against a documented step — but `house.sh` itself trusts an inherited root that points outside the project it was handed, which is worth surfacing to the user.
+
 ## Open
 
 - **Plugin-gating of directives** (architecture lens, low): a floor-only house project (no `agent` layer) still gets every workflow directive, this one included, though `bespunky-workflow` is enabled only by the `agent` layer. Pre-existing for all workflow directives; fixing it is a design change across all of them — surfaced to the user.
