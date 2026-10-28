@@ -37,6 +37,16 @@ Run headlessly (`claude -p --plugin-dir plugins/workflow`) as the real `bespunky
 
 The first self-upgrade dogfood (`house.sh upgrade --local .` from the worktree) wrote `HOUSE.md` and `post-create.sh` into the **main** checkout: this shell carries `NX_WORKSPACE_ROOT_PATH=/workspaces/claude-toolkit`, and the run omitted the `NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$PWD"` prefix that `/bespunky-house:upgrade` documents. Restored at once (main was clean before). Operator error against a documented step — but `house.sh` itself trusts an inherited root that points outside the project it was handed, which is worth surfacing to the user.
 
+## Plugin-gating (added on the user's "Yes")
+
+Asked whether to gate the workflow directives on the plugin they rely on, in this branch or separately, the user answered *"Yes"* — taken as this branch, per the standing rule that known gaps ship together.
+
+- **The principle:** text the house writes into a project names a toolkit skill, agent or command only where the project **enables** its plugin. Each `HOUSE.rules.md` directive is the operational half of a skill, so it arrives with that skill's plugin; `HOUSE.md`, the seeded `CLAUDE.md` and every other generated file gate only the sentence, with a plain alternative that still says what to do.
+- **Enablement is `.claude/settings.json`, not the layers' declarations.** The first cut gated on the layers' `claudePlugins`; the review of it showed only the agent layer's `claude-settings` step turns a declaration into enablement, so an angular / design-system / ci project without `agent` was still told to use skills it lacked. One reader (`_utils/claude-settings-file.ts`) now serves both the writer and every gate; a project that enables a plugin by hand gets its directives.
+- **Two safety rules stand alone:** the CI cloud-identity rule and the Firebase live-credentials rule name no plugin, so each became its own section rather than vanishing with a gated one.
+- **Accepted, not fixed:** on `new`, `environment.prod.ts` is written before the settings exist, so a fresh Angular + Firebase scaffold omits that file's App Hosting skill pointer (HOUSE.md and the welcome banner carry it); and the released 0.50.0 rung writes that pointer ungated, reaching only Firebase projects without the agent layer. Seeded files in existing projects are the project's own and are not migrated.
+- **Verified end to end:** a plain repo upgraded to the floor gets a rules file naming no skill (only *Generator-first*) and a CLAUDE.md pointer that still imports it; a Firebase + Angular consumer from published 0.49.2 upgrades cleanly (twice: then a no-op), builds, lints, keeps every hand-made shape, and carries the full rule set with every named plugin enabled; `new` passes for every preset.
+
 ## Open
 
-- **Plugin-gating of directives** (architecture lens, low): a floor-only house project (no `agent` layer) still gets every workflow directive, this one included, though `bespunky-workflow` is enabled only by the `agent` layer. Pre-existing for all workflow directives; fixing it is a design change across all of them — surfaced to the user.
+- Nothing open in this effort.
