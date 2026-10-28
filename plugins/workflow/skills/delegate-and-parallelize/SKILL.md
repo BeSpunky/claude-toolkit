@@ -22,7 +22,7 @@ Both bills are settled by the same move. Delegate.
 ## When to use
 
 - **At the start of any request with more than one moving part** — before the first `Read`, `grep` or edit (see *Step 0*).
-- **The moment you catch yourself working inline on labour** — about to read a fifth file, grep the repo "just to check", audit N call sites, review a diff across several dimensions, research several options, or run a long build/test sweep in the main thread.
+- **The moment you catch yourself working inline on labour** — about to read a fifth file, grep the repo "just to check", audit N call sites, review a diff across several dimensions, research several options, or run a long build/test sweep in the main thread. (Reviewing a *finished* implementation across lenses before the hand-back has its own skill and agent: [[sanity-review]].)
 - **Mid-flight**, whenever a task turns out to have independent pieces.
 - **Not for** work that is genuinely one unit, a change small enough that describing it costs more than doing it, or a strictly serial chain — fanning out there is theatre (see *Anti-patterns*), and this skill says so.
 
