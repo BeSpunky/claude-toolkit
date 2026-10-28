@@ -27,7 +27,8 @@ import { type CiDeployProvider, type CiEnvironment } from '../../layers/descript
 import { detectLayers, layer } from '../../layers/registry';
 import { branchModelFromOption, readBranchModel, type BranchModel, type BranchProjection } from '../_utils/branch-model';
 import { nxInvocation } from '../_utils/nx-host';
-import { pluginPointerValues, type PluginPointers } from '../_utils/plugin-pointers';
+import { pluginPointerValues } from '../_utils/plugin-pointers';
+import { CI_SKILL_POINTERS } from './skill-pointers';
 import { nodeVersionFile, projectNode } from '../_utils/node-version';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, type WiredLine } from './workflow';
@@ -65,14 +66,6 @@ const ABOUT =
   '`cloud` is what tools/setup-gcp.sh was last rendered for (a change prints a HUMAN_STEP); `configurations` are the ' +
   'ci-<environment> configurations it wrote on provider deploy targets. Never hand-edit.';
 
-/**
- * The skill the layer's own words send a reader to — in `.bespunky/ci.json`'s `pending` and the workflow's header —
- * rendered only where the project enables it (_utils/plugin-pointers); every sentence reads whole without it.
- */
-const SKILL_POINTERS: PluginPointers = {
-  branchModelSkill: ['bespunky-workflow', ' through the bespunky-workflow:branch-and-release skill'],
-};
-
 export default async function ciGenerator(tree: Tree, options: CiSchema = {}): Promise<void> {
   const layers = options.layers?.length ? options.layers : detectLayers(tree);
   const providers = layers.map((id) => layer(id).ciDeploy).filter((p): p is CiDeployProvider => Boolean(p));
@@ -81,8 +74,8 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
     options.branchProjection !== undefined ? branchModelFromOption(options.branchProjection) : readBranchModel(tree);
 
   const notes: string[] = [];
-  const { branchModelSkill } = pluginPointerValues(tree, SKILL_POINTERS);
-  const { lines, environments, pending } = resolve(model, providers, notes, branchModelSkill);
+  const { throughBranchModelSkill } = pluginPointerValues(tree, CI_SKILL_POINTERS);
+  const { lines, environments, pending } = resolve(model, providers, notes, throughBranchModelSkill);
 
   // ── environments no binding names any more, whose cloud setup is still recorded: kept until rolled back ──────
   const retired = new Map<string, CiEnvironment[]>();
@@ -118,7 +111,7 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
         packageManager: nx.packageManager,
         yarnBerry: tree.exists('.yarnrc.yml') || /"packageManager"\s*:\s*"yarn@[2-9]/.test(tree.read('package.json', 'utf8') ?? ''),
         nodeVersionFile: nodeVersionFile(tree),
-        branchModelSkill,
+        throughBranchModelSkill,
       }),
     });
     if (projectNode(tree).state !== 'declared') notes.push(`the workflow reads Node from ${nodeVersionFile(tree)}, which declares none here — add .nvmrc (one line: the Node major) or the deploy job fails at setup-node.`);
@@ -187,7 +180,7 @@ function resolve(
   model: BranchModel,
   providers: readonly CiDeployProvider[],
   notes: string[],
-  branchModelSkill: string,
+  throughBranchModelSkill: string,
 ): { lines: WiredLine[]; environments: Map<string, CiEnvironment[]>; pending?: string } {
   const environments = new Map<string, CiEnvironment[]>();
   if (!model.declared) {
@@ -196,7 +189,7 @@ function resolve(
       environments,
       pending:
         'the branch model is not declared (.bespunky/branches.json), and the house never guesses which branch is production. ' +
-        `Declare it${branchModelSkill}, give each line that should deploy a \`ci\` binding, then upgrade.`,
+        `Declare it${throughBranchModelSkill}, give each line that should deploy a \`ci\` binding, then upgrade.`,
     };
   }
   const lines: WiredLine[] = [];
@@ -238,7 +231,7 @@ function resolve(
     environments,
     pending:
       'no protected line in the branch model has a `ci` deploy binding. Add one to each line that should deploy ' +
-      `(e.g. "deploys": { "ci": { "environment": "production", "providers": { "firebase": "default" } } })${branchModelSkill}, then upgrade.`,
+      `(e.g. "deploys": { "ci": { "environment": "production", "providers": { "firebase": "default" } } })${throughBranchModelSkill}, then upgrade.`,
   };
 }
 

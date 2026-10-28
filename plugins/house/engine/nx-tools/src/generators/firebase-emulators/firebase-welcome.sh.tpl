@@ -65,7 +65,7 @@ if _fb_setup_pending; then
   printf '  source instead (\033[1mfirebase init apphosting\033[0m once, then \033[1mfirebase deploy --only apphosting\033[0m). Either way the Root Directory is the app, never /.\n'
   printf '  Cloud Functions and the Firestore / Storage rules deploy through Nx, not App Hosting — the road from login to the\n'
   printf '  first deploy (and to CI), with what this machine already has ticked: \033[1mnode tools/firebase-deploy.mjs --check\033[0m\n'
-  printf '  Or just ask Claude to walk you through it (staging, deploy modes, account moves){{appHostingSkill}}.\n\n'
+  printf '  Or just ask Claude{{appHostingSkill}} to walk you through it (staging, deploy modes, account moves).\n\n'
 fi
 
 unset -f _fb_setup_pending _fb_has_client

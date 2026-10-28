@@ -665,6 +665,7 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
 // each subset of the registry closed under `requires` — with the branch model declared and undeclared, because the
 // gates nest inside layer and model gates (`{{#ci}}{{#firebase}}`, `{{#branches-declared}}`) a smaller sample misses.
 const WORKFLOW_ONLY = [/\bbranches\.mjs\b/, /\bthe skill(?:'s)?\b/];
+const NX_ONLY = [/`nx-[a-z-]+` skill/, /\bNx MCP\b/];
 checkAsync('house docs name only toolkit skills and agents whose plugin the project enables', async (ok) => {
   const { claudePlugins } = require_(join(BUILD, 'src/generators/_utils/layer-contributions'));
   const { enabledPlugins } = require_(join(BUILD, 'src/generators/_utils/claude-settings-file'));
@@ -694,6 +695,8 @@ checkAsync('house docs name only toolkit skills and agents whose plugin the proj
         for (const plugin of named) ok(enabled.has(plugin), `${key}: ${file} names ${plugin}, which this project does not enable`);
         // Unnamed references to the workflow skill and its engine — `branches.mjs` ships inside bespunky-workflow.
         if (!enabled.has('bespunky-workflow')) for (const re of WORKFLOW_ONLY) ok(!re.test(text), `${key}: ${file} still says ${text.match(re)?.[0]} without bespunky-workflow`);
+        // The Nx plugin's skills and MCP server carry no `bespunky-` namespace, so they are named here.
+        if (!enabled.has('nx')) for (const re of NX_ONLY) ok(!re.test(text), `${key}: ${file} still says ${text.match(re)?.[0]} without the Nx plugin`);
       }
       // And the other direction: where the plugin IS enabled, its directives render — gating must never drop them.
       if (enabled.has('bespunky-workflow')) ok(rules.includes('## Review before you hand back (non-negotiable)') && rules.includes('## Branch & release workflow'), `${key}: bespunky-workflow is enabled, but its directives did not render`);
@@ -710,6 +713,24 @@ checkAsync('house docs name only toolkit skills and agents whose plugin the proj
   const dir = join(PAYLOAD, 'src/generators/house-doc');
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.tpl'))) {
     for (const [, flag] of readFileSync(join(dir, file), 'utf8').matchAll(/\{\{[#^/](plugin-[\w-]+)\}\}/g)) ok(declaredAnywhere.has(flag), `${file} gates on ${flag}, which no layer declares`);
+  }
+  // Every OTHER template reaches a toolkit skill or command only through a pointer token (_utils/plugin-pointers): a
+  // name typed into the template itself renders whatever the project enables. And each pointer table entry gates on the
+  // plugin its own text names — a mismatch (a typo, a renamed plugin) would gate on one and point at another.
+  const templates = (root) =>
+    readdirSync(root, { withFileTypes: true, recursive: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.tpl'))
+      .map((e) => join(e.parentPath ?? e.path, e.name));
+  for (const file of templates(join(PAYLOAD, 'src')).filter((f) => !f.startsWith(dir))) {
+    const hit = readFileSync(file, 'utf8').match(/\/?bespunky-[a-z0-9-]+:[a-z]/);
+    ok(!hit, `${file.slice(PAYLOAD.length + 1)} names ${hit?.[0]} directly — route it through a plugin-pointers token`);
+  }
+  for (const table of ['design-system/skill-pointers', 'firebase-emulators/skill-pointers', 'ci/skill-pointers']) {
+    for (const [name, pointers] of Object.entries(require_(join(BUILD, 'src/generators', table)))) {
+      for (const [token, [plugin, text]] of Object.entries(pointers)) {
+        ok(text.includes(`${plugin}:`) && declaredAnywhere.has(`plugin-${plugin}`), `${table} ${name}.${token} gates on ${plugin} but its text points elsewhere, or no layer declares it`);
+      }
+    }
   }
 });
 

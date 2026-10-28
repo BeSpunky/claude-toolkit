@@ -61,6 +61,9 @@ function app(tree, name, call = '') {
   return styles;
 }
 
+/** The rung's warnings, for the case that asserts it reports nothing. */
+const seenWarnings = [];
+
 const tokens = (tree) => tree.read(`${DS}/styles/_core/_tokens.scss`, 'utf8');
 const declared = (tree) => /^\$default-mode: '([\w-]+)';$/m.exec(tokens(tree))?.[1];
 
@@ -104,6 +107,28 @@ export default {
         t.has(theme, 'with real trade-offs), you must apply it');
         t.hasNot(theme, 'bespunky-engineering');
         t.hasNot(theme, '{{');
+      },
+    },
+    {
+      // Every DsTheme seeded from 0.45.0 until the pointers were gated carries the resumable-state pointer, whatever
+      // the project enabled — the rung must still know it for current, not report it as a customised file.
+      name: 'an already-0.45 DsTheme with the old unconditional pointer, bespunky-engineering not enabled: current, not reported',
+      setup: (tree) => {
+        designSystem(tree);
+        app(tree, 'web');
+        tree.write(`${DS}/src/lib/ds-theme.service.ts`, current('adapters/angular/design-system-files/src/lib/ds-theme.service.ts.tpl'));
+        const logger = requireFromRepo('@nx/devkit').logger;
+        const previous = logger.warn;
+        seenWarnings.splice(0);
+        logger.warn = (...args) => {
+          seenWarnings.push(args.join(' '));
+          previous(...args);
+        };
+      },
+      expect: (tree, t) => {
+        const theme = `${DS}/src/lib/ds-theme.service.ts`;
+        t.has(theme, '; see `bespunky-engineering:resumable-state`');
+        t.ok(!seenWarnings.some((w) => w.includes('ds-theme.service.ts')), `the current DsTheme was reported: ${seenWarnings.join(' | ')}`);
       },
     },
     {

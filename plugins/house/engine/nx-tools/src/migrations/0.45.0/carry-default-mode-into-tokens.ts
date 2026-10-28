@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import { findDesignSystem } from '../../generators/_utils/design-system';
 import { applicationsWith } from '../../adapters/registry';
 import { THEME_START, THEME_END } from '../../generators/design-system-styles/generator';
-import { pluginPointerRenderer } from '../../generators/_utils/plugin-pointers';
+import { pluginPointerRenderer, pointerRendererFor } from '../../generators/_utils/plugin-pointers';
 import { DESIGN_SYSTEM_SKILL_POINTERS } from '../../generators/design-system/skill-pointers';
 
 const TAG = '[0.45.0 carry-default-mode-into-tokens]';
@@ -134,7 +134,10 @@ export default async function carryDefaultModeIntoTokens(tree: Tree): Promise<vo
     if (!tree.exists(path)) continue;
     const current = tree.read(path, 'utf8') ?? '';
     const next = render(tree, m.template, prefix);
-    if (fingerprint(current, prefix) === fingerprint(next, prefix)) continue; // already current
+    // Already current: as this project's enablement renders it, or as every seed from 0.45.0 until the pointers were
+    // gated wrote it — each pointer on, whatever the project enables.
+    const currentShapes = [next, renderAsSeeded(m.template, prefix)].map((text) => fingerprint(text, prefix));
+    if (currentShapes.includes(fingerprint(current, prefix))) continue;
     if (fingerprint(current, prefix) !== m.stock044) {
       logger.warn(
         `${TAG} ${path} differs from the stock file the design system seeded, so it was left as it is — and it ` +
@@ -190,6 +193,12 @@ function declare(tokens: string, value: string, prefix: string): string {
 /** A seeded template as the design-system generator renders it: the prefix, and the skill pointers this project enables. */
 function render(tree: Tree, template: string, prefix: string): string {
   const pointers = pluginPointerRenderer(tree, DESIGN_SYSTEM_SKILL_POINTERS);
+  return pointers(readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', prefix));
+}
+
+/** The same template as the seeds before the pointers were gated carried it: every pointer on. */
+function renderAsSeeded(template: string, prefix: string): string {
+  const pointers = pointerRendererFor(DESIGN_SYSTEM_SKILL_POINTERS, () => true);
   return pointers(readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', prefix));
 }
 

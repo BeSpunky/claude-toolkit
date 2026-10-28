@@ -1,7 +1,7 @@
 // THE PROJECT'S CLAUDE CODE SETTINGS — `.claude/settings.json`, read in one place.
 //
-// The `claude-settings` generator (the agent layer's step) writes it; every generator that writes text for Claude to
-// act on reads it, because it is the one fact about which plugins this project actually ENABLES. A layer's
+// The `claude-settings` generator (the agent layer's step) writes it; every generator that writes a pointer to a toolkit
+// skill or command reads it, because it is the one fact about which plugins this project actually ENABLES. A layer's
 // `claudePlugins` is only a declaration — nothing enables it unless the agent layer wrote the settings, or the
 // project enabled a plugin itself — so a doc gated on the declaration would still tell a project without the agent
 // layer to invoke a skill it does not have.

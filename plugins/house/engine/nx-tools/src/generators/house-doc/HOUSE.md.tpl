@@ -180,7 +180,7 @@ Each worktree serve gets a pretty **`<slug>.localhost`** domain (browsers auto-r
 
 ### Observe-only etiquette (co-driving)
 
-The shared browser is one instance you and Claude share. Before Claude asks *you* to complete an interactive step it can't do for you — a real OAuth sign-in, a captcha, anything needing your credentials — it runs **`shared-browser observe`** so its own automation refuses to navigate/click/type and won't move the view under your hands; it runs **`shared-browser resume`** once you're done. Full co-drive mechanics live in the **`bespunky-browser-automation:shared-browser`** skill.
+The shared browser is one instance you and Claude share. Before Claude asks *you* to complete an interactive step it can't do for you — a real OAuth sign-in, a captcha, anything needing your credentials — it runs **`shared-browser observe`** so its own automation refuses to navigate/click/type and won't move the view under your hands; it runs **`shared-browser resume`** once you're done.{{#plugin-bespunky-browser-automation}} Full co-drive mechanics live in the **`bespunky-browser-automation:shared-browser`** skill.{{/plugin-bespunky-browser-automation}}
 
 {{/web}}
 {{#firebase}}
@@ -487,12 +487,12 @@ Libraries here are **publishable by default** — one generator owns the package
 ## Working with Nx
 
 - Invoke Nx as **`{{NX}}`**{{#node}} — through the workspace's package manager, never a globally installed CLI{{/node}}{{^node}} — the wrapper pins the exact Nx version in `nx.json` (`installation`) and installs it into `.nx/installation` on first use; there is no global or package.json Nx here{{/node}}.
-- For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies.
-- When running a project's tasks, prefer `nx` (`nx run`, `nx run-many`, `nx affected`) over the underlying tooling directly, so caching and the task graph apply.
-- You have access to the Nx MCP server and its tools (through the Nx plugin) - use them.
-- For Nx plugin best practices, check `{{#node}}node_modules{{/node}}{{^node}}.nx/installation/node_modules{{/node}}/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
-- For scaffolding (projects, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
-- **Moving Nx is this project's job.** The house upgrade migrates the *house's* shapes; it never changes the Nx version. Nx ships its own migrations for the files *its* generators wrote (vite/vitest configs, `nx.json`, plugin options) — they only arrive when you run `{{NX}} migrate latest`, review what it changes (and the `migrations.json` it writes), then `{{NX}} migrate --run-migrations`. A warning that comes from a file an Nx generator wrote (e.g. Vite's `configLoader: 'native'` complaining about `__dirname` in a `vite.config`) is usually already fixed by one of them.
+{{#plugin-nx}}- For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies.
+{{/plugin-nx}}- When running a project's tasks, prefer `nx` (`nx run`, `nx run-many`, `nx affected`) over the underlying tooling directly, so caching and the task graph apply.
+{{#plugin-nx}}- You have access to the Nx MCP server and its tools (through the Nx plugin) - use them.
+{{/plugin-nx}}- For Nx plugin best practices, check `{{#node}}node_modules{{/node}}{{^node}}.nx/installation/node_modules{{/node}}/@nx/<plugin>/PLUGIN.md` (not all plugins have it - proceed without if absent).
+{{#plugin-nx}}- For scaffolding (projects, structure), invoke the `nx-generate` skill FIRST before exploring or calling MCP tools.
+{{/plugin-nx}}- **Moving Nx is this project's job.** The house upgrade migrates the *house's* shapes; it never changes the Nx version. Nx ships its own migrations for the files *its* generators wrote (vite/vitest configs, `nx.json`, plugin options) — they only arrive when you run `{{NX}} migrate latest`, review what it changes (and the `migrations.json` it writes), then `{{NX}} migrate --run-migrations`. A warning that comes from a file an Nx generator wrote (e.g. Vite's `configLoader: 'native'` complaining about `__dirname` in a `vite.config`) is usually already fixed by one of them.
 {{#house-targets}}- **House targets are yours to extend.** The targets on the house's own projects ({{HOUSE_PROJECTS}}) are re-asserted on every upgrade by a **three-way merge** against `.bespunky/house-targets.json` — the record of what the house last wrote (generated; commit it, never edit it). So an input, an option (`args`), a `configurations` entry or a `dependsOn` entry you add — or a value you change — **survives every upgrade** unless the house changes the same key; then the house's value wins and the upgrade's summary **says what it replaced** (`UPGRADE_ATTENTION`), so you can re-apply it. What a target runs (`executor` with `command`/`commands`) is one value, never mixed. A target the house introduces under a name you already use stays **yours**, whole — the upgrade says so each time; rename yours to take the house's. A few values are the **contract** other machinery relies on (a deploy's `cache: false`, `parallelism: false`, `dependsOn: build`): re-asserted every upgrade, and reported if yours differed. A house target you delete comes back; to run something different, add a target of your own beside it.
 {{/house-targets}}{{^js}}{{^angular}}- This workspace has no JavaScript/TypeScript layer, so the house's TypeScript generators (`app`, `publishable-lib`, `design-system`, …) do not apply — they say so if you run them. Nx itself is language-agnostic: add the plugin for this stack (`{{NX}} add <plugin>`) to give its projects targets.
 {{/angular}}{{/js}}
@@ -512,6 +512,6 @@ This devcontainer ships with **a Playwright Chromium pre-installed**: the shared
 
 Use Playwright whenever you need to **observe** or **drive** the running app instead of reasoning about source: verify a UI change end-to-end, reproduce a user-reported bug in the actual browser, capture before/after screenshots, scrape the rendered DOM, or generate test scaffolding via codegen. Headless for scripts; the shared browser is the headed one, on the container's virtual display.
 
-For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` / `Claude_in_Chrome` MCPs, how to write a headless script, how to capture and feed back screenshots, common pitfalls), invoke the **`bespunky-browser-automation:playwright`** skill before reaching for any browser-side check.
-
+{{#plugin-bespunky-browser-automation}}For the canonical patterns (when to choose Playwright vs. the `Claude_Preview` / `Claude_in_Chrome` MCPs, how to write a headless script, how to capture and feed back screenshots, common pitfalls), invoke the **`bespunky-browser-automation:playwright`** skill before reaching for any browser-side check.
+{{/plugin-bespunky-browser-automation}}
 {{/web}}

@@ -142,8 +142,11 @@ const firebase = MODES.map(({ label, plugins, on }) => ({
   },
   expect: (tree, t) => {
     check(t, on, 'tools/firebase-deploy.mjs', ['/bespunky-house:add-layer ci', 'bespunky-workflow:branch-and-release'], ['4. Add the ci layer', 'declared in .bespunky/branches.json']);
+    // Where the pointer IS the means, the off text names the same means without the plugin — never a dead end.
+    (on ? t.hasNot : t.has)('tools/firebase-deploy.mjs', '4. Add the ci layer:  house.sh add-layer ci .');
     check(t, on, 'tools/firebase-deploy-rules.mjs', ['/bespunky-house:upgrade'], ['Run the house upgrade', 'watches every declared file, or add']);
-    check(t, on, 'tools/firebase-welcome.sh', ['bespunky-house:firebase-app-hosting'], ['Or just ask Claude to walk you through it (staging, deploy modes, account moves)']);
+    (on ? t.hasNot : t.has)('tools/firebase-deploy-rules.mjs', 'Run the house upgrade (house.sh upgrade .), which');
+    check(t, on, 'tools/firebase-welcome.sh', ['bespunky-house:firebase-app-hosting'], ['to walk you through it (staging, deploy modes, account moves).']);
     check(t, on, 'apphosting.yaml', ['bespunky-house:firebase-app-hosting'], ['# Deploying: ask Claude', 'create the backend']);
   },
 }));
