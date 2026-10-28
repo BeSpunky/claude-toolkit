@@ -168,7 +168,7 @@ claude-toolkit/
 ├── plugins/workflow/
 │   ├── .claude-plugin/plugin.json
 │   ├── agents/
-│   │   └── sanity-reviewer.md            # the review before the hand-back — one hostile reviewer per lens, adversarial verification, verified fixes applied (never committed), decisions handed back
+│   │   └── sanity-reviewer.md            # the review itself — method + lens panel: one hostile reviewer per lens, adversarial verification, verified fixes applied (never committed), decisions handed back
 │   ├── hooks/                             # continuity, made reliable rather than hoped-for
 │   │   ├── hooks.json                    # SessionStart + PreCompact registrations, and the one mods.ts module (registers every mod)
 │   │   ├── detect-standing.sh            # SessionStart — silent unless in-flight work has gone dormant; then relays a fact pointing at project-standing (detect, don't execute)
@@ -183,9 +183,8 @@ claude-toolkit/
 │       │   └── SKILL.md
 │       ├── feature-package/               # a feature is a PACKAGE — one effort, one slug, one folder (docs/features/<date>-<slug>/): brief, vision, staging, decision, throwaway mocks, handoff batons
 │       │   └── SKILL.md                  # slug shared with the branch/worktree; born WITH the tree, filled as it happens; conclusion durable, evidence disposable
-│       ├── sanity-review/                 # FINISHED IS NOT REVIEWED — the trigger + brief contract for the sanity-reviewer agent
-│       │   ├── SKILL.md                   # when it runs (work done, before landing; never on a mid-work pause), what to hand it, what to do with its report
-│       │   └── reference/                 # method.md (frame → lenses → verify → apply → re-verify → report) · lenses.md (the panel, each judged by its toolkit skill)
+│       ├── sanity-review/                 # FINISHED IS NOT REVIEWED — the session's side of the review before the hand-back
+│       │   └── SKILL.md                   # when it runs (top-level, work done, before landing/release; never on a mid-work pause or in a subagent), the brief, what to do with the report
 │       ├── delegate-and-parallelize/      # the session ORCHESTRATES, subagents do the work — decompose, delegate every non-atomic unit, run the independent ones at once, recursively
 │       │   ├── SKILL.md                   # inverted default (inline only when delegating costs more); a parent NEVER exits while a child runs — check on them, no zombies; nothing dispatched before the plan is on disk
 │       │   └── reference/
@@ -337,16 +336,16 @@ and runs in CI and as a pre-push hook.
 ## The always-on half
 
 Installing the `engineering`, `design-system`, and `workflow` plugins makes the `architect-mentality`,
-`architecture-first`, `design-system-first`, `feature-package`, and `delegate-and-parallelize` skills available
+`architecture-first`, `design-system-first`, `feature-package`, `delegate-and-parallelize`, and `sanity-review` skills available
 — but a skill only fires when the model judges it relevant, which isn't enough for a mindset and rules that
 must hold on **every** change. (`feature-package` is the sharpest case: *"where should this doc go?"* is
 precisely the question a model never thinks to ask. `delegate-and-parallelize` is the same failure in a
 different costume: a model that has already started reading files serially has *spent* the context the rule
-existed to save, and it will never spontaneously stop to ask whether it should have fanned out instead.) So the
+existed to save, and it will never spontaneously stop to ask whether it should have fanned out instead. And `sanity-review` is the one the user used to type by hand after every long task: a model that has just finished believes its own work, so the review must be a standing rule, not a judgement it makes about itself.) So the
 policy has two halves:
 
 1. **Always-on directives, loaded into context every session** — so the mindset and the rules are never out of mind.
-2. **The skills** — the depth: `architect-mentality` (the full architect mindset), `architecture-first` (the loop, the patch smells to refuse, the redesign moves, the finish gate), `redesign-means-rethink` (the entry gate to the experience-design trio), `design-system-first` (the styling discipline — the promotion loop, the styling patches to refuse, modelling the missing token), `branch-and-release` (the procedure behind the branch rules — the investigation, the declared branch model, the exact commands for every gated move), `feature-package` (one effort, one slug, one folder — where every durable artifact lives, and what may be thrown away), and `delegate-and-parallelize` (the pattern catalogue, the delegated-task contract, the recursion's termination conditions, the supervision duty a parent owes its children, and the resumable ledger that lets an interrupted tree be picked up instead of re-run).
+2. **The skills** — the depth: `architect-mentality` (the full architect mindset), `architecture-first` (the loop, the patch smells to refuse, the redesign moves, the finish gate), `redesign-means-rethink` (the entry gate to the experience-design trio), `design-system-first` (the styling discipline — the promotion loop, the styling patches to refuse, modelling the missing token), `branch-and-release` (the procedure behind the branch rules — the investigation, the declared branch model, the exact commands for every gated move), `feature-package` (one effort, one slug, one folder — where every durable artifact lives, and what may be thrown away), and `delegate-and-parallelize` (the pattern catalogue, the delegated-task contract, the recursion's termination conditions, the supervision duty a parent owes its children, and the resumable ledger that lets an interrupted tree be picked up instead of re-run), `sanity-review` (when the review before the hand-back runs, the brief the `sanity-reviewer` agent needs, what to do with its report; the method and the lens panel live in the agent).
 
 **New projects** get half (1) automatically. The `bespunky-house:new` scaffold writes the directives into a generated
 **`HOUSE.rules.md`** and has `CLAUDE.md` **`@`-import** it — `@HOUSE.rules.md`, on its own line inside the
@@ -362,7 +361,7 @@ repo with no UI is not handed the redesign directive, and only a repo whose stac
 
 **Existing projects** that install the plugins should paste the canonical directives below into their
 `CLAUDE.md` (or run `/bespunky-house:upgrade` and let the engine generate both files), so the mindset, the rule, the
-redesign discipline, the finish gate, the design-system discipline, the branch & release rules, the packaging rule, and the delegation discipline are
+redesign discipline, the finish gate, the design-system discipline, the branch & release rules, the packaging rule, the delegation discipline, and the review before the hand-back are
 always in context — each is an always-on directive paired with the depth of its skill:
 
 ```markdown
@@ -391,14 +390,13 @@ For the method — the sweep, the dependency test, observing the target — the 
 
 ## Review before you hand back (non-negotiable)
 
-**Finished is not reviewed.** When substantial work is done — a feature, a bug fix that touched design, a refactor, a multi-file or multi-step change, a release — **run a sanity review before you hand control back to the user**, and before you propose landing a branch. Specialised reviewers who did not write the work tear it apart through one lens each (architecture, reuse, scalability, clean code, bugs, security, UX, DX, tests, completeness — whatever the change calls for), every weighty finding is adversarially verified, and everything that survives is fixed. The user gets back work that has already been through the critique they would otherwise have had to ask for.
+**Finished is not reviewed.** When a long autonomous stretch of work is done — a feature, a bug fix that touched design, a refactor, a migration — **run a sanity review before you hand control back to the user**, and before you propose landing a branch or cut a release. Reviewers who did not write the work tear it apart through one lens each (architecture, reuse, scalability, clean code, bugs, security, UX, DX, tests, completeness — whatever the change calls for), every weighty finding is adversarially verified, and what survives is fixed. The user gets back work that has already been through the critique they would otherwise have had to ask for.
 
-- **It runs out of your context.** Dispatch the **`bespunky-workflow:sanity-reviewer`** agent synchronously, briefed with what only you know: the goal, the decisions already made with the user (in their words), the exact scope, how the change is verified, and what is out of bounds.
-- **What comes back is evidence.** Read the fix diff, re-run the verification, commit the fixes as their own step. A finding that needs a decision is yours or the user's — never let the review make a design call on its own.
-- **Not when you pause.** Stopping mid-work to ask a question or wait for a confirmation is not finishing — review when the work is done. Skip it for a trivial edit, a read-only answer, or work already reviewed with nothing changed since.
-- **One round, plus one on large fixes.** A second round that still finds design problems is a conversation with the user, not a third review.
+- **The top-level session runs it, out of its own context** — dispatch the **`bespunky-workflow:sanity-reviewer`** agent. A subagent never does; its parent reviews the integrated result.
+- **Not when you pause.** Stopping mid-work to ask a question or wait for a confirmation is not finishing. Skip it, too, for a small or mechanical change, a read-only answer, or work already reviewed with nothing changed since.
+- **Review, then verify end to end, then ship.** The review's fixes postdate any dogfood or real install, so that runs again after them.
 
-For the trigger, the brief and what to do with the result, the **`bespunky-workflow:sanity-review`** skill.
+How to brief it, and what to do with what comes back: the **`bespunky-workflow:sanity-review`** skill.
 
 ## Redesign means rethink
 

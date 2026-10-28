@@ -29,14 +29,13 @@ For the method — the sweep, the dependency test, observing the target — the 
 
 ## Review before you hand back (non-negotiable)
 
-**Finished is not reviewed.** When substantial work is done — a feature, a bug fix that touched design, a refactor, a multi-file or multi-step change, a release — **run a sanity review before you hand control back to the user**, and before you propose landing a branch. Specialised reviewers who did not write the work tear it apart through one lens each (architecture, reuse, scalability, clean code, bugs, security, UX, DX, tests, completeness — whatever the change calls for), every weighty finding is adversarially verified, and everything that survives is fixed. The user gets back work that has already been through the critique they would otherwise have had to ask for.
+**Finished is not reviewed.** When a long autonomous stretch of work is done — a feature, a bug fix that touched design, a refactor, a migration — **run a sanity review before you hand control back to the user**, and before you propose landing a branch or cut a release. Reviewers who did not write the work tear it apart through one lens each (architecture, reuse, scalability, clean code, bugs, security, UX, DX, tests, completeness — whatever the change calls for), every weighty finding is adversarially verified, and what survives is fixed. The user gets back work that has already been through the critique they would otherwise have had to ask for.
 
-- **It runs out of your context.** Dispatch the **`bespunky-workflow:sanity-reviewer`** agent synchronously, briefed with what only you know: the goal, the decisions already made with the user (in their words), the exact scope, how the change is verified, and what is out of bounds.
-- **What comes back is evidence.** Read the fix diff, re-run the verification, commit the fixes as their own step. A finding that needs a decision is yours or the user's — never let the review make a design call on its own.
-- **Not when you pause.** Stopping mid-work to ask a question or wait for a confirmation is not finishing — review when the work is done. Skip it for a trivial edit, a read-only answer, or work already reviewed with nothing changed since.
-- **One round, plus one on large fixes.** A second round that still finds design problems is a conversation with the user, not a third review.
+- **The top-level session runs it, out of its own context** — dispatch the **`bespunky-workflow:sanity-reviewer`** agent. A subagent never does; its parent reviews the integrated result.
+- **Not when you pause.** Stopping mid-work to ask a question or wait for a confirmation is not finishing. Skip it, too, for a small or mechanical change, a read-only answer, or work already reviewed with nothing changed since.
+- **Review, then verify end to end, then ship.** The review's fixes postdate any dogfood or real install, so that runs again after them.
 
-For the trigger, the brief and what to do with the result, the **`bespunky-workflow:sanity-review`** skill.
+How to brief it, and what to do with what comes back: the **`bespunky-workflow:sanity-review`** skill.
 
 {{#ui}}
 ## Redesign means rethink

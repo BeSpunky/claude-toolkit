@@ -660,7 +660,7 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
 
 checkAsync('HOUSE.rules.md: the stack-agnostic directives render in a repo with NO ui layer (none hides inside a layer gate)', async (ok) => {
   const a = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent']);
-  for (const heading of ['## Architect mentality', '## Architecture-first (non-negotiable)', '## Finish the whole job — verified where it runs (non-negotiable)', '## A feature is a package (non-negotiable)']) {
+  for (const heading of ['## Architect mentality', '## Architecture-first (non-negotiable)', '## Finish the whole job — verified where it runs (non-negotiable)', '## Review before you hand back (non-negotiable)', '## A feature is a package (non-negotiable)', '## Delegate and parallelize (non-negotiable)']) {
     ok(a.rules.includes(heading), `missing from a no-UI repo's HOUSE.rules.md: ${heading}`);
   }
   ok(!a.rules.includes('## Redesign means rethink'), 'the ui-gated directive leaked into a repo with no ui layer');
