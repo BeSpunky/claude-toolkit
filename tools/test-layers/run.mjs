@@ -658,6 +658,36 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
   ok(a.house.includes('**Package manager**: npm'), 'the package manager is named');
 });
 
+// A generated doc that names `bespunky-<plugin>:<skill-or-agent>` is an instruction to use it — and a project's own
+// layers are what enable a plugin (`claudePlugins` → .claude/settings.json). So every such reference must name a plugin
+// the layer set enables, or the doc tells Claude to call a skill or an agent that may not exist there (a floor-only
+// project was told to dispatch `bespunky-workflow:sanity-reviewer`). Checked for every layer set a project can hold:
+// the floor alone, each layer with what it requires, and every preset.
+checkAsync('house docs name only toolkit skills and agents whose plugin the layer set enables', async (ok) => {
+  const { PRESETS } = require_(join(BUILD, 'src/layers/presets'));
+  const { claudePlugins } = require_(join(BUILD, 'src/generators/_utils/layer-contributions'));
+  const closure = (ids) => {
+    const out = new Set();
+    const add = (id) => { if (out.has(id)) return; out.add(id); for (const r of registry.layer(id).requires) add(r); };
+    ids.forEach(add);
+    return registry.LAYERS.map((l) => l.id).filter((id) => out.has(id));
+  };
+  const sets = new Map();
+  for (const ids of [['nx'], ...registry.LAYERS.map((l) => [l.id]), ...PRESETS.map((p) => p.layers)]) {
+    const set = closure(ids);
+    sets.set(set.join(','), set);
+  }
+  for (const [key, layers] of sets) {
+    const tree = createTreeWithEmptyWorkspace();
+    await generator('house-doc')(tree, { layers, firebase: layers.includes('firebase'), nxToolsVersion: '9.9.9', pluginVersion: '1.0.0' });
+    const enabled = new Set(claudePlugins(layers.map(registry.layer)).plugins.map((id) => id.split('@')[0]));
+    for (const file of ['HOUSE.md', 'HOUSE.rules.md', 'CLAUDE.md']) {
+      const named = new Set((tree.read(file, 'utf8') ?? '').match(/bespunky-[a-z-]+(?=:[a-z])/g) ?? []);
+      for (const plugin of named) ok(enabled.has(plugin), `${key}: ${file} names ${plugin}, which these layers do not enable`);
+    }
+  }
+});
+
 checkAsync('HOUSE.rules.md: the stack-agnostic directives render in a repo with NO ui layer (none hides inside a layer gate)', async (ok) => {
   const a = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent']);
   for (const heading of ['## Architect mentality', '## Architecture-first (non-negotiable)', '## Finish the whole job — verified where it runs (non-negotiable)', '## Review before you hand back (non-negotiable)', '## A feature is a package (non-negotiable)', '## Delegate and parallelize (non-negotiable)']) {
