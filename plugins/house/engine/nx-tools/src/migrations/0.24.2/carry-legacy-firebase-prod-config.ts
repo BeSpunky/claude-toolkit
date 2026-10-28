@@ -33,6 +33,11 @@ import {
   type TsObjectLiteralExpression,
   type TsSourceFile,
 } from '../../generators/_utils/typescript-api';
+// The second exception follows from writeProdEnvFromTemplate rendering the generator's CURRENT template (see there):
+// that template's skill pointers are placeholders too, and filling them any other way than the generator does would
+// ship `{{appHostingSkill}}` verbatim, or name a skill the project does not enable.
+import { pluginPointerRenderer } from '../../generators/_utils/plugin-pointers';
+import { FIREBASE_SKILL_POINTERS } from '../../generators/firebase-emulators/skill-pointers';
 
 /**
  * The four fields the legacy const carried and the current `environment.prod.ts` expects. Fixed, not derived:
@@ -196,7 +201,7 @@ function writeProdEnvFromTemplate(tree: Tree, envProdPath: string, config: ProdC
   // context — the same contract the generator's own `.split('{{x}}').join(value)` substitution assumes.
   const rendered = FIELDS.reduce(
     (text, field) => text.split(`{{${field}}}`).join(escapeForQuote(config[field], "'")),
-    tpl,
+    pluginPointerRenderer(tree, FIREBASE_SKILL_POINTERS)(tpl),
   );
   tree.write(envProdPath, rendered);
   return FIELDS.filter((f) => config[f]);

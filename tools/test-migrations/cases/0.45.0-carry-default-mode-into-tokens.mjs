@@ -19,7 +19,22 @@ const START = '/* @bespunky/design-system:theme:start — generator-owned. */';
 const END = '/* @bespunky/design-system:theme:end */';
 
 const stock = (name) => readFileSync(join(HERE, '0.45.0-stock-0.44', `${name}.tpl`), 'utf8').replaceAll('{{tokenPrefix}}', PREFIX);
-const current = (template) => readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', PREFIX);
+// The skill pointers the 0.45.0 seeds carried unconditionally — FROZEN here, as 0.45.0 wrote them. Today they are
+// tokens filled only where the project enables the plugin (_utils/plugin-pointers, design-system/skill-pointers), and
+// with it enabled the render is this text byte for byte; without it, nothing.
+const POINTERS_045 = {
+  designPhasePipeline:
+    ':\n//      bespunky-product-ux:envision-the-experience  (the feeling)' +
+    '\n//   -> bespunky-product-ux:stage-the-vision         (the visual system: palette, type, scales, motion)' +
+    '\n//   -> bespunky-product-ux:realize-the-vision       (which lands that visual system HERE, as tokens)',
+  resumableStateSkill: '; see `bespunky-engineering:resumable-state`',
+};
+const ENABLES_THEM = { enabledPlugins: { 'bespunky-product-ux@claude-toolkit': true, 'bespunky-engineering@claude-toolkit': true } };
+const current = (template) =>
+  Object.entries(POINTERS_045).reduce(
+    (text, [token, value]) => text.replaceAll(`{{${token}}}`, value),
+    readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', PREFIX),
+  );
 
 /** A 0.44 design system as the generator seeded it, for the Angular binding (or the neutral one). */
 function designSystem(tree, { binding = 'angular' } = {}) {
@@ -56,6 +71,8 @@ export default {
     {
       name: 'stock project: $default-mode is system, and every stock file becomes exactly what 0.45.0 seeds',
       setup: (tree) => {
+        // Enabling the plugins its files point to, so "what 0.45.0 seeds" is the 0.45.0 text, pointers included.
+        tree.write('.claude/settings.json', JSON.stringify(ENABLES_THEM));
         designSystem(tree);
         app(tree, 'web');
       },
@@ -74,6 +91,19 @@ export default {
           t.ok(t.read(`${DS}/${file}`) === current(template), `${file} is not the 0.45.0 seed`);
         }
         t.has('apps/web/src/styles.scss', '@include ds.theme();');
+      },
+    },
+    {
+      name: 'stock project that does not enable bespunky-engineering: the re-seeded DsTheme names no skill it lacks',
+      setup: (tree) => {
+        designSystem(tree);
+        app(tree, 'web');
+      },
+      expect: (tree, t) => {
+        const theme = `${DS}/src/lib/ds-theme.service.ts`;
+        t.has(theme, 'with real trade-offs), you must apply it');
+        t.hasNot(theme, 'bespunky-engineering');
+        t.hasNot(theme, '{{');
       },
     },
     {

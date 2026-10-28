@@ -74,8 +74,8 @@ if (unwatched.length) {
   const target = `${process.env.NX_TASK_TARGET_PROJECT || 'firebase'}:${TARGET}`;
   fail(
     `firebase.json declares ${unwatched.join(', ')}, which no input of ${target} watches — so \`nx affected -t deploy\` ` +
-      '(CI) would never redeploy a change to it. Nothing was deployed. Run the house upgrade (/bespunky-house:upgrade — ' +
-      `it watches every declared file), or add ${unwatched.map((path) => `"{workspaceRoot}/${path}"`).join(', ')} to ` +
+      '(CI) would never redeploy a change to it. Nothing was deployed. Run the house upgrade{{upgradeCommand}}, which ' +
+      `watches every declared file, or add ${unwatched.map((path) => `"{workspaceRoot}/${path}"`).join(', ')} to ` +
       `${target}'s inputs yourself (house targets are yours to extend).`,
   );
 }

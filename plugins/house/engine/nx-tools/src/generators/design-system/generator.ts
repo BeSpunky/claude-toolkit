@@ -63,6 +63,8 @@ import { adapterOf, applicationsWith, projectRole } from '../../adapters/registr
 import { workspaceStackWith } from '../../adapters/workspace';
 import type { StackAdapter } from '../../adapters/stack-adapter';
 import { platformTag } from '../../platform/platform';
+import { pluginPointerValues } from '../_utils/plugin-pointers';
+import { DESIGN_SYSTEM_SKILL_POINTERS } from './skill-pointers';
 
 interface DesignSystemSchema {
   /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
@@ -136,7 +138,8 @@ export default async function designSystemGenerator(
   if (!existing) binding?.pruneGenerated(tree, root);
 
   // 4) Seed the neutral core (the sass layer), then the binding's runtime + docs over it.
-  const substitutions = { tokenPrefix, importPath, specifier, root, name, prefix };
+  //    The skill pointers in the seeded comments and STRUCTURE.md render only where their plugin is enabled.
+  const substitutions = { tokenPrefix, importPath, specifier, root, name, prefix, ...pluginPointerValues(tree, DESIGN_SYSTEM_SKILL_POINTERS) };
   seedTemplates(tree, join(__dirname, 'files'), root, substitutions, []);
   const runtime = binding ?? NEUTRAL_BINDING;
   seedTemplates(tree, runtime.templates, root, substitutions, [...runtime.alwaysRewrite]);

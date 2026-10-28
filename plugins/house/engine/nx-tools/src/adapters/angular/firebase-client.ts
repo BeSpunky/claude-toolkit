@@ -27,6 +27,8 @@ import { angular } from './index';
 import { declareBrowserSdk, pinAngularForFirebase } from './angularfire';
 import { rewrittenBy } from '../../generators/_utils/changed-files';
 import { reportProxyWiring } from '../../generators/firebase-emulators/proxy-wiring';
+import { FIREBASE_SKILL_POINTERS } from '../../generators/firebase-emulators/skill-pointers';
+import { pluginPointerRenderer } from '../../generators/_utils/plugin-pointers';
 
 /** Blank the credential placeholders: a half-wired prod/staging build must fail loud, not silently use dev. */
 const blankCredentials = (source: string): string =>
@@ -50,7 +52,7 @@ export const angularFirebaseClient: FirebaseClientPort = {
     // 1) Environment files — all WRITE-IF-ABSENT (see the header). The shared shape is one a project EXTENDS.
     if (!tree.exists(env.shape!)) tree.write(env.shape!, firebaseTemplate('environment.interface.ts.tpl'));
     if (!tree.exists(env.dev)) tree.write(env.dev, substitute(firebaseTemplate('environment.ts.tpl')));
-    if (!tree.exists(env.prod)) tree.write(env.prod, blankCredentials(firebaseTemplate('environment.prod.ts.tpl')));
+    if (!tree.exists(env.prod)) tree.write(env.prod, blankCredentials(pluginPointerRenderer(tree, FIREBASE_SKILL_POINTERS)(firebaseTemplate('environment.prod.ts.tpl'))));
     if (staging && !tree.exists(env.staging)) {
       tree.write(env.staging, blankCredentials(firebaseTemplate('environment.staging.ts.tpl')));
     }

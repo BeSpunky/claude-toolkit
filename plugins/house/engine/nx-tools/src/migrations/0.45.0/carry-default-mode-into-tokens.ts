@@ -28,6 +28,8 @@ import { join } from 'node:path';
 import { findDesignSystem } from '../../generators/_utils/design-system';
 import { applicationsWith } from '../../adapters/registry';
 import { THEME_START, THEME_END } from '../../generators/design-system-styles/generator';
+import { pluginPointerRenderer } from '../../generators/_utils/plugin-pointers';
+import { DESIGN_SYSTEM_SKILL_POINTERS } from '../../generators/design-system/skill-pointers';
 
 const TAG = '[0.45.0 carry-default-mode-into-tokens]';
 const SRC = join(__dirname, '../..');
@@ -131,7 +133,7 @@ export default async function carryDefaultModeIntoTokens(tree: Tree): Promise<vo
     const path = `${ds.root}/${m.file}`;
     if (!tree.exists(path)) continue;
     const current = tree.read(path, 'utf8') ?? '';
-    const next = render(m.template, prefix);
+    const next = render(tree, m.template, prefix);
     if (fingerprint(current, prefix) === fingerprint(next, prefix)) continue; // already current
     if (fingerprint(current, prefix) !== m.stock044) {
       logger.warn(
@@ -146,7 +148,7 @@ export default async function carryDefaultModeIntoTokens(tree: Tree): Promise<vo
     logger.info(`${TAG} ${path}: replaced the stock 0.44 file with the 0.45.0 one, which reads \`$default-mode\`.`);
   }
   const moduleFile = `${ds.root}/${DEFAULT_MODE_MODULE.file}`;
-  if (angularUpgraded && !tree.exists(moduleFile)) tree.write(moduleFile, render(DEFAULT_MODE_MODULE.template, prefix));
+  if (angularUpgraded && !tree.exists(moduleFile)) tree.write(moduleFile, render(tree, DEFAULT_MODE_MODULE.template, prefix));
 }
 
 /** Each styled app's theme block: where it is and the argument its `ds.theme(…)` call passes (null for none). */
@@ -185,8 +187,10 @@ function declare(tokens: string, value: string, prefix: string): string {
   return `${tokens.trimEnd()}\n\n${declaration}`;
 }
 
-function render(template: string, prefix: string): string {
-  return readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', prefix);
+/** A seeded template as the design-system generator renders it: the prefix, and the skill pointers this project enables. */
+function render(tree: Tree, template: string, prefix: string): string {
+  const pointers = pluginPointerRenderer(tree, DESIGN_SYSTEM_SKILL_POINTERS);
+  return pointers(readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', prefix));
 }
 
 /**
