@@ -30,6 +30,7 @@
 import { type Tree } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { CLAUDE_SETTINGS, isPlainObject, readClaudeSettings } from '../_utils/claude-settings-file';
 import { activeLayers, claudePlugins } from '../_utils/layer-contributions';
 
 type Json = Record<string, unknown>;
@@ -43,10 +44,10 @@ export default async function claudeSettingsGenerator(tree: Tree, options: Claud
   const layers = activeLayers(tree, options.layers);
   const house = { ...pluginSettings(layers), ...(JSON.parse(readFileSync(join(__dirname, 'settings.json.tpl'), 'utf8')) as Json) };
   const seeds = JSON.parse(readFileSync(join(__dirname, 'settings.seed.json.tpl'), 'utf8')) as Json;
-  const project = readJson(tree, '.claude/settings.json');
+  const project = readClaudeSettings(tree);
   const merged = deepSeed(project ? deepMerge(project, house) : { ...house }, seeds);
 
-  tree.write('.claude/settings.json', `${JSON.stringify(merged, null, 2)}\n`);
+  tree.write(CLAUDE_SETTINGS, `${JSON.stringify(merged, null, 2)}\n`);
 
   // The devcontainer's `.claude/data` bind source is NOT created here: it is gitignored, so anything written now
   // exists on this machine only and a fresh clone would still lack it. The devcontainer's host probe creates it
@@ -72,22 +73,6 @@ function pluginSettings(layers: Parameters<typeof claudePlugins>[0]): Json {
     ),
     enabledPlugins: Object.fromEntries(plugins.map((plugin) => [plugin, true])),
   };
-}
-
-/**
- * Read + parse a JSON file from the tree. A file that doesn't exist — or that a human has left
- * unparseable — yields `undefined`, which the caller treats as "nothing to preserve" and writes the
- * clean house template. Healing a broken settings.json beats failing the whole sync on it.
- */
-function readJson(tree: Tree, path: string): Json | undefined {
-  if (!tree.exists(path)) return undefined;
-
-  try {
-    const parsed: unknown = JSON.parse(tree.read(path, 'utf8') ?? '');
-    return isPlainObject(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /** Recursively merge `house` INTO `project`: house wins at every leaf it declares; unknown keys survive. */
@@ -124,9 +109,4 @@ function deepSeed(target: Json, seeds: Json): Json {
   }
 
   return target;
-}
-
-/** A mergeable object — a JSON object, not an array and not null (both of which are leaves here). */
-function isPlainObject(value: unknown): value is Json {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

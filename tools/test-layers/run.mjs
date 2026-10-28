@@ -665,8 +665,9 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
 // each subset of the registry closed under `requires` — with the branch model declared and undeclared, because the
 // gates nest inside layer and model gates (`{{#ci}}{{#firebase}}`, `{{#branches-declared}}`) a smaller sample misses.
 const WORKFLOW_ONLY = [/\bbranches\.mjs\b/, /\bthe skill(?:'s)?\b/];
-checkAsync('house docs name only toolkit skills and agents whose plugin the layer set enables', async (ok) => {
+checkAsync('house docs name only toolkit skills and agents whose plugin the project enables', async (ok) => {
   const { claudePlugins } = require_(join(BUILD, 'src/generators/_utils/layer-contributions'));
+  const { enabledPlugins } = require_(join(BUILD, 'src/generators/_utils/claude-settings-file'));
   const ids = registry.LAYERS.map((l) => l.id);
   const sets = [];
   for (let mask = 1; mask < 1 << ids.length; mask++) {
@@ -674,20 +675,28 @@ checkAsync('house docs name only toolkit skills and agents whose plugin the laye
     if (set.includes('nx') && set.every((id) => registry.layer(id).requires.every((r) => set.includes(r)))) sets.push(set);
   }
   const declared = { schema: 1, integration: 'main', production: ['main'], productionPatterns: [], chain: ['main'], protected: ['main'], protectedPatterns: [], workBase: 'main', summary: 'main (trunk)' };
-  for (const layers of sets) {
-    const enabled = new Set(claudePlugins(layers.map(registry.layer)).plugins.map((id) => id.split('@')[0]));
+  // What a plugin's presence turns on is ENABLEMENT, which only `.claude/settings.json` records — written by the agent
+  // layer's `claude-settings` step (run here exactly where the planner runs it: before house-doc), or by the project
+  // itself (the last case: no agent layer, bespunky-workflow enabled by hand, so its directives must render).
+  const handEnabled = { enabledPlugins: { 'bespunky-workflow@claude-toolkit': true } };
+  for (const [layers, settings] of [...sets.map((set) => [set, undefined]), [['nx'], handEnabled]]) {
     for (const model of ['undeclared', JSON.stringify(declared)]) {
-      const key = `${layers.join(',')} (${model === 'undeclared' ? 'undeclared' : 'declared'})`;
+      const key = `${layers.join(',')}${settings ? ' + hand-enabled workflow' : ''} (${model === 'undeclared' ? 'undeclared' : 'declared'})`;
       const tree = createTreeWithEmptyWorkspace();
+      if (settings) tree.write('.claude/settings.json', JSON.stringify(settings));
+      if (layers.includes('agent')) await generator('claude-settings')(tree, { layers });
+      const enabled = enabledPlugins(tree);
       await generator('house-doc')(tree, { layers, firebase: layers.includes('firebase'), nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', branchProjection: model });
       const rules = tree.read('HOUSE.rules.md', 'utf8') ?? '';
       for (const file of ['HOUSE.md', 'HOUSE.rules.md', 'CLAUDE.md']) {
         const text = tree.read(file, 'utf8') ?? '';
         const named = new Set(text.match(/bespunky-[a-z0-9-]+(?=:[a-z])/g) ?? []);
-        for (const plugin of named) ok(enabled.has(plugin), `${key}: ${file} names ${plugin}, which these layers do not enable`);
+        for (const plugin of named) ok(enabled.has(plugin), `${key}: ${file} names ${plugin}, which this project does not enable`);
         // Unnamed references to the workflow skill and its engine — `branches.mjs` ships inside bespunky-workflow.
         if (!enabled.has('bespunky-workflow')) for (const re of WORKFLOW_ONLY) ok(!re.test(text), `${key}: ${file} still says ${text.match(re)?.[0]} without bespunky-workflow`);
       }
+      // And the other direction: where the plugin IS enabled, its directives render — gating must never drop them.
+      if (enabled.has('bespunky-workflow')) ok(rules.includes('## Review before you hand back (non-negotiable)') && rules.includes('## Branch & release workflow'), `${key}: bespunky-workflow is enabled, but its directives did not render`);
       // The pointer block promises the directives HOUSE.rules.md carries — never one that did not render.
       const pointer = tree.read('CLAUDE.md', 'utf8') ?? '';
       for (const [named, heading] of [['architecture-first', '## Architecture-first'], ['branch & release rules', '## Branch & release'], ['a feature is a package', '## A feature is a package'], ['design-system-first', '## Design-system-first'], ['redesign-means-rethink', '## Redesign means rethink']]) {

@@ -54,7 +54,10 @@ const section = (doc, title) => {
 const RULES = (t) => section(t.read('HOUSE.rules.md'), 'Branch & release workflow');
 const PARAMS = (t) => section(t.read('HOUSE.md'), 'Branch & release parameters');
 
+// As the planner runs it: with the agent layer, its `claude-settings` step first — the plugins it enables are what
+// house-doc gates the workflow directives on.
 const generate = (layers, extra = {}) => async (tree, ctx) => {
+  if (layers.includes('agent')) await ctx.load('generators/claude-settings/generator').default(tree, { layers });
   await ctx.load('generators/house-doc/generator').default(tree, { layers, nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', ...extra });
 };
 
