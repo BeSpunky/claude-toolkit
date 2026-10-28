@@ -661,30 +661,46 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
 // A generated doc that names `bespunky-<plugin>:<skill-or-agent>` is an instruction to use it — and a project's own
 // layers are what enable a plugin (`claudePlugins` → .claude/settings.json). So every such reference must name a plugin
 // the layer set enables, or the doc tells Claude to call a skill or an agent that may not exist there (a floor-only
-// project was told to dispatch `bespunky-workflow:sanity-reviewer`). Checked for every layer set a project can hold:
-// the floor alone, each layer with what it requires, and every preset.
+// project was told to dispatch `bespunky-workflow:sanity-reviewer`). Checked for EVERY layer set a project can hold —
+// each subset of the registry closed under `requires` — with the branch model declared and undeclared, because the
+// gates nest inside layer and model gates (`{{#ci}}{{#firebase}}`, `{{#branches-declared}}`) a smaller sample misses.
+const WORKFLOW_ONLY = [/\bbranches\.mjs\b/, /\bthe skill(?:'s)?\b/];
 checkAsync('house docs name only toolkit skills and agents whose plugin the layer set enables', async (ok) => {
-  const { PRESETS } = require_(join(BUILD, 'src/layers/presets'));
   const { claudePlugins } = require_(join(BUILD, 'src/generators/_utils/layer-contributions'));
-  const closure = (ids) => {
-    const out = new Set();
-    const add = (id) => { if (out.has(id)) return; out.add(id); for (const r of registry.layer(id).requires) add(r); };
-    ids.forEach(add);
-    return registry.LAYERS.map((l) => l.id).filter((id) => out.has(id));
-  };
-  const sets = new Map();
-  for (const ids of [['nx'], ...registry.LAYERS.map((l) => [l.id]), ...PRESETS.map((p) => p.layers)]) {
-    const set = closure(ids);
-    sets.set(set.join(','), set);
+  const ids = registry.LAYERS.map((l) => l.id);
+  const sets = [];
+  for (let mask = 1; mask < 1 << ids.length; mask++) {
+    const set = ids.filter((_, i) => mask & (1 << i));
+    if (set.includes('nx') && set.every((id) => registry.layer(id).requires.every((r) => set.includes(r)))) sets.push(set);
   }
-  for (const [key, layers] of sets) {
-    const tree = createTreeWithEmptyWorkspace();
-    await generator('house-doc')(tree, { layers, firebase: layers.includes('firebase'), nxToolsVersion: '9.9.9', pluginVersion: '1.0.0' });
+  const declared = { schema: 1, integration: 'main', production: ['main'], productionPatterns: [], chain: ['main'], protected: ['main'], protectedPatterns: [], workBase: 'main', summary: 'main (trunk)' };
+  for (const layers of sets) {
     const enabled = new Set(claudePlugins(layers.map(registry.layer)).plugins.map((id) => id.split('@')[0]));
-    for (const file of ['HOUSE.md', 'HOUSE.rules.md', 'CLAUDE.md']) {
-      const named = new Set((tree.read(file, 'utf8') ?? '').match(/bespunky-[a-z-]+(?=:[a-z])/g) ?? []);
-      for (const plugin of named) ok(enabled.has(plugin), `${key}: ${file} names ${plugin}, which these layers do not enable`);
+    for (const model of ['undeclared', JSON.stringify(declared)]) {
+      const key = `${layers.join(',')} (${model === 'undeclared' ? 'undeclared' : 'declared'})`;
+      const tree = createTreeWithEmptyWorkspace();
+      await generator('house-doc')(tree, { layers, firebase: layers.includes('firebase'), nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', branchProjection: model });
+      const rules = tree.read('HOUSE.rules.md', 'utf8') ?? '';
+      for (const file of ['HOUSE.md', 'HOUSE.rules.md', 'CLAUDE.md']) {
+        const text = tree.read(file, 'utf8') ?? '';
+        const named = new Set(text.match(/bespunky-[a-z0-9-]+(?=:[a-z])/g) ?? []);
+        for (const plugin of named) ok(enabled.has(plugin), `${key}: ${file} names ${plugin}, which these layers do not enable`);
+        // Unnamed references to the workflow skill and its engine — `branches.mjs` ships inside bespunky-workflow.
+        if (!enabled.has('bespunky-workflow')) for (const re of WORKFLOW_ONLY) ok(!re.test(text), `${key}: ${file} still says ${text.match(re)?.[0]} without bespunky-workflow`);
+      }
+      // The pointer block promises the directives HOUSE.rules.md carries — never one that did not render.
+      const pointer = tree.read('CLAUDE.md', 'utf8') ?? '';
+      for (const [named, heading] of [['architecture-first', '## Architecture-first'], ['branch & release rules', '## Branch & release'], ['a feature is a package', '## A feature is a package'], ['design-system-first', '## Design-system-first'], ['redesign-means-rethink', '## Redesign means rethink']]) {
+        ok(!pointer.includes(named) || rules.includes(heading), `${key}: the CLAUDE.md pointer promises ${named}, which HOUSE.rules.md does not carry`);
+      }
     }
+  }
+  // A misspelled gate renders false everywhere, silently — so every `plugin-<name>` a template gates on must be a plugin
+  // some layer declares.
+  const declaredAnywhere = new Set(claudePlugins(registry.LAYERS).plugins.map((id) => `plugin-${id.split('@')[0]}`));
+  const dir = join(PAYLOAD, 'src/generators/house-doc');
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.tpl'))) {
+    for (const [, flag] of readFileSync(join(dir, file), 'utf8').matchAll(/\{\{[#^/](plugin-[\w-]+)\}\}/g)) ok(declaredAnywhere.has(flag), `${file} gates on ${flag}, which no layer declares`);
   }
 });
 

@@ -1,7 +1,7 @@
 <!-- @bespunky/house-tooling:start (generated pointer — do not edit between these markers; `house.sh upgrade` regenerates it) -->
 ## House rules & tooling
 
-The house **directives** that govern every change in this project — architect mentality, **architecture-first**{{#ui}}, redesign-means-rethink{{/ui}}{{#design-system}}, **design-system-first**{{/design-system}}, the **branch & release rules**, and **a feature is a package** — are imported on the line below, so they are **always in context**. They are **mandatory, not optional reference.**
+The house **directives** that govern every change in this project — {{#plugin-bespunky-engineering}}architect mentality, **architecture-first**, {{/plugin-bespunky-engineering}}{{#ui}}{{#plugin-bespunky-product-ux}}redesign-means-rethink, {{/plugin-bespunky-product-ux}}{{/ui}}{{#design-system}}{{#plugin-bespunky-design-system}}**design-system-first**, {{/plugin-bespunky-design-system}}{{/design-system}}{{#plugin-bespunky-workflow}}the **branch & release rules**, **a feature is a package**, {{/plugin-bespunky-workflow}}**generator-first** — are imported on the line below, so they are **always in context**. They are **mandatory, not optional reference.**
 
 @HOUSE.rules.md
 

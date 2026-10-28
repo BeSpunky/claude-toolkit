@@ -2,7 +2,7 @@
 
 # House rules — always in context
 
-> The BeSpunky directives that must hold on **every** change in this project. `CLAUDE.md` **imports** this file, so these are loaded into every session — that is the whole point of them living here and not in [`HOUSE.md`](HOUSE.md), which is read on demand. Each rule is the *operational* half of a skill: the rule is always on, the skill carries the depth. **Generator-owned — never hand-edit** (regenerated from `@bespunky/nx-tools` on every `house.sh upgrade`); the mechanical how-to, and this project's parameters for these rules, live in [`HOUSE.md`](HOUSE.md).
+> The BeSpunky directives that must hold on **every** change in this project. `CLAUDE.md` **imports** this file, so these are loaded into every session — that is the whole point of them living here and not in [`HOUSE.md`](HOUSE.md), which is read on demand. Each rule that names a skill is its *operational* half: the rule is always on, its skill carries the depth. **Generator-owned — never hand-edit** (regenerated from `@bespunky/nx-tools` on every `house.sh upgrade`); the mechanical how-to, and this project's parameters for these rules, live in [`HOUSE.md`](HOUSE.md).
 
 {{#plugin-bespunky-engineering}}
 ## Architect mentality
@@ -83,7 +83,7 @@ For the discipline in full — the loop, the promotion loop, the styling patches
 {{#ci}}{{#firebase}}
 ## CI deploys — the cloud identity is the human's (non-negotiable)
 
-Change *where* it deploys through the branch model's `ci` bindings, never by editing the workflow. **Never run `tools/setup-gcp.sh` or any IAM grant (`gcloud iam …`, `add-iam-policy-binding`)** — hand the user the exact `!` line. How: [`HOUSE.md`](HOUSE.md) → *Continuous deployment (CI)*.
+Change *where* CI deploys through the branch model's `ci` bindings, never by editing the workflow. **Never run `tools/setup-gcp.sh` or any IAM grant (`gcloud iam …`, `add-iam-policy-binding`)** — hand the user the exact `!` line. How: [`HOUSE.md`](HOUSE.md) → *Continuous deployment (CI)*.
 
 {{/firebase}}{{/ci}}
 {{#plugin-bespunky-workflow}}
@@ -132,6 +132,9 @@ Nx is this workspace's floor: every house generator and migration runs through i
 **When you start a server to test a change, you MUST bind it to a random free port — never the project's default port{{#angular}} (`4200`){{/angular}}{{#firebase}}, the emulator ports (`8080`/`9099`/…){{/firebase}}, or any container-forwarded port.** Those belong to whatever server the developer launched manually; grabbing them fails, silently attaches, or forces a disruptive restart. {{#web}}You verify **headless** (Playwright reaches any `localhost:<port>` directly), so you never need the forwarded ports — a random port costs nothing.{{/web}}{{^web}}A random port costs nothing, and anything you need to check can reach it directly.{{/web}} Read the bound URL from the server's own startup output and point your browser there{{#nx-serve}} — as an agent, serve with **`tools/dev/dev serve <app>`**, the engine `{{SERVE}}` wraps: Nx's agent output (`summary`) prints nothing of a task that is still running, so its URL and stop handle would never reach you (`{{SERVE}}` refuses itself there){{/nx-serve}}.{{#web}} **The engine holds you to this:** under an agent its `auto` never takes the base ports, and `--port-offset=0` is refused.{{/web}} **Tear down by the handle you launched with — never by name** (how, for each kind of server: the skill below{{#web}}, and [`HOUSE.md`](HOUSE.md) → *Running stacks*{{/web}}), then **confirm your ports are free** before you report done; a subagent stops what it started before it returns and lists it. **Never kill a server you didn't start** to free a port. Full rules — invoke the **`bespunky-workflow:local-server-isolation`** skill.
 {{#firebase}}
 The emulator suite is the trap: its ports are fixed, so a random *app* port alone doesn't keep you off the developer's suite. Every suite **claims** its ports as a stack before it starts, so one that would collide **refuses to start**, naming the stack that holds them — nothing is ever killed to make room. Never boot a colliding suite on the base ports, and never clear one out of your way.{{#web}} Serve **from your feature worktree**: `{{SERVE}} <app>` there claims a free block for the entire stack (every process the app declares{{#nx-serve}}, the emulator suite with its hub/logging ports included{{/nx-serve}}{{^nx-serve}} — a suite declared for the app, as an `emulators` process in `.bespunky/dev.json`, shifts with it; never start one by hand beside it{{/nx-serve}}), so it coexists with the developer's; open it at its `<slug>.localhost` domain — in the shared browser or a host tab. Skipping the suite ({{#nx-serve}}`--no-emulators`{{/nx-serve}}{{^nx-serve}}`--skip=emulators`{{/nx-serve}}) does **not** reuse the running one: it points the app at the **real** Firebase services (`?emulate=none`) — do it only on purpose, never against production data.{{/web}}{{^web}} Run the suite alone (`{{NX}} run firebase:emulators`): it claims its ports, and refuses if another stack holds them.{{/web}}
+{{/firebase}}
+{{/plugin-bespunky-workflow}}{{#firebase}}
+## Local runs never reach live credentials (non-negotiable)
+
 **Never arm a local run with live credentials or a real project without the user.** The emulator suite runs offline (a `demo-` project id) and its secrets inert by default. Claude never creates or fills `.secret.sandbox.local`, never sets `EMULATOR_SECRETS=sandbox`, and never sets a service to `false` in `environment.ts`'s `EMULATE` map (which moves the whole suite onto the real project id) — unless the user explicitly asked for it. [`HOUSE.md`](HOUSE.md) → *What a local run can reach*.
 {{/firebase}}
-{{/plugin-bespunky-workflow}}

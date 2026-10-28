@@ -357,12 +357,14 @@ always had — the always-on half was, in practice, off. The mechanical how-to s
 that link, deliberately: it is large, it is needed only once you are already doing the thing, and importing it
 would spend context on emulator recipes in every session. `HOUSE.rules.md` is also **layer-gated** — a
 repo with no UI is not handed the redesign directive, and only a repo whose stack has well-known ports
-(Angular's `4200`, Firebase's emulators) is told their numbers — every other repo gets the generic rule. And it is
-**plugin-gated**: each directive is the operational half of a skill, so it arrives with the plugin that carries
+(Angular's `4200`, Firebase's emulators) is told their numbers in the local-server rule. And it is
+**plugin-gated**: a directive that is the operational half of a skill arrives with the plugin that carries
 that skill — a project whose layers do not enable `bespunky-workflow` (anything without the `agent` layer) is
-never told to invoke a workflow skill or dispatch the `sanity-reviewer` agent it may not have. The same holds
-for every passage of `HOUSE.md` and the seeded `CLAUDE.md` that names a toolkit skill; `tools/test-layers`
-asserts it for every layer set.
+never told to invoke a workflow skill, run its `branches.mjs` or dispatch the `sanity-reviewer` agent it may not
+have. A safety rule that names no skill — CI's cloud identity, a local run's live credentials — is gated on its
+layers alone. The same holds for every passage of `HOUSE.md` and the generated `CLAUDE.md` that names a toolkit
+skill; `tools/test-layers` asserts it for every layer set closed under `requires`, with the branch model declared
+and undeclared.
 
 **Existing projects** that install the plugins should paste the canonical directives below into their
 `CLAUDE.md` (or run `/bespunky-house:upgrade` and let the engine generate both files), so the mindset, the rule, the
