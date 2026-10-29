@@ -1,6 +1,9 @@
 ---
 effort: sanity-review
-summary: Ship a sanity-review agent + skill + always-on directive so Claude critically reviews and fixes substantial work across specialised dimensions before handing control back — no hook.
+status: concluded
+concluded: 2026-10-29
+summary: Claude now reviews its own finished work before handing back — a sanity-reviewer agent fans out one hostile reviewer per lens, verifies findings adversarially and fixes what survives, triggered by an always-on house directive (no hook); and house-generated docs name a toolkit skill only where the project enables its plugin.
+tags: [workflow, review, agents, house-rules, plugin-gating, nx-tools-0.51.0]
 ---
 
 # Sanity review — decisions
