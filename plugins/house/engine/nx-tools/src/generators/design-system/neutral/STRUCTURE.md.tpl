@@ -55,5 +55,5 @@ setMode('dark');   // a re-binding of tokens, not a reload
 3. **`ds.theme()` is called exactly once**, from the global stylesheet. Everything else is zero-output.
 4. **When the design system lacks a concept, model it here** — never work around the gap locally.
 
-> **The tokens in `_tokens.scss` are PLACEHOLDERS with no design authority.** The design phase
-> (`bespunky-product-ux:stage-the-vision` → `realize-the-vision`) replaces that file wholesale.
+> **The tokens in `_tokens.scss` are PLACEHOLDERS with no design authority.** The design phase{{designPhaseSkills}}
+> replaces that file wholesale.

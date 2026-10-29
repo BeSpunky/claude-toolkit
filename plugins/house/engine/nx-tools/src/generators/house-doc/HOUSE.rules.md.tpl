@@ -2,8 +2,9 @@
 
 # House rules — always in context
 
-> The BeSpunky directives that must hold on **every** change in this project. `CLAUDE.md` **imports** this file, so these are loaded into every session — that is the whole point of them living here and not in [`HOUSE.md`](HOUSE.md), which is read on demand. Each rule is the *operational* half of a skill: the rule is always on, the skill carries the depth. **Generator-owned — never hand-edit** (regenerated from `@bespunky/nx-tools` on every `house.sh upgrade`); the mechanical how-to, and this project's parameters for these rules, live in [`HOUSE.md`](HOUSE.md).
+> The BeSpunky directives that must hold on **every** change in this project. `CLAUDE.md` **imports** this file, so these are loaded into every session — that is the whole point of them living here and not in [`HOUSE.md`](HOUSE.md), which is read on demand. Each rule that names a skill is its *operational* half: the rule is always on, its skill carries the depth. **Generator-owned — never hand-edit** (regenerated from `@bespunky/nx-tools` on every `house.sh upgrade`); the mechanical how-to, and this project's parameters for these rules, live in [`HOUSE.md`](HOUSE.md).
 
+{{#plugin-bespunky-engineering}}
 ## Architect mentality
 
 Approach every decision — at any scale, from a single function to the whole workspace — as a software architect. Treat **everything as a black box**: a clear boundary, a small deliberate public contract, hidden internals, dependencies received from the outside, and connections to other black boxes only through well-defined, intentionally-directed connection types (dependency injection, parent–child, layered/domain-driven dependency rules). Never reach across a boundary into another box's internals. **Place every element on purpose** — every line, `if`, constant, config, abstraction, and dependency is there deliberately; put each concern where it *belongs* (the place dedicated to it), never merely where it "fits" or happens to work. Model the missing **concept** instead of working around gaps; concentrate complexity so the edges stay simple; refuse false tradeoffs; keep abstractions empowering and honest; design for the next consumer; lead with *why* and one consistent mental model; **build for the goal, not the brief** — a request is a pointer to an outcome, so deliver the outcome (including the surrounding pieces the user implied), generalize examples to the class they represent, and resolve ambiguity by reasoning over the context rather than waiting for a fully-specified brief; and **go the extra mile — always** (find or invent the elegant solution; never settle for the easy-but-complex; *easy ≠ simple*). Be lazy about repetition — **automate every repeated process** (never do the same thing by hand twice; derive from a single source of truth and make it runnable in one step) — and relentless about design quality.
@@ -27,22 +28,36 @@ For any non-trivial change, invoke the **`bespunky-engineering:architecture-firs
 
 For the method — the sweep, the dependency test, observing the target — the **`bespunky-engineering:architecture-first`** skill's *Finish gate*.
 
-{{#ui}}
+{{/plugin-bespunky-engineering}}
+{{#plugin-bespunky-workflow}}
+## Review before you hand back (non-negotiable)
+
+**Finished is not reviewed.** When a long autonomous stretch of work is done — a feature, a bug fix that touched design, a refactor, a migration — **run a sanity review before you hand control back to the user**, and before you propose landing a branch or cut a release. Reviewers who did not write the work tear it apart through one lens each (architecture, reuse, scalability, clean code, bugs, security, UX, DX, tests, completeness — whatever the change calls for), every weighty finding is adversarially verified, and what survives is fixed. The user gets back work that has already been through the critique they would otherwise have had to ask for.
+
+- **The top-level session runs it, out of its own context** — dispatch the **`bespunky-workflow:sanity-reviewer`** agent in `fix` mode, after committing your work. A subagent never does; its parent reviews the integrated result.
+- **Not when you pause.** Stopping mid-work to ask a question or wait for a confirmation is not finishing. Skip it, too, for a small or mechanical change, a read-only answer, or work already reviewed with nothing changed since.
+- **Review, then verify end to end, then ship.** The review's fixes postdate any dogfood or real install, so that runs again after them.
+
+How to brief it, and what to do with what comes back: the **`bespunky-workflow:sanity-review`** skill.
+
+{{/plugin-bespunky-workflow}}
+{{#ui}}{{#plugin-bespunky-product-ux}}
 ## Redesign means rethink
 
 When asked to **redesign** any UI — a layout, screen, page, component, or flow — treat it as a **complete creative reconception from scratch**, never a modification or reskin of what exists. The existing implementation has **zero design authority**: do **not** read it to inform the new design, and don't even look at it before conceiving the new one. Reconceive the **form** from the intent, the requirements, and the feeling; honor the **purpose** (what the thing is for, its data and functionality), which comes from the spec and the user — never reverse-engineered from the old layout. Read the existing code **only after** the new design exists — to plan what to clean up, overwrite, or migrate, and to confirm what functionality must survive — then build the new design cleanly and **remove the old**. (A *targeted tweak* — "move this button", "change this colour" — is **not** a redesign; don't inflate it into one.)
 
 For any redesign, invoke the **`bespunky-product-ux:redesign-means-rethink`** skill — the entry gate to the experience-design trio (`envision-the-experience` → `stage-the-vision` → `realize-the-vision`, run from scratch).
 
-{{/ui}}
-{{#design-system}}
+{{/plugin-bespunky-product-ux}}{{/ui}}
+{{#design-system}}{{#plugin-bespunky-design-system}}
 ## Design-system-first (non-negotiable)
 
 Every visual value in this workspace comes from the **design system** (`{{DS_ROOT}}`) — never from the component you happen to be writing. Before you build any feature UI, **go to the design system first** and compose the screen from its components and its tokens. **Never hardcode a style value:** no raw hex/`rgb()`/`hsl()`, no magic `px`/`rem`, no ad-hoc font stack, weight, shadow, radius, duration or easing. Every colour, space, radius, type step, elevation, border, duration and easing is a **token** — a CSS custom property, consumed through the design system's SASS API (`@use 'design-system/styles' as ds;`) — and a component reads **semantic** tokens (`ds.color('on-surface')`), never a raw primitive. A feature component **composes**; it does not invent appearance (its own SCSS should be little more than layout). **The second occurrence of a UI pattern is a promotion, not a copy-paste** — the moment a card, button, panel, field, or layout shape appears twice, lift it into the design system as a reusable component (`{{NX}} g @bespunky/nx-tools:ds-component <name>` — one secondary entry point each), migrate **both** sites onto it, and delete the copies. **When the design system lacks the concept you need, model it** — add the token, add the semantic alias, extend the scale, add the component — and **never** work around the gap with a local override, an `!important`, {{#angular}}a `::ng-deep` reaching into another component's internals{{/angular}}{{^angular}}a selector reaching into another component's internals{{/angular}}, a duplicated token, or a one-off `variant` boolean. A gap in the design system is a *design gap*; patching it locally is a patch in CSS clothing, and CSS has no compiler to catch the drift — it compounds silently until "change the brand colour" is a four-hundred-file diff. The design system is the **single source of visual truth**: a re-theme, a rebrand, or a redesign must be a change to **tokens**, not to a thousand component files.
 
 For the discipline in full — the loop, the promotion loop, the styling patches to refuse, and what to do when the design system lacks the concept — invoke the **`bespunky-design-system:design-system-first`** skill; for the technique layer (token taxonomy, CSS custom properties, the SASS API, theming and modes, encapsulation, and the design system's entry points) route through **`bespunky-design-system:design-tokens-and-theming`**. The mechanical how-to for *this* project's design system is in [`HOUSE.md`](HOUSE.md).
 
-{{/design-system}}
+{{/plugin-bespunky-design-system}}{{/design-system}}
+{{#plugin-bespunky-workflow}}
 ## Branch & release workflow (non-negotiable)
 
 **You MUST invoke the `bespunky-workflow:branch-and-release` skill before any git branch, worktree, integration, promotion, or release action — this is mandatory, not a recommendation.** The skill is the operative procedure (the relevance check, per-feature git worktrees + the Nx-root override, the rebase-and-re-verify divergence rule, and every human-gated move the branch model declares, with its exact commands), not a reference to consult when convenient. Performing any of those steps from memory — skipping the skill — is a process violation; the skill is the always-on, **auto-updating** source of truth and supersedes any recollection of the flow.
@@ -64,15 +79,20 @@ For the discipline in full — the loop, the promotion loop, the styling patches
 
 **This project's parameters** — the {{#branches-declared}}declared lines and their roles{{/branches-declared}}{{^branches-declared}}undeclared-model protections{{/branches-declared}} and the deploy bindings{{#web}}, and how to serve an in-flight worktree{{/web}} — are in [`HOUSE.md`](HOUSE.md) → *Branch & release parameters*. The skill reads them.
 
+{{/plugin-bespunky-workflow}}
 {{#ci}}{{#firebase}}
-**CI deploys, and its cloud identity is the human's to grant.** Change *where* it deploys through the branch model's `ci` bindings, never by editing the workflow. **Never run `tools/setup-gcp.sh` or any IAM grant (`gcloud iam …`, `add-iam-policy-binding`)** — hand the user the exact `!` line. How: [`HOUSE.md`](HOUSE.md) → *Continuous deployment (CI)*.
+## CI deploys — the cloud identity is the human's (non-negotiable)
+
+Change *where* CI deploys through the branch model's `ci` bindings, never by editing the workflow. **Never run `tools/setup-gcp.sh` or any IAM grant (`gcloud iam …`, `add-iam-policy-binding`)** — hand the user the exact `!` line. How: [`HOUSE.md`](HOUSE.md) → *Continuous deployment (CI)*.
+
 {{/firebase}}{{/ci}}
+{{#plugin-bespunky-workflow}}
 ## A feature is a package (non-negotiable)
 
 **Every effort's durable, non-code output lives in ONE folder, named by the effort's slug — the same slug as its branch and worktree.** Invoke `bespunky-workflow:feature-package` for the method; these rules are always on:
 
 - **The package is `docs/features/<YYYY-MM-DD>-<slug>/`** — created **with** the worktree (same slug, `date -u +%F`), not at the end, and **born with one line**: a `DECISION.md` whose `summary:` frontmatter says, in plain words, what the effort is for, because a slug alone means nothing a month later. At the merge gate that line is rewritten as the outcome. Skip it only for genuinely trivial work (a typo fix); a package for nothing is noise.
-- **Everything durable goes in it** — `BRIEF.md`, `VISION.md`, `STAGING.md`, `DECISION.md` (the design quartet), the throwaway `mocks/`, the effort's `handoffs/` batons, research notes, plans. **Never invent another home**: no `NOTES.md` at the repo root, no folder made up on the spot.
+- **Everything durable goes in it** — `BRIEF.md`, `VISION.md`, `STAGING.md`, `DECISION.md` (the design quartet), the throwaway `mocks/`, the effort's `handoffs/` batons, its `reviews/` ledgers, research notes, plans. **Never invent another home**: no `NOTES.md` at the repo root, no folder made up on the spot.
 - **Write it AS IT HAPPENS, never afterwards.** A doc written at the end is a memory — reconstructed, tidied, and confidently wrong about exactly the parts that matter (why a design was rejected, which constraint was fatal, what the user actually said).
 - **The conclusion is durable; the evidence is disposable.** Decisions and roads-not-taken are committed and permanent. Mocks, spikes, and scratch are **self-ignoring** (a `.gitignore` containing `*`) and **nothing outside them may ever depend on them** — no route, no import, no asset, no config entry — so they can be deleted without breaking a thing. Bin them by default; keep only when the user says so.
 - **Quote the user's own words.** The sentence in which they chose, rejected, or corrected something is the most valuable line in the package and settles a dozen later arguments. Never paraphrase it away.
@@ -98,18 +118,23 @@ The package answers the question the code never can: *six months from now, why w
 
 Subagents are the free everyday tier. **Multi-agent Workflows need the user's explicit opt-in** — propose one and say roughly what it would cost; never launch one on your own authority. For the full method — the pattern catalogue, the delegated-task contract, the termination and isolation rules — invoke the **`bespunky-workflow:delegate-and-parallelize`** skill.
 
+{{/plugin-bespunky-workflow}}
 ## Generator-first, manual last
 
 For anything this workspace can **generate** — projects, apps, libraries, modules, components, config — **use the generator or the stack's own scaffolder; never hand-create and fill the files.** Before hand-writing anything structural, check what exists: the house generators (`{{NX}} list @bespunky/nx-tools`{{#js}}; the everyday ones are in [`HOUSE.md`](HOUSE.md){{/js}}), Nx's (`{{NX}} list` / `{{NX}} list <plugin>`), and the stack's own CLI. Only fall back to manual file creation when nothing covers the task. **Never guess flags** — verify against the tool's own `--help` (or its documentation) before you run it.
 
-Nx is this workspace's floor: every house generator and migration runs through it, invoked here as **`{{NX}}`** — `{{NX}} g <plugin>:<generator> --help` before a first use, and the `nx-generate` skill (the Nx plugin) for discovery.
+Nx is this workspace's floor: every house generator and migration runs through it, invoked here as **`{{NX}}`** — `{{NX}} g <plugin>:<generator> --help` before a first use{{#plugin-nx}}, and the `nx-generate` skill (the Nx plugin) for discovery{{/plugin-nx}}.
 
 {{#agent}}**System packages go in `.devcontainer/os-packages.txt`** (one Debian package name per line) — the image build installs them as one cached layer. Never `sudo apt-get install` one by hand (gone at the next rebuild) or in a post-create step (reinstalled on every rebuild).
 
-{{/agent}}## Local servers — never clobber a running server (non-negotiable)
+{{/agent}}{{#plugin-bespunky-workflow}}## Local servers — never clobber a running server (non-negotiable)
 
 **When you start a server to test a change, you MUST bind it to a random free port — never the project's default port{{#angular}} (`4200`){{/angular}}{{#firebase}}, the emulator ports (`8080`/`9099`/…){{/firebase}}, or any container-forwarded port.** Those belong to whatever server the developer launched manually; grabbing them fails, silently attaches, or forces a disruptive restart. {{#web}}You verify **headless** (Playwright reaches any `localhost:<port>` directly), so you never need the forwarded ports — a random port costs nothing.{{/web}}{{^web}}A random port costs nothing, and anything you need to check can reach it directly.{{/web}} Read the bound URL from the server's own startup output and point your browser there{{#nx-serve}} — as an agent, serve with **`tools/dev/dev serve <app>`**, the engine `{{SERVE}}` wraps: Nx's agent output (`summary`) prints nothing of a task that is still running, so its URL and stop handle would never reach you (`{{SERVE}}` refuses itself there){{/nx-serve}}.{{#web}} **The engine holds you to this:** under an agent its `auto` never takes the base ports, and `--port-offset=0` is refused.{{/web}} **Tear down by the handle you launched with — never by name** (how, for each kind of server: the skill below{{#web}}, and [`HOUSE.md`](HOUSE.md) → *Running stacks*{{/web}}), then **confirm your ports are free** before you report done; a subagent stops what it started before it returns and lists it. **Never kill a server you didn't start** to free a port. Full rules — invoke the **`bespunky-workflow:local-server-isolation`** skill.
 {{#firebase}}
 The emulator suite is the trap: its ports are fixed, so a random *app* port alone doesn't keep you off the developer's suite. Every suite **claims** its ports as a stack before it starts, so one that would collide **refuses to start**, naming the stack that holds them — nothing is ever killed to make room. Never boot a colliding suite on the base ports, and never clear one out of your way.{{#web}} Serve **from your feature worktree**: `{{SERVE}} <app>` there claims a free block for the entire stack (every process the app declares{{#nx-serve}}, the emulator suite with its hub/logging ports included{{/nx-serve}}{{^nx-serve}} — a suite declared for the app, as an `emulators` process in `.bespunky/dev.json`, shifts with it; never start one by hand beside it{{/nx-serve}}), so it coexists with the developer's; open it at its `<slug>.localhost` domain — in the shared browser or a host tab. Skipping the suite ({{#nx-serve}}`--no-emulators`{{/nx-serve}}{{^nx-serve}}`--skip=emulators`{{/nx-serve}}) does **not** reuse the running one: it points the app at the **real** Firebase services (`?emulate=none`) — do it only on purpose, never against production data.{{/web}}{{^web}} Run the suite alone (`{{NX}} run firebase:emulators`): it claims its ports, and refuses if another stack holds them.{{/web}}
+{{/firebase}}
+{{/plugin-bespunky-workflow}}{{#firebase}}
+## Local runs never reach live credentials (non-negotiable)
+
 **Never arm a local run with live credentials or a real project without the user.** The emulator suite runs offline (a `demo-` project id) and its secrets inert by default. Claude never creates or fills `.secret.sandbox.local`, never sets `EMULATOR_SECRETS=sandbox`, and never sets a service to `false` in `environment.ts`'s `EMULATE` map (which moves the whole suite onto the real project id) — unless the user explicitly asked for it. [`HOUSE.md`](HOUSE.md) → *What a local run can reach*.
 {{/firebase}}

@@ -37,6 +37,8 @@ docs/features/2026-07-14-gift-picker/     # the package — slug matches branch 
     gallery.html · serve.sh · variants/ · comments.json …   # the mock-to-choose harness
   handoffs/         # session-handoff — the relay batons for THIS effort
     2026-07-14T0930Z.md
+  reviews/          # sanity-review — each review's ledger (frame, lenses, verdicts); never a baton
+    2026-07-14T1610-sanity-review.md
 ```
 
 **The slug is the identity.** It is the *same* slug that names the branch and the worktree in [[branch-and-release]] (`feat/gift-picker`, `.claude/worktrees/gift-picker`). One name, three places. From the branch you know the slug but **not** the date, so find the package by the slug — newest match wins:
@@ -106,6 +108,7 @@ Every skill that produces something durable writes **into the package**, not int
 | `bespunky-product-ux:mock-to-choose` | `mocks/` (throwaway harness + variants) and `DECISION.md` (durable) | evidence + conclusion |
 | **any decision the effort makes** | `DECISION.md` — what was chosen and why, in the user's words, and what was ruled out. **Owned by the package, not by one skill:** an architecture call or a build-vs-buy with no mocks still records its decision here. | conclusion |
 | `bespunky-workflow:session-handoff` | `handoffs/<UTC-stamp>.md` — the relay batons for this effort | conclusion |
+| `bespunky-workflow:sanity-review` | `reviews/<UTC-stamp>-sanity-review.md` — a review's ledger: the frame, the lenses, every finding's verdict and outcome. Kept out of `handoffs/`, whose newest file resume reads as the baton | conclusion |
 | `bespunky-workflow:branch-and-release` | *creates the package* alongside the worktree; the slug it chooses is the package's name | — |
 | anything else durable | a plainly-named file in the package — research notes, a plan, a spike write-up, an ADR | conclusion |
 

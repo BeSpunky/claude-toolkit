@@ -283,7 +283,7 @@ export default {
         t.equal([ctx.functions.status, ctx.functions.called], [0, 'FIREBASE deploy --only functions -P prod'], `functions: the runner deploys, args forwarded (${ctx.functions.out})`);
         t.ok(!ctx.functions.out.includes('road to a first deploy'), 'a successful deploy prints no road');
         t.equal(ctx.noLogin.status, 1, 'a failed deploy keeps the CLI\'s exit code');
-        for (const step of ['no Firebase login: step 1', 'npx firebase login', 'npx firebase use --add', 'run functions:deploy -P <alias>', '/bespunky-house:add-layer ci', 'bash tools/setup-gcp.sh', '.bespunky/gcp/<environment>.tsv', 'Worked when'])
+        for (const step of ['no Firebase login: step 1', 'npx firebase login', 'npx firebase use --add', 'run functions:deploy -P <alias>', '4. Add the ci layer', 'bash tools/setup-gcp.sh', '.bespunky/gcp/<environment>.tsv', 'Worked when'])
           t.ok(ctx.noLogin.out.includes(step), `no login: the road names "${step}" (${ctx.noLogin.out})`);
         t.ok(ctx.noAlias.out.includes('No project was named') && ctx.noAlias.out.includes('Here: dev@example.com'), `logged in, no alias: points at step 2 (${ctx.noAlias.out})`);
         t.ok(ctx.active.out.includes('project (staging) are set') && !ctx.active.out.includes('No project was named'), `the project \`firebase use\` made active is the one Firebase used (${ctx.active.out})`);

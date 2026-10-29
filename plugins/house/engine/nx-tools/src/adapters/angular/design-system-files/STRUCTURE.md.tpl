@@ -188,6 +188,6 @@ A theme can only **re-bind** tokens the design system already declares. It canno
 nothing would be reading them. A theme is a *values* mechanism, not an escape from the token vocabulary.
 
 > **The tokens currently in `_tokens.scss` are PLACEHOLDERS with no design authority.** They exist so the
-> library compiles and the app runs on day zero. The design phase — `bespunky-product-ux:stage-the-vision`
-> → `realize-the-vision` — replaces that file wholesale with the real visual system. Do not build a look
+> library compiles and the app runs on day zero. The design phase{{designPhaseSkills}}
+> replaces that file wholesale with the real visual system. Do not build a look
 > on top of them, and do not tweak them into one.

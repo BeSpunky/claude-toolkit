@@ -131,6 +131,8 @@ import { isPinnedSpec } from '../_utils/version-spec';
 import { nodeVersionFile, projectNodeMajor } from '../_utils/node-version';
 import { FIREBASE_ADMIN_VERSION, FIREBASE_FUNCTIONS_VERSION, FIREBASE_TOOLS_VERSION } from '../_utils/versions';
 import { FUNCTIONS_NODE_RUNTIMES } from '../_utils/firebase-compat';
+import { pluginPointerRenderer } from '../_utils/plugin-pointers';
+import { FIREBASE_SKILL_POINTERS } from './skill-pointers';
 
 interface FirebaseEmulatorsSchema {
   /** Also attach the Firebase client to this app (composes `firebase-client`), and make it the client app. */
@@ -307,6 +309,8 @@ export default async function firebaseEmulatorsGenerator(
   const workspaceName = options.workspaceName ?? options.project ?? workspaceIdentity(tree);
   const template = (name: string) => readFileSync(join(__dirname, name), 'utf8');
   const substitute = (tpl: string) => tpl.split('{{workspaceName}}').join(workspaceName);
+  // The skill and command pointers in the files below render only where this project enables their plugin.
+  const pointers = pluginPointerRenderer(tree, FIREBASE_SKILL_POINTERS);
 
   // 0) The client half first, when asked for: it writes the env files the scripts below derive ids from.
   const clientCallback: GeneratorCallback = options.project
@@ -353,7 +357,7 @@ export default async function firebaseEmulatorsGenerator(
   if (clientApp) {
     const home = effectiveAppHostingDir(tree, readProjectConfiguration(tree, clientApp).root) ?? '.';
     const at = (file: string) => (home === '.' ? file : `${home}/${file}`);
-    if (!tree.exists(at('apphosting.yaml'))) tree.write(at('apphosting.yaml'), template('apphosting.yaml.tpl'));
+    if (!tree.exists(at('apphosting.yaml'))) tree.write(at('apphosting.yaml'), pointers(template('apphosting.yaml.tpl')));
     if (options.staging && !tree.exists(at('apphosting.staging.yaml'))) {
       tree.write(at('apphosting.staging.yaml'), template('apphosting.staging.yaml.tpl').split('{{projectName}}').join(clientApp));
     }
@@ -382,7 +386,7 @@ export default async function firebaseEmulatorsGenerator(
   //    The welcome banner looks for client env files across the APPS DIRECTORY rather than a list rendered now: an
   //    app added later (`nx g @bespunky/nx-tools:app`) gets its env files from firebase-client without this
   //    workspace step re-running, and the banner must still see them.
-  tree.write('tools/firebase-welcome.sh', template('firebase-welcome.sh.tpl').split('{{appsDir}}').join(appsDir));
+  tree.write('tools/firebase-welcome.sh', pointers(template('firebase-welcome.sh.tpl')).split('{{appsDir}}').join(appsDir));
   tree.write('tools/emulator-ports.mjs', renderEmulatorPortsModule(template('emulator-ports.mjs.tpl')));
   tree.write(
     'tools/emulators.sh',
@@ -400,10 +404,10 @@ export default async function firebaseEmulatorsGenerator(
     functionsPaths(template('push-secrets.sh.tpl')).split('{{appEnvProdPath}}').join(clientEnv?.prod ?? ''),
   );
   tree.write('tools/seed/build-seeds.sh', substitute(template('seed-build-seeds.sh.tpl')));
-  tree.write('tools/firebase-deploy.mjs', functionsPaths(template('firebase-deploy.mjs.tpl')));
+  tree.write('tools/firebase-deploy.mjs', pointers(functionsPaths(template('firebase-deploy.mjs.tpl'))));
   tree.write(
     'tools/firebase-deploy-rules.mjs',
-    template('firebase-deploy-rules.mjs.tpl').split('{{seedMarker}}').join(RULES_SEED_MARKER).split('{{suiteRoot}}').join(suite.root),
+    pointers(template('firebase-deploy-rules.mjs.tpl')).split('{{seedMarker}}').join(RULES_SEED_MARKER).split('{{suiteRoot}}').join(suite.root),
   );
   writeSeedTooling(tree);
   if (!tree.exists('tools/seed/world.mjs')) tree.write('tools/seed/world.mjs', substitute(template('seed-world.mjs.tpl')));

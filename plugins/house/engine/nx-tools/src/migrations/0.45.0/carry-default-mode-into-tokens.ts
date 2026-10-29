@@ -28,6 +28,8 @@ import { join } from 'node:path';
 import { findDesignSystem } from '../../generators/_utils/design-system';
 import { applicationsWith } from '../../adapters/registry';
 import { THEME_START, THEME_END } from '../../generators/design-system-styles/generator';
+import { pluginPointerRenderer, pointerRendererFor } from '../../generators/_utils/plugin-pointers';
+import { DESIGN_SYSTEM_SKILL_POINTERS } from '../../generators/design-system/skill-pointers';
 
 const TAG = '[0.45.0 carry-default-mode-into-tokens]';
 const SRC = join(__dirname, '../..');
@@ -131,8 +133,11 @@ export default async function carryDefaultModeIntoTokens(tree: Tree): Promise<vo
     const path = `${ds.root}/${m.file}`;
     if (!tree.exists(path)) continue;
     const current = tree.read(path, 'utf8') ?? '';
-    const next = render(m.template, prefix);
-    if (fingerprint(current, prefix) === fingerprint(next, prefix)) continue; // already current
+    const next = render(tree, m.template, prefix);
+    // Already current: as this project's enablement renders it, or as every seed from 0.45.0 until the pointers were
+    // gated wrote it — each pointer on, whatever the project enables.
+    const currentShapes = [next, renderAsSeeded(m.template, prefix)].map((text) => fingerprint(text, prefix));
+    if (currentShapes.includes(fingerprint(current, prefix))) continue;
     if (fingerprint(current, prefix) !== m.stock044) {
       logger.warn(
         `${TAG} ${path} differs from the stock file the design system seeded, so it was left as it is — and it ` +
@@ -146,7 +151,7 @@ export default async function carryDefaultModeIntoTokens(tree: Tree): Promise<vo
     logger.info(`${TAG} ${path}: replaced the stock 0.44 file with the 0.45.0 one, which reads \`$default-mode\`.`);
   }
   const moduleFile = `${ds.root}/${DEFAULT_MODE_MODULE.file}`;
-  if (angularUpgraded && !tree.exists(moduleFile)) tree.write(moduleFile, render(DEFAULT_MODE_MODULE.template, prefix));
+  if (angularUpgraded && !tree.exists(moduleFile)) tree.write(moduleFile, render(tree, DEFAULT_MODE_MODULE.template, prefix));
 }
 
 /** Each styled app's theme block: where it is and the argument its `ds.theme(…)` call passes (null for none). */
@@ -185,8 +190,16 @@ function declare(tokens: string, value: string, prefix: string): string {
   return `${tokens.trimEnd()}\n\n${declaration}`;
 }
 
-function render(template: string, prefix: string): string {
-  return readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', prefix);
+/** A seeded template as the design-system generator renders it: the prefix, and the skill pointers this project enables. */
+function render(tree: Tree, template: string, prefix: string): string {
+  const pointers = pluginPointerRenderer(tree, DESIGN_SYSTEM_SKILL_POINTERS);
+  return pointers(readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', prefix));
+}
+
+/** The same template as the seeds before the pointers were gated carried it: every pointer on. */
+function renderAsSeeded(template: string, prefix: string): string {
+  const pointers = pointerRendererFor(DESIGN_SYSTEM_SKILL_POINTERS, () => true);
+  return pointers(readFileSync(join(SRC, template), 'utf8').replaceAll('{{tokenPrefix}}', prefix));
 }
 
 /**

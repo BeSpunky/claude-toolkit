@@ -30,7 +30,7 @@ const MODE_ATTRIBUTE = 'data-{{tokenPrefix}}-mode';
  *   - By DEFAULT (mode `'system'`, no persistence) there is no flash: the CSS itself resolves the design
  *     system's `$default-mode` (and, when that follows the OS, `prefers-color-scheme`), before any JS.
  *   - If you PERSIST an explicit choice (localStorage, the user's server profile — a product decision
- *     with real trade-offs; see `bespunky-engineering:resumable-state`), you must apply it BEFORE first
+ *     with real trade-offs{{resumableStateSkill}}), you must apply it BEFORE first
  *     paint with a tiny inline `<script>` in index.html's <head>, then hydrate `mode` from the same key
  *     here. Setting `mode` from a service alone will flash, because the paint already happened. See
  *     HOUSE.md → *The design system* for the inline-script snippet.

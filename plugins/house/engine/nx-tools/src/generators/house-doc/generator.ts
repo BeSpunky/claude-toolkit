@@ -38,6 +38,7 @@ import { findDesignSystem } from '../_utils/design-system';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type LayerId } from '../../layers/registry';
+import { enabledPlugins } from '../_utils/claude-settings-file';
 import { activeLayers, docSections } from '../_utils/layer-contributions';
 import { matchesEvidence } from '../../layers/evidence';
 import { SERVE_EXECUTOR } from '../_utils/dev-server';
@@ -120,6 +121,12 @@ export default async function houseDocGenerator(
   // before firebase.json exists to detect).
   const flags: Record<string, boolean> = Object.fromEntries([...docSections(active)].map((flag) => [flag, true]));
   flags.firebase = firebase;
+  // THE PLUGINS THIS PROJECT ENABLES — `plugin-<name>` for each one `.claude/settings.json` turns on. A doc that names
+  // a toolkit skill or agent is an instruction to use it, so every such passage is gated on its plugin, and a project
+  // that does not enable it is never told to call something it lacks. The settings — not the layers' `claudePlugins`
+  // — are the fact: only the agent layer's `claude-settings` step enables what the layers declare, and it runs before
+  // this generator, which is always last. tools/test-layers asserts it for every layer set.
+  for (const name of enabledPlugins(tree)) flags[`plugin-${name}`] = true;
   // HOW THIS REPO SERVES — the other command the web docs are written around. The dev loop is the stack-free
   // engine (`tools/dev/dev serve`, reading `.bespunky/dev.json`); `nx serve <app>` is only its Nx face, and exists
   // only where the Nx adapter wired the house `serve` executor onto an app. Rendering `nx serve` unconditionally

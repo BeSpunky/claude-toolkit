@@ -12,7 +12,7 @@
 # read BESIDE it. Any apphosting*.yaml nearer to an app SHADOWS this one (and its overrides)
 # for that app's backend; the house upgrade warns when it finds one.
 #
-# Deploying: ask Claude, or see the bespunky-house:firebase-app-hosting skill — create the backend
+# Deploying: ask Claude{{appHostingSkill}} — create the backend
 # with its Root Directory set to the app (an Nx build fails without it), then deploy either from
 # GitHub (rollouts on push to the live branch) or from local source (firebase deploy).
 

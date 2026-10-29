@@ -5,10 +5,7 @@
 //  zero. They carry ZERO visual intent. Do NOT build a look on top of them, and do NOT "tweak"
 //  them into a design.
 //
-//  This file is REPLACED WHOLESALE by the design phase:
-//      bespunky-product-ux:envision-the-experience  (the feeling)
-//   -> bespunky-product-ux:stage-the-vision         (the visual system: palette, type, scales, motion)
-//   -> bespunky-product-ux:realize-the-vision       (which lands that visual system HERE, as tokens)
+//  This file is REPLACED WHOLESALE by the design phase{{designPhasePipeline}}
 //
 //  The MECHANISM below is what's real: the key sets, the light/dark parity, the accessors in
 //  _functions.scss, the emission in _theme.scss. The VALUES are scaffolding.

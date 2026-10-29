@@ -658,9 +658,85 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
   ok(a.house.includes('**Package manager**: npm'), 'the package manager is named');
 });
 
+// A generated doc that names `bespunky-<plugin>:<skill-or-agent>` is an instruction to use it — and a project's own
+// layers are what enable a plugin (`claudePlugins` → .claude/settings.json). So every such reference must name a plugin
+// the layer set enables, or the doc tells Claude to call a skill or an agent that may not exist there (a floor-only
+// project was told to dispatch `bespunky-workflow:sanity-reviewer`). Checked for EVERY layer set a project can hold —
+// each subset of the registry closed under `requires` — with the branch model declared and undeclared, because the
+// gates nest inside layer and model gates (`{{#ci}}{{#firebase}}`, `{{#branches-declared}}`) a smaller sample misses.
+const WORKFLOW_ONLY = [/\bbranches\.mjs\b/, /\bthe skill(?:'s)?\b/];
+const NX_ONLY = [/`nx-[a-z-]+` skill/, /\bNx MCP\b/];
+checkAsync('house docs name only toolkit skills and agents whose plugin the project enables', async (ok) => {
+  const { claudePlugins } = require_(join(BUILD, 'src/generators/_utils/layer-contributions'));
+  const { enabledPlugins } = require_(join(BUILD, 'src/generators/_utils/claude-settings-file'));
+  const ids = registry.LAYERS.map((l) => l.id);
+  const sets = [];
+  for (let mask = 1; mask < 1 << ids.length; mask++) {
+    const set = ids.filter((_, i) => mask & (1 << i));
+    if (set.includes('nx') && set.every((id) => registry.layer(id).requires.every((r) => set.includes(r)))) sets.push(set);
+  }
+  const declared = { schema: 1, integration: 'main', production: ['main'], productionPatterns: [], chain: ['main'], protected: ['main'], protectedPatterns: [], workBase: 'main', summary: 'main (trunk)' };
+  // What a plugin's presence turns on is ENABLEMENT, which only `.claude/settings.json` records — written by the agent
+  // layer's `claude-settings` step (run here exactly where the planner runs it: before house-doc), or by the project
+  // itself (the last case: no agent layer, bespunky-workflow enabled by hand, so its directives must render).
+  const handEnabled = { enabledPlugins: { 'bespunky-workflow@claude-toolkit': true } };
+  for (const [layers, settings] of [...sets.map((set) => [set, undefined]), [['nx'], handEnabled]]) {
+    for (const model of ['undeclared', JSON.stringify(declared)]) {
+      const key = `${layers.join(',')}${settings ? ' + hand-enabled workflow' : ''} (${model === 'undeclared' ? 'undeclared' : 'declared'})`;
+      const tree = createTreeWithEmptyWorkspace();
+      if (settings) tree.write('.claude/settings.json', JSON.stringify(settings));
+      if (layers.includes('agent')) await generator('claude-settings')(tree, { layers });
+      const enabled = enabledPlugins(tree);
+      await generator('house-doc')(tree, { layers, firebase: layers.includes('firebase'), nxToolsVersion: '9.9.9', pluginVersion: '1.0.0', branchProjection: model });
+      const rules = tree.read('HOUSE.rules.md', 'utf8') ?? '';
+      for (const file of ['HOUSE.md', 'HOUSE.rules.md', 'CLAUDE.md']) {
+        const text = tree.read(file, 'utf8') ?? '';
+        const named = new Set(text.match(/bespunky-[a-z0-9-]+(?=:[a-z])/g) ?? []);
+        for (const plugin of named) ok(enabled.has(plugin), `${key}: ${file} names ${plugin}, which this project does not enable`);
+        // Unnamed references to the workflow skill and its engine — `branches.mjs` ships inside bespunky-workflow.
+        if (!enabled.has('bespunky-workflow')) for (const re of WORKFLOW_ONLY) ok(!re.test(text), `${key}: ${file} still says ${text.match(re)?.[0]} without bespunky-workflow`);
+        // The Nx plugin's skills and MCP server carry no `bespunky-` namespace, so they are named here.
+        if (!enabled.has('nx')) for (const re of NX_ONLY) ok(!re.test(text), `${key}: ${file} still says ${text.match(re)?.[0]} without the Nx plugin`);
+      }
+      // And the other direction: where the plugin IS enabled, its directives render — gating must never drop them.
+      if (enabled.has('bespunky-workflow')) ok(rules.includes('## Review before you hand back (non-negotiable)') && rules.includes('## Branch & release workflow'), `${key}: bespunky-workflow is enabled, but its directives did not render`);
+      // The pointer block promises the directives HOUSE.rules.md carries — never one that did not render.
+      const pointer = tree.read('CLAUDE.md', 'utf8') ?? '';
+      for (const [named, heading] of [['architecture-first', '## Architecture-first'], ['branch & release rules', '## Branch & release'], ['a feature is a package', '## A feature is a package'], ['design-system-first', '## Design-system-first'], ['redesign-means-rethink', '## Redesign means rethink']]) {
+        ok(!pointer.includes(named) || rules.includes(heading), `${key}: the CLAUDE.md pointer promises ${named}, which HOUSE.rules.md does not carry`);
+      }
+    }
+  }
+  // A misspelled gate renders false everywhere, silently — so every `plugin-<name>` a template gates on must be a plugin
+  // some layer declares.
+  const declaredAnywhere = new Set(claudePlugins(registry.LAYERS).plugins.map((id) => `plugin-${id.split('@')[0]}`));
+  const dir = join(PAYLOAD, 'src/generators/house-doc');
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.tpl'))) {
+    for (const [, flag] of readFileSync(join(dir, file), 'utf8').matchAll(/\{\{[#^/](plugin-[\w-]+)\}\}/g)) ok(declaredAnywhere.has(flag), `${file} gates on ${flag}, which no layer declares`);
+  }
+  // Every OTHER template reaches a toolkit skill or command only through a pointer token (_utils/plugin-pointers): a
+  // name typed into the template itself renders whatever the project enables. And each pointer table entry gates on the
+  // plugin its own text names — a mismatch (a typo, a renamed plugin) would gate on one and point at another.
+  const templates = (root) =>
+    readdirSync(root, { withFileTypes: true, recursive: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.tpl'))
+      .map((e) => join(e.parentPath ?? e.path, e.name));
+  for (const file of templates(join(PAYLOAD, 'src')).filter((f) => !f.startsWith(dir))) {
+    const hit = readFileSync(file, 'utf8').match(/\/?bespunky-[a-z0-9-]+:[a-z]/);
+    ok(!hit, `${file.slice(PAYLOAD.length + 1)} names ${hit?.[0]} directly — route it through a plugin-pointers token`);
+  }
+  for (const table of ['design-system/skill-pointers', 'firebase-emulators/skill-pointers', 'ci/skill-pointers']) {
+    for (const [name, pointers] of Object.entries(require_(join(BUILD, 'src/generators', table)))) {
+      for (const [token, [plugin, text]] of Object.entries(pointers)) {
+        ok(text.includes(`${plugin}:`) && declaredAnywhere.has(`plugin-${plugin}`), `${table} ${name}.${token} gates on ${plugin} but its text points elsewhere, or no layer declares it`);
+      }
+    }
+  }
+});
+
 checkAsync('HOUSE.rules.md: the stack-agnostic directives render in a repo with NO ui layer (none hides inside a layer gate)', async (ok) => {
   const a = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent']);
-  for (const heading of ['## Architect mentality', '## Architecture-first (non-negotiable)', '## Finish the whole job — verified where it runs (non-negotiable)', '## A feature is a package (non-negotiable)']) {
+  for (const heading of ['## Architect mentality', '## Architecture-first (non-negotiable)', '## Finish the whole job — verified where it runs (non-negotiable)', '## Review before you hand back (non-negotiable)', '## A feature is a package (non-negotiable)', '## Delegate and parallelize (non-negotiable)']) {
     ok(a.rules.includes(heading), `missing from a no-UI repo's HOUSE.rules.md: ${heading}`);
   }
   ok(!a.rules.includes('## Redesign means rethink'), 'the ui-gated directive leaked into a repo with no ui layer');

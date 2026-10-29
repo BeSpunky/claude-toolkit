@@ -14,8 +14,8 @@
 // The backend then deploys from GitHub (a rollout on every push to its live
 // branch) or from local source (`firebase deploy --only apphosting:<backendId>`).
 // Build/runtime config: the nearest `apphosting.yaml` walking up from the app's
-// directory (the house seeds it at the workspace root). The full story — and
-// moving accounts — is the bespunky-house:firebase-app-hosting skill.
+// directory (the house seeds it at the workspace root). For the full story —
+// and moving accounts — ask Claude{{appHostingSkill}}.
 //
 // Do NOT hand-fabricate this. The CLI is the source of truth for cloud state.
 // The placeholders below are intentionally empty so a half-wired prod build
