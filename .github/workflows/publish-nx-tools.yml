@@ -125,6 +125,9 @@ jobs:
           # publish.sh expects auth in ~/.npmrc; an automation token there publishes unattended.
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
           trap 'rm -f "$HOME/.npmrc"' EXIT
+          # Says which account the token belongs to, dry runs included. npm answers a token it will not honour on upload with
+          # a misleading 404; this proves the token is valid, though only a real publish proves it may upload.
+          npm whoami || { echo "::error::NPM_TOKEN is not a working npm token — set the repo secret again."; exit 1; }
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             bash tools/publish-nx-tools/publish.sh --dry-run
           else
