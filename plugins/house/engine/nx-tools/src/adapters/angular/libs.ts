@@ -41,6 +41,7 @@ export const angularLibs: LibPort = {
   async create(tree, options) {
     const linking = workspaceLinking(tree);
     const ownAlias = linking.kind === 'paths';
+    const libRoot = options.directory.replace(/\/+$/, '');
     // Option NAMES verified against @nx/angular 23 (`nx g @nx/angular:library --help`): standalone-only suite,
     // no NgModule entry, Vitest, eslint as a string (the enum is deprecated). WHICH Vitest depends on the build AND
     // the workspace's Angular major — chosen where every major-dependent choice is (./workspace-angular).
@@ -65,13 +66,12 @@ export const angularLibs: LibPort = {
       } as Parameters<typeof libraryGenerator>[1]))) ?? noop;
     // The Analog test config names its tsconfig, or every graph computation warns about a tsconfig.app.json a
     // library never has (./analog-tsconfig).
-    stateAnalogTsconfig(tree, options.directory.replace(/\/+$/, ''));
+    stateAnalogTsconfig(tree, libRoot);
     // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.
     convertBareLint(tree, options.name);
-    // The generator's fixed peers, trimmed to what the library holds — or it fails its own lint from birth.
-    pruneUnusedPeers(tree, options.directory.replace(/\/+$/, ''));
+    // The generator's fixed peers, trimmed to what the library holds now — or it fails its own lint from birth.
+    pruneUnusedPeers(tree, libRoot);
     if (!ownAlias) {
-      const libRoot = options.directory.replace(/\/+$/, '');
       linking.link(tree, { importPath: options.importPath, libRoot });
       stateTheBuildsSourceMaps(tree, libRoot);
       stateAngularCompilerContract(tree, libRoot);

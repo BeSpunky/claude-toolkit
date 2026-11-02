@@ -4,8 +4,9 @@
 // @angular/common and @angular/core — whatever the library holds, and its standalone demo imports @angular/core alone.
 // So every library it creates fails its own lint on the day it is born (`@nx/dependency-checks`: "The "@angular/common"
 // package is not used by …"). The library port trims the manifest at creation (./libs), which is what makes this true
-// of every Angular library path. A library that later imports @angular/common declares it then — the same lint names
-// the missing peer, and its `--fix` writes it.
+// of every Angular library path, judging what the library holds at that moment. A caller that goes on to reshape the
+// library judges again (the design system, after pruning the demo). A library that later imports @angular/common declares
+// it then — the same lint names the missing peer, and its `--fix` writes it. A shipped rung (0.50.0) calls the judgement.
 import { type Tree, logger } from '@nx/devkit';
 import { updateManifest } from '../../generators/_utils/dependencies';
 
@@ -22,8 +23,7 @@ export function pruneUnusedPeers(tree: Tree, root: string): void {
 
 /**
  * The `@angular/*` peers (other than @angular/core, which every Angular library needs) a library's manifest declares
- * and no source file under it imports — what @nx/angular's library generator declared for its demo component. The
- * rule @nx/dependency-checks applies, so the library passes its own lint.
+ * and no source file under it imports. The rule @nx/dependency-checks applies, so the library passes its own lint.
  */
 export function unusedAngularPeers(tree: Tree, root: string): string[] {
   const manifest = `${root}/package.json`;

@@ -211,7 +211,7 @@ The shared browser is one instance you and Claude share. Before Claude asks *you
 | --- | --- | --- |
 | `provideAppFirebase()` | `firebase.config.ts` | **241 kB** — the Firebase app itself (210 kB with no Firebase at all). **Always at root**: each service below resolves the default Firebase app from the SDK when its factory runs, so it must already be initialised at or above wherever the service is provided. |
 | `provideAppAuth()` | `firebase-auth.config.ts` | 319 kB |
-| `provideAppFirestore()` | `firebase-firestore.config.ts` | 607 kB — the heaviest |
+| `provideAppFirestore()` | `firebase-firestore.config.ts` | 607 kB — the heaviest; at root it trips the stock 500 kB budget warning on its own (the build still succeeds) |
 | `provideAppStorage()` | `firebase-storage.config.ts` | 304 kB |
 | `provideAppFunctions()` | `firebase-functions.config.ts` | 295 kB |
 | *all four at root* | | **650 kB** — what `provideAppFirebase()` used to return on its own |

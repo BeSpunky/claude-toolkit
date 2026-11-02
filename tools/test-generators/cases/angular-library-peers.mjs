@@ -39,6 +39,15 @@ export default {
       run: prune,
       expect: (tree, t) => t.missing(`${ROOT}/package.json`),
     },
+    {
+      name: 'the design system prunes a demo that was the only importer: the peer goes with it',
+      setup: library(PAIR, { 'src/lib/demo/demo.ts': "import { CommonModule } from '@angular/common';\n" }),
+      run: (tree, ctx) => ctx.load('adapters/angular/design-system').angularDesignSystem.pruneGenerated(tree, ROOT),
+      expect: (tree, t) => {
+        t.missing(`${ROOT}/src/lib/demo/demo.ts`);
+        t.equal(peersOf(t), { '@angular/core': '^21.0.0' }, 'the peers');
+      },
+    },
     ...MATRIX.filter((m) => m.layout === 'apps-libs').map((m) => ({
       name: `publishable-lib, ${m.label}: born without the unused peer, @angular/core kept`,
       needs: ['@nx/angular', '@nx/js'],

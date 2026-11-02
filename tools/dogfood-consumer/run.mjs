@@ -25,10 +25,10 @@
  *   upgrade   on a work branch, `house.sh upgrade --local --yes .` with the toolkit UNDER TEST: UPGRADE_OK and none
  *             of UPGRADE_PARTIAL / _REFUSED / _FAILED; the stamp is the toolkit's version; every seed survived; a
  *             SECOND upgrade is a no-op (UPGRADE_OK, `UPGRADE_NEXT: none`, no commit, clean tree); then the
- *             upgraded workspace builds and lints (`UPGRADE_OK` says the run completed, never that its output
+ *             upgraded workspace builds, lints and passes its tests (`UPGRADE_OK` says the run completed, never that its output
  *             compiles — house.sh says so itself, in UPGRADE_VERIFY).
  *   new-*     a real `house.sh new --local` with the toolkit under test for EVERY preset: agent, node, angular and
- *             angular + --firebase, each with its sanity facts, and build + lint where there is an app to build.
+ *             angular + --firebase, each with its sanity facts, and build + lint + test where there is an app to build.
  *
  * `--yes` is passed to the upgrades on purpose and is not the gate being satisfied by a machine: the upgrade
  * target is a throwaway fixture this run created seconds earlier, and running this tool IS the human's consent.
@@ -309,18 +309,21 @@ function must(cond, msg) { if (!cond) throw new Error(msg); }
 const SEEDS = [
   {
     id: 'branch-model',
-    message: 'chore: declare the branch model (string deploys notes)',
+    message: 'chore: declare the branch model (deploys notes)',
     async apply(c) {
-      // Written with the RELEASED branches.mjs, the way the project wrote it, with the legacy STRING `deploys`.
+      // Written with the RELEASED branches.mjs, the way the project wrote it. The form is the one it accepts: `write` has
+      // refused a bare-string `deploys` since 0.50.0.
       const b = join(RELEASED_TREE, 'plugins/workflow/skills/branch-and-release/scripts/branches.mjs');
       const stages = c.staging ? 'staging,main' : 'main';
       const ex = spawnSync('node', [b, 'expand', '--preset', c.staging ? 'three-line' : 'two-line', '--stages', stages], { cwd: c.dir, env: ENV, encoding: 'utf8' });
       must(ex.status === 0, `branches.mjs expand: ${ex.stderr.trim()}`);
       const model = JSON.parse(ex.stdout);
       for (const s of model.stages) {
-        s.deploys = s.branch === 'main'
-          ? `App Hosting backend ${c.name}-web tracks main (GitHub-linked); functions deployed by hand: nx run functions:deploy`
-          : `App Hosting backend ${c.name}-${s.branch} tracks ${s.branch}; functions deployed by hand: nx run functions:deploy -P ${s.branch}`;
+        s.deploys = {
+          note: s.branch === 'main'
+            ? `App Hosting backend ${c.name}-web tracks main (GitHub-linked); functions deployed by hand: nx run functions:deploy`
+            : `App Hosting backend ${c.name}-${s.branch} tracks ${s.branch}; functions deployed by hand: nx run functions:deploy -P ${s.branch}`,
+        };
       }
       // The lines the model declares exist, as in the reporting projects, and the seeds land on the integration line.
       const head = gitOut(c.dir, 'rev-parse', 'HEAD');
@@ -530,7 +533,7 @@ async function stepSeed() {
   const status = gitOut(consumer.dir, 'status', '--porcelain');
   record(step, 'tree clean after seeding', status === '', { detail: status ? status.split('\n').slice(0, 3).join(' | ') : '' });
   ok.seed = all && status === '';
-  // The same build + lint the upgraded workspace gets, BEFORE the upgrade: what fails here was already broken in what
+  // The same build + lint + test the upgraded workspace gets, BEFORE the upgrade: what fails here was already broken in what
   // consumers have, so the upgrade's own rows can say which failures it introduced.
   if (ok.seed) baseline = await verify('seed', consumer.dir, 'baseline: ');
   return ok.seed;

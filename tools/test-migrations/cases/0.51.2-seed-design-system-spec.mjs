@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
-const { addProjectConfiguration, readJson } = createRequire(import.meta.url)('@nx/devkit');
+const { addProjectConfiguration, readJson, writeJson } = createRequire(import.meta.url)('@nx/devkit');
 
 const SHAPES = join(dirname(fileURLToPath(import.meta.url)), '0.51.2-ds-theme-shapes');
 const shape = (sha, prefix = 'ds') => readFileSync(join(SHAPES, `${sha}.ts.tpl`), 'utf8').split('{{tokenPrefix}}').join(prefix);
@@ -25,7 +25,7 @@ function ds(tree, { test = UNIT_TEST, theme = shape(LATEST), tags = ['type:desig
   for (const [path, text] of Object.entries(files)) tree.write(`${root}/${path}`, text);
 }
 
-/** Left alone: no spec written, every file as it was, and the reason in the log. */
+/** Left alone: no spec written, and the reason in the log. */
 function leftAlone(reason, spec = SPEC) {
   return (tree, t, logs) => {
     t.ok(spec === null || !tree.exists(spec), 'no spec was written');
@@ -72,12 +72,17 @@ export default {
     {
       name: 'no test target: left, reported',
       setup: (tree) => ds(tree, { test: null }),
-      expect: leftAlone(/Left design-system: it has no test target/),
+      expect: leftAlone(/Left design-system: its project config has no test target/),
     },
     {
       name: 'another executor (jest passes with no specs): left, reported',
       setup: (tree) => ds(tree, { test: { executor: '@nx/jest:jest', options: { passWithNoTests: true } } }),
       expect: leftAlone(/Left design-system: its test target uses @nx\/jest:jest/),
+    },
+    {
+      name: 'the same builder under its own name: left, reported as not judged, not as passing',
+      setup: (tree) => ds(tree, { test: { executor: '@angular/build:unit-test' } }),
+      expect: leftAlone(/this spec is for @nx\/angular:unit-test.*add a spec/),
     },
     {
       name: 'a target with its own include: left, warned, a seeded spec might not run',
@@ -90,9 +95,33 @@ export default {
       expect: leftAlone(/declares its own include\/exclude/),
     },
     {
-      name: 'a spec of the project\'s own, elsewhere in the library: left, reported',
+      name: 'an include in a configuration: left, warned',
+      setup: (tree) => ds(tree, { test: { executor: '@nx/angular:unit-test', configurations: { ci: { include: ['x'] } }, defaultConfiguration: 'ci' } }),
+      expect: leftAlone(/declares its own include\/exclude/),
+    },
+    {
+      name: "a spec of the project's own under the source root: left, reported",
+      setup: (tree) => ds(tree, { files: { 'src/lib/mine.spec.ts': "it('x', () => {});\n" } }),
+      expect: leftAlone(/Left design-system: it already has a spec \(packages\/design-system\/src\/lib\/mine\.spec\.ts\)\.$/),
+    },
+    {
+      name: 'a spec only in an entry point, outside the source root: left, and warned that the target is still red',
       setup: (tree) => ds(tree, { files: { 'button/src/button.spec.ts': "it('x', () => {});\n" } }),
-      expect: leftAlone(/Left design-system: it already has a spec \(packages\/design-system\/button\/src\/button\.spec\.ts\)/),
+      expect: leftAlone(/already has a spec \(packages\/design-system\/button\/src\/button\.spec\.ts\), but .* finds specs only under packages\/design-system\/src, .*still fails/),
+    },
+    {
+      name: 'a spec the runner does not match, under the source root: left, warned',
+      setup: (tree) => ds(tree, { files: { 'src/lib/old.spec.js': '' } }),
+      expect: leftAlone(/still fails/),
+    },
+    {
+      name: "a declared source root is the runner's: a spec there counts, one under src does not",
+      setup: (tree) => {
+        ds(tree, { files: { 'lib/mine.spec.ts': '' } });
+        const project = readJson(tree, `${ROOT}/project.json`);
+        writeJson(tree, `${ROOT}/project.json`, { ...project, sourceRoot: `${ROOT}/lib` });
+      },
+      expect: leftAlone(/already has a spec \(packages\/design-system\/lib\/mine\.spec\.ts\)\.$/),
     },
     {
       name: 'a spec at the very path the rung would write: never overwritten',
@@ -119,6 +148,10 @@ export default {
       ["'dark' dropped from the modes", (s) => s.replace("'light' | 'dark' | 'system'", "'light' | 'system'")],
       ['a dependency TestBed would have to provide', (s) => s.replace('inject(DOCUMENT);', 'inject(DOCUMENT);\n  private readonly http = inject(HttpClient);')],
       ['not provided in root', (s) => s.replace("@Injectable({ providedIn: 'root' })", '@Injectable()')],
+      ['a dependency with an explicit type', (s) => s.replace('inject(DOCUMENT);', 'inject(DOCUMENT);\n  private readonly http = inject<HttpClient>(HttpClient);')],
+      ['a constructor-injected dependency', (s) => s.replace('constructor()', 'constructor(private readonly http: HttpClient)')],
+      ['the attribute on another element', (s) => s.replace('const root = this.document.documentElement', 'const root = this.document.body')],
+      ['the removal commented out', (s) => s.replace("if (mode === 'system') root.removeAttribute(MODE_ATTRIBUTE);\n      else root", "// if (mode === 'system') root.removeAttribute(MODE_ATTRIBUTE);\n      root")],
     ].map(([what, edit]) => ({
       name: `DsTheme reshaped (${what}): left, warned, never guessed at`,
       setup: (tree) => {
@@ -129,12 +162,37 @@ export default {
       expect: leftAlone(/no longer has the shape the house spec tests/),
     })),
     {
-      name: 'a library without the tag is not the design system: untouched and unmentioned',
-      setup: (tree) => ds(tree, { tags: ['type:ui'] }),
+      name: 'a library without the tag or the name is not the design system: untouched and unmentioned',
+      setup: (tree) => ds(tree, { tags: ['type:ui'], name: 'ui' }),
       expect: (tree, t, logs) => {
         t.ok(!tree.exists(SPEC), 'no spec');
         t.equal(logs, [], 'nothing to say');
       },
     },
+    {
+      name: 'a library named design-system with no tag is one (the generator tags it after this rung): the spec is added',
+      setup: (tree) => ds(tree, { tags: [] }),
+      expect: (tree, t) => t.exists(SPEC),
+    },
+    {
+      name: 'an application named design-system is not one: untouched and unmentioned',
+      setup: (tree) => {
+        addProjectConfiguration(tree, 'design-system', { root: ROOT, projectType: 'application', targets: { test: UNIT_TEST } });
+        tree.write(`${ROOT}/src/lib/ds-theme.service.ts`, shape(LATEST));
+      },
+      expect: (tree, t, logs) => {
+        t.ok(!tree.exists(SPEC), 'no spec');
+        t.equal(logs, [], 'nothing to say');
+      },
+    },
+    ...[
+      ['double-quoted, as prettier writes it without singleQuote', (s) => s.replaceAll("'", '"')],
+      ['the decorator on several lines', (s) => s.replace("@Injectable({ providedIn: 'root' })", "@Injectable({\n  providedIn: 'root',\n})")],
+      ['a token prefix with a dot', (s) => s.replace('data-ds-mode', 'data-a.b-mode')],
+    ].map(([what, edit]) => ({
+      name: `DsTheme reformatted, not reshaped (${what}): the spec is added`,
+      setup: (tree) => ds(tree, { theme: edit(shape(LATEST)) }),
+      expect: (tree, t) => t.exists(SPEC),
+    })),
   ],
 };

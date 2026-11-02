@@ -87,6 +87,8 @@ const angularBound = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) =
     t.exists(`${root}/ng-package.json`);
     t.exists(`${root}/styles/_index.scss`);
     t.has(`${root}/src/lib/ds-theme.service.spec.ts`, "const MODE_ATTRIBUTE = 'data-ds-mode';");
+    const peers = t.json(`${root}/package.json`)?.peerDependencies ?? {};
+    t.ok('@angular/core' in peers && !('@angular/common' in peers), `peers what the seeded runtime imports: ${JSON.stringify(peers)}`);
     if (link === 'paths') {
       t.ok(aliases(tree)[DS], `alias: ${JSON.stringify(aliases(tree))}`);
     } else {
