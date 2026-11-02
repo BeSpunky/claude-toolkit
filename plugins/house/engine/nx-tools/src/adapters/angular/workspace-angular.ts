@@ -3,7 +3,7 @@
 // The Angular adapter does not create code for "Angular"; it creates it for the Angular THIS workspace runs, and some
 // choices only exist from a given major on. Spread across call sites, each one silently assumed the newest: the
 // design-system library asked @nx/angular for `vitest-angular` (Angular 21+), so `new --preset=angular --firebase` —
-// which creates on Angular 20, the newest major with a stable @angular/fire — died half-built (0.50.0 review, R1-0).
+// which then created on Angular 20, the newest major with a stable @angular/fire — died half-built (0.50.0 review, R1-0).
 // So the major is read here, once, and every major-dependent choice is a function of it here. Adding one: a function
 // below, with the major it starts at and the source that says so.
 import type { Tree } from '@nx/devkit';
@@ -55,6 +55,15 @@ export function installedManifest(
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether an app created on this Angular major has no zone.js: from Angular 21, which is @nx/angular's default too
+ * (application/lib/normalize-options). The adapter states it to the generator, and the creation-time pin declares
+ * zone.js by it, so the two cannot disagree when Nx moves its default.
+ */
+export function appIsZoneless(major: number): boolean {
+  return major >= 21;
 }
 
 /**

@@ -2,10 +2,11 @@
 // Project what the house must KNOW about Firebase versions — never typed by hand — into the payload.
 //
 // WHY: three versions in a house Firebase app have hard relationships the house used to ignore by writing `latest`:
-//   - `@angular/fire` peers ONE Angular major, so it must follow the workspace's installed Angular major — and for
-//     some majors (Angular 21 and 22, as of 0.50.0) no stable @angular/fire exists at all;
-//   - `firebase` is a DEPENDENCY of @angular/fire (not a peer), so the root `firebase` must be @angular/fire's own
-//     declared range verbatim, or the package manager nests a second SDK under it ("No Firebase App '[DEFAULT]'");
+//   - `@angular/fire` peers ONE Angular major, so it must follow the workspace's installed Angular major — and a major
+//     may have no stable @angular/fire at all (the table's rows say which, as of its date);
+//   - @angular/fire names the `firebase` it is built for, so the root `firebase` must be that range verbatim. Through
+//     AngularFire 21 it is a DEPENDENCY, and another root range nests a second SDK ("No Firebase App '[DEFAULT]'"); from
+//     22 it is a PEER, and another root range is an unmet peer (npm refuses, yarn warns) — and nothing else installs it;
 //   - Cloud Functions runs only the Node majors the pinned firebase-tools declares as live runtimes.
 // The source of truth for all three is npm itself, so it is projected from there:
 //   - the @angular/fire packument → for every Angular major (17 … the newest @angular/core), the newest STABLE
@@ -22,7 +23,7 @@
 // pin and that both archives are still served.
 //
 // IT DRIFTS WITH UPSTREAM, BY DESIGN. Unlike playwright-deps (keyed to a pin), the check re-asks npm, so a new
-// @angular/fire release (the day Angular 21 gets a stable one) makes it fail: that is the staleness alarm — re-run
+// @angular/fire release (the day a major gets its first stable one) makes it fail: that is the staleness alarm — re-run
 // with --write, review the diff, and decide whether existing projects need a migration. It runs on a SCHEDULE and
 // before every payload publish (.github/workflows/upstream-tables.yml, tools/publish-nx-tools/publish.sh) — never in the
 // per-push test job, where an upstream release would turn every unrelated PR red and stop the tests behind it.
@@ -152,20 +153,30 @@ function minWithinMajor(range, major) {
 }
 
 /**
- * Per Angular major: the TypeScript its compiler accepts — the newest stable @angular/compiler-cli of the major peers a
- * range (`>=5.8 <6.0` for 20) — and the TypeScript the house declares for it (`~` the newest release inside). Needed
- * the day the house CREATES a workspace below Nx's newest Angular (the Firebase creation path): create-nx-workspace
- * installs Nx's newest TypeScript, which an older Angular compiler refuses ("requires TypeScript >=5.8.0 and <6.0.0").
+ * Per Angular major: the TypeScript its whole TOOLCHAIN accepts, and the TypeScript the house declares for it (`~` the
+ * newest release inside). Needed the day the house CREATES a workspace below Nx's newest Angular (the Firebase creation
+ * path): create-nx-workspace installs Nx's newest TypeScript, which an older Angular refuses. The compiler alone is not
+ * the answer: @angular/compiler-cli 21 admits TS 6.0 while @angular/build, ng-packagr and @angular/fire 21 stop below
+ * it, and npm refuses that install (ERESOLVE). So the range is what the newest stable of each package of the major,
+ * and that major's @angular/fire release, all admit.
  */
-async function typescriptByMajor(newestMajor) {
-  const [cli, ts] = await Promise.all([packument('@angular/compiler-cli'), packument('typescript')]);
+async function typescriptByMajor(newestMajor, rows, fire) {
+  const [ts, ...toolchain] = await Promise.all(['typescript', '@angular/compiler-cli', '@angular/build', 'ng-packagr'].map(packument));
   const releases = Object.keys(ts.versions).filter((v) => !semver.prerelease(v));
   const out = {};
   for (let major = FIRST_MAJOR; major <= newestMajor; major += 1) {
-    const newest = Object.keys(cli.versions).filter((v) => !semver.prerelease(v) && semver.major(v) === major).sort(semver.rcompare)[0];
-    const range = newest && cli.versions[newest].peerDependencies?.typescript;
-    const pin = range && semver.maxSatisfying(releases, range);
-    if (pin) out[major] = { range, pin: `~${pin}` };
+    const newestOf = (pkg) => Object.keys(pkg.versions).filter((v) => !semver.prerelease(v) && semver.major(v) === major).sort(semver.rcompare)[0];
+    const release = rows[major]?.stable ?? rows[major]?.prerelease;
+    const peers = [
+      ...toolchain.map((pkg) => pkg.versions[newestOf(pkg)]?.peerDependencies?.typescript),
+      release && fire.versions[release.angularfire].peerDependencies?.typescript,
+    ].filter(Boolean);
+    if (!peers.length) continue;
+    const pin = releases.filter((v) => peers.every((range) => semver.satisfies(v, range))).sort(semver.rcompare)[0];
+    if (!pin) throw new Error(`Angular ${major}: its toolchain's TypeScript peers (${peers.join(' | ')}) admit no release — the projection's premise is gone`);
+    // The narrowest peer when one is inside all the others, which reads as what it means; else all of them, ANDed.
+    const range = peers.find((candidate) => peers.every((other) => semver.subset(candidate, other))) ?? [...new Set(peers)].join(' ');
+    out[major] = { range, pin: `~${pin}` };
   }
   return out;
 }
@@ -186,8 +197,15 @@ async function angularFireRows() {
   };
   const row = ([version, manifest], major) => {
     const angularCore = manifest.peerDependencies['@angular/core'];
-    const firebase = manifest.dependencies?.firebase;
-    if (!firebase) throw new Error(`@angular/fire@${version} declares no firebase dependency — the projection's premise is gone`);
+    // Through AngularFire 21 the SDK is a dependency; from 22 it is a PEER. Either way the root declares exactly this
+    // range. The same reading, of an installed manifest: adapters/angular/angularfire.ts carriedFirebase — a copy because
+    // publish.sh runs this check on the host Node, before its check that the host can load the payload's TypeScript.
+    const firebase = manifest.dependencies?.firebase ?? manifest.peerDependencies?.firebase;
+    if (!firebase) throw new Error(`@angular/fire@${version} declares no firebase dependency or peer — the projection's premise is gone`);
+    // An OPTIONAL peer would mean a project may have no firebase at all, and "the root declares exactly this" stops being the rule.
+    if (!manifest.dependencies?.firebase && manifest.peerDependenciesMeta?.firebase?.optional) {
+      throw new Error(`@angular/fire@${version} makes firebase an optional peer — the projection's premise is gone`);
+    }
     // The judges read "the @angular/fire release line for Angular N" as "@angular/fire N.x" (they compare majors). A
     // release that peers two Angular majors (as AngularFire 7 did) breaks that silently — so it fails here instead.
     if (semver.major(version) !== major) {
@@ -218,7 +236,7 @@ async function angularFireRows() {
   for (const release of Object.values(rows).flatMap(({ stable, prerelease }) => [stable, prerelease]).filter(Boolean)) {
     release.firebaseResolves = await release.firebaseResolves;
   }
-  return { rows, newestMajor, typescript: await typescriptByMajor(newestMajor), byTag: { latest: await firebaseNodeNeed('latest') } };
+  return { rows, newestMajor, typescript: await typescriptByMajor(newestMajor, rows, fire), byTag: { latest: await firebaseNodeNeed('latest') } };
 }
 
 function functionsRuntimes(version) {
@@ -274,7 +292,7 @@ export interface FirebaseResolution {
 export interface AngularFireRelease {
   /** Exact: firebase below is THIS release's own range, so a floating @angular/fire would break the pairing. */
   angularfire: string;
-  /** @angular/fire's own \`dependencies.firebase\` — the root declares exactly this, so the package manager keeps ONE SDK. */
+  /** @angular/fire's own \`firebase\` range (a dependency; from 22, a peer) — the root declares exactly this, so the package manager keeps ONE SDK. */
   firebase: string;
   /** What that range installs today, and the Node it needs — a release the project's Node cannot install is never chosen. */
   firebaseResolves: FirebaseResolution;
@@ -308,8 +326,9 @@ export const ANGULARFIRE_TABLE_NEWEST_ANGULAR = ${newestMajor};
 export const FIREBASE_BY_DIST_TAG: Readonly<Record<string, FirebaseResolution>> = ${pretty(byTag).replace(/^  "([a-z]+)":/gm, '  $1:')};
 
 /**
- * Per Angular major: the TypeScript range its newest compiler-cli peers, and the TypeScript the house declares when it
- * CREATES a workspace on that major (create-nx-workspace installs Nx's newest, which an older compiler refuses).
+ * Per Angular major: the TypeScript range its whole toolchain admits (compiler-cli, build, ng-packagr, @angular/fire), and
+ * the TypeScript the house declares when it CREATES a workspace on that major (create-nx-workspace installs Nx's newest,
+ * which an older Angular refuses).
  */
 export const ANGULAR_TYPESCRIPT_BY_MAJOR: Readonly<Record<number, { range: string; pin: string }>> = ${JSON.stringify(typescript, null, 2).replace(/"(\d+)":/g, '$1:')};
 

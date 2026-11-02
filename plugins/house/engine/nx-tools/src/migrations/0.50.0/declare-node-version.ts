@@ -27,7 +27,7 @@ const TAG = '[0.50.0 declare-node-version]';
 const NVMRC = '.nvmrc';
 
 /** The Node facts as of 0.50.0 (tools/node-facts/project.mjs, 2026-10-07) — frozen: the live table moves on. */
-const NODE_FACTS_AS_OF_0_50_0: NodeFactsTable = {
+export const NODE_FACTS_AS_OF_0_50_0: NodeFactsTable = {
   asOf: '2026-10-07',
   ltsCodenames: { argon: 4, boron: 6, carbon: 8, dubnium: 10, erbium: 12, fermium: 14, gallium: 16, hydrogen: 18, iron: 20, jod: 22, krypton: 24 },
   newestLtsMajor: 24,

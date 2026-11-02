@@ -120,6 +120,31 @@ export default {
       },
     },
     {
+      // The rung resolves `.nvmrc` with the facts it froze, not the live table's: `lts/*` is 24 here under every later payload.
+      name: 'an alias in .nvmrc is read with 0.50.0\'s frozen Node facts, however the live table has moved',
+      setup: (tree) => {
+        listen();
+        tree.write('.nvmrc', 'lts/*\n');
+        pkg(tree, { '@angular/core': '~22.1.0', firebase: 'latest', '@angular/fire': 'latest' }); // no pair: the floats stay, and are judged
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, 'firebase', { version: '99.0.0', dependencies: { '@firebase/x': '1.0.0' } });
+        installed(tree, '@firebase/x', { version: '1.0.0', engines: { node: '>=25.0.0' } });
+      },
+      expect: (tree, t) => {
+        t.ok(said.some((line) => /needs Node >=25\.0\.0 \(@firebase\/x@1\.0\.0\); this project's Node is 24/.test(line)), `frozen lts/* is 24, which that engines refuses; the live table's 26 would not: ${said}`);
+      },
+    },
+    {
+      name: 'a project\'s own @angular/fire pin whose firebase is a PEER: firebase "latest" follows the range it peers',
+      setup: (tree) => {
+        listen();
+        pkg(tree, { '@angular/core': '~22.1.0', '@angular/fire': '22.0.0-rc.0', firebase: 'latest' });
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, '@angular/fire', { version: '22.0.0-rc.0', peerDependencies: { firebase: '^12.18.0' } });
+      },
+      expect: (tree, t) => t.equal(deps(tree).firebase, '^12.18.0', 'pinned to the peer range'),
+    },
+    {
       name: 'Angular 22 after following half the advice (firebase pinned, @angular/fire still "latest"): the float is still REPORTED',
       setup: (tree) => {
         listen();
