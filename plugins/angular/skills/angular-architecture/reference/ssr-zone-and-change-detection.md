@@ -48,7 +48,7 @@ loadThing().finally(done);
 
 - **OnPush + signals** (modern default posture): the view updates when a *signal it reads* changes — nothing else.
 - **Zone apps, hot paths:** wrap native work in `ngZone.runOutsideAngular(() => …)`; re-enter with `ngZone.run(() => …)` only for the events that must update the view.
-- **Zoneless** (the direction of travel): there is no automatic CD — reflect native state into the view through signals, updating only what you render.
+- **Zoneless** (the default for an app created on Angular 21+; an older app stays on Zone.js until it migrates): there is no automatic CD — reflect native state into the view through signals, updating only what you render.
 
 **Pitfalls.** Under zoneless/OnPush, mutating a plain field won't update the view — use a signal. Re-entering the zone for every native tick defeats the optimization.
 
