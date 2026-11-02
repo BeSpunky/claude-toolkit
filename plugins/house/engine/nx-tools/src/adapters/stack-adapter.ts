@@ -209,11 +209,6 @@ export interface DesignSystemPort {
   /** Delete what the framework generator emitted that the DS does not ship (demo components). */
   pruneGenerated(tree: Tree, root: string): void;
   /**
-   * On creation, AFTER the runtime is seeded: drop the manifest peers the framework generator declared for the demo it
-   * pruned and nothing the library now holds uses (or the library fails its own @nx/dependency-checks lint).
-   */
-  pruneUnusedPeers?(tree: Tree, root: string): void;
-  /**
    * Templates seeded ONCE, when the library is created, and never again: an upgrade must not bring back what a project
    * deleted, or add what its reshaped library cannot pass. Undefined when this library needs none.
    */
