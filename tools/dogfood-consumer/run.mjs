@@ -581,12 +581,12 @@ async function stepUpgrade() {
   return true;
 }
 
-/** The check UPGRADE_OK / NEW_OK is not: the workspace builds and lints. `run-many` over every project (a fresh
+/** The check UPGRADE_OK / NEW_OK is not: the workspace builds, lints and passes its tests. `run-many` over every project (a fresh
  *  fixture has no cache to make `affected` cheaper), static output so the log reads top to bottom. */
 async function verify(step, dir, prefix = '', before = null) {
   const [bin, pre] = nx(dir);
   const failedSets = {};
-  for (const target of ['build', 'lint']) {
+  for (const target of ['build', 'lint', 'test']) {
     const r = await run(`${step}-${prefix ? 'baseline-' : ''}${target}`, bin, [...pre, 'run-many', '-t', target, '--output-style=static'], { cwd: dir, timeoutMs: 20 * 60_000 });
     const failed = r.code ? failedTasks(r.out) : [];
     failedSets[target] = new Set(failed);
