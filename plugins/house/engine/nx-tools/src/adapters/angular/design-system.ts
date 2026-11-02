@@ -7,9 +7,11 @@
 //     seeded from ./design-system-files, with STRUCTURE.md and the src/index.ts barrel as the owned contract;
 //   - the LIBRARY'S OWN sass channel: ng-packagr does not read an app's stylePreprocessorOptions, it has its
 //     own `lib.styleIncludePaths` (relative to ng-package.json) — and `assets` ships the raw .scss to dist;
+//   - the FIRST SPEC: a library that ships no components still has a runtime to test, and its test target needs one
+//     (see creationTemplates);
 //   - the COMPONENT GENERATOR: `ds-component`, one secondary entry point per component.
 import { join } from 'node:path';
-import { type Tree, updateJson, logger } from '@nx/devkit';
+import { type ProjectConfiguration, type Tree, updateJson, logger } from '@nx/devkit';
 import type { DesignSystemPort } from '../stack-adapter';
 import { updateManifest } from '../../generators/_utils/dependencies';
 
@@ -62,6 +64,17 @@ export const angularDesignSystem: DesignSystemPort = {
       return json;
     });
     logger.info(`[design-system] ${root}/package.json no longer peers ${unused.join(', ')} — only the pruned demo used it.`);
+  },
+
+  /**
+   * @nx/angular:unit-test FAILS on a library with no spec ("No tests found") and has no passWithNoTests option (its
+   * schema refuses one; verified on @nx/angular 24.0 / @angular/build 22.2), and pruning the demo removed the only spec
+   * @nx/angular wrote. So the library is born with a real spec of the runtime it ships. Jest, the runner below Angular
+   * 21, passes on no specs and is left alone. The executor needs Angular 21+, which is what the spec's TestBed.tick()
+   * needs too (20+).
+   */
+  creationTemplates(project: ProjectConfiguration) {
+    return project.targets?.test?.executor === '@nx/angular:unit-test' ? join(__dirname, 'design-system-creation-files') : undefined;
   },
 };
 
