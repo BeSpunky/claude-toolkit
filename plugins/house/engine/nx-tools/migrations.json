@@ -305,6 +305,12 @@
       "layer": "firebase",
       "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev claim) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
       "implementation": "./src/migrations/0.50.0/retire-reap-emulators"
+    },
+    "seed-design-system-spec": {
+      "version": "0.51.2",
+      "layer": "design-system",
+      "description": "`nx test <design system>` exits 1 on a house Angular design system: pruning the demo component removed its only spec, @nx/angular:unit-test fails on \"No tests found\", and it has no passWithNoTests option. Adds src/lib/ds-theme.service.spec.ts, a real spec of the DsTheme the library ships, only where the test target uses that executor without its own include/exclude, the library holds no spec at all, and DsTheme still has the shape the spec tests. Anything else is left and reported, with the reason.",
+      "implementation": "./src/migrations/0.51.2/seed-design-system-spec"
     }
   }
 }
