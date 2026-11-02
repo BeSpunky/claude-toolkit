@@ -19,6 +19,7 @@ import { type Tree, logger } from '@nx/devkit';
 import { HOUSE_NODE_MAJOR } from './versions';
 import * as NODE_FACTS from './node-facts';
 import {
+  type NodeFactsTable,
   type NodeSources,
   type ProjectNode,
   NODE_SOURCE_FILES,
@@ -48,8 +49,8 @@ export function nodeSources(tree: Tree): NodeSources {
   };
 }
 
-export function projectNode(tree: Tree): ProjectNode {
-  return resolveProjectNode(nodeSources(tree), LIVE_NODE_FACTS);
+export function projectNode(tree: Tree, facts: NodeFactsTable = LIVE_NODE_FACTS): ProjectNode {
+  return resolveProjectNode(nodeSources(tree), facts);
 }
 
 /** The project's Node major — seeding `.nvmrc` when the project declares none (from its devcontainer's Node, else the house default). */
@@ -66,7 +67,7 @@ export function projectNodeMajor(tree: Tree): string {
   const major = node.state === 'declared' ? node.major : seed(tree);
   if (node.state === 'declared' && node.alias) {
     logger.info(
-      `[node] ${node.from} says ${node.alias}: the devcontainer and the Cloud Functions runtime are built on Node ${major} — ` +
+      `[node] ${node.from} says ${node.alias}: this project runs Node ${major} (the devcontainer's image, and Cloud Functions as far as it has that runtime) — ` +
         'an alias moves when Node releases, the image tag only when this toolkit\'s table does. Write the major to choose it outright.',
     );
   }

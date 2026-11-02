@@ -200,8 +200,8 @@ export function imageGap(major: number, facts: NodeFactsTable): string | undefin
   const nearest = [...facts.imageMajors].filter((m) => m <= major).pop() ?? facts.imageMajors[0];
   return (
     `mcr.microsoft.com/devcontainers/typescript-node publishes no Node ${major} image (it publishes ` +
-    `${facts.imageMajors.join(', ')} as of ${facts.asOf} — even, LTS-line majors), so the house devcontainer could not ` +
-    `be built. Declare an LTS-line major (e.g. ${nearest}).`
+    `${facts.imageMajors.join(', ')} as of ${facts.asOf}), so the house devcontainer could not ` +
+    `be built. Declare one of those (e.g. ${nearest}).`
   );
 }
 

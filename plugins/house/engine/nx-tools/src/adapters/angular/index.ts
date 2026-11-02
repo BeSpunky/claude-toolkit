@@ -27,6 +27,7 @@ import { setLeafOption } from '../../generators/_utils/dev-server';
 import { angularLibs } from './libs';
 import { angularDesignSystem } from './design-system';
 import { angularFirebaseClient } from './firebase-client';
+import { appIsZoneless, workspaceAngular } from './workspace-angular';
 import { angularGeneratorCall, stateAngularCompilerContract } from './ts-solution';
 import { addSkipLink, seedLandmark } from './app-shell';
 import { convertBareLint } from '../../generators/_utils/lint-inference';
@@ -110,6 +111,8 @@ export const angular: StackAdapter = {
       // These option names are the exact, proven-good flags house.sh always passed
       // (`--minimal --style=scss --routing --e2eTestRunner=none`), expressed programmatically.
       const { applicationGenerator } = await import('@nx/angular/generators');
+      // Judged on the DECLARED Angular, as @nx/angular's own generators do. Nothing declared yet: it installs its newest, and picks for it.
+      const angular = workspaceAngular(tree, undefined, 'declared');
       // Through the TS-solution seam: in a workspaces-linked repo the app is created as a project.json island.
       const callback =
         (await angularGeneratorCall(tree, () => applicationGenerator(tree, {
@@ -124,6 +127,7 @@ export const angular: StackAdapter = {
           // checked the app's imports. Libraries (./libs) and the js stack state it the same way.
           linter: 'eslint',
           skipFormat: true,
+          ...(angular ? { zoneless: appIsZoneless(angular.major) } : {}),
         } as Parameters<typeof applicationGenerator>[1]))) ?? noop;
       const project = emittedProjectName(tree, options.directory, options.name);
       // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.

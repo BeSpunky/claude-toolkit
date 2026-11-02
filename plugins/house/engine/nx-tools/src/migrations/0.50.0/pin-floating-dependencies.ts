@@ -22,6 +22,7 @@
 // ONLY the literal `"latest"` is rewritten — it is what the house wrote. Any other spec is the project's own choice; a
 // floating one (`next`, `*`, …) is REPORTED with what to do, never rewritten.
 import { type Tree, getProjects, logger } from '@nx/devkit';
+import { NODE_FACTS_AS_OF_0_50_0 } from './declare-node-version';
 import { browserSdkFindings, readBrowserSdkFacts } from '../../adapters/angular/angularfire';
 import { coherentPair, renderAdvice } from '../../adapters/angular/angularfire-judge';
 import { applyJsonChanges } from '../../generators/_utils/json-edits';
@@ -134,7 +135,7 @@ function pinFirebasePair(
   set: (name: string, version: string, why: string) => void,
   reports: string[],
 ): boolean {
-  const facts = () => readBrowserSdkFacts(tree, spec);
+  const facts = () => readBrowserSdkFacts(tree, spec, NODE_FACTS_AS_OF_0_50_0);
   const before = facts();
   if (!before.angular && !before.declared.fire) return false;
   const fire = before.declared.fire;

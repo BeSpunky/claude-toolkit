@@ -41,8 +41,11 @@ export function tableOf(compat: typeof FirebaseCompat, firebaseTools: string): A
 export interface BrowserSdkFacts {
   angular: { version: string; major: number; from: 'installed' | 'declared' } | null;
   declared: { fire?: string; firebase?: string };
-  /** The @angular/fire in node_modules, with the firebase range it carries (`dependencies.firebase`; from AngularFire 22, `peerDependencies.firebase`). */
-  installedFire: { version: string; major: number; firebase: string | null } | null;
+  /**
+   * The @angular/fire in node_modules, with the firebase range it names and how: a `dependency` (through AngularFire 21 —
+   * it brings the SDK, and another root range is a second one) or a `peer` (from 22 — the root is the only SDK).
+   */
+  installedFire: { version: string; major: number; firebase: string | null; firebaseIs: 'dependency' | 'peer' | null } | null;
   /** The project's Node major and where it is declared (`.nvmrc` …); null when the project declares none yet. */
   node: { major: number; from: string } | null;
   /**
@@ -57,11 +60,19 @@ export type NodeNeed = { range: string; packages: string[] };
 
 /**
  * Why `resolution` cannot be installed on the project's Node — undefined when it can, or when the project's Node is
- * not known (nothing to judge against).
+ * not known (nothing to judge against). What refuses a Node is a recorded `engines.node`, never the table's scan ending:
+ * `nodeMajors` lists only the majors that existed when it was projected, so a newer major (or one older than the scan,
+ * under a firebase with no engines at all) is outside the list and refused by nothing.
  */
 export function firebaseNodeGap(resolution: FirebaseResolution | undefined, node: BrowserSdkFacts['node']): string | undefined {
   if (!resolution || !node || resolution.nodeMajors.includes(node.major)) return undefined;
-  return nodeRefusal(`firebase ${resolution.firebase}`, resolution.nodeNeeds.filter((need) => !need.nodeMajors.includes(node.major)), node);
+  const refusing = resolution.nodeNeeds.filter((need) => !needAdmits(need, node.major));
+  return refusing.length ? nodeRefusal(`firebase ${resolution.firebase}`, refusing, node) : undefined;
+}
+
+/** A plain floor (`>=20.0.0`) admits every major above the ones the table scanned; any other range only what it listed. */
+function needAdmits(need: FirebaseResolution['nodeNeeds'][number], major: number): boolean {
+  return need.nodeMajors.includes(major) || (/^>=\s*[\d.]+$/.test(need.range.trim()) && major > Math.max(...need.nodeMajors));
 }
 
 /** "firebase 13.0.0 needs Node >=24.12.0 (@firebase/ai@3.0.0 and 8 more); this project's Node is 22 (.nvmrc) — …". */
@@ -73,6 +84,14 @@ export function nodeRefusal(what: string, needs: NodeNeed[], node: { major: numb
     `${what} needs Node ${said}; this project's Node is ${node.major} (${node.from}) — yarn refuses that install outright, ` +
     `npm and pnpm warn and install a firebase that is not built for it`
   );
+}
+
+/** Whether `spec` asks for nothing outside the caret range `range`; undefined when `range` is not a caret to reason about. */
+export function insideCaret(spec: string, range: string): boolean | undefined {
+  const caret = /^\^(\d+\.\d+\.\d+)$/.exec(range.trim());
+  const version = /^[~^]?(\d+\.\d+\.\d+)/.exec(spec.trim())?.[1];
+  if (!caret || !version) return undefined;
+  return majorOf(version) === majorOf(caret[1]) && compare(version, caret[1]) >= 0;
 }
 
 /** The table's release for an exact @angular/fire version (stable or prerelease row), if it knows it. */
@@ -203,8 +222,7 @@ export function coherentPair(facts: BrowserSdkFacts, table: AngularFireTable): {
  */
 function rootFirebaseNote(range: string, installed: BrowserSdkFacts['installedFirebase'], release: AngularFireRelease | undefined): string {
   if (!installed) return '';
-  const caret = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range.trim());
-  const inside = caret ? majorOf(installed.version) === Number(caret[1]) && compare(installed.version, range.trim().slice(1)) >= 0 : undefined;
+  const inside = insideCaret(installed.version, range);
   if (inside === true) return ` It keeps the root firebase installed today (${installed.version}, inside that range).`;
   const target = release ? `firebase ${release.firebaseResolves.firebase} (as of the table)` : 'the newest firebase inside it';
   const facts = [inside === false ? 'outside that range' : '', installed.refusedBy.length ? 'needs a newer Node than this project\'s' : ''].filter(Boolean);

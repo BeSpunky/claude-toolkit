@@ -19,7 +19,7 @@ export const ANGULARFIRE_TABLE_AS_OF = '2026-11-02';
 export interface FirebaseResolution {
   /** The firebase release the spec resolves to on npm (the newest inside the range; `latest`'s target). */
   firebase: string;
-  /** The Node majors (18–27) every package in that closure accepts. */
+  /** The Node majors (18–26) every package in that closure accepts. */
   nodeMajors: number[];
   /** Each distinct `engines.node` in the closure that excludes one of those majors: the majors it admits, who states it. */
   nodeNeeds: Array<{ range: string; nodeMajors: number[]; packages: string[] }>;
@@ -54,7 +54,7 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^10.12.0",
       "firebaseResolves": {
         "firebase": "10.14.1",
-        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26],
         "nodeNeeds": []
       },
       "angularCore": "^17.0.0",
@@ -70,7 +70,7 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^10.12.0",
       "firebaseResolves": {
         "firebase": "10.14.1",
-        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26],
         "nodeNeeds": []
       },
       "angularCore": "^18.0.0",
@@ -86,7 +86,7 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^11.8.0",
       "firebaseResolves": {
         "firebase": "11.10.0",
-        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26],
         "nodeNeeds": []
       },
       "angularCore": "^19.0.0",
@@ -102,7 +102,7 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^11.8.0",
       "firebaseResolves": {
         "firebase": "11.10.0",
-        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26],
         "nodeNeeds": []
       },
       "angularCore": "^20.0.0",
@@ -118,11 +118,11 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^12.18.0",
       "firebaseResolves": {
         "firebase": "12.19.0",
-        "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+        "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
         "nodeNeeds": [
           {
             "range": ">=20.0.0",
-            "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+            "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
             "packages": ["@firebase/ai@2.16.0", "@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/app-compat@0.5.18", "@firebase/app@0.16.2", "@firebase/auth-compat@0.6.11", "@firebase/auth@1.13.6", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/firestore-compat@0.4.14", "@firebase/firestore@4.17.2", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/storage-compat@0.4.5", "@firebase/storage@0.14.5", "@firebase/util@1.15.3", "re2js@2.9.1"]
           }
         ]
@@ -141,11 +141,11 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^12.18.0",
       "firebaseResolves": {
         "firebase": "12.19.0",
-        "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+        "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
         "nodeNeeds": [
           {
             "range": ">=20.0.0",
-            "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+            "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
             "packages": ["@firebase/ai@2.16.0", "@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/app-compat@0.5.18", "@firebase/app@0.16.2", "@firebase/auth-compat@0.6.11", "@firebase/auth@1.13.6", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/firestore-compat@0.4.14", "@firebase/firestore@4.17.2", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/storage-compat@0.4.5", "@firebase/storage@0.14.5", "@firebase/util@1.15.3", "re2js@2.9.1"]
           }
         ]
@@ -168,16 +168,16 @@ export const ANGULARFIRE_TABLE_NEWEST_ANGULAR = 22;
 export const FIREBASE_BY_DIST_TAG: Readonly<Record<string, FirebaseResolution>> = {
   latest: {
     "firebase": "13.1.0",
-    "nodeMajors": [24, 25, 26, 27],
+    "nodeMajors": [24, 25, 26],
     "nodeNeeds": [
       {
         "range": ">=20.0.0",
-        "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+        "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
         "packages": ["@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/util@1.15.3", "re2js@2.9.1"]
       },
       {
         "range": ">=24.12.0",
-        "nodeMajors": [24, 25, 26, 27],
+        "nodeMajors": [24, 25, 26],
         "packages": ["@firebase/ai@3.0.0", "@firebase/app-compat@0.5.20", "@firebase/app@0.16.4", "@firebase/auth-compat@0.6.13", "@firebase/auth@1.13.8", "@firebase/firestore-compat@0.4.16", "@firebase/firestore@4.19.0", "@firebase/storage-compat@0.4.6", "@firebase/storage@0.14.6"]
       }
     ]
@@ -185,8 +185,9 @@ export const FIREBASE_BY_DIST_TAG: Readonly<Record<string, FirebaseResolution>> 
 };
 
 /**
- * Per Angular major: the TypeScript range its newest compiler-cli peers, and the TypeScript the house declares when it
- * CREATES a workspace on that major (create-nx-workspace installs Nx's newest, which an older compiler refuses).
+ * Per Angular major: the TypeScript range its whole toolchain admits (compiler-cli, build, ng-packagr, @angular/fire), and
+ * the TypeScript the house declares when it CREATES a workspace on that major (create-nx-workspace installs Nx's newest,
+ * which an older Angular refuses).
  */
 export const ANGULAR_TYPESCRIPT_BY_MAJOR: Readonly<Record<number, { range: string; pin: string }>> = {
   17: {
@@ -206,8 +207,8 @@ export const ANGULAR_TYPESCRIPT_BY_MAJOR: Readonly<Record<number, { range: strin
     "pin": "~5.9.3"
   },
   21: {
-    "range": ">=5.9 <6.1",
-    "pin": "~6.0.3"
+    "range": ">=5.9 <6.0",
+    "pin": "~5.9.3"
   },
   22: {
     "range": ">=6.0 <6.1",

@@ -22,7 +22,7 @@ export const NODE_LTS_CODENAMES: Readonly<Record<string, number>> = {
 
 /** The newest LTS major (`lts/*`) and the newest major of all (`node`, `current`, `latest`, `stable`). */
 export const NODE_NEWEST_LTS_MAJOR = 26;
-export const NODE_NEWEST_MAJOR = 27;
+export const NODE_NEWEST_MAJOR = 26;
 
 /** The Node majors mcr.microsoft.com/devcontainers/typescript-node publishes a `:<major>` image for. */
 export const TYPESCRIPT_NODE_IMAGE_MAJORS: readonly number[] = [14, 16, 18, 20, 22, 24, 26];

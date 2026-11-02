@@ -678,12 +678,6 @@ function ensureFunctionsProject(
     JSON.parse(template('functions-package.json.tpl')),
   );
 
-  if (!tree.exists(`${root}/package.json`) && runtime.major !== runtime.project) {
-    logger.warn(
-      `[firebase-emulators] Cloud Functions has no Node ${runtime.project} runtime (GA: ${FUNCTIONS_NODE_RUNTIMES.join(', ')}), ` +
-        `so ${root}/package.json declares engines.node "${runtime.major}" while the project runs Node ${runtime.project} (${nodeVersionFile(tree)}).`,
-    );
-  }
   if (!tree.exists(`${root}/package.json`)) {
     // A rendered manifest is a manifest write like any other: no floating version through a template either.
     const floating = floatingAdditions(tree, {}, JSON.parse(template('functions-package.json.tpl')));
@@ -731,7 +725,8 @@ function requireConfigDirSupport(tree: Tree): void {
 /**
  * The deployed runtime and the project's Node are two declarations of one fact, and the manifest is the project's
  * once written — so a disagreement is NAMED on every run, never silently rewritten (moving a deployed runtime is a
- * deploy decision).
+ * deploy decision). That includes the one nobody can settle: a project on a Node Cloud Functions has no runtime for
+ * deploys on the nearest, and the manifest being right about that does not make the two the same Node.
  */
 function reportRuntimeMismatch(tree: Tree, manifest: string, runtime: { major: string; project: string }): void {
   let engines: string | undefined;
@@ -740,7 +735,16 @@ function reportRuntimeMismatch(tree: Tree, manifest: string, runtime: { major: s
   } catch {
     return;
   }
-  if (engines === undefined || engines === runtime.major) return;
+  if (engines === undefined) return;
+  if (engines === runtime.major) {
+    if (runtime.major !== runtime.project) {
+      logger.warn(
+        `[firebase-emulators] ${manifest} deploys Cloud Functions on Node ${runtime.major}, the nearest GA runtime: the project runs ` +
+          `Node ${runtime.project} (${nodeVersionFile(tree)}), which Cloud Functions has no runtime for (GA: ${FUNCTIONS_NODE_RUNTIMES.join(', ')}).`,
+      );
+    }
+    return;
+  }
   logger.warn(
     `[firebase-emulators] ${manifest} deploys Cloud Functions on Node "${engines}", but the project's Node (${nodeVersionFile(tree)}) is ` +
       `${runtime.project}${runtime.major !== runtime.project ? ` (nearest Cloud Functions runtime: ${runtime.major})` : ''}. ` +

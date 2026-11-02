@@ -1,12 +1,13 @@
 // WHICH @angular/fire AND WHICH firebase an Angular workspace gets — derived, never `latest`.
 //
-// The chain is fixed by the packages themselves: @angular/fire peers ONE Angular major, and carries `firebase` as a
-// DEPENDENCY (from AngularFire 22, as a PEER — the same range, stated elsewhere). So the house reads the workspace's Angular (installed, else declared), takes the @angular/fire built for
-// that major from the projected table (generators/_utils/firebase-compat.ts), and declares `firebase` as exactly that
-// release's own range — the package manager then keeps ONE Firebase SDK. Pinning either independently is how a house
-// app got firebase 12 at the root and 11 nested under @angular/fire ("No Firebase App '[DEFAULT]'").
+// The chain is fixed by the packages themselves: @angular/fire peers ONE Angular major, and names the `firebase` it is
+// built for — a DEPENDENCY through AngularFire 21, a PEER from 22. So the house reads the workspace's Angular (installed,
+// else declared), takes the @angular/fire built for that major from the projected table
+// (generators/_utils/firebase-compat.ts), and declares `firebase` as exactly that release's own range — ONE Firebase SDK,
+// the one the release is built for. Pinning either independently is how a house app got firebase 12 at the root and 11
+// nested under @angular/fire ("No Firebase App '[DEFAULT]'"); under a peer the same mistake is an unmet peer instead.
 //
-// WHEN THERE IS NO ANSWER — an Angular major with no stable @angular/fire (21 and 22 as of 0.50.0), one newer than
+// WHEN THERE IS NO ANSWER — an Angular major with no stable @angular/fire (the table says which), one newer than
 // the table, an Angular below what the release accepts — it REFUSES, naming what is true and the choices the developer
 // has, in the order the house recommends them. Writing something anyway would be the bug this exists to remove.
 //
@@ -30,28 +31,44 @@ import {
   coherentPair,
   firebaseNodeGap,
   firebaseToolsAdvice,
+  insideCaret,
   majorOf,
   nodeRefusal,
   renderAdvice,
   tableOf,
 } from './angularfire-judge';
-import { projectNode } from '../../generators/_utils/node-version';
+import { LIVE_NODE_FACTS, projectNode } from '../../generators/_utils/node-version';
+import type { NodeFactsTable } from '../../generators/_utils/node-spec';
 import { rangeAdmitsMajor } from '../../generators/_utils/node-spec';
 import { declareDependencies, declaredSpec, placeDependency, updateManifest } from '../../generators/_utils/dependencies';
-import { installedManifest, workspaceAngular } from './workspace-angular';
+import { appIsZoneless, installedManifest, workspaceAngular } from './workspace-angular';
 
 /** The live compatibility table (the 0.50.0 migration judges with its own frozen copy). */
 export const LIVE_ANGULARFIRE_TABLE: AngularFireTable = tableOf(FIREBASE_COMPAT, FIREBASE_TOOLS_VERSION);
 
 const TAG = '[firebase-client]';
 
+/** What a root firebase outside the range of an @angular/fire that PEERS it costs: no second copy, the wrong only one. */
+const UNMET_PEER = 'an unmet peer: npm refuses that install (ERESOLVE), and yarn warns and runs the one SDK this @angular/fire is not built for';
+
+/**
+ * The firebase an installed @angular/fire names, and how. The same reading of a packument: tools/firebase-compat/project.mjs
+ * (a copy; it says why).
+ */
+function carriedFirebase(fire: { dependencies?: Record<string, string>; peerDependencies?: Record<string, string> }) {
+  if (fire.dependencies?.firebase) return { firebase: fire.dependencies.firebase, firebaseIs: 'dependency' as const };
+  if (fire.peerDependencies?.firebase) return { firebase: fire.peerDependencies.firebase, firebaseIs: 'peer' as const };
+  return { firebase: null, firebaseIs: null };
+}
+
 export function readBrowserSdkFacts(
   tree: Tree,
   declared: (name: string) => string | undefined = (name) => declaredSpec(tree, name),
+  nodeFacts: NodeFactsTable = LIVE_NODE_FACTS,
 ): BrowserSdkFacts {
   const angular = workspaceAngular(tree, declared);
   const fire = installedManifest(tree, '@angular/fire');
-  const declaredNode = projectNode(tree);
+  const declaredNode = projectNode(tree, nodeFacts);
   const node = declaredNode.state === 'declared' ? { major: declaredNode.major, from: declaredNode.from } : null;
   const root = installedManifest(tree, 'firebase');
   return {
@@ -59,7 +76,7 @@ export function readBrowserSdkFacts(
     declared: { fire: declared('@angular/fire'), firebase: declared('firebase') },
     installedFire:
       typeof fire?.version === 'string'
-        ? { version: fire.version, major: majorOf(fire.version), firebase: fire.dependencies?.firebase ?? fire.peerDependencies?.firebase ?? null }
+        ? { version: fire.version, major: majorOf(fire.version), ...carriedFirebase(fire) }
         : null,
     node,
     installedFirebase: typeof root?.version === 'string' ? { version: root.version, refusedBy: node ? installedNodeRefusals(tree, node.major) : [] } : null,
@@ -103,7 +120,8 @@ function installedNodeRefusals(tree: Tree, major: number): NodeNeed[] {
 
 /**
  * What is wrong (or worth knowing) about the pair AS DECLARED — a floating spec, a firebase that is not the range the
- * @angular/fire carries (two SDKs), an @angular/fire built for another Angular major. Empty for a coherent pair.
+ * @angular/fire names, an @angular/fire built for another Angular major, a prerelease a stable release has replaced.
+ * Empty for a coherent pair.
  */
 export function browserSdkFindings(facts: BrowserSdkFacts, table: AngularFireTable = LIVE_ANGULARFIRE_TABLE): SdkAdvice[] {
   const { declared, installedFire, angular } = facts;
@@ -122,7 +140,7 @@ export function browserSdkFindings(facts: BrowserSdkFacts, table: AngularFireTab
       level: 'warn',
       what:
         `package.json declares ${floating.join(' and ')} — ${floating.length > 1 ? 'versions nobody chose; they move' : 'a version nobody chose; it moves'} with no commit behind it, and ` +
-        `firebase drifting from the range @angular/fire carries is the two-SDK crash ("No Firebase App '[DEFAULT]'").` +
+        `${installedFire?.firebaseIs === 'peer' ? `firebase drifting from the range @angular/fire peers is ${UNMET_PEER}` : 'firebase drifting from the range @angular/fire carries is the two-SDK crash ("No Firebase App \'[DEFAULT]\'")'}.` +
         floatingFirebaseNote(facts, table) +
         ('refusal' in verdict ? ` There is no coherent pair to pin for you: ${verdict.refusal.what}` : ''),
       choices: fix,
@@ -137,7 +155,7 @@ export function browserSdkFindings(facts: BrowserSdkFacts, table: AngularFireTab
   const fireMajor = majorOf(fireVersion);
   if (angular && fireMajor !== angular.major) {
     findings.push(
-      'pair' in verdict
+      'pair' in verdict || table.byMajor[angular.major]?.stable
         ? {
             level: 'warn',
             what: `@angular/fire ${fireVersion} is built for Angular ${fireMajor}, but this workspace runs Angular ${angular.version}.`,
@@ -153,15 +171,29 @@ export function browserSdkFindings(facts: BrowserSdkFacts, table: AngularFireTab
           },
     );
   }
+  const stableNow = angular && fireMajor === angular.major && fireVersion.includes('-') ? table.byMajor[fireMajor]?.stable : null;
+  if (stableNow) {
+    findings.push({
+      level: 'info',
+      what: `@angular/fire ${fireVersion} is a prerelease, and ${stableNow.angularfire} is the stable release for Angular ${fireMajor} as of ${table.asOf} (this toolkit's table).`,
+      choices: [`Declare "@angular/fire": "${stableNow.angularfire}", "firebase": "${stableNow.firebase}".`],
+    });
+  }
   const carried = installedFire && installedFire.version === fireVersion ? installedFire.firebase : null;
   if (carried && declared.firebase && declared.firebase !== carried) {
-    findings.push({
-      level: 'warn',
-      what:
-        `package.json declares firebase "${declared.firebase}", but @angular/fire ${fireVersion} carries firebase "${carried}" — ` +
-        `two Firebase SDKs ("No Firebase App '[DEFAULT]'").`,
-      choices: [`Set "firebase": "${carried}".`],
-    });
+    // A peer asks for a range, so anything inside it is exactly right. A dependency brings its own copy: the house's rule
+    // stays the range verbatim, the one spec that can never come apart from it.
+    const peer = installedFire?.firebaseIs === 'peer';
+    if (!peer || insideCaret(declared.firebase, carried) !== true) {
+      findings.push({
+        level: 'warn',
+        what: peer
+          ? `package.json declares firebase "${declared.firebase}", but @angular/fire ${fireVersion} peers firebase "${carried}" — ${UNMET_PEER}.`
+          : `package.json declares firebase "${declared.firebase}", but @angular/fire ${fireVersion} carries firebase "${carried}" — ` +
+            `two Firebase SDKs ("No Firebase App '[DEFAULT]'").`,
+        choices: [`Set "firebase": "${carried}".`],
+      });
+    }
   }
   return findings;
 }
@@ -187,11 +219,11 @@ function floatingFirebaseNote({ declared, installedFirebase, node }: BrowserSdkF
  * The @angular/fire release for this workspace's Angular — or an Error saying exactly why there is none and what to
  * do about it.
  */
-export function angularFireFor(tree: Tree): Pair {
-  const verdict = coherentPair(readBrowserSdkFacts(tree), LIVE_ANGULARFIRE_TABLE);
+export function angularFireFor(tree: Tree, table: AngularFireTable = LIVE_ANGULARFIRE_TABLE): Pair {
+  const verdict = coherentPair(readBrowserSdkFacts(tree), table);
   if ('refusal' in verdict) throw new Error(renderAdvice(TAG, verdict.refusal));
   // house.sh's probe refuses this before an add-layer writes anything; here it is said on every run it still holds.
-  const tools = firebaseToolsAdvice(verdict.pair, LIVE_ANGULARFIRE_TABLE, declaredSpec(tree, 'firebase-tools'));
+  const tools = firebaseToolsAdvice(verdict.pair, table, declaredSpec(tree, 'firebase-tools'));
   if (tools) logger.warn(renderAdvice(TAG, tools));
   return verdict.pair;
 }
@@ -202,7 +234,7 @@ export function angularFireFor(tree: Tree): Pair {
  * (which refuses, with the choices, when there is none). Then — every upgrade — whatever is still wrong with the pair
  * as declared is named, with the same advice the 0.50.0 migration gives.
  */
-export function declareBrowserSdk(tree: Tree): GeneratorCallback {
+export function declareBrowserSdk(tree: Tree, table: AngularFireTable = LIVE_ANGULARFIRE_TABLE): GeneratorCallback {
   const before = readBrowserSdkFacts(tree);
   const { fire, firebase } = before.declared;
   let install: GeneratorCallback = () => undefined;
@@ -210,11 +242,11 @@ export function declareBrowserSdk(tree: Tree): GeneratorCallback {
     const carried = fire && before.installedFire?.firebase;
     if (carried) install = declareDependencies(tree, 'firebase-client', { firebase: carried });
     else {
-      const pair = angularFireFor(tree);
+      const pair = angularFireFor(tree, table);
       install = declareDependencies(tree, 'firebase-client', { '@angular/fire': pair.angularfire, firebase: pair.firebase });
     }
   }
-  for (const advice of browserSdkFindings(readBrowserSdkFacts(tree))) {
+  for (const advice of browserSdkFindings(readBrowserSdkFacts(tree), table)) {
     logger[advice.level](renderAdvice(TAG, advice));
   }
   return install;
@@ -261,7 +293,7 @@ export function pinAngularForFirebase(tree: Tree): void {
   // when @angular/core is undeclared ("assume the workspace was already initialized") — so declaring core alone left a
   // workspace without @angular/common, compiler, router, rxjs, zone.js (verified against @nx/angular 23.3,
   // generators/utils/ensure-angular-dependencies.js). The set and its versions are that function's, for this major,
-  // from @nx/angular's own table; zone.js as its application generator decides it (zoneless from Angular 21 on).
+  // from @nx/angular's own table; zone.js only for an app that needs it (appIsZoneless, which the app is created by).
   const versions = nx.versionsFor(major);
   const runtime: Record<string, string | undefined> = {
     '@angular/common': versions.angularVersion,
@@ -272,7 +304,7 @@ export function pinAngularForFirebase(tree: Tree): void {
     '@angular/router': versions.angularVersion,
     rxjs: versions.rxjsVersion,
     tslib: versions.tsLibVersion,
-    ...(major < 21 ? { 'zone.js': versions.zoneJsVersion } : {}),
+    ...(appIsZoneless(major) ? {} : { 'zone.js': versions.zoneJsVersion }),
   };
   const missing = Object.entries(runtime).filter(([, version]) => !version).map(([name]) => name);
   if (missing.length) throw new Error(`${TAG} @nx/angular's version table names no version for ${missing.join(', ')} on Angular ${major} — this Nx changed it; declare them by hand.`);
@@ -280,7 +312,7 @@ export function pinAngularForFirebase(tree: Tree): void {
     let next = pkg;
     for (const [name, version] of Object.entries(runtime)) if (!declaredIn(next, name)) next = withDependency(next, name, version!);
     if (declaredIn(next, '@angular-devkit/core')) next = withDependency(next, '@angular-devkit/core', versions.angularDevkitVersion);
-    // TypeScript: create-nx-workspace installs Nx's newest, which an older Angular compiler refuses outright.
+    // TypeScript: create-nx-workspace installs Nx's newest, which an older Angular's toolchain refuses.
     const typescript = ANGULAR_TYPESCRIPT_BY_MAJOR[major];
     if (typescript && declaredIn(next, 'typescript') && declaredIn(next, 'typescript') !== typescript.pin) next = withDependency(next, 'typescript', typescript.pin);
     return next;

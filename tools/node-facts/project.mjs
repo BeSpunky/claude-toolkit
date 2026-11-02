@@ -5,7 +5,7 @@
 // package.json `volta.node`), and those speak a GRAMMAR, not just a number: `lts/*`, `lts/jod`, `node`, `22.x`. The
 // house tags the devcontainer image with the major, so it has to resolve those — offline, at generation time, and in
 // the upgrade's probe before anything is written. And it may only tag an image that EXISTS: Microsoft publishes
-// `typescript-node:<major>` for even (LTS-line) majors only, so `.nvmrc = 23` would pass every check and fail at image
+// `typescript-node:<major>` only for the majors it chooses to, so `.nvmrc = 23` would pass every check and fail at image
 // pull. Two upstream sources, projected here:
 //   - nodejs.org/dist/index.json → every LTS codename's major, the newest LTS major (`lts/*`), the newest major (`node`);
 //   - MCR's tag list for devcontainers/typescript-node → the majors it publishes a bare `:<major>` tag for.
@@ -39,7 +39,9 @@ async function nodeReleases() {
   let newest = 0;
   let newestLts = 0;
   for (const { version, lts: codename } of releases) {
-    const major = Number(/^v(\d+)/.exec(version)?.[1]);
+    // Releases only: the index also lists prereleases (v27.0.0-alpha, months before a v27 exists), and nvm's `node` never
+    // resolves to one. Counting it tagged a Node nobody can install, and refused every `.nvmrc = node` project.
+    const major = Number(/^v(\d+)\.\d+\.\d+$/.exec(version)?.[1]);
     if (!major) continue;
     newest = Math.max(newest, major);
     if (codename) {
