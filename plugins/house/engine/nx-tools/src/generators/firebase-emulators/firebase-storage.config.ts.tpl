@@ -1,6 +1,6 @@
 // Firebase STORAGE provider — one of the per-service siblings of firebase.config.ts.
 //
-// Measured at 336 kB initial for a fresh app providing this and nothing else, against 238 kB with no
+// Measured at 304 kB initial for a fresh app providing this and nothing else, against 241 kB with no
 // service at all — most of that is the Firebase core the FIRST service brings in, so Storage is cheap
 // alongside another service and expensive on its own. Either way it is usually reached from one or two
 // surfaces (an upload screen, an avatar picker), which makes it a natural fit for the lazy routes file

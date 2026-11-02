@@ -3,8 +3,8 @@
 // Provide it where Auth is actually needed. `provideAppFirebase()` (the Firebase app) must be provided
 // at root either way; this adds Auth to whatever injector you put it in:
 //
-//   app.config.ts                    → Auth in the initial bundle (measured: 342 kB total for a fresh app
-//                                      providing this and nothing else, vs 238 kB with none)
+//   app.config.ts                    → Auth in the initial bundle (measured: 319 kB total for a fresh app
+//                                      providing this and nothing else, vs 241 kB with none)
 //   a LAZILY-LOADED routes file      → Auth in that lazy chunk, off the critical path
 //
 // AUTH IS THE ONE THAT USUALLY BELONGS AT ROOT — and it should be a decision, not a default. The reason

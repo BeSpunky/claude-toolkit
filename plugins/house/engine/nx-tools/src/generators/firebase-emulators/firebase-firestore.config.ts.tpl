@@ -1,8 +1,8 @@
 // Firebase FIRESTORE provider — one of the per-service siblings of firebase.config.ts.
 //
-// THE HEAVIEST SERVICE: measured at 413 kB initial for a fresh app providing this and nothing else, against
-// 238 kB with no service at all (@firebase/firestore plus its webchannel transport, on top of the Firebase
-// core the first service always brings). Provide it where it is actually read:
+// THE HEAVIEST SERVICE: measured at 607 kB initial for a fresh app providing this and nothing else, against
+// 241 kB with no service at all (re2js ~150 kB, @firebase/firestore ~113, its webchannel transport ~51, on
+// top of the Firebase core the first service always brings). Provide it where it is actually read:
 //
 //   app.config.ts               → Firestore in the initial bundle
 //   a LAZILY-LOADED routes file → Firestore in that lazy chunk, fetched in parallel with the route that
