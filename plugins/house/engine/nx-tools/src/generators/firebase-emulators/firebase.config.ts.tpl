@@ -24,18 +24,20 @@
 //     inside the LAZILY-LOADED routes file (the one behind `loadChildren`), not in the eager app.routes.ts,
 //     or the import pins the chunk anyway and nothing is saved.
 //
-// MEASURED initial-bundle totals for a freshly scaffolded house app (raw, uncompressed): 207 kB with no
-// Firebase at all, 238 kB providing this file alone, and 479 kB with all four services at root — which is
-// what this file used to return on its own. Per service, the total with THAT service and nothing else:
-// firestore 413 kB · auth 342 kB · storage 336 kB · functions 327 kB.
+// MEASURED initial-bundle totals for a freshly scaffolded house app (raw, uncompressed; 2026-11-02 on
+// Angular 21, AngularFire 21.0.0, firebase 12.19, zoneless): 210 kB with no Firebase at all, 241 kB
+// providing this file alone, and 650 kB with all four services at root — which is what this file used to
+// return on its own. Per service, the total with THAT service and nothing else:
+// firestore 607 kB · auth 319 kB · storage 304 kB · functions 295 kB.
 //
-// THOSE NUMBERS DO NOT ADD UP, and it matters. About 74 kB of whichever service you provide FIRST is a
-// one-time @angular/fire base that all four then share, so the first costs ~89–174 kB and each one after
-// it is far cheaper (measured increments once the base is paid: auth ~29, firestore ~100, storage ~24,
-// functions ~15). The four deltas sum to ~464 kB while all four together cost ~240 kB. Practically: the
-// saving is largest for a bundle that needs NO service on the critical path, and shrinks — it does not
-// vanish — once one is there. Deferring is not quite free either: splitting hoists @firebase/app into a
-// shared chunk, which cost ~9 kB on the initial bundle in the measured case.
+// THOSE NUMBERS DO NOT ADD UP, and it matters. About 50 kB of whichever service you provide FIRST is a
+// one-time @angular/fire base that all four then share, so the first costs ~53–366 kB and each one after
+// it costs ~50 kB less (measured increments once the base is paid: auth ~28, firestore ~315, storage ~12,
+// functions ~3) — next to nothing, except Firestore, which stays heavy whenever it arrives. The four
+// deltas sum to ~559 kB while all four together cost ~409 kB. Practically: the saving is largest for a
+// bundle that needs NO service on the critical path, and shrinks — it does not vanish — once one is there.
+// Deferring is not quite free either: splitting hoists @firebase/app into a shared chunk, which cost ~6 kB
+// on the initial bundle in the measured case.
 //
 // AUTH IS THE SHARP ONE, AND THE REASON IS BUNDLING, NOT INJECTION. A guard NAMED in the eager
 // app.routes.ts is statically imported by the initial chunk, so its `inject(Auth)` pulls

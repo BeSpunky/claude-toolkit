@@ -1,6 +1,6 @@
 // Firebase FUNCTIONS (callables) provider — one of the per-service siblings of firebase.config.ts.
 //
-// Measured at 327 kB initial for a fresh app providing this and nothing else, against 238 kB with no
+// Measured at 295 kB initial for a fresh app providing this and nothing else, against 241 kB with no
 // service at all. This is the service most often provided and never used: the house scaffolds a Cloud
 // Functions app whether or not the CLIENT ever calls a callable, and an unused provider
 // is still a pinned import. Provide it in the lazy routes file of the surface that calls one — or not at

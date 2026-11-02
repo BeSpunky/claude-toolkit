@@ -31,24 +31,27 @@ export interface FirebaseServiceConfig {
    * choice of where to provide a service is made with the number in view.
    *
    * Deliberately a TOTAL, not a per-service delta: the deltas do not add up, and publishing them as if
-   * they did would be a lie a reader could act on. About 74 kB of whichever service arrives FIRST is a
-   * one-time @angular/fire base the other three then share, so the first costs ~89–174 kB and each one
-   * after it is far cheaper — the four measured deltas sum to ~464 kB while all four together cost only
-   * ~240 kB over the app-only baseline.
+   * they did would be a lie a reader could act on. About 50 kB of whichever service arrives FIRST is a
+   * one-time @angular/fire base the other three then share, so the first costs ~53–366 kB and each one
+   * after it ~50 kB less — the four measured deltas sum to ~559 kB while all four together cost only
+   * ~409 kB over the app-only baseline.
    */
   readonly initialKbWithThisOnly: number;
   /** One line on where this service usually belongs, for the same note. */
   readonly placement: string;
 }
 
+/** The stack FIREBASE_INITIAL_KB and `initialKbWithThisOnly` were measured on; a different stack weighs differently. */
+const MEASURED_ON = '2026-11-02 on Angular 21, AngularFire 21.0.0, firebase 12.19, zoneless';
+
 /** Measured initial-bundle totals (raw kB) for a fresh house app, as reference points for the note. */
 export const FIREBASE_INITIAL_KB = {
   /** No Firebase providers at all. */
-  none: 207,
+  none: 210,
   /** `provideAppFirebase()` alone — the Firebase app, the new scaffold default. */
-  appOnly: 238,
+  appOnly: 241,
   /** All four services at root — what `provideAppFirebase()` used to return on its own. */
-  allFour: 479,
+  allFour: 650,
 } as const;
 
 export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
@@ -58,7 +61,7 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
     providerFn: 'provideAppAuth',
     importFrom: './firebase-auth.config',
     template: 'firebase-auth.config.ts.tpl',
-    initialKbWithThisOnly: 342,
+    initialKbWithThisOnly: 319,
     placement: 'usually root: a guard in the eager app.routes.ts pins Auth there anyway',
   },
   {
@@ -67,7 +70,7 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
     providerFn: 'provideAppFirestore',
     importFrom: './firebase-firestore.config',
     template: 'firebase-firestore.config.ts.tpl',
-    initialKbWithThisOnly: 413,
+    initialKbWithThisOnly: 607,
     placement: 'the heaviest; prefer the lazy route that reads it',
   },
   {
@@ -76,7 +79,7 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
     providerFn: 'provideAppStorage',
     importFrom: './firebase-storage.config',
     template: 'firebase-storage.config.ts.tpl',
-    initialKbWithThisOnly: 336,
+    initialKbWithThisOnly: 304,
     placement: 'the lazy route that uploads or reads files',
   },
   {
@@ -85,7 +88,7 @@ export const FIREBASE_SERVICE_CONFIGS: readonly FirebaseServiceConfig[] = [
     providerFn: 'provideAppFunctions',
     importFrom: './firebase-functions.config',
     template: 'firebase-functions.config.ts.tpl',
-    initialKbWithThisOnly: 327,
+    initialKbWithThisOnly: 295,
     placement: 'the lazy route that calls a callable — often none, so often nowhere',
   },
 ];
@@ -167,7 +170,7 @@ export const PROXY_LOCAL = 'proxy.local.mjs';
  *
  * WHICH MEANS THE MENU HAS TO BE ACTUALLY USABLE. Each entry is three lines: the weight, the import, and
  * the call ALONE on its own line — because the one thing a reader will do is uncomment that line, and an
- * entry that carried its annotation inline (`// provideAppAuth(),  342 kB — usually root`) would hand
+ * entry that carried its annotation inline (`// provideAppAuth(),  319 kB — usually root`) would hand
  * them a syntax error for following the instruction. The import gets its own line for the same reason:
  * the generator only imports `provideAppFirebase`, so uncommenting a call without adding the import fails
  * to compile, and a menu that omits that step is a menu that does not work.
@@ -189,10 +192,10 @@ export function firebaseProvidersNote(): string {
     '    app.routes.ts pins the chunk just as root does), or',
     '  • uncomment its call below and move its import up with the others, accepting its weight here.',
     '',
-    `Measured initial bundle (raw) for a fresh app: ${FIREBASE_INITIAL_KB.none} kB with no Firebase,`,
-    `${FIREBASE_INITIAL_KB.appOnly} kB as generated, ${FIREBASE_INITIAL_KB.allFour} kB with all four at root.`,
+    `Measured initial bundle (raw) for a fresh app, ${MEASURED_ON}:`,
+    `${FIREBASE_INITIAL_KB.none} kB with no Firebase, ${FIREBASE_INITIAL_KB.appOnly} kB as generated, ${FIREBASE_INITIAL_KB.allFour} kB with all four at root.`,
     'Each figure below is the total with THAT service alone — they do NOT add up, because whichever',
-    "service arrives first drags in Firebase's shared core and the rest are much cheaper after it.",
+    "service arrives first drags in Firebase's shared core (~50 kB) and each later one costs that much less.",
     '',
     ...entries,
   ]
