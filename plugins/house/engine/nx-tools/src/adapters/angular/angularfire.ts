@@ -1,7 +1,7 @@
 // WHICH @angular/fire AND WHICH firebase an Angular workspace gets — derived, never `latest`.
 //
 // The chain is fixed by the packages themselves: @angular/fire peers ONE Angular major, and carries `firebase` as a
-// DEPENDENCY. So the house reads the workspace's Angular (installed, else declared), takes the @angular/fire built for
+// DEPENDENCY (from AngularFire 22, as a PEER — the same range, stated elsewhere). So the house reads the workspace's Angular (installed, else declared), takes the @angular/fire built for
 // that major from the projected table (generators/_utils/firebase-compat.ts), and declares `firebase` as exactly that
 // release's own range — the package manager then keeps ONE Firebase SDK. Pinning either independently is how a house
 // app got firebase 12 at the root and 11 nested under @angular/fire ("No Firebase App '[DEFAULT]'").
@@ -59,7 +59,7 @@ export function readBrowserSdkFacts(
     declared: { fire: declared('@angular/fire'), firebase: declared('firebase') },
     installedFire:
       typeof fire?.version === 'string'
-        ? { version: fire.version, major: majorOf(fire.version), firebase: fire.dependencies?.firebase ?? null }
+        ? { version: fire.version, major: majorOf(fire.version), firebase: fire.dependencies?.firebase ?? fire.peerDependencies?.firebase ?? null }
         : null,
     node,
     installedFirebase: typeof root?.version === 'string' ? { version: root.version, refusedBy: node ? installedNodeRefusals(tree, node.major) : [] } : null,

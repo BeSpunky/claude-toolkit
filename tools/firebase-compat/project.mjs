@@ -186,8 +186,10 @@ async function angularFireRows() {
   };
   const row = ([version, manifest], major) => {
     const angularCore = manifest.peerDependencies['@angular/core'];
-    const firebase = manifest.dependencies?.firebase;
-    if (!firebase) throw new Error(`@angular/fire@${version} declares no firebase dependency — the projection's premise is gone`);
+    // Through AngularFire 21 the SDK is a dependency; from 22 it is a PEER. Either way the root declares exactly this
+    // range, so the package manager keeps ONE SDK — where @angular/fire states it is all that moved.
+    const firebase = manifest.dependencies?.firebase ?? manifest.peerDependencies?.firebase;
+    if (!firebase) throw new Error(`@angular/fire@${version} declares no firebase dependency or peer — the projection's premise is gone`);
     // The judges read "the @angular/fire release line for Angular N" as "@angular/fire N.x" (they compare majors). A
     // release that peers two Angular majors (as AngularFire 7 did) breaks that silently — so it fails here instead.
     if (semver.major(version) !== major) {
@@ -274,7 +276,7 @@ export interface FirebaseResolution {
 export interface AngularFireRelease {
   /** Exact: firebase below is THIS release's own range, so a floating @angular/fire would break the pairing. */
   angularfire: string;
-  /** @angular/fire's own \`dependencies.firebase\` — the root declares exactly this, so the package manager keeps ONE SDK. */
+  /** @angular/fire's own \`firebase\` range (a dependency; from 22, a peer) — the root declares exactly this, so the package manager keeps ONE SDK. */
   firebase: string;
   /** What that range installs today, and the Node it needs — a release the project's Node cannot install is never chosen. */
   firebaseResolves: FirebaseResolution;

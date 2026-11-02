@@ -170,7 +170,7 @@ export default {
       expect: (tree, t) => t.ok(deps(tree)['@angular/fire']?.startsWith('20.'), `got ${deps(tree)['@angular/fire']}`),
     },
     ...[
-      { angular: '21.2.1', says: /No stable @angular\/fire supported Angular 21 as of \d{4}-\d\d-\d\d[\s\S]*21\.0\.0-rc[\s\S]*Angular 20/ },
+      { angular: '22.1.2', says: /No stable @angular\/fire supported Angular 22 as of \d{4}-\d\d-\d\d[\s\S]*22\.0\.0-rc[\s\S]*Angular 21/ },
       { angular: '99.0.0', says: /newer than this toolkit's @angular\/fire table/ },
       { angular: '15.2.0', says: /older than any @angular\/fire the house supports/ },
     ].map(({ angular, says }) => ({
@@ -196,17 +196,17 @@ export default {
       expect: (tree, t, ctx) => {
         const { ANGULARFIRE_BY_ANGULAR_MAJOR } = ctx.load('generators/_utils/firebase-compat');
         const newest = Math.max(...Object.entries(ANGULARFIRE_BY_ANGULAR_MAJOR).filter(([, r]) => r.stable).map(([m]) => Number(m)));
-        t.equal(newest, 20, 'the fixture\'s @nx/angular table is keyed to today\'s answer');
-        t.equal(readJson(tree, 'package.json').dependencies?.['@angular/core'], '~20.3.0', '@nx/angular\'s own range for Angular 20');
-        t.equal(readJson(tree, 'package.json').devDependencies['@angular-devkit/core'], '~20.3.0', 'the devkit init added is realigned');
+        t.equal(newest, 21, 'the fixture\'s @nx/angular table is keyed to today\'s answer');
+        t.equal(readJson(tree, 'package.json').dependencies?.['@angular/core'], '~21.2.0', '@nx/angular\'s own range for Angular 21');
+        t.equal(readJson(tree, 'package.json').devDependencies['@angular-devkit/core'], '~21.2.0', 'the devkit init added is realigned');
         // The WHOLE runtime: @nx/angular adds it only when @angular/core is undeclared (the R1-0 follow-on: a workspace
         // with no @angular/compiler, router or zone.js), so the pin declares what it would have.
         const dependencies = readJson(tree, 'package.json').dependencies;
-        for (const name of ['@angular/common', '@angular/compiler', '@angular/forms', '@angular/platform-browser', '@angular/router']) t.equal(dependencies[name], '~20.3.0', name);
-        t.equal(dependencies['zone.js'], '~0.15.0', 'zone.js (Angular 20 apps are not zoneless)');
+        for (const name of ['@angular/common', '@angular/compiler', '@angular/forms', '@angular/platform-browser', '@angular/router']) t.equal(dependencies[name], '~21.2.0', name);
+        t.equal(dependencies['zone.js'], undefined, 'no zone.js (Angular 21 apps are zoneless)');
         t.equal(dependencies.rxjs, '~7.8.0', 'rxjs');
-        t.equal(readJson(tree, 'package.json').devDependencies.typescript, ctx.load('generators/_utils/firebase-compat').ANGULAR_TYPESCRIPT_BY_MAJOR[20].pin, 'TypeScript inside what Angular 20\'s compiler accepts');
-        t.ok(ctx.logs.some((line) => /Angular 20 — the newest major @angular\/fire supports; upgrade when AngularFire ships 21\+/.test(line)), `said: ${ctx.logs}`);
+        t.equal(readJson(tree, 'package.json').devDependencies.typescript, ctx.load('generators/_utils/firebase-compat').ANGULAR_TYPESCRIPT_BY_MAJOR[21].pin, 'TypeScript inside what Angular 21\'s compiler accepts');
+        t.ok(ctx.logs.some((line) => /Angular 21 — the newest major @angular\/fire supports; upgrade when AngularFire ships 22\+/.test(line)), `said: ${ctx.logs}`);
       },
     },
     {
@@ -216,18 +216,34 @@ export default {
       expect: (tree, t) => t.equal(readJson(tree, 'package.json').dependencies['@angular/core'], '~21.2.0', 'untouched'),
     },
     {
-      name: 'Angular 21 with the pair declared by hand: kept — the refusal is only for what the house would have to choose',
+      name: 'Angular 22 with the pair declared by hand, firebase a PEER of @angular/fire (from 22): kept — the refusal is only for what the house would have to choose',
       setup: () => {
         const tree = workspace();
-        writeJson(tree, 'package.json', { name: 'x', dependencies: { '@angular/fire': '21.0.0-rc.1', firebase: '^12.18.0' } });
-        installed(tree, '@angular/core', { version: '21.2.1' });
-        installed(tree, '@angular/fire', { version: '21.0.0-rc.1', dependencies: { firebase: '^12.18.0' } });
+        writeJson(tree, 'package.json', { name: 'x', dependencies: { '@angular/fire': '22.0.0-rc.0', firebase: '^12.18.0' } });
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, '@angular/fire', { version: '22.0.0-rc.0', peerDependencies: { firebase: '^12.18.0' } });
         return tree;
       },
       run: (tree, ctx) => ctx.load('adapters/angular/angularfire').declareBrowserSdk(tree),
       expect: (tree, t, ctx) => {
-        t.equal(deps(tree)['@angular/fire'], '21.0.0-rc.1', 'kept');
+        t.equal(deps(tree)['@angular/fire'], '22.0.0-rc.0', 'kept');
         t.ok(!ctx.logs.some((line) => line.startsWith('[warn]')), `no warning for a coherent pair: ${ctx.logs}`);
+      },
+    },
+    {
+      // AngularFire 22 moved firebase to its peers. Read only from `dependencies`, this drift goes unseen — the two-SDK check silently off.
+      name: 'Angular 22, firebase a PEER of @angular/fire: a root firebase outside its range is still reported',
+      setup: () => {
+        const tree = workspace();
+        writeJson(tree, 'package.json', { name: 'x', dependencies: { '@angular/fire': '22.0.0-rc.0', firebase: '^11.8.0' } });
+        installed(tree, '@angular/core', { version: '22.1.2' });
+        installed(tree, '@angular/fire', { version: '22.0.0-rc.0', peerDependencies: { firebase: '^12.18.0' } });
+        return tree;
+      },
+      run: (tree, ctx) => ctx.load('adapters/angular/angularfire').declareBrowserSdk(tree),
+      expect: (tree, t, ctx) => {
+        t.ok(ctx.logs.some((line) => /declares firebase "\^11\.8\.0", but @angular\/fire 22\.0\.0-rc\.0 carries firebase "\^12\.18\.0"/.test(line)), `the drift is named: ${ctx.logs}`);
+        t.equal(deps(tree).firebase, '^11.8.0', 'a generator reports, never rewrites a declared spec');
       },
     },
     {
@@ -242,7 +258,7 @@ export default {
       run: (tree, ctx) => ctx.load('adapters/angular/angularfire').declareBrowserSdk(tree),
       expect: (tree, t, ctx) => {
         const report = ctx.logs.find((line) => line.includes('"@angular/fire": "latest" and "firebase": "latest"')) ?? '';
-        t.ok(/1\. Pin the installed @angular\/fire 20\.1\.0[\s\S]*2\. Move to Angular 20[\s\S]*3\. Declare another/.test(report), `ordered choices: ${ctx.logs}`);
+        t.ok(/1\. Use the prerelease built for Angular 22[\s\S]*2\. Pin the installed @angular\/fire 20\.1\.0[\s\S]*3\. Move to Angular 21[\s\S]*4\. Declare another[^\n]*peerDependencies\.firebase/.test(report), `ordered choices: ${ctx.logs}`);
         t.ok(!ctx.logs.some((line) => /two Firebase SDKs/.test(line)), 'no half-advice');
         t.equal(deps(tree)['@angular/fire'], 'latest', 'a generator reports, never rewrites a declared spec');
       },
@@ -257,7 +273,7 @@ export default {
         tree.write('.nvmrc', '22\n');
         writeJson(tree, 'package.json', { name: 'x', dependencies: { '@angular/core': '~22.1.0', '@angular/fire': 'latest', firebase: 'latest' } });
         installed(tree, '@angular/core', { version: '22.1.2' });
-        installed(tree, '@angular/fire', { version: '20.1.0', dependencies: { firebase: '^11.8.0' } });
+        installed(tree, '@angular/fire', { version: '20.1.1', dependencies: { firebase: '^11.8.0' } });
         installed(tree, 'firebase', { version: '13.0.0', dependencies: { '@firebase/ai': '3.0.0', '@firebase/util': '1.15.3' } });
         installed(tree, '@firebase/ai', { version: '3.0.0', engines: { node: '>=24.12.0' }, dependencies: { '@firebase/util': '1.15.3' } });
         installed(tree, '@firebase/util', { version: '1.15.3', engines: { node: '>=20.0.0' } });
@@ -274,10 +290,10 @@ export default {
         );
         const resolves = ANGULARFIRE_BY_ANGULAR_MAJOR[20].stable.firebaseResolves.firebase;
         t.ok(
-          new RegExp(`1\\. Pin the installed @angular/fire 20\\.1\\.0 with the firebase range it carries: "@angular/fire": "20\\.1\\.0", "firebase": "\\^11\\.8\\.0"[^\\n]*root firebase installed today is 13\\.0\\.0 \\(outside that range, and needs a newer Node than this project's\\): the reinstall replaces it with firebase ${resolves.replace(/\./g, '\\.')}`).test(report),
+          new RegExp(`2\\. Pin the installed @angular/fire 20\\.1\\.1 with the firebase range it carries: "@angular/fire": "20\\.1\\.1", "firebase": "\\^11\\.8\\.0"[^\\n]*root firebase installed today is 13\\.0\\.0 \\(outside that range, and needs a newer Node than this project's\\): the reinstall replaces it with firebase ${resolves.replace(/\./g, '\\.')}`).test(report),
           `choice 1 says what is really installed and what the pin does to it: ${report}`,
         );
-        t.ok(/2\. Move to Angular 20[\s\S]*3\. Declare another/.test(report), `then the other choices, in order: ${report}`);
+        t.ok(/1\. Use the prerelease[\s\S]*3\. Move to Angular 21[\s\S]*4\. Declare another/.test(report), `then the other choices, in order: ${report}`);
       },
     },
     {

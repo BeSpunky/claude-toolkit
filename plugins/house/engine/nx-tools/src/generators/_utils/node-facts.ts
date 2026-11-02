@@ -2,7 +2,7 @@
 // Import-free on purpose: house.sh's probe loads it (with ./node-spec.ts) before anything is installed.
 
 /** The date this was projected — the moving aliases (`lts/*`, `node`) mean what they meant on it. */
-export const NODE_FACTS_AS_OF = '2026-10-07';
+export const NODE_FACTS_AS_OF = '2026-11-02';
 
 /** Every Node LTS codename (lower-case, as nvm's `lts/<name>` takes it) → its major, oldest first. */
 export const NODE_LTS_CODENAMES: Readonly<Record<string, number>> = {
@@ -16,12 +16,13 @@ export const NODE_LTS_CODENAMES: Readonly<Record<string, number>> = {
   hydrogen: 18,
   iron: 20,
   jod: 22,
-  krypton: 24
+  krypton: 24,
+  lithium: 26
 };
 
 /** The newest LTS major (`lts/*`) and the newest major of all (`node`, `current`, `latest`, `stable`). */
-export const NODE_NEWEST_LTS_MAJOR = 24;
-export const NODE_NEWEST_MAJOR = 26;
+export const NODE_NEWEST_LTS_MAJOR = 26;
+export const NODE_NEWEST_MAJOR = 27;
 
 /** The Node majors mcr.microsoft.com/devcontainers/typescript-node publishes a `:<major>` image for. */
 export const TYPESCRIPT_NODE_IMAGE_MAJORS: readonly number[] = [14, 16, 18, 20, 22, 24, 26];

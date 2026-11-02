@@ -41,7 +41,7 @@ export function tableOf(compat: typeof FirebaseCompat, firebaseTools: string): A
 export interface BrowserSdkFacts {
   angular: { version: string; major: number; from: 'installed' | 'declared' } | null;
   declared: { fire?: string; firebase?: string };
-  /** The @angular/fire in node_modules, with the firebase range it carries (its own `dependencies.firebase`). */
+  /** The @angular/fire in node_modules, with the firebase range it carries (`dependencies.firebase`; from AngularFire 22, `peerDependencies.firebase`). */
   installedFire: { version: string; major: number; firebase: string | null } | null;
   /** The project's Node major and where it is declared (`.nvmrc` …); null when the project declares none yet. */
   node: { major: number; from: string } | null;
@@ -189,8 +189,8 @@ export function coherentPair(facts: BrowserSdkFacts, table: AngularFireTable): {
     );
   }
   choices.push(
-    'Declare another @angular/fire release yourself, with "firebase" EXACTLY the range it lists in its own dependencies ' +
-      '(`npm view @angular/fire@<version> dependencies.firebase`) — the house keeps what the project declares.',
+    'Declare another @angular/fire release yourself, with "firebase" EXACTLY the range it lists in its own dependencies or peer dependencies ' +
+      '(`npm view @angular/fire@<version> dependencies.firebase peerDependencies.firebase`) — the house keeps what the project declares.',
   );
   if (notOffered.length) what += ` Not offered, because this project's Node cannot install it: ${notOffered.join('; ')}.`;
   return { refusal: { level: 'warn', what, choices } };

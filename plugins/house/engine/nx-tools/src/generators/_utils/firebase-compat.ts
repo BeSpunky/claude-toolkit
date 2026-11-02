@@ -10,7 +10,7 @@
  * The date npm last said this — a project's installed toolkit carries a FROZEN copy, so every message that rests on
  * the table ("no stable @angular/fire for Angular 22") says "as of" this date, never "yet".
  */
-export const ANGULARFIRE_TABLE_AS_OF = '2026-10-07';
+export const ANGULARFIRE_TABLE_AS_OF = '2026-11-02';
 
 /**
  * What a firebase spec installs, and what that install needs of Node: the `engines.node` of firebase's WHOLE dependency
@@ -19,7 +19,7 @@ export const ANGULARFIRE_TABLE_AS_OF = '2026-10-07';
 export interface FirebaseResolution {
   /** The firebase release the spec resolves to on npm (the newest inside the range; `latest`'s target). */
   firebase: string;
-  /** The Node majors (18–26) every package in that closure accepts. */
+  /** The Node majors (18–27) every package in that closure accepts. */
   nodeMajors: number[];
   /** Each distinct `engines.node` in the closure that excludes one of those majors: the majors it admits, who states it. */
   nodeNeeds: Array<{ range: string; nodeMajors: number[]; packages: string[] }>;
@@ -29,7 +29,7 @@ export interface FirebaseResolution {
 export interface AngularFireRelease {
   /** Exact: firebase below is THIS release's own range, so a floating @angular/fire would break the pairing. */
   angularfire: string;
-  /** @angular/fire's own `dependencies.firebase` — the root declares exactly this, so the package manager keeps ONE SDK. */
+  /** @angular/fire's own `firebase` range (a dependency; from 22, a peer) — the root declares exactly this, so the package manager keeps ONE SDK. */
   firebase: string;
   /** What that range installs today, and the Node it needs — a release the project's Node cannot install is never chosen. */
   firebaseResolves: FirebaseResolution;
@@ -54,7 +54,7 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^10.12.0",
       "firebaseResolves": {
         "firebase": "10.14.1",
-        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26],
+        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
         "nodeNeeds": []
       },
       "angularCore": "^17.0.0",
@@ -70,7 +70,7 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^10.12.0",
       "firebaseResolves": {
         "firebase": "10.14.1",
-        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26],
+        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
         "nodeNeeds": []
       },
       "angularCore": "^18.0.0",
@@ -86,7 +86,7 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebase": "^11.8.0",
       "firebaseResolves": {
         "firebase": "11.10.0",
-        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26],
+        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
         "nodeNeeds": []
       },
       "angularCore": "^19.0.0",
@@ -98,11 +98,11 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
   },
   20: {
     stable: {
-      "angularfire": "20.1.0",
+      "angularfire": "20.1.1",
       "firebase": "^11.8.0",
       "firebaseResolves": {
         "firebase": "11.10.0",
-        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26],
+        "nodeMajors": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
         "nodeNeeds": []
       },
       "angularCore": "^20.0.0",
@@ -113,18 +113,17 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
     prerelease: null,
   },
   21: {
-    stable: null,
-    prerelease: {
-      "angularfire": "21.0.0-rc.1",
+    stable: {
+      "angularfire": "21.0.0",
       "firebase": "^12.18.0",
       "firebaseResolves": {
         "firebase": "12.19.0",
-        "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
+        "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
         "nodeNeeds": [
           {
             "range": ">=20.0.0",
-            "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
-            "packages": ["@firebase/ai@2.16.0", "@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/app-compat@0.5.18", "@firebase/app@0.16.2", "@firebase/auth-compat@0.6.11", "@firebase/auth@1.13.6", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/firestore-compat@0.4.14", "@firebase/firestore@4.17.2", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/storage-compat@0.4.5", "@firebase/storage@0.14.5", "@firebase/util@1.15.3"]
+            "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+            "packages": ["@firebase/ai@2.16.0", "@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/app-compat@0.5.18", "@firebase/app@0.16.2", "@firebase/auth-compat@0.6.11", "@firebase/auth@1.13.6", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/firestore-compat@0.4.14", "@firebase/firestore@4.17.2", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/storage-compat@0.4.5", "@firebase/storage@0.14.5", "@firebase/util@1.15.3", "re2js@2.9.1"]
           }
         ]
       },
@@ -133,10 +132,29 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
       "firebaseTools": "^14.0.0 || ^15.0.0",
       "firebaseToolsPin": "15.32.1"
     },
+    prerelease: null,
   },
   22: {
     stable: null,
-    prerelease: null,
+    prerelease: {
+      "angularfire": "22.0.0-rc.0",
+      "firebase": "^12.18.0",
+      "firebaseResolves": {
+        "firebase": "12.19.0",
+        "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+        "nodeNeeds": [
+          {
+            "range": ">=20.0.0",
+            "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+            "packages": ["@firebase/ai@2.16.0", "@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/app-compat@0.5.18", "@firebase/app@0.16.2", "@firebase/auth-compat@0.6.11", "@firebase/auth@1.13.6", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/firestore-compat@0.4.14", "@firebase/firestore@4.17.2", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/storage-compat@0.4.5", "@firebase/storage@0.14.5", "@firebase/util@1.15.3", "re2js@2.9.1"]
+          }
+        ]
+      },
+      "angularCore": "^22.0.0",
+      "minAngular": "22.0.0",
+      "firebaseTools": "^14.0.0 || ^15.0.0",
+      "firebaseToolsPin": "15.32.1"
+    },
   },
 };
 
@@ -149,18 +167,18 @@ export const ANGULARFIRE_TABLE_NEWEST_ANGULAR = 22;
  */
 export const FIREBASE_BY_DIST_TAG: Readonly<Record<string, FirebaseResolution>> = {
   latest: {
-    "firebase": "13.0.0",
-    "nodeMajors": [24, 25, 26],
+    "firebase": "13.1.0",
+    "nodeMajors": [24, 25, 26, 27],
     "nodeNeeds": [
       {
         "range": ">=20.0.0",
-        "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
-        "packages": ["@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/util@1.15.3"]
+        "nodeMajors": [20, 21, 22, 23, 24, 25, 26, 27],
+        "packages": ["@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/util@1.15.3", "re2js@2.9.1"]
       },
       {
         "range": ">=24.12.0",
-        "nodeMajors": [24, 25, 26],
-        "packages": ["@firebase/ai@3.0.0", "@firebase/app-compat@0.5.19", "@firebase/app@0.16.3", "@firebase/auth-compat@0.6.12", "@firebase/auth@1.13.7", "@firebase/firestore-compat@0.4.15", "@firebase/firestore@4.18.0", "@firebase/storage-compat@0.4.6", "@firebase/storage@0.14.6"]
+        "nodeMajors": [24, 25, 26, 27],
+        "packages": ["@firebase/ai@3.0.0", "@firebase/app-compat@0.5.20", "@firebase/app@0.16.4", "@firebase/auth-compat@0.6.13", "@firebase/auth@1.13.8", "@firebase/firestore-compat@0.4.16", "@firebase/firestore@4.19.0", "@firebase/storage-compat@0.4.6", "@firebase/storage@0.14.6"]
       }
     ]
   }
