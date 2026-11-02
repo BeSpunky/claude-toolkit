@@ -7,6 +7,7 @@ import { withPlatform, csvTags } from '../../platform/platform';
 import { stateAnalogTsconfig } from './analog-tsconfig';
 import { convertBareLint } from '../../generators/_utils/lint-inference';
 import { libraryUnitTestRunner } from './workspace-angular';
+import { pruneUnusedPeers } from './library-peers';
 
 const noop: GeneratorCallback = () => {};
 
@@ -67,6 +68,8 @@ export const angularLibs: LibPort = {
     stateAnalogTsconfig(tree, options.directory.replace(/\/+$/, ''));
     // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.
     convertBareLint(tree, options.name);
+    // The generator's fixed peers, trimmed to what the library holds — or it fails its own lint from birth.
+    pruneUnusedPeers(tree, options.directory.replace(/\/+$/, ''));
     if (!ownAlias) {
       const libRoot = options.directory.replace(/\/+$/, '');
       linking.link(tree, { importPath: options.importPath, libRoot });
