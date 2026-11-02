@@ -1066,8 +1066,6 @@ else
   fi
   command -v docker >/dev/null || { echo "ERROR: docker not found (and the local Node is too old to run natively — need Node 22.18+)." >&2; exit 1; }
   docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
-  command -v curl >/dev/null || { echo "ERROR: curl not found" >&2; exit 1; }
-  echo "Resolving latest typescript-node base image..."
   # The image the GENERATORS run in — nothing more. The project's own Node (its devcontainer image, its functions
   # runtime) is the project's own Node file (.nvmrc, .node-version or volta.node), which the generators read; this runner's Node never leaks into the output.
   MAJOR="$(base_image_node_major)"
@@ -2361,6 +2359,12 @@ if [ "$PRINT_INNER" = "1" ]; then
   exit 0
 fi
 
+# The fallback image must have the package manager the program is rendered around. Here, not at the top of the program:
+# nothing has been written yet (no lock, no backup tag), and --print-inner above must not pull an image.
+if [ "$RUNTIME" = "docker" ]; then
+  container_require_command "$IMAGE" "$PM" || exit 1
+fi
+
 # --- single writer per project ------------------------------------------------------------------------------
 # Two upgrades on one project is not a hypothetical: it is one impatient re-run, or a hook-suggested upgrade landing
 # on top of a manual one. They race over node_modules, the lockfile, HOUSE.md — and over `migrations.json`,
@@ -2480,7 +2484,17 @@ else
   # this is a no-op — chowning there would hand the tree to a subuid. The engine decides; see
   # container-engine.sh. Runs before the gh push so git operations on the tree don't hit permission
   # errors. (The native path never creates foreign-owned files, so it needs none of this.)
-  container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT_DIR_NAME"
+  # A scaffold that died early has no tree to hand back, and a chown of nothing under set -e would replace the run's
+  # real failure with its own. A failed chown only ends a run that had otherwise succeeded: the reason the run died
+  # is the one to report.
+  if [ -e "$TARGET" ]; then
+    _own_rc=0
+    container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT_DIR_NAME" || _own_rc=$?
+    if [ "$_own_rc" -ne 0 ]; then
+      echo "ERROR: could not hand $TARGET back to $(id -un) (exit $_own_rc) — files in it may be owned by root." >&2
+      [ "$INNER_RC" -ne 0 ] || exit "$_own_rc"
+    fi
+  fi
 fi
 
 # --- create + push a private GitHub repo (scaffold mode only; gh auth lives on the host) ---
@@ -2489,8 +2503,11 @@ fi
 # `firebase apphosting:backends:create`; we generate no workflow files). Non-Firebase projects
 # just get a remote to push to.
 # Never fail the scaffold over a missing/unauthenticated gh — the local repo already exists.
+# A scaffold that died is never published: there is no finished repo to push, and pushing is what can't be taken back.
 GITHUB_RESULT=""
-if [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ]; then
+if [ "$INNER_RC" -ne 0 ]; then
+  :
+elif [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ]; then
   if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
     GITHUB_RESULT="GITHUB_SKIP: gh not found or not authenticated — local repo only (run 'gh auth login', then 'gh repo create $PROJECT --private --source \"$TARGET\" --remote=origin --push')"
     echo "$GITHUB_RESULT" >&2
@@ -2513,6 +2530,17 @@ elif [ "$MODE" = "new" ]; then
 fi
 
 # --- the run died somewhere: say where, and what that means for the project ------------------------------------
+if [ "$INNER_RC" -ne 0 ] && [ "$MODE" = "new" ]; then
+  # A scaffold has no migrations and no restore point; everything below describes an upgrade.
+  echo "" >&2
+  echo "NEW_FAILED $TARGET (exit $INNER_RC)" >&2
+  if [ -e "$TARGET" ]; then
+    echo "  project    : partly created. Remove $TARGET before re-running; new refuses an existing project." >&2
+  else
+    echo "  project    : not created — nothing to clean up." >&2
+  fi
+  exit "$INNER_RC"
+fi
 if [ "$INNER_RC" -ne 0 ]; then
   _st=""; _mig=""
   if [ -n "${UPGRADE_LOCK:-}" ] && [ -f "$UPGRADE_LOCK/state" ]; then
