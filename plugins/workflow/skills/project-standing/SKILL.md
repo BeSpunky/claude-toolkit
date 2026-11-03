@@ -71,6 +71,8 @@ The common case. Read-only; it observes, it does not act. Reconstruct the standi
 5. **Re-ground, don't trust blindly** — a package reflects what was true at its stamp. Verify the anchors you'll rely on (`git rev-parse`, `test -e`) and report drift (a baton says "next: wire the API" but the branch is already merged) before proposing a next move.
 6. **Then point, don't barge** — end with the single most-actionable next step and offer to resume it. Resuming a specific effort's baton is [[session-handoff]]'s RESUME job; hand to it.
 
+**The pane is this skill's other half.** `/standing`, a mod of this plugin, draws the same engine's facts as a pane with Resume buttons; this report adds what a derivation can't, the drift and the next step. You never open it. A line at the very end of this skill's text says where it stands: a band is offering it to the person (Open pane, Not now), or it is already open. With no such line, nothing has offered it and it may not exist here, so if the person asks for a panel, say `/standing` opens one where mods are on. The pane's **Catch me up** button is how a person gets from it to this report.
+
 ### The report shape (what "orient" produces)
 
 ```markdown

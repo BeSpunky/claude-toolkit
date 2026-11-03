@@ -3,7 +3,7 @@
 // The /standing pane (hooks/standing.tsx) is a VIEW over the project-standing engine
 // (skills/project-standing/scripts/standing.mjs --json). The engine is the single source of
 // truth for what a feature package is and which state it is in; the pane only folds one run of
-// it into ONE session value and draws that. Declared here, in the plugin's contract, because
+// it into ONE session value and draws that, beside the band that offers it when the skill runs. Declared here, in the plugin's contract, because
 // `$.state` values are typed by the owner's `PluginState` entry and anyone may read them.
 
 /** A feature package's closing status, from its DECISION.md (`in-flight` when it has none). */
@@ -87,6 +87,15 @@ export type Standing = {
  */
 export type StandingView = { phase: 'empty'; why: string } | { phase: 'ready'; standing: Standing }
 
+/**
+ * The pane on offer (hooks/standing.tsx): the project-standing skill ran and the pane is not up.
+ * `null` once it was answered, the pane opened, or the next prompt came.
+ */
+export type StandingOffer = {
+  /** The engine's counts in one line. */
+  headline: string
+}
+
 /** One move the merge gate offers: a button that queues `prompt` as the person's own. */
 export type MergeGateMove = {
   /** Stable per move, for the button's key: `land`, `land-promote`, `push`, `promote`. */
@@ -116,6 +125,8 @@ declare module 'claude-code' {
       standing: StandingView
       /** The pane lists the most recent concluded packages instead of one summary line. */
       showConcluded: boolean
+      /** The band offering the pane, until the person answers it. */
+      standingOffer: StandingOffer | null
       /** The standing proposal to land or promote, until the person answers it. */
       mergeGate: MergeGate | null
     }

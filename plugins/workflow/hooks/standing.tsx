@@ -12,14 +12,24 @@
 // cannot disagree.
 //
 // DETECT, DON'T EXECUTE. The pane changes nothing. Resume only queues a prompt for Claude
-// ("resume <slug> — read its newest handoff"), which the person can watch and interrupt; the
-// orientation itself stays the skill's job. Free text from the repo (the about line, a summary, tags) is
+// ("resume <slug> — read its newest handoff"), and Catch me up only queues the skill, both of which
+// the person can watch and interrupt; the orientation itself stays the skill's job. Free text from the repo (the about line, a summary, tags) is
 // drawn, never put into a prompt; the prompt carries only names the engine validated.
 //
 // NEVER OPENED UNASKED. A session start only registers the command. The pane opens when the
-// person runs /standing; the floor without mods is the skill and the SessionStart notice. Because
-// it never comes back by itself, closing it says how to: the control row carries the hint, and a
-// close by any hand toasts it.
+// person runs /standing or presses Open pane; the floor without mods is the skill and the
+// SessionStart notice. Because it never comes back by itself, closing it says how to: the control
+// row carries the hint, and a close by any hand toasts it.
+//
+// ONE FEATURE WITH THE SKILL. The report and the pane answer the same question, so each leads to
+// the other. When the project-standing skill expands, this module offers the pane in a band above
+// the prompt, and adds a line to the skill's text so Claude knows and does not offer it again. No
+// model has to remember anything: the `skill.prompt` event fires however the skill was reached
+// (`/name`, the Skill tool, a subagent's load, which the event does not tell apart). The pane's
+// Catch me up runs the skill in the other direction, because the drift and the next step are the
+// judgement a derivation cannot make. The offer goes when it is answered, when the pane opens by
+// any road, or on the next prompt from the person or a plugin. It is not made while the pane is up
+// (the skill's text says that instead) or when the project has no packages to draw.
 //
 // THE TOOLKIT'S LOOK. The frame, title, rules and mark come from ./_brand.tsx (generated from
 // tools/mod-brand/brand.tsx): this module draws only its own rows.
@@ -33,9 +43,19 @@ import { BrandCommandRow, BrandDivider, BrandFrame, brandLine } from './_brand.t
 
 const VIEW = { plugin: 'bespunky-workflow', key: 'standing' } as const
 const SHOW_CONCLUDED = { plugin: 'bespunky-workflow', key: 'showConcluded' } as const
+const OFFER = { plugin: 'bespunky-workflow', key: 'standingOffer' } as const
 const PANE = 'standing'
 const COMMAND = 'standing'
 const ENGINE = 'skills/project-standing/scripts/standing.mjs'
+const SKILL = 'bespunky-workflow:project-standing'
+/** Who ends the offer with a prompt: the person, typed or through Remote Control, or a plugin's button. */
+const MOVED_ON = /^(composer|bridge|plugin)$/
+/** What the skill's text gains when the pane is on offer: a fact for this run, not an instruction to act on it. */
+export const OFFERED_LINE = 'A band above the prompt offers the person the /standing pane once this turn ends, so do not offer it yourself.'
+/** What it gains when the pane is already open, so nothing Claude says about it is wrong. */
+export const PANE_UP_LINE = 'The /standing pane is already open and was refreshed just now, so do not offer it.'
+/** The pane's way into the skill. Fixed text: nothing from the repo reaches a prompt. */
+export const CATCH_UP_PROMPT = `Catch me up on this project — I pressed Catch me up in the standing pane. Follow ${SKILL}.`
 
 const PACKAGE_DIR = /^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+$/
 /** The engine's baton: the newest in `handoffs/`, else a handoff filed at the package's root. */
@@ -161,10 +181,21 @@ export function age(now: number, then: number) {
   return `${Math.floor(days / 30)}mo ago`
 }
 
+/** The counts in one line: the command's answer and the offer's headline say the same thing. */
+export function countsLine(standing: Standing) {
+  const { live, dormant, concluded } = groups(standing)
+
+  return `Standing: ${live.length} live, ${dormant.length} dormant, ${concluded.length} concluded.`
+}
+
 export const register: Register = on => {
+  /** A person is at the prompt, so an offer has someone to see it. Set again on a reload, which fires session.start again. */
+  let isInteractive = false
+
   // Only where a person is at the prompt: the pane is for someone to read and press, and a
   // headless run has the skill. (The plugin's other mods hook every session start.)
   on('session.start', { isInteractive: true }, async ($, e, next) => {
+    isInteractive = true
     await $.command.register({
       name: COMMAND,
       description: 'Where this project stands: feature packages by status, each with its newest handoff',
@@ -178,10 +209,52 @@ export const register: Register = on => {
     if (view.phase === 'empty') {
       return { text: `No project standing to show: ${view.why}.` }
     }
-    await $.ui.open({ id: PANE, title: 'standing' })
-    const { live, dormant, concluded } = groups(view.standing)
+    await openPane($)
 
-    return { text: `Standing: ${live.length} live, ${dormant.length} dormant, ${concluded.length} concluded.` }
+    return { text: countsLine(view.standing) }
+  })
+
+  on('skill.prompt', { skill: SKILL }, async ($, e, next) => {
+    const expanded = await next(e)
+    if (!isInteractive) return expanded
+    const view = await refresh($)
+    if (view.phase === 'empty') return expanded
+    // Already up: the refresh above is all it needs.
+    if ((await $.ui.panes()).some(pane => pane.id === PANE)) return { text: `${expanded.text}\n\n${PANE_UP_LINE}` }
+    if (view.standing.packages.length === 0) return expanded
+    await update($, OFFER, () => ({ headline: countsLine(view.standing) }))
+
+    return { text: `${expanded.text}\n\n${OFFERED_LINE}` }
+  })
+
+  // The conversation moved on, by the person or by a button's prompt (a press of the merge gate has
+  // a plugin's origin): the offer was only ever worth one look. A typed /project-standing raises it
+  // again after this.
+  on('prompt.submit', { origin: { kind: MOVED_ON } }, async ($, e, next) => {
+    await update($, OFFER, () => null)
+
+    return next(e)
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey || e.props.isWorking) return next(e)
+    const { value: offer } = await $.state.get(OFFER)
+    if (!offer) return next(e)
+
+    const ui = $.ui.resolve(e)
+    const { Box, Button, Text } = ui
+
+    return (
+      <BrandFrame ui={ui} site={e}>
+        <Text bold wrap="truncate-end">
+          {offer.headline}
+        </Text>
+        <Box flexDirection="row" flexWrap="wrap" gap={1}>
+          <Button key="standing-offer-open" label="Open pane" hotkey="o" variant="primary" onPress={() => void openPane($)} />
+          <Button key="standing-offer-dismiss" label="Not now" hotkey="n" role="dismiss" onPress={() => void update($, OFFER, () => null)} />
+        </Box>
+      </BrandFrame>
+    )
   })
 
   // The command's answer row reads as the toolkit's, not as the plugin's bare name.
@@ -209,6 +282,7 @@ export const register: Register = on => {
     const controls = (
       <Box key="standing-controls" flexDirection="row" gap={1}>
         <Button key="standing-refresh" label="Refresh" hotkey="r" onPress={() => void refresh($)} />
+        <Button key="standing-catch-up" label="Catch me up" hotkey="u" onPress={() => void catchUp($)} />
         <Button key="standing-close" label="Close" role="dismiss" onPress={() => void close($)} />
         <Text dimColor wrap="truncate-end">
           {REOPEN_HINT}
@@ -369,6 +443,17 @@ async function derive($: EngineInterface): Promise<Standing | undefined> {
 
     return undefined
   }
+}
+
+/** Every road to the pane: an open pane has nothing left to offer. Open pane does not re-run the engine, which ran when the offer was made. */
+async function openPane($: EngineInterface) {
+  await update($, OFFER, () => null)
+  await $.ui.open({ id: PANE, title: 'standing' })
+}
+
+/** Catch me up pressed: the report, the half of the feature the pane cannot draw. */
+async function catchUp($: EngineInterface) {
+  await $.prompt.submit({ text: CATCH_UP_PROMPT, asUser: true })
 }
 
 /** The Close button: closes the pane and says how it comes back. */

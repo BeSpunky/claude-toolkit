@@ -8,7 +8,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { BRAND, brandLine, brandTitle } from '../hooks/_brand.tsx'
-import { CLOSED_TOAST, REOPEN_HINT, age, concludedLine, dateOf, groups, headline, looseEnds, parseStanding, resumePrompt } from '../hooks/standing.tsx'
+import { CATCH_UP_PROMPT, CLOSED_TOAST, OFFERED_LINE, PANE_UP_LINE, REOPEN_HINT, age, concludedLine, dateOf, groups, headline, looseEnds, parseStanding, resumePrompt } from '../hooks/standing.tsx'
 import type { Standing, StandingPackage } from '../types/index.d.ts'
 
 const PLUGIN = 'bespunky-workflow'
@@ -70,6 +70,7 @@ function world(on: On, standing: Standing | 'crash' = STANDING) {
   const prompts: string[] = []
   const opened: string[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__${PLUGIN}__${e.name}` } }))
   on('session.root', () => ({ value: '/work' }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('ui.log', () => ({ value: undefined }))
@@ -87,6 +88,7 @@ function world(on: On, standing: Standing | 'crash' = STANDING) {
 
     return { text: e.text }
   })
+  on('ui.panes', () => ({ value: opened.map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true as const })) }))
   on('ui.open', ($, e) => {
     opened.push(e.id)
 
@@ -102,6 +104,7 @@ function world(on: On, standing: Standing | 'crash' = STANDING) {
   const closes: unknown[] = []
   on('ui.close', ($, e) => {
     closes.push(e)
+    if (opened.includes(e.id)) opened.splice(opened.indexOf(e.id), 1)
 
     return { value: undefined }
   })
@@ -457,5 +460,193 @@ describe('standing policy', () => {
     expect(age(NOW, NOW - 3 * DAY)).toBe('3d ago')
     expect(age(NOW, NOW - 21 * DAY)).toBe('3w ago')
     expect(age(NOW, NOW - 90 * DAY)).toBe('3mo ago')
+  })
+})
+
+const SKILL = 'bespunky-workflow:project-standing'
+const BAND: RenderPropsOf['AbovePrompt'] = {
+  hasSurvey: false,
+  isWorking: false,
+  maxRows: 12,
+  bodyColumns: 100,
+  scroll: { offset: 0, bodyRows: 12 },
+  view: {},
+}
+const band = ($: Engine, props: Partial<RenderPropsOf['AbovePrompt']> = {}) =>
+  $.ui.mount({ plugin: PLUGIN, surface: 'terminal', component: 'AbovePrompt', requestId: 'above-prompt', props: { ...BAND, ...props } })
+const OPEN = { key: 'standing-offer-open' }
+const NOT_NOW = { key: 'standing-offer-dismiss' }
+
+/** The positive control: without it, "the band is gone" also passes when it never came. */
+async function expectOffered($: Engine) {
+  const ui = await band($)
+  expect(await ui.find(OPEN)).toBeDefined()
+  await ui.unmount()
+}
+
+/** The engine beneath the plugin: the skill's own text, and a band of its own with nothing in it. */
+function skillWorld(on: On, standing: Standing | 'crash' = STANDING) {
+  const w = world(on, standing)
+  on('skill.prompt', ($, e) => ({ text: e.text }))
+  on('ui.render', ($, e) => {
+    const { Box } = $.ui.resolve(e)
+
+    return <Box />
+  })
+
+  return w
+}
+
+describe('the skill and the pane are one feature', () => {
+  test('the skill running offers the pane, tells Claude, and opens nothing', async ($, on) => {
+    const w = skillWorld(on)
+    await started($)
+    const out = await $.skill.prompt({ skill: SKILL, text: 'body' })
+    expect(out.text).toBe(`body\n\n${OFFERED_LINE}`)
+    expect(w.opened).toEqual([])
+    const ui = await band($)
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    expect(texts).toContain('Standing: 2 live, 1 dormant, 2 concluded.')
+    expect(await ui.find(OPEN)).toMatchObject({ props: { label: 'Open pane', hotkey: 'o', variant: 'primary' } })
+    expect(await ui.find(NOT_NOW)).toMatchObject({ props: { label: 'Not now', hotkey: 'n' } })
+    await ui.unmount()
+  })
+
+  test('another skill changes nothing', async ($, on) => {
+    const w = skillWorld(on)
+    await started($)
+    const out = await $.skill.prompt({ skill: 'bespunky-workflow:session-handoff', text: 'body' })
+    expect(out.text).toBe('body')
+    expect(w.ran).toEqual([])
+  })
+
+  test('never drawn while Claude works', async ($, on) => {
+    skillWorld(on)
+    await started($)
+    await $.skill.prompt({ skill: SKILL, text: 'body' })
+    const ui = await band($, { isWorking: true })
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('Open pane opens the pane and takes the band down, without another engine run', async ($, on) => {
+    const w = skillWorld(on)
+    await started($)
+    await $.skill.prompt({ skill: SKILL, text: 'body' })
+    const ui = await band($)
+    await ui.press(OPEN)
+    expect(w.opened).toEqual(['standing'])
+    expect(w.ran).toHaveLength(1)
+    expect(w.prompts).toEqual([])
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('Not now takes it down and opens nothing', async ($, on) => {
+    const w = skillWorld(on)
+    await started($)
+    await $.skill.prompt({ skill: SKILL, text: 'body' })
+    const ui = await band($)
+    await ui.press(NOT_NOW)
+    expect(w.opened).toEqual([])
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('the next prompt the person types takes it down', async ($, on) => {
+    skillWorld(on)
+    await started($)
+    await $.skill.prompt({ skill: SKILL, text: 'body' })
+    await expectOffered($)
+    await $.prompt.submit({ text: 'something else', origin: { kind: 'composer' } })
+    const ui = await band($)
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test("a plugin's prompt takes it down too, so it cannot resurface after a merge gate press", async ($, on) => {
+    skillWorld(on)
+    await started($)
+    await $.skill.prompt({ skill: SKILL, text: 'body' })
+    await expectOffered($)
+    await $.prompt.submit({ text: 'Land it', origin: { kind: 'plugin', name: 'bespunky-workflow', asUser: true } })
+    const ui = await band($)
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('/standing with the band up opens the pane and takes the band down', async ($, on) => {
+    const w = skillWorld(on)
+    await started($)
+    await $.skill.prompt({ skill: SKILL, text: 'body' })
+    await expectOffered($)
+    await $.command.run({ command: 'standing' })
+    expect(w.opened).toEqual(['standing'])
+    const ui = await band($)
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('once the pane is closed the skill offers it again', async ($, on) => {
+    skillWorld(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const pane = await mount($, 'terminal')
+    await pane.press({ key: 'standing-close' })
+    await pane.unmount()
+    const out = await $.skill.prompt({ skill: SKILL, text: 'body' })
+    expect(out.text).toBe(`body\n\n${OFFERED_LINE}`)
+    await expectOffered($)
+  })
+
+  test('with the pane already up there is no offer, it is refreshed, and Claude is told', async ($, on) => {
+    const w = skillWorld(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const out = await $.skill.prompt({ skill: SKILL, text: 'body' })
+    expect(out.text).toBe(`body\n\n${PANE_UP_LINE}`)
+    expect(w.ran).toHaveLength(2)
+    const ui = await band($)
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('with nothing to show there is no offer', async ($, on) => {
+    skillWorld(on, 'crash')
+    await started($)
+    const out = await $.skill.prompt({ skill: SKILL, text: 'body' })
+    expect(out.text).toBe('body')
+    const ui = await band($)
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('with no packages there is no offer of an empty pane', async ($, on) => {
+    skillWorld(on, { ...STANDING, packages: [] })
+    await started($)
+    const out = await $.skill.prompt({ skill: SKILL, text: 'body' })
+    expect(out.text).toBe('body')
+    const ui = await band($)
+    expect(await ui.find(OPEN)).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a headless run gets the skill untouched and runs nothing', async ($, on) => {
+    const w = skillWorld(on)
+    await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: false })
+    const out = await $.skill.prompt({ skill: SKILL, text: 'body' })
+    expect(out.text).toBe('body')
+    expect(w.ran).toEqual([])
+  })
+
+  test("Catch me up sends the skill as the person's prompt, in fixed words", async ($, on) => {
+    const w = skillWorld(on)
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const ui = await mount($, 'terminal')
+    await ui.press({ key: 'standing-catch-up' })
+    expect(w.prompts).toEqual([CATCH_UP_PROMPT])
+    expect(CATCH_UP_PROMPT).toContain(SKILL)
+    await ui.unmount()
   })
 })
