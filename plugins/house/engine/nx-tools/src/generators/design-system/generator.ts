@@ -139,6 +139,9 @@ export default async function designSystemGenerator(
   //    re-exports it) BEFORE seeding — or the seed-if-absent would keep a barrel pointing at a deleted file.
   if (!existing) binding?.pruneGenerated(tree, root);
 
+  // 3b) ... and aim the new library's test target at everything it will hold (an existing one: 0.51.2's rung decides).
+  if (!existing) binding?.reachEntryPointSpecs?.(tree, project.name ?? name);
+
   // 4) Seed the neutral core (the sass layer), then the binding's runtime + docs over it, then what only a new library gets.
   //    The skill pointers in the seeded comments and STRUCTURE.md render only where their plugin is enabled.
   const substitutions = { tokenPrefix, importPath, specifier, root, name, prefix, ...pluginPointerValues(tree, DESIGN_SYSTEM_SKILL_POINTERS) };
