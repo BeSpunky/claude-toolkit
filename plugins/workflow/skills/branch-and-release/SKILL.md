@@ -66,6 +66,8 @@ printf -- '---\neffort: <slug>\nsummary: <what this effort is for, one line>\n--
 
 **The slug is the effort's identity — use it everywhere.** It names the branch, the worktree *and* the effort's **package** ([[feature-package]]: `docs/features/<YYYY-MM-DD>-<slug>/`). Create the package with the tree, not at the end, born with a `DECISION.md` whose one-line `summary:` says what the effort is for (a returning reader sees it beside the slug); skip it only for genuinely trivial work.
 
+**Never run a blanket `git worktree prune`; remove your own tree with `git worktree remove <path>`.** Git records a worktree by its absolute path, so one created on the host is unreachable from a container sharing the same `.git`, and the reverse. `prune` deletes every registration it cannot reach, at once: other people's trees, with their uncommitted work left stranded on disk. `git gc` keeps them for 3 months; an explicit prune doesn't. [[project-standing]] reports what is already orphaned.
+
 **Worktree-blind tooling is the one trap a worktree adds.** A tool that caches *one* workspace root across trees (a daemon, a language server, a build cache keyed on an absolute path) silently builds, tests or serves the **main** tree's source from inside a worktree. **In an Nx workspace (every house project) every `nx` command run from a worktree is prefixed** — `NX_DAEMON=false NX_WORKSPACE_ROOT_PATH="$(pwd)" <pm> nx …`; see [`reference/nx-worktree-override.md`](reference/nx-worktree-override.md). `.claude/worktrees/` is gitignored.
 
 ## Commit small increments as you go (inside the worktree)
