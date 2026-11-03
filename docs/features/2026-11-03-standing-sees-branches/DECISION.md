@@ -36,3 +36,11 @@ Hook 155ms → 200ms; engine 150ms → 190ms (37ms of it the model engine). A fi
 
 - Whether to remove the two orphans and the four leftovers under `.claude/worktrees/`, and re-register `house-postgres-supabase`: the user's call. Nothing was touched.
 - `feat/house-postgres-supabase` is 22 behind `development`; it needs a new worktree (from inside the container) when the work starts.
+
+## After review (sanity review, 2026-11-03)
+
+The ledger is `reviews/20261103-sanity-review.md`. Decisions it added or changed:
+
+- **A remote copy only fills a gap.** It never outranks a local copy: its date is its author's clock, and someone else's push must not close your effort.
+- **`hasWorktree` means a worktree readable here.** An unreachable registration no longer pins an effort `live`; age decides. Such a package carries `checkedOutElsewhere: true`, because `git worktree add` refuses that branch without `--force`. That is what "needs a new worktree" above takes for `house-postgres-supabase` if its registration is still present.
+- **No line to land on, no branch reported.** An undeclared repo's line also comes from `origin/HEAD`. With no base at all, unlanded means nothing, and a missed effort beats calling the main line one.

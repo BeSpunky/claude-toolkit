@@ -56,12 +56,12 @@ case "$commit_age_days" in '' | *[!0-9-]*) exit 0 ;; esac
 # --- the in-flight efforts: an unconcluded package (no closing `status:` in its DECISION.md) ------------------
 # The engine looks everywhere an effort can live, so a package may be in another checkout (its 6th column names that
 # worktree, empty for this one) or only on a branch with no worktree at all (its 7th, printed as git's own
-# `branch:path`, which `git show` reads). The path printed is where the package actually is. A local unlanded branch IS
+# `branch:./path`, which `git show` reads from the project dir). The path printed is where the package actually is. A local unlanded branch IS
 # what this notice exists for, walked-away work, and it costs nothing extra: the same dormancy gate and the same one
 # notice per dormant stretch. A remote-only one (8th column) is left to the skill and the pane: someone else's pushed
 # branch is not something you walked away from, and a team repo has many. Parsed with awk, not `read`: a tab is IFS
 # whitespace, so an empty baton column would collapse and shift the worktree into its place.
-paths="$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pkg" && $3 == "in-flight" && $8 != "1" { print ($7 != "" ? $7 ":docs/features/" $2 "/ (on that branch, no worktree)" : ($6 == "" ? "" : $6 "/") "docs/features/" $2 "/") }')"
+paths="$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pkg" && $3 == "in-flight" && $8 != "1" { print ($7 != "" ? $7 ":./docs/features/" $2 "/ (on that branch, no worktree)" : ($6 == "" ? "" : $6 "/") "docs/features/" $2 "/") }')"
 count=0
 [ -n "$paths" ] && count="$(printf '%s\n' "$paths" | wc -l | tr -d ' ')"
 inflight="$(printf '%s\n' "$paths" | head -n 8 | sed 's/^/  • /')
@@ -89,7 +89,7 @@ plural=""; [ "$count" -gt 1 ] && plural="s"
 cat <<EOF
 [bespunky-workflow] This project has $count in-flight effort$plural and hasn't been touched in ~$commit_age_days days:
 $inflight
-The freshest state for each is the newest baton in its \`handoffs/\` folder. Before starting new work here,
+The freshest state for each is its newest handoff baton. Before starting new work here,
 reconstruct where things stand by running the \`bespunky-workflow:project-standing\` skill (default "orient"
 scope) — it derives the full standing from git + these packages.
 

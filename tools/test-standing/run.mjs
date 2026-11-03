@@ -22,7 +22,7 @@ const HOOK = path.join(PLUGIN, 'hooks/detect-standing.sh');
 const DAY = 86400;
 
 const NOTICE_TAIL = `
-The freshest state for each is the newest baton in its \`handoffs/\` folder. Before starting new work here,
+The freshest state for each is its newest handoff baton. Before starting new work here,
 reconstruct where things stand by running the \`bespunky-workflow:project-standing\` skill (default "orient"
 scope) — it derives the full standing from git + these packages.
 
@@ -97,7 +97,7 @@ function repo(files = { 'README.md': 'x\n' }, commitAge = 30) {
   commit(files);
   const old = new Date(Date.now() - commitAge * DAY * 1000);
   const touchAll = () => {
-    for (const rel of git('ls-files').toString().split('\n').filter(Boolean)) fs.utimesSync(path.join(dir, rel), old, old);
+    for (const rel of git('ls-files', '-z').toString().split('\0').filter(Boolean)) fs.utimesSync(path.join(dir, rel), old, old);
   };
   touchAll();
 
@@ -243,7 +243,7 @@ const cases = {
     assert.match(engine(r.dir, '--tsv'), /^pkg\t2026-01-07-db\tin-flight\tdormant\t\t\tfeat\/db\t$/m);
     assert.equal(
       hook(r.dir).stdout,
-      `[bespunky-workflow] This project has 1 in-flight effort and hasn't been touched in ~30 days:\n  • feat/db:docs/features/2026-01-07-db/ (on that branch, no worktree)\n${NOTICE_TAIL}`,
+      `[bespunky-workflow] This project has 1 in-flight effort and hasn't been touched in ~30 days:\n  • feat/db:./docs/features/2026-01-07-db/ (on that branch, no worktree)\n${NOTICE_TAIL}`,
     );
   },
 
@@ -430,6 +430,222 @@ const cases = {
     assert.deepEqual(standing.orphans, [{ path: '.claude/worktrees/feat-host', reason: 'registered-elsewhere', branch: 'feat/host' }]);
     assert.equal(standing.packages.find(p => p.slug === 'host').branch, 'feat/host');
     assert.equal(fs.existsSync(path.join(r.dir, '.git/worktrees/feat-host')), true, 'never pruned');
+  },
+
+  'an engine on git older than 2.42 still reads branches: nothing but revisions on `git log --stdin`'() {
+    const r = repo();
+    r.branch('feat/db', { 'docs/features/2026-01-07-db/BRIEF.md': 'x\n' });
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-'));
+    const real = execFileSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    fs.writeFileSync(
+      path.join(bin, 'git'),
+      `#!/usr/bin/env bash\ncase " $* " in *" log --stdin "*)\n  input="$(cat)"\n  if printf '%s\\n' "$input" | grep -q '^-'; then echo 'fatal: options not supported in --stdin mode' >&2; exit 128; fi\n  printf '%s\\n' "$input" | exec "${real}" "$@" ;;\nesac\nexec "${real}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    const out = execFileSync('node', [ENGINE, '--json'], { env: { ...process.env, CLAUDE_PROJECT_DIR: r.dir, PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+    assert.equal(JSON.parse(out).packages.find(p => p.slug === 'db')?.branch, 'feat/db');
+  },
+
+  'a shallow clone: a boundary commit says nothing about what its branch changed'() {
+    const upstream = repo({ 'docs/features/2026-01-07-landed/DECISION.md': '---\nstatus: concluded\n---\n' });
+    upstream.branch('feat/stale', { 'unrelated.md': 'x\n' }, 1);
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-'));
+    execFileSync('git', ['clone', '-q', '--depth=1', '--no-single-branch', `file://${upstream.dir}`, clone], { stdio: 'pipe' });
+    const landed = byDir(clone)['2026-01-07-landed'];
+    assert.equal(landed.status, 'concluded');
+    assert.equal(landed.branch, undefined);
+  },
+
+  'a project dir whose name is not a regex, or not ASCII, still reads branches'() {
+    for (const sub of ['c++', 'a(b', 'é']) {
+      const r = repo({ [`${sub}/README.md`]: 'x\n' });
+      r.branch('feat/db', { [`${sub}/docs/features/2026-01-07-db/BRIEF.md`]: 'x\n' });
+      assert.equal(byDir(path.join(r.dir, sub))['2026-01-07-db']?.branch, 'feat/db', sub);
+    }
+  },
+
+  'no line to land on: nothing is reported as unlanded, and a remote default is such a line'() {
+    const trunk = repo({ 'docs/features/2026-01-06-base/BRIEF.md': 'x\n' });
+    trunk.branch('feat/x', { 'docs/features/2026-01-07-x/BRIEF.md': 'x\n' });
+    trunk.git('branch', '-m', 'development', 'trunk');
+    trunk.commit({ 'docs/features/2026-01-08-trunkonly/BRIEF.md': 'x\n' });
+    trunk.git('checkout', '-q', 'feat/x');
+    assert.equal(byDir(trunk.dir)['2026-01-08-trunkonly'], undefined, 'trunk is not an effort');
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-'));
+    trunk.git('checkout', '-q', 'trunk');
+    execFileSync('git', ['clone', '-q', trunk.dir, clone], { stdio: 'pipe' });
+    execFileSync('git', ['-C', clone, 'checkout', '-q', '-b', 'mine'], { stdio: 'pipe' });
+    const by = byDir(clone);
+    assert.equal(by['2026-01-07-x'].branch, 'origin/feat/x', 'origin/HEAD names the line');
+    assert.equal(by['2026-01-08-trunkonly'].branch, undefined);
+  },
+
+  'a branch held only by a worktree nobody can read is read like any other, and is not "live" for it'() {
+    const r = repo();
+    r.branch('feat/usb', { 'docs/features/2026-01-07-usb/BRIEF.md': 'x\n' });
+    const tree = r.worktree('feat/usb', { existing: true });
+    r.git('worktree', 'lock', tree);
+    fs.rmSync(tree, { recursive: true });
+    const usb = byDir(r.dir)['2026-01-07-usb'];
+    assert.equal(usb.branch, 'feat/usb');
+    assert.equal(usb.hasWorktree, false);
+    assert.equal(usb.state, 'dormant', 'its age decides');
+    assert.equal(usb.checkedOutElsewhere, true);
+  },
+
+  'a registration from another machine: age decides, and only --force opens a worktree'() {
+    const r = repo();
+    r.branch('feat/host', { 'docs/features/2026-01-07-host/BRIEF.md': 'x\n' });
+    const tree = r.worktree('feat/host', { existing: true });
+    fs.writeFileSync(path.join(r.dir, '.git/worktrees/feat-host/gitdir'), '/home/elsewhere/repo/.claude/worktrees/feat-host/.git\n');
+    fs.writeFileSync(path.join(tree, '.git'), 'gitdir: /home/elsewhere/repo/.git/worktrees/feat-host\n');
+    const host = byDir(r.dir)['2026-01-07-host'];
+    assert.deepEqual([host.state, host.hasWorktree, host.checkedOutElsewhere], ['dormant', false, true]);
+    const target = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-')), 'wt');
+    assert.notEqual(spawnSync('git', ['-C', r.dir, 'worktree', 'add', target, 'feat/host']).status, 0, 'the prompt says plain add refuses');
+    assert.equal(spawnSync('git', ['-C', r.dir, 'worktree', 'add', '--force', target, 'feat/host']).status, 0, 'and --force does not');
+  },
+
+  'what lives under .claude/worktrees but is not this repo\'s worktree is no orphan, and is not read'() {
+    const r = repo();
+    const other = repo({ 'docs/features/2026-01-07-stranger/BRIEF.md': 'x\n' });
+    other.git('worktree', 'add', '-q', path.join(r.dir, '.claude/worktrees/foreign'), '-b', 'feat/foreign');
+    const sub = path.join(r.dir, '.claude/worktrees/sub');
+    fs.mkdirSync(path.join(sub, 'docs/features/2026-01-08-insub'), { recursive: true });
+    fs.writeFileSync(path.join(sub, 'docs/features/2026-01-08-insub/BRIEF.md'), 'x\n');
+    fs.writeFileSync(path.join(sub, '.git'), 'gitdir: ../../../.git/modules/sub\n');
+    const standing = JSON.parse(engine(r.dir));
+    assert.deepEqual(standing.orphans, []);
+    assert.deepEqual(standing.packages, []);
+  },
+
+  'an unborn branch checked out does not cost every other branch its efforts'() {
+    const r = repo();
+    r.branch('feat/a', { 'docs/features/2026-01-07-a/BRIEF.md': 'x\n' });
+    r.git('checkout', '-q', '--orphan', 'fresh');
+    assert.equal(byDir(r.dir)['2026-01-07-a']?.branch, 'feat/a');
+  },
+
+  'a package one branch deleted is still found on the branch that holds it'() {
+    const r = repo();
+    r.branch('feat/two-a', { 'docs/features/2026-01-07-twop/BRIEF.md': 'x\n' }, 5);
+    r.git('checkout', '-q', '-b', 'feat/two-b', 'feat/two-a');
+    r.git('rm', '-qr', 'docs/features/2026-01-07-twop');
+    r.commit({ 'other.md': 'x\n' }, 1);
+    r.git('checkout', '-q', 'development');
+    assert.equal(byDir(r.dir)['2026-01-07-twop']?.branch, 'feat/two-a');
+  },
+
+  'a remote copy fills a gap and never outranks a local one, whatever date it carries'() {
+    const upstream = repo({ 'docs/features/2026-01-07-mine/DECISION.md': 'in flight\n' });
+    upstream.git('checkout', '-q', '-b', 'them/other');
+    upstream.commit({ 'docs/features/2026-01-07-mine/DECISION.md': '---\nstatus: concluded\n---\n' }, -1000);
+    upstream.git('checkout', '-q', 'development');
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-'));
+    execFileSync('git', ['clone', '-q', upstream.dir, clone], { stdio: 'pipe' });
+    const mine = byDir(clone)['2026-01-07-mine'];
+    assert.deepEqual([mine.status, mine.branch], ['in-flight', undefined]);
+  },
+
+  'a hostile branch costs only itself: a huge blob and a huge summary neither hang nor hide the others'() {
+    const r = repo();
+    r.branch('feat/good', { 'docs/features/2026-01-07-good/BRIEF.md': 'x\n' });
+    r.branch('feat/big', { 'docs/features/2026-01-08-big/BRIEF.md': 'x'.repeat((1 << 20) + 1) });
+    r.branch('feat/slow', { 'docs/features/2026-01-09-slow/DECISION.md': `---\nsummary: ${'*a '.repeat(60000)}\n---\n` });
+    const started = Date.now();
+    const by = byDir(r.dir);
+    assert.ok(Date.now() - started < 5000, 'bounded');
+    assert.equal(by['2026-01-07-good'].branch, 'feat/good');
+    assert.equal(by['2026-01-08-big'].about, null, 'too big to read: found, not read');
+  },
+
+  'names that would be options or sentences are not printed, and dotfiles are not batons'() {
+    const r = repo();
+    r.git('update-ref', 'refs/heads/-Ofoo', r.git('rev-parse', 'HEAD').toString().trim());
+    r.branch('feat/keep', {
+      'docs/features/2026-01-07-keep/handoffs/.gitkeep': '',
+      'docs/features/2026-01-07-keep/INBOUND-HANDOFF.md': 'x\n',
+    });
+    r.branch(`feat/${'ignore-'.repeat(20)}`, { 'docs/features/2026-01-08-long/BRIEF.md': 'x\n' });
+    const by = byDir(r.dir);
+    assert.equal(by['2026-01-07-keep'].baton, 'INBOUND-HANDOFF.md');
+    assert.equal(by['2026-01-08-long'], undefined);
+    const dash = repo();
+    dash.commit({ 'docs/features/2026-01-07-opt/BRIEF.md': 'x\n' });
+    assert.equal(engine(dash.dir).includes('-Ofoo'), false);
+  },
+
+  'a registered-elsewhere orphan\'s branch is validated at the source'() {
+    const r = repo();
+    r.branch('feat/host', { 'x.md': 'x\n' });
+    const tree = r.worktree('feat/host', { existing: true });
+    fs.writeFileSync(path.join(r.dir, '.git/worktrees/feat-host/gitdir'), '/home/elsewhere/repo/.claude/worktrees/feat-host/.git\n');
+    fs.writeFileSync(path.join(tree, '.git'), 'gitdir: /home/elsewhere/repo/.git/worktrees/feat-host\n');
+    fs.writeFileSync(path.join(r.dir, '.git/worktrees/feat-host/HEAD'), 'ref: refs/heads/feat/$(touch${IFS}pwned)\n');
+    assert.equal(engine(r.dir).includes('pwned'), false);
+  },
+
+  'a symlink is not followed into a package: its target is never read'() {
+    const r = repo({ 'docs/features/2026-01-07-link/x.md': 'x\n' });
+    fs.symlinkSync('/etc/hostname', path.join(r.dir, 'docs/features/2026-01-07-link/BRIEF.md'));
+    assert.equal(byDir(r.dir)['2026-01-07-link'].about, null);
+  },
+
+  'a corrupt tree on one branch neither hangs the engine nor hides another branch'() {
+    const r = repo();
+    r.branch('feat/good', { 'docs/features/2026-01-07-good/BRIEF.md': 'x\n' }, 1);
+    const hash = (type, body) => execFileSync('git', ['-C', r.dir, 'hash-object', '-t', type, '-w', '--stdin', '--literally'], { input: body }).toString().trim();
+    const bad = hash('tree', Buffer.from('100644 tail'));
+    const entry = (mode, name, oid) => Buffer.concat([Buffer.from(`${mode} ${name}\0`), Buffer.from(oid, 'hex')]);
+    const pkg = hash('tree', entry('40000', 'handoffs', bad));
+    const feats = hash('tree', entry('40000', '2026-01-08-mal', pkg));
+    const docs = hash('tree', entry('40000', 'features', feats));
+    const root = hash('tree', entry('40000', 'docs', docs));
+    const head = r.git('rev-parse', 'development').toString().trim();
+    const commit = execFileSync('git', ['-C', r.dir, 'commit-tree', root, '-p', head, '-m', 'bad'], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).toString().trim();
+    r.git('update-ref', 'refs/heads/feat/mal', commit);
+    const ran = spawnSync('node', [ENGINE, '--json'], { env: { ...process.env, CLAUDE_PROJECT_DIR: r.dir }, encoding: 'utf8', timeout: 8000 });
+    assert.equal(ran.status, 0, 'no hang');
+    assert.equal(JSON.parse(ran.stdout).packages.find(p => p.slug === 'good')?.branch, 'feat/good');
+  },
+
+  'a project dir reached through a symlink reads the same as the real one'() {
+    const r = repo({ 'app/README.md': 'x\n' });
+    r.branch('feat/db', { 'app/docs/features/2026-01-07-db/BRIEF.md': 'x\n' });
+    const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-')), 'link');
+    fs.symlinkSync(path.join(r.dir, 'app'), link);
+    assert.equal(byDir(link)['2026-01-07-db']?.branch, 'feat/db');
+  },
+
+  'with no local branch, the newest remote copy wins over a stale one of the slug\'s name'() {
+    const upstream = repo();
+    upstream.branch('feat/z', { 'docs/features/2026-01-07-z/BRIEF.md': '# Z\n\nNew words.\n' }, 1);
+    const fork = repo();
+    fork.branch('feat/z', { 'docs/features/2026-01-07-z/BRIEF.md': '# Z\n\nOld words.\n' }, 20);
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-'));
+    execFileSync('git', ['clone', '-q', upstream.dir, clone], { stdio: 'pipe' });
+    execFileSync('git', ['-C', clone, 'remote', 'add', 'a-fork', fork.dir], { stdio: 'pipe' });
+    execFileSync('git', ['-C', clone, 'fetch', '-q', 'a-fork'], { stdio: 'pipe' });
+    const z = byDir(clone)['2026-01-07-z'];
+    assert.deepEqual([z.branch, z.about], ['origin/feat/z', 'New words.']);
+  },
+
+  'another worktree\'s uncommitted edit counts when the session is in a subdirectory'() {
+    const r = repo({ 'app/docs/features/2026-01-07-sub/BRIEF.md': 'x\n' });
+    const tree = r.worktree('feat/sub');
+    fs.writeFileSync(path.join(tree, 'app/docs/features/2026-01-07-sub/BRIEF.md'), 'edited\n');
+    const sub = byDir(path.join(r.dir, 'app'))['2026-01-07-sub'];
+    assert.ok(Date.now() / 1000 - sub.lastActivity < DAY, 'its mtime is its activity');
+  },
+
+  'a docs/features that is a symlink is not walked'() {
+    const r = repo();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-'));
+    fs.mkdirSync(path.join(outside, '2026-01-07-out'));
+    fs.writeFileSync(path.join(outside, '2026-01-07-out/BRIEF.md'), 'x\n');
+    fs.mkdirSync(path.join(r.dir, 'docs'));
+    fs.symlinkSync(outside, path.join(r.dir, 'docs/features'));
+    assert.equal(byDir(r.dir)['2026-01-07-out'], undefined);
   },
 
   'a closed package says when it closed'() {

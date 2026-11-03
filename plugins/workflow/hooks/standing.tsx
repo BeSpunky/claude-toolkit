@@ -126,8 +126,14 @@ export function resumePrompt(pkg: StandingPackage): string | undefined {
   if (pkg.worktree !== undefined && !WORKTREE.test(pkg.worktree)) return undefined
   if (pkg.baton !== undefined && !BATON.test(pkg.baton)) return undefined
   if (pkg.branch !== undefined) {
-    if (!WORKTREE.test(pkg.branch)) return undefined
-    const first = `${pkg.branch}:docs/features/${pkg.dir}/${pkg.baton ?? 'DECISION.md'}`
+    if (!WORKTREE.test(pkg.branch) || pkg.branch.startsWith('-')) return undefined
+    const first = `${pkg.branch}:./docs/features/${pkg.dir}/${pkg.baton ?? 'DECISION.md'}`
+    if (pkg.remote === true) {
+      return `Resume ${pkg.slug}: its package lives only on remote branch ${pkg.branch}, with no local branch, and it may be someone else's. Read \`git show ${first}\`; continuing it needs a local branch of its own first (bespunky-workflow:branch-and-release).`
+    }
+    if (pkg.checkedOutElsewhere === true) {
+      return `Resume ${pkg.slug}: its package lives on branch ${pkg.branch}, checked out only somewhere unreachable from here, so a plain \`git worktree add\` refuses it. Read \`git show ${first}\`; continuing here takes \`git worktree add --force\`, never a prune, which would delete that registration (bespunky-workflow:branch-and-release, then bespunky-workflow:session-handoff).`
+    }
 
     return `Resume ${pkg.slug}: its package lives only on branch ${pkg.branch}, with no worktree. Read \`git show ${first}\`, open a worktree for that branch (bespunky-workflow:branch-and-release), and pick up from there (bespunky-workflow:session-handoff).`
   }
@@ -236,7 +242,7 @@ export const register: Register = on => {
       const prompt = resumePrompt(pkg)
       const hotkey = hotkeyOf(pkg)
       const where = pkg.baton ?? 'no baton yet'
-      const lives = pkg.branch !== undefined ? ` · branch ${pkg.branch}` : pkg.orphaned === true ? ' · orphaned checkout' : pkg.hasWorktree ? ' · worktree' : ''
+      const lives = pkg.branch !== undefined ? ` · ${pkg.remote === true ? 'remote ' : ''}branch ${pkg.branch}` : pkg.orphaned === true ? ' · orphaned checkout' : pkg.hasWorktree ? ' · worktree' : ''
 
       return (
         <Box key={`standing-row-${pkg.dir}`} flexDirection="row" gap={1}>

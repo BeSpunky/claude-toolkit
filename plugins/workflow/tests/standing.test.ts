@@ -266,6 +266,15 @@ describe('standing pane', () => {
     ])
   })
 
+  test('Resume warns of what a plain worktree add cannot do: a remote branch, an unreachable registration, an option-shaped name', async () => {
+    const base = { dir: '2026-03-01-db', state: 'live' as const, baton: 'handoffs/b.md' }
+    expect(resumePrompt(pkg({ ...base, branch: 'origin/feat/db', remote: true }))).toContain("may be someone else's")
+    const held = resumePrompt(pkg({ ...base, branch: 'feat/db', checkedOutElsewhere: true }))
+    expect(held).toContain('git worktree add --force')
+    expect(held).toContain('never a prune')
+    expect(resumePrompt(pkg({ ...base, branch: '-Ofoo' }))).toBeUndefined()
+  })
+
   test('Resume reads a branch-only package through git, and says to open a worktree', async ($, on) => {
     const onBranch = pkg({ dir: '2026-03-01-db', state: 'live', branch: 'feat/db', baton: 'INBOUND-HANDOFF.md' })
     const w = world(on, { ...STANDING, packages: [onBranch] })
@@ -274,7 +283,7 @@ describe('standing pane', () => {
     const ui = await mount($, 'terminal')
     await ui.press({ key: 'standing-resume-2026-03-01-db' })
     expect(w.prompts).toEqual([
-      'Resume db: its package lives only on branch feat/db, with no worktree. Read `git show feat/db:docs/features/2026-03-01-db/INBOUND-HANDOFF.md`, open a worktree for that branch (bespunky-workflow:branch-and-release), and pick up from there (bespunky-workflow:session-handoff).',
+      'Resume db: its package lives only on branch feat/db, with no worktree. Read `git show feat/db:./docs/features/2026-03-01-db/INBOUND-HANDOFF.md`, open a worktree for that branch (bespunky-workflow:branch-and-release), and pick up from there (bespunky-workflow:session-handoff).',
     ])
   })
 

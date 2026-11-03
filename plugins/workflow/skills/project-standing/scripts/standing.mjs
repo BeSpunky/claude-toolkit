@@ -33,10 +33,15 @@ const DAY = 86400;
 const STATUS_RE = /^status:[ \t\v\f\r]*(concluded|abandoned|superseded)\b/im;
 const PACKAGE_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]/;
 const SLUG_RE = /^[a-z0-9-]+$/;
-const BATON_RE = /^[A-Za-z0-9._-]{1,120}$/;
+/** No leading dot: `handoffs/.gitkeep` is how an empty `handoffs/` gets committed, not a baton. */
+const BATON_RE = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,119}$/;
 /** A handoff filed at the package's root instead of in `handoffs/` (`INBOUND-HANDOFF.md`): the baton when `handoffs/` has none. */
 const ROOT_BATON_RE = /handoff[^/]*\.md$/i;
 const MAX_PACKAGE_NAME = 80;
+/** Past this a DECISION.md or BRIEF.md is not read, on disk or on a branch: anyone who can push a branch chooses its size. */
+const MAX_TEXT = 1 << 20;
+/** One `cat-file` process's share of the output buffer, so a large read fails alone, not with every other. */
+const MAX_BATCH = 32 << 20;
 
 /** STALE_DAYS as the hook has always read it: a non-negative integer, else 14. */
 function staleDays(env) {
@@ -49,7 +54,7 @@ const GIT_OPTIONS = { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, maxBuffe
 
 function git(dir, args, input) {
   try {
-    return execFileSync('git', ['-C', dir, ...args], {
+    return execFileSync('git', ['-C', dir, '-c', 'core.quotePath=off', ...args], {
       ...GIT_OPTIONS,
       encoding: 'utf8',
       stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'ignore'],
@@ -131,7 +136,9 @@ const ABOUT_MAX = 140;
 
 /** Markdown inline syntax as plain text, whitespace collapsed, capped at a word boundary. */
 function plain(text) {
+  // The regexes below are quadratic on hostile input, and nothing past the cap survives anyway.
   const flat = text
+    .slice(0, ABOUT_MAX * 8)
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // [text](url), ![alt](src)
     .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_, target, label) => label ?? target) // [[wiki|label]]
     .replace(/`+([^`]*)`+/g, '$1')
@@ -224,7 +231,7 @@ const WORKTREE_RE = /^\/?(?!\.\.?(?:\/|$))[A-Za-z0-9._@+-]+(?:\/(?!\.\.?(?:\/|$)
 
 /**
  * Every worktree of the repository (`git worktree list --porcelain`): its path and checked-out branch. Bare and
- * prunable entries have no files to read but still name a branch, which is what `hasWorktree` asks about.
+ * prunable entries have no files to read.
  */
 function worktrees(root) {
   const out = git(root, ['worktree', 'list', '--porcelain']) ?? '';
@@ -266,6 +273,7 @@ function scanTree(features, { prefix, committed, dirty }) {
   // Codepoint order, as a C-locale shell glob lists them.
   let names;
   try {
+    if (!fs.lstatSync(features).isDirectory()) return [];
     names = fs.readdirSync(features).filter(name => !name.startsWith('.')).sort();
   } catch {
     return [];
@@ -274,7 +282,7 @@ function scanTree(features, { prefix, committed, dirty }) {
   for (const dir of names) {
     const full = path.join(features, dir);
     try {
-      if (!fs.statSync(full).isDirectory()) continue;
+      if (!fs.lstatSync(full).isDirectory()) continue;
     } catch {
       continue;
     }
@@ -282,7 +290,9 @@ function scanTree(features, { prefix, committed, dirty }) {
 
     const read = name => {
       try {
-        return fs.readFileSync(path.join(full, name), 'utf8');
+        const stat = fs.lstatSync(path.join(full, name));
+
+        return stat.isFile() && stat.size <= MAX_TEXT ? fs.readFileSync(path.join(full, name), 'utf8') : '';
       } catch {
         return ''; // absent: in flight, or no brief
       }
@@ -367,7 +377,8 @@ function closedAt(concluded, fallback) {
  *   - `registered-elsewhere`: the registration exists, under a path that does not resolve from here. Do not prune.
  *   - `unregistered`:         the registration is gone. Its files may still hold uncommitted work.
  *   - `no-git-link`:          no `.git` at all: what a removed worktree left behind. Reported, never read.
- * A directory with a `.git` DIRECTORY is a repository of its own, nobody's orphan.
+ * A directory with a `.git` DIRECTORY is a repository of its own, nobody's orphan. So is a link that is no linked
+ * worktree's (a submodule's) or that resolves here to another repository's: that checkout is not this project's business.
  */
 function orphanedCheckouts({ mainRoot, commonDir, registered, branchNamed }) {
   const parent = path.join(mainRoot, '.claude', 'worktrees');
@@ -394,6 +405,9 @@ function orphanedCheckouts({ mainRoot, commonDir, registered, branchNamed }) {
       orphans.push({ full, reason: 'no-git-link' });
       continue;
     }
+    const target = path.resolve(full, link);
+    const owner = path.dirname(path.dirname(target));
+    if (path.basename(path.dirname(target)) !== 'worktrees' || (fs.existsSync(target) && realpath(owner) !== realpath(commonDir))) continue;
     const admin = path.join(commonDir, 'worktrees', path.basename(link));
     if (fs.existsSync(admin)) {
       let head = '';
@@ -416,7 +430,7 @@ const BRANCHES_ENGINE = fileURLToPath(new URL('../../branch-and-release/scripts/
  * The lines an unlanded branch is measured against and the protected names that are never efforts, from the branch-model
  * engine (`status --json`, its frozen contract: this script is not a third resolver). Undeclared or unreadable, the
  * protected names that exist stand in for integration, per the skill; an engine that did not answer leaves the fallback
- * every other reader of it keeps.
+ * every other reader of it keeps. `declared` says whether the model named the line, or those names are a guess.
  */
 function branchLines(root) {
   const ran = spawnSync(process.execPath, [BRANCHES_ENGINE, 'status', '--json'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -428,41 +442,62 @@ function branchLines(root) {
   }
   const isNames = value => Array.isArray(value) && value.every(name => typeof name === 'string' && name !== '');
   if (!['declared', 'undeclared', 'unreadable'].includes(model?.state) || !isNames(model.protected) || !isNames(model.protectedPatterns)) {
-    return { integration: UNDECLARED_LINES, protectedNames: UNDECLARED_LINES, protectedPatterns: [] };
+    return { declared: false, integration: UNDECLARED_LINES, protectedNames: UNDECLARED_LINES, protectedPatterns: [] };
   }
-  const integration = model.state === 'declared' && typeof model.projection?.integration === 'string' ? [model.projection.integration] : model.protected;
+  const declared = model.state === 'declared' && typeof model.projection?.integration === 'string';
 
-  return { integration, protectedNames: model.protected, protectedPatterns: model.protectedPatterns };
+  return { declared, integration: declared ? [model.projection.integration] : model.protected, protectedNames: model.protected, protectedPatterns: model.protectedPatterns };
 }
 
-const globRegex = glob => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\?]/g, '\\$&').replace(/\*/g, '.*')}$`);
+/** A protected pattern's `*` as the PreCompact hook's `case` reads it, in one pass: the pattern is repo text, and a regex of many `.*` is not bounded. */
+function globMatches(glob, name) {
+  const parts = glob.split('*');
+  if (parts.length === 1) return glob === name;
+  const last = parts.at(-1);
+  if (!name.startsWith(parts[0]) || !name.endsWith(last)) return false;
+  let at = parts[0].length;
+  for (const part of parts.slice(1, -1)) {
+    const found = name.indexOf(part, at);
+    if (found < 0) return false;
+    at = found + part.length;
+  }
+
+  return at <= name.length - last.length;
+}
 
 /** `refs/heads/feat/x` → `feat/x`; `refs/remotes/origin/feat/x` → `feat/x`, the line's name on any remote. */
 const lineName = ref => ref.replace(/^refs\/heads\//, '').replace(/^refs\/remotes\/[^/]+\//, '');
 const shortName = ref => ref.replace(/^refs\/(?:heads|remotes)\//, '');
+/** A branch name that is safe to print into a command: a safe path, not an option, and too short to carry a sentence. */
+const isBranchName = name => name.length <= 100 && !name.startsWith('-') && WORKTREE_RE.test(name);
 
 /**
  * The branches a checkout cannot show: every ref that is not checked out in a readable worktree and has not landed.
  * Bounded no matter how many branches exist: `for-each-ref` is one process, the model is only asked when such a branch
  * exists at all (a repo whose branches are all checked out pays nothing), and a landed branch is out before anything of
  * it is read. A remote branch counts only when no local one has its name: a local branch is the user's own, and is the
- * copy that moves. Protected lines are never efforts.
+ * copy that moves. Protected lines are never efforts. Unlanded means nothing without a line to land on: an undeclared
+ * repo's default line is also what its remote says (`origin/HEAD`), and with none at all no branch is reported, because a
+ * missed effort beats calling the main line one.
  */
 function unlandedRefs(root, heldBranches) {
   const out = git(root, ['for-each-ref', '--format=%(refname)%09%(symref)', 'refs/heads', 'refs/remotes']) ?? '';
-  const refs = out.split('\n').filter(Boolean).map(line => line.split('\t')).filter(([, symref]) => !symref).map(([ref]) => ref);
+  const rows = out.split('\n').filter(Boolean).map(line => line.split('\t'));
+  const refs = rows.filter(([, symref]) => !symref).map(([ref]) => ref);
+  const remoteDefaults = rows.filter(([ref, symref]) => symref && ref.endsWith('/HEAD')).map(([, symref]) => lineName(symref));
   const locals = new Set(refs.filter(ref => ref.startsWith('refs/heads/')).map(lineName));
   const strays = refs.filter(ref =>
     ref.startsWith('refs/heads/') ? !heldBranches.has(lineName(ref)) : !locals.has(lineName(ref)) && !ref.endsWith('/HEAD'),
   );
   if (strays.length === 0) return { refs: [], bases: [] };
 
-  const { integration, protectedNames, protectedPatterns } = branchLines(root);
-  const patterns = protectedPatterns.map(globRegex);
-  const isLine = name => protectedNames.includes(name) || patterns.some(pattern => pattern.test(name));
+  const { declared, integration, protectedNames, protectedPatterns } = branchLines(root);
+  const lines = declared ? integration : [...integration, ...remoteDefaults];
+  const isLine = name => lines.includes(name) || protectedNames.includes(name) || protectedPatterns.some(glob => globMatches(glob, name));
   // Every copy of an integration line counts: a stale local line must not make everything look unlanded.
-  const bases = refs.filter(ref => integration.includes(lineName(ref)));
-  const candidates = new Set(strays.filter(ref => !isLine(lineName(ref)) && WORKTREE_RE.test(shortName(ref))));
+  const bases = refs.filter(ref => lines.includes(lineName(ref)));
+  if (bases.length === 0) return { refs: [], bases };
+  const candidates = new Set(strays.filter(ref => !isLine(lineName(ref)) && isBranchName(shortName(ref))));
   if (candidates.size === 0) return { refs: [], bases };
   const unmerged = git(root, ['for-each-ref', '--format=%(refname)', ...bases.map(base => `--no-merged=${base}`), 'refs/heads', 'refs/remotes']);
 
@@ -471,6 +506,32 @@ function unlandedRefs(root, heldBranches) {
 
 /** One `git cat-file --batch` over many objects, in order: `{ type, data }`, or null for what the ref does not hold. */
 function readObjects(root, specs) {
+  if (specs.length === 0) return [];
+  // Sizes first: an object past MAX_TEXT reads as absent, and the rest go in batches, so one huge blob costs only itself.
+  const sizes = (git(root, ['cat-file', '--batch-check'], `${specs.join('\n')}\n`) ?? '').split('\n');
+  const objects = specs.map(() => null);
+  let batch = [];
+  let bytes = 0;
+  const flush = () => {
+    readBatch(root, batch.map(i => specs[i])).forEach((object, at) => {
+      objects[batch[at]] = object;
+    });
+    batch = [];
+    bytes = 0;
+  };
+  specs.forEach((_, i) => {
+    const size = Number(/^[0-9a-f]+ (?:blob|tree|commit|tag) ([0-9]+)$/.exec(sizes[i] ?? '')?.[1] ?? Infinity);
+    if (size > MAX_TEXT) return;
+    if (bytes + size > MAX_BATCH) flush();
+    batch.push(i);
+    bytes += size;
+  });
+  flush();
+
+  return objects;
+}
+
+function readBatch(root, specs) {
   if (specs.length === 0) return [];
   let out;
   try {
@@ -504,6 +565,7 @@ function treeFiles(object) {
   for (let at = 0; at < data.length; ) {
     const space = data.indexOf(0x20, at);
     const nul = data.indexOf(0, space);
+    if (space < 0 || nul < 0) break; // a malformed tree: what git can push, it can push broken
     if (/^100/.test(data.toString('utf8', at, space))) names.push(data.toString('utf8', space + 1, nul));
     at = nul + 1 + oidBytes;
   }
@@ -522,33 +584,42 @@ const blobText = object => (object?.type === 'blob' ? object.data.toString('utf8
  *
  * A package that concluded and aged out to `archive/` is not back in flight because a squash-landed branch was never
  * deleted (`archived`). Several branches can hold one commit (`--source` names one of them), so a branch named for the
- * slug is preferred.
+ * slug is preferred, then any other that touched it (one may have deleted what another holds), a local one before a remote.
+ *
+ * In a shallow clone a boundary commit has no parents here, so it reads as adding its whole tree: it says nothing about
+ * what the branch changed, and is skipped. `committed` is a walk of all history, asked for only once something was found.
+ * The exclusions go as `^<rev>` lines: `--not` on stdin needs git 2.42.
  */
-function branchPackages(root, { prefix, refs, exclude, committed }) {
+function branchPackages(root, { prefix, refs, exclude, boundaries, committedTimes }) {
   if (refs.length === 0) return [];
-  const stdin = [...refs, '--not', ...exclude, ''].join('\n');
-  const log = git(root, ['log', '--stdin', '--source', '--format=%x01%ct%x09%S', '--name-only', '--', 'docs/features'], stdin);
+  const not = exclude.map(rev => `^${rev}`);
+  const logOf = revs =>
+    spawnSync('git', ['-C', root, '-c', 'core.quotePath=off', 'log', '--stdin', '--source', '--format=%x01%H%x09%ct%x09%S', '--name-only', '--', 'docs/features'], {
+      ...GIT_OPTIONS,
+      encoding: 'utf8',
+      input: [...revs, ...not, ''].join('\n'),
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+  // A corrupt tree kills the walk wherever it meets one; only then is each branch walked alone, so it costs only itself.
+  const whole = logOf(refs);
+  const log = whole.status === 0 ? whole.stdout : refs.map(ref => logOf([ref]).stdout ?? '').join('\n');
   if (!log) return [];
-
-  const archived = new Set();
-  const archive = new RegExp(`^${prefix}/archive/[^/]+/([^/]+)/`);
-  for (const key of committed.keys()) {
-    const hit = archive.exec(key);
-    if (hit) archived.add(hit[1]);
-  }
 
   const touched = new Map();
   let at = 0;
   let source = '';
+  let boundary = false;
   for (const line of log.split('\n')) {
     if (line.startsWith('\x01')) {
-      const [time, ref] = line.slice(1).split('\t');
+      const [hash, time, ref] = line.slice(1).split('\t');
       at = Number(time) || 0;
       source = ref;
-    } else if (line.startsWith(`${prefix}/`)) {
+      boundary = boundaries.has(hash);
+    } else if (!boundary && line.startsWith(`${prefix}/`)) {
       const [dir, ...rest] = line.slice(prefix.length + 1).split('/');
-      if (rest.length === 0 || !isPackageDir(dir) || archived.has(dir)) continue;
-      const seen = touched.get(dir) ?? { ref: source, times: new Map(), lastActivity: 0 };
+      if (rest.length === 0 || !isPackageDir(dir)) continue;
+      const seen = touched.get(dir) ?? { refs: new Set(), times: new Map(), lastActivity: 0 };
+      seen.refs.add(source);
       const rel = rest.join('/');
       if (!seen.times.has(rel)) seen.times.set(rel, at);
       seen.lastActivity = Math.max(seen.lastActivity, at);
@@ -556,11 +627,22 @@ function branchPackages(root, { prefix, refs, exclude, committed }) {
     }
   }
 
+  if (touched.size === 0) return [];
+
+  const committed = committedTimes();
+  const archivePrefix = `${prefix}/archive/`;
+  for (const key of committed.keys()) {
+    if (key.startsWith(archivePrefix)) touched.delete(key.slice(archivePrefix.length).split('/')[1]);
+  }
+
   const reads = [...touched].flatMap(([dir, seen]) => {
     const slug = dir.slice(11);
     const named = refs.find(ref => lineName(ref) === slug || lineName(ref).endsWith(`/${slug}`));
+    const isLocal = ref => ref.startsWith('refs/heads/');
+    // Local first, the named one leading; remotes newest first, since another remote's copy of that name may be stale.
+    const holders = [...new Set([named, ...seen.refs].filter(ref => ref && isLocal(ref))), ...new Set([...seen.refs, named].filter(ref => ref && !isLocal(ref)))];
 
-    return [...new Set([named, seen.ref])].filter(Boolean).map(ref => ({ dir, ref, seen }));
+    return holders.map(ref => ({ dir, ref, seen }));
   });
   const objects = readObjects(
     root,
@@ -584,11 +666,21 @@ function branchPackages(root, { prefix, refs, exclude, committed }) {
   return [...packages.values()];
 }
 
+/** The commits a shallow clone cut history at (`$GIT_COMMON_DIR/shallow`); empty for a full clone. */
+function shallowBoundaries(commonDir) {
+  try {
+    return new Set(fs.readFileSync(path.join(commonDir, 'shallow'), 'utf8').split('\n').filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
 export function derive(projectDir, env = process.env, now = Math.floor(Date.now() / 1000)) {
   const stale = staleDays(env);
   const base = { version: 1, staleDays: stale, now, repo: null, packages: [], orphans: [] };
-  const [top, commonDir] = git(projectDir, ['rev-parse', '--show-toplevel', '--path-format=absolute', '--git-common-dir'])?.trim().split('\n') ?? [];
+  const [top, rawCommonDir] = git(projectDir, ['rev-parse', '--show-toplevel', '--git-common-dir'])?.trim().split('\n') ?? [];
   if (!top) return base;
+  const commonDir = path.resolve(projectDir, rawCommonDir);
 
   const lastCommit = Number(git(projectDir, ['log', '-1', '--format=%ct'])?.trim()) || 0;
   const features = path.join(projectDir, 'docs', 'features');
@@ -606,11 +698,11 @@ export function derive(projectDir, env = process.env, now = Math.floor(Date.now(
   // checkout alone misses them. Every readable worktree is scanned at the same place relative to its toplevel; the
   // session's own checkout first, so it wins a tie.
   const all = worktrees(projectDir);
-  const branches = all.filter(tree => tree.branch).map(tree => tree.branch);
-  const sub = path.relative(top, projectDir);
-  const prefix = path.relative(top, features).split(path.sep).join('/');
+  // Measured real path to real path: the project dir may have been reached through a symlink, and git's toplevel never is.
   const home = realpath(projectDir) ?? projectDir;
   const topReal = realpath(top) ?? top;
+  const sub = path.relative(topReal, home);
+  const prefix = path.join(sub, 'docs', 'features').split(path.sep).join('/');
   /** A path as consumers name it; undefined when it fails the charset, so it is never echoed (it would reach a prompt through Resume and the notice). */
   const whereOf = real => {
     const rel = path.relative(home, real);
@@ -620,25 +712,34 @@ export function derive(projectDir, env = process.env, now = Math.floor(Date.now(
   };
   const trees = [{ project: projectDir, root: projectDir, where: undefined }];
   for (const tree of all) {
-    if (!tree.readable || (realpath(tree.path) ?? tree.path) === topReal) continue;
+    if (!tree.readable) continue;
+    if ((realpath(tree.path) ?? tree.path) === topReal) {
+      tree.scanned = true;
+      continue;
+    }
     const project = path.join(tree.path, sub);
     const real = realpath(project);
     if (!real) continue;
     const where = whereOf(real);
     if (where === undefined) continue;
-    trees.push({ project, root: tree.path, where });
+    trees.push({ project, root: project, where });
+    tree.scanned = true;
   }
 
   // What no checkout git knows about can show: branches that have not landed, and checkouts git has lost track of.
-  const held = all.filter(tree => tree.readable);
+  // Only a checkout actually scanned holds its branch: a locked worktree whose directory is gone, or one whose path fails
+  // the charset, shows nothing, so its branch is read like any other.
+  const held = all.filter(tree => tree.scanned);
+  const branches = held.filter(tree => tree.branch).map(tree => tree.branch);
+  const unreachable = new Set(all.filter(tree => tree.branch && !tree.scanned).map(tree => tree.branch));
   const { refs, bases } = unlandedRefs(projectDir, new Set(held.filter(tree => tree.branch).map(tree => tree.branch)));
   const branchNamed = name => refs.map(lineName).find(line => line === name || line.endsWith(`/${name}`));
-  const registered = new Set(held.map(tree => realpath(tree.path)));
+  const registered = new Set(all.filter(tree => tree.readable).map(tree => realpath(tree.path)));
   const lost = all.length === 0 ? [] : orphanedCheckouts({ mainRoot: all[0].path, commonDir, registered, branchNamed });
   const orphans = lost.flatMap(({ full, reason, branch }) => {
     const where = whereOf(realpath(full) ?? full);
 
-    return where === undefined ? [] : [{ path: where, reason, ...(branch ? { branch } : {}), full }];
+    return where === undefined ? [] : [{ path: where, reason, ...(branch && isBranchName(branch) ? { branch } : {}), full }];
   });
   for (const orphan of orphans) {
     if (orphan.reason !== 'no-git-link') trees.push({ project: path.join(orphan.full, sub), where: orphan.path, orphaned: true });
@@ -650,24 +751,27 @@ export function derive(projectDir, env = process.env, now = Math.floor(Date.now(
 
   // One `git log --all` serves every tree (they share the repository); what differs from HEAD is per tree. A lost
   // checkout has no index to ask, so its uncommitted edits to committed files cannot be seen; new files still can.
-  const committed = commitTimes(projectDir);
+  let times;
+  const committedTimes = () => (times ??= commitTimes(projectDir));
   /** The same package seen in several places: the copy with the newest activity wins (a tie keeps the earlier). */
   const chosen = new Map();
   const offer = (pkg, winsTie = false) => {
     const kept = chosen.get(pkg.dir);
+    // A remote copy only fills a gap. Its date is whatever its author's clock said, and someone else's push must not close your effort.
+    if (kept && pkg.remote) return;
     if (!kept || kept.lastActivity < pkg.lastActivity || (winsTie && kept.lastActivity === pkg.lastActivity)) chosen.set(pkg.dir, pkg);
   };
   for (const tree of scanned) {
     const dirty = tree.root === undefined ? new Set() : dirtyPaths(tree.root);
-    for (const pkg of scanTree(path.join(tree.project, 'docs', 'features'), { prefix, committed, dirty })) {
+    for (const pkg of scanTree(path.join(tree.project, 'docs', 'features'), { prefix, committed: committedTimes(), dirty })) {
       offer(tree.where === undefined ? pkg : { ...pkg, worktree: tree.where, ...(tree.orphaned ? { orphaned: true } : {}) });
     }
   }
   // A branch copy is offered last and wins a tie: every commit it is measured by is one no checkout holds, while a
   // checkout's time comes from `committed`, which counts every ref. Equal times mean that checkout was credited with
   // this branch's own commit.
-  const exclude = [...bases, ...held.map(tree => tree.head).filter(Boolean)];
-  for (const pkg of branchPackages(projectDir, { prefix, refs, exclude, committed })) offer(pkg, true);
+  const exclude = [...bases, ...held.map(tree => tree.head).filter(head => head && !/^0+$/.test(head))];
+  for (const pkg of branchPackages(projectDir, { prefix, refs, exclude, boundaries: shallowBoundaries(commonDir), committedTimes })) offer(pkg, true);
 
   const packages = [...chosen.values()]
     .sort((a, b) => (a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0))
@@ -677,7 +781,7 @@ export function derive(projectDir, env = process.env, now = Math.floor(Date.now(
         pkg.status !== 'in-flight' ? 'concluded' : hasWorktree || ageDays(now, pkg.lastActivity) < stale ? 'live' : 'dormant';
       const { dir, date, slug, status, lastActivity, about, ...rest } = pkg;
 
-      return { dir, date, slug, status, state, lastActivity, hasWorktree, about, ...rest };
+      return { dir, date, slug, status, state, lastActivity, hasWorktree, about, ...rest, ...(rest.branch && unreachable.has(rest.branch) ? { checkedOutElsewhere: true } : {}) };
     });
 
   // Work committed in another worktree or on a local branch is activity here too: the session's HEAD never sees it.

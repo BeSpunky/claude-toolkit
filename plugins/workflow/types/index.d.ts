@@ -38,6 +38,8 @@ export type StandingPackage = {
   branch?: string
   /** That `branch` is remote-tracking, with no local branch of the name. */
   remote?: boolean
+  /** That `branch` is checked out in a worktree not read from here, so `git worktree add` refuses it without `--force`. */
+  checkedOutElsewhere?: boolean
   /** The newest baton, relative to the package: `handoffs/<name>`, else a handoff filed at the package's root. */
   baton?: string
   /**
