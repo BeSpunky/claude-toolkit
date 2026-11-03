@@ -117,7 +117,7 @@ export abstract class NativeComponentBase<TWrapper extends NativeWrapper<any>> {
 **What.** Native mutations and high-frequency callbacks (drag, mousemove, render ticks) must **not** thrash change detection; user-facing events that should update the view **must**.
 
 - **Zone-based apps:** run mutations/creation in `NgZone.runOutsideAngular`; re-enter via `ngZone.run(...)` for events that update the view.
-- **Zoneless / OnPush** (the modern direction): nothing auto-runs CD — reflect native state into the view through **signals**, and update only the signals you actually render.
+- **Zoneless** (the default for an app created on Angular 21+) **or OnPush**: nothing auto-runs CD — reflect native state into the view through **signals**, and update only the signals you actually render.
 
 **Why.** *Compensate for your materials' weaknesses* — high-frequency imperative callbacks are a known CD footgun; decide the boundary by *category* (mutations/creation = no CD; user-facing events = update the view) and enforce it at one choke point, not per call site.
 

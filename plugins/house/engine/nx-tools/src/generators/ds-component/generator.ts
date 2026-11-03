@@ -1,7 +1,7 @@
 // House generator: promote a reusable component INTO the design system, as its own secondary entry point.
 //
 //     nx g @bespunky/nx-tools:ds-component button
-//     -> packages/design-system/button/{ng-package.json, src/index.ts, src/button.component.{ts,html,scss}}
+//     -> packages/design-system/button/{ng-package.json, src/index.ts, src/button.{ts,html,scss,spec.ts}}
 //     -> imports as `@<scope>/design-system/button`
 //
 // THIS IS THE ONLY WAY A COMPONENT ENTERS THE DESIGN SYSTEM. Hand-creating the folder gets you a
@@ -35,6 +35,7 @@ import secondaryEntrypointGenerator from '../secondary-entrypoint/generator';
 import { findDesignSystem } from '../_utils/design-system';
 import { requireLayer } from '../../layers/registry';
 import { adapter } from '../../adapters/registry';
+import { reachEntryPointSpecs } from '../../adapters/angular/entry-point-specs';
 
 interface DsComponentSchema {
   /** The component (and entry-point) name, e.g. `button` -> `@scope/design-system/button`. */
@@ -102,11 +103,11 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
   }
 
   // 2) The sass channel for THIS entry's SCSS. Safe to re-assert on every run (a merge-and-dedupe of a
-  //    generator-owned config value, not the developer's content).
-  //    Belt-and-braces: the primary ng-package.json already declares `styleIncludePaths`, and ng-packagr
-  //    MAY inherit that into secondary entries — but that inheritance is unverified, and a component whose
-  //    SCSS can't resolve `@use '<ds>/styles'` fails the build. Declaring it on the entry itself costs one
-  //    line. `../..` from `<lib>/<entry>/ng-package.json` is the lib's PARENT dir — the app's load path.
+  //    generator-owned config value, not the developer's content). BOTH files are load-bearing: ng-packagr reads
+  //    the entry's, and @angular/build's unit-test builder reads only the library's (without it, build exits 0 and
+  //    test fails "Can't find stylesheet"). `--library` can name a library the design-system generator never opened.
+  //    `../..` from `<lib>/<entry>/ng-package.json` is the lib's PARENT dir — the app's load path.
+  adapter('angular').designSystem?.openLibraryStyles(tree, libraryRoot, specifier);
   if (tree.exists(entryNgPackage)) {
     updateJson(tree, entryNgPackage, (json: Record<string, unknown>) => {
       const lib = { ...((json.lib as Record<string, unknown>) ?? {}) };
@@ -118,6 +119,8 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
   }
 
   if (alreadyExists) {
+    // An entry made by hand is an entry all the same: the library's target must reach its spec.
+    reachEntryPointSpecs(tree, designSystem.name);
     logger.info(
       `[ds-component] Entry point \`${entryName}\` already exists — re-asserted its sass config and left ` +
         `its component files untouched (they're yours). Delete the folder first if you meant to recreate it.`
@@ -126,18 +129,13 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
     return;
   }
 
-  // Detect the component's ACTUAL file base — @nx/angular ≤ v19 emits `<name>.component.ts`, v20+ emits
-  // `<name>.ts`. Everything downstream (the barrel re-export, the SCSS filename) derives from what was
-  // really written, so we never hardcode `.component` and then export a path that doesn't exist.
-  const componentBase = detectComponentBase(tree, entryRoot, entryName);
-
   // 3) The component's SCSS: the house starting shape — every value a TOKEN, so a developer's first edit
   //    is `ds.color(...)` not a hex. First creation only (the guard above returned otherwise).
-  seedComponentScss(tree, entryRoot, componentBase, specifier);
+  seedComponentScss(tree, entryRoot, entryName, specifier);
 
   // 4) The entry's PUBLIC API barrel — `<component>/src/index.ts` is the ONLY thing a consumer may import
   //    from this entry; everything else is implementation.
-  seedEntryBarrel(tree, entryRoot, componentBase);
+  seedEntryBarrel(tree, entryRoot, entryName);
 
   if (!options.skipFormat) await formatFiles(tree);
 
@@ -146,23 +144,6 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
       `Now migrate BOTH call sites onto it and delete the local copies — a promotion that leaves the ` +
       `original behind is just a third copy.`
   );
-}
-
-/**
- * The base name (no extension) of the standalone component the delegated generator emitted under
- * `<entry>/src` — `button.component` on @nx/angular ≤ v19, `button` on v20+. Found by scanning for the
- * component `.ts` (skipping `index.ts` and specs) so the barrel and the SCSS always match reality rather
- * than a hardcoded suffix. Falls back to `<name>.component` if the scan finds nothing (shouldn't happen).
- */
-function detectComponentBase(tree: Tree, entryRoot: string, entryName: string): string {
-  const srcDir = joinPathFragments(entryRoot, 'src');
-  if (tree.exists(srcDir)) {
-    for (const child of tree.children(srcDir)) {
-      if (child === 'index.ts' || !child.endsWith('.ts') || child.endsWith('.spec.ts')) continue;
-      return child.replace(/\.ts$/, '');
-    }
-  }
-  return `${entryName}.component`;
 }
 
 /**
@@ -177,7 +158,7 @@ function detectComponentBase(tree: Tree, entryRoot: string, entryName: string): 
  * Written only if secondary-entrypoint's placeholder is still there (i.e. on creation) — never over a
  * barrel the project has since curated.
  */
-function seedEntryBarrel(tree: Tree, entryRoot: string, componentBase: string): void {
+function seedEntryBarrel(tree: Tree, entryRoot: string, componentFile: string): void {
   const indexPath = joinPathFragments(entryRoot, 'src', 'index.ts');
   const current = tree.read(indexPath, 'utf8') ?? '';
 
@@ -192,7 +173,7 @@ function seedEntryBarrel(tree: Tree, entryRoot: string, componentBase: string): 
       `// What you export here, you must support. Everything NOT exported is implementation — put it in a\n` +
       `// \`_\`-prefixed folder named for WHAT IT IS (\`_parts/\`, \`_material/\`), so a consumer cannot reach it\n` +
       `// by accident and you stay free to change it. The \`_\` says "not yours"; the name says what it holds.\n` +
-      `export * from './${componentBase}';\n`
+      `export * from './${componentFile}';\n`
   );
 }
 
@@ -211,9 +192,8 @@ function resolveLibraryRoot(tree: Tree, library: string): string {
  * a file that already reads `ds.color('on-surface')` invites another token. The comment block is the
  * rule stated at the exact moment it applies.
  */
-function seedComponentScss(tree: Tree, entryRoot: string, componentBase: string, specifier: string): void {
-  // The SCSS sits beside the component `.ts` and shares its base (`button.component.scss` / `button.scss`).
-  const target = joinPathFragments(entryRoot, 'src', `${componentBase}.scss`);
+function seedComponentScss(tree: Tree, entryRoot: string, componentFile: string, specifier: string): void {
+  const target = joinPathFragments(entryRoot, 'src', `${componentFile}.scss`);
 
   tree.write(
     target,

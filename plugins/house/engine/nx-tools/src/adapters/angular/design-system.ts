@@ -7,11 +7,15 @@
 //     seeded from ./design-system-files, with STRUCTURE.md and the src/index.ts barrel as the owned contract;
 //   - the LIBRARY'S OWN sass channel: ng-packagr does not read an app's stylePreprocessorOptions, it has its
 //     own `lib.styleIncludePaths` (relative to ng-package.json) — and `assets` ships the raw .scss to dist;
+//   - the FIRST SPEC: a library that ships no components still has a runtime to test, and its test target needs one
+//     (see creationTemplates);
 //   - the COMPONENT GENERATOR: `ds-component`, one secondary entry point per component.
 import { join } from 'node:path';
-import { type Tree, updateJson, logger } from '@nx/devkit';
+import { type ProjectConfiguration, type Tree, updateJson, logger } from '@nx/devkit';
 import type { DesignSystemPort } from '../stack-adapter';
-import { updateManifest } from '../../generators/_utils/dependencies';
+import { pruneUnusedPeers } from './library-peers';
+import { passWithNoTests, passWithNoTestsGap } from '../../generators/_utils/pass-with-no-tests';
+import { UNIT_TEST_EXECUTORS } from './entry-point-reach';
 
 /** The runtime files this binding owns; anything else under src/lib is the base generator's demo output. */
 const RUNTIME_FILES = new Set(['design-system.providers.ts', 'ds-theme.service.ts', 'ds-runtime-theme.service.ts']);
@@ -42,7 +46,8 @@ export const angularDesignSystem: DesignSystemPort = {
 
   /**
    * The design system ships ZERO components — a scaffolded demo component would be the first thing a developer
-   * copies, and it would teach exactly the wrong lesson. Deletes anything under src/lib that isn't ours.
+   * copies, and it would teach exactly the wrong lesson. Deletes anything under src/lib that isn't ours, and judges the
+   * peers again: the library port judged them with the demo still there, and whatever only the demo imported goes with it.
    */
   pruneGenerated(tree: Tree, root: string) {
     const libDir = `${root}/src/lib`;
@@ -52,44 +57,24 @@ export const angularDesignSystem: DesignSystemPort = {
       logger.info(`[design-system] Pruning \`${libDir}/${child}\` — the design system ships no components.`);
       tree.delete(`${libDir}/${child}`);
     }
+    pruneUnusedPeers(tree, root);
+    // That was the only spec. Jest, the runner below Angular 21, can be told that none is not a failure, and on Nx 24 it
+    // has to be: the target is inferred, so no targetDefault says it. @nx/angular:unit-test cannot, and gets a real spec:
+    // see creationTemplates. No runner at all has nothing to fail. Anything else stays red, so it is said.
+    const result = passWithNoTests(tree, root);
+    const seeded = result.kind === 'other-runner' && UNIT_TEST_EXECUTORS.has(result.executor ?? '');
+    const gap = result.kind === 'no-config' || seeded ? null : passWithNoTestsGap(result);
+    if (gap) logger.warn(`[design-system] Could not set passWithNoTests (${gap}). If \`nx test\` on the design system reports no tests, add a spec.`);
   },
 
-  pruneUnusedPeers(tree: Tree, root: string) {
-    const unused = unusedAngularPeers(tree, root);
-    if (!unused.length) return;
-    updateManifest(tree, `${root}/package.json`, 'design-system', (json) => {
-      for (const name of unused) delete json.peerDependencies[name];
-      return json;
-    });
-    logger.info(`[design-system] ${root}/package.json no longer peers ${unused.join(', ')} — only the pruned demo used it.`);
+  /**
+   * @nx/angular:unit-test FAILS on a library with no spec ("No tests found") and has no passWithNoTests option (its
+   * schema refuses one; verified on @nx/angular 24.0 / @angular/build 22.2), and pruning the demo removed the only spec
+   * @nx/angular wrote. So the library is born with a real spec of the runtime it ships. Only this executor is judged:
+   * it means Angular 21+, which covers the 20+ the spec's TestBed.tick() needs. Jest, the runner below Angular 21, is told
+   * to pass on no specs by pruneGenerated.
+   */
+  creationTemplates(project: ProjectConfiguration) {
+    return UNIT_TEST_EXECUTORS.has(project.targets?.test?.executor ?? '') ? join(__dirname, 'design-system-creation-files') : undefined;
   },
 };
-
-/**
- * The `@angular/*` peers (other than @angular/core, which every Angular library needs) a library's manifest declares
- * and no source file under it imports — what @nx/angular's library generator declared for its demo component. The
- * rule @nx/dependency-checks applies, so the library passes its own lint.
- */
-export function unusedAngularPeers(tree: Tree, root: string): string[] {
-  const manifest = `${root}/package.json`;
-  if (!tree.exists(manifest)) return [];
-  let peers: Record<string, string> = {};
-  try {
-    peers = JSON.parse(tree.read(manifest, 'utf8') ?? '').peerDependencies ?? {};
-  } catch {
-    return [];
-  }
-  const candidates = Object.keys(peers).filter((name) => name.startsWith('@angular/') && name !== '@angular/core');
-  if (!candidates.length) return [];
-  const sources: string[] = [];
-  const walk = (dir: string) => {
-    for (const child of tree.children(dir)) {
-      const path = `${dir}/${child}`;
-      if (tree.isFile(path)) {
-        if (/\.[cm]?[jt]sx?$/.test(child)) sources.push(tree.read(path, 'utf8') ?? '');
-      } else if (child !== 'node_modules') walk(path);
-    }
-  };
-  walk(root);
-  return candidates.filter((name) => !sources.some((text) => new RegExp(`['"]${name.replace(/[/]/g, '\\/')}(?:/[^'"]*)?['"]`).test(text)));
-}

@@ -17,7 +17,7 @@ built on this adapter today.
     ├── ng-package.json          ← THIS FILE IS THE BOUNDARY
     └── src/
         ├── index.ts             ★ PUBLIC — the entry's contract
-        ├── button.component.ts
+        ├── button.ts
         └── _parts/
 ```
 

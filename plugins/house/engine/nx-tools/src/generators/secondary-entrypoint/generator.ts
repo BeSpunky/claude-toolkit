@@ -54,6 +54,7 @@ import type { SecondaryEntrypointGeneratorSchema } from './schema';
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking, rootTsconfig } from '../_utils/linking';
 import { angularGeneratorCall } from '../../adapters/angular/ts-solution';
+import { reachEntryPointSpecs } from '../../adapters/angular/entry-point-specs';
 
 export async function secondaryEntrypointGenerator(
   tree: Tree,
@@ -133,30 +134,25 @@ export async function secondaryEntrypointGenerator(
   // 4) Optional component + the entry's public surface (src/index.ts).
   const indexPath = joinPathFragments(entryRoot, 'src', 'index.ts');
   if (component === 'standalone') {
-    // Scaffold a flat standalone component directly inside the entry's src folder, then make it
-    // the entry's public surface. The base generator already created a placeholder src/index.ts;
-    // we overwrite it with the re-export so the entry actually exports the component.
-    // ASSUMPTION (verify in Docker): @nx/angular 23.1 `componentGenerator` accepts `path` (the
-    //    target directory) + `flat` + `skipTests:false` and infers the project from the path.
-    //    Older lines also accepted a `project` key; xpand passed both `project` + `path`. We pass
-    //    both for resilience — `project` is harmless if ignored.
-    const srcPath = joinPathFragments(entryRoot, 'src');
+    // Scaffold a standalone component directly inside the entry's src folder, then make it the entry's public surface.
+    // `path` is the FILE, without its extension, not the directory: `<entry>/src/<name>` writes `<entry>/src/<name>.ts`.
+    // Handed the directory, @nx/angular reads its last segment as the file and writes `<entry>/src.ts` beside the folder
+    // the barrel is in. `type: ''` says nothing is appended to the name: left out, @nx/angular 23 below Angular 20 would
+    // default it to `component` and write the `<name>.component.ts` the barrel below does not export.
     await componentGenerator(tree, {
       name: options.name,
-      project: options.library,
-      path: srcPath,
+      path: joinPathFragments(entryRoot, 'src', options.name),
+      type: '',
       standalone: true,
-      flat: true,
       style: 'scss',
       skipFormat: true,
-    } as Parameters<typeof componentGenerator>[1]);
+    });
 
-    // Re-export the generated component. The componentGenerator writes `<name>.component.ts`
-    // next to src/index.ts (flat: true), so a relative barrel export is correct.
+    // The base generator already created a placeholder src/index.ts; overwrite it with the re-export.
     tree.write(
       indexPath,
       `// ${options.name} secondary entry-point (${packageName}/${options.name}).\n` +
-        `export * from './${options.name}.component';\n`
+        `export * from './${options.name}';\n`
     );
   } else {
     // 'none' — leave the entry empty. Overwrite whatever placeholder the base generator wrote
@@ -168,6 +164,10 @@ export async function secondaryEntrypointGenerator(
         `export {};\n`
     );
   }
+
+  // 5) An entry point sits outside the source root, which is all the library's test target looks at. A library the
+  //    Angular port made already says so; this is for one it did not, and it is a no-op on the rest.
+  reachEntryPointSpecs(tree, options.library);
 
   if (!options.skipFormat) {
     await formatFiles(tree);

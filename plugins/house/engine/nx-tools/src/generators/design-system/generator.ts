@@ -37,6 +37,8 @@
 //   - `styles/` and `src/` are SEEDED, not owned: each file is written only if ABSENT. `styles/_core/_tokens.scss`
 //     is precisely the file the design phase REPLACES, and an upgrade that rewrote it would silently destroy the
 //     project's real design and restore the placeholders.
+//   - The binding's `creationTemplates` are seeded on CREATION and never again: a project that deleted one keeps it
+//     deleted, where a deleted `src/` file above comes back.
 //   - Everything else (STRUCTURE.md, the src/index.ts barrel, the packaging patches, the tags, the app wiring)
 //     is GENERATOR-OWNED and re-asserted on every run, so an upgrade heals drift.
 import {
@@ -137,13 +139,14 @@ export default async function designSystemGenerator(
   //    re-exports it) BEFORE seeding — or the seed-if-absent would keep a barrel pointing at a deleted file.
   if (!existing) binding?.pruneGenerated(tree, root);
 
-  // 4) Seed the neutral core (the sass layer), then the binding's runtime + docs over it.
+  // 4) Seed the neutral core (the sass layer), then the binding's runtime + docs over it, then what only a new library gets.
   //    The skill pointers in the seeded comments and STRUCTURE.md render only where their plugin is enabled.
   const substitutions = { tokenPrefix, importPath, specifier, root, name, prefix, ...pluginPointerValues(tree, DESIGN_SYSTEM_SKILL_POINTERS) };
   seedTemplates(tree, join(__dirname, 'files'), root, substitutions, []);
   const runtime = binding ?? NEUTRAL_BINDING;
   seedTemplates(tree, runtime.templates, root, substitutions, [...runtime.alwaysRewrite]);
-  if (!existing) binding?.pruneUnusedPeers?.(tree, root);
+  const creationTemplates = existing ? undefined : binding?.creationTemplates?.(project);
+  if (creationTemplates) seedTemplates(tree, creationTemplates, root, substitutions, []);
 
   // 5) Channel (2): the library's OWN component styles — the binding's packager, when it has one.
   binding?.openLibraryStyles(tree, root, specifier);

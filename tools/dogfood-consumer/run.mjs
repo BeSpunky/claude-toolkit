@@ -25,10 +25,10 @@
  *   upgrade   on a work branch, `house.sh upgrade --local --yes .` with the toolkit UNDER TEST: UPGRADE_OK and none
  *             of UPGRADE_PARTIAL / _REFUSED / _FAILED; the stamp is the toolkit's version; every seed survived; a
  *             SECOND upgrade is a no-op (UPGRADE_OK, `UPGRADE_NEXT: none`, no commit, clean tree); then the
- *             upgraded workspace builds and lints (`UPGRADE_OK` says the run completed, never that its output
+ *             upgraded workspace builds, lints and passes its tests (`UPGRADE_OK` says the run completed, never that its output
  *             compiles — house.sh says so itself, in UPGRADE_VERIFY).
  *   new-*     a real `house.sh new --local` with the toolkit under test for EVERY preset: agent, node, angular and
- *             angular + --firebase, each with its sanity facts, and build + lint where there is an app to build.
+ *             angular + --firebase, each with its sanity facts, and build + lint + test where there is an app to build.
  *
  * `--yes` is passed to the upgrades on purpose and is not the gate being satisfied by a machine: the upgrade
  * target is a throwaway fixture this run created seconds earlier, and running this tool IS the human's consent.
@@ -309,18 +309,21 @@ function must(cond, msg) { if (!cond) throw new Error(msg); }
 const SEEDS = [
   {
     id: 'branch-model',
-    message: 'chore: declare the branch model (string deploys notes)',
+    message: 'chore: declare the branch model (deploys notes)',
     async apply(c) {
-      // Written with the RELEASED branches.mjs, the way the project wrote it, with the legacy STRING `deploys`.
+      // Written with the RELEASED branches.mjs, the way the project wrote it. The form is the one it accepts: `write` has
+      // refused a bare-string `deploys` since 0.50.0.
       const b = join(RELEASED_TREE, 'plugins/workflow/skills/branch-and-release/scripts/branches.mjs');
       const stages = c.staging ? 'staging,main' : 'main';
       const ex = spawnSync('node', [b, 'expand', '--preset', c.staging ? 'three-line' : 'two-line', '--stages', stages], { cwd: c.dir, env: ENV, encoding: 'utf8' });
       must(ex.status === 0, `branches.mjs expand: ${ex.stderr.trim()}`);
       const model = JSON.parse(ex.stdout);
       for (const s of model.stages) {
-        s.deploys = s.branch === 'main'
-          ? `App Hosting backend ${c.name}-web tracks main (GitHub-linked); functions deployed by hand: nx run functions:deploy`
-          : `App Hosting backend ${c.name}-${s.branch} tracks ${s.branch}; functions deployed by hand: nx run functions:deploy -P ${s.branch}`;
+        s.deploys = {
+          note: s.branch === 'main'
+            ? `App Hosting backend ${c.name}-web tracks main (GitHub-linked); functions deployed by hand: nx run functions:deploy`
+            : `App Hosting backend ${c.name}-${s.branch} tracks ${s.branch}; functions deployed by hand: nx run functions:deploy -P ${s.branch}`,
+        };
       }
       // The lines the model declares exist, as in the reporting projects, and the seeds land on the integration line.
       const head = gitOut(c.dir, 'rev-parse', 'HEAD');
@@ -441,9 +444,13 @@ export const onInquiryCreated = onDocumentCreated(
   },
   {
     id: 'brand-lib',
-    message: 'feat(brand): untagged brand library used by the app',
+    message: 'feat(brand): a brand library used by the app, made with Nx\'s own generator',
     async apply(c) {
-      // Through Nx's own generator, as the project did — untagged (no --tags), imported by the app.
+      // Through Nx's own generator, as the project did — born untagged (no --tags), imported by the app. Then what such a
+      // project does next: `nx sync`, the command the firewall's guidance names. The RELEASED toolkit decides what that means,
+      // so the shape stays true on both sides of the firewall: released WITH it, the sync generator tags the library (a tagged
+      // lint baseline; a project cannot stay untagged and green); released WITHOUT it, the sync has nothing to do, the library
+      // reaches the upgrade untagged, and the 0.50.0 rung must classify it. `survives` asserts the tag either way.
       const [bin, pre] = nx(c.dir);
       const r = await run('seed-brand-lib-generate', bin, [...pre, 'g', '@nx/angular:library', '--directory=packages/brand', '--name=brand',
         `--importPath=@${c.name}/brand`, '--prefix=lib', '--unitTestRunner=none', '--linter=eslint', '--style=css', '--no-interactive'], { cwd: c.dir, timeoutMs: 10 * 60_000 });
@@ -453,8 +460,14 @@ export const onInquiryCreated = onDocumentCreated(
       must(/imports: \[RouterModule/.test(src), `${app} has no 'imports: [RouterModule' to extend`);
       writeFileSync(app, `import { Brand } from '@${c.name}/brand';\n` + src.replace(/imports: \[RouterModule/, 'imports: [RouterModule, Brand'));
       appendFileSync(join(c.dir, `apps/${c.app}/src/app/app.html`), '\n<lib-brand></lib-brand>\n');
+      const sync = await run('seed-brand-lib-sync', bin, [...pre, 'sync'], { cwd: c.dir, timeoutMs: 5 * 60_000 });
+      must(sync.code === 0, `nx sync failed (${sync.log})`);
     },
-    survives: (c) => [readFileSync(join(c.dir, `apps/${c.app}/src/app/app.ts`), 'utf8').includes(`from '@${c.name}/brand'`) && existsSync(join(c.dir, 'packages/brand/project.json')), 'the app still imports the brand lib'],
+    survives: (c) => [
+      readFileSync(join(c.dir, `apps/${c.app}/src/app/app.ts`), 'utf8').includes(`from '@${c.name}/brand'`)
+        && (readJson(join(c.dir, 'packages/brand/project.json')).tags ?? []).includes('platform:web'),
+      'the app still imports the brand lib, and it is classified platform:web',
+    ],
   },
   {
     id: 'web-e2e-compact',
@@ -530,7 +543,7 @@ async function stepSeed() {
   const status = gitOut(consumer.dir, 'status', '--porcelain');
   record(step, 'tree clean after seeding', status === '', { detail: status ? status.split('\n').slice(0, 3).join(' | ') : '' });
   ok.seed = all && status === '';
-  // The same build + lint the upgraded workspace gets, BEFORE the upgrade: what fails here was already broken in what
+  // The same build + lint + test the upgraded workspace gets, BEFORE the upgrade: what fails here was already broken in what
   // consumers have, so the upgrade's own rows can say which failures it introduced.
   if (ok.seed) baseline = await verify('seed', consumer.dir, 'baseline: ');
   return ok.seed;
@@ -578,15 +591,16 @@ async function stepUpgrade() {
   });
   console.log(`        (first upgrade printed ${reports} report line(s) — read them in ${r1.log})`);
   await verify(step, c.dir, '', baseline);
+  await verifyDsComponent(step, c.dir);
   return true;
 }
 
-/** The check UPGRADE_OK / NEW_OK is not: the workspace builds and lints. `run-many` over every project (a fresh
+/** The check UPGRADE_OK / NEW_OK is not: the workspace builds, lints and passes its tests. `run-many` over every project (a fresh
  *  fixture has no cache to make `affected` cheaper), static output so the log reads top to bottom. */
 async function verify(step, dir, prefix = '', before = null) {
   const [bin, pre] = nx(dir);
   const failedSets = {};
-  for (const target of ['build', 'lint']) {
+  for (const target of ['build', 'lint', 'test']) {
     const r = await run(`${step}-${prefix ? 'baseline-' : ''}${target}`, bin, [...pre, 'run-many', '-t', target, '--output-style=static'], { cwd: dir, timeoutMs: 20 * 60_000 });
     const failed = r.code ? failedTasks(r.out) : [];
     failedSets[target] = new Set(failed);
@@ -601,6 +615,25 @@ async function verify(step, dir, prefix = '', before = null) {
     record(step, `${prefix}nx run-many -t ${target}`, r.code === 0, { ms: r.ms, log: r.log, detail, reference: !!prefix, released: prefix ? r.out : null });
   }
   return failedSets;
+}
+/** What `verify` cannot see: the first ds-component builds, lints and tests, and `nx test` is red on a failing spec in it. It runs after
+ *  the road's checks and leaves no trace. It installs nothing, so it tests this checkout even before the version bump. */
+async function verifyDsComponent(step, dir) {
+  const [bin, pre] = nx(dir);
+  const nxRun = (name, ...args) => run(`${step}-ds-component-${name}`, bin, [...pre, ...args], { cwd: dir, timeoutMs: 20 * 60_000 });
+  const g = await nxRun('generate', 'g', '@bespunky/nx-tools:ds-component', 'card', '--no-interactive');
+  if (!record(step, 'nx g ds-component card', g.code === 0, { ms: g.ms, log: g.log, detail: g.code ? why(g.out) : '' })) return;
+  for (const target of ['build', 'lint', 'test']) {
+    const r = await nxRun(target, target, 'design-system', '--output-style=static');
+    record(step, `nx ${target} design-system, with a component`, r.code === 0, { ms: r.ms, log: r.log, detail: r.code ? why(r.out) : '' });
+  }
+  const spec = gitOut(dir, 'ls-files', '--others', '--exclude-standard', '*/card/src/card.spec.ts');
+  if (!record(step, 'ds-component wrote card/src/card.spec.ts', !!spec)) return;
+  writeFileSync(join(dir, spec), "it('fails', () => { expect(1).toBe(2); });\n");
+  const failing = await nxRun('failing-spec', 'test', 'design-system', '--output-style=static');
+  record(step, 'nx test design-system is red on a failing spec in the entry', failing.code !== 0, { ms: failing.ms, log: failing.log, detail: failing.code ? '' : 'exit 0 past a failing spec' });
+  gitOut(dir, 'checkout', '-q', '.');
+  gitOut(dir, 'clean', '-fdq');
 }
 /** Nx's own "Failed tasks:" list, as task ids. */
 function failedTasks(out) {
@@ -626,7 +659,10 @@ async function stepNew(id) {
     ...(p.firebase ? [['firebase.json + apps/functions', existsSync(join(dir, 'firebase.json')) && existsSync(join(dir, 'apps/functions/project.json'))]] : []),
   ];
   for (const [what, yes] of facts) record(id, what, yes);
-  if (p.verify) await verify(id, dir);
+  if (p.verify) {
+    await verify(id, dir);
+    await verifyDsComponent(id, dir);
+  }
 }
 
 // ── cleanup ───────────────────────────────────────────────────────────────────────────────────────────────

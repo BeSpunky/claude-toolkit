@@ -30,6 +30,14 @@ function linkedCore(link, ctx) {
   return tree;
 }
 
+/** The library's only spec is under src/lib, which --keepShim deletes. */
+function unitTestShim(ctx, executor, targetName = 'test') {
+  const tree = linkedCore('paths', ctx);
+  updateJson(tree, 'packages/core/project.json', (json) => ({ ...json, targets: { build: { executor: '@nx/angular:package' }, [targetName]: { executor } } }));
+  tree.write('packages/core/src/lib/core.spec.ts', "it('x', () => {});\n");
+  return tree;
+}
+
 export default {
   name: 'adopt-extracted · link range → published range',
   cases: [
@@ -37,7 +45,7 @@ export default {
       {
         name: `${link}: adopting swaps the link range for the published one`,
         setup: (ctx) => linkedCore(link, ctx),
-        run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0' }),
+        run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0' }),
         expect: (tree, t) => t.equal(t.json('package.json').dependencies?.[CORE], '^1.2.0', 'root (the app\'s governing manifest)'),
       },
       {
@@ -62,7 +70,7 @@ export default {
         once: 'finalizing DELETES the library — there is nothing left for a second run to act on',
         setup: async (ctx) => {
           const tree = linkedCore(link, ctx);
-          await adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0' });
+          await adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0' });
           return tree;
         },
         run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, finalize: true }),
@@ -79,7 +87,7 @@ export default {
       once: 'finalizing DELETES the library — there is nothing left for a second run to act on',
       setup: async (ctx) => {
         const tree = linkedCore('paths', ctx);
-        await adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0' });
+        await adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0' });
         updateJson(tree, 'package.json', (json) => ({ ...json, dependencies: { ...json.dependencies, [CORE]: '^1.2.0' } }));
         return tree;
       },
@@ -88,6 +96,110 @@ export default {
         t.missing('packages/core/project.json');
         t.ok(!aliases(tree)[CORE], `alias left: ${JSON.stringify(aliases(tree))}`);
         t.equal(t.json('package.json').dependencies?.[CORE], '^1.2.0', 'the published range stays');
+      },
+    },
+    {
+      name: '--keepShim: the implementation and its spec go, so the runner is told none is not a failure',
+      setup: (ctx) => {
+        const tree = linkedCore('paths', ctx);
+        tree.write('packages/core/src/lib/core.ts', 'export const core = 1;\n');
+        tree.write('packages/core/src/lib/core.spec.ts', "it('x', () => {});\n");
+        tree.write('packages/core/vite.config.mts', 'export default {\n  test: {\n    watch: false,\n  },\n};\n');
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => {
+        t.missing('packages/core/src/lib/core.spec.ts');
+        t.has('packages/core/vite.config.mts', 'passWithNoTests: true,');
+        t.equal(t.json('packages/core/extraction.json').status, 'adopted-shim', 'status');
+      },
+    },
+    {
+      name: '--keepShim: a spec the library keeps outside src/lib still counts, so nothing is stated',
+      setup: (ctx) => {
+        const tree = linkedCore('paths', ctx);
+        tree.write('packages/core/tests/keep.spec.ts', "it('x', () => {});\n");
+        tree.write('packages/core/vite.config.mts', 'export default {\n  test: {\n    watch: false,\n  },\n};\n');
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.ok(!t.read('packages/core/vite.config.mts').includes('passWithNoTests'), 'stated over a spec'),
+    },
+    {
+      name: '--keepShim on a stack-free library: it peers the package at that version, and other peers are not its to judge',
+      setup: (ctx) => {
+        const tree = linkedCore('paths', ctx);
+        writeJson(tree, 'packages/core/package.json', { name: '@shop/old-core', version: '0.0.1', peerDependencies: { rxjs: '^7.0.0' } });
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.equal(t.json('packages/core/package.json').peerDependencies, { [CORE]: '^1.2.0', rxjs: '^7.0.0' }, 'added, the other kept'),
+    },
+    {
+      name: '--keepShim on an Angular library: the package is peered, and every Angular peer nothing imports goes, @angular/core included',
+      setup: (ctx) => {
+        const tree = unitTestShim(ctx, '@nx/angular:unit-test');
+        writeJson(tree, 'packages/core/package.json', { name: '@shop/old-core', version: '0.0.1', peerDependencies: { '@angular/common': '^22.0.0', '@angular/core': '^22.0.0', rxjs: '^7.0.0' } });
+        tree.write('packages/core/src/lib/core.ts', "import { Component } from '@angular/core';\n");
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.equal(t.json('packages/core/package.json').peerDependencies, { [CORE]: '^1.2.0', rxjs: '^7.0.0' }, 'only what it still imports or was not judged'),
+    },
+    {
+      name: '--keepShim on an Angular library with an entry point still importing @angular/core: that peer stays',
+      setup: (ctx) => {
+        const tree = unitTestShim(ctx, '@nx/angular:unit-test');
+        writeJson(tree, 'packages/core/package.json', { name: '@shop/old-core', version: '0.0.1', peerDependencies: { '@angular/common': '^22.0.0', '@angular/core': '^22.0.0' } });
+        tree.write('packages/core/card/src/index.ts', "import { Component } from '@angular/core';\n");
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.equal(t.json('packages/core/package.json').peerDependencies, { [CORE]: '^1.2.0', '@angular/core': '^22.0.0' }, 'core kept, common gone'),
+    },
+    {
+      name: '--keepShim: a library sharing the package name does not peer itself, and no manifest is no problem',
+      setup: (ctx) => {
+        const tree = linkedCore('paths', ctx);
+        writeJson(tree, 'packages/core/package.json', { name: CORE, version: '0.0.1' });
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.equal(t.json('packages/core/package.json').peerDependencies, undefined, 'no self-peer'),
+    },
+    ...['@nx/angular:unit-test', '@angular/build:unit-test'].map((executor) => ({
+      name: `--keepShim on ${executor}, no spec left: it cannot pass on no tests, so its target goes, and why is said`,
+      setup: (ctx) => unitTestShim(ctx, executor),
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t, ctx) => {
+        t.equal(Object.keys(t.json('packages/core/project.json').targets), ['build'], 'only the test target went');
+        t.ok(ctx.logs.some((line) => line.includes('Removed the test target of "core"') && line.includes('No tests found')), `said: ${ctx.logs.join(' | ')}`);
+        t.ok(!ctx.logs.some((line) => line.includes('Could not set passWithNoTests')), `nothing left to warn of: ${ctx.logs.join(' | ')}`);
+      },
+    })),
+    {
+      name: '--keepShim: the same runner under another name goes too',
+      setup: (ctx) => unitTestShim(ctx, '@nx/angular:unit-test', 'unit'),
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.equal(Object.keys(t.json('packages/core/project.json').targets), ['build'], 'only that target went'),
+    },
+    {
+      name: '--keepShim on the unit-test builder, a spec kept outside src/lib: the target stays, it has something to run',
+      setup: (ctx) => {
+        const tree = unitTestShim(ctx, '@nx/angular:unit-test');
+        tree.write('packages/core/testing/src/keep.spec.ts', "it('x', () => {});\n");
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.equal(t.json('packages/core/project.json').targets.test.executor, '@nx/angular:unit-test', 'kept'),
+    },
+    {
+      name: '--keepShim on another command: it may read neither, so it stays, and the warning stands',
+      setup: (ctx) => unitTestShim(ctx, 'nx:run-commands'),
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, packageVersion: '^1.2.0', keepShim: true }),
+      expect: (tree, t, ctx) => {
+        t.equal(t.json('packages/core/project.json').targets.test.executor, 'nx:run-commands', 'kept');
+        t.ok(ctx.logs.some((line) => line.includes('Could not set passWithNoTests')), `warned: ${ctx.logs.join(' | ')}`);
       },
     },
   ],

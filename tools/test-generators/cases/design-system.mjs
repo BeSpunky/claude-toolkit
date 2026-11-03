@@ -10,10 +10,12 @@
 // created BEFORE the app exists — with an Angular app present the workspace's stack would bind it to Angular and
 // delegate to @nx/angular:library (that path is the tripwire's, tools/test-angular-ts-solution/) — so `run` is
 // exactly a SYNC over an existing neutral DS and a newer app: what wires every app, every time.
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { requireFromRepo } from '../../test-support/payload.mjs';
 import { workspace, angularWorkspace, angularApp, MATRIX, RESOLVED, LINKINGS, LINK_RANGE, workspaceGlobs, references, aliases, SCOPE } from '../workspaces.mjs';
 
-const { writeJson, getProjects } = requireFromRepo('@nx/devkit');
+const { writeJson, getProjects, addProjectConfiguration } = requireFromRepo('@nx/devkit');
 const DS = `@${SCOPE}/design-system`;
 
 const neutral = MATRIX.map((m) => ({
@@ -84,6 +86,9 @@ const angularBound = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) =
     t.equal(getProjects(tree).get('design-system')?.root, root, 'root');
     t.exists(`${root}/ng-package.json`);
     t.exists(`${root}/styles/_index.scss`);
+    t.has(`${root}/src/lib/ds-theme.service.spec.ts`, "const MODE_ATTRIBUTE = 'data-ds-mode';");
+    const peers = t.json(`${root}/package.json`)?.peerDependencies ?? {};
+    t.ok('@angular/core' in peers && !('@angular/common' in peers), `peers what the seeded runtime imports: ${JSON.stringify(peers)}`);
     if (link === 'paths') {
       t.ok(aliases(tree)[DS], `alias: ${JSON.stringify(aliases(tree))}`);
     } else {
@@ -95,7 +100,72 @@ const angularBound = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) =
   },
 }));
 
+// The first spec: which libraries are born with one, and that an upgrade never writes it (0.51.2's rung decides that,
+// with the checks a generator has no business carrying). No @nx/angular needed: both read an existing project's config.
+const SPEC = 'src/lib/ds-theme.service.spec.ts';
+const firstSpec = [
+  {
+    name: 'pruning the demo of a Jest library says none is not a failure; a library with no runner config only loses its demo',
+    setup: () => {
+      const tree = workspace({ layout: 'packages', link: 'paths' });
+      tree.write('packages/jested/jest.config.ts', "export default {\n  displayName: 'jested',\n};\n");
+      tree.write('packages/jested/src/lib/demo/demo.spec.ts', '');
+      tree.write('packages/built/src/lib/demo/demo.spec.ts', '');
+      return tree;
+    },
+    run: (tree, ctx) => {
+      const { angularDesignSystem: port } = ctx.load('adapters/angular/design-system');
+      port.pruneGenerated(tree, 'packages/jested');
+      port.pruneGenerated(tree, 'packages/built');
+    },
+    expect: (tree, t) => {
+      t.missing('packages/jested/src/lib/demo/demo.spec.ts');
+      t.has('packages/jested/jest.config.ts', 'passWithNoTests: true,');
+      t.missing('packages/built/src/lib/demo/demo.spec.ts');
+    },
+  },
+  {
+    name: 'the Angular binding seeds a first spec only for the executor that fails without one',
+    setup: () => workspace({ layout: 'packages', link: 'paths' }),
+    run: () => {},
+    expect: (tree, t, ctx) => {
+      const { angularDesignSystem: port } = ctx.load('adapters/angular/design-system');
+      const dir = port.creationTemplates({ root: 'x', targets: { test: { executor: '@nx/angular:unit-test' } } });
+      t.ok(existsSync(join(dir, `${SPEC}.tpl`)), `the template is where the port says: ${dir}`);
+      t.ok(readFileSync(join(dir, `${SPEC}.tpl`), 'utf8').includes('data-{{tokenPrefix}}-mode'), 'it tests the library\'s own attribute');
+      t.equal(port.creationTemplates({ root: 'x', targets: { test: { executor: '@nx/jest:jest' } } }), undefined, 'jest is told to pass on no specs, by pruneGenerated');
+      t.equal(port.creationTemplates({ root: 'x', targets: {} }), undefined, 'no test target');
+    },
+  },
+  {
+    name: 'an upgrade over an existing Angular DS with no spec seeds none: a project may have deleted it',
+    setup: () => {
+      const tree = angularWorkspace({ layout: 'packages', link: 'paths' });
+      addProjectConfiguration(tree, 'design-system', {
+        root: 'packages/design-system',
+        projectType: 'library',
+        tags: ['type:design-system'],
+        targets: {
+          build: { executor: '@nx/angular:package', options: { project: 'packages/design-system/ng-package.json' } },
+          test: { executor: '@nx/angular:unit-test', options: { watch: false } },
+        },
+      });
+      writeJson(tree, 'packages/design-system/ng-package.json', {});
+      writeJson(tree, 'packages/design-system/package.json', { name: DS, version: '0.0.1' });
+      return tree;
+    },
+    run: async (tree, ctx) => {
+      await ctx.load('generators/design-system/generator').default(tree, { skipFormat: true });
+    },
+    expect: (tree, t) => {
+      t.exists('packages/design-system/src/lib/ds-theme.service.ts');
+      t.missing(`packages/design-system/${SPEC}`);
+      t.equal(getProjects(tree).get('design-system')?.targets?.test?.options, { watch: false }, 'and leaves the target: its first entry point aims it (secondary-entrypoint), and the rung decides for an existing one');
+    },
+  },
+];
+
 export default {
   name: 'design system · created and linked to an app',
-  cases: [...neutral, ...angularBound],
+  cases: [...neutral, ...angularBound, ...firstSpec],
 };

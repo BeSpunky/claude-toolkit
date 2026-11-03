@@ -103,6 +103,8 @@ export interface LibPort {
   normalizePackaging?(tree: Tree, projectRoot: string): void;
   /** Allow these runtime `dependencies` through the framework packager, where it gates them. */
   allowDependencies?(tree: Tree, projectRoot: string, dependencies: string[]): void;
+  /** The library is now a re-export of a package: drop the framework peers nothing in it imports any more. */
+  pruneShimPeers?(tree: Tree, projectRoot: string): void;
 }
 
 /** One application's environment-config files — where per-env values live in this framework. */
@@ -209,10 +211,10 @@ export interface DesignSystemPort {
   /** Delete what the framework generator emitted that the DS does not ship (demo components). */
   pruneGenerated(tree: Tree, root: string): void;
   /**
-   * On creation, AFTER the runtime is seeded: drop the manifest peers the framework generator declared for the demo it
-   * pruned and nothing the library now holds uses (or the library fails its own @nx/dependency-checks lint).
+   * Templates seeded ONCE, when the library is created, and never again: an upgrade must not bring back what a project
+   * deleted, or add what its reshaped library cannot pass. Undefined when this library needs none.
    */
-  pruneUnusedPeers?(tree: Tree, root: string): void;
+  creationTemplates?(project: ProjectConfiguration): string | undefined;
 }
 
 export interface FirebaseClientPort {

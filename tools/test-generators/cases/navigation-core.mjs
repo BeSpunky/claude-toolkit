@@ -19,11 +19,14 @@ export default {
       expect: (tree, t) => {
         const project = getProjects(tree).get('navigation-core');
         t.equal(project?.tags, ['type:navigation', 'platform:web'], 'tags');
+        t.ok(!tree.children('libs/navigation-core/src/lib').some((file) => /\.spec\./.test(file)), 'the demo spec is gone');
         const config = ['vite.config.mts', 'vitest.config.mts'].map((f) => `libs/navigation-core/${f}`).find((f) => tree.exists(f));
         t.ok(config, 'a vite/vitest config was written');
         if (config) {
           t.has(config, "angular({ tsconfig: './tsconfig.spec.json' })");
           t.ok(!/\bangular\(\s*\)/.test(t.read(config)), `a bare angular() is left:\n${t.read(config)}`);
+          // The demo spec is gone and the kernel ships none: without this, `nx test navigation-core` exits 1.
+          t.has(config, 'passWithNoTests: true,');
         }
       },
     },

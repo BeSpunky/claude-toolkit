@@ -81,4 +81,56 @@ npx tsc -p "$(cat .tripwire-app-root)/tsconfig.app.json" --noEmit || fail "the A
 step "build — ng-packagr for the library, the Angular application builder for the app"
 npx nx run-many -t build --outputStyle=static || fail "build"
 
-printf '\nok: the Angular TS-solution hybrid builds on Nx %s\n' "$NX_VERSION"
+# @nx/angular:unit-test looks only under the source root, and the house's include reaches an entry point past it through
+# the builder's undocumented glob behaviour (adapters/angular/entry-point-specs.ts). A fixture can only read the include;
+# if the builder moves, the lie comes back as exit 0 on a failing spec, so only a real exit code can tell.
+step "nx test: the truth about specs in src and in an entry point"
+LIB_ROOT="$(cat .tripwire-lib-root)"
+FAILING="it('fails', () => { expect(1).toBe(2); });"
+npx nx test ui --skip-nx-cache --outputStyle=static || fail "nx test ui: red with every spec passing"
+for at in "card/src" "src/lib"; do
+  printf '%s\n' "$FAILING" > "$LIB_ROOT/$at/tripwire.spec.ts"
+  if npx nx test ui --skip-nx-cache --outputStyle=static; then
+    fail "nx test ui exits 0 past a failing spec in $at: the include no longer reaches it"
+  fi
+  rm "$LIB_ROOT/$at/tripwire.spec.ts"
+done
+
+# A library is aimed at birth, so an entry point nobody's generator made is reached, and its failing spec is red.
+step "nx test: an entry point made by hand, on a library born with none"
+PLAIN_ROOT="$(cat .tripwire-plain-root)"
+npx nx test plain --skip-nx-cache --outputStyle=static || fail "nx test plain: red with every spec passing"
+mkdir -p "$PLAIN_ROOT/late/src"
+printf '{ "lib": { "entryFile": "src/index.ts" } }\n' > "$PLAIN_ROOT/late/ng-package.json"
+printf 'export {};\n' > "$PLAIN_ROOT/late/src/index.ts"
+printf '%s\n' "$FAILING" > "$PLAIN_ROOT/late/src/late.spec.ts"
+if npx nx test plain --skip-nx-cache --outputStyle=static; then
+  fail "nx test plain exits 0 past a failing spec in a hand-made entry: the birth include no longer reaches it"
+fi
+rm -r "$PLAIN_ROOT/late"
+
+# The same include must not have turned "no specs" into something else: exit 1, and the builder's own words.
+step "nx test: no spec at all still says so"
+find "$PLAIN_ROOT/src" -name '*.spec.ts' -delete
+NO_SPEC_LOG="$(mktemp)"
+if npx nx test plain --skip-nx-cache --outputStyle=static >"$NO_SPEC_LOG" 2>&1; then
+  fail "nx test plain exits 0 with no spec at all"
+fi
+grep -q 'No tests found' "$NO_SPEC_LOG" || { cat "$NO_SPEC_LOG"; fail "nx test plain with no spec fails with something other than \"No tests found\""; }
+rm "$NO_SPEC_LOG"
+
+step "nx run-many -t test over a keepShim library: it has no target to fail"
+npx nx run-many -t test -p shim,ui --skip-nx-cache --outputStyle=static || fail "run-many -t test: red over a keepShim library"
+
+step "nx lint: a keepShim library peers what it re-exports and nothing it no longer imports"
+npx nx lint shim --skip-nx-cache --outputStyle=static || fail "nx lint shim: a keepShim library fails its own dependency checks"
+
+# tsconfig.spec.json's entry-sources glob also matches a build output at the library's root; its exclude must keep that out.
+# On `plain`: `ui` holds an entry, and secondary-entrypoint's tsconfig.lib.json has a glob of its own that also reaches there.
+step "typecheck: tsconfig.spec.json keeps a build output at the library's root out"
+mkdir -p "$PLAIN_ROOT/dist/x/src"
+printf 'export const notANumber: number = "tripwire";\n' > "$PLAIN_ROOT/dist/x/src/output.ts"
+npx nx typecheck plain --skip-nx-cache --outputStyle=static || fail "typecheck reaches $PLAIN_ROOT/dist through the spec tsconfig's include"
+rm -r "$PLAIN_ROOT/dist"
+
+printf '\nok: the Angular TS-solution hybrid builds and tests truthfully on Nx %s\n' "$NX_VERSION"

@@ -17,11 +17,16 @@ if (!payload) throw new Error('usage: node drive.cjs <compiled-payload-dir>');
 const fromWorkspace = (id) => require(require.resolve(id, { paths: [process.cwd()] }));
 const { FsTree, flushChanges } = fromWorkspace('nx/src/generators/tree');
 const { readJson, getProjects } = fromWorkspace('@nx/devkit');
+// The generator first, as Nx loads one: it enters the adapter registry's import cycle at the end that resolves.
+const { secondaryEntrypointGenerator } = require(join(payload, 'src/generators/secondary-entrypoint/generator'));
+const adoptExtracted = require(join(payload, 'src/generators/adopt-extracted/generator')).default;
 const { angular } = require(join(payload, 'src/adapters/angular'));
 const { detectLinking, workspaceLinking } = require(join(payload, 'src/generators/_utils/linking'));
 
 const APP_ROOT = 'apps/shop';
 const LIB_ROOT = 'packages/ui';
+const PLAIN_ROOT = 'packages/plain';
+const SHIM_ROOT = 'packages/shim';
 
 (async () => {
   const tree = new FsTree(process.cwd(), false);
@@ -43,6 +48,22 @@ const LIB_ROOT = 'packages/ui';
   tree.write(`${LIB_ROOT}/src/lib/greeting.ts`, "export const GREETING = 'hello across the workspace link';\n");
   tree.write(`${LIB_ROOT}/src/index.ts`, `${tree.read(`${LIB_ROOT}/src/index.ts`, 'utf8') ?? ''}export * from './lib/greeting';\n`);
   tree.write(`${APP_ROOT}/src/main.ts`, `import { GREETING } from '${importPath}';\nconsole.log(GREETING);\n${tree.read(`${APP_ROOT}/src/main.ts`, 'utf8')}`);
+
+  // An entry point with a component and its spec: the run below asserts `nx test` runs it, which a fixture cannot.
+  await secondaryEntrypointGenerator(tree, { library: 'ui', name: 'card', component: 'standalone', skipFormat: true });
+  writeFileSync('.tripwire-lib-root', LIB_ROOT);
+
+  // A library no house generator gave an entry: what the run below asserts about it is that its birth already reaches one.
+  await angular.libs.create(tree, { name: 'plain', directory: PLAIN_ROOT, importPath: `@${scope}/plain`, publishable: true, prefix: 'bs', style: 'scss' });
+  angular.libs.normalizePackaging?.(tree, PLAIN_ROOT);
+  writeFileSync('.tripwire-plain-root', PLAIN_ROOT);
+
+  // A shim with no spec left: the unit-test builder cannot pass on none, so adopting it must leave no target to fail. rxjs:
+  // published, typed, and already what an Angular workspace declares.
+  await angular.libs.create(tree, { name: 'shim', directory: SHIM_ROOT, importPath: `@${scope}/shim`, publishable: true, prefix: 'bs', style: 'scss' });
+  angular.libs.normalizePackaging?.(tree, SHIM_ROOT);
+  await adoptExtracted(tree, { lib: 'shim', package: 'rxjs', packageVersion: readJson(tree, 'package.json').dependencies?.rxjs ?? '^7.8.0', keepShim: true });
+  assert.equal(readJson(tree, `${SHIM_ROOT}/project.json`).targets.test, undefined, 'adopt-extracted --keepShim left a test target that can only fail "No tests found"');
 
   const roots = [...getProjects(tree).values()].map((p) => p.root);
   assert.ok(roots.includes(APP_ROOT) && roots.includes(LIB_ROOT), `projects not created: ${roots.join(', ')}`);

@@ -305,6 +305,18 @@
       "layer": "firebase",
       "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev claim) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
       "implementation": "./src/migrations/0.50.0/retire-reap-emulators"
+    },
+    "truthful-angular-library-tests": {
+      "version": "0.51.2",
+      "layer": "angular",
+      "description": "`nx test` lied about a house Angular library both ways. @nx/angular:unit-test looks only under <library>/src, so it exited 0 past a failing spec in a secondary entry point (<library>/<entry>/src), on any library that has one, and it exited 1 on a design system with no spec (pruning the demo component removed the only one, and the executor has no passWithNoTests). Gives the target of a library with entry points, and of a design system, an include/exclude that reach every spec in the library, naming the specs that start running because one may fail, and adds src/lib/ds-theme.service.spec.ts, a real spec of the DsTheme the design system ships, where it holds no spec at all and DsTheme still has the shape the spec tests. A target with its own include/exclude, a source root outside the library, and another executor that may share the blindness, are left and reported, with the reason, and so is the stray <entry>/src.ts an earlier generator wrote.",
+      "implementation": "./src/migrations/0.51.2/truthful-angular-library-tests"
+    },
+    "pass-libraries-with-no-specs": {
+      "version": "0.51.2",
+      "layer": "nx",
+      "description": "`nx test <library>` exits 1 on a library the house left with no spec: navigation-core and a Jest-tested design system lost their generator's demo, an adopt-extracted shim lost its implementation, and Vitest and Jest fail on no tests. Sets `passWithNoTests: true` in the library's runner config, which is where it reaches an inferred target; a spec that fails still fails. A library with its own spec has nothing to do. Another executor, a config already deciding, several runner configs or a config without the generators' shape is left and reported, with the reason.",
+      "implementation": "./src/migrations/0.51.2/pass-libraries-with-no-specs"
     }
   }
 }

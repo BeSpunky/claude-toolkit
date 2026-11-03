@@ -57,7 +57,7 @@ can freely rename, reshape, or delete.
     ├── ng-package.json
     └── src/
         ├── index.ts                 ★ THE PUBLIC API of {{importPath}}/<component>
-        ├── <component>.component.{ts,html,scss}
+        ├── <component>.{ts,html,scss,spec.ts}
         └── _parts/                  sub-components, helpers, types the consumer must not depend on
                                      (name it for what it holds — `_parts`, `_core`, `_material` — never `internal`)
 ```

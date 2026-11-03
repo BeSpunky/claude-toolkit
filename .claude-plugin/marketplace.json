@@ -16,7 +16,7 @@
       "name": "bespunky-house",
       "source": "./plugins/house",
       "description": "The BeSpunky house standard for any repo, as a stack of detected layers on an Nx floor: the agent DX (composed devcontainer, Claude settings, window identity, HOUSE docs) by default; Node, JS libraries, the stack-free web dev loop, Angular, a design system, navigation or Firebase only when worn. /bespunky-house:new creates a project, /bespunky-house:upgrade migrates one to the current standard, /bespunky-house:add-layer adds a layer. Generator-first; consented, never automatic.",
-      "version": "0.49.1"
+      "version": "0.49.2"
     },
     {
       "name": "bespunky-workflow",
@@ -34,13 +34,13 @@
       "name": "bespunky-angular",
       "source": "./plugins/angular",
       "description": "BeSpunky's Angular adapter skills, for projects that wear Angular. angular-architecture: modern-Angular technique clusters (standalone, signals, inject()) - DI and providers, lifecycle and reactivity, SSR and change detection, extensibility, content projection, component APIs. angular-native-wrappers: wrap an imperative or third-party JS API (maps, editors, charts, players) in idiomatic, type-safe Angular. The stack-agnostic mindset they realize lives in bespunky-engineering.",
-      "version": "0.1.2"
+      "version": "0.1.3"
     },
     {
       "name": "bespunky-design-system",
       "source": "./plugins/design-system",
       "description": "BeSpunky design-system skills - styling as a SYSTEM on any stack (Angular is one adapter). design-system-first: the discipline - every visual value is a token from the design system, no raw hex, magic px or style reach-ins, and a pattern's second occurrence is promoted into the DS. design-tokens-and-theming: the techniques - token tiers, CSS custom properties as the runtime layer, a zero-output SASS API, light/dark/brand modes, encapsulation, and the DS library's entry points.",
-      "version": "0.2.4"
+      "version": "0.2.5"
     },
     {
       "name": "bespunky-browser-automation",

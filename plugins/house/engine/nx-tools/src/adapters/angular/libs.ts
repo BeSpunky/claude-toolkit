@@ -7,6 +7,8 @@ import { withPlatform, csvTags } from '../../platform/platform';
 import { stateAnalogTsconfig } from './analog-tsconfig';
 import { convertBareLint } from '../../generators/_utils/lint-inference';
 import { libraryUnitTestRunner } from './workspace-angular';
+import { pruneShimPeers, pruneUnusedPeers } from './library-peers';
+import { aimUnitTestTargets } from './entry-point-specs';
 
 const noop: GeneratorCallback = () => {};
 
@@ -40,6 +42,7 @@ export const angularLibs: LibPort = {
   async create(tree, options) {
     const linking = workspaceLinking(tree);
     const ownAlias = linking.kind === 'paths';
+    const libRoot = options.directory.replace(/\/+$/, '');
     // Option NAMES verified against @nx/angular 23 (`nx g @nx/angular:library --help`): standalone-only suite,
     // no NgModule entry, Vitest, eslint as a string (the enum is deprecated). WHICH Vitest depends on the build AND
     // the workspace's Angular major — chosen where every major-dependent choice is (./workspace-angular).
@@ -64,17 +67,22 @@ export const angularLibs: LibPort = {
       } as Parameters<typeof libraryGenerator>[1]))) ?? noop;
     // The Analog test config names its tsconfig, or every graph computation warns about a tsconfig.app.json a
     // library never has (./analog-tsconfig).
-    stateAnalogTsconfig(tree, options.directory.replace(/\/+$/, ''));
+    stateAnalogTsconfig(tree, libRoot);
     // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.
     convertBareLint(tree, options.name);
+    // Its specs are every spec in it, not only those under src: an entry point added later, by a generator or by hand, is reached.
+    aimUnitTestTargets(tree, options.name);
+    // The generator's fixed peers, trimmed to what the library holds now — or it fails its own lint from birth.
+    pruneUnusedPeers(tree, libRoot);
     if (!ownAlias) {
-      const libRoot = options.directory.replace(/\/+$/, '');
       linking.link(tree, { importPath: options.importPath, libRoot });
       stateTheBuildsSourceMaps(tree, libRoot);
       stateAngularCompilerContract(tree, libRoot);
     }
     return callback;
   },
+
+  pruneShimPeers,
 
   /**
    * The library's root ng-package.json in the house modern-entrypoint shape:
