@@ -10,7 +10,7 @@
  * The date npm last said this — a project's installed toolkit carries a FROZEN copy, so every message that rests on
  * the table ("no stable @angular/fire for Angular 22") says "as of" this date, never "yet".
  */
-export const ANGULARFIRE_TABLE_AS_OF = '2026-11-02';
+export const ANGULARFIRE_TABLE_AS_OF = '2026-11-03';
 
 /**
  * What a firebase spec installs, and what that install needs of Node: the `engines.node` of firebase's WHOLE dependency
@@ -167,7 +167,7 @@ export const ANGULARFIRE_TABLE_NEWEST_ANGULAR = 22;
  */
 export const FIREBASE_BY_DIST_TAG: Readonly<Record<string, FirebaseResolution>> = {
   latest: {
-    "firebase": "13.1.0",
+    "firebase": "13.2.0",
     "nodeMajors": [24, 25, 26],
     "nodeNeeds": [
       {
@@ -178,7 +178,12 @@ export const FIREBASE_BY_DIST_TAG: Readonly<Record<string, FirebaseResolution>> 
       {
         "range": ">=24.12.0",
         "nodeMajors": [24, 25, 26],
-        "packages": ["@firebase/ai@3.0.0", "@firebase/app-compat@0.5.20", "@firebase/app@0.16.4", "@firebase/auth-compat@0.6.13", "@firebase/auth@1.13.8", "@firebase/firestore-compat@0.4.16", "@firebase/firestore@4.19.0", "@firebase/storage-compat@0.4.6", "@firebase/storage@0.14.6"]
+        "packages": ["@firebase/ai@3.0.0", "@firebase/app-compat@0.5.21", "@firebase/app@0.16.5", "@firebase/auth-compat@0.6.14", "@firebase/auth@1.13.9", "@firebase/firestore-compat@0.4.17", "@firebase/firestore@4.19.1", "@firebase/storage-compat@0.4.6", "@firebase/storage@0.14.6"]
+      },
+      {
+        "range": "^18.19.0 || >=20.6.0",
+        "nodeMajors": [18, 20, 21, 22, 23, 24, 25, 26],
+        "packages": ["@opentelemetry/core@2.10.0", "@opentelemetry/core@2.12.0", "@opentelemetry/core@2.9.0", "@opentelemetry/exporter-logs-otlp-http@0.220.0", "@opentelemetry/exporter-trace-otlp-proto@0.220.0", "@opentelemetry/instrumentation-document-load@0.65.0", "@opentelemetry/instrumentation-fetch@0.220.0", "@opentelemetry/instrumentation-xml-http-request@0.220.0", "@opentelemetry/instrumentation@0.220.0", "@opentelemetry/otlp-exporter-base@0.220.0", "@opentelemetry/otlp-transformer@0.220.0", "@opentelemetry/resources@2.10.0", "@opentelemetry/resources@2.12.0", "@opentelemetry/resources@2.9.0", "@opentelemetry/sdk-logs@0.220.0", "@opentelemetry/sdk-metrics@2.9.0", "@opentelemetry/sdk-trace-base@2.10.0", "@opentelemetry/sdk-trace-base@2.12.0", "@opentelemetry/sdk-trace-base@2.9.0", "@opentelemetry/sdk-trace-web@2.10.0", "@opentelemetry/sdk-trace-web@2.12.0", "@opentelemetry/sdk-trace-web@2.9.0", "@opentelemetry/sdk-trace@2.10.0", "@opentelemetry/sdk-trace@2.12.0", "@opentelemetry/sdk-trace@2.9.0"]
       }
     ]
   }
