@@ -11,7 +11,7 @@ import { type Tree, readProjectConfiguration, logger } from '@nx/devkit';
 import { updateProjectConfigurationInPlace } from '../../generators/_utils/project-files';
 import { updateJsonInPlace } from '../../generators/_utils/json-edits';
 import { normalizedPath, under } from '../../generators/_utils/library-files';
-import { UNIT_TEST_EXECUTORS, judgeEntryPointReach } from './entry-point-reach';
+import { type SpecTsconfig, UNIT_TEST_EXECUTORS, holdEntrySources, judgeEntryPointReach } from './entry-point-reach';
 
 /** A test executor known to walk the whole library. */
 const WALKS_THE_LIBRARY = new Set(['@nx/jest:jest']);
@@ -34,22 +34,18 @@ const notTheLibrarysOwn = (up: string) => [`${up}**/node_modules/**`, `${up}dist
  * globals do not resolve. Specs alone would fail a TS-solution typecheck, TS6307: a composite project must list what they import.
  */
 const ENTRY_SOURCES = '**/src/**/*.ts';
+/** ENTRY_SOURCES also matches a build output at the library's root. Only there: a folder of that name inside an entry may hold a source. */
+const NOT_SOURCES = 'dist/**';
 
 /**
- * Makes `name`'s test target, and its tsconfig.spec.json, reach the specs of its entry points. Called by whatever gives a
- * library an entry point, because that is what makes the library need it. A project's own include/exclude, a source root
- * that `..` cannot climb out of into the library, or another runner that may share the blindness, is left and reported.
+ * Makes `name`'s unit-test targets, and its tsconfig.spec.json, reach every spec in the library, entry points or not. The
+ * library port states this at birth, so an entry point made later, by anyone, is reached by construction: with no entry
+ * and no spec it changes nothing about "No tests found", because src is still in the include. A project's own
+ * include/exclude, or a source root that `..` cannot climb out of into the library, is left and reported.
  */
-export function reachEntryPointSpecs(tree: Tree, name: string): void {
+export function aimUnitTestTargets(tree: Tree, name: string): void {
   const project = readProjectConfiguration(tree, name);
   const runners = Object.entries(project.targets ?? {}).filter(([, target]) => UNIT_TEST_EXECUTORS.has(target.executor ?? ''));
-  if (runners.length === 0) {
-    const test = project.targets?.test;
-    if (test && !WALKS_THE_LIBRARY.has(test.executor ?? '')) {
-      logger.warn(`[angular] ${name}: its test target uses ${test.executor ?? 'a command'}, so \`nx test ${name}\` may not run the specs of its entry points (at <library>/<entry>). Check that it does.`);
-    }
-    return;
-  }
 
   let aimed = false;
   let changed = false;
@@ -74,11 +70,25 @@ export function reachEntryPointSpecs(tree: Tree, name: string): void {
   if (aimed) includeEntrySourcesInSpecTsconfig(tree, project.root);
 }
 
-/** Only adds to an include the file states: a tsconfig with none already holds everything under it. */
+/**
+ * The same, for whatever gives a library an entry point, which is the one moment it is owed even by a library this port
+ * did not make, or made before it stated this. Another runner that may share the blindness is told here, and not at
+ * birth, because only now does it have something to miss.
+ */
+export function reachEntryPointSpecs(tree: Tree, name: string): void {
+  const targets = readProjectConfiguration(tree, name).targets ?? {};
+  if (!Object.values(targets).some((target) => UNIT_TEST_EXECUTORS.has(target.executor ?? ''))) {
+    const test = targets.test;
+    if (test && !WALKS_THE_LIBRARY.has(test.executor ?? '')) {
+      logger.warn(`[angular] ${name}: its test target uses ${test.executor ?? 'a command'}, so \`nx test ${name}\` may not run the specs of its entry points (at <library>/<entry>). Check that it does.`);
+    }
+    return;
+  }
+  aimUnitTestTargets(tree, name);
+}
+
 function includeEntrySourcesInSpecTsconfig(tree: Tree, root: string): void {
   const file = under(normalizedPath(root), 'tsconfig.spec.json');
   if (!tree.exists(file)) return;
-  updateJsonInPlace<{ include?: string[] }>(tree, file, (json) => {
-    if (json.include) json.include = [...new Set([...json.include, ENTRY_SOURCES])];
-  });
+  updateJsonInPlace<SpecTsconfig>(tree, file, (json) => holdEntrySources(json, ENTRY_SOURCES, NOT_SOURCES));
 }

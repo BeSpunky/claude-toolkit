@@ -1,5 +1,6 @@
 // 0.51.2 — what `nx test` says about a house Angular library is the truth: it exits 1 on a design system with no spec, and
-// on any library with entry points it exits 0 past a failing spec in one of them.
+// on any library with entry points it exits 0 past a failing spec in one of them. A library with none today is the same
+// the day someone adds one, by hand or through @nx/angular, where no house generator is there to say anything.
 //
 // WHY. @nx/angular:unit-test looks only under the project's source root (<library>/src), and a secondary entry point lives
 // beside it, at <library>/<entry>, where `secondary-entrypoint --component=standalone` and ds-component write a spec. So
@@ -8,13 +9,13 @@
 // components; the executor throws "No tests found" on a library with no spec and has no passWithNoTests option (the schema
 // refuses it: verified on @nx/angular 24.0.3 / @angular/build 22.2.5).
 //
-// WHAT THIS DOES, for a library with entry points and for every design system:
+// WHAT THIS DOES, for every library on this executor, entry points or not, and for every design system:
 //   1. gives the target an include and exclude that reach every spec in the library. The include holds both halves: the
 //      builder's glob reports a file under its cwd (the source root) by its cwd-relative path, which a `../` pattern never
 //      matches, so `../**` alone finds the entry points and silently drops src. The exclude is needed because the
 //      builder's own node_modules ignore does not match above its cwd either. That can turn a green target red, truthfully,
-//      so the specs that start running are named. secondary-entrypoint now does the same when it creates an entry. A design
-//      system with none gets it here regardless: the next step decides what runs by what the target reaches. Whatever the
+//      so the specs that start running are named. The Angular library port now states the same at birth. With no entry and no
+//      spec it changes nothing: src is still in the include, and the target still throws "No tests found" (verified). Whatever the
 //      target now reaches also goes in the include of tsconfig.spec.json, if it states one: every entry's src, not only
 //      its specs, because a composite project (a TS-solution workspace) must list what they import or typecheck fails
 //      TS6307. The runner does not need that (it hands the compiler the specs it found, and type-checks them either way:
@@ -24,14 +25,16 @@
 //      must not swap one red target for another: it adds only what it can tell will run and pass. Every house DsTheme ever
 //      shipped (ed399a8d, a4ca72cb, 94f13d27) passes the shape check below and this spec.
 //
-// LEFT, WITH A REPORT (a library that is not a design system is only mentioned when it has entry points on this executor):
-//   - no test target, or one with another executor: neither change is known to be what that runner lacks (jest also exits
+// LEFT, WITH A REPORT:
+//   - no test target, or one with another executor (a library that is not a design system is only mentioned when it has entry points): neither change is known to be what that runner lacks (jest also exits
 //     1 on no tests unless told otherwise, and Nx 24 infers its target, so no project config shows it);
 //     pass-libraries-with-no-specs, the next rung, tells those runners what they can be told. A library with entry points
 //     on anything but Jest, whose root is the library, is told that its entry points' specs may not run;
 //   - the target declares an include/exclude other than the above, in any configuration: the project chose what is
 //     tested, so a seeded spec may not even be picked up, and an entry's spec may not either;
 //   - a source root outside the library: `..` from there is not the library;
+//   - a library with no entry point and another project inside it (one at the workspace root holds them all): the include
+//     would run that project's specs as well, on the wrong runner, for an entry point that does not exist yet;
 //   - any spec already in the library, and the file is never overwritten. One the runner matches is what the target runs;
 //     one it does not leaves the target red, so that one warns;
 //   - no src/lib/ds-theme.service.ts, or a DsTheme reshaped past what the spec tests (the mode signal, the root element
@@ -49,7 +52,7 @@
 // FROZEN by the migration contract: the tag, the globs and the spec are copies, not imports from the generators. What it
 // shares with them is the pure mechanics that take those values as parameters, and the question of what a project is.
 import { type ProjectConfiguration, type TargetConfiguration, type Tree, getProjects, logger } from '@nx/devkit';
-import { judgeEntryPointReach } from '../../adapters/angular/entry-point-reach';
+import { type SpecTsconfig, holdEntrySources, judgeEntryPointReach } from '../../adapters/angular/entry-point-reach';
 import { projectRole } from '../../adapters/registry';
 import { filesOfLibrary, firstMatching, normalizedPath, otherProjectRoots, under } from '../../generators/_utils/library-files';
 import { updateJsonInPlace } from '../../generators/_utils/json-edits';
@@ -77,6 +80,8 @@ const excludeFrom = (up: string) => [`${up}**/node_modules/**`, `${up}dist/**`];
 /** For tsconfig.spec.json, which is relative to the library. */
 const ENTRY_SOURCES = '**/src/**/*.ts';
 const SPEC_TSCONFIG = 'tsconfig.spec.json';
+/** ENTRY_SOURCES also matches a build output at the library's root. Only there: a folder of that name inside an entry may hold a source. */
+const NOT_SOURCES = 'dist/**';
 /** What DsTheme may inject and still construct in a bare TestBed. */
 const PROVIDED_BY_TESTBED = new Set(['DOCUMENT', 'DestroyRef']);
 
@@ -89,10 +94,17 @@ export default function update(tree: Tree): void {
     if (designSystems.has(name)) {
       if (reachDesignSystem(tree, name, project, stops)) seedSpec(tree, name, project, stops);
       reportStrayComponents(tree, name, project, true);
-    } else if (project.targets && projectRole(tree, name) !== 'application' && hasEntryPoints(tree, project, stops)) {
-      for (const [targetName, target] of unitTestTargets(project)) reachWholeLibrary(tree, name, project, targetName, target, stops);
-      if (unitTestTargets(project).length === 0) reportOtherRunner(name, project);
-      reportStrayComponents(tree, name, project, false);
+    } else if (project.targets && projectRole(tree, name) !== 'application') {
+      const entries = hasEntryPoints(tree, project, stops);
+      if (!entries && projectRole(tree, name) !== 'library') continue;
+      const runners = unitTestTargets(project);
+      const nested = entries ? [] : projectsInside(project, stops);
+      if (runners.length && nested.length) reportNested(name, nested);
+      else for (const [targetName, target] of runners) reachWholeLibrary(tree, name, project, targetName, target, stops);
+      if (entries) {
+        if (runners.length === 0) reportOtherRunner(name, project);
+        reportStrayComponents(tree, name, project, false);
+      }
     }
   }
 }
@@ -112,6 +124,16 @@ function hasEntryPoints(tree: Tree, project: ProjectConfiguration, stops: Readon
     if (file !== own && file.endsWith(`/${ENTRY_POINT}`)) return true;
   }
   return false;
+}
+
+/** The projects whose roots lie inside this one's. */
+function projectsInside(project: ProjectConfiguration, stops: ReadonlySet<string>): string[] {
+  const root = normalizedPath(project.root);
+  return [...stops].filter((other) => !root || other.startsWith(`${root}/`));
+}
+
+function reportNested(name: string, nested: string[]): void {
+  logger.warn(`${TAG} Left ${name}: other projects live inside it (${nested.join(', ')}), and reaching every spec in the library would run theirs too. It has no entry point today; if it gains one, \`nx g @bespunky/nx-tools:secondary-entrypoint\` or an include of your own is what runs that entry's specs.`);
 }
 
 function reportOtherRunner(name: string, project: ProjectConfiguration): void {
@@ -156,7 +178,7 @@ function reachWholeLibrary(tree: Tree, name: string, project: ProjectConfigurati
     const started = specsOutside(tree, project.root, new Set([...stops, sourceRoot]));
     const log = started.length ? logger.warn : logger.info;
     log(
-      `${TAG} ${name}: \`${command}\` now runs every spec in the library. It looked only under ${sourceRoot}, so a failing spec in an entry point exited 0.` +
+      `${TAG} ${name}: \`${command}\` now runs every spec in the library. It looked only under ${sourceRoot}, where an entry point's specs are not, so a failing one exited 0.` +
         (started.length ? ` These start running now, and it is the truth if one fails: ${started.join(', ')}.` : ''),
     );
   }
@@ -164,13 +186,11 @@ function reachWholeLibrary(tree: Tree, name: string, project: ProjectConfigurati
   return true;
 }
 
-/** Only adds to an include the file states: a tsconfig with none already holds everything under it. In place, because it may hold comments. */
+/** In place, because it may hold comments. */
 function includeEntrySourcesInSpecTsconfig(tree: Tree, root: string): void {
   const file = under(normalizedPath(root), SPEC_TSCONFIG);
   if (!tree.exists(file)) return;
-  const wrote = updateJsonInPlace<{ include?: string[] }>(tree, file, (json) => {
-    if (Array.isArray(json.include) && !json.include.includes(ENTRY_SOURCES)) json.include = [...json.include, ENTRY_SOURCES];
-  });
+  const wrote = updateJsonInPlace<SpecTsconfig>(tree, file, (json) => holdEntrySources(json, ENTRY_SOURCES, NOT_SOURCES));
   if (wrote) logger.info(`${TAG} ${file}: its include now holds the entry points' sources, so \`tsc\` and the editor see their specs. In a TS-solution workspace, \`nx typecheck\` checks them too.`);
 }
 

@@ -8,6 +8,7 @@ import { stateAnalogTsconfig } from './analog-tsconfig';
 import { convertBareLint } from '../../generators/_utils/lint-inference';
 import { libraryUnitTestRunner } from './workspace-angular';
 import { pruneUnusedPeers } from './library-peers';
+import { aimUnitTestTargets } from './entry-point-specs';
 
 const noop: GeneratorCallback = () => {};
 
@@ -69,6 +70,8 @@ export const angularLibs: LibPort = {
     stateAnalogTsconfig(tree, libRoot);
     // Linted the way Nx recommends (@nx/eslint/plugin's inferred target), not by the deprecated executor @nx/angular writes.
     convertBareLint(tree, options.name);
+    // Its specs are every spec in it, not only those under src: an entry point added later, by a generator or by hand, is reached.
+    aimUnitTestTargets(tree, options.name);
     // The generator's fixed peers, trimmed to what the library holds now — or it fails its own lint from birth.
     pruneUnusedPeers(tree, libRoot);
     if (!ownAlias) {

@@ -123,7 +123,11 @@ const seam = [
   reach('the target and the tsconfig are aimed', {}, (t, targets) => {
     t.equal(targets.test.options, { watch: false, ...REACH }, 'the target');
     t.equal(t.json(`${UI}/tsconfig.spec.json`).include, SPEC_TSCONFIG_INCLUDE, 'the tsconfig');
+    t.equal(t.json(`${UI}/tsconfig.spec.json`).exclude, ['dist/**'], 'not a build output at its root');
   }),
+  reach("the tsconfig's own exclude is kept", { tsconfig: { include: ['src/**/*.ts'], exclude: ['src/legacy/**'] } }, (t) => t.equal(t.json(`${UI}/tsconfig.spec.json`).exclude, ['src/legacy/**', 'dist/**'], 'added to')),
+  reach('a stated exclude replaces the default, so an outDir inside the library stays out', { tsconfig: { compilerOptions: { outDir: './out-tsc/vitest' }, include: ['src/**/*.ts'] } }, (t) => t.equal(t.json(`${UI}/tsconfig.spec.json`).exclude, ['out-tsc/vitest/**', 'dist/**'], 'kept out')),
+  reach('an outDir above the library is out of its include anyway', { tsconfig: { compilerOptions: { outDir: '../../dist/out-tsc' }, include: ['src/**/*.ts'] } }, (t) => t.equal(t.json(`${UI}/tsconfig.spec.json`).exclude, ['dist/**'], 'not named')),
   reach('a source root deeper in the library: the globs climb out of where it is', { sourceRoot: `${UI}/src/public` }, (t, targets) => {
     t.equal(targets.test.options.include.at(-1), '../../**/*.test.ts', 'two levels up');
     t.equal(targets.test.options.exclude, ['../../**/node_modules/**', '../../dist/**'], 'the exclude too');
@@ -147,4 +151,36 @@ const seam = [
   reach('a source root outside the library: left, reported', { sourceRoot: 'elsewhere/src', test: { executor: UNIT_TEST } }, leftReported(/ui: its source root elsewhere\/src is outside the library/, { test: { executor: UNIT_TEST } })),
 ];
 
-export default { name: 'ds-component', cases: [...dsComponent, handMadeEntry, secondaryEntrypoint, ...seam] };
+// The half the library port calls at birth: no entry point yet, so another runner has nothing to miss and nothing to be told.
+const birth = [
+  {
+    name: 'aimUnitTestTargets: a library with no entry point is aimed',
+    setup: () => {
+      const tree = angularWorkspace({ layout: 'packages', link: 'paths' });
+      addProjectConfiguration(tree, 'ui', { root: UI, sourceRoot: `${UI}/src`, projectType: 'library', targets: { test: { executor: UNIT_TEST, options: { watch: false } } } });
+      writeJson(tree, `${UI}/tsconfig.spec.json`, { include: ['src/**/*.ts', 'src/**/*.d.ts'] });
+      return tree;
+    },
+    run: async (tree, ctx) => ctx.load('adapters/angular/entry-point-specs').aimUnitTestTargets(tree, 'ui'),
+    expect: (tree, t, ctx) => {
+      t.equal(t.json(`${UI}/project.json`).targets.test.options, { watch: false, ...REACH }, 'the target');
+      t.equal(t.json(`${UI}/tsconfig.spec.json`).include, SPEC_TSCONFIG_INCLUDE, 'the tsconfig');
+      t.equal(ctx.logs, [], 'and it is not news');
+    },
+  },
+  {
+    name: 'aimUnitTestTargets: another runner has nothing to miss yet, so nothing is said',
+    setup: () => {
+      const tree = angularWorkspace({ layout: 'packages', link: 'paths' });
+      addProjectConfiguration(tree, 'ui', { root: UI, sourceRoot: `${UI}/src`, projectType: 'library', targets: { test: { executor: '@angular/build:karma' } } });
+      return tree;
+    },
+    run: async (tree, ctx) => ctx.load('adapters/angular/entry-point-specs').aimUnitTestTargets(tree, 'ui'),
+    expect: (tree, t, ctx) => {
+      t.equal(t.json(`${UI}/project.json`).targets.test, { executor: '@angular/build:karma' }, 'untouched');
+      t.equal(ctx.logs, [], 'silent');
+    },
+  },
+];
+
+export default { name: 'ds-component', cases: [...dsComponent, handMadeEntry, secondaryEntrypoint, ...seam, ...birth] };

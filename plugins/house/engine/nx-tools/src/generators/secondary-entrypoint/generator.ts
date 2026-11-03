@@ -165,7 +165,8 @@ export async function secondaryEntrypointGenerator(
     );
   }
 
-  // 5) An entry point sits outside the source root, which is all the library's test target looks at.
+  // 5) An entry point sits outside the source root, which is all the library's test target looks at. A library the
+  //    Angular port made already says so; this is for one it did not, and it is a no-op on the rest.
   reachEntryPointSpecs(tree, options.library);
 
   if (!options.skipFormat) {

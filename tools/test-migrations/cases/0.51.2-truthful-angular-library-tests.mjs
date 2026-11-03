@@ -94,6 +94,7 @@ const anyLibrary = [
       const text = tree.read(`${UI}/tsconfig.spec.json`, 'utf8');
       t.ok(text.includes("// the runner's globals"), `the comment stays: ${text}`);
       for (const glob of [...SPEC_INCLUDE, '**/src/**/*.ts']) t.ok(text.includes(`"${glob}"`), `${glob}: ${text}`);
+      t.ok(text.includes('"exclude"') && text.includes('"dist/**"'), `and not a build output at its root: ${text}`);
       t.equal(tree.read(`${UI}/tsconfig.lib.json`, 'utf8'), '{ "exclude": ["**/src/**/*.spec.ts"] }\n', 'the build still excludes specs');
       if (logs) {
         t.ok(!logs.some((line) => line.includes('start running')), `no spec yet, so nothing to warn of: ${logs.join(' | ')}`);
@@ -126,14 +127,53 @@ const anyLibrary = [
     },
   },
   {
-    name: 'no entry point: not this rung\'s',
+    name: 'no entry point: reached all the same, so one added later runs, and with no spec outside src there is nothing to warn of',
     setup: (tree) => library(tree, { files: { 'src/lib/ui.spec.ts': '', 'tsconfig.spec.json': SPEC_TSCONFIG } }),
-    expect: untouched(UNIT_TEST),
+    expect: (tree, t, logs) => {
+      t.equal(uiTarget(tree).options, REACHED, 'the target runs every spec in the library');
+      t.ok(tree.read(`${UI}/tsconfig.spec.json`, 'utf8').includes('"**/src/**/*.ts"'), 'and they are in a project of the library');
+      if (logs) t.ok(!logs.some((line) => line.startsWith('[warn]')), `no warning: ${logs.join(' | ')}`);
+    },
+  },
+  {
+    name: 'no entry point and no spec: reached, no spec seeded, and the target stays exactly as red as it was',
+    setup: (tree) => library(tree, { files: { 'src/index.ts': '', 'tsconfig.spec.json': SPEC_TSCONFIG } }),
+    expect: (tree, t, logs) => {
+      t.equal(uiTarget(tree).options, REACHED, 'reached');
+      t.ok(!tree.exists(`${UI}/src/lib/ds-theme.service.spec.ts`), 'not a design system: nothing seeded');
+      if (logs) t.ok(!logs.some((line) => line.startsWith('[warn]')), `no warning: ${logs.join(' | ')}`);
+    },
+  },
+  {
+    name: 'no entry point, but a spec outside src: it starts running, so it is named, whatever is in it',
+    setup: (tree) => library(tree, { files: { 'src/lib/ui.spec.ts': '', 'testing/helpers.spec.ts': '', 'tsconfig.spec.json': SPEC_TSCONFIG } }),
+    expect: (tree, t, logs) => {
+      t.equal(uiTarget(tree).options, REACHED, 'reached');
+      if (logs) t.ok(logs.some((line) => line.startsWith('[warn]') && /start running now.*packages\/ui\/testing\/helpers\.spec\.ts\.$/.test(line)), `named: ${logs.join(' | ')}`);
+    },
+  },
+  {
+    name: 'no entry point and its own include: left, warned with the value',
+    setup: (tree) => library(tree, { targets: { test: { executor: '@nx/angular:unit-test', options: { include: ['src/app/**/*.spec.ts'] } } }, files: { 'tsconfig.spec.json': SPEC_TSCONFIG } }),
+    expect: libraryLeft(/\[warn\].*Left ui: its test target declares its own include\/exclude/, { executor: '@nx/angular:unit-test', options: { include: ['src/app/**/*.spec.ts'] } }),
+  },
+  {
+    name: 'no entry point and a source root outside the library: left, warned',
+    setup: (tree) => library(tree, { sourceRoot: 'elsewhere/src', files: { 'tsconfig.spec.json': SPEC_TSCONFIG } }),
+    expect: libraryLeft(/\[warn\].*Left ui: its source root elsewhere\/src is outside the library/, UNIT_TEST),
+  },
+  {
+    name: 'no entry point and no declared type or evidence of being a library: untouched and unmentioned',
+    setup: (tree) => addProjectConfiguration(tree, 'tool', { root: 'tools/tool', sourceRoot: 'tools/tool/src', targets: { test: UNIT_TEST } }),
+    expect: (tree, t, logs) => {
+      t.equal(readJson(tree, 'tools/tool/project.json').targets.test, UNIT_TEST, 'the target stands');
+      if (logs) t.equal(logs, [], 'nothing to say');
+    },
   },
   {
     name: 'an ng-package.json in an install or build output, or inside the source root the runner already walks, is no entry point',
-    setup: (tree) => library(tree, { files: { 'ng-package.json': '{}', 'node_modules/x/ng-package.json': '{}', 'dist/ng-package.json': '{}', 'src/inner/ng-package.json': '{}', 'tsconfig.spec.json': SPEC_TSCONFIG } }),
-    expect: untouched(UNIT_TEST),
+    setup: (tree) => library(tree, { targets: { test: { executor: '@angular/build:karma' } }, files: { 'ng-package.json': '{}', 'node_modules/x/ng-package.json': '{}', 'dist/ng-package.json': '{}', 'src/inner/ng-package.json': '{}', 'tsconfig.spec.json': SPEC_TSCONFIG } }),
+    expect: untouched({ executor: '@angular/build:karma' }),
   },
   {
     name: 'an entry point on another runner (Jest walks the whole library): not this rung\'s, and not a design system to report',
@@ -240,14 +280,26 @@ const anyLibrary = [
     },
   },
   {
-    name: "a project nested in the library is its own: not an entry point, and its specs are not the library's",
+    name: "a project nested in the library is its own: not an entry point, and the include would run its specs, so the library is left and told",
     setup: (tree) => {
       library(tree, { files: { 'src/lib/ui.spec.ts': '', 'tsconfig.spec.json': SPEC_TSCONFIG } });
       addProjectConfiguration(tree, 'playground', { root: `${UI}/playground`, projectType: 'library', targets: { test: { executor: '@nx/jest:jest' } } });
       tree.write(`${UI}/playground/ng-package.json`, '{}');
       tree.write(`${UI}/playground/src/p.spec.ts`, '');
     },
-    expect: untouched(UNIT_TEST),
+    expect: libraryLeft(/\[warn\].*Left ui: other projects live inside it \(packages\/ui\/playground\)/, UNIT_TEST),
+  },
+  {
+    name: 'a library at the workspace root with no entry point holds every other project: left and told, not aimed at the whole workspace',
+    setup: (tree) => {
+      addProjectConfiguration(tree, 'rootlib', { root: '.', sourceRoot: 'src', projectType: 'library', targets: { test: UNIT_TEST } });
+      library(tree);
+    },
+    expect: (tree, t, logs) => {
+      t.equal(readJson(tree, 'project.json').targets.test, UNIT_TEST, "the root library's target stands");
+      t.equal(uiTarget(tree).options, REACHED, 'the other library is aimed');
+      if (logs) t.ok(logs.some((line) => /\[warn\].*Left rootlib: other projects live inside it/.test(line)), logs.join(' | '));
+    },
   },
   {
     name: 'a trailing slash on the source root climbs the right distance',
@@ -487,11 +539,12 @@ export default {
       expect: leftAlone(/no longer has the shape the house spec tests/),
     })),
     {
-      name: 'a library without the tag or the name is not the design system: untouched and unmentioned',
+      name: 'a library without the tag or the name is not the design system: aimed like any library, nothing seeded',
       setup: (tree) => ds(tree, { tags: ['type:ui'], name: 'ui' }),
       expect: (tree, t, logs) => {
         t.ok(!tree.exists(SPEC), 'no spec');
-        t.equal(logs, [], 'nothing to say');
+        t.equal(testTarget(tree).options, REACHED, 'reached');
+        if (logs) t.ok(!logs.some((line) => line.startsWith('[warn]') || line.includes('wrote')), `nothing to warn of: ${logs.join(' | ')}`);
       },
     },
     {

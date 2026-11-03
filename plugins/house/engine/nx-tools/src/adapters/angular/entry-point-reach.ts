@@ -39,3 +39,26 @@ export function judgeEntryPointReach(
   if (declared) return { kind: 'declared', include, exclude };
   return ours || !levels ? { kind: 'reached' } : { kind: 'aim', include, exclude };
 }
+
+/**
+ * tsconfig.spec.json gains `sources`, and loses `notSources`. Only adds to an include the file states: a tsconfig with none
+ * already holds everything under it, and is not this edit's to narrow. An exclude the file does not state is stated here,
+ * and that replaces the compiler's default, whose only member that can lie under an include of the library is the file's outDir.
+ */
+export function holdEntrySources(json: SpecTsconfig, sources: string, notSources: string): void {
+  if (!Array.isArray(json.include)) return;
+  if (!json.include.includes(sources)) json.include = [...json.include, sources];
+  const stated = Array.isArray(json.exclude) ? json.exclude : defaultExclude(json.compilerOptions?.outDir);
+  if (!stated.includes(notSources)) json.exclude = [...stated, notSources];
+}
+
+export interface SpecTsconfig {
+  include?: string[];
+  exclude?: string[];
+  compilerOptions?: { outDir?: string };
+}
+
+function defaultExclude(outDir: string | undefined): string[] {
+  const own = normalizedPath(outDir ?? '');
+  return own && !own.startsWith('..') && !own.startsWith('/') ? [`${own}/**`] : [];
+}
