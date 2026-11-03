@@ -444,9 +444,13 @@ export const onInquiryCreated = onDocumentCreated(
   },
   {
     id: 'brand-lib',
-    message: 'feat(brand): untagged brand library used by the app',
+    message: 'feat(brand): a brand library used by the app, made with Nx\'s own generator',
     async apply(c) {
-      // Through Nx's own generator, as the project did — untagged (no --tags), imported by the app.
+      // Through Nx's own generator, as the project did — born untagged (no --tags), imported by the app. Then what such a
+      // project does next: `nx sync`, the command the firewall's guidance names. The RELEASED toolkit decides what that means,
+      // so the shape stays true on both sides of the firewall: released WITH it, the sync generator tags the library (a tagged
+      // lint baseline; a project cannot stay untagged and green); released WITHOUT it, the sync has nothing to do, the library
+      // reaches the upgrade untagged, and the 0.50.0 rung must classify it. `survives` asserts the tag either way.
       const [bin, pre] = nx(c.dir);
       const r = await run('seed-brand-lib-generate', bin, [...pre, 'g', '@nx/angular:library', '--directory=packages/brand', '--name=brand',
         `--importPath=@${c.name}/brand`, '--prefix=lib', '--unitTestRunner=none', '--linter=eslint', '--style=css', '--no-interactive'], { cwd: c.dir, timeoutMs: 10 * 60_000 });
@@ -456,8 +460,14 @@ export const onInquiryCreated = onDocumentCreated(
       must(/imports: \[RouterModule/.test(src), `${app} has no 'imports: [RouterModule' to extend`);
       writeFileSync(app, `import { Brand } from '@${c.name}/brand';\n` + src.replace(/imports: \[RouterModule/, 'imports: [RouterModule, Brand'));
       appendFileSync(join(c.dir, `apps/${c.app}/src/app/app.html`), '\n<lib-brand></lib-brand>\n');
+      const sync = await run('seed-brand-lib-sync', bin, [...pre, 'sync'], { cwd: c.dir, timeoutMs: 5 * 60_000 });
+      must(sync.code === 0, `nx sync failed (${sync.log})`);
     },
-    survives: (c) => [readFileSync(join(c.dir, `apps/${c.app}/src/app/app.ts`), 'utf8').includes(`from '@${c.name}/brand'`) && existsSync(join(c.dir, 'packages/brand/project.json')), 'the app still imports the brand lib'],
+    survives: (c) => [
+      readFileSync(join(c.dir, `apps/${c.app}/src/app/app.ts`), 'utf8').includes(`from '@${c.name}/brand'`)
+        && (readJson(join(c.dir, 'packages/brand/project.json')).tags ?? []).includes('platform:web'),
+      'the app still imports the brand lib, and it is classified platform:web',
+    ],
   },
   {
     id: 'web-e2e-compact',
