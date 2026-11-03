@@ -1,4 +1,5 @@
-// 0.51.2 — a house Angular design system gets the spec its @nx/angular:unit-test target fails without.
+// 0.51.2 — a house Angular design system gets a test target that runs every spec in the library, and the spec the target
+// fails without.
 //
 // A rung that adds a test can swap one red target for another, so every skip is a case. Input: DsTheme exactly as the
 // house shipped it (0.51.2-ds-theme-shapes/, from git: ed399a8d — unchanged in code through 8ec22591 —, a4ca72cb,
@@ -18,12 +19,17 @@ const LATEST = '94f13d27';
 const ROOT = 'packages/design-system';
 const SPEC = `${ROOT}/src/lib/ds-theme.service.spec.ts`;
 const UNIT_TEST = { executor: '@nx/angular:unit-test', options: { watch: false } };
+const INCLUDE = ['**/*.spec.ts', '**/*.test.ts', '../**/*.spec.ts', '../**/*.test.ts'];
+const EXCLUDE = ['../**/node_modules/**', '../**/dist/**'];
+const REACHED = { watch: false, include: INCLUDE, exclude: EXCLUDE };
 
 function ds(tree, { test = UNIT_TEST, theme = shape(LATEST), tags = ['type:design-system', 'platform:web'], files = {}, name = 'design-system', root = ROOT } = {}) {
   addProjectConfiguration(tree, name, { root, projectType: 'library', tags, targets: { build: { executor: '@nx/angular:package' }, ...(test ? { test } : {}) } });
   if (theme !== null) tree.write(`${root}/src/lib/ds-theme.service.ts`, theme);
   for (const [path, text] of Object.entries(files)) tree.write(`${root}/${path}`, text);
 }
+
+const testTarget = (tree, root = ROOT) => readJson(tree, `${root}/project.json`).targets.test;
 
 /** Left alone: no spec written, and the reason in the log. */
 function leftAlone(reason, spec = SPEC) {
@@ -44,6 +50,7 @@ export default {
         t.exists(SPEC);
         t.has(SPEC, "const MODE_ATTRIBUTE = 'data-ds-mode';");
         t.has(SPEC, "from './ds-theme.service'");
+        t.equal(testTarget(tree).options, REACHED, 'the target runs every spec in the library');
         if (logs) t.ok(logs.some((line) => line.includes(`wrote ${SPEC}`)), `the write is reported: ${logs.join(' | ')}`);
       },
     })),
@@ -64,8 +71,8 @@ export default {
         t.exists('libs/ui/src/lib/ds-theme.service.spec.ts');
         t.equal(
           readJson(tree, 'libs/ui/project.json').targets.test,
-          { executor: '@nx/angular:unit-test', dependsOn: ['^build'], options: { watch: false, coverage: true } },
-          'the target as the project left it',
+          { executor: '@nx/angular:unit-test', dependsOn: ['^build'], options: { watch: false, coverage: true, include: INCLUDE, exclude: EXCLUDE } },
+          'the target as the project left it, plus the reach',
         );
       },
     },
@@ -77,17 +84,23 @@ export default {
     {
       name: 'another executor (jest passes with no specs): left, reported',
       setup: (tree) => ds(tree, { test: { executor: '@nx/jest:jest', options: { passWithNoTests: true } } }),
-      expect: leftAlone(/Left design-system: its test target uses @nx\/jest:jest/),
+      expect: (tree, t, logs) => {
+        leftAlone(/Left design-system: its test target uses @nx\/jest:jest/)(tree, t, logs);
+        t.equal(testTarget(tree).options, { passWithNoTests: true }, 'the target is untouched');
+      },
     },
     {
       name: 'the same builder under its own name: left, reported as not judged, not as passing',
       setup: (tree) => ds(tree, { test: { executor: '@angular/build:unit-test' } }),
-      expect: leftAlone(/this spec is for @nx\/angular:unit-test.*add a spec/),
+      expect: leftAlone(/this is for @nx\/angular:unit-test.*add a spec/),
     },
     {
-      name: 'a target with its own include: left, warned, a seeded spec might not run',
+      name: "a target with its own include: left, warned that neither a seeded spec nor the entry points' may run, and told the value",
       setup: (tree) => ds(tree, { test: { executor: '@nx/angular:unit-test', options: { include: ['src/app/**/*.spec.ts'] } } }),
-      expect: leftAlone(/Left design-system: its test target declares its own include\/exclude/),
+      expect: (tree, t, logs) => {
+        leftAlone(/Left design-system: its test target declares its own include\/exclude.*entry points.*\.\.\/\*\*\/\*\.spec\.ts/)(tree, t, logs);
+        t.equal(testTarget(tree).options, { include: ['src/app/**/*.spec.ts'] }, 'the project\'s include stands');
+      },
     },
     {
       name: 'a target with its own exclude: left, warned',
@@ -105,9 +118,77 @@ export default {
       expect: leftAlone(/Left design-system: it already has a spec \(packages\/design-system\/src\/lib\/mine\.spec\.ts\)\.$/),
     },
     {
-      name: 'a spec only in an entry point, outside the source root: left, and warned that the target is still red',
+      name: 'a spec only in an entry point: the target now reaches it, so it is what the target runs, and nothing is seeded',
       setup: (tree) => ds(tree, { files: { 'button/src/button.spec.ts': "it('x', () => {});\n" } }),
-      expect: leftAlone(/already has a spec \(packages\/design-system\/button\/src\/button\.spec\.ts\), but .* finds specs only under packages\/design-system\/src, .*still fails/),
+      expect: (tree, t, logs) => {
+        leftAlone(/already has a spec \(packages\/design-system\/button\/src\/button\.spec\.ts\)\.$/)(tree, t, logs);
+        t.equal(testTarget(tree).options, REACHED, 'the target reaches it');
+        if (logs) t.ok(logs.some((line) => /now runs every spec in the library/.test(line)), `the change is reported: ${logs.join(' | ')}`);
+      },
+    },
+    {
+      name: 'the include this rung writes is not "its own": no warning, and the spec is still seeded',
+      setup: (tree) => ds(tree, { test: { executor: '@nx/angular:unit-test', options: REACHED } }),
+      expect: (tree, t, logs) => {
+        t.exists(SPEC);
+        t.equal(testTarget(tree).options, REACHED, 'unchanged');
+        if (logs) t.ok(!logs.some((line) => /declares its own/.test(line)), `no warning: ${logs.join(' | ')}`);
+      },
+    },
+    {
+      name: 'the include this rung writes with an exclude the project changed: its own, left',
+      setup: (tree) => ds(tree, { test: { executor: '@nx/angular:unit-test', options: { ...REACHED, exclude: ['../legacy/**'] } } }),
+      expect: leftAlone(/declares its own include\/exclude/),
+    },
+    {
+      name: 'the include this rung writes, in a configuration: its own, left',
+      setup: (tree) => ds(tree, { test: { executor: '@nx/angular:unit-test', options: REACHED, configurations: { ci: { include: INCLUDE } } } }),
+      expect: leftAlone(/declares its own include\/exclude/),
+    },
+    {
+      name: 'a source root deeper in the library: the globs climb out of where it is',
+      setup: (tree) => {
+        ds(tree);
+        writeJson(tree, `${ROOT}/project.json`, { ...readJson(tree, `${ROOT}/project.json`), sourceRoot: `${ROOT}/src/public` });
+      },
+      expect: (tree, t) => {
+        t.equal(testTarget(tree).options.include.at(-1), '../../**/*.test.ts', 'two levels up');
+        t.equal(testTarget(tree).options.exclude, ['../../**/node_modules/**', '../../**/dist/**'], 'the exclude too');
+      },
+    },
+    {
+      name: 'a source root that is the library: the default already reaches everything, so the target is left as it is',
+      setup: (tree) => {
+        ds(tree);
+        writeJson(tree, `${ROOT}/project.json`, { ...readJson(tree, `${ROOT}/project.json`), sourceRoot: ROOT });
+      },
+      expect: (tree, t) => {
+        t.exists(SPEC);
+        t.equal(testTarget(tree).options, { watch: false }, 'no include');
+      },
+    },
+    {
+      name: 'a source root outside the library: left, warned, `..` from there is not the library',
+      setup: (tree) => {
+        ds(tree);
+        writeJson(tree, `${ROOT}/project.json`, { ...readJson(tree, `${ROOT}/project.json`), sourceRoot: 'elsewhere/src' });
+      },
+      expect: (tree, t, logs) => {
+        leftAlone(/its source root elsewhere\/src is outside the library/)(tree, t, logs);
+        t.equal(testTarget(tree).options, { watch: false }, 'no include');
+      },
+    },
+    {
+      name: 'what an earlier ds-component left in an entry: reported, nothing touched',
+      setup: (tree) => ds(tree, { files: { 'button/src.ts': '// stray\n', 'button/src/index.ts': "export * from './button.component';\n", 'card/src/index.ts': "export * from './card';\n" } }),
+      expect: (tree, t, logs) => {
+        t.equal(tree.read(`${ROOT}/button/src.ts`, 'utf8'), '// stray\n', 'the stray file stays');
+        t.has(`${ROOT}/button/src/index.ts`, './button.component');
+        if (logs) {
+          t.ok(logs.some((line) => /button\/src\.ts is what ds-component wrote before 0\.51\.2.*delete packages\/design-system\/button.*ds-component button/.test(line)), `reported: ${logs.join(' | ')}`);
+          t.ok(!logs.some((line) => line.includes('card/src.ts')), 'a whole entry is not mentioned');
+        }
+      },
     },
     {
       name: 'a spec the runner does not match, under the source root: left, warned',

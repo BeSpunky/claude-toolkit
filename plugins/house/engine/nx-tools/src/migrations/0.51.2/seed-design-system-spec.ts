@@ -1,30 +1,40 @@
-// 0.51.2 — a house Angular design system is born with no spec, so `nx test` on it exits 1.
+// 0.51.2 — what `nx test` says about a house Angular design system is the truth: it exits 1 on a library with no spec, and
+// exits 0 past a failing spec in an entry point.
 //
-// WHY IT FAILS. @nx/angular's library generator wrote a demo component and its spec; the design-system generator pruned
-// both, because the library ships no components. The target it left is @nx/angular:unit-test, which throws "No tests
-// found" on a library with no spec and has no passWithNoTests option (the schema refuses it: verified on @nx/angular
-// 24.0.3 / @angular/build 22.2.5). It looks only under the project's source root (<library>/src), so a ds-component's
-// spec, at <library>/<entry>/src, does not count for it.
+// WHY. @nx/angular's library generator wrote a demo component and its spec; the design-system generator pruned both,
+// because the library ships no components. The target it left is @nx/angular:unit-test, which throws "No tests found" on a
+// library with no spec and has no passWithNoTests option (the schema refuses it: verified on @nx/angular 24.0.3 /
+// @angular/build 22.2.5). It looks only under the project's source root (<library>/src), and a ds-component's spec is at
+// <library>/<entry>/src: never run, so a failing one exits 0 beside a passing DsTheme spec.
 //
-// WHAT THIS DOES. The generator now seeds a real spec of DsTheme on creation; this rung gives it to the libraries already
-// on disk. It adds a TEST, so it must not swap one red target for another: it adds only what it can tell will run and
-// pass, and everything else is left and reported with its reason. Every house DsTheme ever shipped (ed399a8d, a4ca72cb,
-// 94f13d27) passes the shape check below and this spec.
+// WHAT THIS DOES, as the generator now does on creation:
+//   1. gives the target an include and exclude that reach every spec in the library. The include holds both halves: the
+//      builder's glob reports a file under its cwd (the source root) by its cwd-relative path, which a `../` pattern never
+//      matches, so `../**` alone finds the entry points and silently drops src. The exclude is needed because the
+//      builder's own node_modules ignore does not match above its cwd either;
+//   2. seeds a real spec of DsTheme where the library has none at all. That adds a TEST, so it must not swap one red
+//      target for another: it adds only what it can tell will run and pass. Every house DsTheme ever shipped (ed399a8d,
+//      a4ca72cb, 94f13d27) passes the shape check below and this spec.
 //
-// SKIPPED, WITH A REPORT:
-//   - no test target, or one with another executor: this spec is not known to be what that runner lacks (jest also
-//     exits 1 on no tests unless told otherwise, and Nx 24 infers its target, so no project config shows it);
-//   - the target declares its own include/exclude, in any configuration: the project chose what is tested, so a spec
-//     may not even be picked up;
-//   - any spec anywhere in the library, and the file is never overwritten. One under the source root is what the target
-//     runs; one only outside it leaves the target red, so that one warns;
+// LEFT, WITH A REPORT:
+//   - no test target, or one with another executor: neither change is known to be what that runner lacks (jest also exits
+//     1 on no tests unless told otherwise, and Nx 24 infers its target, so no project config shows it);
+//   - the target declares an include/exclude other than the above, in any configuration: the project chose what is
+//     tested, so a seeded spec may not even be picked up, and an entry's spec may not either;
+//   - a source root outside the library: `..` from there is not the library;
+//   - any spec already in the library, and the file is never overwritten. One the runner matches is what the target runs;
+//     one it does not leaves the target red, so that one warns;
 //   - no src/lib/ds-theme.service.ts, or a DsTheme reshaped past what the spec tests (the mode signal, the root element
 //     it writes the attribute to and removes it from, the 'dark' and 'system' modes, no dependency TestBed would have
 //     to provide).
 // What can leave the target red warns and says what to do.
 //
-// SELF-CONTAINED by the migration contract: the tag and the spec are frozen copies, not imports from the generators.
-import { type ProjectConfiguration, type Tree, getProjects, logger } from '@nx/devkit';
+// REPORTED, NEVER REPAIRED: `<entry>/src.ts` beside `<entry>/src/`, what ds-component wrote before 0.51.2 (it handed
+// @nx/angular a directory where it reads a file). The barrel it wrote exports a file that does not exist, so that entry
+// never built as generated; one that builds was fixed by hand, in a shape only its project knows.
+//
+// SELF-CONTAINED by the migration contract: the tag, the globs and the spec are frozen copies, not imports from the generators.
+import { type ProjectConfiguration, type Tree, getProjects, logger, updateProjectConfiguration } from '@nx/devkit';
 
 const TAG = '[migrate 0.51.2 seed-design-system-spec]';
 const DESIGN_SYSTEM_TAG = 'type:design-system';
@@ -35,8 +45,11 @@ const THEME = 'src/lib/ds-theme.service.ts';
 const SPEC = 'src/lib/ds-theme.service.spec.ts';
 /** The one thing a project's own spec could be called, whatever its extension. */
 const ANY_SPEC = /\.(?:spec|test)\.[cm]?[jt]sx?$/;
-/** What the executor's default include finds. */
+/** What the include below finds. */
 const RUNNABLE_SPEC = /\.(?:spec|test)\.ts$/;
+/** What the target is given: every spec in a library whose source root is `up` levels below its root. */
+const includeFrom = (up: string) => ['**/*.spec.ts', '**/*.test.ts', `${up}**/*.spec.ts`, `${up}**/*.test.ts`];
+const excludeFrom = (up: string) => [`${up}**/node_modules/**`, `${up}**/dist/**`];
 /** Never walked: an install or build output is not the library's own spec. */
 const SKIPPED_DIRS = new Set(['node_modules', 'dist']);
 /** What DsTheme may inject and still construct in a bare TestBed. */
@@ -47,24 +60,72 @@ export default function update(tree: Tree): void {
   const tagged = [...projects].filter(([, project]) => project.tags?.includes(DESIGN_SYSTEM_TAG));
   const byName = projects.get(DESIGN_SYSTEM_NAME);
   const found = tagged.length || !byName || byName.projectType === 'application' ? tagged : [[DESIGN_SYSTEM_NAME, byName] as const];
-  for (const [name, project] of found) seedSpec(tree, name, project);
+  for (const [name, project] of found) {
+    if (reachWholeLibrary(tree, name, project)) seedSpec(tree, name, project);
+    reportStrayComponents(tree, name, project);
+  }
+}
+
+/** Aims the target at every spec in the library. False when it is left as it is, and what it finds is not this rung's to judge. */
+function reachWholeLibrary(tree: Tree, name: string, project: ProjectConfiguration): boolean {
+  const target = project.targets?.test;
+  if (!target) {
+    logger.info(`${TAG} Left ${name}: its project config has no test target, and this is for ${EXECUTOR}. If an inferred runner reports no tests, add a spec.`);
+    return false;
+  }
+  if (target.executor !== EXECUTOR) {
+    logger.info(`${TAG} Left ${name}: its test target uses ${target.executor ?? 'a command'}, and this is for ${EXECUTOR}. If \`nx test ${name}\` reports no tests, add a spec.`);
+    return false;
+  }
+  const sourceRoot = project.sourceRoot ?? `${project.root}/src`;
+  const inside = sourceRoot === project.root || sourceRoot.startsWith(`${project.root}/`);
+  if (!inside) {
+    logger.warn(`${TAG} Left ${name}: its source root ${sourceRoot} is outside the library, so \`nx test ${name}\` may not run the specs of its entry points. Check that it does.`);
+    return false;
+  }
+  const up = '../'.repeat(sourceRoot === project.root ? 0 : sourceRoot.slice(project.root.length + 1).split('/').length);
+  const include = includeFrom(up);
+  const exclude = excludeFrom(up);
+  const ours = same(target.options?.include, include) && same(target.options?.exclude, exclude);
+  const declared = [ours ? undefined : target.options, ...Object.values(target.configurations ?? {})].some((options) => options?.include || options?.exclude);
+  if (declared) {
+    logger.warn(
+      `${TAG} Left ${name}: its test target declares its own include/exclude, so a seeded spec might not run, and neither might the specs of its entry points (at <library>/<entry>/src). ` +
+        `If \`nx test ${name}\` reports "No tests found", add a spec it matches; to run every spec in the library, its include is ${JSON.stringify(include)}.`,
+    );
+    return false;
+  }
+  // A source root that IS the library: the runner's default already walks everything in it.
+  if (up && !ours) {
+    target.options = { ...target.options, include, exclude };
+    updateProjectConfiguration(tree, name, project);
+    logger.info(`${TAG} ${name}: its test target now runs every spec in the library. It looked only under ${sourceRoot}, so a failing spec in an entry point exited 0.`);
+  }
+  return true;
+}
+
+function same(actual: unknown, expected: string[]): boolean {
+  return JSON.stringify(actual) === JSON.stringify(expected);
+}
+
+/** Says what ds-component left in an entry before 0.51.2; see REPORTED, NEVER REPAIRED above. */
+function reportStrayComponents(tree: Tree, name: string, project: ProjectConfiguration): void {
+  for (const child of tree.children(project.root)) {
+    const entry = `${project.root}/${child}`;
+    if (tree.isFile(entry) || SKIPPED_DIRS.has(child) || !tree.exists(`${entry}/src.ts`) || !tree.exists(`${entry}/src/index.ts`)) continue;
+    logger.warn(
+      `${TAG} ${name}: ${entry}/src.ts is what ds-component wrote before 0.51.2, beside the folder its barrel is in. If ${entry}/src/index.ts exports a file that does not exist, ` +
+        `\`nx build ${name}\` fails on it: delete ${entry} and run \`nx g @bespunky/nx-tools:ds-component ${child}\`. If you fixed it by hand, its spec (${entry}/src.spec.ts) now runs too.`,
+    );
+  }
 }
 
 function seedSpec(tree: Tree, name: string, project: ProjectConfiguration): void {
-  const target = project.targets?.test;
-  if (!target) return logger.info(`${TAG} Left ${name}: its project config has no test target, and this spec is for ${EXECUTOR}. If an inferred runner reports no tests, add a spec.`);
-  if (target.executor !== EXECUTOR) {
-    return logger.info(`${TAG} Left ${name}: its test target uses ${target.executor ?? 'a command'}, and this spec is for ${EXECUTOR}. If \`nx test ${name}\` reports no tests, add a spec.`);
-  }
-  if ([target.options, ...Object.values(target.configurations ?? {})].some((options) => options?.include || options?.exclude)) {
-    return logger.warn(`${TAG} Left ${name}: its test target declares its own include/exclude, so a seeded spec might not run. If \`nx test ${name}\` reports "No tests found", add a spec it matches.`);
-  }
-  const sourceRoot = project.sourceRoot ?? `${project.root}/src`;
-  const runnable = firstSpec(tree, sourceRoot, RUNNABLE_SPEC);
+  const runnable = firstSpec(tree, project.root, RUNNABLE_SPEC);
   if (runnable) return logger.info(`${TAG} Left ${name}: it already has a spec (${runnable}).`);
-  const unreachable = firstSpec(tree, project.root, ANY_SPEC);
-  if (unreachable) {
-    return logger.warn(`${TAG} Left ${name}: it already has a spec (${unreachable}), but ${EXECUTOR} finds specs only under ${sourceRoot}, so \`nx test ${name}\` still fails with "No tests found". Add a spec there, or an include that reaches this one.`);
+  const unmatched = firstSpec(tree, project.root, ANY_SPEC);
+  if (unmatched) {
+    return logger.warn(`${TAG} Left ${name}: it already has a spec (${unmatched}), but ${EXECUTOR} runs only *.spec.ts and *.test.ts, so \`nx test ${name}\` still fails with "No tests found". Add a spec it matches.`);
   }
 
   const themePath = `${project.root}/${THEME}`;
