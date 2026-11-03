@@ -1,6 +1,9 @@
 ---
 effort: subagent-no-zombie-watchers
-summary: An agent never reports back while a watcher or poll it started is still running, so a finished review cannot leave a loop going for hours.
+status: concluded
+concluded: 2026-11-03
+summary: Agents wait by ending their turn and stop what they started by id before reporting; the rules had named a blocking dispatch the tool does not have, which led a reviewer to a poll that ran eight hours. Ruled out a SubagentStop guard, since background work has no owner.
+tags: [delegation, sanity-review, subagents, house-rules]
 ---
 
 The sanity-reviewer of standing-skill-pane reported at 14:30 and left a shell poll running until it was killed at 22:13. User, offered the fix: *"Yes, fix it"*.
