@@ -94,7 +94,7 @@
     "adopt-extracted": {
       "factory": "./src/generators/adopt-extracted/generator",
       "schema": "./src/generators/adopt-extracted/schema.json",
-      "description": "Close the extraction loop: replace a local library (already published as @bespunky/<name>) with the public-npm package. Honours verify-then-delete — the default run adds the package + rewrites imports but keeps the lib; build to verify, then re-run with --finalize to remove the now-unused local lib. --keepShim instead leaves the lib as a thin re-export for staged migration; with no spec left, a runner that reads a config is told none is not a failure, and an @nx/angular:unit-test or @angular/build:unit-test target, which cannot be told, is removed."
+      "description": "Close the extraction loop: replace a local library (already published as @bespunky/<name>) with the public-npm package. Honours verify-then-delete — the default run adds the package + rewrites imports but keeps the lib; build to verify, then re-run with --finalize to remove the now-unused local lib. --keepShim instead leaves the lib as a thin re-export for staged migration, peering the package and dropping the framework peers it no longer imports; with no spec left, a runner that reads a config is told none is not a failure, and an @nx/angular:unit-test or @angular/build:unit-test target, which cannot be told, is removed."
     },
     "navigation-core": {
       "factory": "./src/generators/navigation-core/generator",

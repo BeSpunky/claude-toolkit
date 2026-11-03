@@ -48,3 +48,9 @@ Not covered: UX, scalability, security, visual lenses: no surface for them here.
 ## Verification after the fixes
 
 test-migrations 386 (clean copy, no peers), test-generators --strict 303, test-layers 103, descriptions and script modes ok. Extended Angular tripwire, real run on Nx 23.1: passing 0, failing spec in `card/src` 1, in `src/lib` 1. Every changed module loads alone when compiled. The tripwire caught an import cycle this review's first fix introduced (the adapter reaching the layer registry through entry-point-specs): the pure half moved to `adapters/angular/entry-point-reach.ts`. Owed again: `tools/dogfood-consumer/run.mjs`, with the new `verifyDsComponent` step, not yet run through the tool (a verifier dry-ran its commands by hand: 0, 0, 0, 0, failing 1, clean).
+
+## Decisions taken after this review
+
+- F1, F3 and the `tsconfig.spec.json` dist exclude: implemented.
+- `tsconfig.lib.json` also reaches `<lib>/dist/*/src`, through the same `**/src/**/*.ts` that secondary-entrypoint's reset writes (observed: a type error planted there fails `nx typecheck` on a library with an entry). Left alone: pre-existing, and nothing observed failing on a real output.
+- `adopt-extracted --version` never reached the generator, because Nx's CLI keeps the flag: renamed `--packageVersion`, no alias. `--keepShim` now peers the package and drops the Angular peers nothing imports, so it passes its own lint.

@@ -7,7 +7,7 @@ import { withPlatform, csvTags } from '../../platform/platform';
 import { stateAnalogTsconfig } from './analog-tsconfig';
 import { convertBareLint } from '../../generators/_utils/lint-inference';
 import { libraryUnitTestRunner } from './workspace-angular';
-import { pruneUnusedPeers } from './library-peers';
+import { pruneShimPeers, pruneUnusedPeers } from './library-peers';
 import { aimUnitTestTargets } from './entry-point-specs';
 
 const noop: GeneratorCallback = () => {};
@@ -81,6 +81,8 @@ export const angularLibs: LibPort = {
     }
     return callback;
   },
+
+  pruneShimPeers,
 
   /**
    * The library's root ng-package.json in the house modern-entrypoint shape:

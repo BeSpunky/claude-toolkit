@@ -122,6 +122,9 @@ rm "$NO_SPEC_LOG"
 step "nx run-many -t test over a keepShim library: it has no target to fail"
 npx nx run-many -t test -p shim,ui --skip-nx-cache --outputStyle=static || fail "run-many -t test: red over a keepShim library"
 
+step "nx lint: a keepShim library peers what it re-exports and nothing it no longer imports"
+npx nx lint shim --skip-nx-cache --outputStyle=static || fail "nx lint shim: a keepShim library fails its own dependency checks"
+
 # tsconfig.spec.json's entry-sources glob also matches a build output at the library's root; its exclude must keep that out.
 # On `plain`: `ui` holds an entry, and secondary-entrypoint's tsconfig.lib.json has a glob of its own that also reaches there.
 step "typecheck: tsconfig.spec.json keeps a build output at the library's root out"

@@ -12,7 +12,18 @@ import { updateManifest } from '../../generators/_utils/dependencies';
 
 /** Drop the manifest peers {@link unusedAngularPeers} names, each one named in the log. */
 export function pruneUnusedPeers(tree: Tree, root: string): void {
-  const unused = unusedAngularPeers(tree, root);
+  dropPeers(tree, root, unusedAngularPeers(tree, root));
+}
+
+/**
+ * The same for a library that has become a re-export of a package, which is the one Angular library that may need no
+ * @angular/core: nothing left imports it, and @nx/dependency-checks reports that one like any other (real run, Nx 24).
+ */
+export function pruneShimPeers(tree: Tree, root: string): void {
+  dropPeers(tree, root, peersNothingImports(tree, root, () => true));
+}
+
+function dropPeers(tree: Tree, root: string, unused: string[]): void {
   if (!unused.length) return;
   updateManifest(tree, `${root}/package.json`, 'angular library', (json) => {
     for (const name of unused) delete json.peerDependencies[name];
@@ -26,6 +37,10 @@ export function pruneUnusedPeers(tree: Tree, root: string): void {
  * and no source file under it imports. The rule @nx/dependency-checks applies, so the library passes its own lint.
  */
 export function unusedAngularPeers(tree: Tree, root: string): string[] {
+  return peersNothingImports(tree, root, (name) => name !== '@angular/core');
+}
+
+function peersNothingImports(tree: Tree, root: string, judged: (name: string) => boolean): string[] {
   const manifest = `${root}/package.json`;
   if (!tree.exists(manifest)) return [];
   let peers: Record<string, string> = {};
@@ -34,7 +49,7 @@ export function unusedAngularPeers(tree: Tree, root: string): string[] {
   } catch {
     return [];
   }
-  const candidates = Object.keys(peers).filter((name) => name.startsWith('@angular/') && name !== '@angular/core');
+  const candidates = Object.keys(peers).filter((name) => name.startsWith('@angular/') && judged(name));
   if (!candidates.length) return [];
   const sources: string[] = [];
   const walk = (dir: string) => {

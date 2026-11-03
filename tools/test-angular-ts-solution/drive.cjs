@@ -62,7 +62,7 @@ const SHIM_ROOT = 'packages/shim';
   // published, typed, and already what an Angular workspace declares.
   await angular.libs.create(tree, { name: 'shim', directory: SHIM_ROOT, importPath: `@${scope}/shim`, publishable: true, prefix: 'bs', style: 'scss' });
   angular.libs.normalizePackaging?.(tree, SHIM_ROOT);
-  await adoptExtracted(tree, { lib: 'shim', package: 'rxjs', version: readJson(tree, 'package.json').dependencies?.rxjs ?? '^7.8.0', keepShim: true });
+  await adoptExtracted(tree, { lib: 'shim', package: 'rxjs', packageVersion: readJson(tree, 'package.json').dependencies?.rxjs ?? '^7.8.0', keepShim: true });
   assert.equal(readJson(tree, `${SHIM_ROOT}/project.json`).targets.test, undefined, 'adopt-extracted --keepShim left a test target that can only fail "No tests found"');
 
   const roots = [...getProjects(tree).values()].map((p) => p.root);

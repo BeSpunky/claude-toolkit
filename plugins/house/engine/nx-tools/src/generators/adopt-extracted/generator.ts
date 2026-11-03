@@ -35,15 +35,17 @@ import {
 } from '@nx/devkit';
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking } from '../_utils/linking';
-import { declareDependencies, declaredSpec, updateManifest } from '../_utils/dependencies';
+import { declareDependencies, declaredSpec, placeDependency, updateManifest } from '../_utils/dependencies';
 import { passWithNoTests, passWithNoTestsGap } from '../_utils/pass-with-no-tests';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { UNIT_TEST_EXECUTORS } from '../../adapters/angular/entry-point-reach';
+import { adapterOf } from '../../adapters/registry';
 
 interface AdoptExtractedSchema {
   lib: string;
   package?: string;
-  version?: string;
+  /** Not `version`: Nx's CLI keeps that flag for itself, and it never reaches a generator. */
+  packageVersion?: string;
   finalize?: boolean;
   keepShim?: boolean;
 }
@@ -74,6 +76,20 @@ function tellTheRunnerAboutNoSpecs(tree: Tree, lib: string): void {
   const noRunner = result.kind === 'no-config' && !project.targets?.test;
   const gap = covered || noRunner ? null : passWithNoTestsGap(result);
   if (gap) logger.warn(`Could not set passWithNoTests on "${lib}" (${gap}). \`nx test ${lib}\` fails on "no tests" until the library has a spec, or its test target is removed.`);
+}
+
+/**
+ * A shim imports the package, so a publishable one peers it, or it fails its own lint (@nx/dependency-checks) and consumers
+ * do not get it. At the version the workspace was just told to adopt. A library sharing the package's name does not peer
+ * itself, and one already depending on the package has declared it.
+ */
+function peerThePackage(tree: Tree, root: string, packageName: string, version: string): void {
+  const manifest = joinPathFragments(root, 'package.json');
+  if (!tree.exists(manifest)) return;
+  updateManifest(tree, manifest, 'adopt-extracted', (json) => {
+    if (json.name === packageName || json.dependencies?.[packageName]) return;
+    json.peerDependencies = placeDependency(json.peerDependencies, packageName, version);
+  });
 }
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -150,11 +166,11 @@ export default async function adoptExtractedGenerator(
   // when it published (marker.ingestedPackage.version), as a caret range; with neither, ask rather than float.
   const recorded: unknown = marker.ingestedPackage?.version;
   const version =
-    options.version ?? (typeof recorded === 'string' && /^\d+\.\d+\.\d+/.test(recorded) ? `^${recorded}` : undefined);
+    options.packageVersion ?? (typeof recorded === 'string' && /^\d+\.\d+\.\d+/.test(recorded) ? `^${recorded}` : undefined);
   if (!version) {
     throw new Error(
       `adopt-extracted: which version of ${packageName} should "${options.lib}" adopt? The extraction marker records ` +
-        `none it can use${typeof recorded === 'string' ? ` ("${recorded}")` : ''}. Pass --version=^<published version> ` +
+        `none it can use${typeof recorded === 'string' ? ` ("${recorded}")` : ''}. Pass --packageVersion=^<published version> ` +
         `(\`npm view ${packageName} version\` names the newest) — the house never declares a dist-tag like latest.`
     );
   }
@@ -174,6 +190,8 @@ export default async function adoptExtractedGenerator(
     if (tree.exists(libImplDir)) tree.delete(libImplDir);
     // A shim has nothing to test; a spec it kept outside src/lib, it keeps.
     tellTheRunnerAboutNoSpecs(tree, options.lib);
+    peerThePackage(tree, project.root, packageName, version);
+    adapterOf(tree, options.lib)?.libs?.pruneShimPeers?.(tree, project.root);
     marker.status = 'adopted-shim';
     writeJson(tree, markerPath, marker);
     await formatFiles(tree);

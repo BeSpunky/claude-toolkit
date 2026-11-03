@@ -103,6 +103,8 @@ export interface LibPort {
   normalizePackaging?(tree: Tree, projectRoot: string): void;
   /** Allow these runtime `dependencies` through the framework packager, where it gates them. */
   allowDependencies?(tree: Tree, projectRoot: string, dependencies: string[]): void;
+  /** The library is now a re-export of a package: drop the framework peers nothing in it imports any more. */
+  pruneShimPeers?(tree: Tree, projectRoot: string): void;
 }
 
 /** One application's environment-config files — where per-env values live in this framework. */
