@@ -1,6 +1,9 @@
 ---
 effort: standing-skill-pane
-summary: The project-standing skill knows about the /standing pane and offers it non-intrusively, with a button instead of a second, disconnected way to see the same thing.
+status: concluded
+concluded: 2026-11-03
+summary: Running project-standing now offers the /standing pane in a band above the prompt, raised by the mod from the skill.prompt event, and the pane's Catch me up runs the skill; ruled out a tool Claude must remember to call.
+tags: [project-standing, mods, standing-pane, workflow]
 ---
 
 User, on the skill and the pane being separate: *"That's rediculos. Integrate the two. The skill should know about the mod and propose the panel non-intrusively. Maybe by adding mod buttons that will run the `/standing` command?"*
