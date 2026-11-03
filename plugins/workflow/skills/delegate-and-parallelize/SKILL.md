@@ -217,7 +217,15 @@ Delegates **gather and execute**. You **decide**. The line is not about difficul
 
 > **You may not report, conclude, or hand back while a child you spawned is still in flight. Every agent you start, you finish.**
 
-**Wait properly, don't poll blindly.** Background agents notify you when they complete — that notification is the primary signal, and re-invoking or busy-waiting for it is wasted spend. When you need a result *before* you can take the next step, run that agent synchronously rather than starting it and guessing at when it lands.
+**To wait, end your turn.** Agents run in the background and there is no blocking dispatch, so when you need a result before the next step, end your turn with one line saying what you are waiting for, and do not report or hand back. A turn is not an exit: the child's report arrives as your next message, and you carry on. This holds at every depth, and for a long command of your own: `run_in_background`, end your turn, and its completion wakes you.
+
+**A notice is not a report.** A child can stop with *has not reported yet: it is waiting on its own background work*. That says nothing about its result, so end your turn again. Observed on Claude Code 2.1.317: a subagent that does so can be told to hand back at once (`[handback-send-enforce]`), because a child in that state no longer counts as running. Then hand back, naming the child you are still missing and what its absence leaves uncovered. Its report is not lost: it goes up to the session, which folds it in. So a child whose answer you need should do its long work in the foreground where it can.
+
+**Never build a wait for an agent.** No `sleep` or `until` loop, no `Monitor` or grep over another agent's transcript. (`Monitor` is fine for a condition outside the tree, such as a deploy going green: it expires by itself, and a hand-rolled loop does not.) Each of these has already failed for real:
+
+- **A foreground wait holds back what it waits for.** Reports are delivered between your tool calls, so a reviewer's report from 14:16 reached a parent blocked in a poll at 14:24.
+- **A transcript is not a contract.** One watcher fired at once because its grep matched a tool's name in the prompt recorded at the top of the file. Its replacement could never pass, because a finished agent's last record is a tool result.
+- **A wait outlives you.** A foreground command past its timeout moves to the background and keeps running. That poll ran for eight hours after the agent reported.
 
 **Check on them anyway — silence is not progress.** Notification covers the agents that finish; supervision covers the ones that don't. Long-running children go quiet for two very different reasons, and from the outside they look identical, so periodically ask which one you are looking at:
 
@@ -234,6 +242,8 @@ Between checks, do the work that does not depend on them. Idle waiting is the on
 - **Failed or returned nothing** — say so in the report. A dropped agent is a hole in the coverage, and an unmentioned hole reads as coverage.
 - **Still running when the goal is already settled** — its answer no longer changes anything, so **stop it deliberately** rather than leaving it to run out. Stopping is a decision you make and state; drifting away from it is not.
 - **Never assume an outcome you were not told.** A child you did not hear back from has not "probably finished". If a result has not arrived, you do not have it — and you never write the notification yourself.
+
+**Then your own background commands.** Anything of yours that went to the background, by choice or by timing out, gets stopped by the id the tool gave you (`TaskStop`), before you report. Don't stop it by a pattern: `pkill -f` matches the command line as launched, not as you remember it, and a miss looks exactly like success. A completion notice that says an agent *stopped with background work still running* means it left something behind: while it is still waiting on its own children that is normal, but once it has reported, send it a message to stop what it left, by id.
 
 **Then the process roster — the agents are not the only thing a fan-out leaves running.** Check what is still listening against what the children reported starting: `tools/dev/dev ps` in a house project (every stack, its owner and ports; orphans included), else `ss -ltnp` on the ports they named. A listener nobody reported is an unaccounted child: stop it by its handle if it is provably the tree's own (`tools/dev/dev stop <app> --offset=<n>` — by name: the session is every agent's owner), and **report** anything you cannot prove is yours rather than killing it.
 

@@ -30,7 +30,7 @@ This skill is **the session's side**: when to run it, how to brief it, what to d
 
 ## The brief
 
-Dispatch the agent **synchronously** (`run_in_background: false`) — its result is the next thing you need. It shares none of your context, and what you hand it, it does not have to rebuild from the repo, so hand it:
+Dispatch the agent and end your turn: it runs in the background, and its report arrives as your next message. It shares none of your context, and what you hand it, it does not have to rebuild from the repo, so hand it:
 
 1. **The goal** — what the user asked for, and the outcome it was a pointer to.
 2. **The decisions already made with the user**, in their own words where you have them. Reviewers must not "fix" a deliberate choice back into what the user rejected.
@@ -42,6 +42,8 @@ Dispatch the agent **synchronously** (`run_in_background: false`) — its result
 8. **The mode** — `fix` when the work is this session's own or the user asked for fixes; `report` when it is someone else's work (a PR, a teammate's branch) and the user asked only for a review, or when you may not commit. With no mode, the agent reports.
 
 ## What comes back
+
+If its completion notice says it *stopped with background work still running* after it has reported, it left something behind: send it a message to stop that by id, and don't call the work closed until a notice stops saying so. A report arriving from an agent you did not start is one of its reviewers, finishing after it: read it against **Not covered**.
 
 The agent returns the report its method defines — **Fixed** (or, in `report` mode, **Verified findings**), **Needs decision**, **Rejected**, **Not covered**, **Verification**, **Ledger**.
 
