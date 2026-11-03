@@ -604,6 +604,11 @@ async function verify(step, dir, prefix = '', before = null) {
     const r = await run(`${step}-${prefix ? 'baseline-' : ''}${target}`, bin, [...pre, 'run-many', '-t', target, '--output-style=static'], { cwd: dir, timeoutMs: 20 * 60_000 });
     const failed = r.code ? failedTasks(r.out) : [];
     failedSets[target] = new Set(failed);
+    // Nx exits 0 when no project has the target: nothing was checked, so it passes nothing. Every verified workspace has one for each.
+    if (!r.code && /No tasks were run/.test(r.out)) {
+      record(step, `${prefix}nx run-many -t ${target}`, false, { ms: r.ms, log: r.log, detail: 'no project has this target', reference: !!prefix, released: prefix ? r.out : null });
+      continue;
+    }
     let detail = (r.out.match(/Successfully ran target \S+ for (\d+ projects?)/) ?? [, ''])[1];
     if (r.code) {
       detail = failed.length ? `failed: ${failed.join(', ')}` : why(r.out);
@@ -635,6 +640,30 @@ async function verifyDsComponent(step, dir) {
   gitOut(dir, 'checkout', '-q', '.');
   gitOut(dir, 'clean', '-fdq');
 }
+/** The navigation kernel: no preset wears it, so `verify` never sees it. `nx test` is green on a kernel with no spec and red on a failing one.
+ *  Its generator installs @nx/vitest for real, and after `--local` an install would fetch this unpublished toolkit from the registry, so the
+ *  manifest first points at a pack of the build already installed. It leaves no trace in git. */
+async function verifyNavigationCore(step, dir) {
+  const [bin, pre] = nx(dir);
+  const nxRun = (name, ...args) => run(`${step}-navigation-${name}`, bin, [...pre, ...args], { cwd: dir, timeoutMs: 20 * 60_000 });
+  const pack = await run(`${step}-navigation-pack`, 'npm', ['pack', '--silent', '--pack-destination', TMP], { cwd: join(dir, 'node_modules/@bespunky/nx-tools') });
+  if (!record(step, 'pack the installed toolkit', pack.code === 0, { ms: pack.ms, log: pack.log, detail: pack.code ? why(pack.out) : '' })) return;
+  const manifest = readJson(join(dir, 'package.json'));
+  manifest.devDependencies['@bespunky/nx-tools'] = `file:${join(TMP, pack.out.match(/^\S+\.tgz$/m)[0])}`;
+  writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  const g = await nxRun('generate', 'g', '@bespunky/nx-tools:navigation-core', '--no-interactive');
+  if (!record(step, 'nx g navigation-core', g.code === 0, { ms: g.ms, log: g.log, detail: g.code ? why(g.out) : '' })) return;
+  const green = await nxRun('test', 'test', 'navigation-core', '--output-style=static');
+  record(step, 'nx test navigation-core passes with no spec', green.code === 0, { ms: green.ms, log: green.log, detail: green.code ? why(green.out) : '' });
+  const root = gitOut(dir, 'ls-files', '--others', '--exclude-standard', '*/navigation-core/vite.config.mts').replace(/\/vite\.config\.mts$/, '');
+  writeFileSync(join(dir, root, 'src/failing.spec.ts'), "import { it, expect } from 'vitest';\nit('fails', () => { expect(1).toBe(2); });\n");
+  const failing = await nxRun('failing-spec', 'test', 'navigation-core', '--output-style=static');
+  // Red for the spec's own reason: a target that cannot even start is red too.
+  const red = failing.code !== 0 && failing.out.includes('failing.spec.ts');
+  record(step, 'nx test navigation-core is red on a failing spec', red, { ms: failing.ms, log: failing.log, detail: red ? '' : failing.code ? why(failing.out) : 'exit 0 past a failing spec' });
+  gitOut(dir, 'checkout', '-q', '.');
+  gitOut(dir, 'clean', '-fdq');
+}
 /** Nx's own "Failed tasks:" list, as task ids. */
 function failedTasks(out) {
   const at = out.indexOf('Failed tasks:');
@@ -662,6 +691,7 @@ async function stepNew(id) {
   if (p.verify) {
     await verify(id, dir);
     await verifyDsComponent(id, dir);
+    await verifyNavigationCore(id, dir);
   }
 }
 
@@ -675,7 +705,6 @@ function cleanup() {
     spawnSync('git', ['-C', TOOLKIT, 'worktree', 'remove', '--force', RELEASED_TREE], { env: ENV });
     rmSync(RELEASED_TREE, { recursive: true, force: true });
   }
-  spawnSync('git', ['-C', TOOLKIT, 'worktree', 'prune'], { env: ENV });
   rmSync(TMP, { recursive: true, force: true });
   if (!opts.keep) rmSync(CONSUMERS, { recursive: true, force: true });
 }
