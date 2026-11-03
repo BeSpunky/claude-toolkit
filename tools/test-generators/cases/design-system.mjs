@@ -105,6 +105,26 @@ const angularBound = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) =
 const SPEC = 'src/lib/ds-theme.service.spec.ts';
 const firstSpec = [
   {
+    name: 'pruning the demo of a Jest library says none is not a failure; on @nx/angular:unit-test, with no config, the seeded spec is the answer',
+    setup: () => {
+      const tree = workspace({ layout: 'packages', link: 'paths' });
+      tree.write('packages/jested/jest.config.ts', "export default {\n  displayName: 'jested',\n};\n");
+      tree.write('packages/jested/src/lib/demo/demo.spec.ts', '');
+      tree.write('packages/built/src/lib/demo/demo.spec.ts', '');
+      return tree;
+    },
+    run: (tree, ctx) => {
+      const { angularDesignSystem: port } = ctx.load('adapters/angular/design-system');
+      port.pruneGenerated(tree, 'packages/jested');
+      port.pruneGenerated(tree, 'packages/built');
+    },
+    expect: (tree, t) => {
+      t.missing('packages/jested/src/lib/demo/demo.spec.ts');
+      t.has('packages/jested/jest.config.ts', 'passWithNoTests: true,');
+      t.missing('packages/built/src/lib/demo/demo.spec.ts');
+    },
+  },
+  {
     name: 'the Angular binding seeds a first spec only for the executor that fails without one',
     setup: () => workspace({ layout: 'packages', link: 'paths' }),
     run: () => {},
@@ -113,7 +133,7 @@ const firstSpec = [
       const dir = port.creationTemplates({ root: 'x', targets: { test: { executor: '@nx/angular:unit-test' } } });
       t.ok(existsSync(join(dir, `${SPEC}.tpl`)), `the template is where the port says: ${dir}`);
       t.ok(readFileSync(join(dir, `${SPEC}.tpl`), 'utf8').includes('data-{{tokenPrefix}}-mode'), 'it tests the library\'s own attribute');
-      t.equal(port.creationTemplates({ root: 'x', targets: { test: { executor: '@nx/jest:jest' } } }), undefined, 'jest passes with no specs');
+      t.equal(port.creationTemplates({ root: 'x', targets: { test: { executor: '@nx/jest:jest' } } }), undefined, 'jest is told to pass on no specs, by pruneGenerated');
       t.equal(port.creationTemplates({ root: 'x', targets: {} }), undefined, 'no test target');
     },
   },
