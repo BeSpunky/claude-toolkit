@@ -30,6 +30,14 @@ function linkedCore(link, ctx) {
   return tree;
 }
 
+/** The library's only spec is under src/lib, which --keepShim deletes. */
+function unitTestShim(ctx, executor, targetName = 'test') {
+  const tree = linkedCore('paths', ctx);
+  updateJson(tree, 'packages/core/project.json', (json) => ({ ...json, targets: { build: { executor: '@nx/angular:package' }, [targetName]: { executor } } }));
+  tree.write('packages/core/src/lib/core.spec.ts', "it('x', () => {});\n");
+  return tree;
+}
+
 export default {
   name: 'adopt-extracted · link range → published range',
   cases: [
@@ -116,6 +124,41 @@ export default {
       },
       run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0', keepShim: true }),
       expect: (tree, t) => t.ok(!t.read('packages/core/vite.config.mts').includes('passWithNoTests'), 'stated over a spec'),
+    },
+    ...['@nx/angular:unit-test', '@angular/build:unit-test'].map((executor) => ({
+      name: `--keepShim on ${executor}, no spec left: it cannot pass on no tests, so its target goes, and why is said`,
+      setup: (ctx) => unitTestShim(ctx, executor),
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0', keepShim: true }),
+      expect: (tree, t, ctx) => {
+        t.equal(Object.keys(t.json('packages/core/project.json').targets), ['build'], 'only the test target went');
+        t.ok(ctx.logs.some((line) => line.includes('Removed the test target of "core"') && line.includes('No tests found')), `said: ${ctx.logs.join(' | ')}`);
+        t.ok(!ctx.logs.some((line) => line.includes('Could not set passWithNoTests')), `nothing left to warn of: ${ctx.logs.join(' | ')}`);
+      },
+    })),
+    {
+      name: '--keepShim: the same runner under another name goes too',
+      setup: (ctx) => unitTestShim(ctx, '@nx/angular:unit-test', 'unit'),
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.equal(Object.keys(t.json('packages/core/project.json').targets), ['build'], 'only that target went'),
+    },
+    {
+      name: '--keepShim on the unit-test builder, a spec kept outside src/lib: the target stays, it has something to run',
+      setup: (ctx) => {
+        const tree = unitTestShim(ctx, '@nx/angular:unit-test');
+        tree.write('packages/core/testing/src/keep.spec.ts', "it('x', () => {});\n");
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.equal(t.json('packages/core/project.json').targets.test.executor, '@nx/angular:unit-test', 'kept'),
+    },
+    {
+      name: '--keepShim on another command: it may read neither, so it stays, and the warning stands',
+      setup: (ctx) => unitTestShim(ctx, 'nx:run-commands'),
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0', keepShim: true }),
+      expect: (tree, t, ctx) => {
+        t.equal(t.json('packages/core/project.json').targets.test.executor, 'nx:run-commands', 'kept');
+        t.ok(ctx.logs.some((line) => line.includes('Could not set passWithNoTests')), `warned: ${ctx.logs.join(' | ')}`);
+      },
     },
   ],
 };

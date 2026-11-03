@@ -37,6 +37,8 @@ import { requireLayer } from '../../layers/registry';
 import { workspaceLinking } from '../_utils/linking';
 import { declareDependencies, declaredSpec, updateManifest } from '../_utils/dependencies';
 import { passWithNoTests, passWithNoTestsGap } from '../_utils/pass-with-no-tests';
+import { updateProjectConfigurationInPlace } from '../_utils/project-files';
+import { UNIT_TEST_EXECUTORS } from '../../adapters/angular/entry-point-reach';
 
 interface AdoptExtractedSchema {
   lib: string;
@@ -48,6 +50,31 @@ interface AdoptExtractedSchema {
 
 const readJsonSafe = (tree: Tree, path: string): Record<string, any> =>
   tree.exists(path) ? (readJson(tree, path) as Record<string, any>) : {};
+
+/**
+ * A shim with no spec left must not fail `nx test`. A runner that reads a config is told none is not a failure. The
+ * unit-test builder cannot be told (no passWithNoTests, its schema refuses one) and throws "No tests found", so its target
+ * goes: Nx skips a target a project does not have, in `run-many` and in any dependsOn naming it, and a targetDefault
+ * applies only to a target that exists, so nothing is left pointing at it.
+ */
+function tellTheRunnerAboutNoSpecs(tree: Tree, lib: string): void {
+  const project = readProjectConfiguration(tree, lib);
+  const result = passWithNoTests(tree, project.root);
+  if (result.kind === 'has-spec') return;
+
+  const retired = Object.entries(project.targets ?? {}).filter(([, target]) => UNIT_TEST_EXECUTORS.has(target.executor ?? ''));
+  for (const [name, target] of retired) {
+    delete project.targets?.[name];
+    logger.info(`Removed the ${name} target of "${lib}": the shim has no spec left, and ${target.executor} fails on "No tests found" with no option to pass. A spec added later needs the target back.`);
+  }
+  if (retired.length) updateProjectConfigurationInPlace(tree, lib, project);
+
+  // What was just retired was told, and a library with no test target and no runner config has nothing to fail.
+  const covered = result.kind === 'other-runner' && UNIT_TEST_EXECUTORS.has(result.executor ?? '');
+  const noRunner = result.kind === 'no-config' && !project.targets?.test;
+  const gap = covered || noRunner ? null : passWithNoTestsGap(result);
+  if (gap) logger.warn(`Could not set passWithNoTests on "${lib}" (${gap}). \`nx test ${lib}\` fails on "no tests" until the library has a spec, or its test target is removed.`);
+}
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -146,8 +173,7 @@ export default async function adoptExtractedGenerator(
       : joinPathFragments(project.root, 'src', 'lib');
     if (tree.exists(libImplDir)) tree.delete(libImplDir);
     // A shim has nothing to test; a spec it kept outside src/lib, it keeps.
-    const gap = passWithNoTestsGap(passWithNoTests(tree, project.root));
-    if (gap) logger.warn(`Could not set passWithNoTests on "${options.lib}" (${gap}). \`nx test ${options.lib}\` fails on "no tests" until the library has a spec, or its test target is removed.`);
+    tellTheRunnerAboutNoSpecs(tree, options.lib);
     marker.status = 'adopted-shim';
     writeJson(tree, markerPath, marker);
     await formatFiles(tree);
