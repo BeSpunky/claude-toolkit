@@ -123,10 +123,11 @@ step "nx run-many -t test over a keepShim library: it has no target to fail"
 npx nx run-many -t test -p shim,ui --skip-nx-cache --outputStyle=static || fail "run-many -t test: red over a keepShim library"
 
 # tsconfig.spec.json's entry-sources glob also matches a build output at the library's root; its exclude must keep that out.
+# On `plain`: `ui` holds an entry, and secondary-entrypoint's tsconfig.lib.json has a glob of its own that also reaches there.
 step "typecheck: tsconfig.spec.json keeps a build output at the library's root out"
-mkdir -p "$LIB_ROOT/dist/x/src"
-printf 'export const notANumber: number = "tripwire";\n' > "$LIB_ROOT/dist/x/src/output.ts"
-npx nx typecheck ui --skip-nx-cache --outputStyle=static || fail "typecheck reaches $LIB_ROOT/dist through the spec tsconfig's include"
-rm -r "$LIB_ROOT/dist"
+mkdir -p "$PLAIN_ROOT/dist/x/src"
+printf 'export const notANumber: number = "tripwire";\n' > "$PLAIN_ROOT/dist/x/src/output.ts"
+npx nx typecheck plain --skip-nx-cache --outputStyle=static || fail "typecheck reaches $PLAIN_ROOT/dist through the spec tsconfig's include"
+rm -r "$PLAIN_ROOT/dist"
 
 printf '\nok: the Angular TS-solution hybrid builds and tests truthfully on Nx %s\n' "$NX_VERSION"
