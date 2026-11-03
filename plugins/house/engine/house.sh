@@ -1062,9 +1062,9 @@ else
   if [ "$FORCE_DOCKER" = "1" ]; then
     echo "--docker: forcing the base image even though the local Node may suffice."
   else
-    echo "Local Node missing or older than 22.18 — falling back to Docker."
+    echo "No local Node 22.18+ with $PM on PATH — falling back to Docker."
   fi
-  command -v docker >/dev/null || { echo "ERROR: docker not found (and the local Node is too old to run natively — need Node 22.18+)." >&2; exit 1; }
+  command -v docker >/dev/null || { echo "ERROR: docker not found (and running natively needs Node 22.18+ with $PM on PATH)." >&2; exit 1; }
   docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
   # The image the GENERATORS run in — nothing more. The project's own Node (its devcontainer image, its functions
   # runtime) is the project's own Node file (.nvmrc, .node-version or volta.node), which the generators read; this runner's Node never leaks into the output.
@@ -2361,8 +2361,24 @@ fi
 
 # The fallback image must have the package manager the program is rendered around. Here, not at the top of the program:
 # nothing has been written yet (no lock, no backup tag), and --print-inner above must not pull an image.
-if [ "$RUNTIME" = "docker" ]; then
-  container_require_command "$IMAGE" "$PM" || exit 1
+report_new_failed() {
+  echo "" >&2
+  echo "NEW_FAILED $TARGET (exit $1)" >&2
+  if [ -e "$TARGET" ]; then
+    echo "  project    : partly created. Remove $TARGET before re-running; new refuses an existing project." >&2
+  else
+    echo "  project    : not created — nothing to clean up." >&2
+  fi
+  [ "$GITHUB" != "1" ] || echo "  github     : not published." >&2
+}
+if [ "$RUNTIME" = "docker" ] && ! container_require_command "$IMAGE" "$PM"; then
+  echo "       Node 22.18+ with $PM on this machine's PATH runs natively, with no image (without --docker)." >&2
+  if [ "$MODE" = "new" ]; then
+    report_new_failed 1
+  else
+    echo "UPGRADE_REFUSED: runner-image" >&2
+  fi
+  exit 1
 fi
 
 # --- single writer per project ------------------------------------------------------------------------------
@@ -2532,13 +2548,7 @@ fi
 # --- the run died somewhere: say where, and what that means for the project ------------------------------------
 if [ "$INNER_RC" -ne 0 ] && [ "$MODE" = "new" ]; then
   # A scaffold has no migrations and no restore point; everything below describes an upgrade.
-  echo "" >&2
-  echo "NEW_FAILED $TARGET (exit $INNER_RC)" >&2
-  if [ -e "$TARGET" ]; then
-    echo "  project    : partly created. Remove $TARGET before re-running; new refuses an existing project." >&2
-  else
-    echo "  project    : not created — nothing to clean up." >&2
-  fi
+  report_new_failed "$INNER_RC"
   exit "$INNER_RC"
 fi
 if [ "$INNER_RC" -ne 0 ]; then

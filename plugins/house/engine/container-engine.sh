@@ -1,13 +1,14 @@
 # shellcheck shell=bash
 # container-engine.sh — SOURCED (never executed) by every host-side launcher that falls back to the
-# typescript-node base image: house.sh (beside it) and this repo's tools/extract-tool/extract-tool.sh.
+# typescript-node base image: house.sh (beside it) and this repo's tools/extract-tool/extract-tool.sh and
+# tools/publish-nx-tools/publish.sh.
 #
 # Why it lives HERE, in the house plugin's engine: house.sh runs inside consumers' projects from the
 # INSTALLED plugin directory, where this repo's tools/ does not exist — so the one copy both can reach is
-# the one shipped with the plugin. extract-tool lives in this repo and reaches it by a repo-relative path.
+# the one shipped with the plugin. The two tools live in this repo and reach it by a repo-relative path.
 # (The reverse — a helper under tools/ — would leave house.sh unable to source it once installed.)
 #
-# It answers two questions both launchers used to answer by copy-paste:
+# It answers two questions the launchers used to answer by copy-paste:
 #   1. WHICH base image  — the typescript-node image of the house's own Node major (HOUSE_NODE_MAJOR).
 #   2. WHO OWNS the files a container writes into a bind mount — asked of the ENGINE, never the host.
 #

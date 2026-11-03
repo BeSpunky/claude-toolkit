@@ -34,3 +34,12 @@ It also removes the MCR call and the `curl` requirement from both launchers (`ho
 - Docker path, real images, no Node on the host, throwaway `PROJECTS_DIR`: `house.sh new --local --preset=angular dockerpm-e2e` reached `NEW_OK` on `typescript-node:24`. `--local` was needed because `@bespunky/nx-tools@0.51.0` is not on npm; without it the run reached the install and stopped with `NEW_FAILED`.
 - Real `typescript-node:26` (a copy of the engine with the constant changed): one clear error, exit 1, nothing written, no `chown`.
 - `tools/test-scaffold/docker-fallback.test.sh` covers the above against a fake `docker`. Run against the old engine it fails 21 assertions.
+
+## Corrections from the sanity review (2026-11-03)
+
+- **A third launcher.** `tools/publish-nx-tools/publish.sh` floated on the newest image too, with its own copy of the lookup. It now takes the same function, so "both launchers" above is three. `extract-tool` also checks for yarn up front, because `extract-tool.mjs` runs `yarn nx g`.
+- **"No longer depends on what MCR published" is true of the major, not the contents.** `:24` is a rolling tag. If it loses yarn, the up-front check says so, but nothing catches it earlier.
+- **The open gap is wider than yarn on 26.** The devcontainer's unguarded install dies on any package manager its image lacks. `pnpm` on `:24` was not checked. On the fallback, a project whose package manager the image lacks now stops at the check with `UPGRADE_REFUSED: runner-image`.
+- **"Runs on the Node its project runs on" holds for `new` only.** An upgrade on the fallback runs on `HOUSE_NODE_MAJOR` whatever the project declares, so yarn 1's strict `engines` can stop a project that excludes it. This is not worse than before, when the runner had no yarn at all.
+- **The check is presence, not usability.** `packageManager: yarn@4` without a `yarnPath` passes it and then fails on yarn 1.
+- **The Docker verification above predates the rebase.** It used `--local`, so the registry path has not reached `NEW_OK` on this base.
