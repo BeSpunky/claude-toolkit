@@ -19,3 +19,8 @@ The other direction, because the user said to integrate the two: the pane's Catc
 
 - `skill.prompt` carries `bespunky-workflow:project-standing` both typed and through the Skill tool (probe mod under `claude -p`, Haiku).
 - A real interactive session in tmux on this branch's plugin: running the skill drew `Standing: 4 live, 0 dormant, 59 concluded.` with Open pane and Not now once the turn ended; Claude did not offer the pane itself; pressing Open pane opened it and took the band down.
+- After the review's fixes, same way: the band still appears once the turn ends; typing `/standing` with it up opens the pane and clears the band; clicking Catch me up sends its prompt, and no band follows because the pane is up.
+
+## Accepted
+
+A subagent loading this skill raises the band too: `skill.prompt` does not say who loaded it. An offer nobody needed costs one press of Not now; correlating it with `tool.call` or `agent.spawn` would add machinery to prevent that.
