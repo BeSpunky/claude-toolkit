@@ -302,6 +302,14 @@ describe('standing pane', () => {
     ).toBe('2 orphaned checkouts: db, host')
   })
 
+  test('a concluded effort still on an unlanded branch is a loose end, beside the checkouts', () => {
+    const packages = [pkg({ dir: '2026-01-01-docker', state: 'concluded', status: 'concluded', branch: 'fix/docker' })]
+    expect(looseEnds({ ...STANDING, packages })).toBe('1 concluded, never landed: docker')
+    expect(looseEnds({ ...STANDING, packages, orphans: [{ path: '.claude/worktrees/db', reason: 'unregistered' }] })).toBe(
+      '1 orphaned checkout: db · 1 concluded, never landed: docker',
+    )
+  })
+
   test('Refresh re-runs the engine', async ($, on) => {
     const w = world(on)
     await started($)

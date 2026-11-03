@@ -103,13 +103,17 @@ export function concludedLine(now: number, concluded: StandingPackage[]) {
   return `${concluded.length} concluded · latest: ${latest.slug} (${age(now, latest.closedAt ?? latest.lastActivity)})`
 }
 
-/** The checkouts that may hold work git cannot see, as one line: "2 orphaned checkouts: a, b". Leftovers with no git link are the skill's to mention. */
-export function looseEnds({ orphans }: Standing) {
+/** What was left behind, as one line: "2 orphaned checkouts: a, b · 1 concluded, never landed: c". Leftovers with no git link are the skill's to mention. */
+export function looseEnds({ orphans, packages }: Standing) {
   const linked = orphans.filter(orphan => orphan.reason !== 'no-git-link')
-  if (linked.length === 0) return undefined
+  const unlanded = packages.filter(pkg => pkg.status === 'concluded' && pkg.branch !== undefined)
   const leaf = (at: string) => at.slice(at.lastIndexOf('/') + 1)
+  const parts = [
+    linked.length > 0 && `${linked.length} orphaned checkout${linked.length === 1 ? '' : 's'}: ${linked.map(orphan => leaf(orphan.path)).join(', ')}`,
+    unlanded.length > 0 && `${unlanded.length} concluded, never landed: ${unlanded.map(pkg => pkg.slug).join(', ')}`,
+  ].filter(Boolean)
 
-  return `${linked.length} orphaned checkout${linked.length === 1 ? '' : 's'}: ${linked.map(orphan => leaf(orphan.path)).join(', ')}`
+  return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
 /** An epoch as its UTC calendar date, `YYYY-MM-DD`. */
