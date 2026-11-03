@@ -214,13 +214,13 @@ let current = null; // the running child, killed (whole group) on a signal
 
 /** Run a command to its own log file. Resolves { code, out, ms, log }. The child leads its own process group so a
  *  timeout or a Ctrl+C takes down everything it started, not just the shell. */
-function run(label, cmd, args, { cwd, timeoutMs = 30 * 60_000, env = ENV } = {}) {
+function run(label, cmd, args, { cwd, timeoutMs = 30 * 60_000 } = {}) {
   const log = join(LOGS, `${String(++logSeq).padStart(2, '0')}-${label.replace(/[^a-z0-9.-]+/gi, '_')}.log`);
   writeFileSync(log, `$ (cd ${cwd ?? process.cwd()} && ${[cmd, ...args].join(' ')})\n\n`);
   const fd = openSync(log, 'a');
   const t0 = Date.now();
   return new Promise((done) => {
-    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd], detached: true });
+    const child = spawn(cmd, args, { cwd, env: ENV, stdio: ['ignore', fd, fd], detached: true });
     current = child;
     const timer = setTimeout(() => { appendFileSync(log, `\n[dogfood] TIMEOUT after ${timeoutMs / 1000}s — killed\n`); killGroup(child.pid); }, timeoutMs);
     const finish = (code) => {
@@ -641,22 +641,26 @@ async function verifyDsComponent(step, dir) {
   gitOut(dir, 'clean', '-fdq');
 }
 /** The navigation kernel: no preset wears it, so `verify` never sees it. `nx test` is green on a kernel with no spec and red on a failing one.
- *  Its generator installs a dependency, and after `--local` that install would fetch this unpublished toolkit from the registry, so only that
- *  call runs with the package managers stubbed; nothing the checks run needs that dependency. It leaves no trace. */
+ *  Its generator installs @nx/vitest for real, and after `--local` an install would fetch this unpublished toolkit from the registry, so the
+ *  manifest first points at a pack of the build already installed. It leaves no trace in git. */
 async function verifyNavigationCore(step, dir) {
   const [bin, pre] = nx(dir);
-  const stubs = join(TMP, 'no-install');
-  mkdirSync(stubs, { recursive: true });
-  for (const pm of ['npm', 'pnpm', 'yarn']) writeFileSync(join(stubs, pm), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  const nxRun = (name, env, ...args) => run(`${step}-navigation-${name}`, bin, [...pre, ...args], { cwd: dir, timeoutMs: 20 * 60_000, env });
-  const g = await nxRun('generate', { ...ENV, PATH: `${stubs}:${ENV.PATH}` }, 'g', '@bespunky/nx-tools:navigation-core', '--no-interactive');
+  const nxRun = (name, ...args) => run(`${step}-navigation-${name}`, bin, [...pre, ...args], { cwd: dir, timeoutMs: 20 * 60_000 });
+  const pack = await run(`${step}-navigation-pack`, 'npm', ['pack', '--silent', '--pack-destination', TMP], { cwd: join(dir, 'node_modules/@bespunky/nx-tools') });
+  if (!record(step, 'pack the installed toolkit', pack.code === 0, { ms: pack.ms, log: pack.log, detail: pack.code ? why(pack.out) : '' })) return;
+  const manifest = readJson(join(dir, 'package.json'));
+  manifest.devDependencies['@bespunky/nx-tools'] = `file:${join(TMP, pack.out.match(/^\S+\.tgz$/m)[0])}`;
+  writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  const g = await nxRun('generate', 'g', '@bespunky/nx-tools:navigation-core', '--no-interactive');
   if (!record(step, 'nx g navigation-core', g.code === 0, { ms: g.ms, log: g.log, detail: g.code ? why(g.out) : '' })) return;
-  const green = await nxRun('test', ENV, 'test', 'navigation-core', '--output-style=static');
+  const green = await nxRun('test', 'test', 'navigation-core', '--output-style=static');
   record(step, 'nx test navigation-core passes with no spec', green.code === 0, { ms: green.ms, log: green.log, detail: green.code ? why(green.out) : '' });
-  const root = readJson(join(dir, gitOut(dir, 'ls-files', '--others', '--exclude-standard', '*/navigation-core/project.json')));
-  writeFileSync(join(dir, root.sourceRoot, 'failing.spec.ts'), "import { it, expect } from 'vitest';\nit('fails', () => { expect(1).toBe(2); });\n");
-  const failing = await nxRun('failing-spec', ENV, 'test', 'navigation-core', '--output-style=static');
-  record(step, 'nx test navigation-core is red on a failing spec', failing.code !== 0, { ms: failing.ms, log: failing.log, detail: failing.code ? '' : 'exit 0 past a failing spec' });
+  const root = gitOut(dir, 'ls-files', '--others', '--exclude-standard', '*/navigation-core/vite.config.mts').replace(/\/vite\.config\.mts$/, '');
+  writeFileSync(join(dir, root, 'src/failing.spec.ts'), "import { it, expect } from 'vitest';\nit('fails', () => { expect(1).toBe(2); });\n");
+  const failing = await nxRun('failing-spec', 'test', 'navigation-core', '--output-style=static');
+  // Red for the spec's own reason: a target that cannot even start is red too.
+  const red = failing.code !== 0 && failing.out.includes('failing.spec.ts');
+  record(step, 'nx test navigation-core is red on a failing spec', red, { ms: failing.ms, log: failing.log, detail: red ? '' : failing.code ? why(failing.out) : 'exit 0 past a failing spec' });
   gitOut(dir, 'checkout', '-q', '.');
   gitOut(dir, 'clean', '-fdq');
 }
