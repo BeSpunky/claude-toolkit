@@ -153,13 +153,12 @@ else
 
   command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
   docker info >/dev/null 2>&1   || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
-  command -v curl >/dev/null    || { echo "ERROR: curl not found" >&2; exit 1; }
 
-  echo "Resolving latest typescript-node base image..."
-  MAJOR="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
-    | grep -oE '[0-9]+-bookworm' | sed 's/-bookworm//' | sort -rn | awk '$1>=20' | head -1 || true)"
-  [ -n "${MAJOR:-}" ] || MAJOR=24
-  IMAGE="mcr.microsoft.com/devcontainers/typescript-node:${MAJOR}"
+  # The same image every launcher runs on, never the newest on MCR: see container-engine.sh.
+  # shellcheck source=../../plugins/house/engine/container-engine.sh
+  . "$ASSETS_DIR/container-engine.sh"
+  MAJOR="$(base_image_node_major)"
+  IMAGE="$(base_image_for_major "$MAJOR")"
   echo "Base image: $IMAGE"
 
   NPMRC_MOUNT=()

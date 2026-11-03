@@ -334,6 +334,8 @@ failure the gate removes. If you find yourself looking for one, the answer is th
 Once the user has chosen and the state is resolved, **re-run this command from the top** rather than resuming
 mid-way. Step 1 may matter again, and the gate is cheap.
 
+- **`runner-image`** — only on the Docker fallback: the image the generators run in cannot run this project's package manager, or could not be run at all (the `ERROR` line above it says which). Nothing to resolve in the project. Relay it, and offer the way around it: Node 22.18+ with that package manager on the machine's PATH runs natively, with no image.
+
 ### The rest
 
 - **`BACKUP_ABORT: … is not versioned by git`** — very common on a first retrofit (no repository at all, or a

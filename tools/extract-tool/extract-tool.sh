@@ -47,13 +47,15 @@ INTO_BASE="$(basename "$INTO_INPUT")"
 # --- guards ---
 command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
 docker info >/dev/null 2>&1   || { echo "ERROR: docker daemon not accessible" >&2; exit 1; }
-command -v curl >/dev/null    || { echo "ERROR: curl not found" >&2; exit 1; }
 
-# --- resolve newest typescript-node base image (same source as house.sh) ---
-echo "Resolving latest typescript-node base image..."
-IMAGE="$(base_image_for_major "$(base_image_node_major)")"
+# --- the typescript-node base image (same source as house.sh) ---
+# Two steps: a failure nested inside the image's own $(...) would not reach set -e, and the run would go on with a tagless image.
+MAJOR="$(base_image_node_major)"
+IMAGE="$(base_image_for_major "$MAJOR")"
 echo "Base image: $IMAGE"
 echo "Container engine: $(container_engine_describe)"
+# extract-tool.mjs runs `yarn nx g` in the shared workspace.
+container_require_command "$IMAGE" yarn
 
 # --- run the tool inside the container; ~/projects at /work, the tool dir read-only at /tool ---
 container_run_as_host_user \

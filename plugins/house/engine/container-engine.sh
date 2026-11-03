@@ -1,14 +1,15 @@
 # shellcheck shell=bash
 # container-engine.sh — SOURCED (never executed) by every host-side launcher that falls back to the
-# typescript-node base image: house.sh (beside it) and this repo's tools/extract-tool/extract-tool.sh.
+# typescript-node base image: house.sh (beside it) and this repo's tools/extract-tool/extract-tool.sh and
+# tools/publish-nx-tools/publish.sh.
 #
 # Why it lives HERE, in the house plugin's engine: house.sh runs inside consumers' projects from the
 # INSTALLED plugin directory, where this repo's tools/ does not exist — so the one copy both can reach is
-# the one shipped with the plugin. extract-tool lives in this repo and reaches it by a repo-relative path.
+# the one shipped with the plugin. The two tools live in this repo and reach it by a repo-relative path.
 # (The reverse — a helper under tools/ — would leave house.sh unable to source it once installed.)
 #
-# It answers two questions both launchers used to answer by copy-paste:
-#   1. WHICH base image  — the newest typescript-node major published on MCR (>= 18; 24 when offline).
+# It answers two questions the launchers used to answer by copy-paste:
+#   1. WHICH base image  — the typescript-node image of the house's own Node major (HOUSE_NODE_MAJOR).
 #   2. WHO OWNS the files a container writes into a bind mount — asked of the ENGINE, never the host.
 #
 # Ownership, the reasoning. On a ROOTFUL engine, container uids ARE host uids: we run as `-u uid:gid` so
@@ -68,15 +69,41 @@ container_restore_ownership() {
   docker run --rm -v "$host_dir":/work -w /work "$image" chown -R "$(id -u):$(id -g)" "$@"
 }
 
-# Echo the newest typescript-node major tagged on MCR (>= 18), or 24 when the registry is unreachable.
+# Echo the Node major the fallback runs on: the house's own, read from the payload shipped beside this file (one
+# source, HOUSE_NODE_MAJOR; the same one a new project's .nvmrc is seeded with), so a scaffold runs on the Node its
+# project will run on.
+#   It is deliberately NOT the newest image on MCR. It used to be, which made every launcher depend on whatever
+#   Microsoft published that day: typescript-node:26 ships neither yarn nor corepack (24 ships yarn 1.22.22), so the
+#   day it appeared `yarn create nx-workspace` stopped working with no change here. A runner needs a known toolchain,
+#   not a new one. Moving HOUSE_NODE_MAJOR past 24 therefore has to answer where yarn comes from, here and in the
+#   generated devcontainer: docs/features/2026-11-02-house-docker-pm/DECISION.md.
 base_image_node_major() {
-  local major
-  major="$(curl -fsSL 'https://mcr.microsoft.com/v2/devcontainers/typescript-node/tags/list' \
-    | grep -oE '[0-9]+-bookworm' | sed 's/-bookworm//' | sort -rn | awk '$1>=18' | head -1 || true)"
-  echo "${major:-24}"
+  local versions major
+  versions="$(dirname "${BASH_SOURCE[0]}")/nx-tools/src/generators/_utils/versions.ts"
+  major="$(sed -n "s/^export const HOUSE_NODE_MAJOR = '\([0-9][0-9]*\)';.*/\1/p" "$versions" 2>/dev/null)"
+  if [ -z "$major" ]; then
+    echo "ERROR: no HOUSE_NODE_MAJOR found in $versions — cannot choose a base image." >&2
+    return 1
+  fi
+  echo "$major"
 }
 
 # Echo the base image reference for a typescript-node major.
 base_image_for_major() {
   echo "mcr.microsoft.com/devcontainers/typescript-node:$1"
+}
+
+# Stop, saying why, when the image cannot run a command the program is about to depend on. Asked the way the program
+# runs (same user, same login shell), before anything is written: without it a missing tool surfaced as one line of
+# `env: 'yarn': No such file or directory`, deep in the run.
+#   $1 image   $2 command   (docker run exits 125 and up when it could not start the container at all)
+container_require_command() {
+  local rc=0
+  container_run_as_host_user -e HOME=/home/node "$1" bash -lc 'command -v "$1"' _ "$2" >/dev/null || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) echo "ERROR: $1 has no '$2', and this run needs it. Nothing was written." >&2 ;;
+    *) echo "ERROR: could not run $1 to look for '$2' (docker exit $rc). Nothing was written." >&2 ;;
+  esac
+  return 1
 }
