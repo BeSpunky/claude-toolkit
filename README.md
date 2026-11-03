@@ -172,7 +172,7 @@ claude-toolkit/
 │   ├── hooks/                             # continuity, made reliable rather than hoped-for
 │   │   ├── hooks.json                    # SessionStart + PreCompact registrations, and the one mods.ts module (registers every mod)
 │   │   ├── detect-standing.sh            # SessionStart — silent unless in-flight work has gone dormant; then relays a fact pointing at project-standing (detect, don't execute)
-│   │   ├── standing.tsx                  # mod — `/standing` opens a pane: feature packages live / dormant / concluded, newest baton each, Resume queues a prompt (never acts); closing it says `/standing` reopens it
+│   │   ├── standing.tsx                  # mod — `/standing` opens a pane: feature packages live / dormant / concluded, newest baton each, Resume queues a prompt (never acts); closing it says `/standing` reopens it. One feature with the skill: running `project-standing` offers the pane in a band above the prompt, and the pane's Catch me up runs the skill
 │   │   ├── merge-gate.tsx                # mod — Claude's `propose_move` call draws Land / Land & promote / Push / Not yet above the prompt; a press is sent as the person's prompt (never acts)
 │   │   ├── branch-engine.ts              # the mods' pure reading of `branches.mjs status --json` (shared by branch-status and merge-gate)
 │   │   ├── _brand.tsx                    # GENERATED — the toolkit's one mod look (`✦ bespunky` mark, frame, rules), projected into every mod-shipping plugin from tools/mod-brand/brand.tsx

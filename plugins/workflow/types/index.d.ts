@@ -87,6 +87,15 @@ export type Standing = {
  */
 export type StandingView = { phase: 'empty'; why: string } | { phase: 'ready'; standing: Standing }
 
+/**
+ * The pane on offer (hooks/standing.tsx): the project-standing skill ran and the pane is not up.
+ * `null` once the person answered it or sent their next prompt.
+ */
+export type StandingOffer = {
+  /** The engine's counts in one line. */
+  headline: string
+}
+
 /** One move the merge gate offers: a button that queues `prompt` as the person's own. */
 export type MergeGateMove = {
   /** Stable per move, for the button's key: `land`, `land-promote`, `push`, `promote`. */
@@ -116,6 +125,8 @@ declare module 'claude-code' {
       standing: StandingView
       /** The pane lists the most recent concluded packages instead of one summary line. */
       showConcluded: boolean
+      /** The band offering the pane, until the person answers it. */
+      standingOffer: StandingOffer | null
       /** The standing proposal to land or promote, until the person answers it. */
       mergeGate: MergeGate | null
     }
