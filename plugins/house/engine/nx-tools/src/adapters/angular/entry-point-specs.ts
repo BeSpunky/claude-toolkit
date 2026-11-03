@@ -20,11 +20,12 @@ const specsOfTheLibrary = (up: string) => ['**/*.spec.ts', '**/*.test.ts', `${up
 /** The builder ignores `**\/node_modules/**` itself, but that pattern does not match above its cwd either. */
 const notTheLibrarysOwn = (up: string) => [`${up}**/node_modules/**`, `${up}**/dist/**`];
 /**
- * For tsconfig.spec.json, which is relative to the library. The runner type-checks an entry's spec without it (it hands the
- * compiler the specs it found), so this is for the editor and `tsc`: outside it, and excluded by tsconfig.lib.json, the spec
- * is in no project of the library, so its test globals do not resolve.
+ * For tsconfig.spec.json, which is relative to the library: every entry's src, as tsconfig.lib.json holds them, not only
+ * its specs. The runner type-checks an entry's spec without this (it hands the compiler the specs it found), so this is for
+ * the editor and `tsc`: outside it, and excluded by tsconfig.lib.json, the spec is in no project of the library, so its test
+ * globals do not resolve. Specs alone would fail a TS-solution typecheck, TS6307: a composite project must list what they import.
  */
-const SPECS_FOR_THE_COMPILER = ['**/*.spec.ts', '**/*.test.ts'];
+const ENTRY_SOURCES = '**/src/**/*.ts';
 
 /**
  * Makes `name`'s test target, and its tsconfig.spec.json, reach the specs of its entry points. Called by whatever gives a
@@ -72,7 +73,7 @@ function includeSpecsInTsconfig(tree: Tree, root: string): void {
   const file = `${root}/tsconfig.spec.json`;
   if (!tree.exists(file)) return;
   updateJsonInPlace<{ include?: string[] }>(tree, file, (json) => {
-    if (json.include) json.include = [...new Set([...json.include, ...SPECS_FOR_THE_COMPILER])];
+    if (json.include) json.include = [...new Set([...json.include, ENTRY_SOURCES])];
   });
 }
 

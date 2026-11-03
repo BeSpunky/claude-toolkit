@@ -88,14 +88,17 @@ const anyLibrary = [
     },
   },
   {
-    name: "tsconfig.spec.json's include gains the specs, in place, its comment kept; the build's config is not touched",
+    name: "tsconfig.spec.json's include gains the entries' sources, in place, its comment kept; the build's config is not touched",
     setup: (tree) => library(tree, { files: { 'card/ng-package.json': '{}', 'tsconfig.spec.json': SPEC_TSCONFIG, 'tsconfig.lib.json': '{ "exclude": ["**/src/**/*.spec.ts"] }\n' } }),
     expect: (tree, t, logs) => {
       const text = tree.read(`${UI}/tsconfig.spec.json`, 'utf8');
       t.ok(text.includes("// the runner's globals"), `the comment stays: ${text}`);
-      for (const glob of [...SPEC_INCLUDE, '**/*.spec.ts', '**/*.test.ts']) t.ok(text.includes(`"${glob}"`), `${glob}: ${text}`);
+      for (const glob of [...SPEC_INCLUDE, '**/src/**/*.ts']) t.ok(text.includes(`"${glob}"`), `${glob}: ${text}`);
       t.equal(tree.read(`${UI}/tsconfig.lib.json`, 'utf8'), '{ "exclude": ["**/src/**/*.spec.ts"] }\n', 'the build still excludes specs');
-      if (logs) t.ok(logs.some((line) => line.startsWith('[info]') && !line.includes('start running')), `no spec yet, so nothing to warn of: ${logs.join(' | ')}`);
+      if (logs) {
+        t.ok(!logs.some((line) => line.includes('start running')), `no spec yet, so nothing to warn of: ${logs.join(' | ')}`);
+        t.ok(logs.some((line) => line.includes(`${UI}/tsconfig.spec.json: its include now holds`)), `the edit is reported: ${logs.join(' | ')}`);
+      }
     },
   },
   {
@@ -164,7 +167,7 @@ const anyLibrary = [
     setup: (tree) => library(tree, { sourceRoot: UI }),
     expect: (tree, t) => {
       t.equal(uiTarget(tree), UNIT_TEST, 'no include');
-      t.ok(tree.read(`${UI}/tsconfig.spec.json`, 'utf8').includes('"**/*.spec.ts"'), 'the tsconfig gains');
+      t.ok(tree.read(`${UI}/tsconfig.spec.json`, 'utf8').includes('"**/src/**/*.ts"'), 'the tsconfig gains');
     },
   },
   {

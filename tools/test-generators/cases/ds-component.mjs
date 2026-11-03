@@ -11,7 +11,7 @@ const { addProjectConfiguration, writeJson } = requireFromRepo('@nx/devkit');
 const ROOT = 'packages/design-system';
 const UNIT_TEST = '@nx/angular:unit-test';
 const REACH = { include: ['**/*.spec.ts', '**/*.test.ts', '../**/*.spec.ts', '../**/*.test.ts'], exclude: ['../**/node_modules/**', '../**/dist/**'] };
-const SPEC_TSCONFIG_INCLUDE = ['src/**/*.ts', 'src/**/*.d.ts', '**/*.spec.ts', '**/*.test.ts'];
+const SPEC_TSCONFIG_INCLUDE = ['src/**/*.ts', 'src/**/*.d.ts', '**/src/**/*.ts'];
 
 function entryIsWhole(tree, t, entry, name) {
   for (const extension of ['ts', 'html', 'scss', 'spec.ts']) t.exists(`${entry}/src/${name}.${extension}`);
@@ -50,6 +50,7 @@ const secondaryEntrypoint = {
     const tree = angularWorkspace({ layout: 'packages', link: 'paths' });
     addProjectConfiguration(tree, 'ui', { root: 'packages/ui', sourceRoot: 'packages/ui/src', projectType: 'library', prefix: 'ui', targets: { build: { executor: '@nx/angular:package' }, test: { executor: UNIT_TEST, options: { watch: false } } } });
     writeJson(tree, 'packages/ui/tsconfig.spec.json', { include: ['src/**/*.ts', 'src/**/*.d.ts'] });
+    writeJson(tree, 'packages/ui/tsconfig.lib.json', { include: ['src/**/*.ts'] });
     writeJson(tree, 'packages/ui/package.json', { name: `@${SCOPE}/ui`, version: '0.0.1' });
     writeJson(tree, 'packages/ui/ng-package.json', { lib: { entryFile: 'src/index.ts' } });
     tree.write('packages/ui/src/index.ts', 'export {};\n');
@@ -62,7 +63,7 @@ const secondaryEntrypoint = {
     entryIsWhole(tree, t, 'packages/ui/card', 'card');
     t.equal(t.json('packages/ui/project.json').targets.test.options, { watch: false, ...REACH }, 'any library with an entry runs its specs, not only the design system');
     t.equal(t.json('packages/ui/tsconfig.spec.json').include, SPEC_TSCONFIG_INCLUDE, 'and they are in a project of the library');
-    t.has('packages/ui/tsconfig.lib.json', '**/src/**/*.spec.ts');
+    t.ok(t.json('packages/ui/tsconfig.lib.json').exclude.includes('**/src/**/*.spec.ts'), 'and out of the one the build uses');
   },
 };
 

@@ -15,9 +15,11 @@
 //      builder's own node_modules ignore does not match above its cwd either. That can turn a green target red, truthfully,
 //      so the specs that start running are named. secondary-entrypoint now does the same when it creates an entry. A design
 //      system with none gets it here regardless: the next step decides what runs by what the target reaches. Whatever the
-//      target now reaches also goes in the include of tsconfig.spec.json, if it states one. The runner does not need that
-//      (it hands the compiler the specs it found, and type-checks them either way: verified); the editor and `tsc` do,
-//      because tsconfig.lib.json excludes specs, which leaves an entry's in no project of the library;
+//      target now reaches also goes in the include of tsconfig.spec.json, if it states one: every entry's src, not only
+//      its specs, because a composite project (a TS-solution workspace) must list what they import or typecheck fails
+//      TS6307. The runner does not need that (it hands the compiler the specs it found, and type-checks them either way:
+//      verified); the editor and `tsc` do, because tsconfig.lib.json excludes specs, which leaves an entry's in no project
+//      of the library. A spec with a type error fails `nx test` already, so typecheck only agrees with it;
 //   2. for a design system only, seeds a real spec of DsTheme where the library has none at all. That adds a TEST, so it
 //      must not swap one red target for another: it adds only what it can tell will run and pass. Every house DsTheme ever
 //      shipped (ed399a8d, a4ca72cb, 94f13d27) passes the shape check below and this spec.
@@ -59,8 +61,8 @@ const RUNNABLE_SPEC = /\.(?:spec|test)\.ts$/;
 /** What the target is given: every spec in a library whose source root is `up` levels below its root. */
 const includeFrom = (up: string) => ['**/*.spec.ts', '**/*.test.ts', `${up}**/*.spec.ts`, `${up}**/*.test.ts`];
 const excludeFrom = (up: string) => [`${up}**/node_modules/**`, `${up}**/dist/**`];
-/** The same specs for tsconfig.spec.json, which is relative to the library. */
-const SPECS_FOR_THE_COMPILER = ['**/*.spec.ts', '**/*.test.ts'];
+/** For tsconfig.spec.json, which is relative to the library. */
+const ENTRY_SOURCES = '**/src/**/*.ts';
 const SPEC_TSCONFIG = 'tsconfig.spec.json';
 /** Never walked: an install or build output is not the library's own spec. */
 const SKIPPED_DIRS = new Set(['node_modules', 'dist']);
@@ -155,15 +157,11 @@ function reachWholeLibrary(tree: Tree, name: string, project: ProjectConfigurati
 function includeSpecsInTsconfig(tree: Tree, root: string): void {
   const file = `${root}/${SPEC_TSCONFIG}`;
   if (!tree.exists(file)) return;
-  let text = tree.read(file, 'utf8') ?? '';
+  const text = tree.read(file, 'utf8') ?? '';
   const include = parse(text)?.include;
-  if (!Array.isArray(include)) return;
-  const missing = SPECS_FOR_THE_COMPILER.filter((glob) => !include.includes(glob));
-  if (missing.length === 0) return;
-  missing.forEach((glob, index) => {
-    text = applyEdits(text, modify(text, ['include', include.length + index], glob, { isArrayInsertion: true, formattingOptions: { insertSpaces: true, tabSize: 2 } }));
-  });
-  tree.write(file, text);
+  if (!Array.isArray(include) || include.includes(ENTRY_SOURCES)) return;
+  tree.write(file, applyEdits(text, modify(text, ['include', include.length], ENTRY_SOURCES, { isArrayInsertion: true, formattingOptions: { insertSpaces: true, tabSize: 2 } })));
+  logger.info(`${TAG} ${file}: its include now holds the entry points' sources, so \`tsc\` and the editor see their specs. In a TS-solution workspace, \`nx typecheck\` checks them too.`);
 }
 
 /** Every spec the target's default did not reach: under the library, outside its source root. */
