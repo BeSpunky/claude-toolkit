@@ -213,11 +213,6 @@ export interface DesignSystemPort {
    * deleted, or add what its reshaped library cannot pass. Undefined when this library needs none.
    */
   creationTemplates?(project: ProjectConfiguration): string | undefined;
-  /**
-   * Make the new library's test target run the specs of its entry points too, when this framework's runner would not
-   * find them on its own. Once, at creation, like `creationTemplates`: what a target holds afterwards is the project's.
-   */
-  reachEntryPointSpecs?(tree: Tree, project: string): void;
 }
 
 export interface FirebaseClientPort {

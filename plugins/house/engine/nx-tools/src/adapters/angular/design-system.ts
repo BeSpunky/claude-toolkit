@@ -8,26 +8,16 @@
 //   - the LIBRARY'S OWN sass channel: ng-packagr does not read an app's stylePreprocessorOptions, it has its
 //     own `lib.styleIncludePaths` (relative to ng-package.json) — and `assets` ships the raw .scss to dist;
 //   - the FIRST SPEC: a library that ships no components still has a runtime to test, and its test target needs one
-//     (see creationTemplates), and a target that also runs the specs its entry points carry (see reachEntryPointSpecs);
+//     (see creationTemplates);
 //   - the COMPONENT GENERATOR: `ds-component`, one secondary entry point per component.
 import { join } from 'node:path';
-import { type ProjectConfiguration, type Tree, readProjectConfiguration, updateJson, logger } from '@nx/devkit';
-import { updateProjectConfigurationInPlace } from '../../generators/_utils/project-files';
+import { type ProjectConfiguration, type Tree, updateJson, logger } from '@nx/devkit';
 import type { DesignSystemPort } from '../stack-adapter';
 import { pruneUnusedPeers } from './library-peers';
 import { passWithNoTests } from '../../generators/_utils/pass-with-no-tests';
 
 /** The runtime files this binding owns; anything else under src/lib is the base generator's demo output. */
 const RUNTIME_FILES = new Set(['design-system.providers.ts', 'ds-theme.service.ts', 'ds-runtime-theme.service.ts']);
-
-/**
- * The specs of the whole library, for a runner that resolves globs from the source root (<library>/src). BOTH halves are
- * needed: the builder's glob reports a file under its cwd by its cwd-relative path, which a `../` pattern never matches,
- * so `../**` alone finds the entry points and silently drops src (verified on @angular/build 22.2).
- */
-const SPECS_OF_THE_LIBRARY = ['**/*.spec.ts', '**/*.test.ts', '../**/*.spec.ts', '../**/*.test.ts'];
-/** The builder ignores `**\/node_modules/**` itself, but that pattern does not match above its cwd either. */
-const NOT_THE_LIBRARYS_OWN = ['../**/node_modules/**', '../**/dist/**'];
 
 export const angularDesignSystem: DesignSystemPort = {
   templates: join(__dirname, 'design-system-files'),
@@ -81,17 +71,5 @@ export const angularDesignSystem: DesignSystemPort = {
    */
   creationTemplates(project: ProjectConfiguration) {
     return project.targets?.test?.executor === '@nx/angular:unit-test' ? join(__dirname, 'design-system-creation-files') : undefined;
-  },
-
-  /**
-   * @nx/angular:unit-test looks only under the source root, and `ds-component` writes a component's spec at
-   * <library>/<entry>/src. Without this a failing entry spec exits 0 beside DsTheme's passing one: a false green.
-   */
-  reachEntryPointSpecs(tree: Tree, name: string) {
-    const project = readProjectConfiguration(tree, name);
-    const test = project.targets?.test;
-    if (test?.executor !== '@nx/angular:unit-test') return;
-    test.options = { ...test.options, include: SPECS_OF_THE_LIBRARY, exclude: NOT_THE_LIBRARYS_OWN };
-    updateProjectConfigurationInPlace(tree, name, project);
   },
 };

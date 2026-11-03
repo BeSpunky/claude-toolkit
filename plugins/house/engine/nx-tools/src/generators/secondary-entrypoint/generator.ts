@@ -54,6 +54,7 @@ import type { SecondaryEntrypointGeneratorSchema } from './schema';
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking, rootTsconfig } from '../_utils/linking';
 import { angularGeneratorCall } from '../../adapters/angular/ts-solution';
+import { reachEntryPointSpecs } from '../../adapters/angular/entry-point-specs';
 
 export async function secondaryEntrypointGenerator(
   tree: Tree,
@@ -161,6 +162,9 @@ export async function secondaryEntrypointGenerator(
         `export {};\n`
     );
   }
+
+  // 5) An entry point sits outside the source root, which is all the library's test target looks at.
+  reachEntryPointSpecs(tree, options.library);
 
   if (!options.skipFormat) {
     await formatFiles(tree);

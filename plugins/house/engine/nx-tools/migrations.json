@@ -306,11 +306,11 @@
       "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev claim) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
       "implementation": "./src/migrations/0.50.0/retire-reap-emulators"
     },
-    "seed-design-system-spec": {
+    "truthful-angular-library-tests": {
       "version": "0.51.2",
-      "layer": "design-system",
-      "description": "`nx test <design system>` lied both ways on a house Angular design system: it exited 1 on a library with no spec (pruning the demo component removed the only one, and @nx/angular:unit-test has no passWithNoTests), and it exited 0 past a failing spec in an entry point (the executor looks only under <library>/src). Gives the target an include/exclude that reach every spec in the library, and adds src/lib/ds-theme.service.spec.ts, a real spec of the DsTheme the library ships, where the library holds no spec at all and DsTheme still has the shape the spec tests. A target with another executor or its own include/exclude is left and reported, with the reason, and so is the stray <entry>/src.ts an earlier ds-component wrote.",
-      "implementation": "./src/migrations/0.51.2/seed-design-system-spec"
+      "layer": "angular",
+      "description": "`nx test` lied about a house Angular library both ways. @nx/angular:unit-test looks only under <library>/src, so it exited 0 past a failing spec in a secondary entry point (<library>/<entry>/src), on any library that has one, and it exited 1 on a design system with no spec (pruning the demo component removed the only one, and the executor has no passWithNoTests). Gives the target of a library with entry points, and of a design system, an include/exclude that reach every spec in the library, naming the specs that start running because one may fail, and adds src/lib/ds-theme.service.spec.ts, a real spec of the DsTheme the design system ships, where it holds no spec at all and DsTheme still has the shape the spec tests. A target with its own include/exclude, a source root outside the library, and on a design system another executor, are left and reported, with the reason, and so is the stray <entry>/src.ts an earlier ds-component wrote.",
+      "implementation": "./src/migrations/0.51.2/truthful-angular-library-tests"
     },
     "pass-libraries-with-no-specs": {
       "version": "0.51.2",

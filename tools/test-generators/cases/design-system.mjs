@@ -87,11 +87,6 @@ const angularBound = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) =
     t.exists(`${root}/ng-package.json`);
     t.exists(`${root}/styles/_index.scss`);
     t.has(`${root}/src/lib/ds-theme.service.spec.ts`, "const MODE_ATTRIBUTE = 'data-ds-mode';");
-    const test = getProjects(tree).get('design-system')?.targets?.test;
-    if (test?.executor === '@nx/angular:unit-test') {
-      t.equal(test.options?.include, ['**/*.spec.ts', '**/*.test.ts', '../**/*.spec.ts', '../**/*.test.ts'], 'the target runs the source root AND the entry points');
-      t.equal(test.options?.exclude, ['../**/node_modules/**', '../**/dist/**'], 'and nothing that is not the library\'s own');
-    }
     const peers = t.json(`${root}/package.json`)?.peerDependencies ?? {};
     t.ok('@angular/core' in peers && !('@angular/common' in peers), `peers what the seeded runtime imports: ${JSON.stringify(peers)}`);
     if (link === 'paths') {
@@ -106,7 +101,7 @@ const angularBound = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) =
 }));
 
 // The first spec: which libraries are born with one, and that an upgrade never writes it (0.51.2's rung decides that,
-// with the checks a generator has no business carrying). Same for the include a new library's target gets. No @nx/angular needed: both read an existing project's config.
+// with the checks a generator has no business carrying). No @nx/angular needed: both read an existing project's config.
 const SPEC = 'src/lib/ds-theme.service.spec.ts';
 const firstSpec = [
   {
@@ -165,7 +160,7 @@ const firstSpec = [
     expect: (tree, t) => {
       t.exists('packages/design-system/src/lib/ds-theme.service.ts');
       t.missing(`packages/design-system/${SPEC}`);
-      t.equal(getProjects(tree).get('design-system')?.targets?.test?.options, { watch: false }, 'and leaves the target: the rung decides that too');
+      t.equal(getProjects(tree).get('design-system')?.targets?.test?.options, { watch: false }, 'and leaves the target: its first entry point aims it (secondary-entrypoint), and the rung decides for an existing one');
     },
   },
 ];

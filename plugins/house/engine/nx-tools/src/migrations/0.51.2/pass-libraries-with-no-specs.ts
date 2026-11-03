@@ -3,7 +3,7 @@
 // WHY IT FAILS. Vitest and Jest exit 1 on "no tests found", and three house generators remove a library's only spec:
 //   - navigation-core deletes the demo under src/lib and writes a vendored kernel with no spec. Its runner is Vitest
 //     through Analog, or Jest below Angular 21;
-//   - design-system prunes the demo. On @nx/angular:unit-test seed-design-system-spec gives it a real spec, because that
+//   - design-system prunes the demo. On @nx/angular:unit-test truthful-angular-library-tests gives it a real spec, because that
 //     executor has no such option; below Angular 21 it is Jest, and on Nx 24 no targetDefault saves it;
 //   - adopt-extracted --keepShim deletes the library's src/lib, leaving a re-export.
 //

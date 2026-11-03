@@ -1,5 +1,5 @@
-// 0.51.2 — a house Angular design system gets a test target that runs every spec in the library, and the spec the target
-// fails without.
+// 0.51.2 — a house Angular library with entry points, and any design system, gets a test target that runs every spec in the
+// library, and a design system the spec the target fails without.
 //
 // A rung that adds a test can swap one red target for another, so every skip is a case. Input: DsTheme exactly as the
 // house shipped it (0.51.2-ds-theme-shapes/, from git: ed399a8d — unchanged in code through 8ec22591 —, a4ca72cb,
@@ -39,9 +39,147 @@ function leftAlone(reason, spec = SPEC) {
   };
 }
 
+const UI = 'packages/ui';
+const uiTarget = (tree, name = 'test') => readJson(tree, `${UI}/project.json`).targets[name];
+const SPEC_INCLUDE = ['src/**/*.ts', 'src/**/*.d.ts'];
+const SPEC_TSCONFIG = `{
+  "extends": "./tsconfig.json",
+  // the runner's globals
+  "compilerOptions": { "types": ["vitest/globals"] },
+  "include": ["src/**/*.ts", "src/**/*.d.ts"]
+}
+`;
+
+/** Any library, not the design system: a publishable one with an entry point, unless told otherwise. */
+function library(tree, { targets = { test: UNIT_TEST }, sourceRoot = `${UI}/src`, files = { 'card/ng-package.json': '{}', 'card/src/card.spec.ts': '', 'src/lib/ui.spec.ts': '', 'tsconfig.spec.json': SPEC_TSCONFIG } } = {}) {
+  addProjectConfiguration(tree, 'ui', { root: UI, sourceRoot, projectType: 'library', tags: ['platform:web'], targets: { build: { executor: '@nx/angular:package' }, ...targets } });
+  for (const [path, text] of Object.entries(files)) tree.write(`${UI}/${path}`, text);
+}
+
+/** Not this rung's: the target, the tsconfig and the log say nothing happened. */
+function untouched(target) {
+  return (tree, t, logs) => {
+    t.equal(uiTarget(tree), target, 'the target stands');
+    if (tree.exists(`${UI}/tsconfig.spec.json`)) t.equal(tree.read(`${UI}/tsconfig.spec.json`, 'utf8'), SPEC_TSCONFIG, 'and the tsconfig');
+    if (logs) t.equal(logs, [], 'nothing to say');
+  };
+}
+
+/** Left, for a reason it says: a target the project aimed, or one this rung cannot climb out of. */
+function libraryLeft(reason, target) {
+  return (tree, t, logs) => {
+    t.equal(uiTarget(tree), target, 'the target stands');
+    t.equal(tree.read(`${UI}/tsconfig.spec.json`, 'utf8'), SPEC_TSCONFIG, 'and the tsconfig');
+    if (logs) t.ok(logs.some((line) => reason.test(line)), `the reason is reported: ${logs.join(' | ')}`);
+  };
+}
+
+const anyLibrary = [
+  {
+    name: 'a publishable library with an entry point: its target reaches the entry, the specs that start running are named, and nothing is seeded',
+    setup: (tree) => library(tree),
+    expect: (tree, t, logs) => {
+      t.equal(uiTarget(tree).options, REACHED, 'the target runs every spec in the library');
+      t.ok(!tree.exists(`${UI}/src/lib/ds-theme.service.spec.ts`), 'no DsTheme spec: this is not a design system');
+      if (logs) {
+        t.ok(logs.some((line) => line.startsWith('[warn]') && /ui: `nx test ui` now runs every spec in the library.*start running now.*packages\/ui\/card\/src\/card\.spec\.ts\.$/.test(line)), `warned, the entry's spec named: ${logs.join(' | ')}`);
+        t.ok(!logs.some((line) => line.includes('src/lib/ui.spec.ts')), 'a spec that already ran is not one that starts');
+      }
+    },
+  },
+  {
+    name: "tsconfig.spec.json's include gains the specs, in place, its comment kept; the build's config is not touched",
+    setup: (tree) => library(tree, { files: { 'card/ng-package.json': '{}', 'tsconfig.spec.json': SPEC_TSCONFIG, 'tsconfig.lib.json': '{ "exclude": ["**/src/**/*.spec.ts"] }\n' } }),
+    expect: (tree, t, logs) => {
+      const text = tree.read(`${UI}/tsconfig.spec.json`, 'utf8');
+      t.ok(text.includes("// the runner's globals"), `the comment stays: ${text}`);
+      for (const glob of [...SPEC_INCLUDE, '**/*.spec.ts', '**/*.test.ts']) t.ok(text.includes(`"${glob}"`), `${glob}: ${text}`);
+      t.equal(tree.read(`${UI}/tsconfig.lib.json`, 'utf8'), '{ "exclude": ["**/src/**/*.spec.ts"] }\n', 'the build still excludes specs');
+      if (logs) t.ok(logs.some((line) => line.startsWith('[info]') && !line.includes('start running')), `no spec yet, so nothing to warn of: ${logs.join(' | ')}`);
+    },
+  },
+  {
+    name: 'a tsconfig.spec.json stating no include already holds everything: left; none at all is no problem',
+    setup: (tree) => library(tree, { files: { 'card/ng-package.json': '{}', 'tsconfig.spec.json': '{ "extends": "./tsconfig.json" }\n' } }),
+    expect: (tree, t) => {
+      t.equal(tree.read(`${UI}/tsconfig.spec.json`, 'utf8'), '{ "extends": "./tsconfig.json" }\n', 'unchanged');
+      t.equal(uiTarget(tree).options, REACHED, 'the target still');
+    },
+  },
+  {
+    name: 'an entry point nested deeper counts',
+    setup: (tree) => library(tree, { files: { 'a/b/ng-package.json': '{}', 'a/b/src/b.spec.ts': '' } }),
+    expect: (tree, t, logs) => {
+      t.equal(uiTarget(tree).options, REACHED, 'reached');
+      if (logs) t.ok(logs.some((line) => line.includes(`${UI}/a/b/src/b.spec.ts`)), `named: ${logs.join(' | ')}`);
+    },
+  },
+  {
+    name: 'a target under another name is the same runner, and the report says which',
+    setup: (tree) => library(tree, { targets: { unit: UNIT_TEST } }),
+    expect: (tree, t, logs) => {
+      t.equal(uiTarget(tree, 'unit').options, REACHED, 'reached');
+      if (logs) t.ok(logs.some((line) => line.includes('`nx unit ui` now runs')), `reported: ${logs.join(' | ')}`);
+    },
+  },
+  {
+    name: 'no entry point: not this rung\'s',
+    setup: (tree) => library(tree, { files: { 'src/lib/ui.spec.ts': '', 'tsconfig.spec.json': SPEC_TSCONFIG } }),
+    expect: untouched(UNIT_TEST),
+  },
+  {
+    name: 'an ng-package.json in an install or build output, or inside the source root the runner already walks, is no entry point',
+    setup: (tree) => library(tree, { files: { 'ng-package.json': '{}', 'node_modules/x/ng-package.json': '{}', 'dist/ng-package.json': '{}', 'src/inner/ng-package.json': '{}', 'tsconfig.spec.json': SPEC_TSCONFIG } }),
+    expect: untouched(UNIT_TEST),
+  },
+  {
+    name: 'an entry point on another runner (Jest walks the whole library): not this rung\'s, and not a design system to report',
+    setup: (tree) => library(tree, { targets: { test: { executor: '@nx/jest:jest' } } }),
+    expect: untouched({ executor: '@nx/jest:jest' }),
+  },
+  {
+    name: 'an entry point, no test target at all: unmentioned',
+    setup: (tree) => library(tree, { targets: {} }),
+    expect: (tree, t, logs) => {
+      t.equal(uiTarget(tree), undefined, 'none added');
+      if (logs) t.equal(logs, [], 'nothing to say');
+    },
+  },
+  ...[
+    ['its own include', { executor: UNIT_TEST.executor, options: { include: ['src/app/**/*.spec.ts'] } }],
+    ['its own exclude', { executor: UNIT_TEST.executor, options: { exclude: ['card/**'] } }],
+    ['an include in a configuration', { executor: UNIT_TEST.executor, configurations: { ci: { include: ['x'] } } }],
+  ].map(([what, test]) => ({
+    name: `a library with an entry point and ${what}: left, warned with the value, its tsconfig left too`,
+    setup: (tree) => library(tree, { targets: { test } }),
+    expect: libraryLeft(/\[warn\].*Left ui: its test target declares its own include\/exclude.*entry points.*\.\.\/\*\*\/\*\.spec\.ts/, test),
+  })),
+  {
+    name: 'a library with an entry point and a source root outside it: left, warned',
+    setup: (tree) => library(tree, { sourceRoot: 'elsewhere/src' }),
+    expect: libraryLeft(/\[warn\].*Left ui: its source root elsewhere\/src is outside the library/, UNIT_TEST),
+  },
+  {
+    name: 'a source root that is the library: the runner already walks everything; only the tsconfig gains',
+    setup: (tree) => library(tree, { sourceRoot: UI }),
+    expect: (tree, t) => {
+      t.equal(uiTarget(tree), UNIT_TEST, 'no include');
+      t.ok(tree.read(`${UI}/tsconfig.spec.json`, 'utf8').includes('"**/*.spec.ts"'), 'the tsconfig gains');
+    },
+  },
+  {
+    name: 'a design system with an entry point and the include already in: nothing more is said, whichever generator or rung aimed it',
+    setup: (tree) => ds(tree, { test: { executor: '@nx/angular:unit-test', options: REACHED }, files: { 'button/ng-package.json': '{}', 'button/src/button.spec.ts': '' } }),
+    expect: (tree, t, logs) => {
+      t.equal(testTarget(tree).options, REACHED, 'unchanged');
+      if (logs) t.ok(!logs.some((line) => /now runs/.test(line)), `no false claim of a change: ${logs.join(' | ')}`);
+    },
+  },
+];
+
 export default {
-  name: '0.51.2 · seed-design-system-spec',
-  ladder: ['0.51.2/seed-design-system-spec'],
+  name: '0.51.2 · truthful-angular-library-tests',
+  ladder: ['0.51.2/truthful-angular-library-tests'],
   cases: [
     ...['ed399a8d', 'a4ca72cb', '94f13d27'].map((sha) => ({
       name: `DsTheme as it shipped at ${sha}: the spec is added`,
@@ -92,7 +230,7 @@ export default {
     {
       name: 'the same builder under its own name: left, reported as not judged, not as passing',
       setup: (tree) => ds(tree, { test: { executor: '@angular/build:unit-test' } }),
-      expect: leftAlone(/this is for @nx\/angular:unit-test.*add a spec/),
+      expect: leftAlone(/this is for @nx\/angular:unit-test.*pass-libraries-with-no-specs/),
     },
     {
       name: "a target with its own include: left, warned that neither a seeded spec nor the entry points' may run, and told the value",
@@ -123,7 +261,7 @@ export default {
       expect: (tree, t, logs) => {
         leftAlone(/already has a spec \(packages\/design-system\/button\/src\/button\.spec\.ts\)\.$/)(tree, t, logs);
         t.equal(testTarget(tree).options, REACHED, 'the target reaches it');
-        if (logs) t.ok(logs.some((line) => /now runs every spec in the library/.test(line)), `the change is reported: ${logs.join(' | ')}`);
+        if (logs) t.ok(logs.some((line) => /now runs every spec in the library.*start running now.*button\/src\/button\.spec\.ts/.test(line)), `the change is reported, the spec named: ${logs.join(' | ')}`);
       },
     },
     {
@@ -275,5 +413,6 @@ export default {
       setup: (tree) => ds(tree, { theme: edit(shape(LATEST)) }),
       expect: (tree, t) => t.exists(SPEC),
     })),
+    ...anyLibrary,
   ],
 };
