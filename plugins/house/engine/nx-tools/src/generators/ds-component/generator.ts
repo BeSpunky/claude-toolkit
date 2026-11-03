@@ -1,7 +1,7 @@
 // House generator: promote a reusable component INTO the design system, as its own secondary entry point.
 //
 //     nx g @bespunky/nx-tools:ds-component button
-//     -> packages/design-system/button/{ng-package.json, src/index.ts, src/button.component.{ts,html,scss}}
+//     -> packages/design-system/button/{ng-package.json, src/index.ts, src/button.{ts,html,scss,spec.ts}}
 //     -> imports as `@<scope>/design-system/button`
 //
 // THIS IS THE ONLY WAY A COMPONENT ENTERS THE DESIGN SYSTEM. Hand-creating the folder gets you a
@@ -126,18 +126,13 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
     return;
   }
 
-  // Detect the component's ACTUAL file base — @nx/angular ≤ v19 emits `<name>.component.ts`, v20+ emits
-  // `<name>.ts`. Everything downstream (the barrel re-export, the SCSS filename) derives from what was
-  // really written, so we never hardcode `.component` and then export a path that doesn't exist.
-  const componentBase = detectComponentBase(tree, entryRoot, entryName);
-
   // 3) The component's SCSS: the house starting shape — every value a TOKEN, so a developer's first edit
   //    is `ds.color(...)` not a hex. First creation only (the guard above returned otherwise).
-  seedComponentScss(tree, entryRoot, componentBase, specifier);
+  seedComponentScss(tree, entryRoot, entryName, specifier);
 
   // 4) The entry's PUBLIC API barrel — `<component>/src/index.ts` is the ONLY thing a consumer may import
   //    from this entry; everything else is implementation.
-  seedEntryBarrel(tree, entryRoot, componentBase);
+  seedEntryBarrel(tree, entryRoot, entryName);
 
   if (!options.skipFormat) await formatFiles(tree);
 
@@ -146,23 +141,6 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
       `Now migrate BOTH call sites onto it and delete the local copies — a promotion that leaves the ` +
       `original behind is just a third copy.`
   );
-}
-
-/**
- * The base name (no extension) of the standalone component the delegated generator emitted under
- * `<entry>/src` — `button.component` on @nx/angular ≤ v19, `button` on v20+. Found by scanning for the
- * component `.ts` (skipping `index.ts` and specs) so the barrel and the SCSS always match reality rather
- * than a hardcoded suffix. Falls back to `<name>.component` if the scan finds nothing (shouldn't happen).
- */
-function detectComponentBase(tree: Tree, entryRoot: string, entryName: string): string {
-  const srcDir = joinPathFragments(entryRoot, 'src');
-  if (tree.exists(srcDir)) {
-    for (const child of tree.children(srcDir)) {
-      if (child === 'index.ts' || !child.endsWith('.ts') || child.endsWith('.spec.ts')) continue;
-      return child.replace(/\.ts$/, '');
-    }
-  }
-  return `${entryName}.component`;
 }
 
 /**
@@ -177,7 +155,7 @@ function detectComponentBase(tree: Tree, entryRoot: string, entryName: string): 
  * Written only if secondary-entrypoint's placeholder is still there (i.e. on creation) — never over a
  * barrel the project has since curated.
  */
-function seedEntryBarrel(tree: Tree, entryRoot: string, componentBase: string): void {
+function seedEntryBarrel(tree: Tree, entryRoot: string, componentFile: string): void {
   const indexPath = joinPathFragments(entryRoot, 'src', 'index.ts');
   const current = tree.read(indexPath, 'utf8') ?? '';
 
@@ -192,7 +170,7 @@ function seedEntryBarrel(tree: Tree, entryRoot: string, componentBase: string): 
       `// What you export here, you must support. Everything NOT exported is implementation — put it in a\n` +
       `// \`_\`-prefixed folder named for WHAT IT IS (\`_parts/\`, \`_material/\`), so a consumer cannot reach it\n` +
       `// by accident and you stay free to change it. The \`_\` says "not yours"; the name says what it holds.\n` +
-      `export * from './${componentBase}';\n`
+      `export * from './${componentFile}';\n`
   );
 }
 
@@ -211,9 +189,8 @@ function resolveLibraryRoot(tree: Tree, library: string): string {
  * a file that already reads `ds.color('on-surface')` invites another token. The comment block is the
  * rule stated at the exact moment it applies.
  */
-function seedComponentScss(tree: Tree, entryRoot: string, componentBase: string, specifier: string): void {
-  // The SCSS sits beside the component `.ts` and shares its base (`button.component.scss` / `button.scss`).
-  const target = joinPathFragments(entryRoot, 'src', `${componentBase}.scss`);
+function seedComponentScss(tree: Tree, entryRoot: string, componentFile: string, specifier: string): void {
+  const target = joinPathFragments(entryRoot, 'src', `${componentFile}.scss`);
 
   tree.write(
     target,
