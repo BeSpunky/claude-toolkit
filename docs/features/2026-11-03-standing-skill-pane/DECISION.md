@@ -11,7 +11,7 @@ The trigger is the `skill.prompt` event, not an instruction in SKILL.md and not 
 
 The user's suggestion was mod buttons "that will run the `/standing` command". Open pane calls the same `$.ui.open` the command does, rather than submitting `/standing` as a prompt: no extra row in the transcript, and the engine has just run.
 
-Non-intrusive means: a band, never a pane opened unasked; drawn only once the turn is over; gone on Not now or the next thing the person sends; no offer when the pane is already up (it is refreshed instead) or the engine has nothing to say.
+Non-intrusive means: a band, never a pane opened unasked; drawn only once the turn is over; gone on Not now, the pane opening by any road, or the next prompt from the person or a plugin (a merge gate press is a plugin's prompt, and the offer must not resurface after it); no offer when the pane is already up (it is refreshed, and the skill's text says so) or the engine has nothing to say, which includes a project with no packages.
 
 The other direction, because the user said to integrate the two: the pane's Catch me up runs the skill as the person's prompt, in fixed words.
 

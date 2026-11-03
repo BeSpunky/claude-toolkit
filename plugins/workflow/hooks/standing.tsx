@@ -12,8 +12,8 @@
 // cannot disagree.
 //
 // DETECT, DON'T EXECUTE. The pane changes nothing. Resume only queues a prompt for Claude
-// ("resume <slug> — read its newest handoff"), which the person can watch and interrupt; the
-// orientation itself stays the skill's job. Free text from the repo (the about line, a summary, tags) is
+// ("resume <slug> — read its newest handoff"), and Catch me up only queues the skill, both of which
+// the person can watch and interrupt; the orientation itself stays the skill's job. Free text from the repo (the about line, a summary, tags) is
 // drawn, never put into a prompt; the prompt carries only names the engine validated.
 //
 // NEVER OPENED UNASKED. A session start only registers the command. The pane opens when the
@@ -25,9 +25,11 @@
 // the other. When the project-standing skill expands, this module offers the pane in a band above
 // the prompt, and adds a line to the skill's text so Claude knows and does not offer it again. No
 // model has to remember anything: the `skill.prompt` event fires however the skill was reached
-// (`/name`, the Skill tool). The pane's Catch me up runs the skill in the other direction, because
-// the drift and the next step are the judgement a derivation cannot make. The offer goes when the
-// person answers it or sends their next prompt, and is not made while the pane is already up.
+// (`/name`, the Skill tool, a subagent's load, which the event does not tell apart). The pane's
+// Catch me up runs the skill in the other direction, because the drift and the next step are the
+// judgement a derivation cannot make. The offer goes when it is answered, when the pane opens by
+// any road, or on the next prompt from the person or a plugin. It is not made while the pane is up
+// (the skill's text says that instead) or when the project has no packages to draw.
 //
 // THE TOOLKIT'S LOOK. The frame, title, rules and mark come from ./_brand.tsx (generated from
 // tools/mod-brand/brand.tsx): this module draws only its own rows.
@@ -46,13 +48,12 @@ const PANE = 'standing'
 const COMMAND = 'standing'
 const ENGINE = 'skills/project-standing/scripts/standing.mjs'
 const SKILL = 'bespunky-workflow:project-standing'
-/** Module-private on purpose: `claude plugin validate` reads a matcher only from a const nothing else references. */
-const SKILL_ID = 'bespunky-workflow:project-standing'
-/** The person's own prompts: typed at the terminal, or through Remote Control. Module-private, as SKILL_ID. */
-const PERSON = /^(composer|bridge)$/
+/** Who ends the offer with a prompt: the person, typed or through Remote Control, or a plugin's button. */
+const MOVED_ON = /^(composer|bridge|plugin)$/
 /** What the skill's text gains when the pane is on offer: a fact for this run, not an instruction to act on it. */
-export const OFFERED_LINE =
-  'The person will see a band above the prompt when this turn ends, offering the /standing pane with a button. Write the report as usual, and do not offer the pane yourself.'
+export const OFFERED_LINE = 'A band above the prompt offers the person the /standing pane once this turn ends, so do not offer it yourself.'
+/** What it gains when the pane is already open, so nothing Claude says about it is wrong. */
+export const PANE_UP_LINE = 'The /standing pane is already open and was refreshed just now, so do not offer it.'
 /** The pane's way into the skill. Fixed text: nothing from the repo reaches a prompt. */
 export const CATCH_UP_PROMPT = `Catch me up on this project — I pressed Catch me up in the standing pane. Follow ${SKILL}.`
 
@@ -208,25 +209,28 @@ export const register: Register = on => {
     if (view.phase === 'empty') {
       return { text: `No project standing to show: ${view.why}.` }
     }
-    await $.ui.open({ id: PANE, title: 'standing' })
+    await openPane($)
 
     return { text: countsLine(view.standing) }
   })
 
-  on('skill.prompt', { skill: SKILL_ID }, async ($, e, next) => {
+  on('skill.prompt', { skill: SKILL }, async ($, e, next) => {
     const expanded = await next(e)
     if (!isInteractive) return expanded
     const view = await refresh($)
     if (view.phase === 'empty') return expanded
-    // Already up: the refresh above is all it needs, and the report can point at what is on screen.
-    if ((await $.ui.panes()).some(pane => pane.id === PANE)) return expanded
+    // Already up: the refresh above is all it needs.
+    if ((await $.ui.panes()).some(pane => pane.id === PANE)) return { text: `${expanded.text}\n\n${PANE_UP_LINE}` }
+    if (view.standing.packages.length === 0) return expanded
     await update($, OFFER, () => ({ headline: countsLine(view.standing) }))
 
     return { text: `${expanded.text}\n\n${OFFERED_LINE}` }
   })
 
-  // Anything the person typed answers the offer too: it was only ever worth one look.
-  on('prompt.submit', { origin: { kind: PERSON } }, async ($, e, next) => {
+  // The conversation moved on, by the person or by a button's prompt (a press of the merge gate has
+  // a plugin's origin): the offer was only ever worth one look. A typed /project-standing raises it
+  // again after this.
+  on('prompt.submit', { origin: { kind: MOVED_ON } }, async ($, e, next) => {
     await update($, OFFER, () => null)
 
     return next(e)
@@ -246,7 +250,7 @@ export const register: Register = on => {
           {offer.headline}
         </Text>
         <Box flexDirection="row" flexWrap="wrap" gap={1}>
-          <Button key="standing-offer-open" label="Open pane" hotkey="o" variant="primary" onPress={() => void acceptOffer($)} />
+          <Button key="standing-offer-open" label="Open pane" hotkey="o" variant="primary" onPress={() => void openPane($)} />
           <Button key="standing-offer-dismiss" label="Not now" hotkey="n" role="dismiss" onPress={() => void update($, OFFER, () => null)} />
         </Box>
       </BrandFrame>
@@ -441,8 +445,8 @@ async function derive($: EngineInterface): Promise<Standing | undefined> {
   }
 }
 
-/** Open pane pressed: the same pane /standing opens. The engine ran when the offer was made, so it does not run again. */
-async function acceptOffer($: EngineInterface) {
+/** Every road to the pane: an open pane has nothing left to offer. Open pane does not re-run the engine, which ran when the offer was made. */
+async function openPane($: EngineInterface) {
   await update($, OFFER, () => null)
   await $.ui.open({ id: PANE, title: 'standing' })
 }
