@@ -214,13 +214,13 @@ let current = null; // the running child, killed (whole group) on a signal
 
 /** Run a command to its own log file. Resolves { code, out, ms, log }. The child leads its own process group so a
  *  timeout or a Ctrl+C takes down everything it started, not just the shell. */
-function run(label, cmd, args, { cwd, timeoutMs = 30 * 60_000 } = {}) {
+function run(label, cmd, args, { cwd, timeoutMs = 30 * 60_000, env = ENV } = {}) {
   const log = join(LOGS, `${String(++logSeq).padStart(2, '0')}-${label.replace(/[^a-z0-9.-]+/gi, '_')}.log`);
   writeFileSync(log, `$ (cd ${cwd ?? process.cwd()} && ${[cmd, ...args].join(' ')})\n\n`);
   const fd = openSync(log, 'a');
   const t0 = Date.now();
   return new Promise((done) => {
-    const child = spawn(cmd, args, { cwd, env: ENV, stdio: ['ignore', fd, fd], detached: true });
+    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd], detached: true });
     current = child;
     const timer = setTimeout(() => { appendFileSync(log, `\n[dogfood] TIMEOUT after ${timeoutMs / 1000}s — killed\n`); killGroup(child.pid); }, timeoutMs);
     const finish = (code) => {
@@ -604,6 +604,11 @@ async function verify(step, dir, prefix = '', before = null) {
     const r = await run(`${step}-${prefix ? 'baseline-' : ''}${target}`, bin, [...pre, 'run-many', '-t', target, '--output-style=static'], { cwd: dir, timeoutMs: 20 * 60_000 });
     const failed = r.code ? failedTasks(r.out) : [];
     failedSets[target] = new Set(failed);
+    // Nx exits 0 when no project has the target: nothing was checked, so it passes nothing. Every verified workspace has one for each.
+    if (!r.code && /No tasks were run/.test(r.out)) {
+      record(step, `${prefix}nx run-many -t ${target}`, false, { ms: r.ms, log: r.log, detail: 'no project has this target', reference: !!prefix, released: prefix ? r.out : null });
+      continue;
+    }
     let detail = (r.out.match(/Successfully ran target \S+ for (\d+ projects?)/) ?? [, ''])[1];
     if (r.code) {
       detail = failed.length ? `failed: ${failed.join(', ')}` : why(r.out);
@@ -635,6 +640,26 @@ async function verifyDsComponent(step, dir) {
   gitOut(dir, 'checkout', '-q', '.');
   gitOut(dir, 'clean', '-fdq');
 }
+/** The navigation kernel: no preset wears it, so `verify` never sees it. `nx test` is green on a kernel with no spec and red on a failing one.
+ *  Its generator installs a dependency, and after `--local` that install would fetch this unpublished toolkit from the registry, so only that
+ *  call runs with the package managers stubbed; nothing the checks run needs that dependency. It leaves no trace. */
+async function verifyNavigationCore(step, dir) {
+  const [bin, pre] = nx(dir);
+  const stubs = join(TMP, 'no-install');
+  mkdirSync(stubs, { recursive: true });
+  for (const pm of ['npm', 'pnpm', 'yarn']) writeFileSync(join(stubs, pm), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const nxRun = (name, env, ...args) => run(`${step}-navigation-${name}`, bin, [...pre, ...args], { cwd: dir, timeoutMs: 20 * 60_000, env });
+  const g = await nxRun('generate', { ...ENV, PATH: `${stubs}:${ENV.PATH}` }, 'g', '@bespunky/nx-tools:navigation-core', '--no-interactive');
+  if (!record(step, 'nx g navigation-core', g.code === 0, { ms: g.ms, log: g.log, detail: g.code ? why(g.out) : '' })) return;
+  const green = await nxRun('test', ENV, 'test', 'navigation-core', '--output-style=static');
+  record(step, 'nx test navigation-core passes with no spec', green.code === 0, { ms: green.ms, log: green.log, detail: green.code ? why(green.out) : '' });
+  const root = readJson(join(dir, gitOut(dir, 'ls-files', '--others', '--exclude-standard', '*/navigation-core/project.json')));
+  writeFileSync(join(dir, root.sourceRoot, 'failing.spec.ts'), "import { it, expect } from 'vitest';\nit('fails', () => { expect(1).toBe(2); });\n");
+  const failing = await nxRun('failing-spec', ENV, 'test', 'navigation-core', '--output-style=static');
+  record(step, 'nx test navigation-core is red on a failing spec', failing.code !== 0, { ms: failing.ms, log: failing.log, detail: failing.code ? '' : 'exit 0 past a failing spec' });
+  gitOut(dir, 'checkout', '-q', '.');
+  gitOut(dir, 'clean', '-fdq');
+}
 /** Nx's own "Failed tasks:" list, as task ids. */
 function failedTasks(out) {
   const at = out.indexOf('Failed tasks:');
@@ -662,6 +687,7 @@ async function stepNew(id) {
   if (p.verify) {
     await verify(id, dir);
     await verifyDsComponent(id, dir);
+    await verifyNavigationCore(id, dir);
   }
 }
 
@@ -675,7 +701,6 @@ function cleanup() {
     spawnSync('git', ['-C', TOOLKIT, 'worktree', 'remove', '--force', RELEASED_TREE], { env: ENV });
     rmSync(RELEASED_TREE, { recursive: true, force: true });
   }
-  spawnSync('git', ['-C', TOOLKIT, 'worktree', 'prune'], { env: ENV });
   rmSync(TMP, { recursive: true, force: true });
   if (!opts.keep) rmSync(CONSUMERS, { recursive: true, force: true });
 }

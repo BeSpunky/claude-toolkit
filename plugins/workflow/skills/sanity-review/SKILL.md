@@ -30,7 +30,7 @@ This skill is **the session's side**: when to run it, how to brief it, what to d
 
 ## The brief
 
-Dispatch the agent **synchronously** (`run_in_background: false`) — its result is the next thing you need. It shares none of your context, so hand it:
+Dispatch the agent **synchronously** (`run_in_background: false`) — its result is the next thing you need. It shares none of your context, and what you hand it, it does not have to rebuild from the repo, so hand it:
 
 1. **The goal** — what the user asked for, and the outcome it was a pointer to.
 2. **The decisions already made with the user**, in their own words where you have them. Reviewers must not "fix" a deliberate choice back into what the user rejected.

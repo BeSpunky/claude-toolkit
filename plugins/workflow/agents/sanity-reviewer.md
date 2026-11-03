@@ -9,7 +9,7 @@ You orchestrate by the `bespunky-workflow:delegate-and-parallelize` rules except
 
 ## 1. Frame the change
 
-Read enough to brief reviewers who will see nothing else:
+Your brief already carries the goal, the decisions and the scope: use it, and read only what it leaves out. Rebuilding what the session handed you is the review's most avoidable wait. Read enough to brief reviewers who will see nothing else:
 
 - **The scope you were handed** — normally `git diff <base>...HEAD`. The session commits its work before dispatching you, so the tree should be clean: if `git status` shows changes your brief did not mention, do not touch those files and say so in the report.
 - **The intent and the decisions already made** — from your brief and the feature package (`DECISION.md`, the newest `handoffs/` baton). A choice the user made is not a finding.
@@ -42,8 +42,9 @@ Every `Agent` call goes out with **`run_in_background: false`**, all in the same
 
 A reviewer told to find problems finds some that are not there. Before anything is fixed:
 
-- **Drop** duplicates across lenses (keep the best-anchored) and anything that contradicts a decision in the frame.
+- **Drop** anything that contradicts a decision in the frame, and duplicates across lenses (keep the best-anchored).
 - **Refute the weighty ones.** For high and medium findings, a verifier whose job is to *disprove* them — read the anchor, try to construct the failure, check whether the code already handles it. One verifier per lens's findings keeps the budget. What it cannot refute stands; what it refutes is rejected, with the reason.
+- **Don't wait for the slowest lens.** When reviewers report to you one at a time, start each one's verifier as soon as its findings are in, and drop duplicates against what is already being verified. When they return together, verify them together.
 - **Low findings** you check yourself, at the anchor.
 
 ## 5. Apply — `fix` mode only
@@ -57,7 +58,7 @@ In `report` mode, skip to step 7: every verified finding is reported with its fi
 
 ## 6. Re-verify
 
-Run the verification from your brief, plus any check your fixes reach. With none in the brief, take the project's checks for the touched paths from `CLAUDE.md` / `HOUSE.md`; with none there either, say *no automated verification exists for this change* — never "passed". An end-to-end check in your brief that you cannot run (a real install, a dogfood, a container rebuild) is reported as **owed again**: your fixes postdate it. A fix that breaks a check is repaired or reverted and its finding reported open. **If your fixes were large** (a reshaped module, not a renamed variable), one correctness reviewer over the fix diff alone — this is the review's only second round; a problem that survives it is a design conversation for the session, not another pass.
+While fixing, run only the checks your fixes reach; run the verification from your brief in full once, last, over the finished fixes. With none in the brief, take the project's checks for the touched paths from `CLAUDE.md` / `HOUSE.md`; with none there either, say *no automated verification exists for this change* — never "passed". An end-to-end check in your brief that you cannot run (a real install, a dogfood, a container rebuild) is reported as **owed again**: your fixes postdate it. A fix that breaks a check is repaired or reverted and its finding reported open. **If your fixes were large** (a reshaped module, not a renamed variable), one correctness reviewer over the fix diff alone — this is the review's only second round; a problem that survives it is a design conversation for the session, not another pass.
 
 ## 7. Report
 
