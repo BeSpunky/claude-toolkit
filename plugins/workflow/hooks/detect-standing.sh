@@ -39,7 +39,7 @@ ENGINE="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}/skills/project-
 command -v node >/dev/null 2>&1 && [ -f "$ENGINE" ] || exit 0
 facts="$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" BESPUNKY_STANDING_STALE_DAYS="$STALE_DAYS" node "$ENGINE" --tsv 2>/dev/null)" || exit 0
 
-# repo<TAB>hasFeatures<TAB>hasRecentDoc<TAB>lastCommit<TAB>commitAgeDays, then pkg<TAB>dir<TAB>status<TAB>state<TAB>baton<TAB>worktree
+# repo<TAB>hasFeatures<TAB>hasRecentDoc<TAB>lastCommit<TAB>commitAgeDays, then pkg<TAB>dir<TAB>status<TAB>state<TAB>baton<TAB>worktree<TAB>branch<TAB>remote
 IFS="$(printf '\t')" read -r tag has_features recent_doc last_commit commit_age_days <<EOF_REPO
 $(printf '%s\n' "$facts" | head -n 1)
 EOF_REPO
@@ -54,10 +54,14 @@ case "$commit_age_days" in '' | *[!0-9-]*) exit 0 ;; esac
 [ "$commit_age_days" -lt "$STALE_DAYS" ] && exit 0   # a commit landed recently → active → quiet
 
 # --- the in-flight efforts: an unconcluded package (no closing `status:` in its DECISION.md) ------------------
-# The engine scans every worktree, so a package may live in another checkout: its 6th column names that
-# worktree (empty for this one), and the path printed is where the package actually is. Parsed with awk, not
-# `read`: a tab is IFS whitespace, so an empty baton column would collapse and shift the worktree into its place.
-paths="$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pkg" && $3 == "in-flight" { print ($6 == "" ? "" : $6 "/") "docs/features/" $2 "/" }')"
+# The engine looks everywhere an effort can live, so a package may be in another checkout (its 6th column names that
+# worktree, empty for this one) or only on a branch with no worktree at all (its 7th, printed as git's own
+# `branch:path`, which `git show` reads). The path printed is where the package actually is. A local unlanded branch IS
+# what this notice exists for, walked-away work, and it costs nothing extra: the same dormancy gate and the same one
+# notice per dormant stretch. A remote-only one (8th column) is left to the skill and the pane: someone else's pushed
+# branch is not something you walked away from, and a team repo has many. Parsed with awk, not `read`: a tab is IFS
+# whitespace, so an empty baton column would collapse and shift the worktree into its place.
+paths="$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pkg" && $3 == "in-flight" && $8 != "1" { print ($7 != "" ? $7 ":docs/features/" $2 "/ (on that branch, no worktree)" : ($6 == "" ? "" : $6 "/") "docs/features/" $2 "/") }')"
 count=0
 [ -n "$paths" ] && count="$(printf '%s\n' "$paths" | wc -l | tr -d ' ')"
 inflight="$(printf '%s\n' "$paths" | head -n 8 | sed 's/^/  • /')

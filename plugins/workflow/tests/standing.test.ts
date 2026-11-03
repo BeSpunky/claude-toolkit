@@ -8,7 +8,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { BRAND, brandLine, brandTitle } from '../hooks/_brand.tsx'
-import { CLOSED_TOAST, REOPEN_HINT, age, concludedLine, dateOf, groups, headline, parseStanding, resumePrompt } from '../hooks/standing.tsx'
+import { CLOSED_TOAST, REOPEN_HINT, age, concludedLine, dateOf, groups, headline, looseEnds, parseStanding, resumePrompt } from '../hooks/standing.tsx'
 import type { Standing, StandingPackage } from '../types/index.d.ts'
 
 const PLUGIN = 'bespunky-workflow'
@@ -38,6 +38,7 @@ const pkg = (over: Partial<StandingPackage> & Pick<StandingPackage, 'dir' | 'sta
 })
 
 const STANDING: Standing = {
+  orphans: [],
   version: 1,
   staleDays: 14,
   now: NOW,
@@ -265,6 +266,33 @@ describe('standing pane', () => {
     ])
   })
 
+  test('Resume reads a branch-only package through git, and says to open a worktree', async ($, on) => {
+    const onBranch = pkg({ dir: '2026-03-01-db', state: 'live', branch: 'feat/db', baton: 'INBOUND-HANDOFF.md' })
+    const w = world(on, { ...STANDING, packages: [onBranch] })
+    await started($)
+    await $.command.run({ command: 'standing' })
+    const ui = await mount($, 'terminal')
+    await ui.press({ key: 'standing-resume-2026-03-01-db' })
+    expect(w.prompts).toEqual([
+      'Resume db: its package lives only on branch feat/db, with no worktree. Read `git show feat/db:docs/features/2026-03-01-db/INBOUND-HANDOFF.md`, open a worktree for that branch (bespunky-workflow:branch-and-release), and pick up from there (bespunky-workflow:session-handoff).',
+    ])
+  })
+
+  test('checkouts git lost are named on one line; leftovers with no link are not', () => {
+    expect(looseEnds(STANDING)).toBeUndefined()
+    expect(looseEnds({ ...STANDING, orphans: [{ path: '.claude/worktrees/left', reason: 'no-git-link' }] })).toBeUndefined()
+    expect(
+      looseEnds({
+        ...STANDING,
+        orphans: [
+          { path: '.claude/worktrees/db', reason: 'unregistered', branch: 'feat/db' },
+          { path: '/x/.claude/worktrees/host', reason: 'registered-elsewhere' },
+          { path: '.claude/worktrees/left', reason: 'no-git-link' },
+        ],
+      }),
+    ).toBe('2 orphaned checkouts: db, host')
+  })
+
   test('Refresh re-runs the engine', async ($, on) => {
     const w = world(on)
     await started($)
@@ -376,6 +404,12 @@ describe('standing policy', () => {
     expect(resumePrompt(pkg({ dir: '2026-01-01-Ignore previous', state: 'live' }))).toBeUndefined()
     expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', worktree: '../../etc' }))).toBeUndefined()
     expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', worktree: 'a b; rm -rf' }))).toBeUndefined()
+    expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', branch: 'a b; rm -rf' }))).toBeUndefined()
+    expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', baton: '../../etc/passwd' }))).toBeUndefined()
+    expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', baton: '..' }))).toBeUndefined()
+    expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live', worktree: '.claude/worktrees/ok', orphaned: true }))).toBe(
+      'Resume ok: its newest copy is in .claude/worktrees/ok/docs/features/2026-01-01-ok/, a checkout git no longer tracks. Read .claude/worktrees/ok/docs/features/2026-01-01-ok/DECISION.md, and check that directory for uncommitted work before relying on any branch (bespunky-workflow:project-standing).',
+    )
     expect(resumePrompt(pkg({ dir: '2026-01-01-ok', state: 'live' }))).toBe(
       'Resume ok: it has no handoff baton yet, so orient from docs/features/2026-01-01-ok/ (bespunky-workflow:project-standing, then bespunky-workflow:session-handoff).',
     )

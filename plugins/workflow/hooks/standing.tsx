@@ -38,7 +38,8 @@ const COMMAND = 'standing'
 const ENGINE = 'skills/project-standing/scripts/standing.mjs'
 
 const PACKAGE_DIR = /^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+$/
-const BATON = /^handoffs\/[A-Za-z0-9._-]{1,120}$/
+/** The engine's baton: the newest in `handoffs/`, else a handoff filed at the package's root. */
+const BATON = /^(?:handoffs\/)?[A-Za-z0-9_-][A-Za-z0-9._-]{0,119}$/
 /** The engine's worktree rule: a relative or absolute path of safe segments, never `.` or `..`. */
 const WORKTREE = /^\/?(?!\.\.?(?:\/|$))[A-Za-z0-9._@+-]+(?:\/(?!\.\.?(?:\/|$))[A-Za-z0-9._@+-]+)*$/
 /** Digits 1–9 press the first nine Resume buttons. */
@@ -102,6 +103,15 @@ export function concludedLine(now: number, concluded: StandingPackage[]) {
   return `${concluded.length} concluded · latest: ${latest.slug} (${age(now, latest.closedAt ?? latest.lastActivity)})`
 }
 
+/** The checkouts that may hold work git cannot see, as one line: "2 orphaned checkouts: a, b". Leftovers with no git link are the skill's to mention. */
+export function looseEnds({ orphans }: Standing) {
+  const linked = orphans.filter(orphan => orphan.reason !== 'no-git-link')
+  if (linked.length === 0) return undefined
+  const leaf = (at: string) => at.slice(at.lastIndexOf('/') + 1)
+
+  return `${linked.length} orphaned checkout${linked.length === 1 ? '' : 's'}: ${linked.map(orphan => leaf(orphan.path)).join(', ')}`
+}
+
 /** An epoch as its UTC calendar date, `YYYY-MM-DD`. */
 export function dateOf(epoch: number) {
   return new Date(epoch * 1000).toISOString().slice(0, 10)
@@ -114,12 +124,20 @@ export function dateOf(epoch: number) {
 export function resumePrompt(pkg: StandingPackage): string | undefined {
   if (!PACKAGE_DIR.test(pkg.dir)) return undefined
   if (pkg.worktree !== undefined && !WORKTREE.test(pkg.worktree)) return undefined
+  if (pkg.baton !== undefined && !BATON.test(pkg.baton)) return undefined
+  if (pkg.branch !== undefined) {
+    if (!WORKTREE.test(pkg.branch)) return undefined
+    const first = `${pkg.branch}:docs/features/${pkg.dir}/${pkg.baton ?? 'DECISION.md'}`
+
+    return `Resume ${pkg.slug}: its package lives only on branch ${pkg.branch}, with no worktree. Read \`git show ${first}\`, open a worktree for that branch (bespunky-workflow:branch-and-release), and pick up from there (bespunky-workflow:session-handoff).`
+  }
   const where = `${pkg.worktree === undefined ? '' : `${pkg.worktree}/`}docs/features/${pkg.dir}/`
+  if (pkg.orphaned === true) {
+    return `Resume ${pkg.slug}: its newest copy is in ${where}, a checkout git no longer tracks. Read ${where}${pkg.baton ?? 'DECISION.md'}, and check that directory for uncommitted work before relying on any branch (bespunky-workflow:project-standing).`
+  }
   if (pkg.baton === undefined) {
     return `Resume ${pkg.slug}: it has no handoff baton yet, so orient from ${where} (bespunky-workflow:project-standing, then bespunky-workflow:session-handoff).`
   }
-  if (!BATON.test(pkg.baton)) return undefined
-
   return `Resume ${pkg.slug}: read its newest handoff, ${where}${pkg.baton}, and pick up from there (bespunky-workflow:session-handoff).`
 }
 
@@ -218,6 +236,7 @@ export const register: Register = on => {
       const prompt = resumePrompt(pkg)
       const hotkey = hotkeyOf(pkg)
       const where = pkg.baton ?? 'no baton yet'
+      const lives = pkg.branch !== undefined ? ` · branch ${pkg.branch}` : pkg.orphaned === true ? ' · orphaned checkout' : pkg.hasWorktree ? ' · worktree' : ''
 
       return (
         <Box key={`standing-row-${pkg.dir}`} flexDirection="row" gap={1}>
@@ -227,7 +246,7 @@ export const register: Register = on => {
               <Text dimColor>
                 {' '}
                 {age(standing.now, pkg.lastActivity)}
-                {pkg.hasWorktree ? ' · worktree' : ''} · {where}
+                {lives} · {where}
               </Text>
             </Text>
             {aboutLine(pkg)}
@@ -272,6 +291,15 @@ export const register: Register = on => {
       </Box>
     )
 
+    // Checkouts git has lost track of: not efforts, but the one thing only this view can say. Empty says nothing.
+    const orphans = looseEnds(standing)
+    const lost =
+      orphans === undefined ? null : (
+        <Text key="standing-orphans" dimColor wrap="truncate-end">
+          {orphans}
+        </Text>
+      )
+
     const summary = concludedLine(standing.now, concluded)
     const history =
       summary === undefined ? null : (
@@ -299,6 +327,7 @@ export const register: Register = on => {
         {section('Live', live)}
         {section('Dormant', dormant)}
         {history}
+        {lost}
         {controls}
       </BrandFrame>
     )

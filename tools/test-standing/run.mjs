@@ -74,6 +74,58 @@ const FILES = {
   ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => [`docs/features/2026-02-0${i}-many${i}/BRIEF.md`, 'x\n'])),
 };
 
+/** A repo on `development` whose every commit is `age` days old unless a step says otherwise, with the helpers these cases share. */
+function repo(files = { 'README.md': 'x\n' }, commitAge = 30) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-'));
+  const dated = age => {
+    const stamp = new Date(Date.now() - age * DAY * 1000).toISOString();
+
+    return { ...process.env, GIT_AUTHOR_DATE: stamp, GIT_COMMITTER_DATE: stamp };
+  };
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe', env: dated(commitAge) });
+  const commit = (changes, age = commitAge) => {
+    for (const [rel, text] of Object.entries(changes)) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), text);
+    }
+    git('add', '-A');
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'step'], { stdio: 'pipe', env: dated(age) });
+  };
+  git('init', '-q', '-b', 'development');
+  git('config', 'user.email', 't@t');
+  git('config', 'user.name', 't');
+  commit(files);
+  const old = new Date(Date.now() - commitAge * DAY * 1000);
+  const touchAll = () => {
+    for (const rel of git('ls-files').toString().split('\n').filter(Boolean)) fs.utimesSync(path.join(dir, rel), old, old);
+  };
+  touchAll();
+
+  return {
+    dir,
+    git,
+    commit: (changes, age) => {
+      commit(changes, age);
+      touchAll();
+    },
+    /** Commits `changes` on `name` (cut from here, or continued), and comes back to `development`. */
+    branch(name, changes, age = commitAge) {
+      git('checkout', '-q', ...(git('branch', '--list', name).length > 0 ? [name] : ['-b', name]));
+      commit(changes, age);
+      git('checkout', '-q', 'development');
+      touchAll();
+    },
+    worktree(name, { existing = false } = {}) {
+      const tree = path.join(dir, '.claude/worktrees', name.replace('/', '-'));
+      git('worktree', 'add', '-q', tree, ...(existing ? [name] : ['-b', name]));
+
+      return tree;
+    },
+  };
+}
+
+const byDir = dir => Object.fromEntries(JSON.parse(engine(dir)).packages.map(p => [p.dir, p]));
+
 const cases = {
   'the engine classifies, validates and finds the newest baton'() {
     const dir = fixture({ commitAge: 30, docAge: 30, files: FILES });
@@ -151,7 +203,7 @@ const cases = {
     assert.equal(by.alpha.baton, 'handoffs/2026-01-03T1200Z.md');
     assert.equal(by.beta.worktree, undefined, 'a tie keeps the session checkout');
     assert.equal(standing.repo.hasRecentDoc, true, 'recent work in another worktree is activity');
-    assert.match(engine(dir, '--tsv'), /^pkg\t2026-01-06-gamma\tin-flight\tdormant\thandoffs\/2026-01-06T1200Z\.md\t\.claude\/worktrees\/other$/m);
+    assert.match(engine(dir, '--tsv'), /^pkg\t2026-01-06-gamma\tin-flight\tdormant\thandoffs\/2026-01-06T1200Z\.md\t\.claude\/worktrees\/other\t\t$/m);
 
     // Seen from inside the linked worktree, that checkout is the session's: its copies carry no worktree.
     const inside = Object.fromEntries(JSON.parse(engine(tree)).packages.map(p => [p.slug, p]));
@@ -173,6 +225,211 @@ const cases = {
       hook(dir).stdout,
       `[bespunky-workflow] This project has 1 in-flight effort and hasn't been touched in ~30 days:\n  • .claude/worktrees/other/docs/features/2026-01-06-gamma/\n${NOTICE_TAIL}`,
     );
+  },
+
+  'a package only on an unlanded branch is found, says where it lives, from any checkout'() {
+    const r = repo();
+    r.branch('feat/db', { 'docs/features/2026-01-07-db/DECISION.md': '---\nsummary: the db layer\n---\n' });
+    const tree = r.worktree('feat/other');
+    for (const at of [r.dir, tree]) {
+      const db = byDir(at)['2026-01-07-db'];
+      assert.equal(db.branch, 'feat/db', at);
+      assert.equal(db.worktree, undefined);
+      assert.equal(db.status, 'in-flight');
+      assert.equal(db.hasWorktree, false);
+      assert.equal(db.state, 'dormant');
+      assert.equal(db.about, 'the db layer');
+    }
+    assert.match(engine(r.dir, '--tsv'), /^pkg\t2026-01-07-db\tin-flight\tdormant\t\t\tfeat\/db\t$/m);
+    assert.equal(
+      hook(r.dir).stdout,
+      `[bespunky-workflow] This project has 1 in-flight effort and hasn't been touched in ~30 days:\n  • feat/db:docs/features/2026-01-07-db/ (on that branch, no worktree)\n${NOTICE_TAIL}`,
+    );
+  },
+
+  'a repo whose docs/features exists only on a branch is still seen'() {
+    const r = repo({ 'README.md': 'x\n' });
+    r.branch('feat/db', { 'docs/features/2026-01-07-db/BRIEF.md': 'x\n' });
+    const standing = JSON.parse(engine(r.dir));
+    assert.equal(standing.repo.hasFeatures, true);
+    assert.deepEqual(standing.packages.map(p => [p.slug, p.branch]), [['db', 'feat/db']]);
+  },
+
+  'a recent commit on an unlanded branch is activity: the notice stays quiet'() {
+    const r = repo();
+    r.branch('feat/db', { 'docs/features/2026-01-07-db/BRIEF.md': 'x\n' }, 2);
+    assert.equal(byDir(r.dir)['2026-01-07-db'].state, 'live');
+    assert.equal(JSON.parse(engine(r.dir)).repo.hasRecentDoc, true);
+    assert.equal(hook(r.dir).stdout, '');
+  },
+
+  'a landed branch, a protected line and a branch checked out elsewhere are not branch-only efforts'() {
+    const r = repo();
+    r.branch('feat/landed', { 'docs/features/2026-01-07-landed/BRIEF.md': 'x\n' });
+    r.git('merge', '-q', '--no-ff', '-m', 'land', 'feat/landed');
+    r.branch('main', { 'docs/features/2026-01-08-hotline/BRIEF.md': 'x\n' });
+    r.branch('feat/open', { 'docs/features/2026-01-09-open/BRIEF.md': 'x\n' });
+    r.worktree('feat/open', { existing: true });
+    const by = byDir(r.dir);
+    assert.equal(by['2026-01-07-landed'].branch, undefined, 'landed: read from the checkout');
+    assert.equal(by['2026-01-08-hotline'], undefined, 'a protected line is not an effort');
+    assert.equal(by['2026-01-09-open'].branch, undefined);
+    assert.equal(by['2026-01-09-open'].worktree, '.claude/worktrees/feat-open');
+  },
+
+  'what a branch merely forked with is not its effort, so a stale branch cannot revive a concluded package'() {
+    const r = repo({ 'docs/features/2026-01-07-done/DECISION.md': 'in flight\n' });
+    r.branch('feat/stale', { 'unrelated.md': 'x\n' });
+    r.commit({ 'docs/features/2026-01-07-done/DECISION.md': '---\nstatus: concluded\nsummary: closed\n---\n' });
+    const done = byDir(r.dir)['2026-01-07-done'];
+    assert.equal(done.status, 'concluded');
+    assert.equal(done.branch, undefined);
+  },
+
+  'a branch that moved a package on keeps the newest copy; one that moved it earlier does not'() {
+    const r = repo({ 'docs/features/2026-01-07-shared/DECISION.md': 'x\n', 'docs/features/2026-01-08-both/DECISION.md': 'x\n' });
+    // Touched on a branch and nowhere since: that copy is the newest, though the checkout has the path too.
+    r.branch('feat/moved', { 'docs/features/2026-01-07-shared/handoffs/2026-01-09T0000Z.md': 'baton\n' }, 5);
+    // Touched on a branch, then concluded later on integration: integration is the newest.
+    r.branch('feat/older', { 'docs/features/2026-01-08-both/handoffs/a.md': 'baton\n' }, 5);
+    r.commit({ 'docs/features/2026-01-08-both/DECISION.md': '---\nstatus: concluded\n---\n' }, 1);
+    const by = byDir(r.dir);
+    assert.equal(by['2026-01-07-shared'].branch, 'feat/moved');
+    assert.equal(by['2026-01-07-shared'].baton, 'handoffs/2026-01-09T0000Z.md');
+    assert.equal(by['2026-01-08-both'].branch, undefined);
+    assert.equal(by['2026-01-08-both'].status, 'concluded');
+  },
+
+  'a concluded package on an unlanded branch stays concluded, and says the branch'() {
+    const r = repo();
+    r.branch('fix/closed', { 'docs/features/2026-01-07-closed/DECISION.md': '---\nstatus: concluded\nconcluded: 2026-01-09\nsummary: done\n---\n' });
+    const closed = byDir(r.dir)['2026-01-07-closed'];
+    assert.equal(closed.state, 'concluded');
+    assert.equal(closed.branch, 'fix/closed');
+    assert.equal(closed.summary, 'done');
+    assert.equal(hook(r.dir).stdout.includes('closed'), false, 'closed is not in flight: the notice stays out of it');
+  },
+
+  'a package archived on integration is not back in flight because its branch survived a squash landing'() {
+    const r = repo();
+    r.branch('feat/gone', { 'docs/features/2025-01-07-gone/DECISION.md': 'in flight\n' });
+    r.commit({ 'docs/features/archive/2025/2025-01-07-gone/DECISION.md': '---\nstatus: concluded\n---\n' });
+    assert.equal(byDir(r.dir)['2025-01-07-gone'], undefined);
+  },
+
+  'a branch that deleted or moved a package no longer carries it'() {
+    const r = repo();
+    r.branch('feat/moved', { 'docs/features/2026-01-07-moved/DECISION.md': 'x\n' });
+    r.git('checkout', '-q', 'feat/moved');
+    r.git('rm', '-qr', 'docs/features/2026-01-07-moved');
+    r.commit({ 'docs/features/2026-01-08-renamed/DECISION.md': 'x\n' });
+    r.git('checkout', '-q', 'development');
+    const by = byDir(r.dir);
+    assert.equal(by['2026-01-07-moved'], undefined);
+    assert.equal(by['2026-01-08-renamed'].branch, 'feat/moved');
+  },
+
+  'the baton is the newest in handoffs/, else a handoff filed at the root, from a branch and from a checkout'() {
+    const files = {
+      'docs/features/2026-01-07-inbound/INBOUND-HANDOFF.md': 'x\n',
+      'docs/features/2026-01-07-inbound/NOTES.md': 'x\n',
+      'docs/features/2026-01-08-both/INBOUND-HANDOFF.md': 'x\n',
+      'docs/features/2026-01-08-both/handoffs/b.md': 'x\n',
+    };
+    const r = repo();
+    r.branch('feat/batons', files);
+    const seen = repo(files);
+    for (const by of [byDir(r.dir), byDir(seen.dir)]) {
+      assert.equal(by['2026-01-07-inbound'].baton, 'INBOUND-HANDOFF.md');
+      assert.equal(by['2026-01-08-both'].baton, 'handoffs/b.md');
+    }
+  },
+
+  'a branch whose name fails the charset is never echoed'() {
+    const r = repo();
+    r.branch('feat/x;rm', { 'docs/features/2026-01-07-hostile/BRIEF.md': 'x\n' });
+    assert.equal(engine(r.dir).includes(';rm'), false);
+    assert.equal(hook(r.dir).stdout.includes(';rm'), false);
+  },
+
+  'a package on a remote-only branch is found and marked, and stays out of the notice'() {
+    const upstream = repo();
+    upstream.branch('feat/theirs', { 'docs/features/2026-01-07-theirs/BRIEF.md': 'x\n' });
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'standing-test-'));
+    execFileSync('git', ['clone', '-q', upstream.dir, clone], { stdio: 'pipe' });
+    const theirs = byDir(clone)['2026-01-07-theirs'];
+    assert.equal(theirs.branch, 'origin/feat/theirs');
+    assert.equal(theirs.remote, true);
+    assert.equal(hook(clone).stdout, '', 'someone else\'s branch is not what you walked away from');
+    // Once it is a local branch too, the local one is the copy that counts.
+    execFileSync('git', ['-C', clone, 'branch', '-q', 'feat/theirs', 'origin/feat/theirs'], { stdio: 'pipe' });
+    assert.deepEqual([byDir(clone)['2026-01-07-theirs'].branch, byDir(clone)['2026-01-07-theirs'].remote], ['feat/theirs', undefined]);
+  },
+
+  'integration comes from the declared model: other lines count as unlanded, its release pattern is protected'() {
+    const r = repo();
+    const branches = (...args) => spawnSync('node', [path.join(PLUGIN, 'skills/branch-and-release/scripts/branches.mjs'), ...args], { cwd: r.dir, encoding: 'utf8' });
+    const declared = branches('expand', '--preset', 'gitflow', '--integration', 'development');
+    assert.equal(declared.status, 0, declared.stderr);
+    const input = path.join(os.tmpdir(), `standing-model-${process.pid}.json`);
+    fs.writeFileSync(input, declared.stdout);
+    const wrote = branches('write', input);
+    fs.rmSync(input);
+    assert.equal(wrote.status, 0, wrote.stderr);
+    r.commit({});
+    r.branch('release/1.0', { 'docs/features/2026-01-07-stabilise/BRIEF.md': 'x\n' });
+    r.branch('feat/db', { 'docs/features/2026-01-08-db/BRIEF.md': 'x\n' });
+    const by = byDir(r.dir);
+    assert.equal(by['2026-01-07-stabilise'], undefined, 'a release line is protected, not an effort');
+    assert.equal(by['2026-01-08-db'].branch, 'feat/db');
+  },
+
+  'a checkout git lost track of is reported and read, and nothing about it changes'() {
+    const r = repo({ 'docs/features/2026-01-06-base/BRIEF.md': 'x\n' });
+    r.branch('feat/lost', { 'docs/features/2026-01-07-lost/DECISION.md': 'x\n' });
+    const lost = r.worktree('feat/lost', { existing: true });
+    // Born on another machine, whose path this one cannot see, and pruned from here: the way it actually happens.
+    fs.writeFileSync(path.join(r.dir, '.git/worktrees/feat-lost/gitdir'), '/home/elsewhere/repo/.claude/worktrees/feat-lost/.git\n');
+    fs.writeFileSync(path.join(lost, '.git'), 'gitdir: /home/elsewhere/repo/.git/worktrees/feat-lost\n');
+    r.git('worktree', 'prune');
+    assert.equal(fs.existsSync(path.join(r.dir, '.git/worktrees/feat-lost')), false, 'fixture: the registration is gone');
+    // Written there and never committed: only that directory has it.
+    const only = path.join(lost, 'docs/features/2026-01-08-uncommitted');
+    fs.mkdirSync(path.join(only, 'handoffs'), { recursive: true });
+    fs.writeFileSync(path.join(only, 'handoffs/a.md'), 'x\n');
+    // A leftover with no git link, and a repository of its own, which is no orphan at all.
+    fs.mkdirSync(path.join(r.dir, '.claude/worktrees/leftover/docs/features/2026-01-09-left'), { recursive: true });
+    fs.writeFileSync(path.join(r.dir, '.claude/worktrees/leftover/docs/features/2026-01-09-left/BRIEF.md'), 'x\n');
+    execFileSync('git', ['init', '-q', path.join(r.dir, '.claude/worktrees/standalone')], { stdio: 'pipe' });
+    const snapshot = () => fs.readdirSync(path.join(r.dir, '.git/worktrees'), { recursive: true }).concat(fs.readFileSync(path.join(lost, '.git'), 'utf8'));
+    r.git('worktree', 'add', '-q', path.join(r.dir, '.claude/worktrees/still'), '-b', 'feat/still');
+    const before = snapshot();
+
+    const standing = JSON.parse(engine(r.dir));
+    const by = Object.fromEntries(standing.packages.map(p => [p.dir, p]));
+    assert.deepEqual(standing.orphans, [
+      { path: '.claude/worktrees/feat-lost', reason: 'unregistered' },
+      { path: '.claude/worktrees/leftover', reason: 'no-git-link' },
+    ]);
+    assert.equal(by['2026-01-07-lost'].branch, 'feat/lost', 'the branch is the durable copy');
+    assert.equal(by['2026-01-08-uncommitted'].worktree, '.claude/worktrees/feat-lost');
+    assert.equal(by['2026-01-08-uncommitted'].orphaned, true);
+    assert.equal(by['2026-01-08-uncommitted'].baton, 'handoffs/a.md');
+    assert.equal(by['2026-01-09-left'], undefined, 'a leftover is reported, never read');
+    assert.equal(by['2026-01-06-base'].worktree, undefined, 'a stale copy in an orphan ties and loses');
+    assert.deepEqual(snapshot(), before, 'read-only');
+  },
+
+  'a worktree registered under a path this environment cannot see: its branch is read, its checkout named'() {
+    const r = repo();
+    r.branch('feat/host', { 'docs/features/2026-01-07-host/BRIEF.md': 'x\n' });
+    const tree = r.worktree('feat/host', { existing: true });
+    fs.writeFileSync(path.join(r.dir, '.git/worktrees/feat-host/gitdir'), '/home/elsewhere/repo/.claude/worktrees/feat-host/.git\n');
+    fs.writeFileSync(path.join(tree, '.git'), 'gitdir: /home/elsewhere/repo/.git/worktrees/feat-host\n');
+    const standing = JSON.parse(engine(r.dir));
+    assert.deepEqual(standing.orphans, [{ path: '.claude/worktrees/feat-host', reason: 'registered-elsewhere', branch: 'feat/host' }]);
+    assert.equal(standing.packages.find(p => p.slug === 'host').branch, 'feat/host');
+    assert.equal(fs.existsSync(path.join(r.dir, '.git/worktrees/feat-host')), true, 'never pruned');
   },
 
   'a closed package says when it closed'() {

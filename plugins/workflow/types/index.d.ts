@@ -32,7 +32,13 @@ export type StandingPackage = {
    * dir, relative to the session's when inside it, else absolute. Charset-validated at the source.
    */
   worktree?: string
-  /** The newest baton, relative to the package: `handoffs/<name>`. */
+  /** That `worktree` is a checkout git no longer tracks (see `StandingOrphan`). */
+  orphaned?: boolean
+  /** The newest copy is only on this unlanded branch, checked out nowhere readable. Charset-validated at the source. */
+  branch?: string
+  /** That `branch` is remote-tracking, with no local branch of the name. */
+  remote?: boolean
+  /** The newest baton, relative to the package: `handoffs/<name>`, else a handoff filed at the package's root. */
   baton?: string
   /**
    * What the package is about, in one plain line (DECISION.md's summary, else BRIEF.md's summary or
@@ -47,6 +53,19 @@ export type StandingPackage = {
   closedAt?: number
 }
 
+/** A directory under `.claude/worktrees/` that git does not list as a worktree here. Left exactly as it is. */
+export type StandingOrphan = {
+  /** Named as `worktree` is. */
+  path: string
+  /**
+   * `registered-elsewhere`: registered under a path this environment cannot see.
+   * `unregistered`: the registration is gone; its files may hold uncommitted work.
+   * `no-git-link`: no `.git`; what a removed worktree left behind.
+   */
+  reason: 'registered-elsewhere' | 'unregistered' | 'no-git-link'
+  branch?: string
+}
+
 /** What `standing.mjs --json` prints. `repo` is null outside a git repository. */
 export type Standing = {
   version: 1
@@ -55,6 +74,7 @@ export type Standing = {
   now: number
   repo: { lastCommit: number; commitAgeDays: number; hasFeatures: boolean; hasRecentDoc: boolean } | null
   packages: StandingPackage[]
+  orphans: StandingOrphan[]
 }
 
 /**
