@@ -14,7 +14,8 @@ import { join } from 'node:path';
 import { type ProjectConfiguration, type Tree, updateJson, logger } from '@nx/devkit';
 import type { DesignSystemPort } from '../stack-adapter';
 import { pruneUnusedPeers } from './library-peers';
-import { passWithNoTests } from '../../generators/_utils/pass-with-no-tests';
+import { passWithNoTests, passWithNoTestsGap } from '../../generators/_utils/pass-with-no-tests';
+import { UNIT_TEST_EXECUTORS } from './entry-point-reach';
 
 /** The runtime files this binding owns; anything else under src/lib is the base generator's demo output. */
 const RUNTIME_FILES = new Set(['design-system.providers.ts', 'ds-theme.service.ts', 'ds-runtime-theme.service.ts']);
@@ -58,8 +59,12 @@ export const angularDesignSystem: DesignSystemPort = {
     }
     pruneUnusedPeers(tree, root);
     // That was the only spec. Jest, the runner below Angular 21, can be told that none is not a failure, and on Nx 24 it
-    // has to be: the target is inferred, so no targetDefault says it. @nx/angular:unit-test cannot: see creationTemplates.
-    passWithNoTests(tree, root);
+    // has to be: the target is inferred, so no targetDefault says it. @nx/angular:unit-test cannot, and gets a real spec:
+    // see creationTemplates. No runner at all has nothing to fail. Anything else stays red, so it is said.
+    const result = passWithNoTests(tree, root);
+    const seeded = result.kind === 'other-runner' && UNIT_TEST_EXECUTORS.has(result.executor ?? '');
+    const gap = result.kind === 'no-config' || seeded ? null : passWithNoTestsGap(result);
+    if (gap) logger.warn(`[design-system] Could not set passWithNoTests (${gap}). If \`nx test\` on the design system reports no tests, add a spec.`);
   },
 
   /**
@@ -70,6 +75,6 @@ export const angularDesignSystem: DesignSystemPort = {
    * to pass on no specs by pruneGenerated.
    */
   creationTemplates(project: ProjectConfiguration) {
-    return project.targets?.test?.executor === '@nx/angular:unit-test' ? join(__dirname, 'design-system-creation-files') : undefined;
+    return UNIT_TEST_EXECUTORS.has(project.targets?.test?.executor ?? '') ? join(__dirname, 'design-system-creation-files') : undefined;
   },
 };

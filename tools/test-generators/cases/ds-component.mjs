@@ -10,7 +10,7 @@ import { angularWorkspace, SCOPE } from '../workspaces.mjs';
 const { addProjectConfiguration, writeJson } = requireFromRepo('@nx/devkit');
 const ROOT = 'packages/design-system';
 const UNIT_TEST = '@nx/angular:unit-test';
-const REACH = { include: ['**/*.spec.ts', '**/*.test.ts', '../**/*.spec.ts', '../**/*.test.ts'], exclude: ['../**/node_modules/**', '../**/dist/**'] };
+const REACH = { include: ['**/*.spec.ts', '**/*.test.ts', '../**/*.spec.ts', '../**/*.test.ts'], exclude: ['../**/node_modules/**', '../dist/**'] };
 const SPEC_TSCONFIG_INCLUDE = ['src/**/*.ts', 'src/**/*.d.ts', '**/src/**/*.ts'];
 
 function entryIsWhole(tree, t, entry, name) {
@@ -19,6 +19,8 @@ function entryIsWhole(tree, t, entry, name) {
   t.has(`${entry}/src/${name}.ts`, `templateUrl: './${name}.html'`);
   t.ok(!tree.exists(`${entry}/src.ts`), 'nothing written beside the entry\'s src folder');
 }
+
+const jsonOf = (tree, path) => JSON.parse(tree.read(path, 'utf8'));
 
 const dsComponent = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) => ({
   name: `packages × ${link}: the component sits beside its barrel, which re-exports it, and its SCSS reads tokens`,
@@ -38,9 +40,37 @@ const dsComponent = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) =>
     t.equal(t.json(`${entry}/ng-package.json`).lib.entryFile, 'src/index.ts', 'the entry file');
     t.ok(t.json(`${entry}/ng-package.json`).lib.styleIncludePaths.includes('../..'), 'the sass channel');
     const test = t.json(`${ROOT}/project.json`).targets.test;
-    if (test?.executor === UNIT_TEST) t.equal({ include: test.options.include, exclude: test.options.exclude }, REACH, 'the entry\'s spec runs: secondary-entrypoint aimed the design system\'s target');
+    t.equal(test?.executor, UNIT_TEST, 'the fixture\'s runner: a Jest fixture would test nothing here');
+    t.equal({ include: test.options.include, exclude: test.options.exclude }, REACH, 'the entry\'s spec runs: secondary-entrypoint aimed the design system\'s target');
   },
 }));
+
+const handMadeEntry = {
+  name: "a re-run over an entry made by hand: the library's own sass channel and its target's reach are re-asserted, the files are not",
+  needs: ['@nx/angular', '@nx/js'],
+  setup: async (ctx) => {
+    const tree = angularWorkspace({ layout: 'packages', link: 'paths' });
+    await ctx.load('generators/design-system/generator').default(tree, { skipFormat: true });
+    const project = jsonOf(tree, `${ROOT}/project.json`);
+    const { include, exclude, ...options } = project.targets.test.options ?? {};
+    tree.write(`${ROOT}/project.json`, JSON.stringify({ ...project, targets: { ...project.targets, test: { ...project.targets.test, options } } }, null, 2));
+    const ngPackage = jsonOf(tree, `${ROOT}/ng-package.json`);
+    delete ngPackage.lib.styleIncludePaths;
+    tree.write(`${ROOT}/ng-package.json`, JSON.stringify(ngPackage, null, 2));
+    tree.write(`${ROOT}/card/ng-package.json`, '{ "lib": { "entryFile": "src/index.ts" } }\n');
+    tree.write(`${ROOT}/card/src/mine.ts`, '// mine\n');
+    return tree;
+  },
+  run: async (tree, ctx) => {
+    await ctx.load('generators/ds-component/generator').default(tree, { name: 'card', skipFormat: true });
+  },
+  expect: (tree, t) => {
+    t.equal(t.json(`${ROOT}/ng-package.json`).lib.styleIncludePaths, ['..'], "the library's: the test builder reads only this one");
+    const { include, exclude } = t.json(`${ROOT}/project.json`).targets.test.options;
+    t.equal({ include, exclude }, REACH, 'the entry\'s spec runs');
+    t.equal(tree.read(`${ROOT}/card/src/mine.ts`, 'utf8'), '// mine\n', 'the files are its own');
+  },
+};
 
 const secondaryEntrypoint = {
   name: 'secondary-entrypoint --component=standalone, on its own: the same whole entry',
@@ -96,7 +126,7 @@ const seam = [
   }),
   reach('a source root deeper in the library: the globs climb out of where it is', { sourceRoot: `${UI}/src/public` }, (t, targets) => {
     t.equal(targets.test.options.include.at(-1), '../../**/*.test.ts', 'two levels up');
-    t.equal(targets.test.options.exclude, ['../../**/node_modules/**', '../../**/dist/**'], 'the exclude too');
+    t.equal(targets.test.options.exclude, ['../../**/node_modules/**', '../../dist/**'], 'the exclude too');
   }),
   reach('a source root that is the library: the runner walks it all by default; only the tsconfig gains', { sourceRoot: UI }, (t, targets) => {
     t.equal(targets.test.options, { watch: false }, 'no include');
@@ -112,7 +142,9 @@ const seam = [
   }),
   reach("a target's own include: left, reported", { test: own }, leftReported(/ui: its test target declares its own include\/exclude/, { test: own })),
   reach('an exclude in a configuration: left, reported', { test: ownInConfiguration }, leftReported(/ui: its test target declares its own include\/exclude/, { test: ownInConfiguration })),
+  reach('a runner that may share the blindness: told, nothing touched', { test: { executor: '@angular/build:karma' } }, leftReported(/ui: its test target uses @angular\/build:karma.*may not run the specs/, { test: { executor: '@angular/build:karma' } })),
+  reach('the same builder under its own name: aimed', { test: { executor: '@angular/build:unit-test' } }, (t, targets) => t.equal(targets.test.options, REACH, 'aimed')),
   reach('a source root outside the library: left, reported', { sourceRoot: 'elsewhere/src', test: { executor: UNIT_TEST } }, leftReported(/ui: its source root elsewhere\/src is outside the library/, { test: { executor: UNIT_TEST } })),
 ];
 
-export default { name: 'ds-component', cases: [...dsComponent, secondaryEntrypoint, ...seam] };
+export default { name: 'ds-component', cases: [...dsComponent, handMadeEntry, secondaryEntrypoint, ...seam] };

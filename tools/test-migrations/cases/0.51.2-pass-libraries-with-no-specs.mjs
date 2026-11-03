@@ -27,7 +27,7 @@ const JEST = `module.exports = {
   preset: '../../jest.preset.js',
 };
 `;
-const NOTE = '// This library ships no spec of its own. A spec added later still runs, and still fails the target when it fails.';
+const NOTE = '// This library ships no spec of its own. A spec the runner is set to find still runs, and still fails the target when it fails.';
 
 function lib(tree, { name = 'navigation-core', root = ROOT, tags = ['type:navigation', 'platform:web'], test, files = { 'vite.config.mts': VITE } } = {}) {
   addProjectConfiguration(tree, name, { root, projectType: 'library', tags, targets: test ? { test } : {} });
@@ -173,6 +173,75 @@ export default {
       setup: (tree) => lib(tree, { files: { 'vite.config.mts': text } }),
       expect: leftAlone(`${ROOT}/vite.config.mts`, text, reason),
     })),
+    ...[
+      ['the anchor in a block comment', VITE.replace('test: {', "test: { name: 'x' },\n  /*\n  test: {\n  */\n  ignored: {")],
+      ['the anchor in a template string', VITE.replace('test: {', 'banner: `\n  test: {\n`,\n  test: shared, unused: {')],
+      ['the anchor in a nested object, beside the real block', VITE.replace('plugins: [angular({ tsconfig: \'./tsconfig.spec.json\' })],', "plugins: [thing({\n    test: {\n      a: 1,\n    },\n  })],").replace(/  test: \{\n[\s\S]*?\n  \},/, "  test: { name: 'x' },")],
+    ].map(([what, text]) => ({
+      name: `${what}: left, reported, the file untouched`,
+      setup: (tree) => lib(tree, { files: { 'vite.config.mts': text } }),
+      expect: leftAlone(`${ROOT}/vite.config.mts`, text, /does not have one `test: \{` block/),
+    })),
+    {
+      name: 'an option in a block comment is no decision',
+      setup: (tree) => lib(tree, { files: { 'vite.config.mts': `/* passWithNoTests: true was tried once */\n${VITE}` } }),
+      expect: (tree, t) => t.has(`${ROOT}/vite.config.mts`, `${NOTE}\n    passWithNoTests: true,`),
+    },
+    {
+      name: 'a computed option: reported, never doubled',
+      setup: (tree) => lib(tree, { files: { 'vite.config.mts': VITE.replace('test: {', 'test: {\n    passWithNoTests: isCi,') } }),
+      expect: leftAlone(`${ROOT}/vite.config.mts`, VITE.replace('test: {', 'test: {\n    passWithNoTests: isCi,'), /computes passWithNoTests/),
+    },
+    {
+      name: 'a CRLF config stays CRLF',
+      setup: (tree) => lib(tree, { files: { 'vite.config.mts': VITE.replaceAll('\n', '\r\n') } }),
+      expect: (tree, t) => {
+        const text = tree.read(`${ROOT}/vite.config.mts`, 'utf8');
+        t.ok(text.includes('passWithNoTests: true,\r\n'), 'stated');
+        t.ok(!/[^\r]\n/.test(text), 'no bare line feed');
+      },
+    },
+    {
+      name: 'a target naming its config with {projectRoot}: that file gets it',
+      setup: (tree) => lib(tree, { test: { executor: '@nx/jest:jest', options: { jestConfig: '{projectRoot}/jest.config.ts' } }, files: { 'jest.config.ts': JEST } }),
+      expect: (tree, t) => t.has(`${ROOT}/jest.config.ts`, 'passWithNoTests: true,'),
+    },
+    {
+      name: 'the executor, not the file name, says which runner a named config is for',
+      setup: (tree) => lib(tree, { test: { executor: '@nx/jest:jest', options: { jestConfig: `${ROOT}/unit.config.ts` } }, files: { 'unit.config.ts': JEST } }),
+      expect: (tree, t) => t.has(`${ROOT}/unit.config.ts`, 'passWithNoTests: true,'),
+    },
+    {
+      name: 'a configuration saying false: its decision, reported',
+      setup: (tree) => lib(tree, { test: { executor: '@nx/vite:test', configurations: { ci: { passWithNoTests: false } } } }),
+      expect: leftAlone(`${ROOT}/vite.config.mts`, VITE, /its test target's ci configuration says `passWithNoTests: false`/),
+    },
+    {
+      name: 'a configuration naming a config of its own: reported, not half done',
+      setup: (tree) => lib(tree, { test: { executor: '@nx/vite:test', configurations: { ci: { configFile: 'ci.config.mts' } } } }),
+      expect: leftAlone(`${ROOT}/vite.config.mts`, VITE, /ci configuration names ci\.config\.mts/),
+    },
+    {
+      name: 'a spec in a project nested inside is not its own: the library is still told',
+      setup: (tree) => {
+        lib(tree);
+        addProjectConfiguration(tree, 'nested', { root: `${ROOT}/nested`, projectType: 'library' });
+        tree.write(`${ROOT}/nested/src/a.spec.ts`, '');
+      },
+      expect: (tree, t) => t.has(`${ROOT}/vite.config.mts`, 'passWithNoTests: true,'),
+    },
+    {
+      name: 'an application that declares no type, by its tsconfig, named design-system: not this rung\'s',
+      setup: (tree) => {
+        addProjectConfiguration(tree, 'design-system', { root: 'apps/design-system' });
+        tree.write('apps/design-system/tsconfig.app.json', '{}');
+        tree.write('apps/design-system/vite.config.mts', VITE);
+      },
+      expect: (tree, t, logs) => {
+        t.equal(tree.read('apps/design-system/vite.config.mts', 'utf8'), VITE, 'untouched');
+        if (logs) t.equal(logs, [], 'nothing to say');
+      },
+    },
     {
       name: 'a Jest config exporting a name: not the house\'s shape, reported',
       setup: (tree) => lib(tree, { files: { 'jest.config.ts': 'const config = {};\nexport default config;\n' } }),

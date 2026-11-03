@@ -3,6 +3,7 @@
 import { requireFromRepo } from '../../test-support/payload.mjs';
 
 const { createTreeWithEmptyWorkspace } = requireFromRepo('@nx/devkit/testing');
+const { addProjectConfiguration } = requireFromRepo('@nx/devkit');
 const seam = (ctx) => ctx.load('generators/_utils/pass-with-no-tests');
 const VITE = "export default defineConfig(() => ({\n  test: {\n    watch: false,\n  },\n}));\n";
 const JEST = "module.exports = {\n  displayName: 'x',\n};\n";
@@ -42,6 +43,34 @@ export default {
       expect: (tree, t) => t.has('lib/vite.config.ts', '    passWithNoTests: true,\n  },'),
     },
     {
+      name: 'the config already says true: nothing to do, no gap',
+      setup: withFiles({ 'vite.config.mts': VITE.replace('watch: false', 'passWithNoTests: true') }),
+      run,
+      expect: (tree, t, ctx) => {
+        t.equal(ctx.result.kind, 'decided', 'result');
+        t.equal(ctx.gap, null, 'no gap');
+      },
+    },
+    {
+      name: 'a commented-out option is no decision',
+      setup: withFiles({ 'vite.config.mts': VITE.replace('watch: false', '// passWithNoTests: false,\n    watch: false') }),
+      run,
+      expect: (tree, t) => t.has('lib/vite.config.mts', 'when it fails.\n    passWithNoTests: true,'),
+    },
+    {
+      name: "a test target on another executor: the option does not reach it, whichever config lies around",
+      setup: () => {
+        const tree = withFiles({ 'vite.config.mts': VITE })();
+        addProjectConfiguration(tree, 'lib', { root: 'lib', targets: { test: { executor: '@nx/angular:unit-test' } } });
+        return tree;
+      },
+      run,
+      expect: (tree, t, ctx) => {
+        t.equal(tree.read('lib/vite.config.mts', 'utf8'), VITE, 'config');
+        t.ok(/@nx\/angular:unit-test/.test(ctx.gap ?? ''), `gap: ${ctx.gap}`);
+      },
+    },
+    {
       name: 'a spec anywhere in the library: untouched',
       setup: withFiles({ 'vite.config.mts': VITE, 'src/deep/a.spec.ts': '' }),
       run,
@@ -55,7 +84,9 @@ export default {
       ['no config', {}, /no vite, vitest or jest config/],
       ['two configs', { 'vite.config.mts': VITE, 'jest.config.ts': JEST }, /several runner configs/],
       ['no test block', { 'vite.config.mts': 'export default {};\n' }, /one `test: \{` block/],
-      ['several projects', { 'vite.config.mts': `${VITE}// projects:\nconst a = {\n  projects: [],\n};\n` }, /several projects/],
+      ['several projects', { 'vite.config.mts': `${VITE}const a = {\n  projects: [],\n};\n` }, /several projects/],
+      ['the anchor only in a comment', { 'vite.config.mts': 'export default {\n  /*\n  test: {\n  */\n};\n' }, /one `test: \{` block/],
+      ['the config says false', { 'vite.config.mts': VITE.replace('watch: false', 'passWithNoTests: false') }, /says `passWithNoTests: false`/],
     ].map(([what, files, reason]) => ({
       name: `${what}: a gap the caller reports`,
       setup: withFiles(files),

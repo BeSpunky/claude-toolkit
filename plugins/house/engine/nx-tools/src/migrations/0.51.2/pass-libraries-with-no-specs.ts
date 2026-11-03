@@ -9,17 +9,22 @@
 //
 // WHAT THIS DOES. Sets `passWithNoTests: true` in the library's runner config, where the generators now set it on
 // creation. In the config, because Nx infers these targets: there is no target to put an option on. Observed for real on
-// Nx 24.0.3: exit 1 without it, exit 0 with it, exit 1 again the moment a spec fails, so it hides no suite.
+// Nx 24.0.3: exit 1 without it, exit 0 with it, exit 1 again the moment a spec fails. Only a library with no spec anywhere gets it.
 //
 // SKIPPED: a library with any spec has nothing to do. SKIPPED, WITH A REPORT:
 //   - a test target with another executor or command: the option is not known to reach that runner;
-//   - a target or config that already says passWithNoTests: false, which is the project's decision;
-//   - a target naming a config that does not exist; no runner config, or several;
+//   - a target, a configuration of it or a config that already says passWithNoTests: false, which is the project's decision;
+//   - a target naming a config that does not exist, a configuration naming one of its own; no runner config, or several;
 //   - a config without the one `test: {` block or `module.exports = {` / `export default {` line the generators write,
-//     or one declaring several projects.
+//     read with comments and strings blanked out, or one declaring several projects or computing the option.
 //
-// SELF-CONTAINED by the migration contract: every value is a frozen copy, not an import from the generators.
+// FROZEN by the migration contract: every value is a copy, not an import from the generators. What it shares with them is
+// the pure mechanics that take those values as parameters (_utils/pass-with-no-tests, _utils/library-files), and the
+// question of what a project is (adapters/registry), which holds no value.
 import { type ProjectConfiguration, type Tree, getProjects, logger } from '@nx/devkit';
+import { projectRole } from '../../adapters/registry';
+import { normalizedPath, otherProjectRoots, under } from '../../generators/_utils/library-files';
+import { statePassWithNoTests } from '../../generators/_utils/pass-with-no-tests';
 
 const TAG = '[migrate 0.51.2 pass-libraries-with-no-specs]';
 const NAVIGATION_TAG = 'type:navigation';
@@ -29,32 +34,25 @@ const DESIGN_SYSTEM_NAME = 'design-system';
 /** adopt-extracted's marker, and the status --keepShim leaves in it. */
 const EXTRACTION_MARKER = 'extraction.json';
 const SHIM_STATUS = 'adopted-shim';
-/** What reads the runner's own config file. No target at all is an inferred one, which runs the runner in the project's root. */
 const CONFIG_READING_EXECUTORS = new Set(['@nx/vite:test', '@nx/vitest:test', '@nx/jest:jest']);
 const RUNNER_CONFIGS = ['vitest', 'vite', 'jest'].flatMap((runner) =>
   ['mts', 'ts', 'cts', 'mjs', 'js', 'cjs'].map((extension) => `${runner}.config.${extension}`),
 );
-const ANY_SPEC = /\.(?:spec|test)\.[cm]?[jt]sx?$/;
-const SKIPPED_DIRS = new Set(['node_modules', 'dist']);
-const OPTION = /^(?!\s*\/\/).*\bpassWithNoTests\s*:\s*(true|false)/m;
-const MULTI_PROJECT = /^\s*(?:projects|workspace)\s*:/m;
-const VITE_ANCHOR = /^([ \t]*)test:\s*\{[ \t]*$/gm;
-const JEST_ANCHOR = /^()(?:module\.exports\s*=|export default)\s*\{[ \t]*$/gm;
-const NOTE = 'This library ships no spec of its own. A spec added later still runs, and still fails the target when it fails.';
+const NOTE = 'This library ships no spec of its own. A spec the runner is set to find still runs, and still fails the target when it fails.';
 
 export default function update(tree: Tree): void {
   const projects = getProjects(tree);
   const hasDesignSystem = [...projects.values()].some((project) => project.tags?.includes(DESIGN_SYSTEM_TAG));
   for (const [name, project] of projects) {
-    const preTagDesignSystem = !hasDesignSystem && name === DESIGN_SYSTEM_NAME && project.projectType !== 'application';
+    const preTagDesignSystem = !hasDesignSystem && name === DESIGN_SYSTEM_NAME && projectRole(tree, name) === 'library';
     if (project.tags?.includes(NAVIGATION_TAG) || project.tags?.includes(DESIGN_SYSTEM_TAG) || preTagDesignSystem || isShim(tree, project)) {
-      state(tree, name, project);
+      state(tree, name, project, otherProjectRoots(projects.values(), project.root));
     }
   }
 }
 
 function isShim(tree: Tree, project: ProjectConfiguration): boolean {
-  const marker = `${project.root}/${EXTRACTION_MARKER}`;
+  const marker = under(normalizedPath(project.root), EXTRACTION_MARKER);
   if (!tree.exists(marker)) return false;
   try {
     return JSON.parse(tree.read(marker, 'utf8') ?? '{}').status === SHIM_STATUS;
@@ -63,56 +61,23 @@ function isShim(tree: Tree, project: ProjectConfiguration): boolean {
   }
 }
 
-function state(tree: Tree, name: string, project: ProjectConfiguration): void {
-  const spec = firstSpec(tree, project.root);
-  if (spec) return logger.info(`${TAG} Left ${name}: it has its own spec (${spec}), so there is nothing to pass without.`);
-
+function state(tree: Tree, name: string, project: ProjectConfiguration, stops: ReadonlySet<string>): void {
   const left = (why: string) =>
     logger.warn(`${TAG} Left ${name}: ${why}. If \`nx test ${name}\` reports no tests, add a spec or tell its runner \`passWithNoTests\`.`);
-  const target = project.targets?.test;
-  if (target && !CONFIG_READING_EXECUTORS.has(target.executor ?? '')) {
-    return left(`its test target uses ${target.executor ?? 'a command'}, which this option is not known to reach`);
+  const result = statePassWithNoTests(tree, project, { configReadingExecutors: CONFIG_READING_EXECUTORS, runnerConfigs: RUNNER_CONFIGS, note: NOTE, stops });
+  switch (result.kind) {
+    case 'stated':
+      return logger.info(`${TAG} ${result.file}: \`passWithNoTests: true\`, so \`nx test ${name}\` stops failing on a library with no spec. A spec that fails still fails it.`);
+    case 'has-spec':
+      return logger.info(`${TAG} Left ${name}: it has its own spec (${result.spec}), so there is nothing to pass without.`);
+    case 'decided':
+      if (!result.value) left(`${result.source} says \`passWithNoTests: false\`, which is its decision`);
+      return;
+    case 'other-runner':
+      return left(`its test target uses ${result.executor ?? 'a command'}, which this option is not known to reach`);
+    case 'no-config':
+      return left('it has no vite, vitest or jest config at its root');
+    case 'unrecognised':
+      return left(result.reason);
   }
-  const options = (target?.options ?? {}) as { passWithNoTests?: boolean; configFile?: string; jestConfig?: string };
-  if (options.passWithNoTests === true) return;
-  if (options.passWithNoTests === false) return left('its test target says `passWithNoTests: false`, which is its decision');
-
-  const named = options.configFile ?? options.jestConfig;
-  if (named && !tree.exists(named)) return left(`its test target names ${named}, which is not a file here`);
-  const configs = named ? [named] : RUNNER_CONFIGS.map((config) => `${project.root}/${config}`).filter((config) => tree.exists(config));
-  if (configs.length === 0) return left('it has no vite, vitest or jest config at its root');
-  if (configs.length > 1) return left(`it has several runner configs (${configs.join(', ')})`);
-
-  const file = configs[0];
-  const text = tree.read(file, 'utf8') ?? '';
-  const decided = OPTION.exec(text);
-  if (decided) {
-    if (decided[1] === 'false') left(`${file} says \`passWithNoTests: false\`, which is its decision`);
-    return;
-  }
-  if (MULTI_PROJECT.test(text)) return left(`${file} declares several projects`);
-  const jest = /(?:^|\/)[^/]*jest[^/]*$/.test(file);
-  const anchors = [...text.matchAll(jest ? JEST_ANCHOR : VITE_ANCHOR)];
-  if (anchors.length !== 1) {
-    const expected = jest ? 'one `module.exports = {` or `export default {`' : 'one `test: {` block';
-    return left(`${file} does not have ${expected} on a line of its own`);
-  }
-  const end = anchors[0].index + anchors[0][0].length;
-  const indent = /^[ \t]*(?=\S)/m.exec(text.slice(end + 1))?.[0];
-  const inner = indent && indent.length > anchors[0][1].length ? indent : `${anchors[0][1]}  `;
-  tree.write(file, `${text.slice(0, end)}\n${inner}// ${NOTE}\n${inner}passWithNoTests: true,${text.slice(end)}`);
-  logger.info(`${TAG} ${file}: \`passWithNoTests: true\`, so \`nx test ${name}\` stops failing on a library with no spec. A spec that fails still fails it.`);
-}
-
-function firstSpec(tree: Tree, dir: string): string | null {
-  for (const child of tree.children(dir)) {
-    const path = `${dir}/${child}`;
-    if (tree.isFile(path)) {
-      if (ANY_SPEC.test(child)) return path;
-    } else if (!SKIPPED_DIRS.has(child) && !child.startsWith('.')) {
-      const found = firstSpec(tree, path);
-      if (found) return found;
-    }
-  }
-  return null;
 }

@@ -81,4 +81,19 @@ npx tsc -p "$(cat .tripwire-app-root)/tsconfig.app.json" --noEmit || fail "the A
 step "build — ng-packagr for the library, the Angular application builder for the app"
 npx nx run-many -t build --outputStyle=static || fail "build"
 
-printf '\nok: the Angular TS-solution hybrid builds on Nx %s\n' "$NX_VERSION"
+# @nx/angular:unit-test looks only under the source root, and the house's include reaches an entry point past it through
+# the builder's undocumented glob behaviour (adapters/angular/entry-point-specs.ts). A fixture can only read the include;
+# if the builder moves, the lie comes back as exit 0 on a failing spec, so only a real exit code can tell.
+step "nx test: the truth about specs in src and in an entry point"
+LIB_ROOT="$(cat .tripwire-lib-root)"
+FAILING="it('fails', () => { expect(1).toBe(2); });"
+npx nx test ui --skip-nx-cache --outputStyle=static || fail "nx test ui: red with every spec passing"
+for at in "card/src" "src/lib"; do
+  printf '%s\n' "$FAILING" > "$LIB_ROOT/$at/tripwire.spec.ts"
+  if npx nx test ui --skip-nx-cache --outputStyle=static; then
+    fail "nx test ui exits 0 past a failing spec in $at: the include no longer reaches it"
+  fi
+  rm "$LIB_ROOT/$at/tripwire.spec.ts"
+done
+
+printf '\nok: the Angular TS-solution hybrid builds and tests truthfully on Nx %s\n' "$NX_VERSION"

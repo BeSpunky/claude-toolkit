@@ -147,7 +147,7 @@ export default async function adoptExtractedGenerator(
     if (tree.exists(libImplDir)) tree.delete(libImplDir);
     // A shim has nothing to test; a spec it kept outside src/lib, it keeps.
     const gap = passWithNoTestsGap(passWithNoTests(tree, project.root));
-    if (gap) logger.warn(`Could not set passWithNoTests on "${options.lib}" (${gap}). If \`nx test ${options.lib}\` reports no tests, add a spec.`);
+    if (gap) logger.warn(`Could not set passWithNoTests on "${options.lib}" (${gap}). \`nx test ${options.lib}\` fails on "no tests" until the library has a spec, or its test target is removed.`);
     marker.status = 'adopted-shim';
     writeJson(tree, markerPath, marker);
     await formatFiles(tree);

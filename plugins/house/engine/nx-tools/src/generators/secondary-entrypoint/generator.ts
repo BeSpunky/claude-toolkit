@@ -135,12 +135,14 @@ export async function secondaryEntrypointGenerator(
   const indexPath = joinPathFragments(entryRoot, 'src', 'index.ts');
   if (component === 'standalone') {
     // Scaffold a standalone component directly inside the entry's src folder, then make it the entry's public surface.
-    // `path` is the FILE, without its extension, not the directory: `<entry>/src/<name>` writes `<entry>/src/<name>.ts`
-    // (with no `type`, nothing is appended to the name). Handed the directory, @nx/angular reads its last segment as the
-    // file and writes `<entry>/src.ts` beside the folder the barrel is in.
+    // `path` is the FILE, without its extension, not the directory: `<entry>/src/<name>` writes `<entry>/src/<name>.ts`.
+    // Handed the directory, @nx/angular reads its last segment as the file and writes `<entry>/src.ts` beside the folder
+    // the barrel is in. `type: ''` says nothing is appended to the name: left out, @nx/angular 23 below Angular 20 would
+    // default it to `component` and write the `<name>.component.ts` the barrel below does not export.
     await componentGenerator(tree, {
       name: options.name,
       path: joinPathFragments(entryRoot, 'src', options.name),
+      type: '',
       standalone: true,
       style: 'scss',
       skipFormat: true,

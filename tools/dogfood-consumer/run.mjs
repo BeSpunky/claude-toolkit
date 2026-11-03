@@ -591,6 +591,7 @@ async function stepUpgrade() {
   });
   console.log(`        (first upgrade printed ${reports} report line(s) — read them in ${r1.log})`);
   await verify(step, c.dir, '', baseline);
+  await verifyDsComponent(step, c.dir);
   return true;
 }
 
@@ -614,6 +615,25 @@ async function verify(step, dir, prefix = '', before = null) {
     record(step, `${prefix}nx run-many -t ${target}`, r.code === 0, { ms: r.ms, log: r.log, detail, reference: !!prefix, released: prefix ? r.out : null });
   }
   return failedSets;
+}
+/** What `verify` cannot see: the first ds-component builds, lints and tests, and `nx test` is red on a failing spec in it. It runs after
+ *  the road's checks and leaves no trace. It installs nothing, so it tests this checkout even before the version bump. */
+async function verifyDsComponent(step, dir) {
+  const [bin, pre] = nx(dir);
+  const nxRun = (name, ...args) => run(`${step}-ds-component-${name}`, bin, [...pre, ...args], { cwd: dir, timeoutMs: 20 * 60_000 });
+  const g = await nxRun('generate', 'g', '@bespunky/nx-tools:ds-component', 'card', '--no-interactive');
+  if (!record(step, 'nx g ds-component card', g.code === 0, { ms: g.ms, log: g.log, detail: g.code ? why(g.out) : '' })) return;
+  for (const target of ['build', 'lint', 'test']) {
+    const r = await nxRun(target, target, 'design-system', '--output-style=static');
+    record(step, `nx ${target} design-system, with a component`, r.code === 0, { ms: r.ms, log: r.log, detail: r.code ? why(r.out) : '' });
+  }
+  const spec = gitOut(dir, 'ls-files', '--others', '--exclude-standard', '*/card/src/card.spec.ts');
+  if (!record(step, 'ds-component wrote card/src/card.spec.ts', !!spec)) return;
+  writeFileSync(join(dir, spec), "it('fails', () => { expect(1).toBe(2); });\n");
+  const failing = await nxRun('failing-spec', 'test', 'design-system', '--output-style=static');
+  record(step, 'nx test design-system is red on a failing spec in the entry', failing.code !== 0, { ms: failing.ms, log: failing.log, detail: failing.code ? '' : 'exit 0 past a failing spec' });
+  gitOut(dir, 'checkout', '-q', '.');
+  gitOut(dir, 'clean', '-fdq');
 }
 /** Nx's own "Failed tasks:" list, as task ids. */
 function failedTasks(out) {
@@ -639,7 +659,10 @@ async function stepNew(id) {
     ...(p.firebase ? [['firebase.json + apps/functions', existsSync(join(dir, 'firebase.json')) && existsSync(join(dir, 'apps/functions/project.json'))]] : []),
   ];
   for (const [what, yes] of facts) record(id, what, yes);
-  if (p.verify) await verify(id, dir);
+  if (p.verify) {
+    await verify(id, dir);
+    await verifyDsComponent(id, dir);
+  }
 }
 
 // ── cleanup ───────────────────────────────────────────────────────────────────────────────────────────────

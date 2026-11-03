@@ -27,7 +27,8 @@
 // LEFT, WITH A REPORT (a library that is not a design system is only mentioned when it has entry points on this executor):
 //   - no test target, or one with another executor: neither change is known to be what that runner lacks (jest also exits
 //     1 on no tests unless told otherwise, and Nx 24 infers its target, so no project config shows it);
-//     pass-libraries-with-no-specs, the next rung, tells those runners what they can be told;
+//     pass-libraries-with-no-specs, the next rung, tells those runners what they can be told. A library with entry points
+//     on anything but Jest, whose root is the library, is told that its entry points' specs may not run;
 //   - the target declares an include/exclude other than the above, in any configuration: the project chose what is
 //     tested, so a seeded spec may not even be picked up, and an entry's spec may not either;
 //   - a source root outside the library: `..` from there is not the library;
@@ -38,19 +39,31 @@
 //     to provide).
 // What can leave the target red warns and says what to do.
 //
-// REPORTED, NEVER REPAIRED: `<entry>/src.ts` beside `<entry>/src/`, what ds-component wrote before 0.51.2 (it handed
-// @nx/angular a directory where it reads a file). The barrel it wrote exports a file that does not exist, so that entry
+// NOT THIS RUNG'S: an application (it has no entry points; a library's beside it is the library's), and what lies inside
+// another project's root, which is that project's, on its own runner.
+//
+// REPORTED, NEVER REPAIRED: `<entry>/src.ts` beside `<entry>/src/`, what secondary-entrypoint and ds-component wrote before
+// 0.51.2 (they handed @nx/angular a directory where it reads a file). The barrel they wrote exports a file that does not exist, so that entry
 // never built as generated; one that builds was fixed by hand, in a shape only its project knows.
 //
-// SELF-CONTAINED by the migration contract: the tag, the globs and the spec are frozen copies, not imports from the generators.
-import { applyEdits, modify, parse } from 'jsonc-parser';
-import { type ProjectConfiguration, type TargetConfiguration, type Tree, getProjects, logger, updateProjectConfiguration } from '@nx/devkit';
+// FROZEN by the migration contract: the tag, the globs and the spec are copies, not imports from the generators. What it
+// shares with them is the pure mechanics that take those values as parameters, and the question of what a project is.
+import { type ProjectConfiguration, type TargetConfiguration, type Tree, getProjects, logger } from '@nx/devkit';
+import { judgeEntryPointReach } from '../../adapters/angular/entry-point-reach';
+import { projectRole } from '../../adapters/registry';
+import { filesOfLibrary, firstMatching, normalizedPath, otherProjectRoots, under } from '../../generators/_utils/library-files';
+import { updateJsonInPlace } from '../../generators/_utils/json-edits';
+import { updateProjectConfigInPlace } from '../../generators/_utils/project-files';
 
 const TAG = '[migrate 0.51.2 truthful-angular-library-tests]';
 const DESIGN_SYSTEM_TAG = 'type:design-system';
 /** The name a hand-made or pre-tag design system goes by: a generator finds it by this, and tags it after this rung ran. */
 const DESIGN_SYSTEM_NAME = 'design-system';
 const EXECUTOR = '@nx/angular:unit-test';
+/** The same builder, under the name an Angular CLI library brings. */
+const UNIT_TEST_EXECUTORS = new Set([EXECUTOR, '@angular/build:unit-test']);
+/** Walks the whole library, so entry points are nothing to it. */
+const WALKS_THE_LIBRARY = new Set(['@nx/jest:jest']);
 const ENTRY_POINT = 'ng-package.json';
 const THEME = 'src/lib/ds-theme.service.ts';
 const SPEC = 'src/lib/ds-theme.service.spec.ts';
@@ -58,146 +71,139 @@ const SPEC = 'src/lib/ds-theme.service.spec.ts';
 const ANY_SPEC = /\.(?:spec|test)\.[cm]?[jt]sx?$/;
 /** What the include below finds. */
 const RUNNABLE_SPEC = /\.(?:spec|test)\.ts$/;
-/** What the target is given: every spec in a library whose source root is `up` levels below its root. */
+/** What the target is given: every spec in a library whose source root `up` climbs out of. */
 const includeFrom = (up: string) => ['**/*.spec.ts', '**/*.test.ts', `${up}**/*.spec.ts`, `${up}**/*.test.ts`];
-const excludeFrom = (up: string) => [`${up}**/node_modules/**`, `${up}**/dist/**`];
+const excludeFrom = (up: string) => [`${up}**/node_modules/**`, `${up}dist/**`];
 /** For tsconfig.spec.json, which is relative to the library. */
 const ENTRY_SOURCES = '**/src/**/*.ts';
 const SPEC_TSCONFIG = 'tsconfig.spec.json';
-/** Never walked: an install or build output is not the library's own spec. */
-const SKIPPED_DIRS = new Set(['node_modules', 'dist']);
 /** What DsTheme may inject and still construct in a bare TestBed. */
 const PROVIDED_BY_TESTBED = new Set(['DOCUMENT', 'DestroyRef']);
 
 export default function update(tree: Tree): void {
   const projects = getProjects(tree);
-  const tagged = [...projects].filter(([, project]) => project.tags?.includes(DESIGN_SYSTEM_TAG));
-  const byName = projects.get(DESIGN_SYSTEM_NAME);
-  const designSystems = new Set((tagged.length || !byName || byName.projectType === 'application' ? tagged : [[DESIGN_SYSTEM_NAME, byName] as const]).map(([name]) => name));
+  const tagged = [...projects.keys()].filter((name) => projects.get(name)?.tags?.includes(DESIGN_SYSTEM_TAG));
+  const designSystems = new Set(tagged.length || projectRole(tree, DESIGN_SYSTEM_NAME) !== 'library' ? tagged : [DESIGN_SYSTEM_NAME]);
   for (const [name, project] of projects) {
+    const stops = otherProjectRoots(projects.values(), project.root);
     if (designSystems.has(name)) {
-      if (reachDesignSystem(tree, name, project)) seedSpec(tree, name, project);
-      reportStrayComponents(tree, name, project);
-    } else if (hasEntryPoints(tree, project.root, sourceRootOf(project))) {
-      for (const [targetName, target] of unitTestTargets(project)) reachWholeLibrary(tree, name, project, targetName, target);
+      if (reachDesignSystem(tree, name, project, stops)) seedSpec(tree, name, project, stops);
+      reportStrayComponents(tree, name, project, true);
+    } else if (project.targets && projectRole(tree, name) !== 'application' && hasEntryPoints(tree, project, stops)) {
+      for (const [targetName, target] of unitTestTargets(project)) reachWholeLibrary(tree, name, project, targetName, target, stops);
+      if (unitTestTargets(project).length === 0) reportOtherRunner(name, project);
+      reportStrayComponents(tree, name, project, false);
     }
   }
 }
 
 function sourceRootOf(project: ProjectConfiguration): string {
-  return project.sourceRoot ?? `${project.root}/src`;
+  return normalizedPath(project.sourceRoot ?? under(normalizedPath(project.root), 'src'));
 }
 
 function unitTestTargets(project: ProjectConfiguration): [string, TargetConfiguration][] {
-  return Object.entries(project.targets ?? {}).filter(([, target]) => target.executor === EXECUTOR);
+  return Object.entries(project.targets ?? {}).filter(([, target]) => UNIT_TEST_EXECUTORS.has(target.executor ?? ''));
 }
 
 /** A secondary entry point: an ng-package.json below the library's own, outside what the runner already walks. */
-function hasEntryPoints(tree: Tree, root: string, sourceRoot: string): boolean {
-  const walk = (dir: string): boolean =>
-    tree.children(dir).some((child) => {
-      const path = `${dir}/${child}`;
-      if (tree.isFile(path) || SKIPPED_DIRS.has(child) || child.startsWith('.') || path === sourceRoot) return false;
-      return tree.exists(`${path}/${ENTRY_POINT}`) || walk(path);
-    });
-  return walk(root);
+function hasEntryPoints(tree: Tree, project: ProjectConfiguration, stops: ReadonlySet<string>): boolean {
+  const own = under(normalizedPath(project.root), ENTRY_POINT);
+  for (const file of filesOfLibrary(tree, project.root, new Set([...stops, sourceRootOf(project)]))) {
+    if (file !== own && file.endsWith(`/${ENTRY_POINT}`)) return true;
+  }
+  return false;
 }
 
-/** The design system's test target decides whether a spec can be seeded. False when it is left, and what it finds is not this rung's to judge. */
-function reachDesignSystem(tree: Tree, name: string, project: ProjectConfiguration): boolean {
+function reportOtherRunner(name: string, project: ProjectConfiguration): void {
+  const test = project.targets?.test;
+  if (!test || WALKS_THE_LIBRARY.has(test.executor ?? '')) return;
+  logger.warn(`${TAG} Left ${name}: its test target uses ${test.executor ?? 'a command'}, so \`nx test ${name}\` may not run the specs of its entry points (at <library>/<entry>). Check that it does.`);
+}
+
+/** The design system's test targets decide whether a spec can be seeded. False when none is aimed, and what they find is not this rung's to judge. */
+function reachDesignSystem(tree: Tree, name: string, project: ProjectConfiguration, stops: ReadonlySet<string>): boolean {
+  const runners = unitTestTargets(project);
+  if (runners.length) return runners.map(([targetName, target]) => reachWholeLibrary(tree, name, project, targetName, target, stops)).some(Boolean);
   const target = project.targets?.test;
   if (!target) {
     logger.info(`${TAG} Left ${name}: its project config has no test target, and this is for ${EXECUTOR}. An inferred runner that can pass on no tests is told to by pass-libraries-with-no-specs, in this same upgrade.`);
-    return false;
-  }
-  if (target.executor !== EXECUTOR) {
+  } else {
     logger.info(`${TAG} Left ${name}: its test target uses ${target.executor ?? 'a command'}, and this is for ${EXECUTOR}. pass-libraries-with-no-specs, in this same upgrade, tells a runner that can pass on no tests to, and says so where it cannot.`);
-    return false;
   }
-  return reachWholeLibrary(tree, name, project, 'test', target);
+  return false;
 }
 
 /** Aims the target at every spec in the library. False when it is left as it is. */
-function reachWholeLibrary(tree: Tree, name: string, project: ProjectConfiguration, targetName: string, target: TargetConfiguration): boolean {
+function reachWholeLibrary(tree: Tree, name: string, project: ProjectConfiguration, targetName: string, target: TargetConfiguration, stops: ReadonlySet<string>): boolean {
   const command = `nx ${targetName} ${name}`;
-  const sourceRoot = sourceRootOf(project);
-  const inside = sourceRoot === project.root || sourceRoot.startsWith(`${project.root}/`);
-  if (!inside) {
-    logger.warn(`${TAG} Left ${name}: its source root ${sourceRoot} is outside the library, so \`${command}\` may not run the specs of its entry points. Check that it does.`);
+  const reach = judgeEntryPointReach(project, target, includeFrom, excludeFrom);
+  if (reach.kind === 'outside') {
+    logger.warn(`${TAG} Left ${name}: its source root ${reach.sourceRoot} is outside the library, so \`${command}\` may not run the specs of its entry points. Check that it does.`);
     return false;
   }
-  const up = '../'.repeat(sourceRoot === project.root ? 0 : sourceRoot.slice(project.root.length + 1).split('/').length);
-  const include = includeFrom(up);
-  const exclude = excludeFrom(up);
-  const ours = same(target.options?.include, include) && same(target.options?.exclude, exclude);
-  const declared = [ours ? undefined : target.options, ...Object.values(target.configurations ?? {})].some((options) => options?.include || options?.exclude);
-  if (declared) {
+  if (reach.kind === 'declared') {
     logger.warn(
       `${TAG} Left ${name}: its ${targetName} target declares its own include/exclude, so it may not run every spec in the library, the specs of its entry points (at <library>/<entry>/src) among them. ` +
-        `If \`${command}\` reports "No tests found", add a spec it matches; to run every spec, its include is ${JSON.stringify(include)} and its exclude ${JSON.stringify(exclude)}.`,
+        `If \`${command}\` reports "No tests found", add a spec it matches; to run every spec, its include is ${JSON.stringify(reach.include)} and its exclude ${JSON.stringify(reach.exclude)}.`,
     );
     return false;
   }
-  // A source root that IS the library: the runner's default already walks everything in it.
-  if (up && !ours) {
-    target.options = { ...target.options, include, exclude };
-    updateProjectConfiguration(tree, name, project);
-    const started = specsOutside(tree, project.root, sourceRoot);
+  if (reach.kind === 'aim') {
+    updateProjectConfigInPlace(tree, project.root, (config) => {
+      config.targets = { ...config.targets, [targetName]: { ...config.targets?.[targetName], options: { ...target.options, include: reach.include, exclude: reach.exclude } } };
+    });
+    const sourceRoot = sourceRootOf(project);
+    const started = specsOutside(tree, project.root, new Set([...stops, sourceRoot]));
     const log = started.length ? logger.warn : logger.info;
     log(
       `${TAG} ${name}: \`${command}\` now runs every spec in the library. It looked only under ${sourceRoot}, so a failing spec in an entry point exited 0.` +
         (started.length ? ` These start running now, and it is the truth if one fails: ${started.join(', ')}.` : ''),
     );
   }
-  includeSpecsInTsconfig(tree, project.root);
+  includeEntrySourcesInSpecTsconfig(tree, project.root);
   return true;
 }
 
 /** Only adds to an include the file states: a tsconfig with none already holds everything under it. In place, because it may hold comments. */
-function includeSpecsInTsconfig(tree: Tree, root: string): void {
-  const file = `${root}/${SPEC_TSCONFIG}`;
+function includeEntrySourcesInSpecTsconfig(tree: Tree, root: string): void {
+  const file = under(normalizedPath(root), SPEC_TSCONFIG);
   if (!tree.exists(file)) return;
-  const text = tree.read(file, 'utf8') ?? '';
-  const include = parse(text)?.include;
-  if (!Array.isArray(include) || include.includes(ENTRY_SOURCES)) return;
-  tree.write(file, applyEdits(text, modify(text, ['include', include.length], ENTRY_SOURCES, { isArrayInsertion: true, formattingOptions: { insertSpaces: true, tabSize: 2 } })));
-  logger.info(`${TAG} ${file}: its include now holds the entry points' sources, so \`tsc\` and the editor see their specs. In a TS-solution workspace, \`nx typecheck\` checks them too.`);
-}
-
-/** Every spec the target's default did not reach: under the library, outside its source root. */
-function specsOutside(tree: Tree, dir: string, sourceRoot: string): string[] {
-  return tree.children(dir).flatMap((child) => {
-    const path = `${dir}/${child}`;
-    if (tree.isFile(path)) return RUNNABLE_SPEC.test(child) ? [path] : [];
-    return SKIPPED_DIRS.has(child) || child.startsWith('.') || path === sourceRoot ? [] : specsOutside(tree, path, sourceRoot);
+  const wrote = updateJsonInPlace<{ include?: string[] }>(tree, file, (json) => {
+    if (Array.isArray(json.include) && !json.include.includes(ENTRY_SOURCES)) json.include = [...json.include, ENTRY_SOURCES];
   });
+  if (wrote) logger.info(`${TAG} ${file}: its include now holds the entry points' sources, so \`tsc\` and the editor see their specs. In a TS-solution workspace, \`nx typecheck\` checks them too.`);
 }
 
-function same(actual: unknown, expected: string[]): boolean {
-  return JSON.stringify(actual) === JSON.stringify(expected);
+/** Every spec the target's default did not reach: under the library, outside its source root and other projects. */
+function specsOutside(tree: Tree, root: string, stops: ReadonlySet<string>): string[] {
+  return [...filesOfLibrary(tree, root, stops)].filter((file) => RUNNABLE_SPEC.test(file));
 }
 
-/** Says what ds-component left in an entry before 0.51.2; see REPORTED, NEVER REPAIRED above. */
-function reportStrayComponents(tree: Tree, name: string, project: ProjectConfiguration): void {
-  for (const child of tree.children(project.root)) {
-    const entry = `${project.root}/${child}`;
-    if (tree.isFile(entry) || SKIPPED_DIRS.has(child) || !tree.exists(`${entry}/src.ts`) || !tree.exists(`${entry}/src/index.ts`)) continue;
+/** Says what an earlier generator left in an entry; see REPORTED, NEVER REPAIRED above. */
+function reportStrayComponents(tree: Tree, name: string, project: ProjectConfiguration, designSystem: boolean): void {
+  const root = normalizedPath(project.root);
+  for (const child of tree.children(root || '.')) {
+    const entry = under(root, child);
+    if (tree.isFile(entry) || child === 'node_modules' || child === 'dist' || !tree.exists(`${entry}/src.ts`) || !tree.exists(`${entry}/src/index.ts`)) continue;
+    const remake = designSystem ? `nx g @bespunky/nx-tools:ds-component ${child}` : `nx g @bespunky/nx-tools:secondary-entrypoint --library=${name} --name=${child} --component=standalone`;
     logger.warn(
-      `${TAG} ${name}: ${entry}/src.ts is what ds-component wrote before 0.51.2, beside the folder its barrel is in. If ${entry}/src/index.ts exports a file that does not exist, ` +
-        `\`nx build ${name}\` fails on it: delete ${entry} and run \`nx g @bespunky/nx-tools:ds-component ${child}\`. If you fixed it by hand, its spec (${entry}/src.spec.ts) now runs too.`,
+      `${TAG} ${name}: ${entry}/src.ts is what ${designSystem ? 'ds-component' : 'secondary-entrypoint'} wrote before 0.51.2, beside the folder its barrel is in. If ${entry}/src/index.ts exports a file that does not exist, ` +
+        `\`nx build ${name}\` fails on it: delete ${entry} and run \`${remake}\`. If you fixed it by hand, its spec (${entry}/src.spec.ts) runs once the test target reaches it.`,
     );
   }
 }
 
-function seedSpec(tree: Tree, name: string, project: ProjectConfiguration): void {
-  const runnable = firstSpec(tree, project.root, RUNNABLE_SPEC);
+function seedSpec(tree: Tree, name: string, project: ProjectConfiguration, stops: ReadonlySet<string>): void {
+  const root = normalizedPath(project.root);
+  const files = [...filesOfLibrary(tree, root, stops)];
+  const runnable = firstMatching(files, RUNNABLE_SPEC);
   if (runnable) return logger.info(`${TAG} Left ${name}: it already has a spec (${runnable}).`);
-  const unmatched = firstSpec(tree, project.root, ANY_SPEC);
+  const unmatched = firstMatching(files, ANY_SPEC);
   if (unmatched) {
     return logger.warn(`${TAG} Left ${name}: it already has a spec (${unmatched}), but ${EXECUTOR} runs only *.spec.ts and *.test.ts, so \`nx test ${name}\` still fails with "No tests found". Add a spec it matches.`);
   }
 
-  const themePath = `${project.root}/${THEME}`;
+  const themePath = under(root, THEME);
   if (!tree.exists(themePath)) {
     return logger.warn(`${TAG} Left ${name}: there is no ${themePath} to test, so \`nx test ${name}\` still fails with "No tests found". Add a spec of your own.`);
   }
@@ -206,23 +212,9 @@ function seedSpec(tree: Tree, name: string, project: ProjectConfiguration): void
     return logger.warn(`${TAG} Left ${name}: ${themePath} no longer has the shape the house spec tests, so \`nx test ${name}\` still fails with "No tests found". Add a spec of your own.`);
   }
 
-  const specPath = `${project.root}/${SPEC}`;
+  const specPath = under(root, SPEC);
   tree.write(specPath, spec(attribute));
   logger.info(`${TAG} wrote ${specPath}: \`nx test ${name}\` failed with "No tests found", and this is a real spec of the DsTheme the library ships.`);
-}
-
-/** The first file under `dir` `matching` accepts, or null. */
-function firstSpec(tree: Tree, dir: string, matching: RegExp): string | null {
-  for (const child of tree.children(dir)) {
-    const path = `${dir}/${child}`;
-    if (tree.isFile(path)) {
-      if (matching.test(child)) return path;
-    } else if (!SKIPPED_DIRS.has(child) && !child.startsWith('.')) {
-      const found = firstSpec(tree, path, matching);
-      if (found) return found;
-    }
-  }
-  return null;
 }
 
 /** The attribute this DsTheme writes, when it still has everything the spec relies on; otherwise null. */

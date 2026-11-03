@@ -17,6 +17,8 @@ if (!payload) throw new Error('usage: node drive.cjs <compiled-payload-dir>');
 const fromWorkspace = (id) => require(require.resolve(id, { paths: [process.cwd()] }));
 const { FsTree, flushChanges } = fromWorkspace('nx/src/generators/tree');
 const { readJson, getProjects } = fromWorkspace('@nx/devkit');
+// The generator first, as Nx loads one: it enters the adapter registry's import cycle at the end that resolves.
+const { secondaryEntrypointGenerator } = require(join(payload, 'src/generators/secondary-entrypoint/generator'));
 const { angular } = require(join(payload, 'src/adapters/angular'));
 const { detectLinking, workspaceLinking } = require(join(payload, 'src/generators/_utils/linking'));
 
@@ -43,6 +45,10 @@ const LIB_ROOT = 'packages/ui';
   tree.write(`${LIB_ROOT}/src/lib/greeting.ts`, "export const GREETING = 'hello across the workspace link';\n");
   tree.write(`${LIB_ROOT}/src/index.ts`, `${tree.read(`${LIB_ROOT}/src/index.ts`, 'utf8') ?? ''}export * from './lib/greeting';\n`);
   tree.write(`${APP_ROOT}/src/main.ts`, `import { GREETING } from '${importPath}';\nconsole.log(GREETING);\n${tree.read(`${APP_ROOT}/src/main.ts`, 'utf8')}`);
+
+  // An entry point with a component and its spec: the run below asserts `nx test` runs it, which a fixture cannot.
+  await secondaryEntrypointGenerator(tree, { library: 'ui', name: 'card', component: 'standalone', skipFormat: true });
+  writeFileSync('.tripwire-lib-root', LIB_ROOT);
 
   const roots = [...getProjects(tree).values()].map((p) => p.root);
   assert.ok(roots.includes(APP_ROOT) && roots.includes(LIB_ROOT), `projects not created: ${roots.join(', ')}`);

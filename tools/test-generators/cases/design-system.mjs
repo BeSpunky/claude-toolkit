@@ -105,7 +105,7 @@ const angularBound = ['paths', 'workspaces-npm', 'workspaces-pnpm'].map((link) =
 const SPEC = 'src/lib/ds-theme.service.spec.ts';
 const firstSpec = [
   {
-    name: 'pruning the demo of a Jest library says none is not a failure; on @nx/angular:unit-test, with no config, the seeded spec is the answer',
+    name: 'pruning the demo of a Jest library says none is not a failure; a library with no runner config only loses its demo',
     setup: () => {
       const tree = workspace({ layout: 'packages', link: 'paths' });
       tree.write('packages/jested/jest.config.ts', "export default {\n  displayName: 'jested',\n};\n");

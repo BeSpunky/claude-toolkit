@@ -20,7 +20,7 @@ const ROOT = 'packages/design-system';
 const SPEC = `${ROOT}/src/lib/ds-theme.service.spec.ts`;
 const UNIT_TEST = { executor: '@nx/angular:unit-test', options: { watch: false } };
 const INCLUDE = ['**/*.spec.ts', '**/*.test.ts', '../**/*.spec.ts', '../**/*.test.ts'];
-const EXCLUDE = ['../**/node_modules/**', '../**/dist/**'];
+const EXCLUDE = ['../**/node_modules/**', '../dist/**'];
 const REACHED = { watch: false, include: INCLUDE, exclude: EXCLUDE };
 
 function ds(tree, { test = UNIT_TEST, theme = shape(LATEST), tags = ['type:design-system', 'platform:web'], files = {}, name = 'design-system', root = ROOT } = {}) {
@@ -178,6 +178,95 @@ const anyLibrary = [
       if (logs) t.ok(!logs.some((line) => /now runs/.test(line)), `no false claim of a change: ${logs.join(' | ')}`);
     },
   },
+  {
+    name: 'a compact, commented project.json keeps its form: only the options change',
+    setup: (tree) => {
+      library(tree, { targets: {} });
+      tree.write(`${UI}/project.json`, `{
+  // hand-written
+  "name": "ui", "sourceRoot": "${UI}/src", "projectType": "library",
+  "targets": { "test": { "executor": "@nx/angular:unit-test" } }
+}
+`);
+    },
+    expect: (tree, t) => {
+      const text = tree.read(`${UI}/project.json`, 'utf8');
+      t.ok(text.includes('// hand-written'), `the comment stays: ${text}`);
+      t.ok(text.includes('"name": "ui", "sourceRoot"'), `the form stays: ${text}`);
+      t.ok(!text.includes('$schema'), `nothing is added: ${text}`);
+      t.ok(text.includes('"../dist/**"'), `the exclude: ${text}`);
+    },
+  },
+  {
+    name: 'a project a package.json defines: its nx block takes the options, no project.json appears',
+    setup: (tree) => {
+      tree.write('package.json', JSON.stringify({ name: 'root', workspaces: ['packages/*'] }, null, 2));
+      tree.write(`${UI}/package.json`, JSON.stringify({ name: '@x/ui', nx: { name: 'ui', projectType: 'library', sourceRoot: `${UI}/src`, targets: { test: { executor: '@nx/angular:unit-test' } } } }, null, 4));
+      tree.write(`${UI}/card/ng-package.json`, '{}');
+    },
+    expect: (tree, t) => {
+      t.ok(!tree.exists(`${UI}/project.json`), 'no project.json');
+      const text = tree.read(`${UI}/package.json`, 'utf8');
+      t.equal(JSON.parse(text).nx.targets.test.options, { include: INCLUDE, exclude: EXCLUDE }, 'the nx block');
+      t.ok(text.startsWith('{\n    "name"'), `its indent stays: ${text}`);
+    },
+  },
+  {
+    name: "a root application is not a library, and another library's entries are not its own: untouched and unmentioned",
+    setup: (tree) => {
+      addProjectConfiguration(tree, 'root', { root: '.', sourceRoot: 'src', projectType: 'application', targets: { test: UNIT_TEST } });
+      library(tree);
+    },
+    expect: (tree, t, logs) => {
+      t.equal(readJson(tree, 'project.json').targets.test, UNIT_TEST, "the root app's target stands");
+      t.equal(uiTarget(tree).options, REACHED, 'the library is aimed');
+      if (logs) t.ok(!logs.some((line) => /\broot\b/.test(line)), logs.join(' | '));
+    },
+  },
+  {
+    name: 'a library at the workspace root: `./` and trailing slashes are the same paths, and other projects stop its walk',
+    setup: (tree) => {
+      addProjectConfiguration(tree, 'rootlib', { root: '.', sourceRoot: 'src/', projectType: 'library', targets: { test: UNIT_TEST } });
+      tree.write('entry/ng-package.json', '{}');
+      tree.write('entry/src/e.spec.ts', '');
+      library(tree, { targets: {} });
+    },
+    expect: (tree, t, logs) => {
+      t.equal(readJson(tree, 'project.json').targets.test.options, REACHED, 'one level up, not two');
+      if (logs) {
+        t.ok(logs.some((line) => line.includes('entry/src/e.spec.ts')), `its entry's spec is named: ${logs.join(' | ')}`);
+        t.ok(!logs.some((line) => line.includes('rootlib') && line.includes('card.spec.ts')), `another project's is not: ${logs.join(' | ')}`);
+      }
+    },
+  },
+  {
+    name: "a project nested in the library is its own: not an entry point, and its specs are not the library's",
+    setup: (tree) => {
+      library(tree, { files: { 'src/lib/ui.spec.ts': '', 'tsconfig.spec.json': SPEC_TSCONFIG } });
+      addProjectConfiguration(tree, 'playground', { root: `${UI}/playground`, projectType: 'library', targets: { test: { executor: '@nx/jest:jest' } } });
+      tree.write(`${UI}/playground/ng-package.json`, '{}');
+      tree.write(`${UI}/playground/src/p.spec.ts`, '');
+    },
+    expect: untouched(UNIT_TEST),
+  },
+  {
+    name: 'a trailing slash on the source root climbs the right distance',
+    setup: (tree) => library(tree, { sourceRoot: `${UI}/src/` }),
+    expect: (tree, t) => t.equal(uiTarget(tree).options, REACHED, 'one level up'),
+  },
+  {
+    name: 'an entry point on a runner that may share the blindness: told, nothing touched',
+    setup: (tree) => library(tree, { targets: { test: { executor: '@angular/build:karma' } } }),
+    expect: libraryLeft(/\[warn\].*Left ui: its test target uses @angular\/build:karma.*may not run the specs of its entry points/, { executor: '@angular/build:karma' }),
+  },
+  {
+    name: 'what an earlier secondary-entrypoint left in a plain library: reported, with its own remedy',
+    setup: (tree) => library(tree, { files: { 'card/ng-package.json': '{}', 'card/src.ts': '// stray\n', 'card/src/index.ts': "export * from './card.component';\n", 'tsconfig.spec.json': SPEC_TSCONFIG } }),
+    expect: (tree, t, logs) => {
+      t.equal(tree.read(`${UI}/card/src.ts`, 'utf8'), '// stray\n', 'it stays');
+      if (logs) t.ok(logs.some((line) => /card\/src\.ts is what secondary-entrypoint wrote.*secondary-entrypoint --library=ui --name=card/.test(line)), logs.join(' | '));
+    },
+  },
 ];
 
 export default {
@@ -223,7 +312,7 @@ export default {
       expect: leftAlone(/Left design-system: its project config has no test target/),
     },
     {
-      name: 'another executor (jest passes with no specs): left, reported',
+      name: 'another executor: left, reported',
       setup: (tree) => ds(tree, { test: { executor: '@nx/jest:jest', options: { passWithNoTests: true } } }),
       expect: (tree, t, logs) => {
         leftAlone(/Left design-system: its test target uses @nx\/jest:jest/)(tree, t, logs);
@@ -231,9 +320,23 @@ export default {
       },
     },
     {
-      name: 'the same builder under its own name: left, reported as not judged, not as passing',
-      setup: (tree) => ds(tree, { test: { executor: '@angular/build:unit-test' } }),
-      expect: leftAlone(/this is for @nx\/angular:unit-test.*pass-libraries-with-no-specs/),
+      name: 'the same builder under its own name is the same runner: aimed, and the spec is seeded',
+      setup: (tree) => ds(tree, { test: { executor: '@angular/build:unit-test', options: { watch: false } } }),
+      expect: (tree, t) => {
+        t.exists(SPEC);
+        t.equal(testTarget(tree).options, REACHED, 'aimed');
+      },
+    },
+    {
+      name: 'a design system whose runner goes by another name: aimed like any library, and the spec is seeded',
+      setup: (tree) => {
+        ds(tree, { test: null, files: { 'button/src/button.spec.ts': '' } });
+        writeJson(tree, `${ROOT}/project.json`, { ...readJson(tree, `${ROOT}/project.json`), targets: { unit: { executor: '@nx/angular:unit-test' } } });
+      },
+      expect: (tree, t, logs) => {
+        t.equal(readJson(tree, `${ROOT}/project.json`).targets.unit.options, { include: INCLUDE, exclude: EXCLUDE }, 'aimed');
+        if (logs) t.ok(logs.some((line) => line.includes('`nx unit design-system` now runs')), logs.join(' | '));
+      },
     },
     {
       name: "a target with its own include: left, warned that neither a seeded spec nor the entry points' may run, and told the value",
@@ -294,7 +397,7 @@ export default {
       },
       expect: (tree, t) => {
         t.equal(testTarget(tree).options.include.at(-1), '../../**/*.test.ts', 'two levels up');
-        t.equal(testTarget(tree).options.exclude, ['../../**/node_modules/**', '../../**/dist/**'], 'the exclude too');
+        t.equal(testTarget(tree).options.exclude, ['../../**/node_modules/**', '../../dist/**'], 'the exclude too');
       },
     },
     {
@@ -404,6 +507,20 @@ export default {
       },
       expect: (tree, t, logs) => {
         t.ok(!tree.exists(SPEC), 'no spec');
+        t.equal(logs, [], 'nothing to say');
+      },
+    },
+    {
+      name: 'an application that declares no type, by its tsconfig, named design-system is not one either',
+      setup: (tree) => {
+        addProjectConfiguration(tree, 'design-system', { root: ROOT, targets: { test: UNIT_TEST } });
+        tree.write(`${ROOT}/tsconfig.app.json`, '{}');
+        tree.write(`${ROOT}/button/ng-package.json`, '{}');
+        tree.write(`${ROOT}/src/lib/ds-theme.service.ts`, shape(LATEST));
+      },
+      expect: (tree, t, logs) => {
+        t.ok(!tree.exists(SPEC), 'no spec');
+        t.equal(testTarget(tree), UNIT_TEST, 'the target stands');
         t.equal(logs, [], 'nothing to say');
       },
     },

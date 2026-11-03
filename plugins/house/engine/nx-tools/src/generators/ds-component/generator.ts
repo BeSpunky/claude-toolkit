@@ -35,6 +35,7 @@ import secondaryEntrypointGenerator from '../secondary-entrypoint/generator';
 import { findDesignSystem } from '../_utils/design-system';
 import { requireLayer } from '../../layers/registry';
 import { adapter } from '../../adapters/registry';
+import { reachEntryPointSpecs } from '../../adapters/angular/entry-point-specs';
 
 interface DsComponentSchema {
   /** The component (and entry-point) name, e.g. `button` -> `@scope/design-system/button`. */
@@ -102,11 +103,11 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
   }
 
   // 2) The sass channel for THIS entry's SCSS. Safe to re-assert on every run (a merge-and-dedupe of a
-  //    generator-owned config value, not the developer's content).
-  //    Belt-and-braces: the primary ng-package.json already declares `styleIncludePaths`, and ng-packagr
-  //    MAY inherit that into secondary entries — but that inheritance is unverified, and a component whose
-  //    SCSS can't resolve `@use '<ds>/styles'` fails the build. Declaring it on the entry itself costs one
-  //    line. `../..` from `<lib>/<entry>/ng-package.json` is the lib's PARENT dir — the app's load path.
+  //    generator-owned config value, not the developer's content). BOTH files are load-bearing: ng-packagr reads
+  //    the entry's, and @angular/build's unit-test builder reads only the library's (without it, build exits 0 and
+  //    test fails "Can't find stylesheet"). `--library` can name a library the design-system generator never opened.
+  //    `../..` from `<lib>/<entry>/ng-package.json` is the lib's PARENT dir — the app's load path.
+  adapter('angular').designSystem?.openLibraryStyles(tree, libraryRoot, specifier);
   if (tree.exists(entryNgPackage)) {
     updateJson(tree, entryNgPackage, (json: Record<string, unknown>) => {
       const lib = { ...((json.lib as Record<string, unknown>) ?? {}) };
@@ -118,6 +119,8 @@ export default async function dsComponentGenerator(tree: Tree, options: DsCompon
   }
 
   if (alreadyExists) {
+    // An entry made by hand is an entry all the same: the library's target must reach its spec.
+    reachEntryPointSpecs(tree, designSystem.name);
     logger.info(
       `[ds-component] Entry point \`${entryName}\` already exists — re-asserted its sass config and left ` +
         `its component files untouched (they're yours). Delete the folder first if you meant to recreate it.`
