@@ -311,6 +311,12 @@
       "layer": "design-system",
       "description": "`nx test <design system>` lied both ways on a house Angular design system: it exited 1 on a library with no spec (pruning the demo component removed the only one, and @nx/angular:unit-test has no passWithNoTests), and it exited 0 past a failing spec in an entry point (the executor looks only under <library>/src). Gives the target an include/exclude that reach every spec in the library, and adds src/lib/ds-theme.service.spec.ts, a real spec of the DsTheme the library ships, where the library holds no spec at all and DsTheme still has the shape the spec tests. A target with another executor or its own include/exclude is left and reported, with the reason, and so is the stray <entry>/src.ts an earlier ds-component wrote.",
       "implementation": "./src/migrations/0.51.2/seed-design-system-spec"
+    },
+    "pass-libraries-with-no-specs": {
+      "version": "0.51.2",
+      "layer": "nx",
+      "description": "`nx test <library>` exits 1 on a library the house left with no spec: navigation-core and a Jest-tested design system lost their generator's demo, an adopt-extracted shim lost its implementation, and Vitest and Jest fail on no tests. Sets `passWithNoTests: true` in the library's runner config, which is where it reaches an inferred target; a spec that fails still fails. A library with its own spec has nothing to do. Another executor, a config already deciding, several runner configs or a config without the generators' shape is left and reported, with the reason.",
+      "implementation": "./src/migrations/0.51.2/pass-libraries-with-no-specs"
     }
   }
 }

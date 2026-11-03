@@ -36,6 +36,7 @@ import {
 import { requireLayer } from '../../layers/registry';
 import { workspaceLinking } from '../_utils/linking';
 import { declareDependencies, declaredSpec, updateManifest } from '../_utils/dependencies';
+import { passWithNoTests, passWithNoTestsGap } from '../_utils/pass-with-no-tests';
 
 interface AdoptExtractedSchema {
   lib: string;
@@ -144,6 +145,9 @@ export default async function adoptExtractedGenerator(
       ? joinPathFragments(project.sourceRoot, 'lib')
       : joinPathFragments(project.root, 'src', 'lib');
     if (tree.exists(libImplDir)) tree.delete(libImplDir);
+    // A shim has nothing to test; a spec it kept outside src/lib, it keeps.
+    const gap = passWithNoTestsGap(passWithNoTests(tree, project.root));
+    if (gap) logger.warn(`Could not set passWithNoTests on "${options.lib}" (${gap}). If \`nx test ${options.lib}\` reports no tests, add a spec.`);
     marker.status = 'adopted-shim';
     writeJson(tree, markerPath, marker);
     await formatFiles(tree);

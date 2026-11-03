@@ -15,6 +15,7 @@ import { type ProjectConfiguration, type Tree, readProjectConfiguration, updateJ
 import { updateProjectConfigurationInPlace } from '../../generators/_utils/project-files';
 import type { DesignSystemPort } from '../stack-adapter';
 import { pruneUnusedPeers } from './library-peers';
+import { passWithNoTests } from '../../generators/_utils/pass-with-no-tests';
 
 /** The runtime files this binding owns; anything else under src/lib is the base generator's demo output. */
 const RUNTIME_FILES = new Set(['design-system.providers.ts', 'ds-theme.service.ts', 'ds-runtime-theme.service.ts']);
@@ -66,14 +67,17 @@ export const angularDesignSystem: DesignSystemPort = {
       tree.delete(`${libDir}/${child}`);
     }
     pruneUnusedPeers(tree, root);
+    // That was the only spec. Jest, the runner below Angular 21, can be told that none is not a failure, and on Nx 24 it
+    // has to be: the target is inferred, so no targetDefault says it. @nx/angular:unit-test cannot: see creationTemplates.
+    passWithNoTests(tree, root);
   },
 
   /**
    * @nx/angular:unit-test FAILS on a library with no spec ("No tests found") and has no passWithNoTests option (its
    * schema refuses one; verified on @nx/angular 24.0 / @angular/build 22.2), and pruning the demo removed the only spec
    * @nx/angular wrote. So the library is born with a real spec of the runtime it ships. Only this executor is judged:
-   * it means Angular 21+, which covers the 20+ the spec's TestBed.tick() needs. Jest, the runner below Angular 21, passes
-   * on no specs only through Nx 23 (its targetDefaults); Nx 24 infers its target, and no target here means no spec.
+   * it means Angular 21+, which covers the 20+ the spec's TestBed.tick() needs. Jest, the runner below Angular 21, is told
+   * to pass on no specs by pruneGenerated.
    */
   creationTemplates(project: ProjectConfiguration) {
     return project.targets?.test?.executor === '@nx/angular:unit-test' ? join(__dirname, 'design-system-creation-files') : undefined;
