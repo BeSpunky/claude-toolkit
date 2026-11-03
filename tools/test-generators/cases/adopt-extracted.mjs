@@ -90,5 +90,32 @@ export default {
         t.equal(t.json('package.json').dependencies?.[CORE], '^1.2.0', 'the published range stays');
       },
     },
+    {
+      name: '--keepShim: the implementation and its spec go, so the runner is told none is not a failure',
+      setup: (ctx) => {
+        const tree = linkedCore('paths', ctx);
+        tree.write('packages/core/src/lib/core.ts', 'export const core = 1;\n');
+        tree.write('packages/core/src/lib/core.spec.ts', "it('x', () => {});\n");
+        tree.write('packages/core/vite.config.mts', 'export default {\n  test: {\n    watch: false,\n  },\n};\n');
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => {
+        t.missing('packages/core/src/lib/core.spec.ts');
+        t.has('packages/core/vite.config.mts', 'passWithNoTests: true,');
+        t.equal(t.json('packages/core/extraction.json').status, 'adopted-shim', 'status');
+      },
+    },
+    {
+      name: '--keepShim: a spec the library keeps outside src/lib still counts, so nothing is stated',
+      setup: (ctx) => {
+        const tree = linkedCore('paths', ctx);
+        tree.write('packages/core/tests/keep.spec.ts', "it('x', () => {});\n");
+        tree.write('packages/core/vite.config.mts', 'export default {\n  test: {\n    watch: false,\n  },\n};\n');
+        return tree;
+      },
+      run: async (tree, ctx) => adopt(ctx)(tree, { lib: 'core', package: CORE, version: '^1.2.0', keepShim: true }),
+      expect: (tree, t) => t.ok(!t.read('packages/core/vite.config.mts').includes('passWithNoTests'), 'stated over a spec'),
+    },
   ],
 };

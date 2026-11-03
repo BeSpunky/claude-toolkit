@@ -14,7 +14,7 @@
 //
 // Re-runnable: an existing navigation library (found by its tag) gets the kernel rewritten in place — the files
 // are vendored, so they are owned, byte-for-byte, never formatted.
-import { type Tree, type GeneratorCallback, getProjects } from '@nx/devkit';
+import { type Tree, type GeneratorCallback, getProjects, logger } from '@nx/devkit';
 import { declareDependencies } from '../_utils/dependencies';
 import { TYPESCRIPT_UTILS_VERSION } from '../_utils/versions';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -23,6 +23,7 @@ import { requireLayer } from '../../layers/registry';
 import { NAVIGATION_TAG } from '../../layers/navigation';
 import { adapter } from '../../adapters/registry';
 import { resolveLibsDir, resolveWorkspaceScope } from '../_utils/workspace-layout';
+import { passWithNoTests, passWithNoTestsGap } from '../_utils/pass-with-no-tests';
 
 interface NavigationCoreSchema {
   /** The library (and project) name. Default `navigation-core`. */
@@ -59,6 +60,9 @@ export default async function navigationCoreGenerator(
     });
     // The base generator's demo component is not part of the kernel.
     if (tree.exists(`${root}/src/lib`)) tree.delete(`${root}/src/lib`);
+    // And the vendored kernel ships no spec, so the runner must be told that none is not a failure.
+    const gap = passWithNoTestsGap(passWithNoTests(tree, root));
+    if (gap) logger.warn(`[navigation-core] Could not set passWithNoTests (${gap}). If \`nx test ${name}\` reports no tests, add a spec.`);
   }
 
   const filesDir = join(__dirname, 'files');
