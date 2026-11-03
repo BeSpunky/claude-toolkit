@@ -25,9 +25,9 @@ Reviewers and verifiers together stay within **the budget share in your brief** 
 
 **Open the ledger before you dispatch** — at the path in your brief (the effort's `reviews/<ts>-sanity-review.md`), with the frame and the lenses — and update it as each stage lands. It lives in `reviews/`, never `handoffs/`: resume reads the newest file there as the effort's baton, and a review is always the last thing written. You do not commit it; the session commits it with your fixes. With no ledger path, the report is the record.
 
-## 3. Fan out — one reviewer per lens, synchronously, in ONE message
+## 3. Fan out — one reviewer per lens, in ONE message
 
-Every `Agent` call goes out with **`run_in_background: false`**, all in the same message: calls in one message still run at once, and `false` is what makes you *wait* for them. Subagents are backgrounded by default, and a background child's report arrives after you have returned — to nobody, while it keeps spending. The same holds for the verifiers in step 4. Never return while a child is running.
+Every `Agent` call goes out in the same message, so they run at once. They run in the background, so **to wait, end your turn with one line saying what you are waiting for**, with no hand-back: each report arrives as your next message. The same holds for the verifiers in step 4. Never write a wait of your own (a `sleep` or `until` loop, a `Monitor` or grep over a reviewer's transcript): it holds their reports back, and it can outlive you. Never hand back while a child is running or anything of yours is still in the background; stop that by the id the tool gave you. The one exception is the harness itself insisting (`[handback-send-enforce]`): then hand back and list the missing lens under **Not covered**.
 
 **Every agent you dispatch** — lens reviewers, verifiers, the re-check reviewer — gets the frame, the scope, its task, and these rules:
 
