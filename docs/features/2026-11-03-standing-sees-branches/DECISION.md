@@ -1,6 +1,9 @@
 ---
 effort: standing-sees-branches
-summary: project-standing missed an in-flight effort that lived only on an unmerged branch; make every in-flight effort show up wherever it lives.
+status: concluded
+concluded: 2026-11-03
+summary: Project standing now finds an in-flight effort wherever it lives, on an unlanded branch or an orphaned checkout, and accepts a handoff at a package root; it missed house-postgres-supabase because it only read registered worktrees.
+tags: [workflow, standing, worktrees, hooks]
 ---
 
 ## The incident
