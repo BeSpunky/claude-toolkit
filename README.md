@@ -195,7 +195,7 @@ claude-toolkit/
 │       │   └── SKILL.md
 │       ├── session-handoff/               # carry a live effort across a context boundary — capture writes the baton into the feature package; resume re-grounds
 │       │   └── SKILL.md
-│       └── project-standing/              # the COLD pick-up — orient after a gap; DERIVES standing from git + feature packages (never a stored status doc); live/stalled/concluded, which baton to read first; archive tier for scale
+│       └── project-standing/              # the COLD pick-up — orient after a gap; DERIVES standing from git + feature packages (never a stored status doc), wherever an effort lives: worktree, unlanded branch or orphaned checkout; live/stalled/concluded, which baton to read first; archive tier for scale
 │           ├── SKILL.md
 │           └── scripts/standing.mjs       # THE derivation (--json | --tsv), read-only — the SessionStart notice and the /standing pane both consume it
 ├── plugins/communication/

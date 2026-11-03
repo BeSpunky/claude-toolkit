@@ -130,10 +130,10 @@ Resume is a **re-grounding, never blind trust.** The baton reflects what was tru
    ```bash
    slug=$(git branch --show-current | sed 's|.*/||')             # feat/gift-picker → gift-picker (last segment)
    pkg=$(ls -d docs/features/*-"$slug" 2>/dev/null | tail -1)      # newest dated package for this slug
-   ls -t "$pkg"/handoffs/*.md | head -1                            # its latest baton
+   ls -t "$pkg"/handoffs/*.md | head -1                            # its latest baton (none: a *handoff*.md at the package's root)
    ```
 
-   If you're launched at the repo root with no obvious branch, `git worktree list` enumerates the in-flight efforts, each a `feat/<slug>` tree with its own package. **Then read the package** ([[feature-package]]): the `BRIEF.md` / `VISION.md` / `STAGING.md` / `DECISION.md` sitting beside the baton are this effort's agreed problem, design, and decisions — the baton distils *state*, the package holds the *reasoning*, and re-deriving what's already written there is exactly the waste the baton exists to prevent.
+   If you're launched at the repo root with no obvious branch, [[project-standing]]'s engine enumerates the in-flight efforts and where each lives; `git worktree list` alone misses an effort whose branch has no worktree. **Then read the package** ([[feature-package]]): the `BRIEF.md` / `VISION.md` / `STAGING.md` / `DECISION.md` sitting beside the baton are this effort's agreed problem, design, and decisions — the baton distils *state*, the package holds the *reasoning*, and re-deriving what's already written there is exactly the waste the baton exists to prevent.
 2. **Verify the anchors.** Do the SHAs, paths, and PRs still exist and match? `git rev-parse`, `test -e`, `git log`. Check the current HEAD/branch against the baton's as-of.
 3. **Report drift** — a short, honest diff of *baton vs. reality*: what still holds, what changed (new commits, moved files, resolved questions), what's now stale. Surface it before proceeding.
 4. **Trust by type.** Facts → verify against the repo. Intentions → re-confirm with the user. Assumptions / "Assumed (unverified)" items → treat as unproven and re-check.
