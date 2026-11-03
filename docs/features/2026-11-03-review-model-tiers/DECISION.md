@@ -12,3 +12,9 @@ The two finished reviews of 2026-11-02 and 2026-11-03 took 27 and 31 minutes. Ab
 ## Three safe changes, shipping either way
 
 Targeted suites after fixing and the full set once at the end; the session hands over its frame; each verifier starts when its lens returns.
+
+## 2026-11-03 — no model names in the implementation
+
+User: *"Once this is tested and proven, the implementation should not include fixed models. It should tell the sanity agent to chose from what's available at the time of testing"*.
+
+So the reviewer's instructions describe what each kind of check needs (judgement, or fast search), and the agent picks from the models available when the review runs. The benchmark's named models are the test's, not the design's. Read "at the time of testing" as when the review runs.
