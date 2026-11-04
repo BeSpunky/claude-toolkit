@@ -30,6 +30,7 @@ on:
       - 'plugins/house/engine/nx-tools/package.json'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
       - 'tools/check-runner-image/**'
+      - '!tools/check-runner-image/devcontainer.sh' # devcontainer-image-e2e.yml's; it reaches neither the fallback nor its image
       - '.github/workflows/runner-image-e2e.yml'
 
 permissions:

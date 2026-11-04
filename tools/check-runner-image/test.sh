@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The runner-image checks' own decisions, against a fake docker and a fake curl: no image, no network, seconds. Whether a
-# real image passes is what check.sh and e2e.sh are for; this only proves that each answer they can get produces the
+# real image passes is what check.sh, e2e.sh and devcontainer.sh are for; this only proves that each answer they can get produces the
 # right exit code and the right words, because a checker whose red branches have never run is a checker nobody can trust.
 set -uo pipefail
 
@@ -163,5 +163,165 @@ case "$(grep '^house.sh ' "$FAKE_ARGV")" in *--local*) fail "the registry road p
 echo 'stdin a tool could wait on' | env PATH="$TMP/bin:$PATH" GITHUB_ACTIONS= HOME="$TMP" FAKE_MAJOR="$MAJOR" "FAKE_REPORT=NEW_OK <dir> (image=$IMAGE_REF x)\n" bash "$E2E_SH" local >/dev/null 2>&1
 grep -q 'house.sh had stdin' "$FAKE_ARGV" && fail "house.sh inherited stdin" || ok "house.sh gets no stdin"
 unset E2E_SH
+
+# devcontainer.sh, against a fake docker that answers as a right image would unless a FAKE_ names a fault, and a stand-in
+# house.sh whose project's `nx` writes the files the real generator does. Each fault must turn into the right exit and words.
+DC="$TMP/dc"
+mkdir -p "$DC/bin" "$DC/state" "$DC/tree/tools/check-runner-image" "$DC/tree/plugins/house/engine/nx-tools/src/generators/_utils"
+cp "$HERE/devcontainer.sh" "$DC/tree/tools/check-runner-image/"
+cp "$ROOT/plugins/house/engine/nx-tools/src/generators/_utils/versions.ts" "$DC/tree/plugins/house/engine/nx-tools/src/generators/_utils/"
+export FAKE_DC_STATE="$DC/state"
+cat > "$DC/tree/plugins/house/engine/house.sh" <<'FAKE'
+#!/usr/bin/env bash
+echo "house.sh $*" >> "$FAKE_ARGV"
+[ "${FAKE_NEW_RC:-0}" -eq 0 ] || { echo "the project could not be made"; exit "$FAKE_NEW_RC"; }
+dir="$PROJECTS_DIR/base"
+mkdir -p "$dir/node_modules/.bin"
+echo '{ "name": "base", "packageManager": "yarn@1.22.22" }' > "$dir/package.json"
+cat > "$dir/node_modules/.bin/nx" <<'NX'
+#!/usr/bin/env bash
+echo "nx $*" >> "$FAKE_ARGV"
+[ "${FAKE_NX_RC:-0}" -eq 0 ] || { echo "the generator threw"; exit "$FAKE_NX_RC"; }
+spec="$(sed -n 's/.*"packageManager": "\([^"]*\)".*/\1/p' package.json)"
+[ -n "$spec" ] || spec=yarn
+[ -z "${FAKE_WRONG_SPEC:-}" ] || spec=npm
+mkdir -p .devcontainer
+cat > .devcontainer/devcontainer.json <<JSON
+{
+  "build": {
+    "dockerfile": "house.Dockerfile",
+    "context": "."
+  },
+  "remoteUser": "node",
+  "remoteEnv": {
+    "PATH": "/home/node/.local/bin:\${containerEnv:PATH}"
+  },
+  "mounts": [
+    "source=x-local,target=/home/node/.local,type=volume"
+  ]
+}
+JSON
+printf 'FROM mcr.microsoft.com/devcontainers/typescript-node:%s\nRUN sh house.package-manager.sh '"'"'%s'"'"' || echo x\n' "$(cat .nvmrc)" "$spec" > .devcontainer/house.Dockerfile
+: > .devcontainer/house.package-manager.sh
+{
+  echo '#!/usr/bin/env bash'
+  [ -n "${FAKE_NO_SECTION:-}" ] || echo '# --- Volume ownership (DERIVED) ---'
+  echo "# --- The project's dependencies (node) ---"
+} > .devcontainer/post-create.sh
+NX
+chmod +x "$dir/node_modules/.bin/nx"
+FAKE
+cat > "$DC/bin/docker" <<'FAKE'
+#!/usr/bin/env bash
+sub="$1"; shift
+echo "docker $sub $*" >> "$FAKE_ARGV"
+case "$sub" in
+  pull) [ "${FAKE_PULL_RC:-0}" -eq 0 ] || echo "manifest unknown"; exit "${FAKE_PULL_RC:-0}" ;;
+  build)
+    while [ "$#" -gt 0 ]; do case "$1" in -f) file="$2"; shift ;; -t) tag="$2"; shift ;; esac; shift; done
+    spec="$(sed -n "s/.*house.package-manager.sh '\([^']*\)'.*/\1/p" "$file")"
+    from="$(sed -n 's/^FROM .*:\([0-9]*\)$/\1/p' "$file")"
+    version="${spec#*@}"; [ "$spec" != yarn ] || version="$FAKE_YARN_PIN"
+    echo "$spec $version" > "$FAKE_DC_STATE/$tag"
+    # The step's header states the soft-fail's words on every build, as BuildKit prints it.
+    echo '#7 [2/2] RUN sh house.package-manager.sh || echo "[package-manager] not installed in the image; post-create tries again"'
+    [ "${FAKE_BUILD_RC:-0}" -eq 0 ] || { echo '#7 ERROR: process did not complete'; exit "$FAKE_BUILD_RC"; }
+    [ -z "${FAKE_CACHED:-}" ] || { echo '#7 CACHED'; exit 0; }
+    if [ -n "${FAKE_SOFT_FAIL:-}" ]; then
+      echo '#7 2.10 [package-manager] not installed in the image; post-create tries again'
+    elif [ "$from:$spec" = 24:yarn@1.22.22 ] && [ -z "${FAKE_ALWAYS_INSTALLS:-}" ]; then
+      echo '#7 0.20 [package-manager] yarn 1.22.22 — nothing to install'
+    else
+      echo "#7 0.20 [package-manager] npm install -g  ${spec%%@*}@$version"
+      echo "#7 2.10 [package-manager] ${spec%%@*} $version installed"
+    fi
+    exit 0 ;;
+  run)
+    cat > /dev/null
+    [ "${FAKE_RUN_RC:-0}" -eq 0 ] || { echo "OCI runtime create failed"; exit "$FAKE_RUN_RC"; }
+    while [ "$#" -gt 0 ]; do case "$1" in house-devcontainer-e2e-*) tag="$1" ;; _) shift; break ;; esac; shift; done
+    mode="$1"; pm="$2"; spec="$3"
+    read -r _ version < "$FAKE_DC_STATE/$tag"
+    [ -n "${FAKE_NO_SENTINEL:-}" ] && exit 0
+    count="$FAKE_DC_STATE/$tag.$mode"; echo x >> "$count"
+    echo "home=${FAKE_HOME:-/home/node}"
+    if [ "$mode" = start ]; then
+      echo "[post-create] package manager: $pm"
+      if [ -n "${FAKE_START_INSTALLS:-}" ] && [ "$(wc -l < "$count")" -gt "$FAKE_START_INSTALLS" ]; then
+        echo "[package-manager] npm install -g  $pm@$version"; echo "[package-manager] $pm $version installed"
+      else
+        echo "[package-manager] $pm $version — nothing to install"
+      fi
+    else
+      version="${spec#*@}"
+      echo "[package-manager] npm install -g  $spec"
+      echo "[package-manager] $pm $version installed${FAKE_LOCAL_FALLBACK:+ in ~/.local}"
+    fi
+    echo "step.rc=${FAKE_STEP_RC:-0}"
+    echo "pm.path=/usr/local/share/npm-global/bin/$pm"
+    echo "pm.version=${FAKE_ANSWER:-$version}"
+    echo "orphans=${FAKE_ORPHANS:-}"
+    echo "dangling=${FAKE_DANGLING:-}"
+    echo "rootowned=${FAKE_ROOTOWNED:-0}"
+    echo "probe=done"
+    exit 0 ;;
+esac
+exit 0
+FAKE
+chmod +x "$DC/bin/docker"
+
+dc_case() {   # <name> <cases, space-separated, or empty for all> <expected rc> <must say> <must NOT say> [ENV=VAL…]
+  local name="$1" cases="$2" want="$3" say="$4" not="$5" got out; shift 5
+  : > "$FAKE_ARGV"; rm -f "$DC/state/"*
+  # shellcheck disable=SC2086
+  out="$(env PATH="$DC/bin:$PATH" GITHUB_ACTIONS= GITHUB_STEP_SUMMARY= HOME="$TMP" FAKE_YARN_PIN="$YARN_PIN" "$@" bash "$DC/tree/tools/check-runner-image/devcontainer.sh" $cases 2>&1)"; got=$?
+  if [ "$got" != "$want" ]; then fail "$name: exit $got, wanted $want"; printf '%s\n' "$out" | tail -n 15 | sed 's/^/       /'; return; fi
+  case "$out" in *"$say"*) ;; *) fail "$name: never said '$say'"; printf '%s\n' "$out" | tail -n 15 | sed 's/^/       /'; return ;; esac
+  if [ -n "$not" ]; then case "$out" in *"$not"*) fail "$name: wrongly said '$not'"; return ;; esac; fi
+  ok "$name (exit $got)"
+}
+
+echo "devcontainer.sh"
+YARN_PIN="$(sed -n "s/^[[:space:]]*yarn: \['\([^']*\)'.*/\1/p" "$ROOT/plugins/house/engine/nx-tools/src/generators/_utils/versions.ts" | head -n 1)"
+dc_case "every case on a right image passes" "" 0 "PASS" "FAILED"
+for want in "new --local --preset=node base" "nx g @bespunky/nx-tools:devcontainer base --no-interactive" "--no-cache --progress=plain -f" "--user node" "target=/home/node/.local,type=volume" "typescript-node:26"; do
+  grep -qF -- "$want" "$FAKE_ARGV" && ok "the run carries $want" || fail "the run lacks $want"
+done
+for id in yarn1-node24 yarn1-node26 pnpm-node24 pnpm-node26 yarn4-node24 lockfile-node26; do
+  grep -q "docker build.*-t house-devcontainer-e2e-$id " "$FAKE_ARGV" && ok "it built $id" || fail "it never built $id"
+done
+dc_case "one case by name runs only that one" pnpm-node26 0 "pnpm-node26" "yarn1-node24"
+dc_case "an unknown case: usage" nope 2 "usage" "PASS"
+dc_case "the build failing: a finding, with the build's words" yarn1-node26 1 "FAILED (yarn1-node26): docker build exited 0 (it exited 3)" "first container start" FAKE_BUILD_RC=3
+dc_case "the build's tail is shown" yarn1-node26 1 "process did not complete" "" FAKE_BUILD_RC=3
+dc_case "the soft-fail hiding a failed layer: a finding" yarn1-node26 1 "not hidden by the soft-fail" "PASS" FAKE_SOFT_FAIL=1
+dc_case "the soft-fail's words in the step header alone: no finding" yarn1-node26 0 "PASS" "FAILED"
+dc_case "a cached layer printing nothing: a finding, not a pass" yarn1-node26 1 "the layer installed" "PASS" FAKE_CACHED=1
+dc_case "an installed version when the image was right: a finding" yarn1-node24 1 "says nothing to install" "PASS" FAKE_ALWAYS_INSTALLS=1
+dc_case "the wrong version answering: a finding" pnpm-node24 1 "pnpm answers 10.30.0 (it answers '0.0.1'" "PASS" FAKE_ANSWER=0.0.1
+dc_case "the post-create step failing: a finding" pnpm-node24 1 "the step exited 0 (it exited 1)" "PASS" FAKE_STEP_RC=1
+dc_case "a Dockerfile stating another spec: a finding" pnpm-node24 1 "states 'pnpm@10.30.0'" "PASS" FAKE_WRONG_SPEC=1
+dc_case "post-create losing a section: a finding" pnpm-node24 1 "volume-ownership and dependencies" "PASS" FAKE_NO_SECTION=1
+dc_case "the generator failing: a finding" pnpm-node24 1 "the devcontainer generator ran" "PASS" FAKE_NX_RC=4
+dc_case "a HOME the image does not give: a finding" pnpm-node24 1 "HOME is /home/node (it is '/root')" "PASS" FAKE_HOME=/root
+dc_case "a first start installing: a finding" pnpm-node24 1 "first start: installed nothing" "PASS" FAKE_START_INSTALLS=0
+dc_case "only the second start installing: a finding" pnpm-node24 1 "second start: installed nothing" "first start: installed nothing (" FAKE_START_INSTALLS=1
+dc_case "an orphan: a finding" pnpm-node24 1 "no orphaned directory in the prefix (/p/.pnpm-abc)" "PASS" FAKE_ORPHANS=/p/.pnpm-abc
+dc_case "a dangling bin: a finding" pnpm-node24 1 "no dangling bin (/p/bin/pnpm)" "PASS" FAKE_DANGLING=/p/bin/pnpm
+dc_case "root's copy never handed back: a finding" pnpm-node24 1 "root-owned" "PASS" FAKE_ROOTOWNED=2
+dc_case "falling back to ~/.local after root's install: a finding" pnpm-node24 1 "no fallback to ~/.local" "PASS" FAKE_LOCAL_FALLBACK=1
+dc_case "no base image: could not run, no verdict on the case" pnpm-node24 2 "COULD NOT RUN (pnpm-node24): docker pull" "FAILED" FAKE_PULL_RC=1
+dc_case "an engine error at run: could not run" pnpm-node24 2 "COULD NOT RUN (pnpm-node24): docker run (start) exited 125" "FAILED" FAKE_RUN_RC=125
+dc_case "exit 0 with no sentinel: could not run" pnpm-node24 2 "before the probe's end" "PASS" FAKE_NO_SENTINEL=1
+dc_case "no project: could not run" pnpm-node24 2 "COULD NOT RUN (new)" "=== pnpm-node24" FAKE_NEW_RC=9
+out="$(env PATH="$DC/bin:$PATH" GITHUB_ACTIONS= HOME="$TMP" FAKE_YARN_PIN="$YARN_PIN" FAKE_BUILD_RC=3 bash "$DC/tree/tools/check-runner-image/devcontainer.sh" pnpm-node24 pnpm-node26 2>&1)"; got=$?
+[ "$got" = 1 ] && ok "two cases, a build failing: a finding" || fail "two cases, a build failing: exit $got"
+case "$out" in *"=== pnpm-node26"*) ok "a red case does not stop the next" ;; *) fail "a red case stopped the next" ;; esac
+out="$(PATH="$TMP/nodocker" GITHUB_ACTIONS= "$TMP/nodocker/bash" "$HERE/devcontainer.sh" 2>&1)"; got=$?
+if [ "$got" = 2 ] && case "$out" in *"no docker on PATH"*) true ;; *) false ;; esac; then
+  ok "no docker: could not run (exit 2)"
+else
+  fail "no docker: exit $got: $out"
+fi
 
 [ "$FAILED" -eq 0 ] && echo "PASS" || { echo "FAIL"; exit 1; }

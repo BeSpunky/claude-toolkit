@@ -34,3 +34,11 @@ This supersedes 2026-11-02's "Still open": the devcontainer half is closed. Movi
 GitHub run 41794445331, uid 1001, the real `typescript-node:24`. The image check passed and `HOME=/tmp` was writable, but `yarn create nx-workspace` died with `Cannot create "/usr/local/share/npm-global/bin/create-nx-workspace" due to insufficient permissions`: the image's global prefix belongs to uid 1000 too, the same bug as `HOME`, which no fake docker could show. Reproduced with real yarn 1.22.22 and an unwritable `NPM_CONFIG_PREFIX`; a writable one gets through. `container_run_program` now sets it beside `HOME`.
 
 The same run corrected a claim: `:24` holds node 24.22.1, yarn 1.22.22, corepack 0.36.0 and **pnpm 12.15.0**, in `/usr/local/share/npm-global/bin`. The earlier note that it has no pnpm was wrong.
+
+## A generated devcontainer on a real image (2026-11-04)
+
+`tools/check-runner-image/devcontainer.sh`, in its own workflow `devcontainer-image-e2e.yml` (weekly, by hand, and on pushes to any branch touching the templates, `compose.ts`, `versions.ts` or `package-manager.ts`). Six cases: Node 24 and 26 on yarn 1, Node 24 and 26 on an exact pnpm of the 10 line, Node 24 on an exact yarn 4 with no `yarnPath`, Node 26 with only a versionless `yarn.lock`. One project made with `new --local --preset=node`, mutated and regenerated per case, built from the generated Dockerfile and context. The build log's installer lines are read rather than the Dockerfile's soft-fail changed.
+
+**Observed: not on a real image; there is no Docker here.** With a local stand-in for `docker` that ran the real generated installer and post-create sections against a sandboxed prefix, every assertion held except the two a host cannot satisfy (HOME, and "the layer installed yarn" where the host already has it). Root, the hand-back, the image's PATH and its real package managers remain unobserved until the first run.
+
+**That stand-in found a false green in the check itself.** `check "… $(x) …" $?` passes the status of `$(x)`, because arguments expand left to right, so every assertion was green. `check` here takes the status first. `e2e.sh` had the same defect on one line: its "everything belongs to this uid" check, the one thing only a real engine can show, could never fail, because of the `$(id -u)` in its message. Fixed. Its past greens on that line prove nothing.
