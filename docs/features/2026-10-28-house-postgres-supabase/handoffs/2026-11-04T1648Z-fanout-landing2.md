@@ -22,7 +22,7 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 | id | branch | re-runnable | status |
 |---|---|---|---|
 | debts-ci | feat/hps2-ci | yes, its own branch | returned |
-| debts-engine | feat/hps2-engine | yes, its own branch | dispatched |
+| debts-engine | feat/hps2-engine | yes, its own branch | returned |
 | core | feat/hps2-core | yes, its own branch | dispatched |
 | wire | tripwire, dogfood boot, image e2e; after core | yes | pending |
 | docs | new skill, README, CLAUDE.md, tips; after core | yes | pending |
@@ -35,3 +35,7 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 Note on branch: handoffs/seam2-ci.md. F4, F8, F7, F14 done with cases. Nothing to migrate. New payload dep `yaml` (needs proof in a real consumer install: gate). F7 adds a stack-record comment to firewalls so removed bans stay removed. `typescript-node:14` is bullseye, a printed exemption. Not verified: a real GitHub run.
 ORCHESTRATOR DECISION: a targeted provider a line does not name stays blocked, consistent with the user's "yes, fail CI"; "name only some" covers targetless and superseded providers only.
 Owed: CLAUDE.md commands row.
+
+### debts-engine (returned; feat/hps2-engine 0f224934..317b8721; spent 0 of 0)
+Note on branch: handoffs/seam2-engine.md. E1 fixed (serve and `dev stop` name a failed shutdown, exit 1). F5 refused with the glob; `deployTarget(tree, root, spec)`. E6: `dev run` lacked exports, added; `ps --json` documented and tested. 6a bound and fd 3 hold, engine unchanged. Nothing to migrate.
+Limit: an orphaned stop cannot report an exit status. Owed docs: the new `dev stop` exit and public `ps --json` in HOUSE.md and CLAUDE.md. Relayed the shape and the signature to core.
