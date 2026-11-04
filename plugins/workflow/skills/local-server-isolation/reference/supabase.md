@@ -1,0 +1,17 @@
+# Worked example — Supabase
+
+> Applies to projects wearing the `supabase` layer (their `HOUSE.md` stamp lists it in `layers=`). It is the `postgres` layer's verbs on another local server, so [`postgres.md`](postgres.md) applies, with what follows in place of what it says about a server's identity and data. The stack runs on the CLI's native runtime, an **alpha**, pinned exactly.
+
+In a house project a Supabase stack is part of a dev stack, on a block of ten ports (`5432` to `5441` plus the offset). It daemonises, so a foreground **keeper** (the `serve` or `start` process) stands for it under the dev engine.
+
+- **Only the launcher starts and stops it.** No bare `supabase start`, `stop` or `db reset`: a start missing the port pins moves every port and exits 0, and one with new ports on a running stack keeps the old ones and exits 0. `supabase status`, `db diff`, `db query`, `migration list` and `gen types` are read-only company. Start it with a serve (`tools/dev/dev serve <app>`) or `node tools/postgres/postgres.mjs start --port-offset=<n>`.
+- **Blocks stay out of 10000-32767.** The native runtime refuses a public port in 10000-19999 and allocates its own from 20000-32767. `auto` skips that range and an explicit offset inside it is refused, so a random offset you pick starts at 28000: every port of the block then lands above it. A free port is not enough here.
+- **One stack per tree**, the CLI's model. A second one in that tree is refused, whoever's the first is. Testing beside the user's stack means another worktree.
+- **A verb means this tree's running stack, and it does not ask whose**, as on `postgres`. Look first with `tools/dev/dev ps`.
+- **The URL is the whole isolation.** Every stack has the same keys, and a token from one is accepted by another: a wrong URL returns the wrong stack's data, not an auth error. Take the URL from what the stack handed you (`DATABASE_URL`, `SUPABASE_URL`) or `tools/dev/dev ps --json`; never reuse a port from memory. Local only, and never a security boundary.
+- **A reset is never interrupted.** `node tools/postgres/postgres.mjs reset` holds the stack's lock and runs to completion in a session of its own: a signal at your command does not reach it, and a stop waits for it. `supabase db reset` by hand, cut short, can wedge the stack or leave it reporting healthy with no migrations.
+- **Stop it by the handle it prints**, `tools/dev/dev stop <app> --offset=<n>` (`postgres` for a stack of its own), which stops the stack through the CLI, and waits.
+- **The accepted gap: `kill -9` of the keeper.** The stack runs on, its ports held, and `tools/dev/dev ps` no longer shows it. So never `kill -9` a keeper. The next start in that tree adopts it; a tree nobody starts again keeps it until `supabase stop` from that tree. `--all` stops every stack on the machine, the user's included: that is not yours to run.
+- **Never remove `/dev/shm/PostgreSQL.*`.** A live segment is in use by name even when no process maps it, and removing one breaks every new connection of a stack that still says healthy.
+- **`status` is not the database's health.** It has said healthy on a half-built database. Ask the database, on a new connection.
+- **No login, no link, no hosted project.** `postgres:deploy` refuses to run under Claude Code; hand it to the user, as you do `supabase login`.

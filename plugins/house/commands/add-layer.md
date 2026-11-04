@@ -1,5 +1,5 @@
 ---
-description: Add a house layer to this project (agent, node, js, web, firebase, postgres, …) — an upgrade that also brings the named layers into being. Updates the claude-toolkit plugins first.
+description: Add a house layer to this project (agent, node, js, web, firebase, postgres, supabase, …) — an upgrade that also brings the named layers into being. Updates the claude-toolkit plugins first.
 argument-hint: "<layers> [--preset=<id>] [--firebase] [--voice] [--staging] [--local] [--docker] [--no-backup]"
 allowed-tools: Bash, Read
 ---
@@ -18,7 +18,7 @@ the layers the user named — never one of your own, never a "while we're at it"
 ## 0. Check the arguments before anything else
 
 The **first** argument is the layer list: comma-separated layer ids, no spaces, no leading `--` (for example
-`agent`, `firebase`, `postgres`, `node,js`). Everything after it is a flag. If the first argument is missing, or starts with
+`agent`, `firebase`, `postgres`, `supabase`, `node,js`). Everything after it is a flag. If the first argument is missing, or starts with
 `--`, or is not a comma-separated list of lowercase ids, **stop and ask** which layers they want — say what each
 command does: `/bespunky-house:upgrade` brings the project current and adds nothing;
 `/bespunky-house:add-layer <layers>` also adds layers. Don't guess a layer from context.
