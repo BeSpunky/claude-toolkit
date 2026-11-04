@@ -112,6 +112,7 @@ p="$(argv probe)"; g="$(argv program)"
 container_home="$(. "$ENGINE/container-engine.sh"; echo "$CONTAINER_HOME")"
 [ "$container_home" = "/tmp" ] && ok "HOME is somewhere every uid can write" || fail "CONTAINER_HOME is $container_home"
 case "$p" in *"-u $(id -u):$(id -g)"*"-e HOME=$container_home"*) ok "the probe has the program's user and HOME" ;; *) fail "probe: $p" ;; esac
+case "$g" in *"-e NPM_CONFIG_PREFIX=$container_home/"*) ok "the program's global prefix is one its user can write (yarn create links its binary there)" ;; *) fail "program prefix: $g" ;; esac
 case "$g" in *"-u $(id -u):$(id -g)"*"-e HOME=$container_home"*) ok "…and so does the program" ;; *) fail "program: $g" ;; esac
 case "$(argv chown)" in *" -u 0:0"*) ok "the chown asks for root, not for the image's default user" ;; *) fail "chown: $(argv chown)" ;; esac
 grep -qx "tool=yarn" "$CALLS.argv" && ok "it asks for yarn" || fail "asked: $(cat "$CALLS.argv")"

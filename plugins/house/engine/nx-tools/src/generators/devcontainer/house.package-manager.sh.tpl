@@ -5,7 +5,7 @@
 # not this copy. To change what it installs, change `packageManager` in package.json.
 #
 # WHY IT EXISTS: an image's package managers are the image's accident. typescript-node:26 ships neither yarn nor
-# corepack, :24 ships yarn 1 and no pnpm, and a project on yarn 4 cannot use yarn 1 without a `yarnPath`.
+# corepack, :24 ships yarn 1 beside a pnpm of its own choosing, and a project on yarn 4 cannot use yarn 1 without a `yarnPath`.
 #
 # TWO CALLERS, ONE RULE — install only what is not already right:
 #   - the IMAGE BUILD (.devcontainer/house.Dockerfile), as root, with what package.json said at the last upgrade: one

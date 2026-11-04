@@ -69,10 +69,16 @@ container_run_as_host_user() {
 # only they provided would be reported up front.
 CONTAINER_HOME=/tmp
 
+# The global package prefix of the same programs, for the same reason. The image points it at
+# /usr/local/share/npm-global, also uid 1000's, and `yarn create` links its binary there before it runs anything: on a
+# GitHub runner (uid 1001) that was "Cannot create ... due to insufficient permissions" and no project. Nothing later
+# needs what lands here: yarn runs the binary by its full path, and the container is `--rm`.
+CONTAINER_NPM_PREFIX="$CONTAINER_HOME/.npm-global"
+
 # `docker run --rm` the way every launcher runs its program in the image, so a check made through this answers for the
 # program. Takes every other `docker run` argument.
 container_run_program() {
-  container_run_as_host_user -e HOME="$CONTAINER_HOME" "$@"
+  container_run_as_host_user -e HOME="$CONTAINER_HOME" -e NPM_CONFIG_PREFIX="$CONTAINER_NPM_PREFIX" "$@"
 }
 
 # Hand container-written files back to the invoking host user. Rootful only; a no-op when rootless.
