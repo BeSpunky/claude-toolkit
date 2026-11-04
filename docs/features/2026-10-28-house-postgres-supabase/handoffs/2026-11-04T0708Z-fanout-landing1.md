@@ -13,7 +13,7 @@ Units are independent; each must build and test, so one worktree and branch each
 | seam-engine | feat/hps-engine | dispatched |
 | seam-platform | feat/hps-platform | returned |
 | seam-ci | feat/hps-ci | returned |
-| seam-installer | feat/hps-installer | dispatched |
+| seam-installer | feat/hps-installer | returned |
 | docs | on the integration branch, by the orchestrator | pending |
 
 ## Results
@@ -27,3 +27,8 @@ Note on branch: handoffs/seam-platform.md. StackAdapter.webOnlyImports, workspac
 Departures: firewall.ts:76-84 left (LEGACY_COMMENTS, matched for deletion); runtime watchedFiles not extracted (no second caller).
 ORCHESTRATOR DECISION: existing firewalls never gain the driver bans, so a rung ships with the Landing 1 release: adds the bans additively, log says a lint failure it causes is a real leak. Not deferred to Landing 2 (no-deferred-gaps).
 Owed: HOUSE.md.tpl:29,249 describes the firewall only under {{#firebase}}. ensurePlatformFirewall no-ops without a root ESLint config: Landing 2 must say so. Not run: upgrade --local, dogfood, publish dry-run, 35 skipped cases.
+
+### seam-installer (returned; feat/hps-installer 0eba0ba3, 5c5c906e; spent 0 of 1)
+Note on branch: handoffs/seam-installer.md. ArchiveTool = TarballTool | DebClosureTool (format deb, id, bin, libraryPaths, prune?, closures by codename: version, systemDepends, packages by arch). generators/_utils/postgres-closures.ts, 32 pins as of 2026-11-04, --check OK; weekly + pre-publish. tools/postgres-debs/{project,run-closure}.mjs. Tests: layers 106/0, generators 282/0/35 skipped, scaffold pass. Rendered devcontainer files byte-identical for agent, web, firebase, firebase+web. Real run unprivileged with apt-get and sudo stubbed: 26 ok; trixie 17 and 18 ran, bookworm extracted only. Nothing to migrate.
+Unproven until a user rebuild: root dpkg-deb -x then running as remote user; real apt-get satisfy on both base images; real bookworm; arm64; post-create on an adopted image through real sudo.
+For Landing 2: prune usr/lib/postgresql/<major>/bin/pg_config. For docs: name tools/postgres-debs in CLAUDE.md. About 10 lines of shell shared by the two installers, kept for byte-identity: reconsider at review.
