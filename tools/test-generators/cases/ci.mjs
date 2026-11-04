@@ -5,6 +5,7 @@
 //   - a provider's arguments reaching a deploy target that is not the provider's (another stack's deploy reading
 //     `--project=prod`);
 //   - a job that installs dependencies, or a tag-pinned action, holding `id-token: write`;
+//   - a package manager that exists only because the runner's system Node still happens to carry a corepack;
 //   - a second deploy workflow beside the project's own (two deploys on one push);
 //   - a file the house did not write overwritten, or one it no longer needs left behind;
 //   - the cloud identity's conditions drifting from the branch model without a human being told to re-run setup,
@@ -12,6 +13,8 @@
 import { workspace } from '../workspaces.mjs';
 
 const MODEL = '.bespunky/branches.json';
+/** The one fetch the workflow makes for its package manager: an exact version, scripts off. */
+const COREPACK_INSTALL = /- run: npm install -g --ignore-scripts corepack@\d+\.\d+\.\d+\n/;
 const PROJECTION = {
   schema: 1,
   integration: 'development',
@@ -116,6 +119,22 @@ export default {
       },
     },
     {
+      // Node 25+ ships no corepack, and the project's .nvmrc decides the Node: a bare `corepack enable` passes on the
+      // runner's system Node, by accident. Each job's order is what makes it real: there is no npm before setup-node,
+      // no yarn before corepack enable, and no `cache:` on setup-node, which would need that yarn before any of it.
+      name: 'the package manager comes from a pinned corepack, after Node and before anything uses it, in both jobs',
+      setup: fixture(BOUND),
+      run: run(),
+      expect: (tree, t) => {
+        for (const [name, firstUse] of [['prepare', 'yarn install --immutable'], ['deploy', 'actions/cache/restore@']]) {
+          const steps = job(t, name);
+          const order = ['actions/setup-node@', COREPACK_INSTALL, '- run: corepack enable', firstUse].map((needle) => steps.search(needle));
+          t.ok(order.every((at, i) => at >= 0 && (i === 0 || order[i - 1] < at)), `${name}: setup-node, the pinned install, corepack enable, then ${firstUse} (at ${order})`);
+          t.ok(steps.match(/\bcorepack@/g).length === 1 && !/^\s+cache:/m.test(steps), `${name}: one exact install, and no package-manager cache on setup-node`);
+        }
+      },
+    },
+    {
       name: 'least privilege in the workflow: id-token only on the deploy job, every action pinned by SHA, concurrency per environment',
       setup: fixture(BOUND),
       run: run(),
@@ -124,7 +143,7 @@ export default {
         const deploy = job(t, 'deploy');
         t.ok(!/id-token/.test(prepare) && /yarn install --immutable/.test(prepare) && /nx-set-shas/.test(prepare), 'install and nx-set-shas run without id-token');
         t.ok(/actions: read/.test(job(t, 'prepare')), "prepare keeps nx-set-shas' actions: read");
-        t.ok(/id-token: write/.test(deploy) && !/(yarn|npm|pnpm) (install|ci)\b/.test(deploy) && !/nx-set-shas/.test(deploy), 'deploy holds id-token and runs no install');
+        t.ok(/id-token: write/.test(deploy) && !/(yarn|npm|pnpm) (install|ci)\b/.test(deploy.replace(COREPACK_INSTALL, '')) && !/nx-set-shas/.test(deploy), 'deploy holds id-token and runs no install (the pinned corepack, scripts off, aside)');
         t.ok(/fail-on-cache-miss: true/.test(deploy), 'deploy restores what prepare installed, or stops');
         t.ok(!/id-token/.test(job(t, 'resolve')), 'resolve has no id-token');
         t.ok(/group: deploy-\$\{\{ needs\.resolve\.outputs\.environment \}\}/.test(deploy) && /cancel-in-progress: false/.test(deploy), 'one deploy per environment, never cancelled');

@@ -75,3 +75,10 @@ export const PACKAGE_MANAGER_PINS: Readonly<Record<'yarn' | 'pnpm' | 'npm', read
   pnpm: ['10.34.9'],
   npm: [],
 };
+
+/**
+ * The corepack the deploy workflow installs before `corepack enable`, on every Node: Node 25+ ships none. Its `engines`
+ * leave out Node 25, 23 and <22, where npm only warns; 18, 20, 22, 23, 24, 25 and 26 were each run with it and resolved yarn 1,
+ * yarn 4 and pnpm. Moving it moves the workflow on the next upgrade, which rewrites that owned file: nothing to migrate.
+ */
+export const COREPACK_VERSION = '0.36.0';
