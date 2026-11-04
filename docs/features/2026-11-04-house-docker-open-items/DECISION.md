@@ -1,6 +1,9 @@
 ---
 effort: house-docker-open-items
-summary: close the five items house-docker-pm left open — a chown failure losing the report, yarn 2+ without yarnPath, the rolling :24 image, a stale versions.ts comment, and a devcontainer dying on a package manager its image lacks
+status: concluded
+concluded: 2026-11-04
+summary: the Docker fallback works for any host user and refuses a yarn it cannot reach, a chown failure keeps the report, generated devcontainers and CI provide their own package manager on any Node, and real-image CI now guards all of it
+tags: [house, docker, devcontainer, package-manager, ci]
 ---
 
 # Decisions made before dispatch
@@ -42,3 +45,13 @@ The same run corrected a claim: `:24` holds node 24.22.1, yarn 1.22.22, corepack
 **Observed: not on a real image; there is no Docker here.** With a local stand-in for `docker` that ran the real generated installer and post-create sections against a sandboxed prefix, every assertion held except the two a host cannot satisfy (HOME, and "the layer installed yarn" where the host already has it). Root, the hand-back, the image's PATH and its real package managers remain unobserved until the first run.
 
 **That stand-in found a false green in the check itself.** `check "… $(x) …" $?` passes the status of `$(x)`, because arguments expand left to right, so every assertion was green. `check` here takes the status first. `e2e.sh` had the same defect on one line: its "everything belongs to this uid" check, the one thing only a real engine can show, could never fail, because of the `$(id -u)` in its message. Fixed. Its past greens on that line prove nothing.
+
+## Conclusion
+
+Landed as `bespunky-house` 0.49.5 and `@bespunky/nx-tools` 0.51.4 (nothing to migrate). The user's instruction was "Send agents to fix those open items". All five are closed, and the review and real runs added: `HOME` and the global prefix writable by any uid, the yarn refusal on the native route, a pinned corepack in generated CI.
+
+**The real runs earned their cost.** The fake docker passed everything while the fallback could not create a project at uid 1001, and one assertion could never fail. Treat a fake's green as proof of the launcher's decisions only.
+
+**Roads not taken:** a digest pin on `:24` (stops security updates, and the devcontainer stays on the rolling tag anyway); corepack in the devcontainer (absent on 26); widening the Docker build context (rebuilds on every dependency change); installing yarn into the fallback's image at run time (a mapped uid cannot write the prefix).
+
+**Left open:** a real VS Code rebuild of a project, owed before promoting; the registry road, which first runs from `main`; rootless Docker and Podman; a uid-1000 host on the new `HOME`. Not fixed, on purpose: a persisted `~/.local` copy satisfying a versionless spec. For the user to decide: registry logins in `~/.npmrc` and `~/.yarnrc.yml` lost on rebuild (pre-existing). `HOUSE_NODE_MAJOR` still cannot move past 24 until the fallback's yarn has an answer.
