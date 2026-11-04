@@ -1,8 +1,9 @@
 // The Postgres launcher's decisions, with no database: fakes on PATH and a fake `tools/dev/dev.mjs` saying what runs. Whatever
 // would regress SILENTLY: an address, a refusal, what a child is handed. What needs real binaries is tools/test-postgres.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -178,6 +179,11 @@ result = run('deploy');
 check('no URL: refused, naming the variable', result.status !== 0 && /POSTGRES_DEPLOY_URL is not set/.test(result.stderr), result.stderr);
 result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET });
 check('outside CI with no terminal: refused', result.status !== 0 && /asks a human/.test(result.stderr) && lastCall('dbmate').length === 0, result.stderr);
+result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CI: 'true', CLAUDECODE: '1' });
+check('under Claude Code, with CI set: refused, saying a human runs it or CI does', result.status !== 0 && /a human runs it, or CI does/.test(result.stderr) && lastCall('dbmate').length === 0, result.stderr);
+check('…and names no secret', !(result.stdout + result.stderr).includes('hunter2'), result.stderr);
+result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CLAUDECODE: '1' });
+check('under Claude Code, with no CI: the same refusal, not the terminal question', /a human runs it, or CI does/.test(result.stderr), result.stderr);
 for (const name of ['.env', '.env.local', '.local.env', '.deploy.env', 'postgres/.env']) {
   writeFileSync(join(tree, name), `export POSTGRES_DEPLOY_URL=${SECRET}\n`);
   result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CI: 'true' });
@@ -243,6 +249,67 @@ if (process.getuid?.() !== 0) {
   check('a parent that cannot be read proves nothing: kept', existsSync(behind) && again.stdout.includes('kept the Postgres data of') && again.stdout.includes(sealed), again.stdout);
 }
 rmSync(sweepHome, { recursive: true, force: true });
+
+// ── the heartbeat: another container on this data ──
+const age = (file, seconds) => utimesSync(file, new Date(Date.now() - seconds * 1000), new Date(Date.now() - seconds * 1000));
+const beating = (name, recorded, host, seconds = 0) => {
+  const dir = recordTree(name, recorded);
+  const owner = join(dir, 'postgres@0/18/owner');
+  writeFileSync(owner, `${host}\n`);
+  age(owner, seconds);
+  return dir;
+};
+const stillBeating = beating('beating', join(worktrees, 'gone-a'), 'other-container');
+const staleBeat = beating('stale', join(worktrees, 'gone-b'), 'other-container', 120);
+const myBeat = beating('mine', join(worktrees, 'gone-c'), hostname());
+const beats = sweep();
+check('the sweep: a tree proven gone with a fresh heartbeat from another host: kept', existsSync(stillBeating));
+check('…and named, with the host', beats.stdout.includes('container other-container is running a server') && beats.stdout.includes(join(worktrees, 'gone-a')), beats.stdout);
+check('the sweep: its heartbeat stale: dropped', !existsSync(staleBeat), beats.stdout);
+check('the sweep: its heartbeat this host\'s own: dropped, no server being there', !existsSync(myBeat), beats.stdout);
+rmSync(sweepHome, { recursive: true, force: true });
+
+// A start inside a stack, against a cluster that already exists, and a server that exits at once and says what it found.
+const stackDir = join(tree, '.bespunky/run/postgres@0');
+mkdirSync(stackDir, { recursive: true });
+const hash = createHash('sha256').update(realpathSync(tree)).digest('hex').slice(0, 16);
+const clusterAt = join(sweepHome, hash, 'postgres@0/18');
+const serveVerb = (extra = {}) =>
+  spawnSync(process.execPath, [join(tree, 'tools/postgres/postgres.mjs'), 'serve'], {
+    cwd: tree,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    env: { PATH: `${bin}:${process.env.PATH}`, XDG_DATA_HOME: xdg, HOME: scratch, DEV_STACK_DIR: stackDir, DEV_STACK_TMP: scratch, PORT_POSTGRES: '45432', ...extra },
+  });
+const staged = (host, seconds) => {
+  mkdirSync(join(clusterAt, 'data'), { recursive: true });
+  writeFileSync(join(clusterAt, 'identity'), '42\n');
+  writeFileSync(join(clusterAt, 'data/postmaster.pid'), '999999\n');
+  writeFileSync(join(clusterAt, 'owner'), `${host}\n`);
+  age(join(clusterAt, 'owner'), seconds);
+  mkdirSync(dirname(clusterAt), { recursive: true });
+  writeFileSync(join(sweepHome, hash, 'tree'), `${realpathSync(tree)}\n`);
+};
+writeFileSync(join(bin, 'postgres'), `#!/bin/sh\ncat "${clusterAt}/owner" > "${calls}/owner-at-boot"; test -e "${clusterAt}/data/postmaster.pid" && touch "${calls}/pid-at-boot"; exit 3\n`, { mode: 0o755 });
+staged('other-container', 5);
+clearCalls();
+result = serveVerb();
+check('a fresh heartbeat from another host: refused', result.status !== 0 && /Container other-container is running/.test(result.stderr), result.stderr);
+check('…naming the cause and the way out', /share a ~\/\.local volume/.test(result.stderr) && /folder of its own name/.test(result.stderr) && /clears within 30s/.test(result.stderr), result.stderr);
+check('…with postmaster.pid and the owner left alone, and no server started', existsSync(join(clusterAt, 'data/postmaster.pid')) && readFileSync(join(clusterAt, 'owner'), 'utf8').trim() === 'other-container' && !existsSync(join(calls, 'owner-at-boot')));
+staged('other-container', 120);
+clearCalls();
+result = serveVerb();
+check('a stale heartbeat from another host, as after a rebuild: taken over, the server started', existsSync(join(calls, 'owner-at-boot')) && readFileSync(join(calls, 'owner-at-boot'), 'utf8').trim() === hostname(), result.stderr);
+check('…with the dead postmaster.pid gone first', !existsSync(join(calls, 'pid-at-boot')));
+check('…and letting go when it ended', !existsSync(join(clusterAt, 'owner')));
+staged(hostname(), 1);
+clearCalls();
+result = serveVerb();
+check('a fresh heartbeat of this very host: no refusal: a launcher killed outright here is recovered', existsSync(join(calls, 'owner-at-boot')), result.stderr);
+rmSync(bin + '/postgres');
+rmSync(sweepHome, { recursive: true, force: true });
+rmSync(join(tree, '.bespunky/run'), { recursive: true, force: true });
 
 rmSync(scratch, { recursive: true, force: true });
 console.log(failed ? `FAILED: ${failed}` : 'ok');

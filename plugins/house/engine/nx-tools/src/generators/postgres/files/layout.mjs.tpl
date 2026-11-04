@@ -5,6 +5,7 @@
 //   <data home>/<hash of the tree>/tree                  the tree's path: what the sweep asks about
 //   <data home>/<hash of the tree>/<app>@<offset>/<major>/data       the cluster
 //   <data home>/<hash of the tree>/<app>@<offset>/<major>/identity   its system_identifier, written once, before the rename
+//   <data home>/<hash of the tree>/<app>@<offset>/<major>/owner      the hostname running it; its mtime is the heartbeat
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -51,3 +52,4 @@ export const stackHome = (key) => join(treeHome(), key);
 export const clusterHome = (key, major) => join(stackHome(key), major);
 export const dataDir = (home) => join(home, 'data');
 export const identityFile = (home) => join(home, 'identity');
+export const ownerFile = (home) => join(home, 'owner');

@@ -139,6 +139,33 @@ export default {
       },
     },
     {
+      name: 'on a wrapper host, a served app is seeded to run Nx by node: ./nx is a script a stop would kill and leave Nx running',
+      setup: () => {
+        const tree = wearingAgent();
+        tree.delete('package.json');
+        addProjectConfiguration(tree, 'site', { root: 'apps/site', targets: { serve: { executor: SERVE }, 'dev-server': { executor: 'nx:run-commands', options: { command: 'x', port: 4300 } } } });
+        return tree;
+      },
+      run: generate,
+      expect: (tree, t) => {
+        const app = JSON.parse(tree.read('.bespunky/dev.json', 'utf8')).apps.site.processes.find((p) => p.id === 'app');
+        t.equal(app.cmd.slice(0, 4), ['node', '.nx/nxw.js', 'run', 'site:dev-server'], 'node, the wrapper\'s own program, then the target');
+      },
+    },
+    {
+      name: 'on a node host, the same app is seeded to run Nx from node_modules',
+      setup: () => {
+        const tree = wearingAgent();
+        addProjectConfiguration(tree, 'site', { root: 'apps/site', targets: { serve: { executor: SERVE }, 'dev-server': { executor: 'nx:run-commands', options: { command: 'x', port: 4300 } } } });
+        return tree;
+      },
+      run: generate,
+      expect: (tree, t) => {
+        const app = JSON.parse(tree.read('.bespunky/dev.json', 'utf8')).apps.site.processes.find((p) => p.id === 'app');
+        t.equal(app.cmd.slice(0, 3), ['node_modules/.bin/nx', 'run', 'site:dev-server'], 'the installed binary');
+      },
+    },
+    {
       name: 'the launcher and the fragment agree on the port, the marker and the process\'s command',
       once: 'reads templates; nothing is generated',
       setup: () => wearingAgent(),
@@ -184,6 +211,27 @@ export default {
         t.ok(!workflow.includes('id-token: write'), 'no OIDC: the job cannot mint a token');
         const { targets } = readProjectConfiguration(tree, 'postgres');
         t.ok(!JSON.stringify(targets.deploy).includes('postgresql://'), 'no URL in project.json');
+      },
+    },
+    {
+      name: 'a line deploying it gets a HUMAN_STEP naming the secret and the command, once, and no value on the command line',
+      setup: () => {
+        const tree = wearingAgent({ pm: 'yarn-berry' });
+        tree.write('.bespunky/branches.json', JSON.stringify({ schema: 1, projection: { schema: 1, integration: 'development', production: ['main'], productionPatterns: [], chain: ['development', 'main'], protected: ['development', 'main'], protectedPatterns: [], workBase: 'development', summary: 'development → main', deploys: [{ kind: 'line', line: 'main', ci: { environment: 'production', providers: {} } }] } }, null, 2));
+        return tree;
+      },
+      once: 'its run is already the two runs: it asserts what the second does not say',
+      run: async (tree, ctx) => {
+        await generate(tree, ctx);
+        const ci = ctx.load('generators/ci/generator').default;
+        await ci(tree, { layers: ['nx', 'agent', 'postgres', 'ci'] });
+        await ci(tree, { layers: ['nx', 'agent', 'postgres', 'ci'] }); // nothing changed, so it must not be said again
+      },
+      expect: (_tree, t, ctx) => {
+        const steps = ctx.logs.filter((line) => line.includes('HUMAN_STEP:') && line.includes('POSTGRES_DEPLOY_URL'));
+        t.ok(steps.length === 1, `one step for the one environment: ${ctx.logs.join(' | ')}`);
+        t.ok(steps[0]?.includes('gh secret set POSTGRES_DEPLOY_URL --env production'), steps[0]);
+        t.ok(!/--body|-b /.test(steps[0] ?? ''), 'it prompts: the value is on no command line');
       },
     },
     {

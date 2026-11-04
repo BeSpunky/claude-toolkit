@@ -140,6 +140,8 @@ async function humanConfirms(target) {
 
 async function deploy(argv) {
   parse(argv, []);
+  // First, and whatever CI says: an agent can set CI itself, and it reaches a database nobody asked it to migrate.
+  if (process.env.CLAUDECODE === '1') throw new Refusal(`A deploy is not an agent's to run: a human runs it, or CI does. Hand the user this command to run in a terminal: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
   const file = urlInAFile();
   if (file) throw new Refusal(`${DEPLOY_URL_VAR} is set in ${file}. A deploy's URL comes from CI or from a variable you set yourself, never from a file: remove it.`);
   const url = process.env[DEPLOY_URL_VAR];

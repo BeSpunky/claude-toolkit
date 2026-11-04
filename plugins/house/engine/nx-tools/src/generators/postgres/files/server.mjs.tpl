@@ -9,19 +9,28 @@
 // five-second grace, past which it kills) then turns it into a fast shutdown, which ends whatever clients remain. The server
 // is in its own session, so a Ctrl+C or a closed terminal reaches it through this policy, never around it.
 //
+// A HEARTBEAT, BECAUSE ANOTHER CONTAINER CAN HOLD THIS DATA. The `~/.local` volume is named after the folder, so two checkouts
+// with one name share it, and hash to one tree. Nothing else can see that: `postmaster.pid` names a pid in another container's
+// process table, which reads here as a dead server, and removing it to recover would put two postmasters on one data directory.
+// So the launcher keeps `owner` beside the data: its hostname, touched every interval. Fresh from another host is a refusal. Stale
+// means that container is gone, which is what a rebuild looks like, and is taken over.
+//
 // THE SERVER HOLDS THE STACK'S LOCK (fd 3). So a launcher killed outright leaves a server that `dev ps` still shows as an
 // orphan, and that `dev stop` can clear. Without it, that server would hold the port and be invisible to both.
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, fstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, fstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { NX, PORT_NAME, READY_MARKER, ROLE, ROOT, Refusal, clusterHome, dataDir, dataHome, declaredMajor, identityFile, stackHome, treeHome } from './layout.mjs';
+import { NX, PORT_NAME, READY_MARKER, ROLE, ROOT, Refusal, clusterHome, dataDir, dataHome, declaredMajor, identityFile, ownerFile, stackHome, treeHome } from './layout.mjs';
 import { assertIdentity } from './stack.mjs';
 import { ensureDatabase, localMigrate, localUrl, seedOnce } from './schema.mjs';
 import { run, scrubbedEnv, tool } from './tools.mjs';
 
 const SMART_STOP_MS = 2000;
 const ACCEPTING_TIMEOUT_MS = 60_000;
+const HEARTBEAT_MS = 10_000;
+const HEARTBEAT_FRESH_MS = 3 * HEARTBEAT_MS;
 
 const log = (line) => console.log(`[postgres] ${line}`);
 
@@ -38,6 +47,54 @@ function serverOf(data) {
   } catch {
     return undefined;
   }
+}
+
+/** Another host's fresh heartbeat on this cluster home, as `{ host, ageSeconds }`, or undefined: no file, stale, or ours. */
+function heldElsewhere(home) {
+  try {
+    const age = Date.now() - statSync(ownerFile(home)).mtimeMs;
+    const host = readFileSync(ownerFile(home), 'utf8').trim();
+    return age < HEARTBEAT_FRESH_MS && host !== hostname() ? { host, ageSeconds: Math.max(0, Math.round(age / 1000)) } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Refuse before anything of this cluster is touched, `postmaster.pid` above all. */
+function assertNotHeldElsewhere(home) {
+  const held = heldElsewhere(home);
+  if (!held) return;
+  throw new Refusal(
+    `Container ${held.host} is running this data directory's server (heartbeat ${held.ageSeconds}s ago): ${home}. Two servers on one data directory corrupt it.\n` +
+      `The two containers share a ~/.local volume, which is named after the project's folder, so same-named checkouts share one. Stop the stack there, or give one checkout a folder of its own name. If that container is already gone, this clears within ${HEARTBEAT_FRESH_MS / 1000}s.`,
+  );
+}
+
+/** Take the owner file and keep it fresh. `onLost` runs if another host takes it, as one will after this container was paused for too long. Returns how to let go. */
+function holdOwnership(home, onLost) {
+  const file = ownerFile(home);
+  writeFileSync(file, `${hostname()}\n`);
+  const mine = () => {
+    try {
+      return readFileSync(file, 'utf8').trim() === hostname();
+    } catch {
+      return false;
+    }
+  };
+  const beat = setInterval(() => {
+    try {
+      if (!existsSync(file)) writeFileSync(file, `${hostname()}\n`);
+      else if (mine()) utimesSync(file, new Date(), new Date());
+      else onLost(readFileSync(file, 'utf8').trim());
+    } catch (error) {
+      log(`could not touch ${file}: ${error.message}. Another container could take this data over.`);
+    }
+  }, HEARTBEAT_MS);
+  beat.unref();
+  return () => {
+    clearInterval(beat);
+    if (mine()) rmSync(file, { force: true });
+  };
 }
 
 /**
@@ -85,6 +142,11 @@ export function sweepDeadTrees() {
     const clusters = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((stack) =>
       readdirSync(join(dir, stack.name)).map((major) => ({ stack: stack.name, major, data: dataDir(join(dir, stack.name, major)) })),
     );
+    const held = clusters.map(({ stack, major }) => heldElsewhere(join(dir, stack, major))).find(Boolean);
+    if (held) {
+      log(`kept the Postgres data of ${tree}: container ${held.host} is running a server on it (heartbeat ${held.ageSeconds}s ago).`);
+      continue;
+    }
     const running = clusters.filter(({ data }) => serverOf(data));
     if (running.length) {
       log(`${tree} is gone, but a server still runs on its data (${running.map((c) => c.stack).join(', ')}): left alone. tools/dev/dev cannot reach it from here; stop it by its pid in ${running[0].data}/postmaster.pid.`);
@@ -163,12 +225,20 @@ export async function serve() {
   const stopped = () => signal.aborted;
 
   sweepDeadTrees();
+  assertNotHeldElsewhere(clusterHome(key, major));
   const home = await ensureCluster(key, major, { signal });
   if (stopped() || !home) return 0;
   const data = dataDir(home);
   chmodSync(data, 0o700);
   const holder = serverOf(data);
   if (holder) throw new Refusal(`A server of this data directory is already running (pid ${holder}). See tools/dev/dev ps, which names the command that stops it.`);
+  let lostTo;
+  const letGo = holdOwnership(home, (host) => {
+    if (lostTo) return;
+    lostTo = host;
+    console.error(`[postgres] container ${host} took this data over while this server ran, so it is stopping: two servers on one data directory corrupt it.`);
+    stop();
+  });
   rmSync(join(data, 'postmaster.pid'), { force: true });
 
   server = spawn(tool('postgres'), serverArgs(data, port, socketDir, key), { env: scrubbedEnv(), detached: true, stdio: ['ignore', 'inherit', 'inherit', 3] });
@@ -204,10 +274,13 @@ export async function serve() {
     stop();
     await exited;
     clearTimeout(smartBound);
+    letGo();
     throw failure;
   }
   const end = await exited;
   clearTimeout(smartBound);
+  letGo();
+  if (lostTo) return 1;
   if (stopped()) return end.code === 0 ? 0 : 1;
   // An exit nobody asked for is a failure, even with status 0: Postgres shuts itself down when its data directory vanishes.
   console.error(`[postgres] the server exited on its own (${end.error?.message ?? end.signal ?? `status ${end.code}`}). If its log above speaks of a lock file or a pre-existing shared memory block, an orphan holds the data: tools/dev/dev ps names the command that clears it.`);

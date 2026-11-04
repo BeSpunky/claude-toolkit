@@ -8,9 +8,9 @@
 // what this is for: the stop roads, the orphan, recovery, dbmate's real reading of the environment, and whether a server on
 // the right port is the right server. Every server runs on a random free block, never a base port, and is stopped by its handle.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NoClosureHere, ensureTools } from './tools.mjs';
@@ -429,6 +429,41 @@ scenario('the sweep: a tree invisible from here keeps its data, which still work
   ok(sql(back.port, 'SELECT name FROM thing') === 'seeded', 'the tree comes back to its own rows');
   stop(back);
   await untilEnded(back);
+});
+
+scenario('the heartbeat: another container on this data is refused, a stale one taken over, and a server that lost it stops', async () => {
+  const dir = fixture();
+  addMigration(dir);
+  addSeed(dir);
+  const first = await start(dir);
+  stop(first);
+  await untilEnded(first);
+  const home = join(xdg, 'bespunky/postgres');
+  const hash = readdirSync(home).find((d) => existsSync(join(home, d, 'tree')) && readFileSync(join(home, d, 'tree'), 'utf8').trim() === realpathSync(dir));
+  const cluster = join(home, hash, first.key, '18');
+  const owner = join(cluster, 'owner');
+  ok(!existsSync(owner), 'a clean stop lets go of the data');
+  // What the other container's running server looks like from here: a pid nothing here has, and its fresh heartbeat.
+  const pidFile = join(cluster, 'data/postmaster.pid');
+  writeFileSync(pidFile, '999999\n');
+  writeFileSync(owner, 'other-container\n');
+  const refused = await start(dir, { offset: first.offset, expectFailure: true });
+  await untilEnded(refused);
+  ok(refused.ended && refused.code !== 0 && refused.log().includes('Container other-container is running'), 'a fresh heartbeat from another host is refused');
+  ok(readFileSync(pidFile, 'utf8') === '999999\n', 'and its postmaster.pid is left alone');
+  const old = new Date(Date.now() - 120_000);
+  utimesSync(owner, old, old);
+  const taken = await start(dir, { offset: first.offset });
+  ok(sql(taken.port, 'SELECT name FROM thing') === 'seeded', 'a stale one is taken over, as after a rebuild, with the rows intact');
+  ok(readFileSync(owner, 'utf8').trim() === hostname(), 'and now names this host');
+  const before = statSync(owner).mtimeMs;
+  await sleep(11_000);
+  ok(statSync(owner).mtimeMs > before, 'the running launcher touches it');
+  writeFileSync(owner, 'other-container\n');
+  ok(await untilEnded(taken, 20_000), 'a server whose data another host took stops');
+  ok(taken.code !== 0 && taken.log().includes('took this data over'), 'and says why');
+  ok(readFileSync(owner, 'utf8').trim() === 'other-container', 'leaving that host\'s claim where it is');
+  rmSync(owner);
 });
 
 scenario('a hostile environment and .env: local verbs and the bring-up reach only this stack', async () => {
