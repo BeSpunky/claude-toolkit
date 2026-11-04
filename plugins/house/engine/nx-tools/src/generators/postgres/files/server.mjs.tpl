@@ -12,9 +12,9 @@
 // THE SERVER HOLDS THE STACK'S LOCK (fd 3). So a launcher killed outright leaves a server that `dev ps` still shows as an
 // orphan, and that `dev stop` can clear. Without it, that server would hold the port and be invisible to both.
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, fstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, fstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { basename, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { NX, PORT_NAME, READY_MARKER, ROLE, ROOT, Refusal, clusterHome, dataDir, dataHome, declaredMajor, identityFile, stackHome, treeHome } from './layout.mjs';
 import { assertIdentity } from './stack.mjs';
 import { ensureDatabase, localMigrate, localUrl, seedOnce } from './schema.mjs';
@@ -41,8 +41,28 @@ function serverOf(data) {
 }
 
 /**
- * Drop the data of every tree that no longer exists (data lives outside the tree, so removing a worktree cannot take it),
- * and say what went. A tree still has its data while a server runs on it: that is left, and named.
+ * Was this tree removed? Absence alone does not say: `~/.local` is a volume, and a tree another container mounts is invisible
+ * from this one. So a deletion must be proven: the parent directory answers, and in it the tree does not. Everything short of
+ * that (no such parent, a parent that cannot be read, a record that is no absolute path) is `unknown`.
+ */
+function treeState(tree) {
+  const look = (path) => {
+    try {
+      return statSync(path).isDirectory() ? 'directory' : 'file';
+    } catch (error) {
+      return error.code === 'ENOENT' ? 'absent' : 'unknown';
+    }
+  };
+  if (!isAbsolute(tree)) return 'unknown';
+  const here = look(tree);
+  if (here !== 'absent') return here === 'unknown' ? 'unknown' : 'here';
+  return look(dirname(tree)) === 'directory' ? 'gone' : 'unknown';
+}
+
+/**
+ * Drop the data of every tree proven gone (data lives outside the tree, so removing a worktree cannot take it), and say what
+ * went. A tree that cannot be proven gone keeps its data and is named, every start, so a real leftover is not silent. A tree
+ * still has its data while a server runs on it: that is left, and named.
  */
 export function sweepDeadTrees() {
   const home = dataHome();
@@ -56,7 +76,12 @@ export function sweepDeadTrees() {
     } catch {
       continue; // being created, or not ours
     }
-    if (existsSync(tree)) continue;
+    const state = treeState(tree);
+    if (state === 'here') continue;
+    if (state === 'unknown') {
+      log(`kept the Postgres data of ${tree || 'an unnamed tree'}: it is not visible from here, and nothing proves it was removed. If it was, remove ${dir}.`);
+      continue;
+    }
     const clusters = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((stack) =>
       readdirSync(join(dir, stack.name)).map((major) => ({ stack: stack.name, major, data: dataDir(join(dir, stack.name, major)) })),
     );

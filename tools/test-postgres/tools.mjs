@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import { compilePayload, requireFromRepo } from '../test-support/payload.mjs';
 import { parseRelations } from '../postgres-debs/closure.mjs';
 
+/** This machine is not a Debian the closures cover: nothing can be said about the tools here, by any caller. */
+export class NoClosureHere extends Error {}
+
 export async function ensureTools({ major = '18' } = {}) {
   const codename = /^VERSION_CODENAME=(.*)$/m.exec(readFileSync('/etc/os-release', 'utf8'))?.[1];
   const { build, load, dispose } = compilePayload('bespunky-test-postgres');
@@ -18,10 +21,7 @@ export async function ensureTools({ major = '18' } = {}) {
   tree.write('.bespunky/postgres.json', JSON.stringify({ major: Number(major) }));
   const fragment = layer('postgres').devcontainer(tree);
   const closure = fragment.archives.find((a) => a.format === 'deb').closures[codename];
-  if (!closure) {
-    console.error(`this machine is ${codename}, and the closures are for other releases: this needs a Debian the closures cover.`);
-    process.exit(2);
-  }
+  if (!closure) throw new NoClosureHere(`this machine is ${codename}, and the closures are for other releases: this needs a Debian the closures cover.`);
   const script = renderOsPackagesScript(compose([{ id: 'postgres', fragment: { image: { ref: 'img', remoteUser: 'node' }, ...fragment } }], { nodeMajor: '22' }));
   dispose();
 

@@ -198,6 +198,52 @@ check('and only that: the rest of a hostile environment is gone', !/^(PGHOST|DBM
 result = run('serve');
 check('`serve` outside a dev stack: refused, naming the target', result.status !== 0 && /postgres:start/.test(result.stderr), result.stderr);
 
+// ── the sweep: a deletion must be proven ──
+// `~/.local` is a volume, so a tree another container mounts is invisible from this one, and treating it as gone loses its data.
+const sweepHome = join(xdg, 'bespunky/postgres');
+const recordTree = (name, recorded) => {
+  const dir = join(sweepHome, name);
+  mkdirSync(join(dir, 'postgres@0/18/data'), { recursive: true });
+  writeFileSync(join(dir, 'tree'), `${recorded}\n`);
+  return dir;
+};
+const sweep = () =>
+  spawnSync(process.execPath, ['--input-type=module', '-e', `(await import(${JSON.stringify(pathToFileURL(join(tree, 'tools/postgres/server.mjs')).href)})).sweepDeadTrees();`], {
+    cwd: tree,
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, XDG_DATA_HOME: xdg, HOME: scratch },
+  });
+const worktrees = join(scratch, 'worktrees');
+mkdirSync(join(worktrees, 'alive'), { recursive: true });
+writeFileSync(join(scratch, 'a-file'), '');
+const removed = recordTree('removed', join(worktrees, 'removed'));
+const alive = recordTree('alive', join(worktrees, 'alive'));
+const invisible = recordTree('invisible', join(scratch, 'mounted-elsewhere/project'));
+const deeper = recordTree('deeper', join(scratch, 'mounted-elsewhere/a/b/project'));
+const underFile = recordTree('under-file', join(scratch, 'a-file/project'));
+const relative = recordTree('relative', 'worktrees/removed');
+const blank = recordTree('blank', '');
+const swept = sweep();
+check('the sweep ran', swept.status === 0, swept.stderr);
+check('a removed worktree, its parent here: dropped', !existsSync(removed));
+check('…and reported, naming the tree', swept.stdout.includes(`dropped the Postgres data of ${join(worktrees, 'removed')}`), swept.stdout);
+check('a tree that is here: kept, with nothing said', existsSync(alive) && !swept.stdout.includes(join(worktrees, 'alive')), swept.stdout);
+check('a tree whose parent is not here: kept', existsSync(join(invisible, 'postgres@0/18/data')) && existsSync(join(deeper, 'postgres@0/18/data')));
+check('…and reported as kept, naming the tree and the directory to remove', swept.stdout.includes(`kept the Postgres data of ${join(scratch, 'mounted-elsewhere/project')}`) && swept.stdout.includes(invisible), swept.stdout);
+check('a path under a file proves nothing: kept', existsSync(underFile));
+check('a record that is no absolute path proves nothing: kept, though it reads as a removed worktree from here', existsSync(relative) && existsSync(blank), swept.stdout);
+check('nothing was reported dropped but the removed worktree', swept.stdout.match(/dropped the Postgres data/g)?.length === 1, swept.stdout);
+if (process.getuid?.() !== 0) {
+  // Root reads through any mode, so this one cannot be staged as root.
+  const sealed = join(scratch, 'sealed');
+  mkdirSync(sealed, { mode: 0o000 });
+  const behind = recordTree('sealed', join(sealed, 'project'));
+  const again = sweep();
+  chmodSync(sealed, 0o755);
+  check('a parent that cannot be read proves nothing: kept', existsSync(behind) && again.stdout.includes('kept the Postgres data of') && again.stdout.includes(sealed), again.stdout);
+}
+rmSync(sweepHome, { recursive: true, force: true });
+
 rmSync(scratch, { recursive: true, force: true });
 console.log(failed ? `FAILED: ${failed}` : 'ok');
 process.exit(failed ? 1 : 0);

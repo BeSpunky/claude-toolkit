@@ -8,12 +8,12 @@
 // what this is for: the stop roads, the orphan, recovery, dbmate's real reading of the environment, and whether a server on
 // the right port is the right server. Every server runs on a random free block, never a base port, and is stopped by its handle.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureTools } from './tools.mjs';
+import { NoClosureHere, ensureTools } from './tools.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '../..');
@@ -24,7 +24,11 @@ const scratch = mkdtempSync(join(tmpdir(), 'bespunky-test-postgres-'));
 const xdg = join(scratch, 'xdg');
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-const toolEnv = await ensureTools();
+const toolEnv = await ensureTools().catch((error) => {
+  if (!(error instanceof NoClosureHere)) throw error;
+  console.error(error.message);
+  process.exit(2);
+});
 const baseEnv = () => {
   const env = { ...process.env, ...toolEnv, DEV_OWNER: OWNER, XDG_DATA_HOME: xdg, NO_COLOR: '1' };
   delete env.CLAUDECODE; // a human's run: the offset below is explicit either way
@@ -396,6 +400,35 @@ scenario('the sweep: data of a removed worktree is dropped and reported, a live 
   stop(stack);
   await untilEnded(stack);
   ok(Boolean(dirOf(dir)), 'this tree keeps its own');
+});
+
+scenario('the sweep: a tree invisible from here keeps its data, which still works when it comes back', async () => {
+  // Two containers on one `~/.local`: the tree, under a mount this one does not have, is staged by moving its parent away.
+  const mount = join(scratch, `mount-${++fixtures}`);
+  const dir = join(mount, 'project');
+  mkdirSync(mount);
+  cpSync(fixture(), dir, { recursive: true });
+  addMigration(dir);
+  addSeed(dir);
+  const first = await start(dir);
+  ok(sql(first.port, 'SELECT name FROM thing') === 'seeded', 'it has data');
+  stop(first);
+  await untilEnded(first);
+  const home = join(xdg, 'bespunky/postgres');
+  const hash = readdirSync(home).find((d) => existsSync(join(home, d, 'tree')) && readFileSync(join(home, d, 'tree'), 'utf8').trim() === dir);
+  const elsewhere = `${mount}-elsewhere`;
+  renameSync(mount, elsewhere);
+  const other = await start(fixture());
+  ok(existsSync(join(home, hash, first.key, '18/data/PG_VERSION')), 'another tree\'s start keeps the cluster');
+  ok(other.log().includes(`kept the Postgres data of ${dir}`) && other.log().includes(join(home, hash)), 'and says so, naming the tree and the directory');
+  ok(!other.log().includes(`dropped the Postgres data of ${dir}`), 'and does not say it dropped it');
+  stop(other);
+  await untilEnded(other);
+  renameSync(elsewhere, mount);
+  const back = await start(dir, { offset: first.offset });
+  ok(sql(back.port, 'SELECT name FROM thing') === 'seeded', 'the tree comes back to its own rows');
+  stop(back);
+  await untilEnded(back);
 });
 
 scenario('a hostile environment and .env: local verbs and the bring-up reach only this stack', async () => {
