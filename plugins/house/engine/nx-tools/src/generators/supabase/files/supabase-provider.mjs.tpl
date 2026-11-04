@@ -71,11 +71,15 @@ const refuseUnderAgent = (what) => {
   if (process.env.CLAUDECODE === '1') throw new Refusal(`${what} is not an agent's to run: a human runs it, in a terminal. Hand the user the command.`);
 };
 
-/** A line of the env file the CLI reads, by its own grammar (the tripwire feeds it these and reads what it would have sent). */
+/**
+ * A line of the env file the CLI reads, by its own grammar, observed (tools/test-supabase sends it these and reads what it would post):
+ * inside any of its quotes a character is itself, with no escapes, so a value needs a quote it does not hold. All three: refused.
+ */
 export function secretLine(name, value) {
   if (/[\r\n]/.test(value)) throw new Refusal(`${name}'s value holds a line break, which this verb does not carry. Encode it, or use the dashboard.`);
-  if (!value.includes("'")) return `${name}='${value}'\n`;
-  return `${name}="${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}"\n`;
+  const quote = ["'", '`', '"'].find((candidate) => !value.includes(candidate));
+  if (!quote) throw new Refusal(`${name}'s value holds all three quote characters, which the CLI's env file cannot carry. Encode it, or use the dashboard.`);
+  return `${name}=${quote}${value}${quote}\n`;
 }
 
 /** One line from the terminal, never echoed. Ctrl+C or Ctrl+D ends the verb having sent nothing. */

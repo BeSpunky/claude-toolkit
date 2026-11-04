@@ -300,6 +300,92 @@ try {
   owner.kill('SIGKILL');
   check('the owner gone unasked ends the keeper as a failure, without a stop', (await k.ended) === 1 && callsOf('stop').length === 0 && /owner went away/.test(k.said()), k.said());
 
+  console.log('types, functions, hosted secrets');
+  respondsWell();
+  answer('gen', `printf 'export type Database = {}\\n'; echo 'Target: local' >&2\n`);
+  clearCalls();
+  let said2 = run('gen-types', [], { FAKE_PS: runningStack() });
+  check('gen-types: stdout alone, to the default path', said2.status === 0 && readFileSync(join(tree, 'supabase/types/database.ts'), 'utf8') === 'export type Database = {}\n', said2.stderr);
+  check('…in the language asked, through the launcher\'s address', (callsOf('gen')[0] ?? '').includes('--lang\ntypescript\n'), callsOf('gen')[0]);
+  mkdirSync(join(tree, '.bespunky'), { recursive: true });
+  writeFileSync(join(tree, '.bespunky/supabase.json'), '{ "types": { "out": "libs/db/types.py", "lang": "python", "schema": "public,app" } }\n');
+  clearCalls();
+  said2 = run('gen-types', [], { FAKE_PS: runningStack() });
+  const genCall = callsOf('gen')[0] ?? '';
+  check('the project\'s declared path, language and schemas', said2.status === 0 && existsSync(join(tree, 'libs/db/types.py')) && genCall.includes('--lang\npython\n') && genCall.includes('--schema\npublic,app\n'), `${said2.stderr}\n${genCall}`);
+  said2 = run('gen-types', ['--out=x/y.ts', '--lang=go'], { FAKE_PS: runningStack() });
+  check('a flag wins, for one run', said2.status === 0 && existsSync(join(tree, 'x/y.ts')), said2.stderr);
+  for (const out of ['../outside.ts', '/etc/outside.ts']) {
+    said2 = run('gen-types', [`--out=${out}`], { FAKE_PS: runningStack() });
+    check(`a path outside the tree is refused: ${out}`, said2.status !== 0 && /inside this tree/.test(said2.stderr), said2.stderr);
+  }
+  rmSync(join(tree, '.bespunky/supabase.json'));
+  writeFileSync(join(tree, 'supabase/types/database.ts'), 'kept\n');
+  answer('gen', `printf 'half'; echo boom >&2; exit 1\n`);
+  said2 = run('gen-types', [], { FAKE_PS: runningStack() });
+  check('a failed run keeps the old file', said2.status !== 0 && readFileSync(join(tree, 'supabase/types/database.ts'), 'utf8') === 'kept\n' && /boom/.test(said2.stderr), said2.stderr);
+  rmSync(join(tree, 'supabase/types'), { recursive: true });
+  rmSync(join(tree, 'libs'), { recursive: true });
+  rmSync(join(tree, 'x'), { recursive: true });
+  said2 = run('gen-types', [], {});
+  check('no stack: says which verb starts one', said2.status !== 0 && /Start one/.test(said2.stderr), said2.stderr);
+
+  clearCalls();
+  answer('functions', `cat > "${calls}/functions-stdin"\n`);
+  said2 = run('new-function', ['--name=hello']);
+  check('new-function: the CLI\'s own, declining its offer to rewrite .vscode', said2.status === 0 && readFileSync(join(calls, 'functions-stdin'), 'utf8') === 'n\n' && (callsOf('functions')[0] ?? '').startsWith('functions\nnew\nhello\n'), said2.stderr);
+  said2 = run('new-function', ['--name=../evil']);
+  check('…and a name is a name', said2.status !== 0, said2.stdout);
+
+  const REF = 'abcdefghijklmnopqrst';
+  said2 = run('secrets-set', [`--project-ref=${REF}`, '--name=A'], { CLAUDECODE: '1' });
+  check('secrets-set: refused under an agent', said2.status !== 0 && /not an agent/.test(said2.stderr), said2.stderr);
+  said2 = run('secrets-set', [`--project-ref=${REF}`, '--name=A'], {});
+  check('…refused with no terminal', said2.status !== 0 && /terminal/.test(said2.stderr), said2.stderr);
+  said2 = run('secrets-set', ['--name=A'], {});
+  check('…needs a project named', said2.status !== 0 && /project-ref/.test(said2.stderr), said2.stderr);
+  said2 = run('secrets-set', ['--project-ref=https://evil', '--name=A'], {});
+  check('…a ref, never a URL', said2.status !== 0 && /ref/.test(said2.stderr) && !/https:/.test(said2.stderr), said2.stderr);
+  for (const name of ['SUPABASE_X', 'A=b']) {
+    said2 = run('secrets-set', [`--project-ref=${REF}`, `--name=${name}`], {});
+    check(`…refuses the name ${name}`, said2.status !== 0, said2.stderr);
+  }
+  // At a real terminal: the value is not echoed, not in argv, not in a file, not printed. `script` gives it a pty.
+  answer('secrets', `cat > "${calls}/secrets-stdin"; echo "set with TOPSECRETVALUE"\n`);
+  clearCalls();
+  const launcherPath = join(tree, 'tools/postgres/postgres.mjs');
+  // Typed once it is asking, as a person would: the terminal itself echoes what is typed ahead of the prompt.
+  const typed = spawnSync('sh', ['-c', `(sleep 1; printf 'TOPSECRETVALUE\\r'; sleep 2) | script -qec '${process.execPath} ${launcherPath} secrets-set --project-ref=${REF} --name=MY_KEY' /dev/null`], { cwd: tree, encoding: 'utf8', env: baseEnv({ SUPABASE_ACCESS_TOKEN: 'sbp_x' }), timeout: 20_000 });
+  const secretCall = callsOf('secrets')[0] ?? '';
+  check('the value goes down the pipe, for the CLI\'s /dev/stdin', readFileSync(join(calls, 'secrets-stdin'), 'utf8') === "MY_KEY='TOPSECRETVALUE'\n", typed.stdout);
+  check('never argv', secretCall.includes('--env-file\n/dev/stdin\n') && secretCall.includes(`--remote=${REF}\n`) && secretCall.includes('--yes\n') && !secretCall.split('--env')[0].includes('TOPSECRETVALUE'), secretCall);
+  check('never echoed, never printed', !typed.stdout.includes('TOPSECRETVALUE') && /set MY_KEY on/.test(typed.stdout), typed.stdout);
+  check('the shell\'s token is handed on', secretCall.includes('SUPABASE_ACCESS_TOKEN=sbp_x'), secretCall);
+  const { secretLine, functionNames } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-provider.mjs')));
+  check('a value with all three quotes is refused: the CLI\'s env file has no escape', (() => { try { secretLine('A', `'"\``); return false; } catch { return true; } })());
+  check('a value with a line break is refused', (() => { try { secretLine('A', 'x\ny'); return false; } catch { return true; } })());
+
+  console.log('a deploy with functions');
+  mkdirSync(join(tree, 'supabase/functions/hello'), { recursive: true });
+  mkdirSync(join(tree, 'supabase/functions/_shared'), { recursive: true });
+  check('_shared is not a function', functionNames().join() === 'hello', functionNames().join());
+  const URL2 = 'postgresql://postgres.ref:pw@aws-0-eu.pooler.supabase.com:5432/postgres?sslmode=require';
+  answer('db-push', 'echo pushed\n');
+  answer('functions', 'echo shipped\n');
+  clearCalls();
+  said2 = run('deploy', [], { CI: 'true', POSTGRES_DEPLOY_URL: URL2, SUPABASE_ACCESS_TOKEN: 'sbp_x' });
+  check('no ref: refused before anything is pushed', said2.status !== 0 && /project-ref/.test(said2.stderr) && !allCalls().length, said2.stderr);
+  said2 = run('deploy', [`--project-ref=${REF}`], { CI: 'true', POSTGRES_DEPLOY_URL: URL2 });
+  check('no token in CI: refused before anything is pushed', said2.status !== 0 && /SUPABASE_ACCESS_TOKEN/.test(said2.stderr) && !allCalls().length, said2.stderr);
+  said2 = run('deploy', [`--project-ref=${REF}`], { CLAUDECODE: '1', CI: 'true', POSTGRES_DEPLOY_URL: URL2, SUPABASE_ACCESS_TOKEN: 'sbp_x' });
+  check('an agent cannot, with functions either', said2.status !== 0 && /not an agent/.test(said2.stderr) && !allCalls().length, said2.stderr);
+  said2 = run('deploy', [`--project-ref=${REF}`], { CI: 'true', POSTGRES_DEPLOY_URL: URL2, SUPABASE_ACCESS_TOKEN: 'sbp_x' });
+  const pushedAt = allCalls().find((call) => call.startsWith('db\npush\n')) ?? '';
+  const shipped = callsOf('functions')[0] ?? '';
+  check('the schema, then the functions, bundled on Supabase\'s side', said2.status === 0 && Boolean(pushedAt) && shipped.startsWith('functions\ndeploy\n--use-api\n') && shipped.includes(`--remote=${REF}\n`) && shipped.includes('--yes\n') && said2.stdout.indexOf('pushed') < said2.stdout.indexOf('shipped'), `${said2.stderr}\n${shipped}`);
+  check('the database credential does not go with the functions, nor the token with the push', !shipped.includes('PGPASSFILE') && !pushedAt.includes('SUPABASE_ACCESS_TOKEN'), `${shipped}\n${pushedAt}`);
+  rmSync(join(tree, 'supabase/functions'), { recursive: true });
+
   console.log('the preflight');
   const probe = (cwd, ...args) => spawnSync(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', join(GENERATORS, '../../../house-probe.mts'), ...args], { cwd, encoding: 'utf8' });
   const project = join(scratch, 'probed');

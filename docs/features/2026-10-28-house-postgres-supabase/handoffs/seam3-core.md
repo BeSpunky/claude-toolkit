@@ -49,3 +49,12 @@ README row and layer list, CLAUDE.md engine section (layer list, the port), `new
 
 ## To weigh
 With 10000-32767 out, every block but 2000-4000 is above 32767, so inside Linux's ephemeral range. `auto` probes every port and a clash is loud ("Cannot bind"), seen once with a hand-picked offset, so nothing is silent; a stack can still lose a port to an outgoing connection between probe and start, and the next start picks again.
+
+## Types, functions, secrets (departure 9, reversed by the orchestrator)
+Learned on the real CLI, with nothing hosted touched (a local fake API behind `--profile` stands in for the Management API):
+- **Types.** `gen types` prints to stdout, notes to stderr, unformatted. `postgres:gen-types`; path, language and schemas in `.bespunky/supabase.json`, class C, because the launcher run directly by an agent must read the same choice a target would.
+- **Functions.** The stack itself serves `supabase/functions` (class C): a new function answers with no restart, an edit is live, `functions serve` adds nothing. `functions/.env` is read at a start, and gets an owned `.gitignore` line. **Limit: a tree under /tmp answers 404 `Function not found`**: the Edge Runtime has its own /tmp filesystem, so `Deno.lstat` there is NotFound. Under `node_modules` a function with npm imports fails `BOOT_ERROR`. `postgres:new-function`; it declines the CLI's offer to rewrite `.vscode/settings.json`.
+- **Deploy.** `postgres:deploy` pushes the schema, then `functions deploy --use-api --remote=<ref> --yes`. Refused before anything is pushed with functions and no ref, or in CI no token. The ref is `ci.providers.supabase` on a line, optional; the token `SUPABASE_ACCESS_TOKEN_<ENV>`, literal.
+- **Secrets.** A verb, `postgres:secrets-set`, because the CLI reads `--env-file /dev/stdin`: a value needs neither argv nor a file. Not a socket: Node's child stdin is one and the CLI refuses it (`PermissionDenied`), so it goes through `cat`. The CLI's env file has no escapes (observed): a value is quoted with a quote it does not hold; all three is refused.
+
+Unproven, needs a real account: a real upload and boot of a deployed function, a real secret reaching a function, real token scopes. Seen against the fake only: the requests' paths, the secrets' bytes.

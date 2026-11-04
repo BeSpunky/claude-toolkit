@@ -10,10 +10,11 @@
 // as it finds it: an agent's run is a run a generated project sees too. `~/.supabase` follows the passwd home, which no variable moves.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compilePayload, requireFromRepo } from '../test-support/payload.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -86,8 +87,8 @@ const renderDir = (from, to) => {
 };
 
 let fixtures = 0;
-function fixture({ migrations = true } = {}) {
-  const dir = join(scratch, `repo-${++fixtures}`);
+function fixture({ migrations = true, root = scratch } = {}) {
+  const dir = join(root, `repo-${++fixtures}`);
   mkdirSync(join(dir, 'supabase/migrations'), { recursive: true });
   mkdirSync(join(dir, 'postgres/seed/world'), { recursive: true });
   renderDir(join(GENERATORS, 'dev/files'), join(dir, 'tools/dev'));
@@ -424,6 +425,114 @@ scenario('a real serve: the keeper as a dependency, its exports reach a sibling,
   check(!existsSync(`/proc/${owner}`) && !listening(row.ports.postgres) && !listening(row.ports.app), 'the stack and the app are gone');
 });
 
+// Outside the system temp dir: the Edge Runtime has a filesystem of its own under /tmp. And not under node_modules, where a function's
+// npm imports fail to boot. In the home's cache.
+const outsideTmp = () => {
+  mkdirSync(join(process.env.HOME, '.cache'), { recursive: true });
+  const dir = mkdtempSync(join(process.env.HOME, '.cache/bespunky-test-supabase-'));
+  outside.push(dir);
+  return dir;
+};
+const outside = [];
+const fetchIt = async (url, options = {}) => {
+  const response = await fetch(url, options);
+  return { status: response.status, text: await response.text() };
+};
+const keysOf = (dir) => JSON.parse(sb(dir, ['status', '--output-format', 'json']).stdout).env;
+
+scenario('types and functions on the native runtime, by real calls: new, served at once, edited live, secrets at a restart', async () => {
+  const dir = fixture({ root: outsideTmp() });
+  const stack = await start(dir);
+  check(!stack.failed, `started: ${JSON.stringify(stack.failed)}`);
+  const made = launcher(dir, 'gen-types');
+  const types = readFileSync(join(dir, 'supabase/types/database.ts'), 'utf8');
+  check(made.status === 0 && types.includes('export type Database') && types.includes('thing') && !types.includes('Target:'), `gen-types: ${made.stderr} ${types.slice(0, 120)}`);
+  const python = launcher(dir, 'gen-types', '--lang=python', '--out=db/types.py');
+  check(python.status === 0 && readFileSync(join(dir, 'db/types.py'), 'utf8').includes('class '), `another language, another path: ${python.stderr}`);
+
+  const created = launcher(dir, 'new-function', '--name=hello');
+  check(created.status === 0 && existsSync(join(dir, 'supabase/functions/hello/index.ts')) && readFileSync(join(dir, 'supabase/config.toml'), 'utf8').includes('[functions.hello]'), `new-function: ${created.stderr}`);
+  check(!existsSync(join(dir, '.vscode')), 'its offer to rewrite .vscode was declined');
+  const env = keysOf(dir);
+  const headers = { Authorization: `Bearer ${env.PUBLISHABLE_KEY}`, apikey: env.PUBLISHABLE_KEY, 'content-type': 'application/json' };
+  const url = `http://127.0.0.1:${stack.api}/functions/v1`;
+  const scaffolded = await fetchIt(`${url}/hello`, { method: 'POST', headers, body: JSON.stringify({ name: 'Functions' }) });
+  check(scaffolded.status === 200 && scaffolded.text.includes('Hello Functions!'), `the CLI's own scaffold, with its npm import, answers with no restart and no serve: ${scaffolded.status} ${scaffolded.text}`);
+
+  mkdirSync(join(dir, 'supabase/functions/plain'));
+  const body = (word) => `Deno.serve(() => Response.json({ word: ${JSON.stringify(word)}, secret: Deno.env.get('MY_SECRET') ?? 'none' }));\n`;
+  writeFileSync(join(dir, 'supabase/functions/plain/index.ts'), body('first'));
+  const anon = { Authorization: `Bearer ${env.ANON_KEY}`, apikey: env.PUBLISHABLE_KEY };
+  check((await fetchIt(`${url}/plain`, { headers: anon })).text.includes('first'), 'a function written by hand answers');
+  writeFileSync(join(dir, 'supabase/functions/plain/index.ts'), body('second'));
+  await sleep(500);
+  check((await fetchIt(`${url}/plain`, { headers: anon })).text.includes('second'), 'an edit is live on the next request');
+  check((await fetchIt(`${url}/plain`)).status === 401, 'verify_jwt holds: no token, 401');
+  writeFileSync(join(dir, 'supabase/functions/.env'), 'MY_SECRET=local-only\n');
+  await stop(stack);
+  const again = await start(dir, { offset: stack.offset });
+  check(!again.failed, `restarted: ${JSON.stringify(again.failed)}`);
+  check((await fetchIt(`${url}/plain`, { headers: anon })).text.includes('local-only'), 'supabase/functions/.env is read at a start');
+  await stop(again);
+  const here = readFileSync(join(dir, 'supabase/.gitignore'), 'utf8');
+  check(here.includes('.temp'), `the CLI's own lines: ${here}`);
+});
+
+scenario('the stated limit: a tree under /tmp serves no function', async () => {
+  const dir = fixture();
+  mkdirSync(join(dir, 'supabase/functions/plain'), { recursive: true });
+  writeFileSync(join(dir, 'supabase/functions/plain/index.ts'), "Deno.serve(() => new Response('ok'));\n");
+  const stack = await start(dir);
+  check(!stack.failed, `started: ${JSON.stringify(stack.failed)}`);
+  const env = keysOf(dir);
+  const answered = await fetchIt(`http://127.0.0.1:${stack.api}/functions/v1/plain`, { headers: { Authorization: `Bearer ${env.ANON_KEY}` } });
+  check(answered.status === 404 && answered.text.includes('Function not found'), `if this now answers, drop the limit from the keeper and the docs: ${answered.status} ${answered.text}`);
+  check(readFileSync(stack.log, 'utf8').includes('under /tmp'), 'and a start says so');
+  await stop(stack);
+});
+
+scenario('hosted flows on the real CLI against a LOCAL FAKE API, never Supabase: what it reads, what it would send', async () => {
+  const dir = fixture({ root: outsideTmp() });
+  mkdirSync(join(dir, 'supabase/functions/plain'), { recursive: true });
+  writeFileSync(join(dir, 'supabase/functions/plain/index.ts'), "Deno.serve(() => new Response('ok'));\n");
+  const seen = [];
+  const server = createHttpServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      seen.push({ method: request.method, url: request.url, body: Buffer.concat(chunks).toString('latin1') });
+      response.setHeader('content-type', 'application/json');
+      response.statusCode = request.method === 'GET' ? 200 : 201;
+      response.end(request.url.endsWith('/functions') || request.url.endsWith('/secrets') ? '[]' : JSON.stringify({ id: 'x', slug: 'plain', name: 'plain', status: 'ACTIVE', version: 1, created_at: 0, updated_at: 0 }));
+    });
+  });
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  const { port } = server.address();
+  const profile = join(scratch, 'profile.yaml');
+  writeFileSync(profile, `name: fake\napi_url: http://127.0.0.1:${port}\nproject_host: localhost\ndashboard_url: http://127.0.0.1:${port}\n`);
+  const REF = 'abcdefghijklmnopqrst';
+  // The launcher's own modules and its own `cli`: so what reaches the CLI is what a verb hands it, through what it hands it with.
+  Object.assign(process.env, { PATH: baseEnv().PATH, XDG_DATA_HOME: xdg, SUPABASE_NO_KEYRING: '1' });
+  const { secretLine } = await import(pathToFileURL(join(dir, 'tools/postgres/supabase-provider.mjs')));
+  const { cli } = await import(pathToFileURL(join(dir, 'tools/postgres/supabase-cli.mjs')));
+  const hosted = async (args, input) => {
+    const { code, stdout, stderr } = await cli([...args, '--profile', profile], { input, env: { SUPABASE_ACCESS_TOKEN: `sbp_${'0'.repeat(40)}` } });
+    return { code, said: `${stdout}${stderr}` };
+  };
+  const VALUES = { PLAIN: 'value', SPACES: 'a b#c', QUOTE: "it's", DOUBLE: 'say "x"', DOLLAR: 'p$HOME', BOTH: `a'b"c$d\\e`, EQUALS: 'k=v=', BACKTICK: 'a`b$c', BACK_QUOTE: `a\`b'c$d\\e` };
+  const set = await hosted(['secrets', 'set', '--env-file', '/dev/stdin', `--remote=${REF}`, '--yes'], Object.entries(VALUES).map(([name, value]) => secretLine(name, value)).join(''));
+  check(set.code === 0, `secrets set from a pipe: ${set.said}`);
+  const posted = seen.find((request) => request.method === 'POST' && request.url === `/v1/projects/${REF}/secrets`);
+  const sent = Object.fromEntries(JSON.parse(posted?.body ?? '[]').map(({ name, value }) => [name, value]));
+  for (const [name, value] of Object.entries(VALUES)) check(sent[name] === value, `${name} would be sent as ${JSON.stringify(sent[name])}, typed ${JSON.stringify(value)}`);
+  check(!set.said.includes('a b#c'), 'the CLI does not print a value');
+  seen.length = 0;
+  const deployed = await hosted(['functions', 'deploy', '--use-api', `--remote=${REF}`, '--yes']);
+  const wire = seen.map((request) => `${request.method} ${request.url}`);
+  check(!deployed.said.includes('Docker') && wire.some((line) => line.startsWith(`POST /v1/projects/${REF}/functions`)), `functions deploy --use-api, no Docker: ${deployed.code} ${deployed.said.slice(-300)} ${wire.join(', ')}`);
+  server.close();
+});
+
 scenario('refusals: an env file, a block in the CLI\'s range, a second stack in a tree, another stack\'s port', async () => {
   const dir = fixture();
   writeFileSync(join(dir, '.env'), 'SUPABASE_DB_PORT=1\n');
@@ -464,6 +573,7 @@ try {
     spawnSync(join(toolsBin, 'supabase'), ['stack', 'destroy', '--yes'], { cwd: dir, env: cliEnv(), stdio: 'ignore', timeout: 60_000 });
   }
   rmSync(scratch, { recursive: true, force: true });
+  for (const dir of outside) rmSync(dir, { recursive: true, force: true });
   rmSync(join(xdg, 'bespunky'), { recursive: true, force: true });
   if (!hadSupabaseDir) rmSync(join(process.env.HOME, '.supabase'), { recursive: true, force: true });
   exit = failures ? 1 : 0;

@@ -112,3 +112,13 @@ Deliberately not first: a supabase-js client port, cloud setup automation, mixed
 ## Note, 2026-11-04: evidence is a tag (amends *The shape*)
 
 *The shape* above says evidence is `postgres/project.json`. The Landing 2 review reproduced that misreading both ways: a library named `postgres` took the verbs while the layer read as absent, and a project of the repo's own at `postgres/` made a plain upgrade start wearing the layer. Decided at the review's list (D3): evidence is the tag `type:postgres`, as `design-system` does; the project is resolved by that tag, and something else holding the name or the folder is refused with the way out. The text above stands as what was proposed.
+
+---
+
+## Note, 2026-11-04: what the real CLI changed, building `supabase` (amends 6b and 7)
+
+Found running the pinned CLI 3.0.0 under the real dev engine (`tools/test-supabase/run.mjs`). The text above stands as what was proposed.
+
+- **Offset blocks stay out of 10000-32767, not 20000-32767.** The native runtime also refuses a public port in 10000-19999: `Public port 15432 … is inside 10000-19999, which is reserved for native service backends`. The spike's block was 41000, so it never met this. Blocks therefore mostly sit above 32767, in Linux's ephemeral range; `auto` probes every port and a clash is loud. Accepted by the orchestrator.
+- **Identity on Supabase is `data_directory`, not `system_identifier`.** Every `db reset` changes the identifier, a hand's reset included, so a recorded value would refuse a healthy stack. A verb checks that the CLI answers on this stack's port, and that the server keeps its data inside this stack's directory.
+- **"After every start, check the ledger; reset if absent" is narrowed.** A project with no migrations has no ledger at all, and one writing its first migration has rows to keep, so read literally the rule resets every start. A stack is rebuilt only with migrations present, no ledger AND no table in `public`, which is what an interrupted reset leaves.

@@ -61,7 +61,10 @@ const cliEnv = (pins = {}, extra = {}) => ({ ...scrubbedEnv(extra), SUPABASE_HOM
  */
 export function cli(args, { pins, env, echo = false, input } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(tool('supabase'), [...args, '--workdir', ROOT, '--agent', 'no'], { cwd: ROOT, env: cliEnv(pins, env), detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    const argv = [tool('supabase'), ...args, '--workdir', ROOT, '--agent', 'no'];
+    // With input, through `cat`: Node's child stdin is a socket, and the CLI cannot open /dev/stdin on one ("PermissionDenied").
+    const [command, ...rest] = input === undefined ? argv : ['/bin/sh', '-c', 'cat | "$@"', 'sh', ...argv];
+    const child = spawn(command, rest, { cwd: ROOT, env: cliEnv(pins, env), detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
     if (input !== undefined) child.stdin.end(input);
     let stdout = '';
     let stderr = '';
