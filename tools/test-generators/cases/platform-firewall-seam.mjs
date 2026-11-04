@@ -94,6 +94,27 @@ export default {
       },
     },
     {
+      name: 'HOUSE.md describes the firewall wherever the config carries one, Firebase or not, and promises none where it does not',
+      setup: () => {
+        const tree = workspace();
+        tree.write('eslint.config.mjs', ESLINT);
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        const doc = () => ctx.load('generators/house-doc/generator').default(tree, { layers: ['nx', 'agent'], nxToolsVersion: '9.9.9', pluginVersion: '9.9.9' });
+        await doc();
+        ctx.before ??= tree.read('HOUSE.md', 'utf8'); // the harness runs this twice: the first one is the no-firewall doc
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+        await doc();
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(!ctx.before.includes('Platform firewall'), 'no firewall in the config, none in the doc');
+        const after = tree.read('HOUSE.md', 'utf8');
+        t.ok(after.includes('**Platform firewall (ESLint-enforced, fail-closed):**'), 'a capability that is not Firebase gets the section');
+        t.ok(!after.includes('{{'), 'nothing left unrendered');
+      },
+    },
+    {
       name: 'a package that runs in a browser is not banned: the table states facts about packages',
       setup: () => {
         const tree = workspace();
