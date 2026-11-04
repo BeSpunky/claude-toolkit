@@ -24,8 +24,8 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 | debts-ci | feat/hps2-ci | yes, its own branch | returned |
 | debts-engine | feat/hps2-engine | yes, its own branch | returned |
 | core | feat/hps2-core | yes, its own branch | returned |
-| wire | tripwire, dogfood boot, image e2e, sweep rule; on this branch | yes | dispatched |
-| docs | new skill, README, CLAUDE.md, tips; on this branch | yes | dispatched |
+| wire | tripwire, dogfood boot, image e2e, sweep rule; on this branch | yes | returned, fixes dispatched |
+| docs | new skill, README, CLAUDE.md, tips; on this branch | yes | returned |
 | review | sanity review | yes | pending |
 | gate | upgrade --local, dogfood-consumer, rebuild | yes | pending |
 
@@ -44,3 +44,15 @@ Limit: an orphaned stop cannot report an exit status. Owed docs: the new `dev st
 Note: handoffs/seam2-core.md. Layer, generator, launcher, CI provider, house-doc, tests. Real binaries: cold 810 ms, warm 200 ms; migrate, seed, reset, stop with a client open; kill -9 orphan cleared; foreign identifier refused; hostile .env contained; under dev serve the app starts after the seed, and a failed migration starts nothing. Departures in the note: `binary` archive format, deploy URL by env as POSTGRES_DEPLOY_URL, transaction poolers refused, reset without template clone, seeded mark as COMMENT ON DATABASE, server in its own session, project.json island.
 Unproven: rebuild, real apt-get satisfy, major 17 or a major move, arm64, bookworm, real CI, hosted database, generator-seeded served app.
 ORCHESTRATOR DECISIONS: (1) keep the human TTY prompt on deploy: an agent cannot walk through it. (2) The sweep must not treat a tree invisible to this container as gone: a deletion must be proven. Drop only when the tree's parent directory exists and the tree does not; otherwise keep and report. Goes to wire. (3) keep dbmate --strict locally: a late-landing older migration fails until re-stamped.
+
+### docs (returned; 76115a8b..8b026ecc interleaved; spent 0)
+Note: handoffs/seam2-docs.md. No new skill: HOUSE.md holds the truth. Fixed two wrong claims. Open in code: CI=1 skips the deploy prompt; no HUMAN_STEP for the secret.
+
+### wire (returned; 9f26add7..5aa7a897 interleaved; spent 0)
+Note: handoffs/seam2-wire.md. Sweep rule, tripwire workflow (never run), dbmate check, dogfood roads, image job (fake docker only). `new-postgres` dogfood FAILS, 5 rows: on a wrapper host `dev stop` leaves a seeded app running, since `./nx` is bash without `exec`.
+ORCHESTRATOR DECISIONS, resumed to wire:
+- Wrapper host: seed a spawn form (`node .nx/nxw.js`) beside `bin`. No rung: no preset creates an app on a wrapper host, so no project holds the shape; a hand-written `./nx` is named in HOUSE.md. Fix `silentUnderNx` for the wrapper host in the same change.
+- Shared volume: same-named clones share `~/.local`, so one cluster can meet two containers. A heartbeat owner file (host + mtime) beside the data: a fresh one from another host refuses to start and is never swept, and postmaster.pid is left alone. Stale means take over, so a rebuild still recovers.
+- Deploy refuses under CLAUDECODE=1, CI=1 or not: a human runs it, or CI.
+- HUMAN_STEP names the deploy secret.
+- Local verbs do not check the stack's owner: same tree, same data. Left, deliberately.
