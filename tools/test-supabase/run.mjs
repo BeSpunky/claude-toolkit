@@ -6,10 +6,10 @@
 //
 // Needs the network once: the CLI through the GENERATED installer, unprivileged, and the stack's artifacts. SUPABASE_TOOLS_CACHE
 // (default under the system temp dir) keeps both, about 1.9 GB: ~2 min from nothing, ~1 min after. ONE stack at a time, on a free block
-// outside 20000-32767, never a base port, stopped by its handle. Nothing here reaches a hosted project or logs in. It leaves CLAUDECODE
+// outside 10000-32767, never a base port, stopped by its handle. Nothing here reaches a hosted project or logs in. It leaves CLAUDECODE
 // as it finds it: an agent's run is a run a generated project sees too. `~/.supabase` follows the passwd home, which no variable moves.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -62,17 +62,16 @@ const baseEnv = () => {
 };
 const cliEnv = () => ({ ...baseEnv(), SUPABASE_HOME: HOME_, SUPABASE_NO_KEYRING: '1', DO_NOT_TRACK: '1' });
 
-/** A free block for every port of the stack, below where the CLI allocates and clear of the base ports. */
+/** A free block for every port of the stack, above what the native runtime keeps for itself. */
 const freeOffset = async () => {
   for (;;) {
-    const offset = 1000 * (10 + Math.floor(Math.random() * 10)) + (Math.random() < 0.5 ? 0 : 33000 - 10000);
+    const offset = 1000 * (28 + Math.floor(Math.random() * 25));
     const free = await new Promise((done) => {
       const server = createServer();
       server.once('error', () => done(false));
       server.listen(5432 + offset, '127.0.0.1', () => server.close(() => done(true)));
     });
-    if (free && 5441 + offset < 20000) return offset;
-    if (free && 5432 + offset > 32767) return offset;
+    if (free) return offset;
   }
 };
 
@@ -127,14 +126,14 @@ async function start(dir, { offset, timeoutMs = 300_000 } = {}) {
   const chosen = offset ?? (await freeOffset());
   const log = join(scratch, `start-${fixtures}-${chosen}.log`);
   writeFileSync(log, '');
-  const child = spawn(process.execPath, ['tools/postgres/postgres.mjs', 'start', `--port-offset=${chosen}`], { cwd: dir, env: baseEnv(), detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
+  const child = spawn(process.execPath, ['tools/postgres/postgres.mjs', 'start', `--port-offset=${chosen}`], { cwd: dir, env: baseEnv(), detached: true, stdio: ['ignore', openSync(log, 'a'), openSync(log, 'a')] });
   const handle = { dir, child, offset: chosen, log, exit: new Promise((done) => child.on('exit', (code, signal) => done({ code, signal }))) };
   running.push(handle);
   const deadline = Date.now() + timeoutMs;
   let ended;
   handle.exit.then((end) => (ended = end));
   for (;;) {
-    if (ended) return { ...handle, failed: ended };
+    if (ended) return { ...handle, failed: { ...ended, said: readFileSync(log, 'utf8').slice(-600) } };
     const row = ps(dir).find((entry) => entry.offset === chosen);
     if (row?.stateDir && existsSync(join(row.stateDir, 'postgres.ready'))) return { ...handle, row, port: 5432 + chosen, api: 5435 + chosen };
     if (Date.now() > deadline) throw new Error(`no ready mark in ${timeoutMs} ms`);
@@ -347,7 +346,7 @@ scenario('refusals: an env file, a block in the CLI\'s range, a second stack in 
   check(door.failed && door.failed.code !== 0, `a project .env is refused: ${JSON.stringify(door.failed)}`);
   rmSync(join(dir, '.env'));
   const inside = spawnSync(process.execPath, ['tools/postgres/postgres.mjs', 'start', '--port-offset=20000'], { cwd: dir, env: baseEnv(), encoding: 'utf8', timeout: 30_000 });
-  check(inside.status !== 0 && /20000-32767/.test(`${inside.stderr}${inside.stdout}`), `a block in the CLI's range: ${inside.stderr}`);
+  check(inside.status !== 0 && /10000-32767/.test(`${inside.stderr}${inside.stdout}`), `a block in the CLI's range: ${inside.stderr}`);
   const stack = await start(dir);
   check(!stack.failed, `started: ${JSON.stringify(stack.failed)}`);
   const second = await start(dir, { timeoutMs: 30_000 });

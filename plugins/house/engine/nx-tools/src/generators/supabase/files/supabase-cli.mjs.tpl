@@ -18,8 +18,8 @@ export const PINNED_VERSION = '{{SUPABASE_CLI_VERSION}}';
 export const SUPABASE_DIR = join(ROOT, 'supabase');
 export const MIGRATIONS = join(SUPABASE_DIR, 'migrations');
 export const CONFIG = join(SUPABASE_DIR, 'config.toml');
-/** Where the CLI allocates the two ports it does not let anyone pin (pgmeta, the realtime RPC). */
-export const ALLOCATES_FROM = '20000-32767';
+/** The native runtime refuses a public port in 10000-19999, its backends', and allocates the two it does not let anyone pin (pgmeta, the realtime RPC) from 20000-32767. */
+export const ALLOCATES_FROM = '10000-32767';
 
 /** Every port the stack can pin: the name in dev.json and `dev run`, its base, and what pins it. */
 const PINS = {

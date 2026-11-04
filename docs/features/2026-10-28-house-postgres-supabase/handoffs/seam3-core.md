@@ -13,3 +13,5 @@ Branch feat/hps3-core. Written as it goes; newest at the bottom.
 ## Log
 - Engine: `avoidPorts` (process field) and `dev run --avoid-ports`. Why the engine changes: `auto` picks a block by hash, so a keeper's refusal alone would refuse the same tree forever.
 - Generator + provider seam + keeper written; generator cases green. Evidence is a tag on the postgres project: the verbs stay postgres:*, so no second project.
+- FOUND, real runs: the native runtime refuses any public port in 10000-19999 ("reserved for native service backends"), which the research did not know (its block was 41000). The avoided block is 10000-32767, not the design's 20000-32767. A departure the design owes a note.
+- FOUND: a project with no migrations has no ledger at all, so "no ledger: reset" (rule 2 read literally) would reset every start, and one writing its first migration would lose its rows. The rule is now: migrations exist, no ledger, AND no table in public.

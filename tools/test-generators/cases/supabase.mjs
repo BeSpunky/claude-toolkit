@@ -187,7 +187,7 @@ export default {
       expect: (tree, t, ctx) => {
         const process = JSON.parse(tree.read('.bespunky/dev.json', 'utf8')).apps.site.processes.find((p) => p.id === 'postgres');
         t.equal(process.ports, ctx.load('generators/supabase/dev-fragment').SUPABASE_PORTS, 'every pinned port');
-        t.equal(process.avoidPorts, ['20000-32767'], 'and the range the CLI allocates from');
+        t.equal(process.avoidPorts, ['10000-32767'], 'and the range the CLI allocates from');
         t.ok(process.exports.DATABASE_URL.endsWith('/postgres?sslmode=disable'), `the stack's database: ${process.exports.DATABASE_URL}`);
         t.ok(process.exports.DIRECT_DATABASE_URL === 'postgresql://custom' && process.exports.MINE === 'kept', 'the project\'s own stay');
         t.ok(process.exports.SUPABASE_URL.includes('${PORT:supabase-api}'), 'the API');

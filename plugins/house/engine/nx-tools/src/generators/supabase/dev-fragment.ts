@@ -2,7 +2,8 @@
 //
 // EVERY PORT THE STACK CAN PIN, IN ONE SMALL BLOCK, so a stack shifts by one offset like any other. Never the CLI's own 54321..:
 // beside an app's 4200 that span leaves no block to shift into. `tools/postgres/supabase-cli.mjs` says the same, and
-// `tools/test-generators` holds the two together. The two ports it cannot pin come from 20000-32767, so the block stays out of there.
+// `tools/test-generators` holds the two together. The native runtime refuses a public port in 10000-19999, reserved for its backends (observed, and not in the docs), and the two
+// ports it cannot pin come from 20000-32767: the block stays out of both.
 //
 // THE URLS hold the stack's well-known local password: local only, and the URL is the whole isolation between stacks, whose keys are
 // identical. The keys themselves are not exported: `supabase status -o env` prints them.
@@ -21,7 +22,7 @@ export const SUPABASE_PORTS = {
   'functions-inspector': 5441,
 } as const;
 
-export const SUPABASE_ALLOCATES_FROM = '20000-32767';
+export const SUPABASE_ALLOCATES_FROM = '10000-32767';
 
 const URL = 'postgresql://postgres:postgres@127.0.0.1:${PORT:postgres}/postgres?sslmode=disable';
 

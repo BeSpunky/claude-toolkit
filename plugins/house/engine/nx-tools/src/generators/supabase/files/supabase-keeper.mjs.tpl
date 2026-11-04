@@ -10,12 +10,12 @@
 // ONE STACK PER TREE. That is the CLI's model: the stack belongs to the worktree. Two dev stacks in one tree (a serve and a `postgres:start`)
 // would be one database under two claims, so the second is refused.
 import { spawn } from 'node:child_process';
-import { fstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, linkSync, existsSync, realpathSync } from 'node:fs';
+import { existsSync, fstatSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
 import { ROOT, READY_MARKER, Refusal, treeHome, verbCommand } from './layout.mjs';
 import { assertNotHeldElsewhere, holdOwnership } from './server.mjs';
 import { runningStacks } from './stack.mjs';
-import { ALLOCATES_FROM, allStacks, assertNoEnvFileOverride, assertPinnedVersion, cli, dbQuery, destroyStack, ownerRunning, portGap, requestedPorts, startStack, stackStatus, stopStack, supabaseHome } from './supabase-cli.mjs';
+import { ALLOCATES_FROM, MIGRATIONS, allStacks, assertNoEnvFileOverride, assertPinnedVersion, cli, dbQuery, destroyStack, ownerRunning, portGap, requestedPorts, startStack, stackStatus, stopStack, supabaseHome } from './supabase-cli.mjs';
 
 const OWNER_POLL_MS = 250;
 const LOCK_POLL_MS = 100;
@@ -113,8 +113,6 @@ export async function assertStackIdentity(stack) {
   if (!dir?.startsWith(home)) throw new Refusal(`The server on port ${stack.port} keeps its data in ${dir}, not in this stack's ${home}. Refusing: something else holds this port. See tools/dev/dev ps.`);
 }
 
-const ledgerThere = async () => Boolean((await dbQuery("select to_regclass('supabase_migrations.schema_migrations')::text ledger"))[0]?.ledger);
-
 async function startOnBlock(requested, { rebuildIfWedged }) {
   let started = await startStack(requested);
   if (started.code !== undefined && WEDGED.test(started.text) && rebuildIfWedged) {
@@ -158,12 +156,19 @@ async function reportLeftovers() {
   }
 }
 
-/** Throw unless the database is really there, on a new connection. A half-built one, whatever `status` says, is reset once. */
+/**
+ * Throw unless the database is really there, on a new connection. An interrupted reset leaves a stack that says it is healthy, with no
+ * ledger and nothing in `public`: rebuilt, once. No ledger is not that by itself. The CLI makes one only when it first has a migration
+ * to record, so a project with none has none, and one that has just written its first has rows to keep.
+ */
 async function assertLedger() {
-  if (await ledgerThere()) return;
-  log('this stack answers and says it is healthy, and it has no migration ledger: a reset was interrupted here. Rebuilding it from its migrations.');
+  if (!readdirSync(MIGRATIONS, { withFileTypes: true }).some((entry) => entry.name.endsWith('.sql'))) return;
+  const [{ ledger, tables } = {}] = await dbQuery("select to_regclass('supabase_migrations.schema_migrations')::text ledger, (select count(*)::int from pg_tables where schemaname = 'public') tables");
+  if (ledger || tables) return;
+  log('this stack answers and says it is healthy, and it has no migration ledger and no tables: a reset was interrupted here. Rebuilding it from its migrations.');
   if ((await resetToCompletion()) !== 0) throw new Refusal(`The reset that should have rebuilt it failed, above. ${verbCommand('reset')} tries again.`);
-  if (!(await ledgerThere())) throw new Refusal('After a reset this stack still has no migration ledger.');
+  const [{ ledger: rebuilt } = {}] = await dbQuery("select to_regclass('supabase_migrations.schema_migrations')::text ledger");
+  if (!rebuilt) throw new Refusal('After a reset this stack still has no migration ledger.');
 }
 
 export async function serve({ resetThenStop = false } = {}) {
@@ -180,7 +185,7 @@ export async function serve({ resetThenStop = false } = {}) {
   assertNoEnvFileOverride();
   const requested = requestedPorts();
   const inRange = Object.entries(requested).find(([, port]) => port >= low && port <= high);
-  if (inRange) throw new Refusal(`${inRange[0]} landed on ${inRange[1]}, inside ${ALLOCATES_FROM}, which the CLI allocates its unpinnable ports from. Start on another offset.`);
+  if (inRange) throw new Refusal(`${inRange[0]} landed on ${inRange[1]}, inside ${ALLOCATES_FROM}, which the native runtime keeps for itself. Start on another offset.`);
   const others = runningStacks().filter((stack) => stack.key !== key);
   if (others.length) throw new Refusal(`This tree already runs ${others.map((stack) => stack.key).join(', ')}, and a tree has one Supabase stack. Use that one, or stop it: tools/dev/dev stop ${others[0].key.split('@')[0]} --offset=${others[0].offset}`);
 
