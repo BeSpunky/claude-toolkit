@@ -380,6 +380,13 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 three passes used to be the habit and people still expect it. **But `UPGRADE_OK` means the run completed, not that
 the result builds** — never report it as a verification.
 
+**`OWNERSHIP_UNRESTORED <path> (exit <n>)` under an `UPGRADE_OK`** (Docker fallback only, non-zero exit): the upgrade
+completed and its report is true, but the container that hands the tree back to the user failed, so files may be
+owned by root. It does not need running again. Relay the `repair` line under it; the user runs it, because it needs
+`sudo`. Report the rest as usual, and run `UPGRADE_VERIFY` after the repair. `UPGRADE_NEXT: unknown` here means git
+refused the tree: re-check what changed once it is repaired. After an `UPGRADE_FAILED` the same line only adds the
+repair: that run's own exit code and report stand.
+
 ### Verify what it rewrote — `UPGRADE_VERIFY`
 
 If the output carries an `UPGRADE_VERIFY:` line, **run the command it names** in the upgrade's tree (with the
@@ -448,7 +455,7 @@ report two, and never invent one the line didn't ask for:
 | `none` | Nothing further. Say it plainly — silence here reads as "restart to be safe", which is the habit we are retiring. |
 | `restart-session` | Restart Claude Code when convenient, to pick up `.claude/settings.json` / `.mcp.json`. **No rebuild.** |
 | `rebuild-container` | Run **Dev Containers: Rebuild Container** when convenient. It *subsumes* the restart — do not also ask for one. |
-| `unknown` | The run had no git base to compare against; say so and name the three paths it would have checked. |
+| `unknown` | Git could not compare the tree with a base (none recorded, or it refuses a tree whose ownership was not restored); say so and name the three paths it would have checked. |
 
 **Never perform the boundary yourself** — no rebuild, no restart, no reload of plugins on your own
 initiative. The script states the fact, the user chooses the moment; both actions throw away the session

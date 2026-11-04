@@ -140,7 +140,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/engine/house.sh" new --preset=node --layout=packages
 
 Pass the preset / `--add-layer` from step 0 input 3 — omit both for the default `agent` preset. Include `<APP_NAME>` **only** when a chosen layer creates an app. Include `--firebase` **only** if step 0 input 5 was yes (the user opted in); `--staging` (the staging environment bundle) only with `--firebase` and only when asked. Include `--voice` **only** if the user explicitly asked for hands-free/spoken voice (see the voice opt-in bullet). Include `--github` **only** if the user said yes to step 0's input 6 (otherwise no remote is created).
 
-Wait for the final `NEW_OK <path>` line; a run that died ends in `NEW_FAILED <path> (exit <n>)` instead, a non-zero exit, and says whether a partial project was left (a failed run is never published). `NEW_OK` also reports the GitHub outcome — `GITHUB_OK <url>` when the private repo was created and pushed, or `GITHUB_SKIP: <reason>` when it was not requested or was skipped (so you can relay the reason and the manual follow-up). On the Docker fallback path, the first run pulls the base image (a few hundred MB); the native path skips that. If a generator/CLI flag is rejected, check `house.sh help`, `nx g @bespunky/nx-tools:<generator> --help`, or `gh repo create --help` - **never guess**.
+Wait for the final `NEW_OK <path>` line; a run that died ends in `NEW_FAILED <path> (exit <n>)` instead, a non-zero exit, and says whether a partial project was left (a failed run is never published). `NEW_OK` with a non-zero exit is followed by `OWNERSHIP_UNRESTORED <path> (exit <n>)` (Docker fallback only): the project is complete but could not be handed back to the user, so relay its `repair` line (it needs `sudo`) and do not re-run; `--github` is then skipped, with the command to run after the repair. `NEW_OK` also reports the GitHub outcome — `GITHUB_OK <url>` when the private repo was created and pushed, or `GITHUB_SKIP: <reason>` when it was not requested or was skipped (so you can relay the reason and the manual follow-up). On the Docker fallback path, the first run pulls the base image (a few hundred MB); the native path skips that. If a generator/CLI flag is rejected, check `house.sh help`, `nx g @bespunky/nx-tools:<generator> --help`, or `gh repo create --help` - **never guess**.
 
 ### 1z. The layer model — what makes this work on a repo that isn't the house shape
 
@@ -246,7 +246,7 @@ command always targets `.`), or when you need a flag it does not pass through (`
 | `none` | Nothing this run wrote needs a new session or container. Say so — silence gets read as "restart to be safe". |
 | `restart-session` | Session-scoped config moved. Restart Claude Code; **no rebuild**. |
 | `rebuild-container` | `.devcontainer/*` moved. **Dev Containers: Rebuild Container** — which *subsumes* the restart (a rebuild is a new session, and its post-create reinstalls the plugins), so never ask for both. |
-| `unknown` | No git base to compare against; say so rather than guess. |
+| `unknown` | Git could not compare the tree with a base; say so rather than guess. |
 
 Until a needed rebuild happens the tooling degrades rather than fails — the shared browser's cross-container port registry isn't mounted, and its `up` warns that parallel containers are invisible to each other.
 

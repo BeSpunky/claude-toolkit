@@ -2371,6 +2371,12 @@ report_new_failed() {
   fi
   [ "$GITHUB" != "1" ] || echo "  github     : not published." >&2
 }
+# A chown that failed says so once, with the repair. After a failed run it comes before that run's own report; after a
+# good one it comes last, under the report, because the work is done and this is the one thing left to do.
+report_ownership_unrestored() {
+  echo "OWNERSHIP_UNRESTORED $TARGET (exit $1): could not hand it back to $(id -un); files in it may be owned by root." >&2
+  echo "  repair     : sudo chown -R $(id -u):$(id -g) '$TARGET'" >&2
+}
 if [ "$RUNTIME" = "docker" ] && ! container_require_command "$IMAGE" "$PM"; then
   echo "       Node 22.18+ with $PM on this machine's PATH runs natively, with no image (without --docker)." >&2
   if [ "$MODE" = "new" ]; then
@@ -2478,6 +2484,7 @@ fi
 # committed, no restore point (that line scrolled past hundreds of install messages ago), and no answer to
 # the only two questions anyone has at that moment: what state is my project in, and is re-running safe?
 INNER_RC=0
+OWNERSHIP_RC=0
 if [ "$RUNTIME" = "native" ]; then
   # Native: the generators run in THIS environment, as the invoking user, writing straight to the host
   # tree — so no mounts, no uid mapping, and no root-owned-files fixup are needed. $INNER's roots are
@@ -2501,15 +2508,12 @@ else
   # container-engine.sh. Runs before the gh push so git operations on the tree don't hit permission
   # errors. (The native path never creates foreign-owned files, so it needs none of this.)
   # A scaffold that died early has no tree to hand back, and a chown of nothing under set -e would replace the run's
-  # real failure with its own. A failed chown only ends a run that had otherwise succeeded: the reason the run died
-  # is the one to report.
+  # real failure with its own. A failed chown never replaces the run's own outcome: after a dead run, the reason it
+  # died is the exit code to report; after a good run, the work is done and its report still has to reach the reader,
+  # so the chown's code is kept for the very end of this script.
   if [ -e "$TARGET" ]; then
-    _own_rc=0
-    container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT_DIR_NAME" || _own_rc=$?
-    if [ "$_own_rc" -ne 0 ]; then
-      echo "ERROR: could not hand $TARGET back to $(id -un) (exit $_own_rc) — files in it may be owned by root." >&2
-      [ "$INNER_RC" -ne 0 ] || exit "$_own_rc"
-    fi
+    container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT_DIR_NAME" || OWNERSHIP_RC=$?
+    [ "$OWNERSHIP_RC" -eq 0 ] || [ "$INNER_RC" -eq 0 ] || report_ownership_unrestored "$OWNERSHIP_RC"
   fi
 fi
 
@@ -2520,9 +2524,15 @@ fi
 # just get a remote to push to.
 # Never fail the scaffold over a missing/unauthenticated gh — the local repo already exists.
 # A scaffold that died is never published: there is no finished repo to push, and pushing is what can't be taken back.
+# Nor is one whose ownership was not restored: host-side git may be refused the tree or unable to read part of it, so a
+# push could publish less than the project, or nothing. It is a skip with the command to run after the repair, the same
+# as a missing gh: the local repo is complete.
 GITHUB_RESULT=""
 if [ "$INNER_RC" -ne 0 ]; then
   :
+elif [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ] && [ "$OWNERSHIP_RC" -ne 0 ]; then
+  GITHUB_RESULT="GITHUB_SKIP: ownership not restored — local repo only (after the repair below, run 'gh repo create $PROJECT --private --source \"$TARGET\" --remote=origin --push')"
+  echo "$GITHUB_RESULT" >&2
 elif [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ]; then
   if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
     GITHUB_RESULT="GITHUB_SKIP: gh not found or not authenticated — local repo only (run 'gh auth login', then 'gh repo create $PROJECT --private --source \"$TARGET\" --remote=origin --push')"
@@ -2615,7 +2625,8 @@ fi
 #   restart-session    session-scoped config moved, but nothing that needs a new container.
 #   none               nothing this run wrote requires either. The common case, and worth saying plainly:
 #                      silence here has previously been read as "probably restart, to be safe".
-#   unknown            no git base to compare against, so the honest answer is that it cannot tell.
+#   unknown            git cannot compare this tree with a base (none recorded, or git refuses a tree whose ownership
+#                      was not restored), so the honest answer is that it cannot tell.
 #
 # SEPARATELY, `UPGRADE_RELOAD` names the generated GUIDANCE files that changed. These are `@`-imported at
 # session start too, but their content needs no restart at all — reading the file puts it in context
@@ -2636,6 +2647,10 @@ _upgrade_next() {   # <target> <base-sha|''> [container verdict: same|changed|''
   UPGRADE_NEXT="unknown"
   UPGRADE_RELOAD=""
   [ -n "$base" ] || return 0
+  # A tree git refuses (root-owned after a failed chown: "dubious ownership") is "cannot tell", not "nothing changed".
+  # Without this the empty answer below reads as `none`, or the failed listing kills the script under set -e, before
+  # any report prints.
+  git -C "$target" rev-parse --verify --quiet "$base^{commit}" >/dev/null 2>&1 || return 0
   # Committed deltas (the migration ladder commits as it goes) + working-tree edits + brand-new untracked
   # files, which `git diff` alone would miss entirely — and a first retrofit creates most of these files.
   # BOTH RELATIVE TO THE PROJECT. `ls-files` answers relative to its -C directory, but `diff --name-only` answers
@@ -2706,7 +2721,7 @@ if [ "$MODE" = "upgrade" ]; then
     none)
       echo "  Nothing this run wrote needs a new session or a container rebuild." ;;
     unknown)
-      echo "  No git base to compare against, so this run cannot tell what changed. If .devcontainer/,"
+      echo "  Git could not compare this tree with a base, so this run cannot tell what changed. If .devcontainer/,"
       echo "  .claude/settings.json or .mcp.json moved, rebuild or restart accordingly." ;;
   esac
   if [ -n "$UPGRADE_RELOAD" ]; then
@@ -2725,7 +2740,7 @@ else
   # detected and upgraded. So: the layer set house-doc STAMPED (the final, detected one — firebase included when
   # present), and the app only when it exists (as the project graph resolved it).
   _final_layers="$(grep -o '@bespunky/house-tooling:stamp[^>]*' "$TARGET/HOUSE.md" 2>/dev/null | head -1 \
-    | grep -o 'layers=[a-z0-9,-]*' | head -1 | cut -d= -f2)"
+    | grep -o 'layers=[a-z0-9,-]*' | head -1 | cut -d= -f2 || true)"
   # The app's root, as the program resolved it from the project graph (`_resolve_upgrade_app`), handed over through
   # the lock's state file — empty when the app is not one of the workspace's apps, and then not printed.
   _app_dir=""
@@ -2746,4 +2761,10 @@ else
     echo "UPGRADE_VERIFY: nothing was built, linted or tested. Before landing it: $NX_RUN affected -t build lint test --base=$RESTORE_SHA"
   fi
   _upgrade_attention "${UPGRADE_LOCK:-}"
+fi
+
+# The report above is complete and true: the program finished. What is left is the one thing it could not do.
+if [ "$OWNERSHIP_RC" -ne 0 ]; then
+  report_ownership_unrestored "$OWNERSHIP_RC"
+  exit "$OWNERSHIP_RC"
 fi

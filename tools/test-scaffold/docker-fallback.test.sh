@@ -8,7 +8,8 @@
 # What is asserted, against a fake `docker` that records every call and plays the part it is told to (no image, no
 # network): the image comes from HOUSE_NODE_MAJOR and from no registry; a missing package manager stops the run before
 # the program starts; a program that dies reports itself with its own exit code, does not chown what does not exist,
-# and is never pushed to GitHub; a failed chown still ends a run that had otherwise succeeded.
+# and is never pushed to GitHub; a failed chown ends a run that had otherwise succeeded with its own exit code, but only
+# after that run's report, because the work is done and the report is the record of it.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -148,13 +149,21 @@ echo "── the program dies and the chown fails too"
 scaffold FAKE_PROGRAM_RC=3 FAKE_CHOWN_RC=9 "FAKE_CREATES=$TMP/projects/shop"
 [ "$rc" -eq 3 ] && ok "the program's failure is the one reported" || fail "exit $rc, not 3"
 grep -q "^NEW_FAILED" <<< "$out" && ok "NEW_FAILED still printed" || fail "no NEW_FAILED: $out"
+grep -qF "sudo chown -R" <<< "$out" && ok "…and the repair, for the partial tree" || fail "no repair: $out"
 rm -rf "$TMP/projects/shop"
 
 echo "── the program succeeds and the chown fails"
 scaffold FAKE_CHOWN_RC=9 "FAKE_CREATES=$TMP/projects/shop"
 [ "$rc" -eq 9 ] && ok "ends the run with the chown's exit code" || fail "exit $rc, not 9"
-grep -qF "could not hand" <<< "$out" && ok "says why" || fail "no clear error: $out"
+grep -q "^NEW_OK $TMP/projects/shop" <<< "$out" && ok "the completed run's NEW_OK still prints" || fail "no NEW_OK: $out"
+grep -q "^OWNERSHIP_UNRESTORED $TMP/projects/shop (exit 9)" <<< "$out" && ok "says the ownership was not restored" || fail "no clear error: $out"
+grep -qF "sudo chown -R $(id -u):$(id -g) '$TMP/projects/shop'" <<< "$out" && ok "gives the exact repair" || fail "no repair: $out"
+[ "$(grep -nE '^(NEW_OK|OWNERSHIP_UNRESTORED)' <<< "$out" | cut -d: -f2 | cut -d' ' -f1 | tr '\n' ' ')" = "NEW_OK OWNERSHIP_UNRESTORED " ] \
+  && ok "the repair comes last, under the report" || fail "order: $out"
+grep -qF "NEW_FAILED" <<< "$out" && fail "a completed scaffold reported as failed" || ok "no NEW_FAILED"
 called gh && fail "published with ownership unrestored" || ok "nothing published"
+grep -qF "GITHUB_SKIP: ownership not restored" <<< "$out" && ok "says why it was not published" || fail "no GITHUB_SKIP: $out"
+rm -rf "$TMP/projects/shop"
 
 # An upgrade reports in its own vocabulary, and the pre-write stop has to leave the project as it was.
 proj="$TMP/projects/existing"
@@ -182,6 +191,44 @@ upgrade FAKE_PROGRAM_RC=3 FAKE_CHOWN_RC=9
 [ "$rc" -eq 3 ] && ok "the program's own exit code" || fail "exit $rc, not 3: $out"
 grep -q "^UPGRADE_FAILED" <<< "$out" && ok "UPGRADE_FAILED" || fail "no UPGRADE_FAILED: $out"
 grep -qF "NEW_FAILED" <<< "$out" && fail "an upgrade reported as a scaffold" || ok "no NEW_FAILED"
+
+echo "── upgrade: the program succeeds and the chown fails"
+upgrade FAKE_CHOWN_RC=9
+[ "$rc" -eq 9 ] && ok "ends with the chown's exit code" || fail "exit $rc, not 9: $out"
+grep -q "^UPGRADE_NEXT: " <<< "$out" && ok "UPGRADE_NEXT still prints" || fail "no UPGRADE_NEXT: $out"
+grep -q "^UPGRADE_OK $proj" <<< "$out" && ok "UPGRADE_OK still prints" || fail "no UPGRADE_OK: $out"
+grep -qF "UPGRADE_FAILED" <<< "$out" && fail "a completed upgrade reported as failed" || ok "no UPGRADE_FAILED"
+[ "$(tail -2 <<< "$out" | cut -d' ' -f1 | head -1)" = "OWNERSHIP_UNRESTORED" ] && ok "the ownership line is last" || fail "order: $out"
+tail -1 <<< "$out" | grep -qF "sudo chown -R $(id -u):$(id -g) '$proj'" && ok "…with the exact repair" || fail "no repair: $out"
+[ ! -e "$proj/.bespunky-upgrade.lock" ] && ok "the lock is released" || fail "lock left behind"
+
+# The native path has its own road to the same report. Its fake yarn is the program's first real command; the real Node
+# stays, because that is what chooses the native path.
+echo "── native: the program dies"
+mkdir -p "$TMP/native-bin"; cp "$TMP/bin/"* "$TMP/native-bin/"
+cat > "$TMP/native-bin/yarn" <<'FAKE'
+#!/usr/bin/env bash
+[ -z "${FAKE_CREATES:-}" ] || mkdir -p "$FAKE_CREATES"
+exit 7
+FAKE
+chmod +x "$TMP/native-bin/yarn"
+native() {
+  : > "$CALLS"
+  out="$(env PATH="$TMP/native-bin:$PATH" PROJECTS_DIR="$TMP/projects" "$@" bash "$HOUSE_SH" new --github --preset=angular shop 2>&1)"
+  rc=$?
+}
+native
+grep -qF "running the generators natively" <<< "$out" && ok "takes the native path" || fail "not native, so this case tests nothing: $out"
+[ "$rc" -eq 7 ] && ok "the program's own exit code" || fail "exit $rc, not 7: $out"
+grep -q "^NEW_FAILED $TMP/projects/shop (exit 7)" <<< "$out" && ok "NEW_FAILED, naming the project" || fail "no NEW_FAILED: $out"
+grep -qF "not created" <<< "$out" && ok "says nothing was created" || fail "does not say what is left: $out"
+grep -qF "UPGRADE_FAILED" <<< "$out" && fail "a scaffold reported as an upgrade" || ok "no upgrade advice"
+grep -qF "OWNERSHIP_UNRESTORED" <<< "$out" && fail "the native path has no ownership to restore" || ok "no ownership line"
+called gh && fail "tried to publish a failed scaffold" || ok "nothing published"
+native "FAKE_CREATES=$TMP/projects/shop"
+[ "$rc" -eq 7 ] && grep -qF "partly created" <<< "$out" && ok "a partial project is named" || fail "rc=$rc: $out"
+called gh && fail "tried to publish a partial scaffold" || ok "nothing published"
+rm -rf "$TMP/projects/shop"
 
 echo "── extract-tool"
 mkdir -p "$TMP/projects/from" "$TMP/projects/into"
