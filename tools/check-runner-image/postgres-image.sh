@@ -156,7 +156,7 @@ run_case() {
   [ "$(value "$facts" uid)" != 0 ]; check $? "it runs as a user who is not root"
   equal "$facts" codename "$codename" "the image is on $codename"
   local tool
-  for tool in postgres psql initdb pg_ctl pg_dump dbmate; do
+  for tool in postgres psql initdb pg_ctl pg_dump pg_controldata pg_isready dbmate; do
     equal "$facts" "path.$tool" "/usr/local/bin/$tool" "$tool is on PATH, from /usr/local/bin"
   done
   equal "$facts" wrapper.postgres "# bespunky-house wrapper for postgres" "the server's binary is reached through its generated wrapper"
@@ -166,7 +166,10 @@ run_case() {
   equal "$facts" initdb.rc 0 "a real initdb, with the launcher's flags, exited 0"
   equal "$facts" boot.rc 0 "the server booted"
   starts "$facts" server.version "$minor" "the server answers, at $minor"
-  [ -n "$(value "$facts" server.vector)" ]; check $? "pgvector loads in it"
+  equal "$facts" ready.rc 0 "pg_isready answers, as the launcher's wait asks it"
+  [[ "$(value "$facts" control.identifier)" =~ ^[0-9]+$ ]]; check $? "pg_controldata reads the identifier the launcher records"
+  # A version, not "some text": a failed CREATE EXTENSION ends on a non-empty HINT line.
+  [[ "$(value "$facts" server.vector)" =~ ^[0-9]+\.[0-9]+ ]]; check $? "pgvector loads in it"
   equal "$facts" dbmate.rc 0 "a real dbmate migration exited 0"
   equal "$facts" dbmate.row 1 "and its row is there"
   equal "$facts" stop.rc 0 "the server stopped"

@@ -192,7 +192,7 @@ export interface LayerDescriptor {
 // WHICH PROVIDERS A LINE MUST NAME. Every provider active in the workspace deploys on every bound line, so a line names
 // exactly the ones that need a value from it. A provider with a `targetLabel` needs one: a line naming none is blocked
 // (a red run on every push; a `ci` key states intent to deploy, and a note is how deploys stopped silently). A provider
-// without one (a database reached through its GitHub environment's `DATABASE_URL`) needs nothing, and a line may leave it
+// without one (a database reached through a secret of its GitHub environment) needs nothing, and a line may leave it
 // out. A provider a required layer's provider `supersedes` is not active at all.
 
 /** One environment a provider deploys into, as the `ci` layer resolved it from the branch model. */
@@ -273,6 +273,11 @@ interface CiDeployProviderShape {
    * the deploy steps and without `deployEnv`, which only those steps hold: reach a secret here through `secrets.*`.
    */
   authSteps(): string;
+  /**
+   * GitHub Actions steps (same form) that put on the runner what this provider's deploy needs and no project install brings.
+   * Before `authSteps`, and with no secret. Pin and check what they fetch: the deploy that follows holds a credential.
+   */
+  setupSteps?(): string;
   /**
    * Owned files this provider adds (the human-run cloud setup), rendered from the resolved environments — retired
    * ones included, so the tool that undoes their setup outlives their binding.

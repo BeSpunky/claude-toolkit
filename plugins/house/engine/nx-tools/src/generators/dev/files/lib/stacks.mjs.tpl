@@ -517,6 +517,7 @@ function records(trees) {
  *               BASE_URL, DEV_URL, DEV_URL_QUERY (if any), PORT_OFFSET, PORT_<NAME> and what the declaration's processes
  *               export, plus DEV_STACK. A `dev run`: PORT_OFFSET, PORT_<NAME> and DEV_STACK, since it has no declaration.
  *   tmp         its TMPDIR (DEV_STACK_TMP)
+ *   stateDir    its state dir (DEV_STACK_DIR): where a process leaves what a reader outside the stack needs, such as a ready mark
  *   processes   [{ id, pid }] — what the engine started
  *   detached    [{ id, pid, status, doing, log }] — detached work still running (`doing` and `log` only if it says)
  *   label, task, url, waitingFor   each only when it applies: what `ps` calls it, the Nx task it runs as, the app's URL
@@ -538,6 +539,7 @@ export function publicStack(s) {
     portStates: s.portStates ?? [],
     exports: s.exports ?? {},
     tmp: s.tmp,
+    stateDir: stackDir(s.tree, s.key),
     processes: (s.processes ?? []).map(({ id, pid }) => ({ id, pid })),
     detached: (s.detached ?? []).map(({ id, pid, status, doing, log }) => ({ id, pid, status, doing, log })),
     label: s.label,

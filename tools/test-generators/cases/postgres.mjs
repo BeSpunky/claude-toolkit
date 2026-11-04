@@ -209,6 +209,10 @@ export default {
         const workflow = tree.read('.github/workflows/deploy.yml', 'utf8') ?? '';
         t.ok(workflow.includes('POSTGRES_DEPLOY_URL: ${{ secrets.POSTGRES_DEPLOY_URL }}'), `the secret reaches the deploy step:\n${workflow}`);
         t.ok(!workflow.includes('id-token: write'), 'no OIDC: the job cannot mint a token');
+        const install = workflow.indexOf('Install dbmate');
+        t.ok(install > 0 && install < workflow.indexOf('POSTGRES_DEPLOY_URL: ${{'), 'the stock runner gets dbmate, before the step that needs it');
+        t.ok(/sha256sum --check --strict/.test(workflow.slice(install)), 'checked against its pin');
+        t.ok(!workflow.slice(0, install).includes('POSTGRES_DEPLOY_URL'), 'and the install holds no secret');
         const { targets } = readProjectConfiguration(tree, 'postgres');
         t.ok(!JSON.stringify(targets.deploy).includes('postgresql://'), 'no URL in project.json');
       },
@@ -246,6 +250,9 @@ export default {
         t.equal(provider.deployTargets(tree), [{ project: 'postgres', target: 'deploy' }], 'its deploy target');
         t.ok(provider.deploySignals.some((signal) => signal.test('dbmate --url x up')), 'a foreign `dbmate up` is a pipeline');
         t.ok(!provider.deploySignals.some((signal) => signal.test('dbmate --help')), '`dbmate --help` is not');
+        for (const command of ['docker run amacneil/dbmate:2 up', 'dbmate-linux-amd64 up', 'ghcr.io/amacneil/dbmate:2.37 --url $U up', 'node tools/postgres/postgres.mjs deploy']) {
+          t.ok(provider.deploySignals.some((signal) => signal.test(command)), `\`${command}\` is a pipeline too`);
+        }
       },
     },
   ],

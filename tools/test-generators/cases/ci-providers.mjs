@@ -362,6 +362,29 @@ export default {
         t.ok(/db\.yml/.test(pending) && /fb\.yml/.test(pending), pending);
       },
     },
+    ...['nx affected -t build,deploy', 'nx affected -t=deploy', 'nx affected --target=build,deploy', 'nx affected --targets="deploy"', 'nx run-many -t lint deploy', 'nx deploy api'].map((command) => ({
+      name: `a project's own pipeline: \`${command}\` is seen, so no second deploy workflow lands beside it`,
+      setup: () => {
+        const tree = fixture(lines(['main', 'production', {}]))();
+        tree.write('.github/workflows/own.yml', `on: push\njobs:\n  d:\n    steps:\n      - run: ${command}\n`);
+        return tree;
+      },
+      run: withFake(['nx', 'node', 'ci']),
+      expect: (tree, t) => {
+        t.missing(WF);
+        t.ok(/own\.yml/.test(t.json('.bespunky/ci.json').pending ?? ''), 'pending names it');
+      },
+    })),
+    ...['nx affected -t build --configuration deploy', 'nx affected -t test', 'dbmate --url postgres://postgres@localhost/test up'].map((command) => ({
+      name: `a workflow only a pull request fires deploys no line: \`${command}\` leaves the owned workflow alone`,
+      setup: () => {
+        const tree = fixture(lines(['main', 'production', {}]))();
+        tree.write('.github/workflows/test.yml', `on: pull_request\njobs:\n  t:\n    steps:\n      - run: ${command}\n`);
+        return tree;
+      },
+      run: withFake(['nx', 'node', 'ci']),
+      expect: (tree, t) => t.exists(WF),
+    })),
     {
       name: 'a signal in a comment is not a pipeline',
       setup: () => {

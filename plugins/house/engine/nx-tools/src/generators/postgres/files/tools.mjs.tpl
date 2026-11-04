@@ -15,9 +15,14 @@ export function scrubbedEnv(extra = {}) {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !SCRUBBED.test(name))), ...extra };
 }
 
-/** A tool's path. They come with the image (`postgres` and `dbmate`), so a missing one means it needs rebuilding. */
+/**
+ * A tool's path. They come with the image (`postgres` and `dbmate`), or in CI with the deploy job's own checked step.
+ * NEVER FROM node_modules/.bin, which Nx puts first on PATH: an npm package with a `dbmate` bin is not the pinned tool, and
+ * would be handed the deploy's URL.
+ */
 export function tool(name) {
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    if (/[\\/]node_modules[\\/]\.bin[\\/]?$/.test(dir)) continue;
     const path = join(dir, name);
     try {
       accessSync(path, constants.X_OK);
@@ -26,7 +31,11 @@ export function tool(name) {
       // the next one
     }
   }
-  throw new Refusal(`${name} is not on PATH. It comes with the postgres layer's image: rebuild the devcontainer (.devcontainer/house.packages.sh on an image of your own).`);
+  throw new Refusal(
+    process.env.CI
+      ? `${name} is not on PATH. The house's deploy workflow installs it in a checked step of its own; a pipeline of your own must install the version pinned in .devcontainer/house.packages.sh.`
+      : `${name} is not on PATH. It comes with the postgres layer's image: rebuild the devcontainer (.devcontainer/house.packages.sh on an image of your own).`,
+  );
 }
 
 /** Run a tool to its end, with its output captured unless `inherit`. Never rejects on an exit code: the caller reads it. */

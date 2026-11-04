@@ -2,7 +2,8 @@
 # The inside of a container built from a project wearing `postgres`, run by tools/check-runner-image/postgres-image.sh as the
 # devcontainer's remote user. No `set -e` and no verdicts: every fact is reported for the host to judge, `probe=done` says it
 # got to the end. Nothing here is the launcher's: its Node may be a devcontainer feature, which `docker build` does not apply.
-# What it asks is whether the image's own tools work, with the launcher's own initdb flags.
+# What it asks is whether the image's own tools work, with the launcher's own initdb flags and server settings. It does not
+# run the launcher: tools/test-postgres does that, on one image only.
 #
 #   postgres-image.inside.sh <devcontainer.json's PATH, with its tokens>
 PATH_TEMPLATE="$1"
@@ -14,7 +15,7 @@ echo "uid=$(id -u)"
 echo "home=$HOME"
 echo "codename=$(sed -n 's/^VERSION_CODENAME=//p' /etc/os-release)"
 echo "arch=$(dpkg --print-architecture)"
-for tool in postgres psql initdb pg_ctl pg_dump dbmate; do
+for tool in postgres psql initdb pg_ctl pg_dump pg_controldata pg_isready dbmate; do
   echo "path.$tool=$(command -v "$tool")"
 done
 echo "wrapper.postgres=$(sed -n 2p "$(command -v postgres)" 2>/dev/null)"
@@ -32,8 +33,11 @@ INIT_RC=$?
 echo "initdb.rc=$INIT_RC"
 [ "$INIT_RC" -eq 0 ] || sed 's/^/  initdb: /' "$SOCKETS/initdb.log"
 
-pg_ctl -D "$DATA" -w -t 60 -l "$SOCKETS/server.log" -o "-p $PORT -k $SOCKETS -c listen_addresses=127.0.0.1" start > /dev/null 2>&1
+pg_ctl -D "$DATA" -w -t 60 -l "$SOCKETS/server.log" -o "-p $PORT -k $SOCKETS -c listen_addresses=127.0.0.1 -c dynamic_shared_memory_type=mmap -c wal_level=logical -c max_slot_wal_keep_size=1GB -c cluster_name=probe" start > /dev/null 2>&1
 echo "boot.rc=$?"
+pg_isready -h 127.0.0.1 -p "$PORT" -U postgres -t 5 > /dev/null 2>&1
+echo "ready.rc=$?"
+echo "control.identifier=$(LC_ALL=C pg_controldata "$DATA" 2>&1 | sed -n 's/^Database system identifier: *//p')"
 sed 's/^/  server: /' "$SOCKETS/server.log" 2>/dev/null | tail -n 5
 echo "server.version=$(sql 'SHOW server_version')"
 echo "server.vector=$(sql 'CREATE EXTENSION vector; SELECT extversion FROM pg_extension WHERE extname = $$vector$$' | tail -n 1)"

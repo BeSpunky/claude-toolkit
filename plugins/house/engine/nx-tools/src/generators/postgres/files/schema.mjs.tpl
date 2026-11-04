@@ -68,7 +68,7 @@ export async function applySeeds(port, { signal } = {}) {
   const args = [...psqlArgs(port), '--single-transaction', ...files.flatMap((file) => ['-f', file]), '-c', `COMMENT ON DATABASE ${DATABASE} IS '${SEEDED}'`];
   const result = await run('psql', args, { cwd: SEEDS, signal });
   if (result.aborted) return false;
-  if (result.code !== 0) throw new Refusal(`Seeding failed, so nothing of it was kept (${relative(ROOT, SEEDS)}): ${result.stderr.trim()}`);
+  if (result.code !== 0) throw new Refusal(`Seeding failed, so nothing of it was kept, unless a file committed by itself (${relative(ROOT, SEEDS)}): ${result.stderr.trim()}`);
   return files.length;
 }
 

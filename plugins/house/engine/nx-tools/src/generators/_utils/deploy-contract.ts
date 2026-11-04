@@ -44,6 +44,15 @@ export interface DeploySpec {
 
 const stripDotSlash = (path: string) => path.replace(/^\.\//, '');
 
+const isDirectoryPath = (tree: Tree, path: string) => path === '' || path === '.' || path.endsWith('/') || tree.exists(path);
+
+/** Can this watched path match a file? For a path the project's own config names: a house declaration just goes to `deployTarget`, which refuses. */
+export function canMatchAFile(tree: Tree, watched: string): boolean {
+  const path = stripDotSlash(watched);
+  if (/[*?[\]{}()!]/.test(path) || tree.isFile(path)) return true;
+  return !isDirectoryPath(tree, path) && /\.[^/]*$/.test(path);
+}
+
 /**
  * Throw unless every watched path can match a file. A glob can. A path that is a file can, and so can one that will be,
  * if its name says file. A directory cannot, and neither can a missing path with no extension: it is a directory the
@@ -51,10 +60,9 @@ const stripDotSlash = (path: string) => path.replace(/^\.\//, '');
  */
 function refuseBareDirectories(tree: Tree, projectRoot: string, watches: readonly string[]): void {
   for (const watched of watches) {
+    if (canMatchAFile(tree, watched)) continue;
     const path = stripDotSlash(watched);
-    if (/[*?[\]{}()!]/.test(path) || tree.isFile(path)) continue;
-    const directory = path === '' || path === '.' || path.endsWith('/') || tree.exists(path);
-    if (!directory && /\.[^/]*$/.test(path)) continue;
+    const directory = isDirectoryPath(tree, path);
     const glob = `${path.replace(/\/$/, '') || '.'}/**/*`;
     throw new Error(
       `The deploy target of ${projectRoot} watches '${watched}', which ${directory ? 'is a directory' : 'does not exist and has no extension, so it reads as a directory'}. ` +

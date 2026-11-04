@@ -171,7 +171,7 @@ export function renderWorkflow(input: WorkflowInput): string {
       ? [`            echo ${bashQuote(`::error::${line.blocked}`)} >&2`, '            exit 1']
       : [`            environment=${line.environment}; full=${line.full}`]),
   ]);
-  const auth = input.providers.map((provider) => provider.authSteps().replace(/^(?=.)/gm, '      ')).join('');
+  const auth = input.providers.map((provider) => `${provider.setupSteps?.() ?? ''}${provider.authSteps()}`.replace(/^(?=.)/gm, '      ')).join('');
   const cache = installedPaths(input.packageManager, input.yarnBerry).map((path) => `            ${path}`);
   const key = 'deploy-deps-${{ github.run_id }}';
   const oidc = [...new Set(input.providers.flatMap((provider) => (provider.oidc ? [provider.oidc.why] : [])))];

@@ -423,7 +423,7 @@ case "$sub" in
     echo "uid=${FAKE_UID:-1000}"
     echo "codename=${FAKE_CODENAME:-$codename}"
     echo "arch=amd64"
-    for tool in postgres psql initdb pg_ctl pg_dump dbmate; do
+    for tool in postgres psql initdb pg_ctl pg_dump pg_controldata pg_isready dbmate; do
       if [ "$tool" = "${FAKE_NO_TOOL:-}" ]; then echo "path.$tool="; else echo "path.$tool=$bin/$tool"; fi
     done
     echo "wrapper.postgres=${FAKE_WRAPPER-# bespunky-house wrapper for postgres}"
@@ -432,6 +432,8 @@ case "$sub" in
     echo "version.dbmate=dbmate version ${FAKE_DBMATE_ANSWER:-$FAKE_DBMATE_PIN}"
     echo "initdb.rc=${FAKE_INITDB_RC:-0}"
     echo "boot.rc=${FAKE_BOOT_RC:-0}"
+    echo "ready.rc=${FAKE_READY_RC:-0}"
+    echo "control.identifier=${FAKE_IDENTIFIER-7123456789012345678}"
     echo "server.version=${FAKE_SERVER_VERSION:-$major.6 (Debian x)}"
     echo "server.vector=${FAKE_VECTOR-0.8.7}"
     echo "dbmate.rc=${FAKE_DBMATE_RC:-0}"
@@ -487,7 +489,9 @@ pg_case "another dbmate answering: a finding" "$ONE" 1 "dbmate --version is the 
 pg_case "initdb failing: a finding" "$ONE" 1 "a real initdb" "PASS" FAKE_INITDB_RC=1
 pg_case "the boot failing: a finding" "$ONE" 1 "the server booted" "PASS" FAKE_BOOT_RC=1
 pg_case "the server answering another version: a finding" "$ONE" 1 "the server answers, at 17.6" "PASS" FAKE_SERVER_VERSION=9.9
-pg_case "pgvector not loading: a finding" "$ONE" 1 "pgvector loads" "PASS" FAKE_VECTOR=
+pg_case "pgvector not loading, as psql really says it: a finding" "$ONE" 1 "pgvector loads" "PASS" "FAKE_VECTOR=HINT:  The extension must first be installed on the system where PostgreSQL is running."
+pg_case "pg_isready not answering: a finding" "$ONE" 1 "pg_isready answers" "PASS" FAKE_READY_RC=2
+pg_case "pg_controldata reading nothing: a finding" "$ONE" 1 "pg_controldata reads" "PASS" FAKE_IDENTIFIER=
 pg_case "a migration failing: a finding" "$ONE" 1 "a real dbmate migration" "PASS" FAKE_DBMATE_RC=1
 pg_case "a migration with no row: a finding" "$ONE" 1 "its row is there" "PASS" FAKE_ROW=0
 pg_case "the stop failing: a finding" "$ONE" 1 "the server stopped" "PASS" FAKE_STOP_RC=1

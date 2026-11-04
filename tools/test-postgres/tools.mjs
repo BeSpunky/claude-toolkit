@@ -62,6 +62,11 @@ export async function ensureTools({ major = '18' } = {}) {
       execFileSync('dpkg-deb', ['-x', readdirSync(system).find((entry) => entry.startsWith(`${name}_`)), '.'], { cwd: system });
     }
   }
-  const multiarch = execFileSync('dpkg-architecture', ['-qDEB_HOST_MULTIARCH'], { encoding: 'utf8' }).trim();
+  let multiarch;
+  try {
+    multiarch = execFileSync('dpkg-architecture', ['-qDEB_HOST_MULTIARCH'], { encoding: 'utf8' }).trim();
+  } catch (error) {
+    throw new NoClosureHere(`dpkg-architecture could not run (${error.code ?? error.message}): it comes with dpkg-dev, and says where the libraries belong`);
+  }
   return { PATH: `${bin}:${process.env.PATH}`, LD_LIBRARY_PATH: join(system, `usr/lib/${multiarch}`) };
 }

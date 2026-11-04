@@ -33,5 +33,5 @@ node tools/postgres/postgres.mjs new-migration --name=add_users writes the next 
 Local Postgres in a bad state? node tools/postgres/postgres.mjs reset drops the database, migrates and seeds from nothing
 node tools/postgres/postgres.mjs psql opens a client on this tree's server with no URL: local verbs compute the address and check the server's identity
 Going to a real database? node tools/postgres/postgres.mjs deploy reads POSTGRES_DEPLOY_URL from CI, or from you at a terminal. It wants the direct URL, not a transaction pooler
-The Postgres major is .bespunky/postgres.json: match it to your production host, then rebuild the container. A new major starts empty
+The Postgres major is .bespunky/postgres.json: match it to your production host, run the house upgrade, then rebuild the container. A new major starts empty
 tools/dev/dev ps --json is the public shape for a script: every running stack, its state and its ports

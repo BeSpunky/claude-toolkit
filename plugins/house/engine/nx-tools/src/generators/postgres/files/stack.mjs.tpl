@@ -4,7 +4,8 @@
 // one place that says what runs, and `runningStacks` below is the ONE place that reads it: its shape is the engine's contract.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { DEV_ENGINE, NX, PORT_NAME, ROOT, Refusal, clusterHome, declaredMajor, identityFile } from './layout.mjs';
+import { join } from 'node:path';
+import { DEV_ENGINE, NX, PORT_NAME, READY_MARKER, ROOT, Refusal, clusterHome, declaredMajor, identityFile } from './layout.mjs';
 import { query, scrubbedEnv } from './tools.mjs';
 
 const sameTree = (path) => {
@@ -15,7 +16,10 @@ const sameTree = (path) => {
   }
 };
 
-/** This tree's stacks that hold a Postgres port: `{ key, offset, port, state, starting }`. */
+/**
+ * This tree's stacks that hold a Postgres port: `{ key, offset, port, state, starting }`. Starting until the launcher has
+ * migrated and seeded, which only it knows: a server that answers may still be doing either, and a verb would collide with it.
+ */
 export function runningStacks() {
   const ps = spawnSync(process.execPath, [DEV_ENGINE, 'ps', '--json'], { cwd: ROOT, env: scrubbedEnv(), encoding: 'utf8' });
   if (ps.status !== 0) throw new Refusal(`tools/dev/dev ps failed: ${(ps.stderr || ps.stdout || ps.error?.message || '').trim()}`);
@@ -27,7 +31,7 @@ export function runningStacks() {
   }
   return rows
     .filter((row) => sameTree(row.tree) && row.ports?.[PORT_NAME])
-    .map((row) => ({ key: row.key, offset: row.offset, port: row.ports[PORT_NAME], state: row.state, starting: Boolean(row.waitingFor) }));
+    .map((row) => ({ key: row.key, offset: row.offset, port: row.ports[PORT_NAME], state: row.state, starting: row.state === 'live' && !existsSync(join(row.stateDir, READY_MARKER)) }));
 }
 
 const line = ({ key, port, state, starting }) => `  ${key}: port ${port}, ${starting ? 'starting' : state}`;
@@ -48,7 +52,8 @@ export function addressedStack(offset) {
   if (stacks.length) {
     throw new Refusal(`No usable Postgres stack in this tree:\n${stacks.map(line).join('\n')}\nSee tools/dev/dev ps, which names the command that clears each one.`);
   }
-  throw new Refusal(`No Postgres is running in this tree. Start one: ${NX} run postgres:start (serving an app starts its own, when it declares one).`);
+  // Under an agent, the launcher itself: Nx would show nothing of it, neither the port nor how to stop it.
+  throw new Refusal(`No Postgres is running in this tree. Start one: ${process.env.CLAUDECODE === '1' ? 'node tools/postgres/postgres.mjs start' : `${NX} run postgres:start`} (serving an app starts its own, when it declares one).`);
 }
 
 function usable(stack) {

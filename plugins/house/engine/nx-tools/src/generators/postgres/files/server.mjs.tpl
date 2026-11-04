@@ -18,7 +18,7 @@
 // THE SERVER HOLDS THE STACK'S LOCK (fd 3). So a launcher killed outright leaves a server that `dev ps` still shows as an
 // orphan, and that `dev stop` can clear. Without it, that server would hold the port and be invisible to both.
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, fstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, fstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -34,7 +34,7 @@ const HEARTBEAT_FRESH_MS = 3 * HEARTBEAT_MS;
 
 const log = (line) => console.log(`[postgres] ${line}`);
 
-/** A live server's data directory is its cwd. Any other meaning of a pid (reused, or another stack's) is not this one. */
+/** A live server's data directory is its cwd, a real path. Any other meaning of a pid (reused, or another stack's) is not this one. */
 function serverOf(data) {
   let pid;
   try {
@@ -43,7 +43,7 @@ function serverOf(data) {
     return undefined;
   }
   try {
-    return readlinkSync(`/proc/${pid}/cwd`) === data ? pid : undefined;
+    return readlinkSync(`/proc/${pid}/cwd`) === realpathSync(data) ? pid : undefined;
   } catch {
     return undefined;
   }
@@ -127,33 +127,60 @@ export function sweepDeadTrees() {
   for (const entry of readdirSync(home, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const dir = join(home, entry.name);
-    let tree;
+    // Housekeeping for another tree never stops this one's start, and another start may be sweeping the same entry.
     try {
-      tree = readFileSync(join(dir, 'tree'), 'utf8').trim();
-    } catch {
-      continue; // being created, or not ours
+      sweepTree(dir);
+    } catch (error) {
+      log(`kept what is left of ${dir}: ${error.message}`);
     }
-    const state = treeState(tree);
-    if (state === 'here') continue;
-    if (state === 'unknown') {
-      log(`kept the Postgres data of ${tree || 'an unnamed tree'}: it is not visible from here, and nothing proves it was removed. If it was, remove ${dir}.`);
-      continue;
-    }
-    const clusters = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((stack) =>
-      readdirSync(join(dir, stack.name)).map((major) => ({ stack: stack.name, major, data: dataDir(join(dir, stack.name, major)) })),
-    );
-    const held = clusters.map(({ stack, major }) => heldElsewhere(join(dir, stack, major))).find(Boolean);
-    if (held) {
-      log(`kept the Postgres data of ${tree}: container ${held.host} is running a server on it (heartbeat ${held.ageSeconds}s ago).`);
-      continue;
-    }
-    const running = clusters.filter(({ data }) => serverOf(data));
-    if (running.length) {
-      log(`${tree} is gone, but a server still runs on its data (${running.map((c) => c.stack).join(', ')}): left alone. tools/dev/dev cannot reach it from here; stop it by its pid in ${running[0].data}/postmaster.pid.`);
-      continue;
-    }
-    rmSync(dir, { recursive: true, force: true });
-    log(`dropped the Postgres data of ${tree}, which no longer exists (${clusters.map((c) => `${c.stack} on ${c.major}`).join(', ') || 'no clusters'}).`);
+  }
+}
+
+function sweepTree(dir) {
+  let tree;
+  try {
+    tree = readFileSync(join(dir, 'tree'), 'utf8').trim();
+  } catch {
+    return; // being created, or not ours
+  }
+  const state = treeState(tree);
+  if (state === 'here') return;
+  if (state === 'unknown') {
+    log(`kept the Postgres data of ${tree || 'an unnamed tree'}: it is not visible from here, and nothing proves it was removed. If it was, remove ${dir}.`);
+    return;
+  }
+  const clusters = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((stack) =>
+    readdirSync(join(dir, stack.name)).map((major) => ({ stack: stack.name, major, data: dataDir(join(dir, stack.name, major)) })),
+  );
+  const held = clusters.map(({ stack, major }) => heldElsewhere(join(dir, stack, major))).find(Boolean);
+  if (held) {
+    log(`kept the Postgres data of ${tree}: container ${held.host} is running a server on it (heartbeat ${held.ageSeconds}s ago).`);
+    return;
+  }
+  const running = clusters.filter(({ data }) => serverOf(data));
+  if (running.length) {
+    log(`${tree} is gone, but a server still runs on its data (${running.map((c) => c.stack).join(', ')}): left alone. tools/dev/dev cannot reach it from here; stop it by its pid in ${running[0].data}/postmaster.pid.`);
+    return;
+  }
+  // The record goes last: a removal that fails partway must still be recognised as this layer's on the next start.
+  for (const name of readdirSync(dir)) {
+    if (name !== 'tree') rmSync(join(dir, name), { recursive: true, force: true });
+  }
+  rmSync(dir, { recursive: true, force: true });
+  log(`dropped the Postgres data of ${tree}, which no longer exists (${clusters.map((c) => `${c.stack} on ${c.major}`).join(', ') || 'no clusters'}).`);
+}
+
+/**
+ * The server on PATH is the major this project declares. The declaration decides what an upgrade writes into the image, so the
+ * two part whenever one step of a move has happened and the other has not; without this, a cluster of the other major would be
+ * filed under the declared one, and a migration would be tested on a server the project does not run.
+ */
+async function assertDeclaredMajor(major, { signal }) {
+  const version = await run('postgres', ['--version'], { signal });
+  if (version.aborted) return;
+  const found = /\b(\d+)(?:\.\d+)?/.exec(version.stdout)?.[1];
+  if (found !== major) {
+    throw new Refusal(`.bespunky/postgres.json declares Postgres ${major}, and the server on PATH is ${found ?? `unreadable (${version.stdout.trim()})`}. The image installs what the declaration said at the last upgrade: run the house upgrade, then rebuild the devcontainer.`);
   }
 }
 
@@ -179,6 +206,7 @@ async function ensureCluster(key, major, { signal }) {
   if (init.aborted) return undefined;
   if (init.code !== 0) throw new Refusal(`initdb failed: ${init.stderr.trim() || init.stdout.trim()}`);
   const control = await run('pg_controldata', [dataDir(sibling)], { env: scrubbedEnv({ LC_ALL: 'C' }), signal });
+  if (control.aborted) return undefined;
   const identifier = /^Database system identifier:\s+(\d+)$/m.exec(control.stdout)?.[1];
   if (!identifier) throw new Refusal(`Could not read the new cluster's identity from pg_controldata: ${control.stderr.trim() || control.stdout.trim()}`);
   writeFileSync(identityFile(sibling), `${identifier}\n`);
@@ -221,9 +249,18 @@ export async function serve() {
     server.kill('SIGTERM');
     smartBound = setTimeout(() => server.kill('SIGINT'), SMART_STOP_MS);
   };
+  // Another postmaster now owns these files. Every other stop flushes and checkpoints, which here would write over its cluster,
+  // so this one is SIGQUIT alone: an immediate shutdown writes nothing. What is lost was already not this server's to keep.
+  const stopWritingNothing = () => {
+    stopping.abort();
+    clearTimeout(smartBound);
+    server?.kill('SIGQUIT');
+  };
   for (const name of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(name, stop);
   const stopped = () => signal.aborted;
 
+  await assertDeclaredMajor(major, { signal });
+  if (stopped()) return 0;
   sweepDeadTrees();
   assertNotHeldElsewhere(clusterHome(key, major));
   const home = await ensureCluster(key, major, { signal });
@@ -237,7 +274,7 @@ export async function serve() {
     if (lostTo) return;
     lostTo = host;
     console.error(`[postgres] container ${host} took this data over while this server ran, so it is stopping: two servers on one data directory corrupt it.`);
-    stop();
+    stopWritingNothing();
   });
   rmSync(join(data, 'postmaster.pid'), { force: true });
 
@@ -275,6 +312,8 @@ export async function serve() {
     await exited;
     clearTimeout(smartBound);
     letGo();
+    // The verbs need a running server, and this one just stopped, so this is the road that remains.
+    if (failure instanceof Refusal) failure.message += `\nThe server stopped with it. To start this stack's database from nothing, remove ${home} and start again; otherwise fix the cause and start again.`;
     throw failure;
   }
   const end = await exited;
@@ -290,7 +329,7 @@ export async function serve() {
 async function untilAccepting(port, exited, signal) {
   let gone;
   exited.then((end) => (gone = end));
-  const deadline = Date.now() + ACCEPTING_TIMEOUT_MS;
+  let deadline = Date.now() + ACCEPTING_TIMEOUT_MS;
   while (!signal.aborted) {
     if (gone) {
       throw new Refusal(`The server exited before accepting connections (${gone.error?.message ?? gone.signal ?? `status ${gone.code}`}). If its log above speaks of a lock file or a pre-existing shared memory block, an orphan holds the data: tools/dev/dev ps names the command that clears it.`);
@@ -298,6 +337,8 @@ async function untilAccepting(port, exited, signal) {
     if (Date.now() > deadline) throw new Refusal(`The server did not accept connections within ${ACCEPTING_TIMEOUT_MS / 1000}s.`);
     const probe = await run('pg_isready', ['-h', '127.0.0.1', '-p', String(port), '-U', ROLE, '-d', 'postgres', '-t', '1'], { signal });
     if (probe.code === 0) return;
+    // 1 is "rejecting": a server that answers and is still recovering. A long recovery is progress, and giving up on it restarts it.
+    if (probe.code === 1) deadline = Date.now() + ACCEPTING_TIMEOUT_MS;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }

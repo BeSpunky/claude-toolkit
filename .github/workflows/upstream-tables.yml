@@ -39,6 +39,7 @@ on:
       - 'plugins/house/engine/nx-tools/src/generators/_utils/node-facts.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
+      - 'plugins/house/engine/nx-tools/src/layers/*.ts' # image-codenames reads which images the layers compose
 
 permissions:
   contents: read

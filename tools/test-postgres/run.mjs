@@ -8,7 +8,7 @@
 // what this is for: the stop roads, the orphan, recovery, dbmate's real reading of the environment, and whether a server on
 // the right port is the right server. Every server runs on a random free block, never a base port, and is stopped by its handle.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -76,8 +76,10 @@ const MIGRATION = '-- migrate:up\nCREATE TABLE thing (id int PRIMARY KEY, name t
 const addMigration = (dir, name = '20260101000000_thing.sql', body = MIGRATION) => writeFileSync(join(dir, 'postgres/migrations', name), body);
 const addSeed = (dir, name = '01_things.sql', body = "INSERT INTO thing VALUES (1, 'seeded');\n") => writeFileSync(join(dir, 'postgres/seed/world', name), body);
 
-const launcher = (dir, ...args) => spawnSync(process.execPath, ['tools/postgres/postgres.mjs', ...args], { cwd: dir, env: baseEnv(), encoding: 'utf8' });
-const dev = (dir, ...args) => spawnSync(process.execPath, ['tools/dev/dev.mjs', ...args], { cwd: dir, env: baseEnv(), encoding: 'utf8' });
+// Bounded: a verb that hangs must fail this run, not burn a CI job's whole timeout.
+const SYNC_TIMEOUT_MS = 90_000;
+const launcher = (dir, ...args) => spawnSync(process.execPath, ['tools/postgres/postgres.mjs', ...args], { cwd: dir, env: baseEnv(), encoding: 'utf8', timeout: SYNC_TIMEOUT_MS });
+const dev = (dir, ...args) => spawnSync(process.execPath, ['tools/dev/dev.mjs', ...args], { cwd: dir, env: baseEnv(), encoding: 'utf8', timeout: SYNC_TIMEOUT_MS });
 const ps = (dir) => JSON.parse(dev(dir, 'ps', '--json').stdout);
 
 const started = [];
@@ -116,6 +118,7 @@ const sql = (port, text, database = 'app') => {
 };
 
 let failures = 0;
+let ran = 0;
 const scenarios = [];
 const scenario = (name, body) => scenarios.push({ name, body });
 const ok = (value, what) => {
@@ -431,6 +434,72 @@ scenario('the sweep: a tree invisible from here keeps its data, which still work
   await untilEnded(back);
 });
 
+scenario('the sweep: a tree removed while its server runs keeps its data, also through a symlinked data home', async () => {
+  // A dotfile manager's ~/.local/share: the path a launcher builds is not the path the kernel reports for the server's cwd.
+  const realHome = join(scratch, `real-data-${++fixtures}`);
+  const linkedHome = join(scratch, `linked-data-${fixtures}`);
+  mkdirSync(realHome);
+  symlinkSync(realHome, linkedHome);
+  const env = { XDG_DATA_HOME: linkedHome };
+  const dir = fixture();
+  const running = await start(dir, { env });
+  const hash = readdirSync(join(realHome, 'bespunky/postgres')).find((d) => existsSync(join(realHome, 'bespunky/postgres', d, 'tree')));
+  const data = join(realHome, 'bespunky/postgres', hash, running.key, '18/data');
+  const moved = `${dir}-moved`;
+  renameSync(dir, moved);
+  // The rename is what `rm` looks like to a sweep: the parent answers, and the tree is not in it.
+  const other = await start(fixture(), { env });
+  ok(existsSync(join(data, 'PG_VERSION')), 'the live cluster is still there');
+  ok(other.log().includes('a server still runs on its data'), 'and the sweep says it left it alone');
+  ok(sql(running.port, 'SELECT 1') === '1', 'the running server still answers');
+  stop(other);
+  await untilEnded(other);
+  renameSync(moved, dir);
+  stop(running);
+  await untilEnded(running);
+});
+
+scenario('a server on this stack\'s port that is not this stack\'s: refused, and nothing is migrated on it', async () => {
+  const decoy = await start(fixture());
+  const dir = fixture();
+  addMigration(dir);
+  const refused = await start(dir, { offset: decoy.offset, expectFailure: true, timeoutMs: 30_000 });
+  await untilEnded(refused);
+  ok(refused.ended && refused.code !== 0 && /not the one/.test(refused.log()), `refused by identity (${refused.log().split('\n').filter((line) => line.includes('[postgres]')).at(-1)})`);
+  ok(sql(decoy.port, "SELECT to_regclass('thing')") === '', 'the other server was not migrated');
+  ok(!existsSync(join(dir, '.bespunky/run', decoy.key, 'postgres.ready')), 'and nothing says ready');
+  stop(decoy);
+  await untilEnded(decoy);
+});
+
+scenario('the declared major and the server on PATH disagree: refused before anything is created', async () => {
+  const dir = fixture({ major: '17' });
+  const refused = await start(dir, { expectFailure: true, timeoutMs: 30_000 });
+  await untilEnded(refused);
+  ok(refused.ended && refused.code !== 0 && /declares Postgres 17, and the server on PATH is 18/.test(refused.log()), `refused, naming both (${refused.log().trim().split('\n').at(-1)})`);
+  ok(/run the house upgrade, then rebuild/.test(refused.log()), 'and it names both steps of the move');
+});
+
+scenario('a failed bring-up names the road back, which works', async () => {
+  const dir = fixture();
+  addMigration(dir, '20260201000000_later.sql');
+  const offset = await freeOffset();
+  const first = await start(dir, { offset });
+  stop(first);
+  await untilEnded(first);
+  addMigration(dir, '20260101000000_earlier.sql', '-- migrate:up\nCREATE TABLE earlier (id int);\n\n-- migrate:down\n');
+  const failed = await start(dir, { offset, expectFailure: true, timeoutMs: 30_000 });
+  await untilEnded(failed);
+  const road = /remove (\S+) and start again/.exec(failed.log())?.[1];
+  ok(failed.code !== 0 && Boolean(road), `an out-of-order migration fails the start, and says what to remove (${failed.log().trim().split('\n').at(-1)})`);
+  ok(/No Postgres/.test(launcher(dir, 'reset').stderr), 'the verbs need a running server, which is why');
+  rmSync(road, { recursive: true, force: true });
+  const again = await start(dir, { offset });
+  ok(sql(again.port, "SELECT to_regclass('earlier')") === 'earlier' && sql(again.port, "SELECT to_regclass('thing')") === 'thing', 'and that road gives a database with both migrations');
+  stop(again);
+  await untilEnded(again);
+});
+
 scenario('the heartbeat: another container on this data is refused, a stale one taken over, and a server that lost it stops', async () => {
   const dir = fixture();
   addMigration(dir);
@@ -462,6 +531,7 @@ scenario('the heartbeat: another container on this data is refused, a stale one 
   writeFileSync(owner, 'other-container\n');
   ok(await untilEnded(taken, 20_000), 'a server whose data another host took stops');
   ok(taken.code !== 0 && taken.log().includes('took this data over'), 'and says why');
+  ok(!taken.log().includes('checkpoint starting: shutdown'), 'and writes nothing on its way out: an immediate shutdown, with no checkpoint over the new owner\'s files');
   ok(readFileSync(owner, 'utf8').trim() === 'other-container', 'leaving that host\'s claim where it is');
   rmSync(owner);
 });
@@ -497,7 +567,7 @@ scenario('deploy: only what is named, from the environment, never from a file', 
   ok(/POSTGRES_DEPLOY_URL is not set/.test(deploy({ CI: 'true' }).stderr), 'no URL: refused, with what to set');
   const noTerminal = deploy({ POSTGRES_DEPLOY_URL: url });
   ok(noTerminal.status !== 0 && /asks a human/.test(noTerminal.stderr) && sql(remote.port, "SELECT to_regclass('thing')") === '', 'outside CI with no terminal: refused, nothing ran');
-  for (const bad of [`postgresql://u@127.0.0.1:/app`, `postgresql:///app`, `postgresql://a:1,b:2/app`, `postgresql://127.0.0.1:${remote.port}/app?host=elsewhere`, `postgresql://127.0.0.1:${remote.port}/`, `mysql://127.0.0.1/app`]) {
+  for (const bad of [`postgresql://u@127.0.0.1:/app`, `postgresql:///app`, `postgresql://a:1,b:2/app`, `postgresql://127.0.0.1:${remote.port}/app?host=elsewhere`, `postgresql://127.0.0.1:${remote.port}/app?socket=/tmp`, `postgresql://127.0.0.1:${remote.port}/`, `mysql://127.0.0.1/app`]) {
     const refused = deploy({ CI: 'true', POSTGRES_DEPLOY_URL: bad });
     ok(refused.status !== 0 && /is refused/.test(refused.stderr), `refused: ${bad}`);
   }
@@ -583,6 +653,7 @@ const cleanup = () => {
 try {
   for (const { name, body } of scenarios) {
     if (only && !name.includes(only)) continue;
+    ran++;
     console.log(name);
     try {
       await body();
@@ -594,6 +665,10 @@ try {
 } finally {
   cleanup();
   rmSync(scratch, { recursive: true, force: true });
+}
+if (!ran) {
+  console.log(`FAILED: no scenario matches --only=${only}`);
+  process.exit(1);
 }
 console.log(failures ? `FAILED: ${failures}` : 'all ok');
 process.exit(failures ? 1 : 0);

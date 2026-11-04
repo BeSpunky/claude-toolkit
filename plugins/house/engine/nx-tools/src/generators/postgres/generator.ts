@@ -5,7 +5,7 @@
 // Writes, by class (CLAUDE.md):
 //   A  tools/postgres/*.mjs: the launcher, rewritten every run.
 //   B  postgres/project.json: the targets, three-way merged like every house project's; a project.json island whatever the
-//      workspace's linking, because it has no package of its own and it is this layer's evidence.
+//      workspace's linking when nothing else holds that name, because it has no package of its own and it is this layer's evidence.
 //   C  postgres/migrations, postgres/seed/world, .bespunky/postgres.json: seeded once, the project's from then on.
 //
 // A running server is declared in `.bespunky/dev.json` for every served app (`postgres.devFragment`); with nothing served,

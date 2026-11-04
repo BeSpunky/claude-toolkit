@@ -21,10 +21,14 @@ writeFileSync(join(tree, '.bespunky/postgres.json'), '{ "major": 18 }\n');
 const fake = (name, body = '') =>
   writeFileSync(join(bin, name), `#!/bin/sh\n{ printf '%s\\n' "$@"; echo "--cwd=$PWD"; env | grep -E '^(PG[A-Z]|DBMATE_|DATABASE_URL|DIRECT_DATABASE_URL|POSTGRES_DEPLOY_URL)' ; } > "${calls}/${name}.$$"\n${body}\nexit 0\n`, { mode: 0o755 });
 fake('dbmate');
+fake('postgres', `case "$*" in --version) echo 'postgres (PostgreSQL) 18.6 (Debian x)' ;; esac`);
 fake('psql', `case "$*" in *pg_control_system*) cat "${scratch}/answer" ;; esac`);
 const say = (answer) => writeFileSync(join(scratch, 'answer'), `${answer}\n`);
 const stacksAre = (rows) => writeFileSync(join(tree, 'tools/dev/dev.mjs'), `process.stdout.write(${JSON.stringify(JSON.stringify(rows))});\n`);
-const row = (offset, extra = {}) => ({ key: `postgres@${offset}`, app: 'postgres', tree, offset, state: 'live', ports: { postgres: 5432 + offset }, ...extra });
+const readyState = join(scratch, 'ready-state');
+mkdirSync(readyState, { recursive: true });
+writeFileSync(join(readyState, 'postgres.ready'), '');
+const row = (offset, extra = {}) => ({ key: `postgres@${offset}`, app: 'postgres', tree, offset, state: 'live', ports: { postgres: 5432 + offset }, stateDir: readyState, ...extra });
 
 const run = (verb, args = [], env = {}) =>
   spawnSync(process.execPath, [join(tree, 'tools/postgres/postgres.mjs'), verb, ...args], { cwd: tree, encoding: 'utf8', env: { PATH: `${bin}:${process.env.PATH}`, XDG_DATA_HOME: xdg, HOME: scratch, ...env } });
@@ -53,6 +57,15 @@ for (const [url, why] of [
   ['postgresql://host:5432/db?host=other', /`host`/],
   ['postgresql://host:5432/db?hostaddr=1.2.3.4', /`hostaddr`/],
   ['postgresql://host:5432/db?service=prod', /`service`/],
+  ['postgresql://u:p@host:5432/db?socket=/tmp', /`socket`/],
+  ['postgresql://u:p@host:5432/db?SOCKET=/tmp', /`SOCKET`/],
+  ['postgresql://u@host:5432/db?password=SECRETQ', /`password`/],
+  ['postgresql://u@host:5432/db?sslpassword=SECRETQ', /`sslpassword`/],
+  ['postgresql://u:p@host:5432/db?%68ost=other', /`host`/],
+  ['postgresql://u:p@host:5432/db?sslmode=disable', /in clear/],
+  ['postgresql://u:p@host:5432/db?sslmode=prefer', /in clear/],
+  ['postgresql://u:p@host%zz/db', /percent/],
+  ['postgresql://admin:1234/abc@prod.example.com/db', /unencoded/],
   ['mysql://host/db', /postgres/],
   ['', /postgres/],
 ]) {
@@ -62,7 +75,7 @@ for (const [url, why] of [
   } catch (error) {
     message = error.message;
   }
-  check(`refused: ${url || '(empty)'}`, why.test(message) && !message.includes(':p@'), message);
+  check(`refused: ${url || '(empty)'}`, why.test(message) && !message.includes(':p@') && !message.includes('SECRETQ') && !message.includes('abc@prod'), message);
 }
 const good = parseDeployUrl('postgresql://user:p%40ss@db.example.com:6000/shop?sslmode=require');
 check('a good URL: host, port, database, and a display with no password', good.display === 'db.example.com:6000/shop' && good.password === 'p%40ss');
@@ -108,9 +121,10 @@ stacksAre([row(100, { state: 'orphaned' })]);
 result = run('reset');
 check('an orphan is not usable, and dev ps is named', result.status !== 0 && /dev ps/.test(result.stderr) && /orphaned/.test(result.stderr), result.stderr);
 
-stacksAre([row(100, { waitingFor: 'postgres' })]);
+// A `dev run` stack waits on nothing the engine knows of, so what says "up" is the launcher's own mark: migrated and seeded.
+stacksAre([row(100, { stateDir: join(scratch, 'no-mark-yet') })]);
 result = run('reset');
-check('a starting stack: try again', result.status !== 0 && /still starting/.test(result.stderr), result.stderr);
+check('a live stack whose launcher is still bringing it up: try again', result.status !== 0 && /still starting/.test(result.stderr), result.stderr);
 
 // ── identity ──
 stacksAre([row(100)]);
@@ -136,6 +150,9 @@ const [dbmate] = lastCall('dbmate');
 check('migrate succeeds', result.status === 0, result.stderr);
 check('dbmate gets the stack\'s complete URL', dbmate?.includes('--url\npostgresql://postgres@127.0.0.1:5532/app?sslmode=disable'), dbmate);
 check('an empty env file, explicit paths, no schema dump, the lock, strict', ['--env-file', `-d\n${join(tree, 'postgres/migrations')}`, '--no-dump-schema', '--migration-lock', 'migrate\n--strict'].every((part) => dbmate?.includes(part)), dbmate);
+clearCalls();
+result = run('psql', ['--sql=SELECT 1']);
+check('psql --sql reads no startup file, where a \\connect would leave the server just checked', lastCall('psql').some((call) => call.includes('SELECT 1\n') && /^-X$/m.test(call)), lastCall('psql').join('---'));
 const envFile = /--env-file\n(.*)\n/.exec(dbmate ?? '')?.[1] ?? '';
 check('its cwd is outside the tree', !/--cwd=.*\/tree/.test(dbmate ?? '') && Boolean(envFile), dbmate);
 check('nothing of PG*, DBMATE_* or a URL reaches any child', ![...lastCall('dbmate'), ...lastCall('psql')].some((call) => /^(PG[A-Z]|DBMATE_|DATABASE_URL|DIRECT_DATABASE_URL|POSTGRES_DEPLOY_URL)/m.test(call)), dbmate);
@@ -172,6 +189,9 @@ check('the file\'s down is empty', readFileSync(join(MIGRATIONS, '29990101000001
 for (const file of readdirSync(MIGRATIONS)) rmSync(join(MIGRATIONS, file));
 writeFileSync(join(MIGRATIONS, '20260101000000_a.sql'), '-- migrate:up\nSELECT 1;\n-- migrate:down\n');
 
+check('loopback may say sslmode=disable: nothing crosses a network', parseDeployUrl('postgresql://u:p@127.0.0.1:6000/shop?sslmode=disable').sslmode === 'disable');
+check('a hosted provider\'s usual parameters pass', parseDeployUrl('postgresql://u:p@db.example.com/shop?sslmode=verify-full&channel_binding=require&options=endpoint%3Dx').host === 'db.example.com');
+
 // ── deploy ──
 const SECRET = 'postgresql://u:hunter2@db.example.com:6000/shop';
 clearCalls();
@@ -190,6 +210,55 @@ for (const name of ['.env', '.env.local', '.local.env', '.deploy.env', 'postgres
   check(`a URL in ${name}: refused`, result.status !== 0 && /never from a file/.test(result.stderr) && !result.stderr.includes('hunter2'), result.stderr);
   rmSync(join(tree, name));
 }
+for (const [name, body] of [['.env', `POSTGRES_DEPLOY_URL: ${SECRET}\n`], ['.env.local', `export POSTGRES_DEPLOY_URL: ${SECRET}\n`]]) {
+  writeFileSync(join(tree, name), body);
+  result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CI: 'true' });
+  check(`dotenv's other spelling in ${name}: refused`, result.status !== 0 && /never from a file/.test(result.stderr), result.stderr);
+  rmSync(join(tree, name));
+}
+clearCalls();
+writeFileSync(join(tree, '.env'), 'CI: true\n');
+result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CI: 'true' });
+check('CI set in a file: refused, because it would skip the confirmation', result.status !== 0 && /would skip/.test(result.stderr) && lastCall('dbmate').length === 0, result.stderr);
+rmSync(join(tree, '.env'));
+result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CI: 'false' });
+check('CI=false is not CI: it asks a human', result.status !== 0 && /asks a human/.test(result.stderr) && lastCall('dbmate').length === 0, result.stderr);
+
+// The prompt, on a real terminal: the only guard on a hand-run production migration.
+const onATerminal = (answer) =>
+  spawnSync('script', ['-qec', `"${process.execPath}" tools/postgres/postgres.mjs deploy`, '/dev/null'], {
+    cwd: tree,
+    encoding: 'utf8',
+    input: `${answer}\n`,
+    env: { PATH: `${bin}:${process.env.PATH}`, XDG_DATA_HOME: xdg, HOME: scratch, POSTGRES_DEPLOY_URL: SECRET },
+  });
+if (spawnSync('script', ['--version']).status === 0) {
+  clearCalls();
+  result = onATerminal('nope');
+  check('a wrong answer at the prompt: nothing ran', /Not confirmed/.test(result.stdout) && lastCall('dbmate').length === 0, result.stdout + result.stderr);
+  result = onATerminal('shop');
+  check('the database\'s name at the prompt: it runs', lastCall('dbmate').length === 1, result.stdout + result.stderr);
+  clearCalls();
+} else {
+  console.log('  skip the prompt (no `script` here)');
+}
+
+// An npm package with a `dbmate` bin: first on PATH under Nx, and it would be handed the URL.
+mkdirSync(join(tree, 'node_modules/.bin'), { recursive: true });
+writeFileSync(join(tree, 'node_modules/.bin/dbmate'), `#!/bin/sh\necho poisoned > "${scratch}/poisoned"\n`, { mode: 0o755 });
+result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CI: 'true', PATH: `${join(tree, 'node_modules/.bin')}:${bin}:${process.env.PATH}` });
+check('a bin in node_modules/.bin is not the pinned tool', result.status === 0 && !existsSync(join(scratch, 'poisoned')), result.stderr);
+rmSync(join(tree, 'node_modules'), { recursive: true });
+mkdirSync(join(scratch, 'empty-path'));
+result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CI: 'true', PATH: join(scratch, 'empty-path') });
+check('no dbmate in CI: says what installs it, not to rebuild a devcontainer', result.status !== 0 && /deploy workflow/.test(result.stderr) && !/rebuild/.test(result.stderr), result.stderr);
+
+// What a client says back, with the URL in it, stays masked.
+fake('dbmate', 'echo "failed on $DATABASE_URL"; exit 1');
+result = run('deploy', [], { POSTGRES_DEPLOY_URL: SECRET, CI: 'true' });
+check('dbmate echoing its URL: the password is masked', result.status !== 0 && !(result.stdout + result.stderr).includes('hunter2') && /\*\*\*/.test(result.stdout), result.stdout);
+fake('dbmate');
+
 result = run('deploy', [], { POSTGRES_DEPLOY_URL: 'postgres://u:hunter2@h:6543/d', CI: 'true' });
 check('a transaction pooler: refused, with no password said', result.status !== 0 && /pooler/.test(result.stderr) && !result.stderr.includes('hunter2'), result.stderr);
 clearCalls();
@@ -203,6 +272,26 @@ check('and only that: the rest of a hostile environment is gone', !/^(PGHOST|DBM
 // ── serve only inside a stack ──
 result = run('serve');
 check('`serve` outside a dev stack: refused, naming the target', result.status !== 0 && /postgres:start/.test(result.stderr), result.stderr);
+
+// ── under an agent, Nx shows nothing of a task until it ends ──
+const summaryRenderer = join(tree, 'node_modules/nx/dist/src/tasks-runner/life-cycles');
+mkdirSync(summaryRenderer, { recursive: true });
+writeFileSync(join(summaryRenderer, 'summary-terminal-output-life-cycle.js'), '');
+const underNx = { CLAUDECODE: '1', NX_TASK_TARGET_PROJECT: 'postgres' };
+stacksAre([]);
+result = run('start', [], underNx);
+check('postgres:start through a silent Nx, under an agent: refused, naming what prints the port and the handle', result.status !== 0 && /node tools\/postgres\/postgres\.mjs start/.test(result.stderr), result.stderr);
+for (const [what, extra] of [['Nx streaming', { NX_DEFAULT_OUTPUT_STYLE: 'stream' }], ['a human', { CLAUDECODE: '' }]]) {
+  result = run('start', [], { ...underNx, ...extra });
+  check(`…not with ${what}`, result.status === 0, result.stderr);
+}
+result = run('start', [], { CLAUDECODE: '1' });
+check('…not when it is not Nx running it', result.status === 0, result.stderr);
+rmSync(join(tree, 'node_modules'), { recursive: true });
+result = run('start', [], underNx);
+check('…not on an Nx with no summary renderer, which streams', result.status === 0, result.stderr);
+result = run('migrate', [], { CLAUDECODE: '1' });
+check('under an agent, a verb with no server names the command that prints its handle', result.status !== 0 && /node tools\/postgres\/postgres\.mjs start/.test(result.stderr), result.stderr);
 
 // ── the sweep: a deletion must be proven ──
 // `~/.local` is a volume, so a tree another container mounts is invisible from this one, and treating it as gone loses its data.
@@ -249,6 +338,16 @@ if (process.getuid?.() !== 0) {
   check('a parent that cannot be read proves nothing: kept', existsSync(behind) && again.stdout.includes('kept the Postgres data of') && again.stdout.includes(sealed), again.stdout);
 }
 rmSync(sweepHome, { recursive: true, force: true });
+if (process.getuid?.() !== 0) {
+  // One dead tree's unreadable stack dir: housekeeping for it must not stop anyone else's start.
+  const stuck = recordTree('stuck', join(worktrees, 'removed-too'));
+  const other = recordTree('other', join(worktrees, 'removed-also'));
+  chmodSync(join(stuck, 'postgres@0'), 0o000);
+  const survived = sweep();
+  chmodSync(join(stuck, 'postgres@0'), 0o755);
+  check('an entry the sweep cannot read does not stop the sweep', survived.status === 0 && survived.stdout.includes(`kept what is left of ${stuck}`) && !existsSync(other), survived.stdout + survived.stderr);
+  rmSync(sweepHome, { recursive: true, force: true });
+}
 
 // ── the heartbeat: another container on this data ──
 const age = (file, seconds) => utimesSync(file, new Date(Date.now() - seconds * 1000), new Date(Date.now() - seconds * 1000));
@@ -290,7 +389,7 @@ const staged = (host, seconds) => {
   mkdirSync(dirname(clusterAt), { recursive: true });
   writeFileSync(join(sweepHome, hash, 'tree'), `${realpathSync(tree)}\n`);
 };
-writeFileSync(join(bin, 'postgres'), `#!/bin/sh\ncat "${clusterAt}/owner" > "${calls}/owner-at-boot"; test -e "${clusterAt}/data/postmaster.pid" && touch "${calls}/pid-at-boot"; exit 3\n`, { mode: 0o755 });
+writeFileSync(join(bin, 'postgres'), `#!/bin/sh\ncase "$*" in --version) echo 'postgres (PostgreSQL) 18.6'; exit 0 ;; esac\ncat "${clusterAt}/owner" > "${calls}/owner-at-boot"; test -e "${clusterAt}/data/postmaster.pid" && touch "${calls}/pid-at-boot"; exit 3\n`, { mode: 0o755 });
 staged('other-container', 5);
 clearCalls();
 result = serveVerb();

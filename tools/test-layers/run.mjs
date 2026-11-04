@@ -1210,6 +1210,12 @@ checkAsync('postgres closures: the table covers the pins, is exactly what its to
   }
   ok(unreadable, 'a pin the check cannot read is an error, never an empty list');
   ok(Object.keys(POSTGRES_CLOSURES).sort().join() === [...versions.POSTGRES_MAJORS].sort().join(), `the table's majors are not the pins: ${Object.keys(POSTGRES_CLOSURES)} (node tools/postgres-debs/project.mjs --write)`);
+  // The image job's table is hand-written, and its header says it covers every major on every release.
+  const imageCases = readFileSync(new URL('../check-runner-image/postgres-image.sh', import.meta.url), 'utf8').match(/^pg\d+-[^|]*\|[^|]*\|[^|]*\|\d+\|[^|]*\|\w+$/gm) ?? [];
+  const imageCovers = new Set(imageCases.map((line) => { const fields = line.split('|'); return `${fields[3]}/${fields[5]}`; }));
+  for (const major of versions.POSTGRES_MAJORS) {
+    for (const codename of versions.POSTGRES_DEB_CODENAMES) ok(imageCovers.has(`${major}/${codename}`), `tools/check-runner-image/postgres-image.sh has no case for Postgres ${major} on ${codename}`);
+  }
   for (const major of versions.POSTGRES_MAJORS) {
     const closures = POSTGRES_CLOSURES[major] ?? {};
     ok(Object.keys(closures).join() === versions.POSTGRES_DEB_CODENAMES.join(), `Postgres ${major}'s codenames are not the pins: ${Object.keys(closures)}`);

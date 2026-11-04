@@ -30,7 +30,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const FILES = join(HERE, '../../plugins/house/engine/nx-tools/src/generators/dev/files');
 
 // `dev ps --json`, a public contract (lib/stacks.mjs publicStack): keys every stack has. A removed or renamed one is a break.
-const PUBLIC_STACK_KEYS = ['key', 'app', 'tree', 'treeLabel', 'offset', 'state', 'pid', 'owner', 'host', 'startedAt', 'ports', 'portStates', 'exports', 'tmp', 'processes', 'detached'];
+const PUBLIC_STACK_KEYS = ['key', 'app', 'tree', 'treeLabel', 'offset', 'state', 'pid', 'owner', 'host', 'startedAt', 'ports', 'portStates', 'exports', 'tmp', 'stateDir', 'processes', 'detached'];
 
 let failed = 0;
 const ok = (label, cond) => {

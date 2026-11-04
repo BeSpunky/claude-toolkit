@@ -941,7 +941,7 @@ async function stepAddLayerPostgres() {
   const offset = await freeOffset(5432);
   const key = `postgres@${offset}`;
   const t0 = Date.now();
-  const start = background(`${step}-start`, bin, [...pre, 'run', 'postgres:start', `--port-offset=${offset}`, '--output-style=static'], { cwd: c.dir, env: tools });
+  const start = background(`${step}-start`, bin, [...pre, 'run', 'postgres:start', `--port-offset=${offset}`], { cwd: c.dir, env: { ...tools, NX_DEFAULT_OUTPUT_STYLE: 'stream' } });
   const up = await until(() => start.ended || existsSync(join(c.dir, '.bespunky/run', key, 'postgres.ready')));
   const booted = !start.ended && Boolean(up);
   if (!record(step, 'nx run postgres:start boots there, on the real server', booted, { ms: Date.now() - t0, log: start.log, detail: booted ? '' : start.ended ? `ended, exit ${start.code}: ${why(start.out())}` : 'not up after 3 minutes' })) {

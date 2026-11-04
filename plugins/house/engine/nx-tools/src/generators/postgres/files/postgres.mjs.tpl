@@ -52,6 +52,17 @@ async function addressed(argv, allowed = ['offset']) {
   return { stack, flags };
 }
 
+/**
+ * Does Nx render this run as an agent's summary, nothing of a task until it ends? The serve executor's rule (executors/serve),
+ * read from the paths because this launcher takes no Nx import. An --output-style flag is invisible from here.
+ */
+function silentUnderNx() {
+  const { CLAUDECODE, NX_TASK_TARGET_PROJECT, NX_STREAM_OUTPUT, NX_TUI, NX_DEFAULT_OUTPUT_STYLE: style } = process.env;
+  if (CLAUDECODE !== '1' || !NX_TASK_TARGET_PROJECT || NX_STREAM_OUTPUT === 'true' || NX_TUI === 'true' || (style && style !== 'summary')) return false;
+  const lifeCycle = 'tasks-runner/life-cycles/summary-terminal-output-life-cycle.js';
+  return ['node_modules/nx', '.nx/installation/node_modules/nx'].some((nx) => ['dist/src', 'src'].some((at) => existsSync(join(ROOT, nx, at, lifeCycle))));
+}
+
 /** A stack of its own, through the engine: it claims the port block and hands the server its lock, like any process of a serve. */
 function start(argv) {
   if (process.env.DEV_STACK_DIR) {
@@ -59,6 +70,9 @@ function start(argv) {
     return serve();
   }
   const { flags } = parse(argv, ['port-offset']);
+  if (silentUnderNx()) {
+    throw new Refusal(`Under an AI agent Nx shows nothing of this while it runs (no port, no stop handle), so it would block silently until the tool call times out. Run the launcher itself, which prints both: node tools/postgres/postgres.mjs start`);
+  }
   const child = spawn(process.execPath, [DEV_ENGINE, 'run', PORT_NAME, '--label=Postgres, run on its own', `--ports=${PORT_NAME}=${BASE_PORT}`, ...(flags['port-offset'] !== undefined ? [`--port-offset=${flags['port-offset']}`] : []), '--', process.execPath, LAUNCHER, 'serve'], {
     cwd: ROOT,
     stdio: 'inherit',
@@ -97,7 +111,8 @@ async function reset(argv) {
 async function psql(argv) {
   const { stack, flags } = await addressed(argv, ['offset', 'sql', 'file']);
   mkdirSync(dataHome(), { recursive: true }); // where PSQL_HISTORY points, in the house's devcontainer
-  const args = ['-h', '127.0.0.1', '-p', String(stack.port), '-U', ROLE, '-d', DATABASE, ...(flags.sql !== undefined ? ['-v', 'ON_ERROR_STOP=1', '-c', flags.sql] : []), ...(flags.file !== undefined ? ['-v', 'ON_ERROR_STOP=1', '-f', flags.file] : [])];
+  // A statement to run names no startup file: a `\\connect` in one would move it off the server just checked. A session is a human's own.
+  const args = ['-h', '127.0.0.1', '-p', String(stack.port), '-U', ROLE, '-d', DATABASE, ...(flags.sql !== undefined || flags.file !== undefined ? ['-X'] : []), ...(flags.sql !== undefined ? ['-v', 'ON_ERROR_STOP=1', '-c', flags.sql] : []), ...(flags.file !== undefined ? ['-v', 'ON_ERROR_STOP=1', '-f', flags.file] : [])];
   process.on('SIGINT', () => {}); // Ctrl+C cancels the query in psql, and must not end this parent
   const child = spawn(tool('psql'), args, { cwd: ROOT, env: scrubbedEnv(), stdio: 'inherit' });
   return new Promise((resolve) => child.on('exit', (code) => resolve(code ?? 1)));
@@ -109,8 +124,11 @@ function createMigration(argv) {
   return 0;
 }
 
-/** Nx loads these files into a task's environment, so a URL in one would reach `deploy` looking like an explicit variable. */
-function urlInAFile() {
+/**
+ * Nx loads these files into a task's environment, so a value in one reaches `deploy` looking like an explicit variable. Which of
+ * them sets `variable`? Read by dotenv's own grammar, which takes `NAME: value` as well as `NAME=value`.
+ */
+function envFileSetting(variable) {
   for (const dir of [ROOT, join(ROOT, 'postgres')]) {
     if (!existsSync(dir)) continue;
     for (const name of readdirSync(dir)) {
@@ -121,14 +139,15 @@ function urlInAFile() {
       } catch {
         continue;
       }
-      if (new RegExp(`^\\s*(export\\s+)?${DEPLOY_URL_VAR}\\s*=`, 'm').test(body)) return join(dir, name);
+      if (new RegExp(`^\\s*(export\\s+)?${variable}(\\s*=|:\\s)`, 'm').test(body)) return join(dir, name);
     }
   }
   return undefined;
 }
 
 async function humanConfirms(target) {
-  if (process.env.CI) return;
+  // What runners set, and from nowhere else: the prompt is the only thing a stray `CI=false` or a project file could remove.
+  if (process.env.CI === 'true' || process.env.CI === '1') return;
   if (!process.stdin.isTTY) {
     throw new Refusal(`Outside CI, a deploy asks a human, and there is no terminal to ask on. Run it yourself in a terminal, or let CI run it.`);
   }
@@ -142,8 +161,10 @@ async function deploy(argv) {
   parse(argv, []);
   // First, and whatever CI says: an agent can set CI itself, and it reaches a database nobody asked it to migrate.
   if (process.env.CLAUDECODE === '1') throw new Refusal(`A deploy is not an agent's to run: a human runs it, or CI does. Hand the user this command to run in a terminal: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
-  const file = urlInAFile();
+  const file = envFileSetting(DEPLOY_URL_VAR);
   if (file) throw new Refusal(`${DEPLOY_URL_VAR} is set in ${file}. A deploy's URL comes from CI or from a variable you set yourself, never from a file: remove it.`);
+  const skipsThePrompt = envFileSetting('CI');
+  if (skipsThePrompt) throw new Refusal(`CI is set in ${skipsThePrompt}, and it would skip a deploy's confirmation. Only the runner says it is CI: remove it.`);
   const url = process.env[DEPLOY_URL_VAR];
   if (!url) throw new Refusal(`${DEPLOY_URL_VAR} is not set. CI sets it from the environment's secret; by hand: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
   let target;
@@ -153,10 +174,13 @@ async function deploy(argv) {
     throw new Refusal(`${DEPLOY_URL_VAR} is refused: ${error.message}`);
   }
   if (target.pooled) throw new Refusal(`${DEPLOY_URL_VAR} names a transaction pooler (${target.display}). Migrations need a direct connection: use the host's direct URL.`);
-  console.log(`[postgres] deploying migrations to ${target.display}`);
+  console.log(`[postgres] deploying migrations to ${target.display}${target.sslmode ? ` (sslmode=${target.sslmode})` : ''}`);
   await humanConfirms(target);
   // In the environment, not on the command line: a URL with a password in argv is readable by every process on the machine.
-  const hide = (text) => (target.password ? text.split(target.password).join('***') : text);
+  const hide = (text) => {
+    const withoutUrl = text.split(url).join('***');
+    return target.password ? withoutUrl.split(target.password).join('***') : withoutUrl;
+  };
   await dbmateMigrate({ args: ['--env', 'DATABASE_URL'], env: { DATABASE_URL: url } }, { onOutput: hide });
   console.log(`[postgres] ${target.display} is migrated.`);
   return 0;

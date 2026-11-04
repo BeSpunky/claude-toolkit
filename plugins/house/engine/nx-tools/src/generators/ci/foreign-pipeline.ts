@@ -4,7 +4,9 @@
 // step name, an env value or a heredoc written to the job summary deploys nothing. Only the commands in a step's `run`
 // count, and a command that only prints its arguments is not running them. It stays a reading of shell, not a shell:
 // a deploy inside a quoted `$(...)` of an `echo` goes unseen, and an unknown command mentioning a signal counts, because
-// taking a real pipeline for an unrelated one puts two deploys on one push, the worse of the two errors.
+// taking a real pipeline for an unrelated one puts two deploys on one push, the worse of the two errors. A workflow only a pull
+// request triggers deploys no line, whatever it runs: that is where a test runs its migrations against a service container.
+// A `uses:` step or job is not read: what it runs is not in this file.
 import { parse } from 'yaml';
 
 /** Commands that only print what they are given. */
@@ -66,6 +68,14 @@ export function executedCommands(script: string): string[] {
   return commands;
 }
 
+/** What fires for a pull request and never for a line. */
+const PULL_REQUEST_EVENTS = new Set(['pull_request', 'pull_request_target', 'merge_group']);
+
+function onlyPullRequests(on: unknown): boolean {
+  const events = typeof on === 'string' ? [on] : Array.isArray(on) ? on : on && typeof on === 'object' ? Object.keys(on) : [];
+  return events.length > 0 && events.every((event) => PULL_REQUEST_EVENTS.has(event));
+}
+
 /** Every `run` script in a workflow's jobs. A file that does not parse runs nothing on GitHub either. */
 function runScripts(workflow: string): string[] {
   let parsed: unknown;
@@ -74,6 +84,7 @@ function runScripts(workflow: string): string[] {
   } catch {
     return [];
   }
+  if (onlyPullRequests((parsed as { on?: unknown } | null)?.on)) return [];
   const jobs = (parsed as { jobs?: unknown } | null)?.jobs;
   if (!jobs || typeof jobs !== 'object') return [];
   return Object.values(jobs).flatMap((job) => {

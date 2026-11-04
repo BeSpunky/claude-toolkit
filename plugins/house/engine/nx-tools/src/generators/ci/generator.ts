@@ -415,7 +415,8 @@ function currentlyOwned(tree: Tree, recorded: readonly string[]): string[] {
 function foreignDeployWorkflows(tree: Tree, ownedFiles: readonly string[]): string[] {
   const dir = '.github/workflows';
   if (!tree.exists(dir)) return [];
-  const DEPLOYS = [/-t\s+deploy\b/, /--targets?[= ]deploy\b/, /\bnx\s+run\s+\S+:deploy\b/, ...LAYERS.flatMap((l) => l.ciDeploy?.deploySignals ?? [])];
+  // Nx takes a target list after -t or --target(s), by `=` or a space, split by commas or spaces and maybe quoted.
+  const DEPLOYS = [/(?:^|\s)(?:-t|--targets?)[=\s]+["']?(?:[\w:][\w:-]*[,\s]+)*deploy\b/, /\bnx\s+run\s+\S+:deploy\b/, /\bnx\s+deploy\b/, ...LAYERS.flatMap((l) => l.ciDeploy?.deploySignals ?? [])];
   return tree
     .children(dir)
     .filter((name) => /\.ya?ml$/.test(name))
