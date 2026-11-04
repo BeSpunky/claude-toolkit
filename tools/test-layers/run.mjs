@@ -566,7 +566,7 @@ checkAsync('wrapper-hosted repo (no package.json), nx+agent: neutral base, Node 
   ok(!('image' in a.dc) && a.dc.build?.dockerfile === 'house.Dockerfile' && a.dc.build?.context === '.', `build ${JSON.stringify(a.dc.build)}`);
   ok(/^FROM mcr\.microsoft\.com\/devcontainers\/base:debian$/m.test(a.dockerfile), 'house.Dockerfile is not FROM the neutral base');
   ok(a.dc.remoteUser === 'vscode', `remoteUser ${a.dc.remoteUser}`);
-  ok(a.dc.features['ghcr.io/devcontainers/features/node:1']?.version === '22', 'the Node feature, pinned to the node major');
+  ok(a.dc.features['ghcr.io/devcontainers/features/node:1.7.1']?.version === '22', 'the Node feature, pinned to the node major');
   ok(JSON.stringify(a.dc.overrideFeatureInstallOrder) === '["ghcr.io/devcontainers/features/node"]', 'Node installs first');
   ok(a.dc.mounts.some((m) => m.includes('target=/home/vscode/.claude')), 'the .claude mount follows the image user');
   ok(a.dc.mounts.some((m) => m.endsWith('/.nx/cache,type=volume')) && !a.dc.mounts.some((m) => m.endsWith('/.nx,type=volume')), 'Nx state on exact volumes, never over .nx/ (it holds the committed nxw.js)');
@@ -646,7 +646,7 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
   tree.write('package-lock.json', '{}');
   const a = await artifacts(tree, ['nx', 'agent', 'node']);
   ok(/^FROM mcr\.microsoft\.com\/devcontainers\/typescript-node:22$/m.test(a.dockerfile) && a.dc.remoteUser === 'node', 'house.Dockerfile is not FROM typescript-node:22 (or remoteUser lost)');
-  ok(!a.dc.features['ghcr.io/devcontainers/features/node:1'] && !a.dc.overrideFeatureInstallOrder, 'no Node feature on a Node image');
+  ok(!a.dc.features['ghcr.io/devcontainers/features/node:1.7.1'] && !a.dc.overrideFeatureInstallOrder, 'no Node feature on a Node image');
   ok(a.dc.mounts.some((m) => m.includes('node_modules,type=volume')) && a.dc.remoteEnv.CHOKIDAR_USEPOLLING === 'true', 'node artifacts');
   ok(
     a.dc.remoteEnv.PATH === '/home/node/.local/bin:${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}',
@@ -1127,8 +1127,9 @@ checkAsync('image: a .deb closure unpacks at its pin behind wrappers, satisfies 
 
 // Persistence: a closure lives in the IMAGE, in a cached layer, outside every persisted directory. Nothing of its own needs a
 // mount, and a mount over either of its two homes would hide what the image built.
-check('no layer declares a version-less devcontainer feature: a bare id is `latest`, and moves with no commit behind it', (ok) => {
+check('no layer declares a floating devcontainer feature: a bare id is `latest` and a major tag moves within its major, with no commit behind either', (ok) => {
   const found = [];
+  const tree = createTreeWithEmptyWorkspace();
   const walk = (node, where) => {
     if (!node || typeof node !== 'object') return;
     for (const [key, value] of Object.entries(node)) {
@@ -1136,11 +1137,10 @@ check('no layer declares a version-less devcontainer feature: a bare id is `late
       else walk(value, where);
     }
   };
-  for (const layer of registry.LAYERS) walk(layer.devcontainer, layer.id);
+  for (const layer of registry.LAYERS) walk(typeof layer.devcontainer === 'function' ? layer.devcontainer(tree) : layer.devcontainer, layer.id);
   ok(found.length >= 2, `the walk sees the layers' features: ${JSON.stringify(found)}`);
   for (const { where, id } of found) {
-    const tag = /:([^/:]+)$/.exec(id)?.[1];
-    ok((tag && tag !== 'latest') || /@sha256:[0-9a-f]{64}$/.test(id), `${where}: ${id} names no version. Pin it in _utils/versions.ts.`);
+    ok(/:\d+\.\d+\.\d+$/.test(id) || /@sha256:[0-9a-f]{64}$/.test(id), `${where}: ${id} names no exact version. Pin it in _utils/versions.ts.`);
   }
 });
 
@@ -1170,7 +1170,10 @@ checkAsync('persistence: an archive tool needs no mount, and no layer mounts ove
 // publish): it covers the pins, it is exactly what the tool writes (so a hand-edit shows), and the selection rules hold
 // against indexes with the futures that would break them.
 checkAsync('postgres closures: the table covers the pins, is exactly what its tool renders, and libpq5 is selected by major', async (ok) => {
-  const { buildClosure, parsePackages, render, selectPackages } = await import('../postgres-debs/closure.mjs');
+  const { buildClosure, parsePackages, render, selectPackages, signedBy } = await import('../postgres-debs/closure.mjs');
+  // A status of a good signature by another key in the keyring: the key file served may hold more than PGDG's.
+  const statusBy = (primary) => `[GNUPG:] GOODSIG ABCD someone\n[GNUPG:] VALIDSIG SUBKEY 2026-11-04 1 0 4 0 1 10 01 ${primary}\n`;
+  ok(signedBy(statusBy('AAAA'), 'AAAA') && !signedBy(statusBy('BBBB'), 'AAAA') && !signedBy('[GNUPG:] GOODSIG ABCD someone\n', 'AAAA'), 'a signature is not held to the fingerprint');
   const versions = require_(join(BUILD, 'src/generators/_utils/versions'));
   const { POSTGRES_CLOSURES, POSTGRES_CLOSURES_AS_OF } = require_(join(BUILD, 'src/generators/_utils/postgres-closures'));
   const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
@@ -1446,7 +1449,7 @@ checkAsync('adopted devcontainer on its own image: only the active layers merged
   ok(!a.dc.mounts.some((m) => m.includes('/.local,')), 'the ~/.local volume was mounted over a FOREIGN image (it would freeze what that image ships there)');
   ok(!('remoteUser' in a.dc), `a remoteUser was imposed on an image that may not have it: ${a.dc.remoteUser}`);
   ok(a.dc.mounts.some((m) => m.includes('target=/root/.claude')), `the .claude mount follows the image's user: ${a.dc.mounts}`);
-  ok(a.dc.features['ghcr.io/devcontainers/features/node:1'], 'Node arrives as a feature (the house tooling needs it)');
+  ok(a.dc.features['ghcr.io/devcontainers/features/node:1.7.1'], 'Node arrives as a feature (the house tooling needs it)');
   ok(!/node_modules|tigervnc|4200|CHOKIDAR/.test(a.dcText), 'an inactive layer leaked into the adopted devcontainer');
   ok(a.dc.postCreateCommand === 'pip install -r requirements.txt' && tree.exists('.devcontainer/post-create.bespunky.sh'), 'their postCreate kept; house script beside it');
   const marker = JSON.parse(tree.read('.devcontainer/.bespunky-devcontainer.json', 'utf8'));

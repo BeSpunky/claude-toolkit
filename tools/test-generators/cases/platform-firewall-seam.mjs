@@ -45,6 +45,24 @@ export default {
   name: 'platform firewall · a neutral seam',
   cases: [
     {
+      name: 'an ESLint config under another name: no firewall, and the log says so, with what to paste',
+      setup: () => workspace(),
+      run: (tree, ctx) => {
+        tree.write('eslint.config.js', ESLINT);
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(tree.read('eslint.config.js', 'utf8') === ESLINT, 'left as it is');
+        t.ok(ctx.logs.some((l) => l.includes(`[${WHO}] No platform firewall`) && l.includes('eslint.config.js') && l.includes('platformConstraints')), `said so: ${ctx.logs.join(' | ')}`);
+      },
+    },
+    {
+      name: 'no ESLint config at all: nothing to write into, and nothing said',
+      setup: () => workspace(),
+      run: (tree, ctx) => seam(ctx).ensurePlatformFirewall(tree, WHO),
+      expect: (tree, t, ctx) => t.ok(!ctx.logs.some((l) => l.includes('No platform firewall')), 'silent'),
+    },
+    {
       // The firewall is project state, so the table reaches only a workspace gaining one. An edit to it with no rung
       // leaves every existing project behind, silently, and each rung freezes its own list, so nothing else compares them.
       name: 'the table is what was released plus what the rungs add: a table that moves without a rung is red',

@@ -8,6 +8,7 @@ import { type PlatformExternals, tableExternals, withDeclared } from './external
 import { workspaceStacks } from '../adapters/workspace';
 import { firewallSnippet, insertPlatformFirewall, readDeclaredBans } from './firewall';
 import { registerPlatformSync } from './sync';
+import { ESLINT_CONFIGS } from '../generators/_utils/lint-inference';
 import { nxInvocation } from '../generators/_utils/nx-host';
 
 export * from './platform';
@@ -54,7 +55,8 @@ export interface ClassifyReport {
 /**
  * Give this workspace the platform firewall — what any capability that brings a second platform calls (Firebase's
  * Cloud Functions, a database driver that must never reach a browser bundle). Best-effort, and safe on every run:
- *   - no root flat ESLint config: nothing to write into, so nothing happens — lint is what enforces the firewall;
+ *   - no root ESLint config: nothing to write into, so nothing happens — lint is what enforces the firewall;
+ *   - a root ESLint config under another name: the firewall has a single home, so none is written, and the log says so;
  *   - a config it cannot edit safely: left alone, and the reason and a snippet to paste are logged;
  *   - the firewall arriving: it comes over projects nobody classified, so they are classified in the same act
  *     (evidence only, every inference reported, what nothing settles left for a human), and the sync generator that
@@ -65,9 +67,19 @@ export interface ClassifyReport {
  * @param who the generator asking — for the log.
  */
 export function ensurePlatformFirewall(tree: Tree, who: string): void {
-  if (!tree.exists(FIREWALL_CONFIG)) return;
-  const externals = platformExternals(tree);
   const nx = nxInvocation(tree).command;
+  if (!tree.exists(FIREWALL_CONFIG)) {
+    const other = ESLINT_CONFIGS.find((file) => tree.exists(file));
+    if (other) {
+      logger.warn(
+        `[${who}] No platform firewall: it is written only into ${FIREWALL_CONFIG}, and this workspace's ESLint config is ${other}, so nothing keeps server code out of a browser bundle. ` +
+          `Add it there by hand, then classify every project (${platformCommand(nx, '<project>')}):\n` +
+          firewallSnippet(platformExternals(tree), nx),
+      );
+    }
+    return;
+  }
+  const externals = platformExternals(tree);
   const edit = insertPlatformFirewall(tree.read(FIREWALL_CONFIG, 'utf8') ?? '', FIREWALL_CONFIG, externals, nx);
   if ('refused' in edit) {
     logger.warn(

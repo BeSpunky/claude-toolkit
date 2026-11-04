@@ -22,6 +22,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SEEDS_DIR="$ROOT/tools/emulator-seeds"
 DEFAULT_SEED="default"
 OFFSET="${PORT_OFFSET:-0}"
+# A data dir is named by a number. Anything else (`auto` is the engine's to resolve) names no stack, and would "reset" a
+# directory nothing ever reads.
+case "$OFFSET" in
+  *[!0-9]*) echo "[emulator-data] PORT_OFFSET must be a number, not '$OFFSET'." >&2; exit 2 ;;
+esac
 
 data_dir() { if [ "$1" = 0 ]; then printf '%s' "$ROOT/.emulator-data"; else printf '%s' "$ROOT/.emulator-data-$1"; fi; }
 

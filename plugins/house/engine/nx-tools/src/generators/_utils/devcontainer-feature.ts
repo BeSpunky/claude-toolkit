@@ -113,10 +113,27 @@ export interface FeaturePin {
 }
 
 /**
+ * Make `to` the pin of an existing devcontainer-lock.json, in place of `from`, exactly as the CLI would write it (its
+ * sort, its format), so the next build has nothing to rewrite. Whether or not `from` was pinned: a build adds a declared
+ * feature's missing pin. No lock is created: a project without one has not asked for one.
+ */
+function setLockPin(tree: Tree, from: string, to: string, pin: FeaturePin): void {
+  if (!tree.exists(DEVCONTAINER_LOCK)) return;
+  try {
+    const lock = JSON.parse(tree.read(DEVCONTAINER_LOCK, 'utf8') ?? '') as { features?: Record<string, unknown> };
+    const { [from]: _old, ...others } = lock.features ?? {};
+    lock.features = Object.fromEntries(Object.entries({ ...others, [to]: pin }).sort(([a], [b]) => a.localeCompare(b)));
+    tree.write(DEVCONTAINER_LOCK, `${JSON.stringify(lock, null, 2)}\n`);
+  } catch {
+    // Not JSON: the CLI rewrites it on the next build, and nothing here can read it.
+  }
+}
+
+/**
  * Move feature `from` to the key `to`, in every place the house keeps it: the KEY in devcontainer.json (its value and
- * its `//` lines stay), the pin in devcontainer-lock.json when there is one (replaced by `pin`, in the CLI's sorted
- * order, so the next build has nothing to rewrite), and an adopted marker's record of what the house added. The caller
- * has decided the move is the house's to make (`houseWrote`). False when `from` is not declared or the file is unreadable.
+ * its `//` lines stay), the pin in devcontainer-lock.json when there is one (`setLockPin`), and an adopted marker's
+ * record of what the house added. The caller has decided the move is the house's to make. False when `from` is not
+ * declared or the file is unreadable.
  */
 export function renameFeature(tree: Tree, from: string, to: string, pin: FeaturePin): boolean {
   const text = tree.exists(DEVCONTAINER_JSON) ? (tree.read(DEVCONTAINER_JSON, 'utf8') ?? '') : '';
@@ -125,18 +142,7 @@ export function renameFeature(tree: Tree, from: string, to: string, pin: Feature
   if (!key) return false;
   tree.write(DEVCONTAINER_JSON, `${text.slice(0, key.offset)}${JSON.stringify(to)}${text.slice(key.offset + key.length)}`);
 
-  if (tree.exists(DEVCONTAINER_LOCK)) {
-    try {
-      const lock = JSON.parse(tree.read(DEVCONTAINER_LOCK, 'utf8') ?? '') as { features?: Record<string, unknown> };
-      if (lock.features?.[from]) {
-        const { [from]: _old, ...others } = lock.features;
-        lock.features = Object.fromEntries(Object.entries({ ...others, [to]: pin }).sort(([a], [b]) => a.localeCompare(b)));
-        tree.write(DEVCONTAINER_LOCK, `${JSON.stringify(lock, null, 2)}\n`);
-      }
-    } catch {
-      // Not JSON: the CLI rewrites it on the next build, and nothing here can read it.
-    }
-  }
+  setLockPin(tree, from, to, pin);
 
   if (tree.exists(DEVCONTAINER_MARKER)) {
     try {
@@ -151,4 +157,56 @@ export function renameFeature(tree: Tree, from: string, to: string, pin: Feature
     }
   }
   return true;
+}
+
+/** What a rung pinning a house feature says: the key it replaces, and the exact tag with the digest of its manifest. */
+export interface FeaturePinning {
+  tag: string;
+  from: string;
+  to: string;
+  pin: FeaturePin;
+}
+
+const isExactly = (id: string) => /:\d+\.\d+\.\d+$/.test(id) || /@sha256:/.test(id);
+const isEmptyObject = (value: unknown) => !!value && typeof value === 'object' && !Object.keys(value).length;
+
+/**
+ * A migration's whole job for a feature whose declaration floats (`from`, a bare id or a major tag): rename it to `to`.
+ *
+ * It is the house's to move where the house wrote it (`houseWrote`) and wherever it says nothing but "this feature"
+ * (`{}`): whoever wrote that, nothing can depend on the key having no exact tag. A key the project gave its own options,
+ * with no record of the house writing them, is reported with the rename. The same feature under another tag that still
+ * floats is the project's, and reported too.
+ */
+export function pinHouseFeature(tree: Tree, { tag, from, to, pin }: FeaturePinning): void {
+  if (!tree.exists(DEVCONTAINER_JSON)) return;
+  const text = tree.read(DEVCONTAINER_JSON, 'utf8') ?? '';
+  const root = parseStrict(text);
+  if (!root) {
+    if (text.includes(`"${from}"`)) logger.warn(`${tag} ${DEVCONTAINER_JSON} could not be read as JSONC. If it declares "${from}", rename the key to "${to}" and rebuild.`);
+    return;
+  }
+  const features = findNodeAtLocation(root, ['features']);
+  for (const property of features?.type === 'object' ? (features.children ?? []) : []) {
+    const id = String(property.children?.[0]?.value);
+    if (id !== from && id !== to && featureIdentity(id) === featureIdentity(to) && !isExactly(id)) {
+      logger.warn(`${tag} Left in place: "${id}" in ${DEVCONTAINER_JSON} is the project's, and that tag moves with no commit behind it. To pin it, rename the key to "${to}" and rebuild.`);
+    }
+  }
+  const node = findNodeAtLocation(root, ['features', from]);
+  if (!node) return;
+  const value = getNodeValue(node);
+  if (!houseWrote(tree, { path: ['features', from], value }) && !isEmptyObject(value)) {
+    logger.warn(`${tag} Left in place: "${from}" in ${DEVCONTAINER_JSON} carries options the house did not write, and that key moves with no commit behind it. To pin it, rename the key to "${to}" and rebuild.`);
+    return;
+  }
+  // Declared twice already: the exact one is the pin, and the other can be depended on by nothing.
+  if (findNodeAtLocation(root, ['features', to])) {
+    removeFeature(tree, from);
+    setLockPin(tree, from, to, pin);
+    logger.info(`${tag} removed "${from}" from ${DEVCONTAINER_JSON}: "${to}" is already declared.`);
+    return;
+  }
+  renameFeature(tree, from, to, pin);
+  logger.info(`${tag} ${DEVCONTAINER_JSON}: "${from}" is now "${to}"${tree.exists(DEVCONTAINER_LOCK) ? `, and so is its pin in ${DEVCONTAINER_LOCK}` : ''}. The next rebuild installs that version.`);
 }

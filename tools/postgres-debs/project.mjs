@@ -26,7 +26,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildClosure, debianSupplies, parsePackages, parseRelations, render, selectPackages } from './closure.mjs';
+import { buildClosure, debianSupplies, parsePackages, parseRelations, render, selectPackages, signedBy } from './closure.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const UTILS = join(ROOT, 'plugins/house/engine/nx-tools/src/generators/_utils');
@@ -59,7 +59,7 @@ const fetchBytes = async (url) => {
 const unpack = (tool, bytes) => execFileSync(tool, ['-dc'], { input: bytes, maxBuffer: 1 << 30 }).toString();
 const gpg = (home, args) => execFileSync('gpg', ['--homedir', home, '--batch', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
 
-/** A private keyring holding PGDG's key, its fingerprint checked: the one signature this projection trusts. */
+/** A private keyring holding PGDG's key, its fingerprint checked. The file may hold other keys, so `signedBy` holds each signature to that fingerprint. */
 async function pgdgKeyring(home) {
   const key = join(home, 'pgdg.asc');
   writeFileSync(key, await fetchBytes(PGDG_KEY_URL));
@@ -79,7 +79,7 @@ async function archiveIndex(home, codename, arch) {
   writeFileSync(signed, await fetchBytes(`${suite}/InRelease`));
   // --decrypt on a clearsigned file writes only the text the signature covers, so nothing outside it can be read as signed.
   const status = gpg(home, ['--status-fd', '1', '--output', clear, '--decrypt', signed]).toString();
-  if (!/^\[GNUPG:\] GOODSIG/m.test(status)) throw new Error(`no good signature on ${suite}/InRelease`);
+  if (!signedBy(status, PGDG_KEY_FINGERPRINT)) throw new Error(`no good signature by PGDG's key on ${suite}/InRelease`);
   const release = readFileSync(clear, 'utf8');
   const relative = `main/binary-${arch}/Packages.bz2`;
   const listed = new RegExp(`^ ([0-9a-f]{64})\\s+\\d+ ${relative.replace(/[.]/g, '\\.')}$`, 'm').exec(release.slice(release.indexOf('SHA256:')));

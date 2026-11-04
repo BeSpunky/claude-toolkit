@@ -376,9 +376,9 @@ function ensureInstalled(decl, tree, { install, dryRun }) {
 /** Log once when the primary process is ready — whatever kind of ready it declares. */
 function announceReady(primary, cwd, appUrl, until) {
   const attempt = async () => {
-    if (until.done) return;
-    const { ok } = await probeOnce(primary.ready, { cwd, env: primary.env });
-    if (until.done) return;
+    if (until.aborted) return;
+    const { ok } = await probeOnce(primary.ready, { cwd, env: primary.env, signal: until });
+    if (until.aborted) return;
     if (ok) log(`Up: ${appUrl}`);
     else setTimeout(attempt, 500).unref();
   };
@@ -531,7 +531,7 @@ async function serve(opts) {
     });
   }
 
-  const until = { done: false };
+  const stopped = new AbortController(); // ends the wait for the "Up:" line, and the probe it is running
   let route = { registered: false };
 
   let stopSignal;
@@ -553,7 +553,7 @@ async function serve(opts) {
     onUp: () => {
       delete record.waitingFor;
       writeRecord(record);
-      announceReady(plan.primary, tree.path, plan.localUrl, until);
+      announceReady(plan.primary, tree.path, plan.localUrl, stopped.signal);
       if (browserOn) {
         attachBrowser({ root: tree.path, env: process.env, slug, port: plan.primaryPort, prettyUrl, localUrl: plan.localUrl, log, warn })
           .then((state) => (route = state))
@@ -565,7 +565,7 @@ async function serve(opts) {
       // A stop asked for from outside (not a process of the stack ending it) is announced, with who asked — and what
       // the stack's processes are about to print about their own stop is read as what it is, not as a failure.
       if (signal) log(`stopping the stack (asked by ${stoppedBy(stackDir, signal)}) — each process reports its own stop below ("stopped before finishing" included); that is the stop, not a failure.`);
-      until.done = true;
+      stopped.abort();
       if (route.registered) detachRoute(tree.path, process.env, slug);
     },
   });
@@ -911,7 +911,11 @@ async function withStack(opts) {
   for (let said = false; ; said = true) {
     const found = readStacks([tree.path]).filter((s) => s.app === opts.app && s.task === task && s.state === 'live');
     if (found.length > 1) throw new UsageError(`${found.length} running stacks of ${task} in ${tree.path} (${found.map((s) => s.key).join(', ')}) — which one this run belongs to cannot be told. Stop the extra one (tools/dev/dev stop ${opts.app} --offset=<n>).`);
-    if (found.length === 1 && (await answers(found[0]))) {
+    // Every plan gives its primary a probe, so a live stack without one was started by another version of this engine.
+    if (found.length === 1 && !found[0].ready && !found[0].waitingFor) {
+      throw new UsageError(`${found[0].key} was started by an older version of this engine, which recorded no readiness this one can ask. Restart it: tools/dev/dev stop ${opts.app} --offset=${found[0].offset}`);
+    }
+    if (found.length === 1 && (await answers(found[0], AbortSignal.timeout(Math.max(until - Date.now(), 1))))) {
       stack = found[0];
       break;
     }
@@ -939,9 +943,9 @@ async function withStack(opts) {
 }
 
 /** Is a stack's app ready — by what its primary declares? Not while its dependencies are still being waited for. */
-async function answers(stack) {
-  if (stack.waitingFor || !stack.ready) return false;
-  const { ok } = await probeOnce(stack.ready, { cwd: stack.tree, env: { ...process.env, ...stack.readyEnv } });
+async function answers(stack, signal) {
+  if (stack.waitingFor) return false;
+  const { ok } = await probeOnce(stack.ready, { cwd: stack.tree, env: { ...process.env, ...stack.readyEnv }, signal });
   return ok;
 }
 

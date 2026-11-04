@@ -3,6 +3,15 @@
 // rules against fixture indexes and prove the committed table is exactly what `render` writes. The network half is project.mjs.
 import { createHash } from 'node:crypto';
 
+/**
+ * Did gpg's `--status-fd` output report a good signature by the key whose PRIMARY fingerprint is `fingerprint`? GOODSIG alone
+ * says only that some key in the keyring signed; VALIDSIG's last field names the primary key of the one that did.
+ */
+export function signedBy(status, fingerprint) {
+  const valid = /^\[GNUPG:\] VALIDSIG (.+)$/m.exec(status);
+  return /^\[GNUPG:\] GOODSIG/m.test(status) && valid?.[1].trim().split(/\s+/).at(-1) === fingerprint;
+}
+
 // ── dpkg version order (Debian Policy 5.6.12) ────────────────────────────────────────────────────────────────────────
 const order = (c) => (c === '~' ? -1 : c === undefined || c === '' ? 0 : /[A-Za-z]/.test(c) ? c.charCodeAt(0) : c.charCodeAt(0) + 256);
 function comparePart(a, b) {

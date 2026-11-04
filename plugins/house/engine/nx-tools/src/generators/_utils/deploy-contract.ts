@@ -32,7 +32,10 @@ export interface DeploySpec {
   inputs: readonly string[];
   /** Workspace-relative files or globs (never a bare directory, see the header) that change what ships. */
   watches: readonly string[];
-  /** What must run first, every time: part of the contract. */
+  /**
+   * What must run first, every time: part of the contract. Never another project's `deploy`: the order between deploys
+   * is the workflow's (`CiDeployProvider.deployStage`), and each stage holds only its own credentials.
+   */
   requires?: readonly DeployDependency[];
   /** What should run first, unless the project says otherwise (a lint). */
   gates?: readonly DeployDependency[];

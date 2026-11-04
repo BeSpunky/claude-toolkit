@@ -179,6 +179,12 @@ export function validate(decl) {
         }
       }
     });
+    for (const [i, p] of app.processes.entries()) {
+      if (p.dependency) continue;
+      for (const name of Object.keys(p.exports ?? {})) {
+        if (exported.has(name)) fail(`${at}.processes[${i}].exports.${name}`, `dependency "${exported.get(name)}" already exports it: the stack's processes would see that value, and a dependent of the stack this one`);
+      }
+    }
     if (primaries > 1) fail(at, 'at most one process may be "primary"');
     if (portNames.size === 0) fail(at, 'must declare at least one port');
     if (!app.processes.some((p) => !p.dependency && Object.keys(p.ports ?? {}).length)) fail(at, 'needs a process that is not a dependency and declares a port: the one the dependencies are for, and the app URL points at');
@@ -321,7 +327,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
     const where = `apps.${appName}.${p.id}`;
     const extra = p.id === primary.id ? passthrough : [];
     const added = {
-      ...Object.assign({}, ...dependencies.filter((d) => d.id !== p.id).map((d) => exportsOf[d.id])),
+      ...Object.assign({}, ...dependencies.map((d) => exportsOf[d.id])),
       ...Object.fromEntries(Object.entries(p.env ?? {}).map(([k, v]) => [k, subst(v, `${where}.env.${k}`)])),
       ...portEnv,
       ...stackEnv,

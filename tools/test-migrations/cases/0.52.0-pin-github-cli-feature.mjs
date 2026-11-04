@@ -1,8 +1,8 @@
-// 0.52.0 — the bare github-cli feature gets a version, where the house wrote it.
+// 0.52.0 — the bare github-cli feature gets a version.
 //
 // The shapes it meets: an owned devcontainer as 0.51.3 composed it (key, comment, lock pin), an owned one with a project
-// option, an adopted one whose record holds the key, an adopted one that adopted before the record (0.41.0) or whose
-// project wrote it, one already tagged, one declaring both, and none at all.
+// option, an adopted one whose record holds the key, an adopted one with no record (before 0.41.0, or the project's own),
+// one carrying the project's options, one under another tag, one declaring both, and none at all.
 const DC = '.devcontainer/devcontainer.json';
 const LOCK = '.devcontainer/devcontainer-lock.json';
 const MARKER = '.devcontainer/.bespunky-devcontainer.json';
@@ -56,41 +56,74 @@ export default {
       },
     },
     {
-      name: "adopted with no record of it (the project's own, or before 0.41.0): left, and reported with the fix",
+      name: "adopted with no record of it (the project's own, or before 0.41.0), and `{}`: nothing can depend on the missing tag, so it moves too",
       setup: (tree) => {
         tree.write(DC, owned());
         tree.write(MARKER, marker({ owned: false, adopted: { houseAdded: [] } }));
         tree.write(LOCK, JSON.stringify({ features: { [BARE]: OLD_PIN } }));
       },
-      expect: (tree, t, logs) => {
-        t.ok(t.read(DC) === owned(), 'byte-identical');
-        t.ok(t.json(LOCK).features[BARE], 'the pin stays with it');
-        t.ok(logs.some((l) => l.includes('was not written by the house') && l.includes(PINNED)), `reported: ${logs.join(' | ')}`);
+      expect: (tree, t) => {
+        t.ok(t.read(DC) === owned().replace(`"${BARE}"`, `"${PINNED}"`), `only the key changed:\n${t.read(DC)}`);
+        t.equal(Object.keys(t.json(LOCK).features), [PINNED], 'the lock moved with it');
       },
     },
     {
-      name: 'adopted, and the project changed the value the house wrote: it is theirs now, and left',
+      name: 'no marker at all, and `{}`: the same',
+      setup: (tree) => tree.write(DC, owned()),
+      expect: (tree, t) => t.has(DC, `"${PINNED}": {}`),
+    },
+    {
+      name: 'adopted, and the project changed the value the house wrote: it is theirs now, left, and reported with the fix',
       setup: (tree) => {
         tree.write(DC, owned('{ "version": "2.60.0" }'));
         tree.write(MARKER, marker({ owned: false, adopted: { houseAdded: [{ path: ['features', BARE], value: {} }] } }));
       },
-      expect: (tree, t) => t.ok(t.read(DC) === owned('{ "version": "2.60.0" }'), 'byte-identical'),
+      expect: (tree, t, logs) => {
+        t.ok(t.read(DC) === owned('{ "version": "2.60.0" }'), 'byte-identical');
+        t.ok(logs.some((l) => l.includes('carries options') && l.includes(PINNED)), `reported: ${logs.join(' | ')}`);
+      },
     },
     {
-      name: 'no marker at all: not known to be the house\'s, so left',
-      setup: (tree) => tree.write(DC, owned()),
-      expect: (tree, t) => t.ok(t.read(DC) === owned(), 'byte-identical'),
+      name: "the project's own option in the string shorthand, with no record: left, and reported",
+      setup: (tree) => {
+        tree.write(DC, owned('"2.60.0"'));
+        tree.write(MARKER, marker({ owned: false }));
+      },
+      expect: (tree, t, logs) => {
+        t.ok(t.read(DC) === owned('"2.60.0"'), 'byte-identical');
+        t.ok(logs.some((l) => l.includes('carries options')), `reported: ${logs.join(' | ')}`);
+      },
     },
     {
-      name: 'a key with a tag already is pinned: nothing to do',
+      name: 'a major tag of the project\'s own floats: left, and reported',
       setup: (tree) => {
         tree.write(DC, owned().replace(`"${BARE}"`, `"${BARE}:1"`));
         tree.write(MARKER, marker({ owned: true }));
       },
       expect: (tree, t, logs) => {
         t.has(DC, `"${BARE}:1"`);
+        t.ok(logs.some((l) => l.includes(`"${BARE}:1"`) && l.includes(PINNED)), `reported: ${logs.join(' | ')}`);
+      },
+    },
+    {
+      name: 'an exact tag of the project\'s own is pinned: nothing to do, and nothing to say',
+      setup: (tree) => {
+        tree.write(DC, owned().replace(`"${BARE}"`, `"${BARE}:1.1.0"`));
+        tree.write(MARKER, marker({ owned: true }));
+      },
+      expect: (tree, t, logs) => {
+        t.has(DC, `"${BARE}:1.1.0"`);
         t.ok(!logs.length, `nothing to say: ${logs.join(' | ')}`);
       },
+    },
+    {
+      name: 'a lock with no pin for it gets one, so the next build has nothing to add',
+      setup: (tree) => {
+        tree.write(DC, owned());
+        tree.write(MARKER, marker({ owned: true }));
+        tree.write(LOCK, JSON.stringify({ features: { 'ghcr.io/aaa/other': { version: '1' } } }));
+      },
+      expect: (tree, t) => t.equal(Object.keys(t.json(LOCK).features), ['ghcr.io/aaa/other', PINNED], 'pinned, sorted'),
     },
     {
       name: 'owned and declared twice: the bare one goes, with its pin',
@@ -101,7 +134,7 @@ export default {
       },
       expect: (tree, t) => {
         t.equal(features(t), [PINNED], 'one key');
-        t.ok(!t.json(LOCK).features[BARE], 'its pin went too');
+        t.equal(t.json(LOCK).features, { [PINNED]: { version: '1.1.3', resolved: `${BARE}@${DIGEST}`, integrity: DIGEST } }, 'its pin went, and the one it keeps is pinned');
       },
     },
     {

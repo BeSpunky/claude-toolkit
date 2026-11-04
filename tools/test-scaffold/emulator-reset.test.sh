@@ -117,6 +117,23 @@ ok 'a named seed reaches every data dir of this tree' "$([ "$(is "$WT/.emulator-
 ok "another tree's data is not touched" "$(is "$MAIN/.emulator-data" dirty)"
 ok 'a directory that is no stack'"'"'s data is not touched' "$(is "$WT/.emulator-data-notanoffset" dirty)"
 
+# ── PORT_OFFSET that names no stack ───────────────────────────────────────────────────────────────
+dirty "$WT/.emulator-data-6000"
+ENVS=(PORT_OFFSET=auto)
+out="$(reset "$WT")"; rc=$?
+ok 'a PORT_OFFSET that is no number is refused, and creates nothing' "$([ "$rc" != 0 ] && [ ! -e "$WT/.emulator-data-auto" ] && [ "$(is "$WT/.emulator-data-6000" dirty)" = 1 ] && echo 1 || echo 0)" "$out"
+ENVS=()
+
+# ── When it cannot tell whether a suite runs, nothing is reset ────────────────────────────────────
+dirty "$WT/.emulator-data-6000"
+mv "$WT/tools/dev/dev.mjs" "$WT/tools/dev/dev.mjs.real"
+out="$(reset "$WT")"; rc=$?
+ok 'no dev engine: refused, naming the upgrade, and the data stays' "$([ "$rc" != 0 ] && [ "$(is "$WT/.emulator-data-6000" dirty)" = 1 ] && case "$out" in *'house upgrade'*) echo 1 ;; *) echo 0 ;; esac || echo 0)" "$out"
+printf 'process.exit(3);\n' > "$WT/tools/dev/dev.mjs"
+out="$(reset "$WT")"; rc=$?
+ok "the engine's ps fails: refused, and the data stays" "$([ "$rc" != 0 ] && [ "$(is "$WT/.emulator-data-6000" dirty)" = 1 ] && case "$out" in *'could not tell'*) echo 1 ;; *) echo 0 ;; esac || echo 0)" "$out"
+mv "$WT/tools/dev/dev.mjs.real" "$WT/tools/dev/dev.mjs"
+
 # ── A seed that does not exist destroys nothing ───────────────────────────────────────────────────
 dirty "$WT/.emulator-data-6000"
 out="$(reset "$WT" nosuch)"; rc=$?

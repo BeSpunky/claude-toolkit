@@ -48,8 +48,10 @@ function tcp(port) {
 }
 
 /**
- * The command, in a process group of its own, because it may hang, and whatever it started must go with it when the
- * wait ends. It holds no lock: a probe is not a member of the stack (fd 3 is the stack's), so it can never keep one alive.
+ * The command, in a process group of its own, because it may hang, and whatever it started must go with it: when `signal`
+ * ends the wait, and when it answers, since an answer is all a probe is for. A caller with no `signal` gives it no bound.
+ * It holds no lock: a probe is not a member of the stack (fd 3 is the stack's), so it can never keep one alive. So a hung
+ * probe outlives an engine killed outright: nothing is left to kill it, and nothing but itself is held up.
  */
 function command(cmd, { cwd, env, signal }) {
   return new Promise((done) => {
@@ -63,9 +65,11 @@ function command(cmd, { cwd, env, signal }) {
         /* already gone */
       }
     };
-    signal?.addEventListener('abort', kill, { once: true });
+    if (signal?.aborted) kill();
+    else signal?.addEventListener('abort', kill, { once: true });
     const end = (result) => {
       signal?.removeEventListener('abort', kill);
+      kill();
       proc.stderr.destroy(); // a descendant it left behind may hold the pipe open
       done({ ...result, said: said.trim() || result.said });
     };

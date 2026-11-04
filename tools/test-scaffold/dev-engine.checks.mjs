@@ -652,6 +652,7 @@ process.on('SIGTERM', () => { server.close(); process.exit(0); });
     await refused('an app of dependencies only', db);
     await refused('an app whose only process with a port is a dependency', { id: 'w', cmd: 'w' }, db);
     await refused('two dependencies exporting one name', web, { ...db, exports: { URL: 'a' } }, { id: 'k', cmd: 'k', ports: { k: 3000 }, dependency: true, ready: { tcp: 'k' }, exports: { URL: 'b' } });
+    await refused('another process exporting what a dependency exports', { ...web, exports: { URL: 'a' } }, { ...db, exports: { URL: 'b' } });
     await refused('a dependency exporting what the engine sets', web, { ...db, exports: { PORT_OFFSET: '1' } });
     await refused('a dependency exporting a port variable', web, { ...db, exports: { PORT_DB: '1' } });
 
@@ -665,7 +666,7 @@ process.on('SIGTERM', () => { server.close(); process.exit(0); });
     const of = (id) => plan.processes.find((p) => p.id === id);
     ok('with no primary marked, the primary is never a dependency', plan.primary.id === 'web');
     ok("a dependency's exports reach a sibling, at the stack's ports", of('side').added.DATABASE_URL === 'pg://localhost:2500/x' && of('side').added.KV_URL === 'kv://localhost:3500');
-    ok("…another dependency's too, and never its own", of('kv').added.DATABASE_URL === 'pg://localhost:2500/x' && !('KV_URL' in of('kv').added) && !('DATABASE_URL' in of('db').added));
+    ok("…another dependency's too, and its own: a readiness command and a launcher's own steps run in that environment", of('kv').added.DATABASE_URL === 'pg://localhost:2500/x' && of('kv').added.KV_URL === 'kv://localhost:3500' && of('db').added.DATABASE_URL === 'pg://localhost:2500/x');
     ok("…a process's own env wins: it is the project's word", of('web').added.KV_URL === 'mine');
     ok("…what a process that is not a dependency exports does not", !('WEB_ONLY' in of('side').added) && !('SIDE' in of('web').added));
     ok('…and they reach a dependent of the stack as well', plan.exports.DATABASE_URL === 'pg://localhost:2500/x');
@@ -697,6 +698,7 @@ setTimeout(() => {
     if (marker) writeFileSync(marker, '');
     if (behaviour === 'dies-after') setTimeout(() => process.exit(0), 400);
     if (behaviour === 'crashes-after') setTimeout(() => process.exit(4), 400);
+    if (behaviour === 'interrupted-after') setTimeout(() => process.exit(130), 400);
   });
 }, Number(delay));
 `);
@@ -800,6 +802,58 @@ setTimeout(() => {
       ok('never ready, a command that hangs: fails on time, with what it said', (await s.ended()) === 1 && /last answer: still migrating/.test(s.out) && !started('web'));
       ok('…and the probe does not outlive the wait', await until(() => !isAliveHere(Number(readFileSync(hung, 'utf8'))), 3000));
       await stackGone();
+
+      // A probe's answer ends it, and whatever it started: one that leaves something behind must not leave one per attempt.
+      const left = join(repo, 'left.pids');
+      declareApp(web(webPort), dep('db', dbPort, 'silent', { ready: { cmd: `sleep 300 & echo $! >> ${left}; exit 1`, timeout: 1 } }));
+      s = serve();
+      await s.ended();
+      {
+        const pids = readFileSync(left, 'utf8').trim().split('\n').map(Number);
+        ok('a probe that backgrounds something leaves nothing behind, attempt after attempt', pids.length > 1 && (await until(() => pids.every((pid) => !isAliveHere(pid)), 3000)));
+      }
+      await stackGone();
+      // A primary's probe that hangs: `with` keeps its --timeout, and a clean stop takes the "Up:" probe with it.
+      const stuck = join(repo, 'stuck.pid');
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort, { ready: { cmd: `echo $$ > ${stuck}; exec sleep 300` } }));
+      s = serve('--task=site:dev-stack');
+      ok('a primary whose probe hangs: the stack still comes up', await until(() => existsSync(stuck) && started('web'), 5000));
+      {
+        const at = Date.now();
+        const asked = await dev('with', 'site', '--timeout=2', '--', 'true');
+        ok('…`with` gives up at its --timeout, and says so', asked.code !== 0 && Date.now() - at < 6000 && /was not ready/.test(asked.out));
+        const probe = Number(readFileSync(stuck, 'utf8'));
+        await dev('stop', '--offset=0');
+        ok('…and a clean stop leaves no probe behind', await until(() => !isAliveHere(probe), 3000) && (await s.ended()) !== 'still running' && (await stackGone()));
+      }
+      // A stack started by an engine that recorded no probe it can read (running across an upgrade).
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort));
+      s = serve('--task=site:dev-stack');
+      await until(() => listening(webPort), 5000);
+      {
+        const [{ key }] = await stacks();
+        const record = join(repo, '.bespunky', 'run', `${key}.json`);
+        const held = JSON.parse(readFileSync(record, 'utf8'));
+        const { ready, readyEnv, ...older } = held;
+        writeFileSync(record, JSON.stringify({ ...older, readyUrl: 'http://127.0.0.1:1/' }));
+        const at = Date.now();
+        const asked = await dev('with', 'site', '--timeout=30', '--', 'true');
+        ok('a stack an older engine started: `with` says so at once, with the way out', asked.code !== 0 && Date.now() - at < 5000 && /older version of this engine/.test(asked.out) && /dev stop site/.test(asked.out) && !/TypeError/.test(asked.out));
+        await dev('stop', '--offset=0');
+        await s.ended();
+        await stackGone();
+      }
+
+      // A dependency ending as if by Ctrl+C, when nobody signalled the group: a crash, not a stop.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'interrupted-after'));
+      s = serve();
+      {
+        const ended = await s.ended();
+        ok('a child exiting 130 with no SIGINT at the engine stops the rest and fails the stack', ended === 1 && events().filter((e) => e === 'web SIGTERM').length === 1 && !/asked by a Ctrl\+C/.test(s.out) && (await stackGone()));
+      }
 
       // After it was ready: its exit stops the stack and fails it, whatever the code.
       for (const [behaviour, code] of [['dies-after', 0], ['crashes-after', 4]]) {

@@ -650,7 +650,7 @@ function mergeIntoExisting(
    * has some can only ever DELETE information, never impose a house choice.
    *
    * The case that proved it: the feature spec permits the string shorthand, so a project may pin a version
-   * on a house feature — `"ghcr.io/devcontainers/features/github-cli": "2.0.0"`. That is a deliberate
+   * on a house feature — `"ghcr.io/devcontainers/features/github-cli:1.1.3": "2.0.0"`. That is a deliberate
    * REFINEMENT of the house's `{}`, not a divergence from it, and it lands here at depth 2. Re-asserting
    * would flatten the pin back to `{}` on every sync while the comment explaining the pin survived
    * beside it — a silent downgrade of somebody's pinned toolchain, in a devcontainer we own.

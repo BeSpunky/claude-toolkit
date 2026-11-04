@@ -15,8 +15,8 @@ Units are independent; each must build and test, so one worktree and branch each
 | seam-ci | feat/hps-ci | returned |
 | seam-installer | feat/hps-installer | returned |
 | finish | docs, firewall rung, leftovers, on the integration branch | returned |
-| review | sanity review of the whole landing | dispatched |
-| gate | upgrade --local + dogfood-consumer | pending |
+| review | sanity review of the whole landing | returned |
+| gate | upgrade --local + dogfood-consumer | dispatched |
 
 ## Results
 
@@ -46,3 +46,6 @@ VS Code died during `finish`. On resume: rung and dev claim removal committed; f
 
 ### finish (returned; 99204721, 536f3a66, 59d58e6a, 71940bcd, 8c24de51, c2f05b1c; spent 0 of 1)
 Two rungs at 0.52.0: ban-postgres-drivers-from-web; pin-github-cli-feature (a migration was owed, so the plan's expected "nothing to migrate" was wrong for this landing). dev claim removed. firebase:reset real, three faults, fixed; test uses a fake firebase; export-over-reset reproduced only after the fix. Whole tree: migrations 412, generators 315/35 skipped, layers 107, scaffold 28 files, no interplay failure. Invariants owe bespunky-house, bespunky-workflow; keep the payload bump last at release. Open: node:1 still floats within v1; lock key form and order for the rung from memory; 35 skipped cases.
+
+### review (returned; ledger reviews/2026-11-04-landing1-sanity-review.md)
+Fixes committed. Tests after fixes: migrations 417, generators 318/35 skipped, layers 107, scaffold 28 files. Three batons now out of date, noted in the review ledger. Not covered: scalability, clean code, reuse in depth; no second reviewer over fixes; real GitHub runner, docker build, real launcher, bookworm run.

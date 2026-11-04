@@ -59,7 +59,7 @@ const fakedb = {
   deployEnv: { FAKEDB_URL: '${{ secrets.FAKEDB_URL }}' },
   deployTargets: () => [{ project: '@acme/db', target: 'deploy' }],
   deployOptions: (target) => ({ args: `--ref=${target}` }),
-  authSteps: () => '- name: Check the token\n  run: test -n "$FAKEDB_URL"\n',
+  authSteps: () => "- name: Check the token\n  if: ${{ secrets.FAKEDB_URL == '' }}\n  run: exit 1\n",
 };
 
 /** Run the generator with `fakedb` contributed by a layer (no production seam exists for this, and none should). */
@@ -138,6 +138,7 @@ export default {
         const resolved = runBash(script(text, 'binding'), { GITHUB_REF: 'refs/heads/main', GITHUB_REF_NAME: 'main' });
         t.equal(resolved.status, 1, 'the push fails');
         t.ok(/::error::main deploys nothing until its `ci` binding names a target for fakedb/.test(resolved.out), `says so: ${resolved.out}`);
+        t.ok(/\.bespunky\/branches\.json/.test(resolved.out) && /deploys\.ci\.providers/.test(resolved.out) && /beside what it already names/.test(resolved.out) && /replace its `ci` with a `note`/.test(resolved.out), `names the file, the key, that it adds, and the way out: ${resolved.out}`);
         t.ok(resolved.out.includes('"fakedb": "<fakedb project ref>"'), 'with the targetLabel of what to add');
         t.equal(resolved.output, '', 'and resolves no environment, so nothing downstream runs');
         const after = ctx.logs.slice(ctx.mark);
@@ -246,6 +247,20 @@ export default {
       run: withFake(BOTH),
       expect: (tree, t) => {
         t.has(WF, "id-token: write # keyless cloud auth: GitHub's OIDC token, exchanged by Workload Identity Federation");
+      },
+    },
+    {
+      name: 'oidc: an upgrade that takes id-token away says so; a run that finds none says nothing',
+      setup: fixture(lines(['main', 'production', {}])),
+      run: async (tree, ctx) => {
+        await withFake(['nx', 'node', 'ci'])(tree, ctx);
+        tree.write(WF, `${tree.read(WF, 'utf8')}\n#\n      id-token: write\n`);
+        await withFake(['nx', 'node', 'ci'])(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        const said = ctx.logs.filter((l) => /no longer holds `id-token: write`/.test(l) && /workflow of your own/.test(l));
+        t.ok(said.length === 1, `once, for the run that took it away, not the one that found none: ${ctx.logs.join(' | ')}`);
+        t.hasNot(WF, 'id-token: write');
       },
     },
     {

@@ -122,6 +122,9 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
         throughBranchModelSkill,
       }),
     });
+    if (previous.files.includes(WORKFLOW) && /^\s*id-token:\s*write/m.test(tree.read(WORKFLOW, 'utf8') ?? '') && !/^\s*id-token:\s*write/m.test(wanted.get(WORKFLOW)!.content)) {
+      notes.push(`${WORKFLOW} no longer holds \`id-token: write\`: no provider this project wears exchanges GitHub's OIDC token. A deploy target of your own that fetches that token itself (npm provenance, cosign) now fails; if you have one, run the deploy from a workflow of your own, and the house steps aside.`);
+    }
     if (projectNode(tree).state !== 'declared') notes.push(`the workflow reads Node from ${nodeVersionFile(tree)}, which declares none here — add .nvmrc (one line: the Node major) or the deploy job fails at setup-node.`);
   }
   // The providers' human-run setup is useful whoever runs the pipeline, so it follows the bindings (and the
@@ -246,7 +249,8 @@ function resolve(
         ? {
             blocked:
               `${binding.line} deploys nothing until its \`ci\` binding names a target for ${missing.map((p) => p.id).join(', ')}: every push to it fails. ` +
-              `Add ${providersExample(missing)} to it${throughBranchModelSkill}, then upgrade.`,
+              `In .bespunky/branches.json, add to that line's \`deploys.ci.providers\`, beside what it already names: ${missing.map((p) => `"${p.id}": "<${p.targetLabel}>"`).join(', ')}${throughBranchModelSkill}, then upgrade. ` +
+              `If this line should not deploy from CI at all, replace its \`ci\` with a \`note\`.`,
           }
         : {}),
     });

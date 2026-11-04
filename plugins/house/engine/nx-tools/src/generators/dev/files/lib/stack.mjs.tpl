@@ -36,6 +36,9 @@ export function descendants(pid) {
   return out;
 }
 
+// How long a child's exit by SIGINT waits for the engine's own: the same signal to the same group, delivered to one event loop.
+const GROUP_SIGINT_GRACE_MS = 1000;
+
 /**
  * Run the declared processes as parallel children in OUR foreground process group, and resolve when all
  * have exited: `{ success, failures, exits }` — `failures` names each child whose own exit failed the stack
@@ -95,6 +98,7 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
     let failed = false;
     const failures = [];
     let stopHandled = false;
+    let groupStopCheck;
     const waiting = new AbortController(); // ends a dependency's readiness wait the moment the stack stops
 
     const runOnStop = (signal) => {
@@ -162,14 +166,31 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
           id: children[i].id,
           code,
           signal,
-          ...(children[i].dependency ? { why: passedReady[i] ? 'a dependency runs for as long as the stack does' : 'before it was ready, so nothing else started' } : {}),
+          ...(children[i].dependency ? { why: passedReady[i] ? 'a dependency runs for as long as the stack does: it stays in the foreground, so one that daemonises needs a launcher that stays' : 'before it was ready, so nothing else started' } : {}),
         });
       }
-      // An interrupted child means the terminal stopped the GROUP: every sibling got the same SIGINT. Treat it as
-      // the group stop it is (onGroupStop) — signalling the siblings again here would be the double signal.
-      if (interrupted && !stopping) onGroupStop();
+      // An interrupted child normally means the terminal stopped the GROUP: every sibling got the same SIGINT, and
+      // signalling them again would be the double signal. With no sibling left there is nothing more to learn. With
+      // some, our own SIGINT settles it: it is on its way if the group was signalled. If it never comes, that SIGINT was
+      // aimed at this child alone, so this is a process of the stack ending under the rest, and they get the one SIGTERM.
+      if (interrupted && !stopping) {
+        if (remaining > 1) {
+          clearTimeout(groupStopCheck);
+          groupStopCheck = setTimeout(() => {
+            if (stopping) return;
+            failed = true;
+            failures.push({ id: children[i].id, code, signal });
+            log?.(`${children[i].id} exited (${signal ?? code}), and nobody asked the stack to stop — stopping the rest of it.`);
+            stopping = true;
+            runOnStop();
+            stopRemaining();
+          }, GROUP_SIGINT_GRACE_MS);
+        } else {
+          onGroupStop();
+        }
+      }
 
-      if (!stopping && remaining > 1) {
+      if (!stopping && !interrupted && remaining > 1) {
         log?.(`${children[i].id} exited (${signal ?? code}) — stopping the rest of the stack.`);
         stopping = true;
         runOnStop();
@@ -177,6 +198,7 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
       }
 
       if (--remaining === 0) {
+        clearTimeout(groupStopCheck);
         cleanup();
         runOnStop();
         resolve({ success: !failed, failures, exits });

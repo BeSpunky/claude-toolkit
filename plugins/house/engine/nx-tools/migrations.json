@@ -327,8 +327,14 @@
     "pin-github-cli-feature": {
       "version": "0.52.0",
       "layer": "agent",
-      "description": "The github-cli devcontainer feature gets a version: the bare id meant `latest`. The merge only adds, so without this the new `github-cli:1.1.3` would sit beside the old key and the feature would install twice. Where the house wrote the key (an owned devcontainer, or an adopted one whose record holds it), the key is renamed with its value and comment kept, the lock pin replaced with the digest of 1.1.3, the adoption record moved. A project's own bare key is reported, and the generator leaves a feature declared under any tag alone.",
+      "description": "The github-cli devcontainer feature gets a version: the bare id meant `latest`, and the generator leaves a feature declared under any tag alone, so the key would stay unpinned for good. Where the house wrote the key, or it is `{}` whoever wrote it, the key is renamed with its value and comment kept, the lock pin set to the digest of 1.1.3, the adoption record moved. A key carrying a project's own options, or the same feature under another floating tag, is reported.",
       "implementation": "./src/migrations/0.52.0/pin-github-cli-feature"
+    },
+    "pin-node-feature": {
+      "version": "0.52.0",
+      "layer": "agent",
+      "description": "The node devcontainer feature moves from its major tag to an exact one: `node:1` moves within v1 with no commit behind it, and the generator leaves a feature declared under any tag alone. Where the house wrote the key, or it is `{}` whoever wrote it, the key is renamed with its value and comment kept, the lock pin set to the digest of 1.7.1, the adoption record moved. A key carrying a project's own options is reported.",
+      "implementation": "./src/migrations/0.52.0/pin-node-feature"
     }
   }
 }

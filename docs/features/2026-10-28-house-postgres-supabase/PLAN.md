@@ -22,6 +22,13 @@ Not in Landing 1, deliberately: `cli.ts:142` per-app platforms. `postgres` has n
 
 Descriptor, generator, launcher (`ARCHITECTURE.md` 6, 6a, 7), `.bespunky` major declaration, pins, `new` skill, README, tips, house-doc sections, `tools/test-*` cases, a real-binary tripwire, a real boot in `dogfood-consumer`, CI provider. **Needs a user rebuild before release.**
 
+**Owed by this landing, from the Landing 1 review** (`reviews/2026-11-04-landing1-sanity-review.md`):
+- Provider shape (F4): target optional; a layer can declare it supersedes a required layer's provider; a line can name only some providers. Reproduced: two providers on one `postgres:deploy` leave `ci-production` with the last one's args.
+- A `dev run` stack has no address (E6): `dev run --export=` matched by app, or the launcher owns it. Decide before the launcher.
+- Closures key on codename while `base:debian` and `typescript-node:<major>` float (F14): tags naming the codename plus a migration, or a tripwire.
+- An existing firewall never gains a later stack's `webOnlyImports` (F7). An unrelated workflow with a deploy signal in an `echo` deletes the owned `deploy.yml` (F8, pre-existing; new signals raise the odds). A bare-directory `watches` is silent (F5).
+- "stopped cleanly" printed over a dependent's failed shutdown (E1). Launcher stop policy is in `ARCHITECTURE.md` 6a; it is untested.
+
 ## Landing 3: `supabase`
 
 Descriptor, provider, launcher and keeper (6b), `config.toml` keys, CLI pin and `supabase.lock`, tripwire from `research/spike-native-tripwire.mjs`, folder move on `add-layer`, major-mismatch preflight, CI provider, persistence. **Needs a user rebuild and a real hosted project before release.**

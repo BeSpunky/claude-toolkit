@@ -30,14 +30,15 @@
 export const PLAYWRIGHT_VERSION = '1.63.0';
 
 /**
- * The devcontainer features the house declares, each with its tag: a bare id means `latest`, which moves with no commit
- * behind it. `github-cli` is exact. `node` is the major tag: the Node it installs is the project's own, through the
- * feature's `version` option. tools/test-layers refuses a version-less feature in any layer. Moving one changes a KEY in
- * every project's devcontainer.json, which the merge only ever adds to, so it owes a migration
- * (0.52.0/pin-github-cli-feature), or the project declares the feature twice.
+ * The devcontainer features the house declares, each at an exact tag: a bare id means `latest` and a major tag moves
+ * within its major, neither with a commit behind it. tools/test-layers refuses anything else in any layer.
+ * The tag pins the feature's install SCRIPT. What that script installs is its `version` option: the project's own Node
+ * for `node`; for `github-cli` the layer passes none, so the option's default, `latest`, installs the newest `gh`.
+ * Moving a tag changes a KEY in every project's devcontainer.json. The generator leaves a feature declared under any tag
+ * alone (`featureIdentity`), so without a migration a project silently stays on the old one (0.52.0/pin-*-feature).
  */
 export const DEVCONTAINER_FEATURE_GITHUB_CLI = 'ghcr.io/devcontainers/features/github-cli:1.1.3';
-export const DEVCONTAINER_FEATURE_NODE = 'ghcr.io/devcontainers/features/node:1';
+export const DEVCONTAINER_FEATURE_NODE = 'ghcr.io/devcontainers/features/node:1.7.1';
 
 /**
  * The Firebase CLI, as the project's own devDependency — exact, because it runs the emulators and the deploys, and

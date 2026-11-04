@@ -240,7 +240,10 @@ export interface CiDeployProvider {
   deployTargets(tree: Tree): { project: string; target: string }[];
   /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
   deployOptions(target: string): Record<string, unknown>;
-  /** GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. */
+  /**
+   * GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. They run before
+   * the deploy steps and without `deployEnv`, which only those steps hold: reach a secret here through `secrets.*`.
+   */
   authSteps(): string;
   /**
    * Owned files this provider adds (the human-run cloud setup), rendered from the resolved environments — retired

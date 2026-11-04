@@ -160,6 +160,25 @@ install_packages() {
   echo "[os-packages] FAILED:$failed" >&2
   return 1
 }
+{{#ARCHIVE_TOOLS}}
+
+# Download one file and hold it to its pinned sha256; says what failed.
+fetch_checked() {   # fetch_checked <sha256> <url> <file>
+  if ! curl -fsSL --retry 3 --retry-delay 5 -o "$3" "$2"; then
+    echo "[os-packages] FAILED to download $2" >&2; return 1
+  fi
+  if ! echo "$1  $3" | sha256sum -c - > /dev/null 2>&1; then
+    echo "[os-packages] FAILED: $2 does not match its pinned sha256 — refusing to install it" >&2; return 1
+  fi
+}
+
+# Everything in a tool's home but this release and the link to it.
+drop_other_releases() {   # drop_other_releases <home> <version>
+  for old in "$1"/*; do
+    [ "${old##*/}" = "$2" ] || [ "${old##*/}" = current ] || $as_root rm -rf "$old"
+  done
+}
+{{/ARCHIVE_TOOLS}}
 {{#ARCHIVES}}
 
 # One archive tool at its pinned version: download, check the sha256, extract BESIDE any other release, switch
@@ -170,12 +189,7 @@ install_archive() {
   home="$archive_home/$id"
   echo "[os-packages] installing $id $version ($arch) from $url"
   download="$(mktemp -d)" || return 1
-  if ! curl -fsSL --retry 3 --retry-delay 5 -o "$download/archive.tar.gz" "$url"; then
-    rm -rf "$download"; echo "[os-packages] FAILED to download $url" >&2; return 1
-  fi
-  if ! echo "$sha256  $download/archive.tar.gz" | sha256sum -c - > /dev/null 2>&1; then
-    rm -rf "$download"; echo "[os-packages] FAILED: $url does not match its pinned sha256 — refusing to install it" >&2; return 1
-  fi
+  fetch_checked "$sha256" "$url" "$download/archive.tar.gz" || { rm -rf "$download"; return 1; }
   $as_root mkdir -p "$home" "$archive_links" &&
     $as_root rm -rf "$home/.partial" && $as_root mkdir "$home/.partial" &&
     $as_root tar -xzf "$download/archive.tar.gz" -C "$home/.partial" --no-same-owner &&
@@ -195,9 +209,7 @@ install_archive() {
   for link in "$archive_links"/*; do
     [ -L "$link" ] && [ ! -e "$link" ] && case "$(readlink "$link")" in "$home"/*) $as_root rm -f "$link" ;; esac
   done
-  for old in "$home"/*; do
-    [ "${old##*/}" = "$version" ] || [ "${old##*/}" = current ] || $as_root rm -rf "$old"
-  done
+  drop_other_releases "$home" "$version"
   echo "[os-packages] $id $version installed"
 }
 {{/ARCHIVES}}
@@ -222,8 +234,8 @@ satisfy_system_depends() {
 is_wrapper_of() { [ -f "$2" ] && [ ! -L "$2" ] && [ "$(sed -n 2p "$2" 2>/dev/null)" = "# bespunky-house wrapper for $1" ]; }
 
 # One closure at this release's version: download and check EVERY file (a bad one changes nothing on this machine), get
-# what Debian must supply, unpack BESIDE any other release, switch `current`, write the wrappers, then drop the release it
-# replaced and any wrapper it no longer has.
+# what Debian must supply, unpack BESIDE any other release, write the wrappers, switch `current` (what says it is installed,
+# so a failure before it is retried on the next run), then drop the release it replaced and any wrapper it no longer has.
 install_deb_archive() {
   id="$1"
   home="$archive_home/$id"
@@ -238,12 +250,7 @@ install_deb_archive() {
   deb_archive deb "$id" | awk -v codename="$codename" -v arch="$arch" '$3 == codename && $4 == arch { print $5, $6 }' > "$download/list"
   while read -r sha256 url; do
     count=$((count + 1))
-    if ! curl -fsSL --retry 3 --retry-delay 5 -o "$download/$count.deb" "$url"; then
-      rm -rf "$download"; echo "[os-packages] FAILED to download $url" >&2; return 1
-    fi
-    if ! echo "$sha256  $download/$count.deb" | sha256sum -c - > /dev/null 2>&1; then
-      rm -rf "$download"; echo "[os-packages] FAILED: $url does not match its pinned sha256 — refusing to install it" >&2; return 1
-    fi
+    fetch_checked "$sha256" "$url" "$download/$count.deb" || { rm -rf "$download"; return 1; }
   done < "$download/list"
   if [ -n "$system_depends" ] && ! satisfy_system_depends "$system_depends"; then
     rm -rf "$download"; echo "[os-packages] FAILED: Debian could not supply what $id needs: $system_depends" >&2; return 1
@@ -271,8 +278,7 @@ install_deb_archive() {
   if [ -z "$library_path" ] || [ ! -d "$home/.partial/$bin" ]; then
     echo "[os-packages] FAILED: $id's closure has no '$bin' or no '$library_paths' — its binaries could not run" >&2; return 1
   fi
-  $as_root rm -rf "$home/$version" && $as_root mv "$home/.partial" "$home/$version" &&
-    $as_root ln -sfn "$version" "$home/current" || { echo "[os-packages] FAILED to unpack $id" >&2; return 1; }
+  $as_root rm -rf "$home/$version" && $as_root mv "$home/.partial" "$home/$version" || { echo "[os-packages] FAILED to unpack $id" >&2; return 1; }
   for tool in "$home/$version/$bin"/*; do
     [ -f "$tool" ] && [ -x "$tool" ] || continue
     link="$archive_links/${tool##*/}"
@@ -285,12 +291,11 @@ install_deb_archive() {
       "$id" "$library_path" "$home/current/$bin/${tool##*/}" | $as_root tee "$link" > /dev/null &&
       $as_root chmod 755 "$link" || return 1
   done
+  $as_root ln -sfn "$version" "$home/current" || { echo "[os-packages] FAILED to switch $id to $version" >&2; return 1; }
   for link in "$archive_links"/*; do
     is_wrapper_of "$id" "$link" && [ ! -x "$home/$version/$bin/${link##*/}" ] && $as_root rm -f "$link"
   done
-  for old in "$home"/*; do
-    [ "${old##*/}" = "$version" ] || [ "${old##*/}" = current ] || $as_root rm -rf "$old"
-  done
+  drop_other_releases "$home" "$version"
   echo "[os-packages] $id $version installed"
 }
 {{/DEB_ARCHIVES}}
