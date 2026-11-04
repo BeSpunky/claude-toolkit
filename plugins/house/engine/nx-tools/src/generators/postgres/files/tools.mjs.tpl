@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { Refusal, DATABASE, ROLE } from './layout.mjs';
 
-const SCRUBBED = /^(PG[A-Z]|DBMATE_)|^(DATABASE_URL|DIRECT_DATABASE_URL|POSTGRES_DEPLOY_URL)$/;
+const SCRUBBED = /^(PG[A-Z]|DBMATE_|SUPABASE_)|^(DATABASE_URL|DIRECT_DATABASE_URL|POSTGRES_DEPLOY_URL)$/;
 
 export function scrubbedEnv(extra = {}) {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !SCRUBBED.test(name))), ...extra };

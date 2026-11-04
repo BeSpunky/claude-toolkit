@@ -27,7 +27,7 @@ import { POSTGRES_ROOT, POSTGRES_TAG, postgresHome, refuseForeignHolder } from '
 import { POSTGRES_DECLARATION, postgresMajor } from './major';
 
 /** The launcher's files, relative to tools/postgres/: each written from files/<name>.tpl. */
-export const LAUNCHER_FILES = ['postgres.mjs', 'layout.mjs', 'tools.mjs', 'url.mjs', 'stack.mjs', 'schema.mjs', 'server.mjs'] as const;
+export const LAUNCHER_FILES = ['postgres.mjs', 'layout.mjs', 'tools.mjs', 'url.mjs', 'stack.mjs', 'schema.mjs', 'server.mjs', 'native.mjs'] as const;
 export const LAUNCHER_ROOT = 'tools/postgres';
 export const POSTGRES_MIGRATIONS = `${POSTGRES_ROOT}/migrations`;
 

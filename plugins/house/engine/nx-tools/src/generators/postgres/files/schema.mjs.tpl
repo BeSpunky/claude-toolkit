@@ -81,16 +81,18 @@ export async function seedOnce(port, options) {
 }
 
 /** The next migration's file, stamped later than every one before it even when the clock disagrees. */
-export function newMigration(name) {
+export const newMigration = (name) => writeNextMigration(MIGRATIONS, name, '-- migrate:up\n\n\n-- migrate:down\n');
+
+export function writeNextMigration(dir, name, body) {
   if (!/^[a-z0-9_]+$/.test(name ?? '')) throw new Refusal('A migration needs a lower_snake name: postgres:new-migration --name=add_users');
   const stamp = (date) => date.toISOString().replace(/\D/g, '').slice(0, 14);
-  const latest = migrationFiles().map((file) => file.slice(0, 14)).filter((file) => /^\d{14}$/.test(file)).at(-1);
+  const latest = readdirSync(dir).filter((file) => file.endsWith('.sql')).sort().map((file) => file.slice(0, 14)).filter((file) => /^\d{14}$/.test(file)).at(-1);
   let now = new Date();
   if (latest && stamp(now) <= latest) {
     const [y, mo, d, h, mi, s] = latest.match(/^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)$/).slice(1).map(Number);
     now = new Date(Date.UTC(y, mo - 1, d, h, mi, s + 1));
   }
-  const file = join(MIGRATIONS, `${stamp(now)}_${name}.sql`);
-  writeFileSync(file, '-- migrate:up\n\n\n-- migrate:down\n');
+  const file = join(dir, `${stamp(now)}_${name}.sql`);
+  writeFileSync(file, body);
   return relative(ROOT, file);
 }
