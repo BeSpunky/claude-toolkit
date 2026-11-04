@@ -21,7 +21,7 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 ## Units
 | id | branch | re-runnable | status |
 |---|---|---|---|
-| debts-ci | feat/hps2-ci | yes, its own branch | dispatched |
+| debts-ci | feat/hps2-ci | yes, its own branch | returned |
 | debts-engine | feat/hps2-engine | yes, its own branch | dispatched |
 | core | feat/hps2-core | yes, its own branch | dispatched |
 | wire | tripwire, dogfood boot, image e2e; after core | yes | pending |
@@ -30,3 +30,8 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 | gate | upgrade --local, dogfood-consumer, rebuild | yes | pending |
 
 ## Results
+
+### debts-ci (returned; feat/hps2-ci ee959331..b037f9f2; spent 0 of 0)
+Note on branch: handoffs/seam2-ci.md. F4, F8, F7, F14 done with cases. Nothing to migrate. New payload dep `yaml` (needs proof in a real consumer install: gate). F7 adds a stack-record comment to firewalls so removed bans stay removed. `typescript-node:14` is bullseye, a printed exemption. Not verified: a real GitHub run.
+ORCHESTRATOR DECISION: a targeted provider a line does not name stays blocked, consistent with the user's "yes, fail CI"; "name only some" covers targetless and superseded providers only.
+Owed: CLAUDE.md commands row.
