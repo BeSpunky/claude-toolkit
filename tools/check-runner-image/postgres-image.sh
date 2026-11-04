@@ -183,7 +183,7 @@ run_case() {
   equal "$facts" stop.pidfile gone "and left no pid file"
 
   # The node presets' images carry their Node, so the launcher itself runs there. The agent preset's is a devcontainer feature.
-  if [ "$preset" = node ]; then
+  if [ "$preset" != agent ]; then
     local running="$WORK/launcher-$CASE" stage="$WORK/stage-$CASE" lrc=0
     mkdir -p "$stage"
     tar -C "$project" -cf - tools/dev tools/postgres .bespunky | tar -C "$stage" -xf -
