@@ -321,7 +321,7 @@ scenario('kill -9 of the launcher: an orphan dev ps sees, dev stop clears, the n
   const blocked = await start(dir, { offset, expectFailure: true, timeoutMs: 15_000 });
   ok(blocked.ended && blocked.code !== 0, 'a new start on that block is refused while the orphan holds it');
   const cleared = stop(stack);
-  ok(cleared.status === 0, `dev stop clears it (${cleared.stderr.trim()})`);
+  ok(cleared.status === 0, `dev stop clears it (status ${cleared.status}, signal ${cleared.signal}, ${cleared.error?.code ?? 'no spawn error'}): ${cleared.stdout.trim()} ${cleared.stderr.trim()}`);
   ok(sql(stack.port, 'SELECT 1').startsWith('ERROR'), 'the port is free');
   ok(ps(dir).length === 0, 'dev ps is empty');
   const again = await start(dir, { offset });

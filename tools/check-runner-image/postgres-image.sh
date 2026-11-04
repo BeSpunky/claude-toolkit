@@ -136,6 +136,8 @@ run_case() {
   IMAGES+=("$tag")
   DOCKER_BUILDKIT=1 docker build --no-cache --progress=plain -f "$dc/$dockerfile" -t "$tag" "$dc/$context" < /dev/null > "$build" 2>&1 || brc=$?
   if [ "$brc" -ne 0 ]; then
+    # The installer's own verdict can sit far above the tail, as it can name the package at fault only after its retries.
+    grep -E '\[os-packages\]|\[package-manager\]|^#[0-9]+ [0-9.]+ (E:|W:|Err:)' "$build" | sed 's/^/    /'
     tail -n 40 "$build" | sed 's/^/    /'
     check "$brc" "docker build exited 0 (it exited $brc)"; summary "| $CASE | **build failed** |"; return
   fi
