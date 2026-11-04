@@ -12,7 +12,7 @@ No edges, then the orchestrator reconciles. Budget 12 (default); 3 leaves, none 
 |---|---|---|---|
 | spike-install | pinned .deb closure, unprivileged (first version using sudo and chroot was denied by the permission check) | research/spike-install.md | returned |
 | spike-lifecycle | foreground Postgres under the real dev engine; in-tree data | research/spike-lifecycle.md | returned |
-| spike-native-concurrency | concurrent native Supabase stacks under stress | research/spike-native-concurrency.md | dispatched |
+| spike-native-concurrency | concurrent native Supabase stacks under stress | research/spike-native-concurrency.md | returned |
 
 ## Cannot run here
 - A real root install of the closure, and a real container rebuild: need the user, once a branch has a fragment to rebuild from.
@@ -31,3 +31,11 @@ Full: research/spike-lifecycle.md. Server per stack holds (shared server never r
 Design changes: no exec (launcher stays parent, TERM/HUP to SIGINT; exec hangs on smart shutdown with a client open, 61 s observed); data keyed per stack (.postgres/${APP}@${OFFSET}); dynamic_shared_memory_type=mmap; initdb to a sibling then rename; socket in DEV_STACK_TMP. dbmate: generated empty --env-file, full-host --url, explicit -d, scrubbed PG*/DBMATE_*.
 In-tree data: sound on Linux. Docker Desktop by web research only: Windows path broken by mechanism, macOS no report either way on >=4.96 with negative history. Agent recommends gating the data home on the tree's fstype, else ~/.local plus a sweep. Seam prototype +41/-5 lines on a scratch copy; the first version wrongly started siblings after a dependency failed, so the real seam needs that test.
 Unproven: Docker Desktop, real nx serve runner, real rebuild, arm64, deb closure together with this, walsenders, file watchers, major bump.
+
+### spike-native-concurrency (returned; spent 0 of 1; stacks destroyed, 0 listeners)
+Full: research/spike-native-concurrency.md, tripwire research/spike-native-tripwire.mjs (PASS, 43 s). Safe as default, no limit on N, 0 isolation violations in 18 min. Rules and keeper shape: ARCHITECTURE.md 6b.
+Interference: spike-lifecycle's /dev/shm cleanup very likely deleted live stacks' segments at 06:39:45 (inferred, not reproduced); stress had finished, results stand. Its "mapped by no process" check is unsafe. Never sweep those.
+Incidents: a grep over /proc/*/fd/* hung ~3 min and may have consumed data from other processes' pipes; pkill -f killed 3 of its own shells. Left: up to 6 /dev/shm/PostgreSQL.* and up to 4 SysV segments (cleared at container restart; the permission check denied a timestamp sweep, not worked around), ~/.npm cache.
+
+## Synthesis
+ARCHITECTURE.md amended: decision 2 reversed by the orchestrator to ~/.local with a sweep (rejecting the spike's filesystem gate), decision 4 to extraction, launcher rules 6a and 6b added. Budget 4 of 12 plus the denied dispatch.

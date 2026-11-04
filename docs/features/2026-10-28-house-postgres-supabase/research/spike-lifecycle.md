@@ -207,3 +207,5 @@ Prototyped on a scratch copy of the rendered engine, not the repo.
 - **Removed:** `.claude/worktrees/spike-lifecycle-tmp/` (its worktrees were its own, `git worktree prune` never run, none registered on this repo); 8 `/dev/shm/PostgreSQL.*` segments leaked by these kills, each checked as mapped by no process.
 - **Left alone:** 2 `/dev/shm/PostgreSQL.*` from 05:42–05:43, before this spike; apparently the previous researcher's SIGKILL tests, about 1 MB, gone at the next container restart.
 - **Kept in the scratchpad:** the harness, launcher prototypes and raw results, under `/tmp/claude-1000/-workspaces-claude-toolkit/0bf80dcc-918b-416c-bc7b-ad1b50711a79/scratchpad/spike-lifecycle/`. Nothing installed system-wide. `yarn install` was not needed.
+
+> **Correction (orchestrator, 2026-11-04):** do not carry forward this spike's `/dev/shm` cleanup or its "mapped by no process" check. Postgres's 1 MB segment is in use by name while unmapped, and this cleanup very likely deleted live segments of the concurrent Supabase spike (`spike-native-concurrency.md`). Never sweep `/dev/shm/PostgreSQL.*`.
