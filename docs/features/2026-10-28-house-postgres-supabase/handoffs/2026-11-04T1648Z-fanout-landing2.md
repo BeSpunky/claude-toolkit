@@ -26,7 +26,7 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 | core | feat/hps2-core | yes, its own branch | returned |
 | wire | tripwire, dogfood boot, image e2e, sweep rule; on this branch | yes | returned |
 | docs | new skill, README, CLAUDE.md, tips; on this branch | yes | returned |
-| review | sanity review | yes | dispatched |
+| review | sanity review | yes | returned, decisions being applied |
 | gate | upgrade --local, dogfood-consumer, rebuild | yes | pending |
 
 ## Results
@@ -59,3 +59,20 @@ ORCHESTRATOR DECISIONS, resumed to wire:
 
 ### wire fixes (returned; 7fe6e36c..c25fe7e1)
 Wrapper host fixed (`spawn` replaces `bin`, guard fires), heartbeat with a server stopping on lost ownership, deploy refused under CLAUDECODE=1, HUMAN_STEP added, docs. Layers 112; generators 393 passed, 35 skipped; scaffold ok; test-postgres ok; check-runner-image test PASS; dogfood 107 passed, 0 failed. Unproven: real images, tripwire workflow, rebuild, hosted database, two real containers. Heartbeat gaps: orphaned server after 30s, identical hostnames, simultaneous starts. Old rung 0.35.0 can still write `./nx`.
+
+### review (returned; spent 5 of 5; reviews/2026-11-04-landing2-sanity-review.md)
+Fixes committed. ORCHESTRATOR DECISIONS on its list, resumed to the reviewer to apply:
+- D1 (a): `postgres:reset` boots the stack through `dev run` when nothing runs.
+- D2 (a)+(b), superseding "a deletion must be proven" as the whole rule: quarantine to `.swept-<ts>`, deleted after 7 days; record hostname and parent st_dev, a mismatch means unknown. Reproduced: the old rule lost data permanently.
+- D3 (a): tag evidence as design-system does, amending ARCHITECTURE; a foreign holder of the name or root is refused.
+- D5 (a): the dbmate signal counts only with `secrets.`. An unreadable `uses:` step gets nothing, as stated in the header.
+- D6: the secret name is suffixed by environment, so nothing inherits from a repo-level one.
+- D7: accept; same trust as the Firebase deploy job. Stated in HOUSE.md.
+- D8: yes, the real launcher in the image job.
+- D9: report each hand-declared app with a snippet; Firebase unchanged.
+- D10: warn, naming where the usual data is.
+- D11: `--port-offset=auto` from a linked worktree.
+- D12: `onAutoForward: ignore` on the Postgres port range.
+- D13, D14: stated limits.
+- D4: the user's, asked.
+Remaining budget: 1, a correctness pass over the fix diff.
