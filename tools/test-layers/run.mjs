@@ -1145,6 +1145,29 @@ check('no layer declares a floating devcontainer feature: a bare id is `latest` 
   }
 });
 
+checkAsync('supabase: the CLI in the image by exact pin; its state in the persisted ~/.local by a literal path; no server of Debian\'s; docs honest', async (ok) => {
+  const { SUPABASE_CLI_DOWNLOADS, SUPABASE_CLI_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const tree = wrapperRepo();
+  const a = await artifacts(tree, ['nx', 'agent', 'postgres', 'supabase']);
+  const home = `/home/${a.dc.remoteUser ?? 'vscode'}`;
+  for (const [arch, { url, sha256 }] of Object.entries(SUPABASE_CLI_DOWNLOADS)) ok(a.osScript.includes(`supabase ${SUPABASE_CLI_VERSION} ${arch} ${sha256} ${url} .`), `the installer lacks the CLI's ${arch} line`);
+  ok(!a.osScript.includes('dbmate') && !a.osScript.includes('postgresql-18'), 'the Debian server or dbmate is still installed: with this layer they serve nothing');
+  ok(/postgresql-client/.test(a.osScript) && /\bprocps\b/.test(a.osScript), 'psql or /bin/ps is missing');
+  // Where the state is, found by running the CLI (layers/supabase.ts): SUPABASE_HOME holds the login, the cache and the stacks.
+  ok(a.dc.containerEnv?.SUPABASE_HOME === `${home}/.local/share/supabase`, `the login and the stacks would not survive a rebuild: ${a.dc.containerEnv?.SUPABASE_HOME}`);
+  ok(a.dc.containerEnv?.SUPABASE_NO_KEYRING === '1', 'without it, `logout` fails on a container with no keyring');
+  ok(a.dc.containerEnv?.DO_NOT_TRACK === '1', 'the CLI sends telemetry by default');
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.local,type=volume`)), '~/.local is not a persisted volume');
+  const without = await artifacts(wrapperRepo(), ['nx', 'agent', 'postgres']);
+  ok(a.dc.mounts.length === without.dc.mounts.length, 'the layer added a mount: its state belongs in a persisted XDG home');
+  ok(a.dc.portsAttributes?.['__supabase_stack_host__']?.onAutoForward === 'ignore', 'a stack\'s ports are left to auto-forward: its superuser password is well known');
+  ok(!/postgres(ql)?:\/\//.test(a.dcText), 'a database URL in devcontainer.json is inherited by every process, and committed');
+  ok(a.house.includes('## Supabase') && a.house.includes('ALPHA') && a.house.includes('accepted gap') && a.house.includes('local only'), 'the house docs do not say what the layer is');
+  ok(!a.house.includes('postgres/migrations/<14 digits>') && a.house.includes('supabase/migrations/<digits>') && !a.house.includes('.bespunky/postgres.json`** ('), 'the docs still describe the native provider');
+  ok(a.rules.includes('only the launcher starts and stops the stack'), 'the rules do not say who starts the stack');
+  ok(!without.house.includes('## Supabase') && !without.rules.includes('only the launcher starts') && without.house.includes('postgres/migrations/<14 digits>'), 'a project on the native provider reads about Supabase');
+  ok(!JSON.stringify(a.settings).includes('supabase@'), 'the official plugin connects to the hosted MCP with write access: not enabled by this layer');
+});
 checkAsync('persistence: an archive tool needs no mount, and no layer mounts over where it is installed', async (ok) => {
   const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
   const fragmentOf = (entry, tree) => (typeof entry.devcontainer === 'function' ? entry.devcontainer(tree) : entry.devcontainer);
