@@ -40,3 +40,6 @@ Note on branch: handoffs/seam-engine.md. `dependency: true`; ready {http | tcp:<
 To check: dev claim has no generated caller; dependency exit 0 after ready fails the stack; stop signals dependents and dependencies together. Bump owed: bespunky-workflow too. Not verified: real nx serve above the wrapper, dogfood, upgrade --local, a real launcher.
 
 Integrated: all four rebased clean onto feat/house-postgres-supabase and fast-forwarded; unit worktrees removed.
+
+### Interruption
+VS Code died during `finish`. On resume: rung and dev claim removal committed; firebase:reset work uncommitted in the tree; no processes left. `finish` resumed from its transcript. Outstanding: items 3-5 of finish, then review, then gate.
