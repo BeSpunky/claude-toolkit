@@ -10,6 +10,7 @@
 //   node tools/postgres/postgres.mjs new-migration --name=<lower_snake>
 //   node tools/postgres/postgres.mjs deploy                        migrate the database POSTGRES_DEPLOY_URL names
 //   node tools/postgres/postgres.mjs serve                         the server inside a dev stack (what dev.json's process runs)
+//   (a provider may bring verbs of its own: `provider.verbs`)
 //
 // LOCAL VERBS TAKE NO URL. They compute the address from this tree's running stack, and check over the connection that the
 // server there is the one that stack created. Only `deploy` reaches a URL it did not compute.
@@ -190,7 +191,7 @@ async function humanConfirms(target) {
 }
 
 async function deploy(argv) {
-  parse(argv, []);
+  const { flags } = parse(argv, provider.deployFlags ?? []);
   // First, and whatever CI says: an agent can set CI itself, and it reaches a database nobody asked it to migrate.
   if (process.env.CLAUDECODE === '1') throw new Refusal(`A deploy is not an agent's to run: a human runs it, or CI does. Hand the user this command to run in a terminal: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
   const file = envFileSetting(DEPLOY_URL_VAR);
@@ -212,12 +213,12 @@ async function deploy(argv) {
     const withoutUrl = text.split(url).join('***');
     return target.password ? withoutUrl.split(target.password).join('***') : withoutUrl;
   };
-  await provider.deploy(url, target, hide);
+  await provider.deploy(url, target, hide, flags);
   console.log(`[postgres] ${target.display} is migrated.`);
   return 0;
 }
 
-const VERBS = { start, serve: (argv) => (parse(argv, []), provider.serve()), 'serve-reset': (argv) => (parse(argv, []), provider.serve({ resetThenStop: true })), migrate, seed, reset, psql, 'new-migration': createMigration, deploy };
+const VERBS = { start, serve: (argv) => (parse(argv, []), provider.serve()), 'serve-reset': (argv) => (parse(argv, []), provider.serve({ resetThenStop: true })), migrate, seed, reset, psql, 'new-migration': createMigration, deploy, ...provider.verbs?.({ parse, addressed }) };
 
 const [verb, ...argv] = process.argv.slice(2);
 try {

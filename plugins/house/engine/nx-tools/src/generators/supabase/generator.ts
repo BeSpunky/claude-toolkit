@@ -4,7 +4,8 @@
 // Writes, by class (CLAUDE.md):
 //   A  tools/postgres/supabase-*.mjs and provider.mjs, rewritten every run. In supabase/config.toml, `[experimental] stack`.
 //   B  the layer's tag on the postgres project; a served app's process in .bespunky/dev.json, reshaped the once (dev-merge.ts).
-//   C  supabase/config.toml, .gitignore and supabase.lock, seeded when absent. The migrations.
+//   C  supabase/config.toml, .gitignore, supabase.lock and .bespunky/supabase.json, seeded when absent. The migrations, supabase/functions.
+//      One line of supabase/.gitignore is re-asserted: functions/.env.
 //
 // THE FOLDER MOVE IS A STEP OF THIS GENERATOR, NOT A MIGRATION. A migration carries every project across a version, unasked; this
 // happens because one project chose this layer, in the run that ensures it, and a project that never does keeps postgres/migrations
@@ -28,6 +29,9 @@ export const SUPABASE_CONFIG = 'supabase/config.toml';
 const SEEDED_SQL_PATHS = '["../postgres/seed/world/*.sql"]';
 const INIT_SQL_PATHS = '["./seed.sql"]';
 const SUPPORTED_MAJOR = SUPABASE_MAJORS.at(-1)!;
+const FUNCTION_SECRETS = 'functions/.env';
+/** Class C: where `postgres:gen-types` writes, and in what language. The project's from the day it is seeded. */
+const SUPABASE_DECLARATION = '.bespunky/supabase.json';
 
 const seed = (name: string) => readFileSync(join(__dirname, 'seed', `${name}.tpl`), 'utf8');
 
@@ -140,6 +144,10 @@ export default async function supabaseGenerator(tree: Tree): Promise<void> {
 
   ensureConfig(tree);
   if (!tree.exists('supabase/.gitignore')) tree.write('supabase/.gitignore', seed('gitignore'));
+  // Owned, as a line: a function's local secrets go here, and the CLI's own ignore file does not cover it.
+  const ignored = tree.read('supabase/.gitignore', 'utf8') ?? '';
+  if (!ignored.split('\n').some((line) => line.trim() === FUNCTION_SECRETS)) tree.write('supabase/.gitignore', `${ignored.replace(/\n?$/, '\n')}\n# A function's local secrets\n${FUNCTION_SECRETS}\n`);
+  if (!tree.exists(SUPABASE_DECLARATION)) tree.write(SUPABASE_DECLARATION, `${JSON.stringify({ types: { out: 'supabase/types/database.ts', lang: 'typescript' } }, null, 2)}\n`);
   if (!tree.exists('supabase/supabase.lock')) tree.write('supabase/supabase.lock', seed('supabase.lock'));
 
   moveMigrations(tree);

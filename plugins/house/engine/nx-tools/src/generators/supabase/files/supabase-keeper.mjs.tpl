@@ -238,6 +238,7 @@ export async function serve({ resetThenStop = false } = {}) {
     writeFileSync(join(stackDir, READY_MARKER), `${new Date().toISOString()}\n`);
     log(`ready on 127.0.0.1:${requested.postgres}; API ${startedStack.apiUrl}. Keys: supabase status -o env.`);
     if (startedStack.mcpUrl) log(`this stack's own MCP, local only: claude mcp add --transport http --scope local supabase-local ${startedStack.mcpUrl}`);
+    if (realpathSync(ROOT).startsWith('/tmp/')) log(`this tree is under /tmp, where the Edge Runtime sees a filesystem of its own: every function here answers 404 "Function not found". Move the tree to serve them.`);
     log(`stop it with: tools/dev/dev stop ${key.split('@')[0]} --offset=${key.split('@')[1]}`);
   }
 

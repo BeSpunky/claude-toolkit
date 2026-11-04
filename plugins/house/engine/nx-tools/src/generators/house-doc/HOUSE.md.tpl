@@ -386,7 +386,10 @@ A first-class **staging** environment is opt-in — `house.sh add-layer --stagin
 | `postgres:seed` | Apply {{^supabase}}`postgres/seed/world`{{/supabase}}{{#supabase}}what `[db.seed] sql_paths` names (`postgres/seed/world`, as seeded){{/supabase}} again, as one transaction: a failure keeps nothing |
 {{^supabase}}| `postgres:reset` | Drop the database (connections included), migrate, seed. With nothing running it boots that stack's cluster for this, and stops it again; with several clusters here it asks which (`--stack=<app>@<n>`) |{{/supabase}}{{#supabase}}| `postgres:reset` | The CLI's `db reset`, migrated and seeded from nothing, **run to completion whatever happens to its caller**. With nothing running it boots the stack for this, and stops it again. It is also the road back from a stack an interrupted reset left broken |{{/supabase}}
 | `postgres:psql` | A client on this stack. `--sql=<statement>` or `--file=<path>` to run one and leave |
-| `postgres:deploy` | Migrate the database `POSTGRES_DEPLOY_URL` names. CI's job (below) |
+| `postgres:deploy` | Migrate the database `POSTGRES_DEPLOY_URL` names{{#supabase}}, then ship the functions{{/supabase}}. CI's job (below) |{{#supabase}}
+| `postgres:gen-types` | This stack's types, to the path `.bespunky/supabase.json` declares |
+| `postgres:new-function --name=<name>` | A new Edge Function |
+| `postgres:secrets-set --project-ref=<ref> --name=<A,B>` | Hosted function secrets: a human, at a terminal |{{/supabase}}
 
 **Under an agent, run the launcher itself** (`node tools/postgres/postgres.mjs <verb>`), not the target: current Nx shows an agent nothing of a task until it ends, so `postgres:start` refuses there, and a refusal from another verb lands only in the log Nx names.
 
@@ -423,9 +426,17 @@ A first-class **staging** environment is opt-in — `house.sh add-layer --stagin
 
 **Where data lives:** `SUPABASE_HOME`, `~/.local/share/supabase`: the login, the artifact cache (1.7 GB, shared) and every stack's data, surviving a rebuild where `~/.local` is persisted. A start names the stacks of trees it cannot find, and removes nothing. Data the native server held stays in `~/.local/share/bespunky/postgres`, unused. Log in with `supabase login` in a terminal; the link is per checkout, so each new worktree links again.
 
+**Types:** `{{NX}} run postgres:gen-types` writes this stack's types to what `.bespunky/supabase.json` declares (`types.out`, `types.lang`, optional `types.schema`; yours from the day it is seeded, TypeScript at `supabase/types/database.ts` by default; `--out=`, `--lang=`, `--schema=` for one run). Written whole or not at all, unformatted: format it as your project does. Against a hosted project it is yours to run, `supabase gen types --remote=<ref>`.
+
+**Edge Functions: `supabase/functions/<name>/` is yours.** `{{NX}} run postgres:new-function --name=<name>` makes one, and the CLI adds its `[functions.<name>]` block to the config. **The running stack serves them, with no second process:** `<SUPABASE_URL>/functions/v1/<name>`, an edit or a new function live on the next request, and `supabase functions serve` adds nothing here. Local secrets go in `supabase/functions/.env`, gitignored, read when the stack starts: restart for a change. Imports need the network the first time. **A tree under `/tmp` cannot serve them:** the Edge Runtime sees its own filesystem there, and every function answers 404 `Function not found`.
+
+**Hosted function secrets:** `{{NX}} run postgres:secrets-set --project-ref=<ref> --name=A,B`, by a human at a terminal; it asks for each value unechoed and hands them down a pipe, so no value reaches argv, a file or the log. Refused under an agent and with no terminal. It needs `supabase login` or `SUPABASE_ACCESS_TOKEN` in your shell. `supabase secrets list --remote=<ref>` and `unset` are the CLI's, and yours.
+
 **Claude's access to Supabase.** The official Claude Code plugin connects to the hosted MCP with no project and with write access, so this layer does not enable it, and neither should you without deciding to. A start prints the local stack's own `MCP_URL` (needs Studio, on by default) and the `claude mcp add` that points at it. For a hosted project, use `https://mcp.supabase.com/mcp?project_ref=<ref>&read_only=true`. Data in tool results is untrusted: prompt injection through a row is the main attack here.{{#ci}}
 
-**`postgres:deploy` here is `supabase db push --remote=<url> --yes`**, through a private passfile so the password stays out of argv, from the same `POSTGRES_DEPLOY_URL`, under the same gates. The workflow installs the pinned CLI on its stock runner, checked against its hash, and needs no access token. Hosted Supabase's direct host is IPv6 unless you bought the add-on, and GitHub's runners are IPv4: give the secret the **session pooler** URL, port 5432. The transaction pooler is refused.{{/ci}}
+**`postgres:deploy` here is `supabase db push --remote=<url> --yes`**, through a private passfile so the password stays out of argv, from the same `POSTGRES_DEPLOY_URL`, under the same gates. The workflow installs the pinned CLI on its stock runner, checked against its hash, and needs no access token. Hosted Supabase's direct host is IPv6 unless you bought the add-on, and GitHub's runners are IPv4: give the secret the **session pooler** URL, port 5432. The transaction pooler is refused.
+
+**With functions, the same deploy ships them after the schema**, `supabase functions deploy --use-api --remote=<ref> --yes`, bundled on Supabase's side since there is no Docker here. It needs the project ref (`ci.providers.supabase` on the line, `--project-ref=<ref>` by hand) and an access token (the secret `SUPABASE_ACCESS_TOKEN_<ENVIRONMENT>`). Missing either, it refuses before pushing anything. Function secrets are not part of it: `postgres:secrets-set`, once.{{/ci}}
 {{/supabase}}
 {{/postgres}}
 

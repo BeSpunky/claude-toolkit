@@ -54,7 +54,7 @@ function ensurePostgresProject(tree: Tree, provider: LocalServerProvider): void 
   const deploy = deployTarget(tree, home.root, {
     command: `${LAUNCH} deploy`,
     inputs: ['default'],
-    watches: [`${MIGRATIONS_OF[provider]}/**/*`],
+    watches: [`${MIGRATIONS_OF[provider]}/**/*`, ...(provider === 'supabase' ? ['supabase/functions/**/*', 'supabase/config.toml'] : [])],
   });
   ensureHouseProject(tree, 'postgres', home, {
     tags,
@@ -67,6 +67,7 @@ function ensurePostgresProject(tree: Tree, provider: LocalServerProvider): void 
       reset: verbTarget('reset'),
       psql: verbTarget('psql', { tty: true }),
       deploy: deploy.target,
+      ...(provider === 'supabase' ? { 'gen-types': verbTarget('gen-types'), 'new-function': verbTarget('new-function'), 'secrets-set': verbTarget('secrets-set', { tty: true }) } : {}),
     },
   });
 }

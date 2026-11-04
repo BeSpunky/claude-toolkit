@@ -59,9 +59,10 @@ const cliEnv = (pins = {}, extra = {}) => ({ ...scrubbedEnv(extra), SUPABASE_HOM
  * wedges a stack. Output captured; `echo` also passes stderr on as it comes, since a first start downloads for a minute. Never
  * rejects on an exit code.
  */
-export function cli(args, { pins, env, echo = false } = {}) {
+export function cli(args, { pins, env, echo = false, input } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(tool('supabase'), [...args, '--workdir', ROOT, '--agent', 'no'], { cwd: ROOT, env: cliEnv(pins, env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(tool('supabase'), [...args, '--workdir', ROOT, '--agent', 'no'], { cwd: ROOT, env: cliEnv(pins, env), detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    if (input !== undefined) child.stdin.end(input);
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => (stdout += chunk));
@@ -194,6 +195,13 @@ export function ownerRunning(id) {
   } catch {
     return false;
   }
+}
+
+/** The types of the running stack, as the CLI prints them: stdout alone, its notes go to stderr. Throws rather than return half a file. */
+export async function genTypes({ lang, schema }) {
+  const result = await cli(['gen', 'types', '--lang', lang, ...(schema ? ['--schema', schema] : [])]);
+  if (result.code !== 0 || !result.stdout.trim()) throw new Refusal(`supabase gen types failed: ${said(result)}`);
+  return result.stdout;
 }
 
 /** The `[db.seed] sql_paths` patterns of config.toml, in order, as a line-level read. */

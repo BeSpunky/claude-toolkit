@@ -1165,6 +1165,8 @@ checkAsync('supabase: the CLI in the image by exact pin; its state in the persis
   ok(a.house.includes('## Supabase') && a.house.includes('ALPHA') && a.house.includes('accepted gap') && a.house.includes('local only'), 'the house docs do not say what the layer is');
   ok(!a.house.includes('postgres/migrations/<14 digits>') && a.house.includes('supabase/migrations/<digits>') && !a.house.includes('.bespunky/postgres.json`** ('), 'the docs still describe the native provider');
   ok(a.rules.includes('only the launcher starts and stops the stack'), 'the rules do not say who starts the stack');
+  ok(a.house.includes('postgres:gen-types') && a.house.includes('postgres:new-function') && a.house.includes('postgres:secrets-set') && a.house.includes('Function not found'), 'the docs do not name the verbs, or the /tmp limit');
+  ok(!without.house.includes('postgres:gen-types'), 'a native project reads about verbs it has not got');
   ok(!without.house.includes('## Supabase') && !without.rules.includes('only the launcher starts') && without.house.includes('postgres/migrations/<14 digits>'), 'a project on the native provider reads about Supabase');
   ok(!JSON.stringify(a.settings).includes('supabase@'), 'the official plugin connects to the hosted MCP with write access: not enabled by this layer');
 });

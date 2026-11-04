@@ -59,7 +59,12 @@ const inEveryCell = MATRIX.map(({ layout, link, label }) => ({
     t.ok(/^stack = true$/m.test(config) && /^sql_paths = \["\.\.\/postgres\/seed\/world\/\*\.sql"\]$/m.test(config) && !config.includes('{{PROJECT_ID'), 'the seeded config');
     t.ok(tree.exists('supabase/supabase.lock') && tree.exists('supabase/.gitignore'), 'the lock and the ignore file');
     const { targets } = readProjectConfiguration(tree, 'postgres');
-    t.equal(Object.keys(targets).sort(), ['deploy', 'migrate', 'new-migration', 'psql', 'reset', 'seed', 'start'], 'the same seven verbs');
+    t.equal(Object.keys(targets).sort(), ['deploy', 'gen-types', 'migrate', 'new-function', 'new-migration', 'psql', 'reset', 'secrets-set', 'seed', 'start'], 'the seven verbs, and three of its own');
+    t.ok(targets['secrets-set'].options.tty === true, 'a value is asked for at a terminal');
+    t.ok(!tree.exists('supabase/functions'), 'supabase/functions is the project\'s: nothing seeded');
+    t.equal(JSON.parse(tree.read('.bespunky/supabase.json', 'utf8')), { types: { out: 'supabase/types/database.ts', lang: 'typescript' } }, 'where the types go is declared, class C');
+    t.ok(tree.read('supabase/.gitignore', 'utf8').split('\n').includes('functions/.env'), 'a function\'s local secrets are ignored');
+    t.ok(JSON.stringify(targets.deploy.inputs).includes('supabase/functions/**/*'), 'a changed function marks the deploy affected');
     t.ok(JSON.stringify(targets.deploy.inputs).includes('supabase/migrations/**/*') && !JSON.stringify(targets.deploy.inputs).includes('postgres/migrations'), `deploy watches the folder: ${JSON.stringify(targets.deploy.inputs)}`);
   },
 }));
@@ -141,6 +146,22 @@ export default {
         t.ok(!tree.exists('tools/postgres/supabase-cli.mjs'), 'nothing written');
       },
     })),
+    {
+      name: 'class C stays the project\'s: a declared types path, a function, an ignore file with its own lines',
+      setup: () => {
+        const tree = wearingAgent();
+        tree.write('.bespunky/supabase.json', '{ "types": { "out": "libs/db/src/types.py", "lang": "python" } }\n');
+        tree.write('supabase/functions/mine/index.ts', '// mine\n');
+        tree.write('supabase/.gitignore', 'mine\n');
+        return tree;
+      },
+      run: ensureBoth,
+      expect: (tree, t) => {
+        t.ok(JSON.parse(tree.read('.bespunky/supabase.json', 'utf8')).types.lang === 'python', 'the declaration stays');
+        t.ok(tree.read('supabase/functions/mine/index.ts', 'utf8') === '// mine\n', 'the function stays');
+        t.ok(tree.read('supabase/.gitignore', 'utf8') === 'mine\n\n# A function\'s local secrets\nfunctions/.env\n', tree.read('supabase/.gitignore', 'utf8'));
+      },
+    },
     {
       name: 'a config.toml that exists is the project\'s: only the owned key moves, by line, comments and all',
       setup: () => {
@@ -268,7 +289,7 @@ export default {
         const tree = workspace({ pm: 'yarn-berry' });
         tree.write('.nvmrc', '22\n');
         tree.write('.vscode/.window-identity.json', '{}\n');
-        tree.write('.bespunky/branches.json', JSON.stringify({ schema: 1, projection: { schema: 1, integration: 'development', production: ['main'], productionPatterns: [], chain: ['development', 'main'], protected: ['development', 'main'], protectedPatterns: [], workBase: 'development', summary: 'development → main', deploys: [{ kind: 'line', line: 'main', ci: { environment: 'production', providers: {} } }] } }));
+        tree.write('.bespunky/branches.json', JSON.stringify({ schema: 1, projection: { schema: 1, integration: 'development', production: ['main'], productionPatterns: [], chain: ['development', 'main'], protected: ['development', 'main'], protectedPatterns: [], workBase: 'development', summary: 'development → main', deploys: [{ kind: 'line', line: 'main', ci: { environment: 'production', providers: { supabase: 'abcdefgh' } } }] } }));
         return tree;
       },
       run: async (tree, ctx) => {
@@ -280,7 +301,8 @@ export default {
         const { SUPABASE_CLI_DOWNLOADS, SUPABASE_CLI_VERSION } = ctx.load('generators/_utils/versions');
         t.ok(workflow.includes(`Install the Supabase CLI ${SUPABASE_CLI_VERSION}`) && workflow.includes(SUPABASE_CLI_DOWNLOADS.amd64.sha256), 'the CLI, checked');
         t.ok(!workflow.includes('dbmate'), 'the replaced provider\'s setup is gone');
-        t.ok(workflow.includes('secrets.POSTGRES_DEPLOY_URL_PRODUCTION') && !workflow.includes('secrets['), 'the secret by its literal name');
+        t.ok(workflow.includes('secrets.POSTGRES_DEPLOY_URL_PRODUCTION') && workflow.includes('secrets.SUPABASE_ACCESS_TOKEN_PRODUCTION') && !workflow.includes('secrets['), 'the secrets by their literal names');
+        t.ok(/--project-ref=abcdefgh/.test(tree.read('postgres/project.json', 'utf8')), `the line's ref reaches the deploy's configuration: ${tree.read('postgres/project.json', 'utf8').slice(0, 300)}`);
         t.ok(!/^\s*id-token: write/m.test(workflow), 'no OIDC');
         t.ok(!/::error::/.test(workflow) || !/no target/i.test(workflow), 'the line is not blocked');
         t.ok(ctx.logs.join('\n').includes('gh secret set POSTGRES_DEPLOY_URL_PRODUCTION') && ctx.logs.join('\n').includes('SESSION pooler'), `the human step: ${ctx.logs.join(' ').slice(0, 300)}`);
@@ -307,6 +329,10 @@ export default {
         const counts = (command) => provider.deploySignals.some((signal) => signal.test(command));
         t.ok(counts('supabase db push --remote --yes') && counts('npx supabase functions deploy --remote=x'), 'a hosted deploy reads as one');
         t.ok(!counts('supabase db push') && !counts('echo hello'), 'a local push does not');
+        t.ok(env.includes('secrets.SUPABASE_ACCESS_TOKEN_PRODUCTION') && env.includes('secrets.SUPABASE_ACCESS_TOKEN_UAT_EU_1'), 'the functions\' token, per environment');
+        t.equal(provider.deployOptions('abcd'), { args: '--project-ref=abcd' }, 'the ref a line names');
+        t.equal(provider.deployOptions(), {}, 'a line need not name one');
+        t.ok(provider.targetLabel === undefined, 'a project with no functions needs no target');
       },
     },
   ],
