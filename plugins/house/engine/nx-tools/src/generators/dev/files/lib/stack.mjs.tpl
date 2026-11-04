@@ -44,8 +44,8 @@ export function descendants(pid) {
  *
  * THE ORDER. A child marked `dependency` starts first, in the order given, each once the one before it passes its
  * `ready` probe (at most `readyTimeoutMs`); then every other child starts, at once. A dependency runs for as long as the
- * stack does, so its own exit is a failure WHATEVER the code, and while any child has yet to start, any end of a running
- * one (that exit, a stop, a timed-out probe) means the rest never starts: this ends with what was started.
+ * stack does, so its own exit is a failure WHATEVER the code. Any end of the wait other than ready (that exit, a stop, the
+ * timeout) means the rest never starts: the stack ends with what was started.
  *
  * Signal discipline (the reason this is bespoke rather than N independent runs) — the rule is decided by WHO
  * delivered the signal, and the signal's name says who that almost always is:
@@ -91,7 +91,6 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
     const passedReady = new Array(children.length).fill(false);
     const exits = {};
     let remaining = 0; // started and not yet ended
-    let unstarted = children.length; // held back behind a dependency; a stop means they never start
     let stopping = false;
     let failed = false;
     const failures = [];
@@ -170,7 +169,7 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
       // the group stop it is (onGroupStop) — signalling the siblings again here would be the double signal.
       if (interrupted && !stopping) onGroupStop();
 
-      if (!stopping && (remaining > 1 || unstarted > 0)) {
+      if (!stopping && remaining > 1) {
         log?.(`${children[i].id} exited (${signal ?? code}) — stopping the rest of the stack.`);
         stopping = true;
         runOnStop();
@@ -186,7 +185,6 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
 
     const start = (child, i) => {
       remaining++;
-      unstarted--;
       const stdio = lockFd === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', lockFd];
       const proc = child.shell
         ? spawn('sh', ['-c', child.command], { cwd, env: child.env, stdio })
@@ -233,7 +231,9 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
         inform(onWaiting, child.id);
         log?.(`waiting for ${child.id} to be ready (${describeProbe(child.ready)})…`);
         const { ok, said } = await waitUntilReady(child.ready, { cwd, env: child.env, signal: waiting.signal, timeoutMs: child.readyTimeoutMs });
-        if (stopping || done[i]) return; // settle() has stopped the stack: nothing else starts
+        // It ended (settle() has already reported it, and the stack may be down by now) or the stack was stopped.
+        // Either way nothing else starts: the one place that decides it, whichever process was the last one running.
+        if (stopping || done[i]) return;
         if (!ok) return notReady(child, said);
         passedReady[i] = true;
         log?.(`${child.id} is ready.`);
