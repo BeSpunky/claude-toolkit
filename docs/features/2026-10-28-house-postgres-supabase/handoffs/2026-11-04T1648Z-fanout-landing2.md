@@ -92,3 +92,7 @@ Green: postgres tripwire, runner image e2e, all suites, and the image job's trix
 Found by real CI and fixed: a wrapper host resolved someone else's Nx; `dev stop` waited forever on a zombie where PID 1 reaps nothing.
 Still red: bookworm. Not Postgres: the Chromium package names are projected for debian13 only, and `js` brings them, so any node-host project on typescript-node:16 or :18 cannot build its image, today, pre-existing. No bookworm project a house composes can build, so a bookworm closure is unreachable without this.
 ORCHESTRATOR DECISION: fix it in this landing, resumed to wire. Per the standing "no deferred gaps". Project Chromium's names per codename; the installer picks by its own codename; an unknown codename fails by name. Bookworm cases go back to the node preset. Agent budget: resume only, no new agent.
+
+### Gate, before the rebuild
+CI on 0e723b76: all green, including the image job (bookworm and trixie, majors 18 and 17, amd64 and arm64, the real launcher on the node preset) and the tripwire. One scaffold flake ("flip: committing auth real", emulators-stop, not this landing's area): passed on re-run and 3 of 3 locally, unexplained. Local dogfood on final code: see below. Rebuild branch chore/hps2-gate prepared. After the rebuild, observe: postgres, psql and dbmate at the pins as the remote user, and tools/postgres on the volume with a real boot; gh, claude first on PATH, logins survive. Then back to development, delete the branch and its worktree, and offer the landing.
+PASS — 156 passed, 0 failed, 0 skipped in 10m53s
