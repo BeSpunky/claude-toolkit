@@ -10,6 +10,7 @@
 // DX". Detecting on it would make the layer opt-OUT: the first plain sync writes HOUSE.md, and the second one
 // detects `agent` and writes a devcontainer nobody asked for. The devcontainer's marker is written on BOTH the
 // owned and the adopted path and is committed; the window-identity marker is the second witness.
+import { DEVCONTAINER_FEATURE_GITHUB_CLI, DEVCONTAINER_FEATURE_NODE } from '../generators/_utils/versions';
 import type { LayerDescriptor, PlanContext } from './descriptor';
 
 const DEVCONTAINER_MARKER = '.devcontainer/.bespunky-devcontainer.json';
@@ -50,7 +51,7 @@ export const agent: LayerDescriptor = {
     image: {
       ref: 'mcr.microsoft.com/devcontainers/base:debian',
       remoteUser: 'vscode',
-      features: [{ id: 'ghcr.io/devcontainers/features/node:1', options: { version: '{{nodeMajor}}' } }],
+      features: [{ id: DEVCONTAINER_FEATURE_NODE, options: { version: '{{nodeMajor}}' } }],
       why: 'A neutral base: this repo brings no stack image. Node comes as a feature — the Nx floor and the house tooling run on it.',
     },
     // NO claude-code feature. It installed a SECOND Claude Code at build time (/usr/local/bin, early on PATH)
@@ -70,7 +71,7 @@ export const agent: LayerDescriptor = {
       },
     ],
     features: [
-      { id: 'ghcr.io/devcontainers/features/github-cli' },
+      { id: DEVCONTAINER_FEATURE_GITHUB_CLI },
     ],
     extensions: [
       'Anthropic.claude-code',

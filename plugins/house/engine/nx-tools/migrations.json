@@ -323,6 +323,12 @@
       "layer": "firebase",
       "description": "An existing platform firewall gains the Postgres drivers (pg, pg-native, pg-pool, pg-cursor, pg-query-stream, pg-promise, postgres, slonik, each with its subpaths) in the ban lists of platform:web and platform:shared. The firewall is project state, so the table change reaches only a workspace gaining one. Additive: only what no entry already covers, in the list's own style; a project with no firewall gets none. A resulting lint failure is a real leak, and is logged as one. A list that cannot be read as an array, a dropped constraint and an un-upgraded 0.49 shape are reported.",
       "implementation": "./src/migrations/0.52.0/ban-postgres-drivers-from-web"
+    },
+    "pin-github-cli-feature": {
+      "version": "0.52.0",
+      "layer": "agent",
+      "description": "The github-cli devcontainer feature gets a version: the bare id meant `latest`. The merge only adds, so without this the new `github-cli:1.1.3` would sit beside the old key and the feature would install twice. Where the house wrote the key (an owned devcontainer, or an adopted one whose record holds it), the key is renamed with its value and comment kept, the lock pin replaced with the digest of 1.1.3, the adoption record moved. A project's own bare key is reported, and the generator leaves a feature declared under any tag alone.",
+      "implementation": "./src/migrations/0.52.0/pin-github-cli-feature"
     }
   }
 }

@@ -6,7 +6,7 @@
 // the lock cannot be forgotten again.
 import { type Tree, logger } from '@nx/devkit';
 import { findNodeAtLocation, getNodeValue } from 'jsonc-parser';
-import { houseWrote } from './devcontainer-provenance';
+import { DEVCONTAINER_MARKER, houseWrote } from './devcontainer-provenance';
 import { parseJsoncStrict as parseStrict } from './jsonc-strict';
 import { removeMemberWithLeadingComment } from './jsonc-remove-member';
 
@@ -100,4 +100,55 @@ export function retireHouseFeature(tree: Tree, tag: string, ids: RegExp, instead
     );
   }
   return removed;
+}
+
+/** A feature's identity, without its tag or digest: `…/github-cli:1.1.3` and `…/github-cli` are one feature. */
+export const featureIdentity = (id: string): string => id.replace(/@sha256:.*$/, '').replace(/:[^/:]*$/, '');
+
+/** A lock pin, as the devcontainer CLI writes it. */
+export interface FeaturePin {
+  version: string;
+  resolved: string;
+  integrity: string;
+}
+
+/**
+ * Move feature `from` to the key `to`, in every place the house keeps it: the KEY in devcontainer.json (its value and
+ * its `//` lines stay), the pin in devcontainer-lock.json when there is one (replaced by `pin`, in the CLI's sorted
+ * order, so the next build has nothing to rewrite), and an adopted marker's record of what the house added. The caller
+ * has decided the move is the house's to make (`houseWrote`). False when `from` is not declared or the file is unreadable.
+ */
+export function renameFeature(tree: Tree, from: string, to: string, pin: FeaturePin): boolean {
+  const text = tree.exists(DEVCONTAINER_JSON) ? (tree.read(DEVCONTAINER_JSON, 'utf8') ?? '') : '';
+  const root = text ? parseStrict(text) : undefined;
+  const key = root && findNodeAtLocation(root, ['features', from])?.parent?.children?.[0];
+  if (!key) return false;
+  tree.write(DEVCONTAINER_JSON, `${text.slice(0, key.offset)}${JSON.stringify(to)}${text.slice(key.offset + key.length)}`);
+
+  if (tree.exists(DEVCONTAINER_LOCK)) {
+    try {
+      const lock = JSON.parse(tree.read(DEVCONTAINER_LOCK, 'utf8') ?? '') as { features?: Record<string, unknown> };
+      if (lock.features?.[from]) {
+        const { [from]: _old, ...others } = lock.features;
+        lock.features = Object.fromEntries(Object.entries({ ...others, [to]: pin }).sort(([a], [b]) => a.localeCompare(b)));
+        tree.write(DEVCONTAINER_LOCK, `${JSON.stringify(lock, null, 2)}\n`);
+      }
+    } catch {
+      // Not JSON: the CLI rewrites it on the next build, and nothing here can read it.
+    }
+  }
+
+  if (tree.exists(DEVCONTAINER_MARKER)) {
+    try {
+      const marker = JSON.parse(tree.read(DEVCONTAINER_MARKER, 'utf8') ?? '') as { adopted?: { houseAdded?: { path?: string[] }[] } };
+      const entry = marker.adopted?.houseAdded?.find((e) => e.path?.[0] === 'features' && e.path[1] === from);
+      if (entry) {
+        entry.path = ['features', to];
+        tree.write(DEVCONTAINER_MARKER, `${JSON.stringify(marker, null, 2)}\n`);
+      }
+    } catch {
+      // An unreadable marker holds no record to keep.
+    }
+  }
+  return true;
 }

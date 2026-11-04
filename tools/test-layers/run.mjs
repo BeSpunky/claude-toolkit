@@ -1127,6 +1127,23 @@ checkAsync('image: a .deb closure unpacks at its pin behind wrappers, satisfies 
 
 // Persistence: a closure lives in the IMAGE, in a cached layer, outside every persisted directory. Nothing of its own needs a
 // mount, and a mount over either of its two homes would hide what the image built.
+check('no layer declares a version-less devcontainer feature: a bare id is `latest`, and moves with no commit behind it', (ok) => {
+  const found = [];
+  const walk = (node, where) => {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'features' && Array.isArray(value)) found.push(...value.map((feature) => ({ where, id: feature.id })));
+      else walk(value, where);
+    }
+  };
+  for (const layer of registry.LAYERS) walk(layer.devcontainer, layer.id);
+  ok(found.length >= 2, `the walk sees the layers' features: ${JSON.stringify(found)}`);
+  for (const { where, id } of found) {
+    const tag = /:([^/:]+)$/.exec(id)?.[1];
+    ok((tag && tag !== 'latest') || /@sha256:[0-9a-f]{64}$/.test(id), `${where}: ${id} names no version. Pin it in _utils/versions.ts.`);
+  }
+});
+
 checkAsync('persistence: an archive tool needs no mount, and no layer mounts over where it is installed', async (ok) => {
   const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
   const fragmentOf = (entry, tree) => (typeof entry.devcontainer === 'function' ? entry.devcontainer(tree) : entry.devcontainer);
@@ -1440,7 +1457,7 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
   const prov = require_(join(BUILD, 'src/generators/_utils/devcontainer-provenance'));
   const DC = '.devcontainer/devcontainer.json';
   const MARKER = '.devcontainer/.bespunky-devcontainer.json';
-  const GH = 'ghcr.io/devcontainers/features/github-cli';
+  const GH = 'ghcr.io/devcontainers/features/github-cli:1.1.3';
   const OURS = 'ghcr.io/example/features/ours';
   const tree = wrapperRepo();
   tree.write(DC, `{\n  "image": "python:3.12",\n  "features": { "${OURS}": {} },\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n`);
@@ -1454,6 +1471,15 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
   const pathEntry = recorded().find((e) => e.path.join('.') === 'remoteEnv.PATH');
   ok(pathEntry, 'remoteEnv.PATH (a whole remoteEnv map written at once) is recorded per entry');
   ok(prov.houseWrote(tree, { path: ['features', GH], value: {} }) && !prov.houseWrote(tree, { path: ['features', OURS], value: {} }), 'houseWrote answers from the record');
+
+  // A feature the project declares under another tag is that feature: a second key would install it twice.
+  for (const own of ['ghcr.io/devcontainers/features/github-cli', 'ghcr.io/devcontainers/features/github-cli:1', 'ghcr.io/devcontainers/features/github-cli@sha256:abc']) {
+    const other = wrapperRepo();
+    other.write(DC, `{\n  "image": "python:3.12",\n  "features": { "${own}": {} }\n}\n`);
+    await generator('devcontainer')(other, { name: 'shop', layers: ['nx', 'agent'] });
+    const ids = Object.keys(parseJsonc(other.read(DC, 'utf8')).features).filter((id) => id.includes('github-cli'));
+    ok(ids.length === 1 && ids[0] === own, `a project's ${own} is not joined by the house's: ${ids}`);
+  }
 
   // A second run adds nothing new: the record neither grows nor loses what the FIRST run added.
   const before = recorded().length;
