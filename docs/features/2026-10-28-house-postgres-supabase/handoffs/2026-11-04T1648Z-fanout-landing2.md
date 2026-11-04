@@ -23,9 +23,9 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 |---|---|---|---|
 | debts-ci | feat/hps2-ci | yes, its own branch | returned |
 | debts-engine | feat/hps2-engine | yes, its own branch | returned |
-| core | feat/hps2-core | yes, its own branch | dispatched |
-| wire | tripwire, dogfood boot, image e2e; after core | yes | pending |
-| docs | new skill, README, CLAUDE.md, tips; after core | yes | pending |
+| core | feat/hps2-core | yes, its own branch | returned |
+| wire | tripwire, dogfood boot, image e2e, sweep rule; on this branch | yes | dispatched |
+| docs | new skill, README, CLAUDE.md, tips; on this branch | yes | dispatched |
 | review | sanity review | yes | pending |
 | gate | upgrade --local, dogfood-consumer, rebuild | yes | pending |
 
@@ -39,3 +39,8 @@ Owed: CLAUDE.md commands row.
 ### debts-engine (returned; feat/hps2-engine 0f224934..317b8721; spent 0 of 0)
 Note on branch: handoffs/seam2-engine.md. E1 fixed (serve and `dev stop` name a failed shutdown, exit 1). F5 refused with the glob; `deployTarget(tree, root, spec)`. E6: `dev run` lacked exports, added; `ps --json` documented and tested. 6a bound and fd 3 hold, engine unchanged. Nothing to migrate.
 Limit: an orphaned stop cannot report an exit status. Owed docs: the new `dev stop` exit and public `ps --json` in HOUSE.md and CLAUDE.md. Relayed the shape and the signature to core.
+
+### core (returned; feat/hps2-core 0f224934..5b0eb0c9; merges engine and ci; spent 0 of 2)
+Note: handoffs/seam2-core.md. Layer, generator, launcher, CI provider, house-doc, tests. Real binaries: cold 810 ms, warm 200 ms; migrate, seed, reset, stop with a client open; kill -9 orphan cleared; foreign identifier refused; hostile .env contained; under dev serve the app starts after the seed, and a failed migration starts nothing. Departures in the note: `binary` archive format, deploy URL by env as POSTGRES_DEPLOY_URL, transaction poolers refused, reset without template clone, seeded mark as COMMENT ON DATABASE, server in its own session, project.json island.
+Unproven: rebuild, real apt-get satisfy, major 17 or a major move, arm64, bookworm, real CI, hosted database, generator-seeded served app.
+ORCHESTRATOR DECISIONS: (1) keep the human TTY prompt on deploy: an agent cannot walk through it. (2) The sweep must not treat a tree invisible to this container as gone: a deletion must be proven. Drop only when the tree's parent directory exists and the tree does not; otherwise keep and report. Goes to wire. (3) keep dbmate --strict locally: a late-landing older migration fails until re-stamped.
