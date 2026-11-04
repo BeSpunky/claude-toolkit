@@ -35,7 +35,7 @@ function emulatorTargets() {
       `${missing.join(', ')} not set — refusing to guess which emulators, and which project, to write to.\n` +
         '  To rebuild the committed seeds (the usual case):  nx run firebase:seed:build\n' +
         '    — it boots its own throwaway emulators, applies every world, and exports them to tools/emulator-seeds/.\n' +
-        '  To load a seed into the stack you are serving:     nx run firebase:reset, then restart the serve.\n' +
+        '  To load a seed into a stack:                        stop it, nx run firebase:reset, then serve it again.\n' +
         '  To write into a RUNNING stack on purpose, name it:  FIREBASE_AUTH_EMULATOR_HOST=localhost:<auth port> \\\n' +
         '    FIRESTORE_EMULATOR_HOST=localhost:<firestore port> GCLOUD_PROJECT=<its project, from its banner> \\\n' +
         '    node tools/seed/build.mjs <world>',

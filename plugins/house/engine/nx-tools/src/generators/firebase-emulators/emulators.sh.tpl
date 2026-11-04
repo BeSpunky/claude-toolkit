@@ -48,8 +48,6 @@ cd "$ROOT"
 proc_start() { local s; s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 0; s="${s##*) }"; set -- $s; printf '%s' "${20:-}"; }
 is_proc() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null && { [ -z "${2:-}" ] || [ "$(proc_start "$1")" = "$2" ]; }; }
 
-DATA_DIR="$ROOT/.emulator-data"
-
 # ── STACK IDENTITY: ONE CLAIM FOR EVERYTHING THAT BINDS THIS PROJECT'S PORTS ──────────────────────────────────
 # A suite is a STACK: it holds a block of ports, it has a state dir, a TMPDIR and a handle (`tools/dev/dev ps`,
 # `tools/dev/dev stop`). Run by the dev engine (`nx serve <app>`, `tools/dev/dev serve`), the serve CLAIMED the block
@@ -105,8 +103,8 @@ if [ "$OFFSET" != "0" ]; then
   OFFSET_CONFIG="$ROOT/.firebase.offset-$OFFSET.json"
   node "$ROOT/tools/emulator-ports.mjs" shift "$ROOT/firebase.json" "$OFFSET" "$OFFSET_CONFIG"
   CONFIG_ARGS=(--config "$OFFSET_CONFIG")
-  DATA_DIR="$ROOT/.emulator-data-$OFFSET"
 fi
+DATA_DIR="$(PORT_OFFSET="$OFFSET" bash "$ROOT/tools/emulator-data.sh" dir)"
 
 # ── THE PROJECT ID: OFFLINE UNLESS THE APP COMMITS A REAL SERVICE ─────────────────────────────────────
 # The suite runs under the OFFLINE twin of the app's project id (`my-app` → `demo-my-app`): Google refuses to create
@@ -228,29 +226,12 @@ if [ -n "$EMU_REAL_SERVICES" ] && [ "${#ONLY_ARGS[@]}" -gt 0 ]; then
 fi
 
 # ── CLONE-LEVEL RESOURCES, RESOLVED ONCE ───────────────────────────────────────────────────────
-# The built emulator SEEDS are gitignored, so they exist per CLONE and never arrive in a freshly-created
-# git worktree. A worktree resolves them this tree first, else the main worktree's — resolve the main
-# worktree once here. (Secrets are deliberately NOT resolved this way: see FUNCTIONS SECRETS below.)
+# A worktree borrows clone-level things from the main worktree (the built seeds, in tools/emulator-data.sh; where to
+# find the secrets file, below) — resolve it once here. (Secret VALUES are not borrowed: see FUNCTIONS SECRETS below.)
 #
 # `|| true` under `set -euo pipefail`: outside a repository `git worktree list` exits 128, and
 # pipefail would propagate that into an errexit kill. Not being in a repo is ordinary here.
 MAIN_WORKTREE="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -1 || true)"
-
-# The seed to prime an isolated stack from. THIS TREE'S OWN SEEDS WIN, and that is the whole point:
-# a worktree that builds or edits seeds is doing it in isolation, and must get its own world back —
-# never the main tree's. A worktree that has NOT touched seeds has no seeds at all (they are built
-# artifacts, gitignored), and starting it from an empty world would make every isolated serve begin
-# with nothing. So it borrows the main tree's as a read-only BASE: primed by copy, so nothing a
-# worktree then does can reach back and change what main holds.
-seed_dir() {   # seed_dir <name> — echoes the resolved seed path, or nothing when there is none
-  local name="$1"
-  if [ -f "$ROOT/tools/emulator-seeds/$name/firebase-export-metadata.json" ]; then
-    printf '%s' "$ROOT/tools/emulator-seeds/$name"
-  elif [ -n "$MAIN_WORKTREE" ] && [ "$MAIN_WORKTREE" != "$ROOT" ] \
-    && [ -f "$MAIN_WORKTREE/tools/emulator-seeds/$name/firebase-export-metadata.json" ]; then
-    printf '%s' "$MAIN_WORKTREE/tools/emulator-seeds/$name"
-  fi
-}
 
 # ── SUPERVISION: ONE STOP, DELIVERED ONCE, WAITED FOR ────────────────────────────────────────────────
 # The export-on-exit runs inside firebase-tools, and only when IT is told to stop while its emulators are still
@@ -307,22 +288,9 @@ entry_field() {   # entry_field <name> — one field of the entry, as plain text
 # No previous suite of this stack can still be running or saving here: the claim waited for one that was saving, and
 # refused one that was running. What it left in the state dir is history.
 mkdir -p "$DETACHED_DIR"
-if [ "$OFFSET" = "0" ]; then
-  bash "$ROOT/tools/emulator-data.sh" ensure
-elif [ ! -f "$DATA_DIR/firebase-export-metadata.json" ]; then
-  # Prime THIS isolated stack's own data dir ONCE, from the resolved 'default' seed — a known world,
-  # without touching (or importing from) the base stack's .emulator-data. From here on the stack
-  # owns its data: it exports back to this dir on exit, so a worktree's session, its signups and any
-  # seed work it does persist across restarts and stay entirely its own.
-  SEED="$(seed_dir default)"
-  if [ -n "$SEED" ]; then
-    cp -r "$SEED" "$DATA_DIR"
-    case "$SEED" in
-      "$ROOT"/*) echo "[emulators] isolated data dir primed from this tree's 'default' seed: $DATA_DIR" >&2 ;;
-      *)         echo "[emulators] isolated data dir primed from the main worktree's 'default' seed: $SEED" >&2 ;;
-    esac
-  fi
-fi
+# A stack's data is its own from here: it exports back to this dir on exit, so a worktree's session and any seed work it
+# does persist across restarts and stay entirely its own.
+PORT_OFFSET="$OFFSET" bash "$ROOT/tools/emulator-data.sh" ensure
 
 # ── STORAGE DATA FOLLOWS THE PROJECT ID ─────────────────────────────────────────────────────────────
 # Emulator Storage keys its data by BUCKET NAME, and the bucket the app and the functions use follows the project id

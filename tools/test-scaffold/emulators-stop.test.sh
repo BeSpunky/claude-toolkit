@@ -94,7 +94,6 @@ mkws() {   # mkws <name> — a workspace with the rendered script, stubs and a f
   mkdir -p "$d/tools" "$d/node_modules"
   sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}||g' -e 's|{{functionsRoot}}|apps/fn|g' -e 's|{{functionsDist}}|dist/apps/fn|g' "$TPL" > "$d/tools/emulators.sh"
   node "$ROOT/tools/test-scaffold/render-engine.mjs" "$d"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$d/tools/emulator-data.sh"
   node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$d"
   printf '{ "emulators": { "auth": { "port": 9099 }, "firestore": { "port": 8080 } } }\n' > "$d/firebase.json"
   printf '%s' "$d"
