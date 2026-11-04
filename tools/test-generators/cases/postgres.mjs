@@ -81,6 +81,25 @@ export default {
       },
     },
     {
+      name: 'a project on a Node the launcher cannot load on is refused, naming the file to move',
+      once: 'it throws: there is no second state to compare',
+      setup: () => {
+        const tree = wearingAgent();
+        tree.write('.nvmrc', '16\n');
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        try {
+          await generate(tree, ctx);
+        } catch (error) {
+          ctx.error = error.message;
+        }
+      },
+      expect: (_t, t, ctx) => {
+        t.ok(/needs Node 18 or newer/.test(ctx.error ?? '') && /\.nvmrc/.test(ctx.error ?? ''), `says what to move: ${ctx.error}`);
+      },
+    },
+    {
       name: 'a major this toolkit has no packages for is refused, naming what it has',
       once: 'it throws: there is no second state to compare',
       setup: () => {

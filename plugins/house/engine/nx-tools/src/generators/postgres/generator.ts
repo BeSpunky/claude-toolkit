@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
 import { FIREWALL_CONFIG, ensurePlatformFirewall, hasPlatformFirewall } from '../../platform';
 import { deployTarget } from '../_utils/deploy-contract';
+import { nodeVersionFile, projectNode } from '../_utils/node-version';
 import { ensureHouseProject, houseProjectHome } from '../_utils/project-files';
 import { readDeclaration } from '../dev/declaration';
 import { POSTGRES_DEFAULT_MAJOR } from '../_utils/versions';
@@ -86,10 +87,22 @@ function reportHandDeclaredApps(tree: Tree): void {
   }
 }
 
+/** The launcher and the dev engine need Node's own APIs from this major on (Node 16 crashes loading the launcher). */
+const LAUNCHER_NODE_FLOOR = 18;
+
+function refuseOldNode(tree: Tree): void {
+  const node = projectNode(tree);
+  if (node.state !== 'declared') return; // nothing declared: the project is seeded with the house's own Node
+  if (node.major < LAUNCHER_NODE_FLOOR) {
+    throw new Error(`postgres: the launcher needs Node ${LAUNCHER_NODE_FLOOR} or newer, and this project declares Node ${node.major}. Move ${nodeVersionFile(tree)} forward first, then add the layer.`);
+  }
+}
+
 export default async function postgresGenerator(tree: Tree): Promise<void> {
   requireLayer(tree, 'agent', 'postgres');
   // Before anything is written: a declaration this toolkit cannot honour stops the run here, naming what it can.
   postgresMajor(tree);
+  refuseOldNode(tree);
   if (!postgresHome(tree)) refuseForeignHolder(tree);
 
   for (const file of LAUNCHER_FILES) {
