@@ -10,7 +10,7 @@ Units are independent; each must build and test, so one worktree and branch each
 ## Units
 | id | branch | status |
 |---|---|---|
-| seam-engine | feat/hps-engine | dispatched |
+| seam-engine | feat/hps-engine | returned |
 | seam-platform | feat/hps-platform | returned |
 | seam-ci | feat/hps-ci | returned |
 | seam-installer | feat/hps-installer | returned |
@@ -32,3 +32,7 @@ Owed: HOUSE.md.tpl:29,249 describes the firewall only under {{#firebase}}. ensur
 Note on branch: handoffs/seam-installer.md. ArchiveTool = TarballTool | DebClosureTool (format deb, id, bin, libraryPaths, prune?, closures by codename: version, systemDepends, packages by arch). generators/_utils/postgres-closures.ts, 32 pins as of 2026-11-04, --check OK; weekly + pre-publish. tools/postgres-debs/{project,run-closure}.mjs. Tests: layers 106/0, generators 282/0/35 skipped, scaffold pass. Rendered devcontainer files byte-identical for agent, web, firebase, firebase+web. Real run unprivileged with apt-get and sudo stubbed: 26 ok; trixie 17 and 18 ran, bookworm extracted only. Nothing to migrate.
 Unproven until a user rebuild: root dpkg-deb -x then running as remote user; real apt-get satisfy on both base images; real bookworm; arm64; post-create on an adopted image through real sudo.
 For Landing 2: prune usr/lib/postgresql/<major>/bin/pg_config. For docs: name tools/postgres-debs in CLAUDE.md. About 10 lines of shell shared by the two installers, kept for byte-identity: reconsider at review.
+
+### seam-engine (returned; feat/hps-engine 795f6ac1..5cb4d52a; spent 0 of 1)
+Note on branch: handoffs/seam-engine.md. `dependency: true`; ready {http | tcp:<port name> | cmd, timeout}; exports reach siblings and dev with; a process's own env wins. `dev run <app> --ports=… [--label] -- <cmd>`. lib/ready.mjs. Gate asks LAYERS who lists the dev step. Tests: scaffold 27 files 755 ok, generators 287/0/35 skipped, layers 103, real firebase-tools through emulators.sh by hand. Nothing to migrate; a stack left running across an upgrade makes `dev with` wait out its timeout.
+To check: dev claim has no generated caller; dependency exit 0 after ready fails the stack; stop signals dependents and dependencies together. Bump owed: bespunky-workflow too. Not verified: real nx serve above the wrapper, dogfood, upgrade --local, a real launcher.
