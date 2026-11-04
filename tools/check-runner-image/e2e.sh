@@ -8,8 +8,9 @@
 #
 # THE REGISTRY ROAD ASKS npm FIRST. It can only be walked once the version in engine/nx-tools/package.json is on npm. On a
 # push that is often not yet the case: a bump's publish is running beside this. So a 404 there is a stated SKIP (exit 0),
-# and the run the finished publish starts walks it. On a schedule, after a publish or by hand there is no such race, so a
-# 404 means the release never reached npm, and it fails.
+# and the run the finished publish starts walks it. On a schedule or by hand there is no such race, so a 404 means the
+# release never reached npm, and it fails. Right after a publish npm still answers 404 for a while, its own "may take a few
+# minutes to become available", so that run gives it NPM_SETTLE_SECONDS before it concludes the same.
 #
 # Needs docker and the network, ~5-15 minutes per road; exits 0 pass or skip, 1 fail. .github/workflows/runner-image-e2e.yml.
 set -uo pipefail
@@ -27,7 +28,17 @@ case "$ROAD" in
   registry) FLAGS=(--docker)
     VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ENGINE/nx-tools/package.json" | head -n 1)"
     [ -n "$VERSION" ] || { notice error "No version in $ENGINE/nx-tools/package.json: nothing to look for on npm."; exit 1; }
-    STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 3 "https://registry.npmjs.org/@bespunky/nx-tools/$VERSION" || true)"
+    npm_status() { curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 3 "https://registry.npmjs.org/@bespunky/nx-tools/$VERSION" || true; }
+    STATUS="$(npm_status)"
+    if [ "${GITHUB_EVENT_NAME:-}" = workflow_run ]; then
+      settle="${NPM_SETTLE_SECONDS:-600}" interval="${NPM_SETTLE_INTERVAL:-20}" waited=0
+      while [ "$STATUS" = 404 ] && [ "$waited" -lt "$settle" ]; do
+        echo "@bespunky/nx-tools@$VERSION was just published and npm does not serve it yet (${waited}s of ${settle}s)."
+        sleep "$interval"
+        waited=$((waited + interval))
+        STATUS="$(npm_status)"
+      done
+    fi
     case "$STATUS" in
       200) echo "@bespunky/nx-tools@$VERSION is on npm: walking the registry road." ;;
       404) case "${GITHUB_EVENT_NAME:-}" in
