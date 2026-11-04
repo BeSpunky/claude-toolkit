@@ -151,6 +151,16 @@ ok "nx: run directly, its stack (record, state dir, TMPDIR) is released once the
 ok "nx: the stop was announced while it ran" "$(grep -q 'stopping — exporting emulator data' "$W/out.log" && echo 1 || echo 0)"
 ok "the suite's TMPDIR is the stack's own, and SHORT (a Functions worker socket must fit 107 bytes): $TMPD" "$(printf '%s' "$TMPD" | grep -qE '^/tmp/bespunky-[0-9a-f]{12}$' && echo 1 || echo 0)"
 
+# A direct run is a stack of its own, named as one: `dev run`, re-entering this very script. One claimer, one script.
+W="$(mkws direct)"; P="$(start "$W")"; STARTED+=("$P")
+ready "$W" >/dev/null
+PS="$(cd "$W" && DEV_OWNER=test node tools/dev/dev.mjs ps 2>&1)"
+ok "direct: ps names it by the label the script passed" "$(grep -q 'firebase@0 .*up .*emulator suite run directly' <<<"$PS" && echo 1 || echo 0)"
+RUNNER="$(pgrep -P "$P" -f 'dev.mjs run firebase')"
+ok "direct: the engine is the claimer, and the script runs once, under it" "$([ -n "$RUNNER" ] && grep -q "\"pid\": $RUNNER," "$W/.bespunky/run/firebase@0.json" && [ "$(pgrep -P "$RUNNER" -f 'tools/emulators.sh' | wc -l)" = 1 ] && echo 1 || echo 0)"
+OUT="$(cd "$W" && DEV_OWNER=test timeout 30 node tools/dev/dev.mjs stop firebase --offset=0 2>&1)"; gone "$P" 100
+ok "direct: dev stop: exported, exit 0, the script exits 0, the stack released (got $(rc "$W"))" "$(grep -q 'ports free' <<<"$OUT" && exported "$W" && [ "$(rc "$W")" = 0 ] && gone_dir "$W/.bespunky/run/firebase@0" && echo 1 || echo 0)"
+
 # ── 2. A terminal's Ctrl+C: SIGINT to the whole process group ──────────────────────────────────────
 W="$(mkws ctrlc)"; P="$(start "$W")"; STARTED+=("$P")
 ready "$W" >/dev/null

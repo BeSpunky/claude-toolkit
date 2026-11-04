@@ -1,6 +1,6 @@
 // Render the stack-free dev engine (tools/dev/) into a fixture workspace exactly as the `dev` generator does: every
 // files/<name>.tpl written as tools/dev/<name>. The emulator scripts under test claim their stacks through it
-// (tools/dev/dev.mjs claim — the one stack identity), so a fixture without it tests nothing real.
+// (tools/dev/dev.mjs run — the one stack identity), so a fixture without it tests nothing real.
 //
 //   node tools/test-scaffold/render-engine.mjs <workspace dir>
 import { chmodSync, cpSync, mkdirSync, readdirSync } from 'node:fs';

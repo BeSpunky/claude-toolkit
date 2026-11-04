@@ -5,7 +5,7 @@
 #
 # Three steps, in order:
 #   1. claim  — the suite's ports, as a stack (tools/dev — see STACK IDENTITY below): run by the dev engine,
-#               its serve already claimed them; run on its own, this script claims them itself.
+#               its serve already claimed them; run on its own, this script runs itself through `tools/dev/dev run`.
 #   2. prime  — make sure the working data dir exists (from the default seed on a fresh
 #               clone), so --import has something to load (tools/emulator-data.sh).
 #   3. start  — boot the suite, IMPORTING the working dir and, on the full run only,
@@ -54,15 +54,15 @@ DATA_DIR="$ROOT/.emulator-data"
 # A suite is a STACK: it holds a block of ports, it has a state dir, a TMPDIR and a handle (`tools/dev/dev ps`,
 # `tools/dev/dev stop`). Run by the dev engine (`nx serve <app>`, `tools/dev/dev serve`), the serve CLAIMED the block
 # for its whole stack before it started anything, and hands the suite its state dir (DEV_STACK_DIR), its TMPDIR
-# (DEV_STACK_TMP) and its offset (PORT_OFFSET). Run on its own (`nx run firebase:emulators`), this script claims
-# `firebase@<offset>` itself, through the same engine — so a direct run and a serve see each other, and the second
-# of them is refused naming the first, instead of the two colliding port by port. The claim is atomic; a block whose
+# (DEV_STACK_TMP) and its offset (PORT_OFFSET). Run on its own (`nx run firebase:emulators`), this script runs itself
+# again through `tools/dev/dev run firebase`, which claims `firebase@<offset>` and hands it exactly the same — so the
+# rest of this script has one contract, a direct run and a serve see each other, and the second of them is refused naming
+# the first, instead of the two colliding port by port. The claim is atomic; a block whose
 # previous suite is still SAVING is waited for (nothing is lost). Run directly by an AI agent (CLAUDECODE=1), the
 # suite never lands on the base ports (`auto`), and PORT_OFFSET=0 is refused.
 #
-# THE STACK LIVES WHILE ITS LOCK IS HELD (tools/dev/lib/stacks.mjs): a SHARED flock this script takes — on the lock the
-# serve passed (DEV_STACK_LOCK), or on a fresh one of its own before it claims — and that everything it starts
-# inherits, the detached keeper above all. So the stack stays claimed while the suite saves after this script is gone,
+# THE STACK LIVES WHILE ITS LOCK IS HELD (tools/dev/lib/stacks.mjs): a SHARED flock this script takes on the lock the
+# engine passed (DEV_STACK_LOCK), and that everything it starts inherits, the detached keeper above all. So the stack stays claimed while the suite saves after this script is gone,
 # and is free the instant the last of them exits, however it exits: the kernel releases it.
 #
 # Port-offset isolation (PORT_OFFSET): the WHOLE suite moves onto one block, so it COEXISTS with a suite on the base
@@ -79,30 +79,23 @@ DATA_DIR="$ROOT/.emulator-data"
 # by another's worker. The stack's TMPDIR is `/tmp/bespunky-<hash>` (tools/dev/lib/stacks.mjs stackTmp), removed with
 # the stack. The JVM emulators use java.io.tmpdir, which TMPDIR does not move — and need not.
 [ -f "$ROOT/tools/dev/dev.mjs" ] || { echo "[emulators] the dev engine (tools/dev) is missing — it claims this suite's ports. Run the house upgrade." >&2; exit 1; }
-if [ -n "${DEV_STACK_DIR:-}" ]; then
-  STACK_DIR="$DEV_STACK_DIR"
-  STACK_TMP="${DEV_STACK_TMP:?the dev engine that started this suite gave it no TMPDIR (DEV_STACK_TMP) — run the house upgrade}"
-  STACK_LOCK="${DEV_STACK_LOCK:?the dev engine that started this suite gave it no stack lock (DEV_STACK_LOCK) — run the house upgrade}"
-  exec {STACK_LOCK_FD}<"$STACK_LOCK"
-  flock -s -w 30 "$STACK_LOCK_FD" || { echo "[emulators] could not join the stack's lock $STACK_LOCK" >&2; exit 1; }
-  OFFSET="${PORT_OFFSET:-0}"
-  DIRECT=0
-else
-  mkdir -p "$ROOT/.bespunky/run/locks"
-  STACK_LOCK="$ROOT/.bespunky/run/locks/$$-$RANDOM$RANDOM.lock"
-  exec {STACK_LOCK_FD}>"$STACK_LOCK"
-  flock -s -n "$STACK_LOCK_FD"
-  STACK_KEY=''
-  # Given up when this script ends: our descriptor closed, then the record removed — unless the suite is still saving
-  # (its keeper holds the lock): then the keeper, the last one out, removes it. A claim that never happened: the lock file.
-  trap 'exec {STACK_LOCK_FD}>&-; if [ -n "$STACK_KEY" ]; then node "$ROOT/tools/dev/dev.mjs" release "$STACK_KEY" --lock="$STACK_LOCK" >/dev/null 2>&1 || true; else rm -f "$STACK_LOCK"; fi' EXIT
-  CLAIM="$(node "$ROOT/tools/dev/dev.mjs" claim firebase --pid=$$ --lock="$STACK_LOCK" ${PORT_OFFSET:+--port-offset="$PORT_OFFSET"} \
-    --ports="$(node "$ROOT/tools/emulator-ports.mjs" claim "$ROOT/firebase.json")")" || exit 1
-  eval "$CLAIM"
-  OFFSET="$STACK_OFFSET"
-  DIRECT=1
-  echo "[emulators] stack $STACK_KEY claimed — tools/dev/dev ps shows it; stop it with Ctrl+C or: tools/dev/dev stop firebase --offset=$OFFSET" >&2
+if [ -z "${DEV_STACK_DIR:-}" ]; then
+  STACK_PORTS="$(node "$ROOT/tools/emulator-ports.mjs" claim "$ROOT/firebase.json")"
+  exec node "$ROOT/tools/dev/dev.mjs" run firebase --label='emulator suite run directly' ${PORT_OFFSET:+--port-offset="$PORT_OFFSET"} \
+    --ports="$STACK_PORTS" -- bash "$ROOT/tools/emulators.sh" "$@"
 fi
+STACK_DIR="$DEV_STACK_DIR"
+STACK_KEY="$(basename "$STACK_DIR")"
+STACK_TMP="${DEV_STACK_TMP:?the dev engine that started this suite gave it no TMPDIR (DEV_STACK_TMP) — run the house upgrade}"
+STACK_LOCK="${DEV_STACK_LOCK:?the dev engine that started this suite gave it no stack lock (DEV_STACK_LOCK) — run the house upgrade}"
+exec {STACK_LOCK_FD}<"$STACK_LOCK"
+flock -s -w 30 "$STACK_LOCK_FD" || { echo "[emulators] could not join the stack's lock $STACK_LOCK" >&2; exit 1; }
+# Held through that descriptor alone. The engine also hands its processes the lock as fd 3; left open, the keeper would
+# still hold it after it lets go (release_stack), and the last one out could never remove the stack's record.
+exec 3>&-
+OFFSET="${PORT_OFFSET:-0}"
+# Run on its own (above) or as one process of a serve: the same stack, but a different command restarts it.
+if [ -n "${DEV_RUN:-}" ]; then DIRECT=1; else DIRECT=0; fi
 mkdir -p "$STACK_DIR" "$STACK_TMP"
 export TMPDIR="$STACK_TMP"
 
@@ -433,7 +426,7 @@ kill_group() {
 
 # THE STACK'S RECORD GOES WITH THE LAST ONE OUT. Each holder of the stack's lock lets go of it as it leaves and asks
 # for the record to be removed; the engine removes it only once the kernel says nobody holds the lock — so the
-# claimer (the dev engine, or this script run directly) leaves it to a keeper still saving, and the keeper, when it is
+# claimer (the dev engine) leaves it to a keeper still saving, and the keeper, when it is
 # the last one out (Nx force-kills a stopping task after a few seconds — a Ctrl+C while the suite exports), removes it.
 # A stack since claimed again under the same key names another lock, and is never touched.
 release_stack() {
