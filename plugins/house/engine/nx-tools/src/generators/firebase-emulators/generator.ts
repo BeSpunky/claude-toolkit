@@ -58,19 +58,14 @@
 //                        `emulators:<svc>`, `seed:build`, `reset`, and `deploy` (the rules and indexes
 //                        firebase.json declares — tools/firebase-deploy-rules.mjs). User-added targets are preserved.
 //   - tools/firebase-deploy.mjs, tools/firebase-deploy-rules.mjs — the deploy runners (owned, rewritten every run).
-//   THE DEPLOY CONTRACT (what `nx affected -t deploy` — by hand or the `ci` layer — relies on): every deployable
-//   house project has a target named exactly `deploy` that runs non-interactively when given `--non-interactive`,
-//   forwards every extra argument to the Firebase CLI (`--project=<alias>` under run-many/affected, `-P <alias>`
-//   under `nx run`, or a named configuration's `args`) — through a SHELL, as Nx run-commands does (each argument
-//   double-quoted: `$` and backticks are still expanded — escape them with a backslash) — never caches, never runs beside another task
-//   (`parallelism: false` — two deploys must not race one Firebase project), builds what it ships through Nx
-//   (`dependsOn: build`), and declares as `{workspaceRoot}/…` inputs exactly the root files whose change changes
-//   what ships: firebase.json, .firebaserc and the rules files it declares outside the suite project. Never the
-//   deploy RUNNERS: a toolkit release that only rewrites tools/firebase-deploy*.mjs ships nothing new, so it must
-//   not mark a deploy affected. `cache`, `parallelism` and `dependsOn: build` are re-asserted on every upgrade
-//   (DEPLOY_CONTRACT — a project value that differed is reported); `lint` in `dependsOn` is a quality gate the
-//   project may drop. The rules deploy refuses a declared rules file its inputs do not watch, so what affected
-//   sees and what the deploy ships cannot drift apart.
+//   THE DEPLOY CONTRACT (_utils/deploy-contract), and what Firebase adds to it: each `deploy` target runs
+//   non-interactively when given `--non-interactive` and forwards every extra argument to the Firebase CLI
+//   (`--project=<alias>` under run-many/affected, `-P <alias>` under `nx run`, or a named configuration's `args`) —
+//   through a SHELL, as Nx run-commands does (each argument double-quoted: `$` and backticks are still expanded —
+//   escape them with a backslash). `functions:deploy` requires its `build`; `lint` is a gate the project may drop.
+//   Both watch firebase.json and .firebaserc, and the rules deploy also the rules files declared outside the suite
+//   project. The rules deploy refuses a declared rules file its inputs do not watch, so what affected sees and what
+//   the deploy ships cannot drift apart.
 //   Both projects are HOUSE PROJECTS (_utils/project-files): found by project, created the way this workspace
 //   defines projects (a project.json, or a package.json workspace member under TS-solution linking).
 //   - tools/{emulators,emulator-data,push-secrets,firebase-welcome}.sh, tools/emulator-ports.mjs,
@@ -123,6 +118,7 @@ import { nodeVersionFile, projectNodeMajor } from '../_utils/node-version';
 import { FIREBASE_ADMIN_VERSION, FIREBASE_FUNCTIONS_VERSION, FIREBASE_TOOLS_VERSION } from '../_utils/versions';
 import { FUNCTIONS_NODE_RUNTIMES } from '../_utils/firebase-compat';
 import { pluginPointerRenderer } from '../_utils/plugin-pointers';
+import { deployTarget } from '../_utils/deploy-contract';
 import { FIREBASE_SKILL_POINTERS } from './skill-pointers';
 
 interface FirebaseEmulatorsSchema {
@@ -183,16 +179,8 @@ function canonicalFunctionsBlock(functions: HouseProjectHome) {
   ];
 }
 
-/**
- * THE DEPLOY CONTRACT's re-asserted values (header): what `nx affected -t deploy` relies on in every `deploy` target.
- * A cached deploy is a skipped deploy; two deploys at once race one Firebase project; a deploy that does not build
- * first ships yesterday's bundle. (`functions:deploy` builds; the rules deploy has nothing to build.)
- */
-const DEPLOY_CONTRACT = { cache: false, parallelism: false };
-const BUILDS_WHAT_IT_SHIPS = { ...DEPLOY_CONTRACT, dependsOn: ['build'] };
-
-/** The root files every Firebase deploy reads — inputs of every deploy target, so `affected` sees them. */
-const FIREBASE_ROOT_INPUTS = ['{workspaceRoot}/firebase.json', '{workspaceRoot}/.firebaserc'];
+/** The root files every Firebase deploy reads — watched by every deploy target (_utils/deploy-contract). */
+const FIREBASE_ROOT_FILES = ['firebase.json', '.firebaserc'];
 
 /** Where `firebase init` puts the rules by default — watched even before firebase.json names them. */
 const CONVENTIONAL_RULES_FILES = ['firestore.rules', 'firestore.indexes.json', 'storage.rules'];
@@ -586,6 +574,16 @@ function ensureFunctionsProject(
   // are packages (TS-solution linking), also the file that DEFINES the project. So a new project is created from the
   // manifest template through the project seam, which writes it as that workspace needs (a workspace member, its
   // Nx configuration in the `nx` block); a project.json workspace gets the same manifest just below, beside it.
+  // THE DEPLOY CONTRACT (header). Nx builds (and lints) what ships — firebase.json carries no predeploy. The command
+  // is `firebase deploy --only functions` through the deploy runner: on a failure it prints the road to a first deploy
+  // (login → alias → deploy → CI) instead of ending on Firebase's bare "have you run firebase login?".
+  const deploy = deployTarget(root, {
+    command: 'node tools/firebase-deploy.mjs --only functions',
+    inputs: ['default', '^default'],
+    watches: FIREBASE_ROOT_FILES,
+    requires: ['build'],
+    gates: lint ? [lint.name] : [],
+  });
   ensureHouseProject(
     tree,
     'firebase-emulators',
@@ -594,7 +592,7 @@ function ensureFunctionsProject(
       projectType: 'application',
       sourceRoot: `${root}/src`,
       tags: ['platform:server'],
-      contract: { deploy: BUILDS_WHAT_IT_SHIPS },
+      contract: { deploy: deploy.contract },
       targets: {
         // esbuild-bundle to dist/<root> with a generated package.json (merging the manifest's deps + the built
         // `main` entry) — that dist output is what firebase.json's `functions.source` points at, for both the
@@ -624,17 +622,7 @@ function ensureFunctionsProject(
         // Lints via the workspace flat config — no per-project ESLint island. Only where the workspace lints, and only
         // where the target is not inferred (the plugin lints a project with no config of its own by the root config).
         ...(lint?.target ? { [lint.name]: lint.target } : {}),
-        // THE DEPLOY CONTRACT (header). Nx builds (and lints) what ships — firebase.json carries no predeploy.
-        deploy: {
-          executor: 'nx:run-commands',
-          dependsOn: ['build', ...(lint ? [lint.name] : [])],
-          inputs: ['default', '^default', ...FIREBASE_ROOT_INPUTS],
-          cache: false,
-          parallelism: false,
-          // `firebase deploy --only functions` through the deploy runner: on a failure it prints the road to a first
-          // deploy (login → alias → deploy → CI) instead of ending on Firebase's bare "have you run firebase login?".
-          options: { command: 'node tools/firebase-deploy.mjs --only functions', cwd: '{workspaceRoot}' },
-        },
+        deploy: deploy.target,
         // Push the project's .secret.local (KEY=VALUE) into Google Secret Manager for the deploy project — one
         // source of truth for which secrets exist (tools/push-secrets.sh).
         'push-secrets': {
@@ -749,6 +737,15 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
     );
   }
 
+  // THE DEPLOY CONTRACT (header): the Firestore rules, Firestore indexes and Storage rules firebase.json declares —
+  // derived when it runs, so a rule set declared later deploys without an upgrade — and nothing it does not declare: a
+  // project whose rules live only in the console gets a no-op that says how to adopt them. Nothing to build.
+  const deploy = deployTarget(suite.root, {
+    command: 'node tools/firebase-deploy-rules.mjs',
+    inputs: ['default'],
+    watches: [...FIREBASE_ROOT_FILES, ...rulesFiles, ...CONVENTIONAL_RULES_FILES],
+  });
+
   ensureHouseProject(tree, 'firebase-emulators', suite, {
     projectType: 'application',
     // `tooling` like the house's other tooling projects: the suite runs the emulators and holds rules and seeds —
@@ -756,7 +753,7 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
     // (`platform:server` predates that and stays: its files run in Node, and dropping it would fail lint on any
     // suite file that imports a workspace project.)
     tags: ['platform:server', 'tooling'],
-    contract: { deploy: DEPLOY_CONTRACT },
+    contract: { deploy: deploy.contract },
     targets: {
       // The full suite. Depends on the functions build: firebase.json points the functions
       // emulator at the functions bundle in dist/, so the backend must exist before the suite boots.
@@ -776,16 +773,7 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
         executor: 'nx:run-commands',
         options: { command: 'bash tools/emulator-data.sh reset', cwd: '{workspaceRoot}' },
       },
-      // THE DEPLOY CONTRACT (header): the Firestore rules, Firestore indexes and Storage rules firebase.json
-      // declares — derived when it runs, so a rule set declared later deploys without an upgrade — and nothing it
-      // does not declare: a project whose rules live only in the console gets a no-op that says how to adopt them.
-      deploy: {
-        executor: 'nx:run-commands',
-        inputs: ['default', ...FIREBASE_ROOT_INPUTS, ...rootRulesInputs(suite, rulesFiles)],
-        cache: false,
-        parallelism: false,
-        options: { command: 'node tools/firebase-deploy-rules.mjs', cwd: '{workspaceRoot}' },
-      },
+      deploy: deploy.target,
     },
   });
 }
@@ -797,15 +785,6 @@ function existingTargets(tree: Tree, name: string): string[] {
   } catch {
     return [];
   }
-}
-
-/** The rules files outside the suite's own root (inside it, `default` already covers them), as root inputs. */
-function rootRulesInputs(suite: HouseProjectHome, declared: string[]): string[] {
-  const inside = (path: string) => suite.root !== '.' && (path === suite.root || path.startsWith(`${suite.root}/`));
-  return [...new Set([...declared, ...CONVENTIONAL_RULES_FILES])]
-    .map((path) => path.replace(/^\.\//, ''))
-    .filter((path) => !inside(path))
-    .map((path) => `{workspaceRoot}/${path}`);
 }
 
 /**
