@@ -616,6 +616,8 @@ case "$sub" in
         echo "launcher.ledger=${FAKE_LAUNCHER_LEDGER-20260101000000}"
         echo "launcher.migrate.rc=${FAKE_LAUNCHER_MIGRATE_RC:-0}"
         echo "launcher.column=1"
+        echo "launcher.types=${FAKE_LAUNCHER_TYPES:-1}"
+        echo "launcher.function=${FAKE_LAUNCHER_FUNCTION:-200 Hello Image!}"
         echo "launcher.stop.rc=${FAKE_LAUNCHER_STOP_RC:-0}"
         echo "launcher.exit.rc=${FAKE_LAUNCHER_EXIT_RC:-0}"
         echo "launcher.port=${FAKE_LAUNCHER_PORT:-closed}"
@@ -678,6 +680,8 @@ sb_case "another major answering: a finding" "$ONE" 1 "on the stack's own Postgr
 sb_case "the launcher seeding nothing: a finding" "$ONE" 1 "migrated and seeded" "PASS" FAKE_LAUNCHER_ROW=
 sb_case "no ledger: a finding" "$ONE" 1 "the CLI's ledger holds the migration" "PASS" FAKE_LAUNCHER_LEDGER=
 sb_case "the migrate verb failing: a finding" "$ONE" 1 "postgres.mjs migrate exited 0" "PASS" FAKE_LAUNCHER_MIGRATE_RC=1
+sb_case "no types: a finding" "$ONE" 1 "gen-types wrote the declared file" "PASS" FAKE_LAUNCHER_TYPES=0
+sb_case "a function not served, as a tree under /tmp answers: a finding" "$ONE" 1 "the running stack serves it" "PASS" "FAKE_LAUNCHER_FUNCTION=404 Function not found"
 sb_case "dev stop failing: a finding" "$ONE" 1 "dev stop exited 0" "PASS" FAKE_LAUNCHER_STOP_RC=1
 sb_case "the keeper ending badly: a finding" "$ONE" 1 "the keeper ended clean" "PASS" FAKE_LAUNCHER_EXIT_RC=1
 sb_case "the port left open: a finding" "$ONE" 1 "the stack's port is closed" "PASS" FAKE_LAUNCHER_PORT=open

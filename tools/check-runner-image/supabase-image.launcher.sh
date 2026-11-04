@@ -44,6 +44,17 @@ printf -- '-- migrate:up\nALTER TABLE public.thing ADD COLUMN extra text;\n\n-- 
 node tools/postgres/postgres.mjs migrate > migrate.log 2>&1
 echo "launcher.migrate.rc=$?"
 echo "launcher.column=$(sql "SELECT count(*) FROM information_schema.columns WHERE table_name = 'thing' AND column_name = 'extra'")"
+node tools/postgres/postgres.mjs gen-types > types.log 2>&1
+grep -q 'export type Database' supabase/types/database.ts 2> /dev/null && grep -q thing supabase/types/database.ts && echo "launcher.types=1" || echo "launcher.types=0"
+node tools/postgres/postgres.mjs new-function --name=hello > function.log 2>&1
+supabase status --output-format json --agent no > status.json 2> /dev/null
+echo "launcher.function=$(API="$((5435 + OFFSET))" node -e '
+  const key = JSON.parse(require("fs").readFileSync("status.json", "utf8")).env.PUBLISHABLE_KEY;
+  fetch(`http://127.0.0.1:${process.env.API}/functions/v1/hello`, { method: "POST", headers: { Authorization: `Bearer ${key}`, apikey: key, "content-type": "application/json" }, body: JSON.stringify({ name: "Image" }), signal: AbortSignal.timeout(120000) })
+    .then(async (response) => console.log(response.status, JSON.parse(await response.text()).message))
+    .catch((error) => console.log(0, String(error)));
+' 2>&1)"
+sed 's/^/  function: /' function.log | tail -n 3
 tools/dev/dev stop postgres --offset="$OFFSET" > stop.log 2>&1
 echo "launcher.stop.rc=$?"
 wait "$START"

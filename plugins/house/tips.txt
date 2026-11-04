@@ -36,6 +36,9 @@ Going to a real database? node tools/postgres/postgres.mjs deploy reads POSTGRES
 Supabase with no Docker: /bespunky-house:add-layer supabase — the same postgres:* targets on the CLI's native runtime, an alpha, pinned
 On Supabase only the launcher starts and stops the stack: node tools/postgres/postgres.mjs start. supabase status, db diff and db query are yours
 Never interrupt a supabase db reset: node tools/postgres/postgres.mjs reset holds the stack's lock and runs to completion
+node tools/postgres/postgres.mjs gen-types writes this Supabase stack's types where .bespunky/supabase.json says
+node tools/postgres/postgres.mjs new-function --name=hello makes an Edge Function the running stack serves at once, with no second process
+Hosted Supabase function secrets: run node tools/postgres/postgres.mjs secrets-set --project-ref=<ref> --name=A,B yourself, at a terminal. It asks unechoed
 Every local Supabase stack has the same keys: the URL is the whole isolation, and it is local only
 The Postgres major is .bespunky/postgres.json: match it to your production host, run the house upgrade, then rebuild the container. A new major starts empty
 tools/dev/dev ps --json is the public shape for a script: every running stack, its state and its ports

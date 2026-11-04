@@ -14,7 +14,7 @@
 # Debian server and no dbmate, on PATH or anywhere under /usr/lib/postgresql; psql, ps and tar there; SUPABASE_HOME under the persisted
 # ~/.local. On the node presets, whose image has its Node (the agent preset's is a devcontainer feature, which `docker build` does not
 # apply): the real launcher boots the real stack, under the real engine, with a migration in the ledger and the seed applied; a second
-# migration through the verb; a stop that leaves nothing running.
+# migration through the verb; types; a real Edge Function served by the stack, on that architecture's runtime; a stop that leaves nothing running.
 #
 # Exit codes, as its siblings: 0 all hold; 1 a case's assertion or build failed; 2 could not run, so nothing is known about that case (no
 # docker, no base image, an engine error, `new` failing). A finding outranks a could-not-run.
@@ -136,7 +136,8 @@ run_case() {
     cp "$HERE/supabase-image.launcher.sh" "$stage/probe.sh"
     echo "  the launcher, as $user"
     # bash -c, so `tar` reads the copy from stdin: a bind mount of this runner's temp directory is not readable by the remote user.
-    tar -C "$stage" -cf - . | docker run -i --rm --user "$user" "${env[@]}" "$tag" bash -c 'd="$(mktemp -d)" && tar -xf - -C "$d" && exec bash "$d/probe.sh" "$d" "$1"' _ "$path" > "$running" 2>&1 || lrc=$?
+    # Under $HOME: the Edge Runtime has its own /tmp, and a function under the real one answers 404.
+    tar -C "$stage" -cf - . | docker run -i --rm --user "$user" "${env[@]}" "$tag" bash -c 'd="$(mktemp -d -p "$HOME")" && tar -xf - -C "$d" && exec bash "$d/probe.sh" "$d" "$1"' _ "$path" > "$running" 2>&1 || lrc=$?
     sed 's/^/    /' "$running"
     if [ "$lrc" -ne 0 ] || ! grep -q '^probe=done$' "$running"; then
       could_not "docker run exited $lrc before the launcher's probe ended"
@@ -147,6 +148,8 @@ run_case() {
       equal "$running" launcher.ledger 20260101000000 "and the CLI's ledger holds the migration"
       equal "$running" launcher.migrate.rc 0 "postgres.mjs migrate exited 0"
       equal "$running" launcher.column 1 "and applied the new migration"
+      equal "$running" launcher.types 1 "postgres.mjs gen-types wrote the declared file, naming the table"
+      equal "$running" launcher.function "200 Hello Image!" "postgres.mjs new-function made one, and the running stack serves it"
       equal "$running" launcher.stop.rc 0 "dev stop exited 0"
       equal "$running" launcher.exit.rc 0 "and the keeper ended clean"
       equal "$running" launcher.port closed "the stack's port is closed"

@@ -41,7 +41,9 @@
  *   new-supabase
  *             the `supabase` layer from nothing, on the wrapper host: `new --local --add-layer=supabase`, the same served app, a real
  *             `nx serve` on the pinned CLI and its native runtime: DATABASE_URL reaches the app, a migration and a seed applied, a stop
- *             leaves nothing. About a minute more the first time: the stack's artifacts land under the workdir, and go with it.
+ *             leaves nothing; types by the target; a real Edge Function, made by the target and answering with no restart. About a minute more
+ *             the first time: the stack's artifacts land under the workdir, and go with it. This project alone lives under ~/.cache
+ *             (removed with the run, kept with --keep): the Edge Runtime has its own /tmp, and every function under the real one is a 404.
  *   add-layer-supabase
  *             `add-layer --local supabase` on the consumer `add-layer-postgres` left: refused at major 18 with nothing written, then at
  *             17 the migrations move and references follow, a second upgrade is a no-op, it still builds, lints and passes its tests, and
@@ -187,7 +189,7 @@ const PRESETS = {
 const POSTGRES_ROADS = {
   'new-postgres': { flags: ['--add-layer=postgres'], layers: ['nx', 'agent', 'postgres'], host: 'wrapper' },
   'new-postgres-node': { flags: ['--preset=node', '--add-layer=postgres'], layers: ['nx', 'agent', 'node', 'postgres'], host: 'node' },
-  'new-supabase': { flags: ['--add-layer=supabase'], layers: ['nx', 'agent', 'postgres', 'supabase'], host: 'wrapper', provider: 'supabase' },
+  'new-supabase': { flags: ['--add-layer=supabase'], layers: ['nx', 'agent', 'postgres', 'supabase'], host: 'wrapper', provider: 'supabase', outsideTmp: true },
 };
 const STEP_ORDER = ['released', 'seed', 'upgrade', 'add-layer-postgres', 'add-layer-supabase', ...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)];
 const REQUIRES = { seed: ['released'], upgrade: ['seed'], 'add-layer-postgres': ['upgrade'], 'add-layer-supabase': ['add-layer-postgres'] };
@@ -220,7 +222,7 @@ const RELEASED_TREE = join(WORK, 'released');
 const CONSUMERS = join(WORK, 'consumers'); // PROJECTS_DIR for every house.sh run
 const TMP = join(WORK, 'tmp');             // TMPDIR for every child: whatever it leaves is ours to delete
 const POSTGRES_DATA = join(TMP, 'xdg');    // XDG_DATA_HOME for a real server: never this machine's ~/.local
-const SUPABASE_DATA = join(TMP, 'supabase'); // SUPABASE_HOME for a real stack, artifacts and all: never this machine's, and it goes with the workdir
+const SUPABASE_DATA = join(POSTGRES_DATA, 'supabase'); // the launcher's SUPABASE_HOME under that XDG_DATA_HOME, artifacts and all: goes with the workdir
 for (const d of [LOGS, CONSUMERS, TMP]) mkdirSync(d, { recursive: true });
 for (const d of [RELEASED_TREE]) if (existsSync(d)) { console.error(`${d} already exists — use a fresh --workdir.`); process.exit(2); }
 
@@ -305,17 +307,27 @@ function straysUnder(dir) {
   return out;
 }
 
-/** Every live process naming this run's SUPABASE_HOME: a stack daemonises, so its cwd says nothing. A zombie names nothing, and is not running. */
+/** Every live process under this run's SUPABASE_HOME, by its environment: a stack daemonises, so its cwd says nothing, and its command line need not name the home. A zombie has no environment, and is not running. */
 function stackProcesses() {
   const out = [];
+  const mine = `SUPABASE_HOME=${SUPABASE_DATA}\0`;
   for (const p of readdirSync('/proc')) {
     if (!/^\d+$/.test(p) || Number(p) === process.pid) continue;
     try {
-      const cmd = readFileSync(`/proc/${p}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
-      if (cmd.includes(`${SUPABASE_DATA}/`)) out.push({ pid: Number(p), cmd: cmd.slice(0, 120) });
+      if (readFileSync(`/proc/${p}/environ`, 'utf8').includes(mine)) out.push({ pid: Number(p), cmd: readFileSync(`/proc/${p}/cmdline`, 'utf8').replace(/\0/g, ' ').trim().slice(0, 120) });
     } catch { /* raced or not ours */ }
   }
   return out;
+}
+
+let outsideTmpDir;
+/** A home for a project serving Edge Functions, outside the system temp dir. One per run, gone with the workdir's other contents. */
+function outsideTmp() {
+  if (outsideTmpDir) return outsideTmpDir;
+  mkdirSync(join(homedir(), '.cache'), { recursive: true });
+  outsideTmpDir = mkdtempSync(join(homedir(), '.cache/dogfood-consumer-'));
+  console.log(`a project beside the workdir, outside /tmp: ${outsideTmpDir}`);
+  return outsideTmpDir;
 }
 
 // ── the record ────────────────────────────────────────────────────────────────────────────────────────────
@@ -900,13 +912,29 @@ async function assertUpgradeIsNoOp(step, dir, args = []) {
   });
 }
 
+/** With the stack up: the targets a Supabase project has beyond the shared ones, by real calls to the real runtime. Nothing here is hosted. */
+async function assertTypesAndFunctions(step, dir, tools, bin, pre, api) {
+  const typed = await run(`${step}-gen-types`, bin, [...pre, 'run', 'postgres:gen-types'], { cwd: dir, env: tools });
+  const declared = readJson(join(dir, '.bespunky/supabase.json')).types?.out;
+  const types = declared && existsSync(join(dir, declared)) ? readFileSync(join(dir, declared), 'utf8') : '';
+  record(step, `nx run postgres:gen-types writes ${declared}, naming the migrated table`, typed.code === 0 && types.includes('export type Database') && types.includes('thing'), { ms: typed.ms, log: typed.log, detail: typed.code ? why(typed.out) : '' });
+  const made = await run(`${step}-new-function`, bin, [...pre, 'run', 'postgres:new-function', '--name=hello'], { cwd: dir, env: tools });
+  const madeOk = made.code === 0 && existsSync(join(dir, 'supabase/functions/hello/index.ts'));
+  if (!record(step, 'nx run postgres:new-function --name=hello', madeOk, { ms: made.ms, log: made.log, detail: madeOk ? '' : why(made.out) })) return;
+  const said = spawnSync('supabase', ['status', '--output-format', 'json', '--agent', 'no'], { cwd: dir, env: { ...ENV, ...tools }, encoding: 'utf8' });
+  const key = JSON.parse(said.stdout || '{}').env?.PUBLISHABLE_KEY;
+  const answer = await fetch(`http://127.0.0.1:${api}/functions/v1/hello`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, apikey: key, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Dogfood' }), signal: AbortSignal.timeout(120_000) }).then(async (response) => ({ status: response.status, text: await response.text() }), (error) => ({ status: 0, text: String(error) }));
+  record(step, 'the running stack serves it at once, with no restart and no second process', answer.status === 200 && answer.text.includes('Hello Dogfood!'), { detail: `${answer.status} ${answer.text.slice(0, 120)}` });
+}
+
 /** `new`, then the day the project gains a served app and upgrades, then a real serve of what the generators declared. */
 async function stepNewPostgres(id) {
   const road = POSTGRES_ROADS[id];
   const local = LOCAL_SERVERS[road.provider ?? 'native'];
-  const dir = join(CONSUMERS, id);
+  const home = road.outsideTmp ? outsideTmp() : CONSUMERS;
+  const dir = join(home, id);
   const app = 'fixture';
-  const r = await run(id, 'bash', [HOUSE(TOOLKIT), 'new', '--local', ...road.flags, dir], { cwd: CONSUMERS });
+  const r = await run(id, 'bash', [HOUSE(TOOLKIT), 'new', '--local', ...road.flags, dir], { cwd: home, env: { PROJECTS_DIR: home } });
   const good = r.code === 0 && /^NEW_OK /m.test(r.out);
   if (!record(id, `new --local ${road.flags.join(' ')}`, good, { ms: r.ms, log: r.log, detail: good ? '' : `exit ${r.code}: ${why(r.out)}` })) return;
   const st = stamp(dir);
@@ -977,7 +1005,8 @@ async function stepNewPostgres(id) {
   record(id, 'the migration and the seed applied, read through that URL', row.status === 0 && row.stdout.trim() === 'seeded', { detail: row.status === 0 ? row.stdout.trim() : row.stderr.trim().slice(0, 140) });
   const stamped = psqlIn(client, seen.DATABASE_URL, `SELECT version FROM ${local.ledger}`);
   record(id, 'the provider\'s ledger recorded the migration', stamped.stdout.trim() === file.split('_')[0], { detail: stamped.stdout.trim().slice(0, 40) });
-  if (road.provider === 'supabase') record(id, 'its daemon is in sight, so "nothing left" below means something', stackProcesses().some((running) => running.cmd.includes('__supabase_stack_host__')));
+  if (road.provider === 'supabase') record(id, 'its daemon is in sight, so "nothing left" below means something', stackProcesses().length > 0);
+  if (road.provider === 'supabase') await assertTypesAndFunctions(id, dir, tools, bin, pre, server.ports['supabase-api'] + offset);
   const stack = stacksIn(dir, tools)?.find((candidate) => candidate.offset === offset);
   record(id, 'tools/dev/dev ps names the stack, live, with its ports', stack?.state === 'live' && stack.ports?.app === ports[0] && stack.ports?.postgres === databasePort, { detail: stack ? `${stack.key} ${stack.state}` : 'no such stack' });
   await assertStops(id, dir, tools, app, offset, ports, serve);
@@ -1116,7 +1145,7 @@ function cleanup() {
   if (cleaned) return; cleaned = true;
   if (current) killGroup(current.pid);
   for (const service of services) killGroup(service.pid);
-  for (const s of [...straysUnder(WORK), ...stackProcesses()]) { try { process.kill(s.pid, 'SIGKILL'); } catch { /* gone */ } }
+  for (const s of [...straysUnder(WORK), ...(outsideTmpDir ? straysUnder(outsideTmpDir) : []), ...stackProcesses()]) { try { process.kill(s.pid, 'SIGKILL'); } catch { /* gone */ } }
   // Port reservations of the stacks this run started. `~/.supabase` follows the passwd home, which no variable moves.
   if (!hadSupabaseDir) rmSync(join(homedir(), '.supabase'), { recursive: true, force: true });
   if (existsSync(RELEASED_TREE)) {
@@ -1125,6 +1154,7 @@ function cleanup() {
   }
   rmSync(TMP, { recursive: true, force: true });
   if (!opts.keep) rmSync(CONSUMERS, { recursive: true, force: true });
+  if (!opts.keep && outsideTmpDir) rmSync(outsideTmpDir, { recursive: true, force: true });
 }
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, () => { console.error(`\n[dogfood] ${sig} — cleaning up`); cleanup(); summary(); process.exit(130); });
@@ -1173,7 +1203,7 @@ try {
 } catch (e) {
   record('run', 'tool error', false, { detail: e.stack?.split('\n').slice(0, 2).join(' ') ?? String(e) });
 } finally {
-  const strays = [...straysUnder(WORK), ...stackProcesses()];
+  const strays = [...straysUnder(WORK), ...(outsideTmpDir ? straysUnder(outsideTmpDir) : []), ...stackProcesses()];
   record('run', 'no process left under the workdir', strays.length === 0, { detail: strays.map((s) => `${s.pid} ${s.cmd}`).join(' | ').slice(0, 200) });
   record('run', 'nothing written to ~/projects', listOrNull(HOME_PROJECTS) === homeProjectsBefore, { detail: homeProjectsBefore === null && existsSync(HOME_PROJECTS) ? `${HOME_PROJECTS} was created` : '' });
   cleanup();
