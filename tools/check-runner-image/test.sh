@@ -40,7 +40,17 @@ mkdir -p "$work/runner-image-e2e"
 [ -n "${FAKE_NO_NVMRC:-}" ] || echo "$FAKE_MAJOR" > "$work/runner-image-e2e/.nvmrc"
 [ -n "${FAKE_NO_DECLARATION:-}" ] || echo '{ "packageManager": "yarn@1.22.22" }' > "$work/runner-image-e2e/package.json"
 FAKE
-printf '#!/usr/bin/env bash\necho "curl $*" >> "$FAKE_ARGV"\nprintf "%%s" "${FAKE_NPM_STATUS:-200}"\n' > "$TMP/bin/curl"
+cat > "$TMP/bin/curl" <<'CURL'
+#!/usr/bin/env bash
+echo "curl $*" >> "$FAKE_ARGV"
+# FAKE_NPM_404S_FILE holds how many more times to answer 404: a version npm is about to serve.
+if [ -n "${FAKE_NPM_404S_FILE:-}" ] && [ "$(cat "$FAKE_NPM_404S_FILE")" -gt 0 ]; then
+  echo "$(($(cat "$FAKE_NPM_404S_FILE") - 1))" > "$FAKE_NPM_404S_FILE"
+  printf 404
+  exit 0
+fi
+printf "%s" "${FAKE_NPM_STATUS:-200}"
+CURL
 chmod +x "$TMP/bin/"*
 
 image_with() {   # <yarn path> <yarn version> <corepack path> <pnpm path> [home.writable] [node path]
@@ -126,7 +136,12 @@ e2e_case "registry road: unpublished is a stated skip, no run" registry 0 "SKIP 
 if grep -q 'bash -lc' "$FAKE_ARGV"; then fail "the skip still ran the program"; else ok "the skip ran nothing"; fi
 e2e_case "registry road: npm not answering fails" registry 1 "Could not tell" "Verdict" FAKE_NPM_STATUS=000
 e2e_case "registry road: a 404 on a schedule means the release never arrived" registry 1 "did not reach it" "SKIP" FAKE_NPM_STATUS=404 GITHUB_EVENT_NAME=schedule
-e2e_case "registry road: …and after a publish" registry 1 "did not reach it" "SKIP" FAKE_NPM_STATUS=404 GITHUB_EVENT_NAME=workflow_run
+e2e_case "registry road: …and after a publish, once npm has had its time" registry 1 "did not reach it" "SKIP" FAKE_NPM_STATUS=404 GITHUB_EVENT_NAME=workflow_run NPM_SETTLE_SECONDS=2 NPM_SETTLE_INTERVAL=1
+case "$(grep -c '^curl ' "$FAKE_ARGV")" in 3) ok "…asked again until the time ran out" ;; *) fail "…asked npm $(grep -c '^curl ' "$FAKE_ARGV") times, not 3" ;; esac
+echo 2 > "$TMP/npm-404s"
+e2e_case "registry road: a version npm serves a moment after its publish walks the road" registry 0 "walking the registry road" "did not reach it" FAKE_NPM_404S_FILE="$TMP/npm-404s" GITHUB_EVENT_NAME=workflow_run NPM_SETTLE_INTERVAL=0
+echo 1 > "$TMP/npm-404s"
+e2e_case "registry road: a 404 on a schedule does not wait" registry 1 "did not reach it" "just published" FAKE_NPM_404S_FILE="$TMP/npm-404s" GITHUB_EVENT_NAME=schedule
 e2e_case "registry road: …but not on a push, which may be racing the publish" registry 0 "SKIP registry road" "" FAKE_NPM_STATUS=404 GITHUB_EVENT_NAME=push
 e2e_case "no road: usage" "" 2 "usage" ""
 e2e_case "no .nvmrc fails" local 1 "FAILED (local road): .nvmrc" "" FAKE_NO_NVMRC=1
