@@ -86,3 +86,9 @@ Next: correctness pass (last of the budget), then push and PR, then gate.
 
 ### correctness pass (returned; budget 12 of 12 spent)
 Eight findings, fixed by the reviewer with tests: reset acts on the tree's `<app>@N` cluster; a returning tree is told of its quarantine and the restore command is run for real; `types:[closed]` counts as deploying; only `run` steps' `secrets` count, in the same job; static literal secret references, no `secrets[`; tripwire branch per run (cause inferred: fixed port 7432). Generators 426 passed, 35 skipped; rest green.
+
+### First real CI (PR #1, b96a3f66)
+Green: postgres tripwire, runner image e2e, all suites, and the image job's trixie cases on amd64 and arm64, with the real root install and the real launcher. So the closure root install is proven on trixie.
+Found by real CI and fixed: a wrapper host resolved someone else's Nx; `dev stop` waited forever on a zombie where PID 1 reaps nothing.
+Still red: bookworm. Not Postgres: the Chromium package names are projected for debian13 only, and `js` brings them, so any node-host project on typescript-node:16 or :18 cannot build its image, today, pre-existing. No bookworm project a house composes can build, so a bookworm closure is unreachable without this.
+ORCHESTRATOR DECISION: fix it in this landing, resumed to wire. Per the standing "no deferred gaps". Project Chromium's names per codename; the installer picks by its own codename; an unknown codename fails by name. Bookworm cases go back to the node preset. Agent budget: resume only, no new agent.
