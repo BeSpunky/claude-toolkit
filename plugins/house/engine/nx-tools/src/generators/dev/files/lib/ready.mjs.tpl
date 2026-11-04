@@ -43,7 +43,8 @@ function tcp(port) {
     };
     socket.setTimeout(ATTEMPT_MS, () => end({ ok: false, said: 'no answer' }));
     socket.on('connect', () => end({ ok: true }));
-    socket.on('error', (err) => end({ ok: false, said: err.message }));
+    // `localhost` on both IPv4 and IPv6 fails with an AggregateError: its message is empty, its code is not.
+    socket.on('error', (err) => end({ ok: false, said: err.message || err.code }));
   });
 }
 

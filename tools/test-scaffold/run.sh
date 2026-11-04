@@ -24,6 +24,10 @@ fi
 # fails HERE, first. (Tests that need a branch name pass `-b` explicitly, as fixtures should.)
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch GIT_CONFIG_VALUE_0=not-a-default-branch
 
+# Nor must the machine's CI variable. Every runner sets CI=true, and `house.sh upgrade` refuses under it, so a test
+# that runs an upgrade passed on a laptop and failed in CI. A test about that refusal sets CI itself.
+unset CI
+
 status=0
 for t in "${tests[@]}"; do
   echo "── $t"
