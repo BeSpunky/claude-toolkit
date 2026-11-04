@@ -32,7 +32,8 @@ import { CI_SKILL_POINTERS } from './skill-pointers';
 import { nodeVersionFile, projectNode } from '../_utils/node-version';
 import { isYarnBerry } from '../_utils/package-manager';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
-import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, type WiredLine } from './workflow';
+import { workflowDeploys } from './foreign-pipeline';
+import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, WORKFLOW_HEADER, type WiredLine } from './workflow';
 
 export { MARKER };
 
@@ -122,7 +123,8 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
 
   // ── what the house writes this run ──────────────────────────────────────────────────────────────────────
   const wanted = new Map<string, { content: string; mode?: number }>();
-  const foreign = foreignDeployWorkflows(tree, previous.files);
+  const ownedFiles = currentlyOwned(tree, previous.files);
+  const foreign = foreignDeployWorkflows(tree, ownedFiles);
   const deployable = lines.filter((line) => !line.blocked);
   const blocked = lines.filter((line) => line.blocked);
   let reason = pending;
@@ -144,7 +146,7 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
         throughBranchModelSkill,
       }),
     });
-    if (previous.files.includes(WORKFLOW) && /^\s*id-token:\s*write/m.test(tree.read(WORKFLOW, 'utf8') ?? '') && !/^\s*id-token:\s*write/m.test(wanted.get(WORKFLOW)!.content)) {
+    if (ownedFiles.includes(WORKFLOW) && /^\s*id-token:\s*write/m.test(tree.read(WORKFLOW, 'utf8') ?? '') && !/^\s*id-token:\s*write/m.test(wanted.get(WORKFLOW)!.content)) {
       notes.push(`${WORKFLOW} no longer holds \`id-token: write\`: no provider this project wears exchanges GitHub's OIDC token. A deploy target of your own that fetches that token itself (npm provenance, cosign) now fails; if you have one, run the deploy from a workflow of your own, and the house steps aside.`);
     }
     if (projectNode(tree).state !== 'declared') notes.push(`the workflow reads Node from ${nodeVersionFile(tree)}, which declares none here — add .nvmrc (one line: the Node major) or the deploy job fails at setup-node.`);
@@ -157,7 +159,7 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
   }
 
   // ── write what is owned; never what is not ───────────────────────────────────────────────────────────────
-  const owned = new Set(previous.files);
+  const owned = new Set(ownedFiles);
   const files: string[] = [];
   for (const [path, file] of wanted) {
     if (tree.exists(path) && !owned.has(path)) {
@@ -167,7 +169,7 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
     tree.write(path, file.content, file.mode ? { mode: file.mode } : undefined);
     files.push(path);
   }
-  for (const path of previous.files) {
+  for (const path of ownedFiles) {
     if (!wanted.has(path) && tree.exists(path)) {
       tree.delete(path);
       notes.push(`removed ${path} — nothing in the branch model calls for it any more.`);
@@ -398,7 +400,18 @@ const splitKey = (key: string): [string, string] => {
   return [key.slice(0, at), key.slice(at + 1)];
 };
 
-/** Workflows the house did not write that already deploy on push — the project's own pipeline. */
+/**
+ * What the house owns now: the marker's record, but the workflow only while it is what the generator wrote. Its header
+ * answers both ways: a project that replaced the file keeps it though the marker still lists it, and a generated file
+ * whose marker was lost is still recognised, instead of being taken for a pipeline of the project's own because it deploys.
+ */
+function currentlyOwned(tree: Tree, recorded: readonly string[]): string[] {
+  const generated = tree.exists(WORKFLOW) && (tree.read(WORKFLOW, 'utf8') ?? '').startsWith(`${WORKFLOW_HEADER}\n`);
+  const others = recorded.filter((path) => path !== WORKFLOW);
+  return generated ? [...others, WORKFLOW] : others;
+}
+
+/** Workflows the house did not write that already deploy — the project's own pipeline. */
 function foreignDeployWorkflows(tree: Tree, ownedFiles: readonly string[]): string[] {
   const dir = '.github/workflows';
   if (!tree.exists(dir)) return [];
@@ -408,12 +421,7 @@ function foreignDeployWorkflows(tree: Tree, ownedFiles: readonly string[]): stri
     .filter((name) => /\.ya?ml$/.test(name))
     .map((name) => `${dir}/${name}`)
     .filter((path) => !ownedFiles.includes(path))
-    .filter((path) =>
-      (tree.read(path, 'utf8') ?? '')
-        .split('\n')
-        .map((line) => line.replace(/(^|\s)#.*$/, ''))
-        .some((line) => DEPLOYS.some((re) => re.test(line))),
-    );
+    .filter((path) => workflowDeploys(tree.read(path, 'utf8') ?? '', DEPLOYS));
 }
 
 function readMarker(tree: Tree): Marker {

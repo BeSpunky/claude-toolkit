@@ -135,6 +135,31 @@ function deployStages(text, selection, opts) {
   return { schema, code: runBash(script(text, 'Deploy'), env, opts) };
 }
 
+const workflowRunning = (run) => `on: push\njobs:\n  d:\n    steps:\n      - run: ${JSON.stringify(run)}\n`;
+const t3 = (tree) => JSON.parse(tree.read('.bespunky/ci.json', 'utf8'));
+/** What a `run` script holds, and whether reading it should find a deploy. */
+const FOREIGN = [
+  ['a plain command', 'firebase deploy --only functions', true],
+  ['a package-manager prefix', 'npx firebase deploy', true],
+  ['an env prefix', 'FORCE=1 firebase deploy', true],
+  ['the second of a chain', 'echo starting && firebase deploy', true],
+  ['inside an if', 'if [ -n "$X" ]; then firebase deploy; fi', true],
+  ['a later line', 'echo starting\nyarn nx affected -t deploy', true],
+  ['a continued line', 'firebase \\\n  deploy', true],
+  ['after a heredoc', 'cat > f <<EOF\nhi\nEOF\nfirebase deploy', true],
+  ['in a heredoc fed to a shell', 'bash <<EOF\nfirebase deploy\nEOF', true],
+  ['in `bash -c`', 'bash -c "firebase deploy"', true],
+  ['an echo', 'echo firebase deploy', false],
+  ['a quoted echo', 'echo "firebase deploy"', false],
+  ['a printf', "printf 'run firebase deploy\\n'", false],
+  ['an echo in a then', 'if true; then echo firebase deploy; fi', false],
+  ['an echo piped on', 'echo firebase deploy | tee out', false],
+  ['a comment', 'true # firebase deploy', false],
+  ['a heredoc to the summary', 'cat >> "$GITHUB_STEP_SUMMARY" <<EOF\nfirebase deploy\nEOF', false],
+  ['a dash heredoc', "cat <<-'DOC'\n\tyarn nx affected -t deploy\n\tDOC", false],
+  ['a chain character inside quotes', 'echo "a; firebase deploy"', false],
+];
+
 const t2 = (tree) => JSON.parse(tree.read('db/project.json', 'utf8')).targets.deploy.configurations;
 
 export default {
@@ -346,6 +371,91 @@ export default {
       },
       run: withFake(FAKE_ONLY),
       expect: (tree, t) => t.exists(WF),
+    },
+    ...FOREIGN.map(([name, run, deploys]) => ({
+      name: `foreign pipeline: ${name} ${deploys ? 'is' : 'is not'} a deploy`,
+      once: 'asserts one pure reading',
+      setup: () => workspace(),
+      run: () => {},
+      expect: (tree, t, ctx) => {
+        const signals = [/\bfirebase\s+deploy\b/, /-t\s+deploy\b/];
+        t.equal(ctx.load('generators/ci/foreign-pipeline').workflowDeploys(workflowRunning(run), signals), deploys, run);
+      },
+    })),
+    {
+      name: 'foreign pipeline: the text outside `run` is not a deploy, whatever it says',
+      once: 'asserts one pure reading',
+      setup: () => workspace(),
+      run: () => {},
+      expect: (tree, t, ctx) => {
+        const text = 'name: firebase deploy\non: push\ndefaults:\n  run:\n    shell: bash\nenv:\n  NOTE: firebase deploy\njobs:\n  d:\n    name: firebase deploy\n    steps:\n      - name: firebase deploy\n        uses: actions/checkout@v5\n        with:\n          ref: firebase deploy\n';
+        t.equal(ctx.load('generators/ci/foreign-pipeline').workflowDeploys(text, [/\bfirebase\s+deploy\b/]), false);
+        t.equal(ctx.load('generators/ci/foreign-pipeline').workflowDeploys('jobs: [unclosed', [/./]), false, 'and a file that does not parse runs nothing');
+      },
+    },
+    {
+      name: 'an unrelated workflow with a signal in an `echo` does not delete the owned workflow',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: async (tree, ctx) => {
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        tree.write('.github/workflows/notes.yml', 'on: push\njobs:\n  n:\n    steps:\n      - run: echo "remember to firebase deploy"\n');
+        ctx.mark = ctx.logs.length;
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.exists(WF);
+        t.ok(!ctx.logs.slice(ctx.mark).some((l) => /removed \.github\/workflows\/deploy\.yml|No deploy workflow/.test(l)), ctx.logs.join(' | '));
+        t.equal(t.json('.bespunky/ci.json').files.includes(WF), true);
+      },
+    },
+    {
+      name: 'a real pipeline arriving beside the owned workflow: the owned one still goes, and says so',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: async (tree, ctx) => {
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        tree.write('.github/workflows/mine.yml', 'on: push\njobs:\n  d:\n    steps:\n      - run: |\n          echo starting\n          firebase deploy\n');
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.missing(WF);
+        t.ok(/mine\.yml/.test(t.json('.bespunky/ci.json').pending ?? ''), 'pending names it');
+      },
+    },
+    {
+      name: 'the owned workflow is recognised by what the generator wrote, with its marker lost',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: async (tree, ctx) => {
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        tree.delete('.bespunky/ci.json');
+        ctx.first = tree.read(WF, 'utf8');
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(t.read(WF), ctx.first, 'rewritten, not taken for a pipeline of the project\'s own');
+        t.equal(t.json('.bespunky/ci.json').pending, undefined);
+        t.ok(t.json('.bespunky/ci.json').files.includes(WF), 'and owned again');
+      },
+    },
+    {
+      name: 'a workflow the project put at the owned path is theirs, though the marker still lists it',
+      once: 'two runs across replacing the file',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: async (tree, ctx) => {
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        tree.write(WF, 'name: theirs\non: push\njobs:\n  d:\n    steps:\n      - run: firebase deploy\n');
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        ctx.deploying = tree.read(WF, 'utf8');
+        ctx.pending = t3(tree).pending;
+        tree.write(WF, 'name: quiet\non: push\njobs: {}\n');
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(/name: theirs/.test(ctx.deploying), 'a deploying replacement is kept');
+        t.ok(/deploy\.yml/.test(ctx.pending ?? ''), `and is the pipeline: ${ctx.pending}`);
+        t.has(WF, 'name: quiet');
+        t.ok(ctx.logs.some((l) => /deploy\.yml exists and the house did not write it/.test(l)), 'a quiet one is kept too, and reported');
+        t.ok(!t.json('.bespunky/ci.json').files.includes(WF), 'and is no longer recorded as owned');
+      },
     },
     {
       name: 'a blocked binding beside a pipeline of the project\'s own: nothing of the house\'s stopped, so it is a note',

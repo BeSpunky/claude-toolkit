@@ -245,8 +245,8 @@ interface CiDeployProviderShape {
    */
   supersedes?: string;
   /**
-   * How a workflow the house did not write shows it already deploys through this provider, tested per line with
-   * comments stripped. Read from EVERY registered provider, worn or not: a repo running its own `firebase deploy` has
+   * How a workflow the house did not write shows it already deploys through this provider, tested against each command
+   * its `run` steps execute (ci/foreign-pipeline.ts). Read from EVERY registered provider, worn or not: a repo running its own `firebase deploy` has
    * a pipeline whether or not it wears `firebase`, and a second deploy workflow beside it is the worst outcome.
    */
   deploySignals: readonly RegExp[];
