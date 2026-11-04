@@ -14,8 +14,8 @@ Units are independent; each must build and test, so one worktree and branch each
 | seam-platform | feat/hps-platform | returned |
 | seam-ci | feat/hps-ci | returned |
 | seam-installer | feat/hps-installer | returned |
-| finish | docs, firewall rung, leftovers, on the integration branch | dispatched |
-| review | sanity review of the whole landing | pending |
+| finish | docs, firewall rung, leftovers, on the integration branch | returned |
+| review | sanity review of the whole landing | dispatched |
 | gate | upgrade --local + dogfood-consumer | pending |
 
 ## Results
@@ -43,3 +43,6 @@ Integrated: all four rebased clean onto feat/house-postgres-supabase and fast-fo
 
 ### Interruption
 VS Code died during `finish`. On resume: rung and dev claim removal committed; firebase:reset work uncommitted in the tree; no processes left. `finish` resumed from its transcript. Outstanding: items 3-5 of finish, then review, then gate.
+
+### finish (returned; 99204721, 536f3a66, 59d58e6a, 71940bcd, 8c24de51, c2f05b1c; spent 0 of 1)
+Two rungs at 0.52.0: ban-postgres-drivers-from-web; pin-github-cli-feature (a migration was owed, so the plan's expected "nothing to migrate" was wrong for this landing). dev claim removed. firebase:reset real, three faults, fixed; test uses a fake firebase; export-over-reset reproduced only after the fix. Whole tree: migrations 412, generators 315/35 skipped, layers 107, scaffold 28 files, no interplay failure. Invariants owe bespunky-house, bespunky-workflow; keep the payload bump last at release. Open: node:1 still floats within v1; lock key form and order for the rung from memory; 35 skipped cases.
