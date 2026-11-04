@@ -16,7 +16,7 @@
 // The engine ships as .tpl files in the payload; this copies them into a temp tools/dev/ as .mjs — exactly
 // what the `dev` generator writes — and imports them.
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -28,6 +28,9 @@ delete process.env.CLAUDECODE;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FILES = join(HERE, '../../plugins/house/engine/nx-tools/src/generators/dev/files');
+
+// `dev ps --json`, a public contract (lib/stacks.mjs publicStack): keys every stack has. A removed or renamed one is a break.
+const PUBLIC_STACK_KEYS = ['key', 'app', 'tree', 'treeLabel', 'offset', 'state', 'pid', 'owner', 'host', 'startedAt', 'ports', 'portStates', 'exports', 'tmp', 'processes', 'detached'];
 
 let failed = 0;
 const ok = (label, cond) => {
@@ -991,6 +994,19 @@ setTimeout(() => {
       asked = await dev('stop', '--offset=0');
       ok('an exit of 143 and a death on the SIGTERM itself are a clean stop: dev stop 0, "stopped cleanly", exit 0', asked.code === 0 && /ports free/.test(asked.out) && (await s.ended()) === 0 && /stopped cleanly/.test(s.out));
 
+      // The public address of a stack: exactly these keys, whatever the record holds (lib/stacks.mjs publicStack).
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'listen', { exports: { DATABASE_URL: 'pg://127.0.0.1:${PORT:db}/app' } }));
+      s = serve();
+      await until(() => listening(webPort), 5000);
+      const [row] = await stacks();
+      ok('ps --json prints exactly the public keys of a serve, none of the record\'s internals', Object.keys(row).sort().join() === [...PUBLIC_STACK_KEYS, 'label', 'url'].sort().join());
+      ok('…the tree, the app, the offset and the resolved ports', realpathSync(row.tree) === realpathSync(repo) && row.app === 'site' && row.offset === 0 && row.key === 'site@0' && row.ports.db === dbPort && row.ports.web === webPort && row.portStates.every((p) => p.listening) && row.state === 'live');
+      ok('…the exports, names and values, as `dev with` hands them', row.exports.DATABASE_URL === `pg://127.0.0.1:${dbPort}/app` && row.exports.PORT_DB === String(dbPort) && row.exports.PORT_WEB === String(webPort) && row.exports.PORT_OFFSET === '0' && row.exports.DEV_STACK === 'site@0' && row.exports.BASE_URL === `http://localhost:${webPort}`);
+      ok('…each process by id and pid alone', row.processes.map((p) => Object.keys(p).join()).join(' ') === 'id,pid id,pid' && row.processes[0].id === 'db' && row.processes[0].pid > 0);
+      await dev('stop', '--offset=0');
+      await s.ended();
+
       // A dry run says it.
       declareApp(web(webPort), dep('db', dbPort, 'listen', { exports: { DATABASE_URL: 'pg:${PORT:db}' } }));
       const dry = await dev('serve', 'site', '--dry-run', '--no-shared-browser', '--port-offset=0');
@@ -1068,6 +1084,144 @@ echo "args=$* run=$DEV_RUN"
       p.on('exit', (code) => res({ code, out }));
     });
     ok('a launcher re-executing itself through run keeps its arguments, and runs once', again.code === 0 && again.out.includes('args=a b c run=reexec') && again.out.match(/args=/g).length === 1);
+
+    // The public address of a run: no declaration to export anything, so where it is, and that is enough to reach it.
+    const addressed = spawn('sh', [join(engine, 'dev'), 'run', 'launcher', `--ports=db=${port}`, '--port-offset=1000', '--', 'node', join(repo, 'launcher.mjs')], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...owner } });
+    const addressedExit = new Promise((res) => addressed.on('exit', res));
+    try {
+      await until(() => listening(port + 1000), 5000);
+      const [row] = await stacks();
+      ok('ps --json addresses a dev run stack: tree, app, offset, shifted ports, exports', realpathSync(row.tree) === realpathSync(repo) && row.app === 'launcher' && row.offset === 1000 && row.ports.db === port + 1000 && row.exports.PORT_DB === String(port + 1000) && row.exports.PORT_OFFSET === '1000' && row.exports.DEV_STACK === 'launcher@1000' && Object.keys(row.exports).length === 3);
+      ok('…the same public keys as a serve, and nothing of the record', Object.keys(row).sort().join() === [...PUBLIC_STACK_KEYS, 'label'].sort().join());
+      await dev('stop', 'launcher', '--offset=1000');
+      await addressedExit;
+    } finally {
+      try {
+        process.kill(-addressed.pid, 'SIGKILL');
+      } catch {
+        /* stopped */
+      }
+    }
+
+    // ARCHITECTURE 6a, the launcher's stop rules, on a fake dependency: it stays the parent of its server, gives it a bound
+    // to shut down, and passes it the stack's lock (fd 3). Nothing here is Postgres; what is under test is the engine.
+    {
+      const log = join(repo, 'server.log');
+      const pidFile = join(repo, 'server.pid');
+      const say = `const say = (w) => appendFileSync(${JSON.stringify(log)}, w + '\\n');`;
+      writeFileSync(join(repo, 'fake-server.mjs'), `import { createServer } from 'node:net';
+import { appendFileSync, writeFileSync } from 'node:fs';
+${say}
+const [port, bound] = process.argv.slice(2);
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+const server = createServer().listen(Number(port), '127.0.0.1');
+let told = false;
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => {
+  say('server ' + sig);
+  if (told) return;
+  told = true;
+  setTimeout(() => { say('server finished'); server.close(); process.exit(0); }, Number(bound));
+});
+`);
+      writeFileSync(join(repo, 'fake-launcher.mjs'), `import { spawn } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+${say}
+const [port, bound, fd] = process.argv.slice(2);
+const server = spawn('node', [${JSON.stringify(join(repo, 'fake-server.mjs'))}, port, bound], { stdio: ['ignore', 'ignore', 'ignore', fd === 'fd3' ? 3 : 'ignore'] });
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { say('launcher ' + sig); server.kill('SIGTERM'); });
+server.on('exit', () => { say('launcher done'); process.exit(0); });
+`);
+      const said = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
+      const fresh = () => rmSync(log, { force: true });
+      const killServer = () => {
+        try {
+          process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
+        } catch {
+          /* gone, which is the point */
+        }
+      };
+      const launcherCmd = (p, bound, fd) => ['node', join(repo, 'fake-launcher.mjs'), String(p), String(bound), fd];
+      const running = (argv) => {
+        const c = spawn('sh', [join(engine, 'dev'), ...argv], { cwd: repo, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...owner } });
+        const r = { pid: c.pid, out: '' };
+        c.stdout.on('data', (d) => (r.out += d));
+        c.stderr.on('data', (d) => (r.out += d));
+        r.done = new Promise((res) => c.on('exit', (code, signal) => res(code ?? signal)));
+        return r;
+      };
+      const killGroup = (pid) => {
+        try {
+          process.kill(-pid, 'SIGKILL');
+        } catch {
+          /* gone */
+        }
+      };
+      const BOUND = 2500;
+      try {
+        // A serve: the launcher is a dependency, with a dependent beside it.
+        const [dbPort, webPort] = [await freePort(), await freePort()];
+        writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes: [
+          { id: 'web', primary: true, cmd: ['node', '-e', `require('net').createServer().listen(${webPort},'127.0.0.1')`], ports: { web: webPort }, ready: { tcp: 'web' } },
+          { id: 'db', dependency: true, cmd: launcherCmd(dbPort, BOUND, 'fd3'), ports: { db: dbPort }, ready: { tcp: 'db', timeout: 10 } },
+        ] } } }));
+        for (const road of ['dev stop', 'SIGTERM to the serve', 'Ctrl+C']) {
+          fresh();
+          const s = running(['serve', 'site', '--no-shared-browser', '--port-offset=0']);
+          try {
+            await until(() => listening(webPort), 8000);
+            const since = Date.now();
+            if (road === 'dev stop') await dev('stop', 'site', '--offset=0');
+            else process.kill(road === 'Ctrl+C' ? -s.pid : s.pid, road === 'Ctrl+C' ? 'SIGINT' : 'SIGTERM');
+            const code = await s.done;
+            ok(`${road}: a dependency's shutdown is given its bound, the engine kills nothing`, Date.now() - since >= BOUND - 200 && said().includes('server finished') && said().includes('launcher done'));
+            ok('…the stack ended clean, and nothing holds its ports', code === (road === 'Ctrl+C' ? 130 : 0) && /stopped cleanly/.test(s.out) && !(await listening(dbPort)) && !(await listening(webPort)) && (await stacks()).length === 0);
+          } finally {
+            killGroup(s.pid);
+            killServer();
+          }
+        }
+
+        // A launcher killed outright, under each claimer: its server holds the port, and only fd 3 keeps a handle on it.
+        fresh();
+        const s = running(['serve', 'site', '--no-shared-browser', '--port-offset=0']);
+        try {
+          await until(() => listening(webPort), 8000);
+          process.kill((await stacks())[0].processes.find((p) => p.id === 'db').pid, 'SIGKILL');
+          ok('a serve whose launcher is killed outright fails, naming it', (await s.done) === 1 && /db exited on SIGKILL/.test(s.out));
+          const [left] = await stacks();
+          ok('…its server, holding fd 3, keeps the stack visible: ps says ORPHANED, the port listening', left?.state === 'orphaned' && left.portStates.some((p) => p.name === 'db' && p.listening) && (await listening(dbPort)));
+          const ended = await dev('stop', 'site', '--offset=0');
+          ok('…dev stop reaches the server, one signal, its bound honoured, the port free', ended.code === 0 && said().filter((w) => w === 'server SIGTERM').length === 1 && said().includes('server finished') && !(await listening(dbPort)) && (await stacks()).length === 0);
+        } finally {
+          killGroup(s.pid);
+          killServer();
+        }
+
+        const runPort = await freePort();
+        for (const fd of ['fd3', 'no fd 3']) {
+          fresh();
+          const r = running(['run', 'db', `--ports=db=${runPort}`, '--', ...launcherCmd(runPort, 300, fd)]);
+          try {
+            await until(() => listening(runPort), 8000);
+            process.kill((await stacks())[0].processes[0].pid, 'SIGKILL');
+            await r.done;
+            const left = await stacks();
+            if (fd === 'fd3') {
+              ok('dev run: a launcher killed outright, its server holding fd 3: ps says ORPHANED, the port listening', left[0]?.state === 'orphaned' && left[0].ports.db === runPort && left[0].portStates[0].listening);
+              const ended = await dev('stop', 'db', '--offset=0');
+              ok('…dev stop ends it and frees the port', ended.code === 0 && said().includes('server finished') && !(await listening(runPort)) && (await stacks()).length === 0);
+            } else {
+              ok('…without fd 3 the server holds the port and NOTHING can see it: why 6a requires the fd', left.length === 0 && (await listening(runPort)));
+            }
+          } finally {
+            killGroup(r.pid);
+            killServer();
+          }
+        }
+      } finally {
+        rmSync(join(repo, '.bespunky', 'dev.json'), { force: true });
+      }
+    }
 
     const unnamed = await dev('run', 'launcher', `--ports=db=${port}`, '--label', '--', 'true');
     ok('a bare --label is refused', unnamed.code === 1 && /--label needs a value/.test(unnamed.out));
