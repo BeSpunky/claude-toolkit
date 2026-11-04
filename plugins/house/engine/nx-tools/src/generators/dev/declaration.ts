@@ -14,6 +14,9 @@ export const DECLARATION_PATH = '.bespunky/dev.json';
 
 export type DevCmd = string | string[];
 
+/** What "up" means: exactly one kind; `timeout` (seconds) only on a dependency. */
+export type DevReady = ({ http: string } | { tcp: string } | { cmd: string }) & { timeout?: number };
+
 export interface DevProcess {
   id: string;
   cmd: DevCmd;
@@ -22,7 +25,9 @@ export interface DevProcess {
   /** What a dependent of the stack (an e2e run, through `tools/dev/dev with`) is told — values substitute like env. */
   exports?: Record<string, string>;
   primary?: boolean;
-  ready?: { http: string };
+  /** Starts before the rest of the stack, which waits until it is `ready`; its `exports` reach every sibling's env. */
+  dependency?: boolean;
+  ready?: DevReady;
   url?: { param: string; value: string; when?: 'always' | 'offset' | 'running' | 'skipped' }[];
   advice?: { text: string; when?: 'always' | 'base' | 'offset' | 'contended' }[];
 }

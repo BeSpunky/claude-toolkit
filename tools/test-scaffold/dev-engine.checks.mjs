@@ -630,6 +630,365 @@ process.on('SIGTERM', () => { server.close(); process.exit(0); });
       }
     }
   }
+  console.log('dependencies: the declaration');
+  {
+    const app = (...processes) => ({ apps: { a: { processes } } });
+    const web = { id: 'web', cmd: 'w', ports: { web: 1000 }, primary: true };
+    const db = { id: 'db', cmd: 'd', ports: { db: 2000 }, dependency: true, ready: { tcp: 'db' } };
+    const refused = async (label, ...processes) => ok(`refused: ${label}`, await throws(() => validate(app(...processes))));
+    ok('legal: a dependency beside a primary, each readiness kind', Boolean(validate(app(web, db, { id: 'k', cmd: 'k', dependency: true, ready: { cmd: 'true', timeout: 5 } }, { id: 'h', cmd: 'h', ports: { h: 3000 }, dependency: true, ready: { http: '/' } }))));
+    ok('legal: tcp and cmd readiness on a primary', Boolean(validate(app({ ...web, ready: { tcp: 'web' } }))) && Boolean(validate(app({ ...web, ready: { cmd: 'true' } }))));
+    await refused('dependency is not a boolean', web, { ...db, dependency: 'yes' });
+    await refused('a dependency with no readiness', web, { ...db, ready: undefined });
+    await refused('ready with no kind', web, { ...db, ready: { timeout: 5 } });
+    await refused('ready with two kinds', web, { ...db, ready: { tcp: 'db', cmd: 'true' } });
+    await refused('ready with an unknown key (a mistyped timeout must not silently mean the default)', web, { ...db, ready: { tcp: 'db', timout: 5 } });
+    await refused('ready is not an object', web, { ...db, ready: 'db' });
+    await refused('an empty cmd', web, { ...db, ready: { cmd: ' ' } });
+    await refused('tcp naming a port this process does not declare', web, { ...db, ready: { tcp: 'web' } });
+    await refused('http on a dependency with no port', web, { id: 'k', cmd: 'k', dependency: true, ready: { http: '/' } });
+    await refused('a timeout on what nothing waits for', { ...web, ready: { http: '/', timeout: 5 } });
+    await refused('a zero timeout', web, { ...db, ready: { tcp: 'db', timeout: 0 } });
+    await refused('a timeout that is not a number', web, { ...db, ready: { tcp: 'db', timeout: '5' } });
+    await refused('a primary dependency', { ...db, primary: true }, web);
+    await refused('an app of dependencies only', db);
+    await refused('an app whose only process with a port is a dependency', { id: 'w', cmd: 'w' }, db);
+    await refused('two dependencies exporting one name', web, { ...db, exports: { URL: 'a' } }, { id: 'k', cmd: 'k', ports: { k: 3000 }, dependency: true, ready: { tcp: 'k' }, exports: { URL: 'b' } });
+    await refused('a dependency exporting what the engine sets', web, { ...db, exports: { PORT_OFFSET: '1' } });
+    await refused('a dependency exporting a port variable', web, { ...db, exports: { PORT_DB: '1' } });
+
+    const both = validate(app(
+      { id: 'db', cmd: 'd', ports: { db: 2000 }, dependency: true, ready: { tcp: 'db', timeout: 7 }, exports: { DATABASE_URL: 'pg://localhost:${PORT:db}/x' } },
+      { id: 'kv', cmd: 'k', ports: { kv: 3000 }, dependency: true, ready: { cmd: 'test -f ${STACK_DIR}/up' }, exports: { KV_URL: 'kv://localhost:${PORT:kv}' } },
+      { id: 'web', cmd: 'w', ports: { web: 1000 }, env: { KV_URL: 'mine' }, exports: { WEB_ONLY: 'x' } },
+      { id: 'side', cmd: 's', exports: { SIDE: 'y' } },
+    ));
+    const plan = planApp(both, 'a', { offset: 500, tree: '/t', stackDir: '/s' });
+    const of = (id) => plan.processes.find((p) => p.id === id);
+    ok('with no primary marked, the primary is never a dependency', plan.primary.id === 'web');
+    ok("a dependency's exports reach a sibling, at the stack's ports", of('side').added.DATABASE_URL === 'pg://localhost:2500/x' && of('side').added.KV_URL === 'kv://localhost:3500');
+    ok("…another dependency's too, and never its own", of('kv').added.DATABASE_URL === 'pg://localhost:2500/x' && !('KV_URL' in of('kv').added) && !('DATABASE_URL' in of('db').added));
+    ok("…a process's own env wins: it is the project's word", of('web').added.KV_URL === 'mine');
+    ok("…what a process that is not a dependency exports does not", !('WEB_ONLY' in of('side').added) && !('SIDE' in of('web').added));
+    ok('…and they reach a dependent of the stack as well', plan.exports.DATABASE_URL === 'pg://localhost:2500/x');
+    ok('probes resolve: tcp at the shifted port, cmd substituted, the primary still http', of('db').ready.tcp === 2500 && of('kv').ready.cmd === 'test -f /s/up' && plan.primary.ready.http === 'http://127.0.0.1:1500/');
+    ok('a timeout is honoured, and there is a default', of('db').readyTimeoutMs === 7000 && of('kv').readyTimeoutMs === 120000);
+    const skipped = planApp(both, 'a', { offset: 0, tree: '/t', stackDir: '/s', skip: ['db'] });
+    ok("--skip of a dependency: it does not run, and its exports reach nobody", !skipped.running.some((p) => p.id === 'db') && !('DATABASE_URL' in skipped.primary.added) && !('DATABASE_URL' in skipped.exports));
+  }
+
+  console.log('dependencies: the stack (real processes)');
+  {
+    const log = join(repo, 'dep.log');
+    const proc = join(repo, 'proc.mjs');
+    // A process of any behaviour: it says what happened to it in the log, and leaves its environment beside it.
+    writeFileSync(proc, `import { createServer } from 'node:http';
+import { appendFileSync, writeFileSync } from 'node:fs';
+const [name, file, behaviour, port, delay = '0', marker] = process.argv.slice(2);
+const say = (what) => appendFileSync(file, name + ' ' + what + '\\n');
+writeFileSync(file + '.' + name + '.env', JSON.stringify(process.env));
+say('started');
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { say(sig); process.exit(0); });
+setInterval(() => {}, 1000);
+setTimeout(() => {
+  if (behaviour === 'exit0') process.exit(0);
+  if (behaviour === 'exit3') process.exit(3);
+  if (behaviour === 'silent') return;
+  createServer((_, res) => res.end('ok')).listen(Number(port), '127.0.0.1', () => {
+    say('bound');
+    if (marker) writeFileSync(marker, '');
+    if (behaviour === 'dies-after') setTimeout(() => process.exit(0), 400);
+    if (behaviour === 'crashes-after') setTimeout(() => process.exit(4), 400);
+  });
+}, Number(delay));
+`);
+    const owner = { DEV_OWNER: 'seam-engine', CLAUDE_CODE_SESSION_ID: '' };
+    const dep = (id, port, behaviour, extra = {}, delay = 0) => ({ id, cmd: ['node', proc, id, log, behaviour, String(port), String(delay)], ports: { [id]: port }, dependency: true, ready: { tcp: id, timeout: 5 }, ...extra });
+    const web = (port, extra = {}) => ({ id: 'web', cmd: ['node', proc, 'web', log, 'listen', String(port)], ports: { web: port }, primary: true, ...extra });
+    const declareApp = (...processes) => {
+      rmSync(log, { force: true });
+      writeFileSync(join(repo, '.bespunky', 'dev.json'), JSON.stringify({ apps: { site: { processes } } }));
+    };
+    const events = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
+    const envOf = (id) => JSON.parse(readFileSync(`${log}.${id}.env`, 'utf8'));
+    const started = (id) => events().includes(`${id} started`);
+    const dev = (...args) =>
+      new Promise((res) => {
+        const p = spawn('sh', [join(engine, 'dev'), ...args], { cwd: repo, env: { ...process.env, ...owner }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        p.stdout.on('data', (d) => (out += d));
+        p.stderr.on('data', (d) => (out += d));
+        p.on('exit', (code) => res({ code, out }));
+      });
+    const stacks = async () => JSON.parse((await dev('ps', '--json')).out);
+    const serves = [];
+    const serve = (...args) => {
+      const p = spawn('sh', [join(engine, 'dev'), 'serve', 'site', '--no-shared-browser', '--port-offset=0', ...args], { cwd: repo, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...owner } });
+      serves.push(p);
+      const s = { pid: p.pid, out: '', code: undefined };
+      p.stdout.on('data', (d) => (s.out += d));
+      p.stderr.on('data', (d) => (s.out += d));
+      s.done = new Promise((res) => p.on('exit', (code, signal) => res((s.code = code ?? signal))));
+      s.ended = () => Promise.race([s.done, sleep(8000).then(() => 'still running')]);
+      return s;
+    };
+    const stackGone = () => until(async () => (await stacks()).length === 0, 8000);
+
+    try {
+      // Ready before anything that needs it; what it exports received.
+      let [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'listen', { exports: { DATABASE_URL: 'pg://127.0.0.1:${PORT:db}/app' } }, 700));
+      let s = serve();
+      ok('the dependency starts first, wherever it is declared', await until(() => started('db'), 5000));
+      const waiting = await stacks();
+      ok('…while it is not ready, nothing else has started', !started('web') && waiting[0]?.processes.length === 1);
+      ok('…and ps says what the stack is waiting on', waiting[0]?.waitingFor === 'db' && /STARTING — waiting for db/.test((await dev('ps')).out));
+      ok('tcp readiness: the sibling starts only once the port accepts', await until(() => started('web'), 5000) && events().indexOf('db bound') < events().indexOf('web started') && events().indexOf('db bound') >= 0);
+      ok('…and receives what the dependency exports', envOf('web').DATABASE_URL === `pg://127.0.0.1:${dbPort}/app`);
+      await until(() => listening(webPort), 5000);
+      ok('…ps reads up once nothing is waited on', (await stacks())[0]?.waitingFor === undefined && /Up: /.test(await until(() => /Up: /.test(s.out), 3000).then(() => s.out)));
+      const stopped = await dev('stop', '--offset=0');
+      ok('dev stop stops both, confirms the ports free, and the stack exits clean', stopped.code === 0 && /ports free/.test(stopped.out) && (await s.ended()) === 0 && !(await listening(dbPort)) && !(await listening(webPort)));
+      ok('…each got one SIGTERM', events().filter((e) => e === 'db SIGTERM').length === 1 && events().filter((e) => e === 'web SIGTERM').length === 1);
+
+      // cmd readiness: the question a launcher answers with a marker in the stack's state dir.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      const marker = '${STACK_DIR}/ready';
+      declareApp(web(webPort), { ...dep('db', dbPort, 'listen', { ready: { cmd: `test -f "${marker}"`, timeout: 5 } }, 500), cmd: ['node', proc, 'db', log, 'listen', String(dbPort), '500', marker] });
+      s = serve();
+      ok('cmd readiness: the sibling starts only after the command passes', await until(() => started('web'), 5000) && events().indexOf('db bound') < events().indexOf('web started'));
+      process.kill(s.pid, 'SIGTERM');
+      ok('…and a SIGTERM to the serve stops the stack clean', (await s.ended()) === 0 && (await stackGone()));
+
+      // http readiness: any answer.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'listen', { ready: { http: '/health', timeout: 5 } }, 500));
+      s = serve();
+      ok('http readiness: the sibling starts only after it answers', await until(() => started('web'), 5000) && events().indexOf('db bound') < events().indexOf('web started'));
+      process.kill(-s.pid, 'SIGINT');
+      ok('…and a Ctrl+C stops the stack as interrupted (130)', (await s.ended()) === 130 && (await stackGone()));
+
+      // A tcp/cmd primary: `Up:` and `with` ask what it declares, not HTTP.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort, { ready: { tcp: 'web' } }));
+      s = serve('--task=site:dev-stack');
+      ok('a primary with tcp readiness is announced Up by it', await until(() => /Up: /.test(s.out), 5000));
+      const withTcp = await dev('with', 'site', '--timeout=10', '--', 'sh', '-c', 'echo "at $BASE_URL"');
+      ok('…and `with` runs once it is ready', withTcp.code === 0 && withTcp.out.includes(`at http://localhost:${webPort}`));
+      await dev('stop', '--offset=0');
+      await s.ended();
+
+      // A dependency that fails: nothing else, a loud failure. The prototype's trap is the exit 0.
+      for (const [behaviour, shown] of [['exit3', 'with code 3'], ['exit0', 'with code 0']]) {
+        [dbPort, webPort] = [await freePort(), await freePort()];
+        declareApp(web(webPort), dep('db', dbPort, behaviour, {}, 100));
+        s = serve();
+        const code = await s.ended();
+        ok(`a dependency that ends before it is ready (${shown}): the stack fails, non-zero`, code === 1 && /the stack FAILED/.test(s.out) && s.out.includes(`db exited ${shown} before it was ready`));
+        ok('…nothing else ever started', !started('web') && !(await listening(webPort)));
+        ok('…and nothing is left of it', await stackGone());
+      }
+
+      // A dependency that never turns ready: named, with what the last attempt said, and stopped.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'silent', { ready: { tcp: 'db', timeout: 1 } }));
+      s = serve();
+      ok('never ready, tcp: the stack fails at its timeout, naming what it waited on', (await s.ended()) === 1 && /db it did not become ready within 1s \(TCP port \d+; last answer: /.test(s.out));
+      ok('…nothing else started, and the dependency was stopped', !started('web') && events().includes('db SIGTERM') && (await stackGone()));
+      // A probe that hangs is killed at the deadline, and what it printed is the report.
+      const hung = join(repo, 'hung.pid');
+      declareApp(web(webPort), dep('db', dbPort, 'silent', { ready: { cmd: `echo "still migrating" >&2; echo $$ > ${hung}; exec sleep 300`, timeout: 1 } }));
+      s = serve();
+      ok('never ready, a command that hangs: fails on time, with what it said', (await s.ended()) === 1 && /last answer: still migrating/.test(s.out) && !started('web'));
+      ok('…and the probe does not outlive the wait', await until(() => !isAliveHere(Number(readFileSync(hung, 'utf8'))), 3000));
+      await stackGone();
+
+      // After it was ready: its exit stops the stack and fails it, whatever the code.
+      for (const [behaviour, code] of [['dies-after', 0], ['crashes-after', 4]]) {
+        [dbPort, webPort] = [await freePort(), await freePort()];
+        declareApp(web(webPort), dep('db', dbPort, behaviour));
+        s = serve();
+        const ended = await s.ended();
+        ok(`a dependency exiting ${code} after it was ready stops the stack, which fails`, ended === 1 && s.out.includes(`db exited with code ${code}`) && /runs for as long as the stack does/.test(s.out));
+        ok('…its sibling started, then got one SIGTERM', events().includes('web started') && events().filter((e) => e === 'web SIGTERM').length === 1 && (await stackGone()));
+      }
+
+      // Two dependencies: in declaration order, each behind the one before it.
+      let kvPort;
+      [dbPort, kvPort, webPort] = [await freePort(), await freePort(), await freePort()];
+      declareApp(
+        dep('db', dbPort, 'listen', { exports: { DB_URL: 'db:${PORT:db}' } }, 400),
+        web(webPort),
+        dep('kv', kvPort, 'listen', { exports: { KV_URL: 'kv:${PORT:kv}' } }, 400),
+      );
+      s = serve();
+      ok('two dependencies: all three come up', await until(() => started('web'), 8000));
+      {
+        const e = events();
+        ok('…in declaration order, each behind the one before', e.indexOf('db bound') < e.indexOf('kv started') && e.indexOf('kv bound') < e.indexOf('web started') && e.indexOf('db bound') >= 0 && e.indexOf('kv bound') >= 0);
+      }
+      ok('…the sibling received both, and the second dependency the first\'s', envOf('web').DB_URL === `db:${dbPort}` && envOf('web').KV_URL === `kv:${kvPort}` && envOf('kv').DB_URL === `db:${dbPort}`);
+      await until(() => listening(webPort), 5000);
+      const withBoth = await dev('stop', '--offset=0');
+      ok('…dev stop stops all three, every port free', withBoth.code === 0 && (await s.ended()) === 0 && !(await listening(dbPort)) && !(await listening(kvPort)) && !(await listening(webPort)));
+
+      [dbPort, kvPort, webPort] = [await freePort(), await freePort(), await freePort()];
+      declareApp(dep('db', dbPort, 'exit3', {}, 100), dep('kv', kvPort, 'listen'), web(webPort));
+      s = serve();
+      ok('the first of two failing: the second never starts, nor anything else', (await s.ended()) === 1 && !started('kv') && !started('web') && (await stackGone()));
+      [dbPort, kvPort, webPort] = [await freePort(), await freePort(), await freePort()];
+      declareApp(dep('db', dbPort, 'listen'), dep('kv', kvPort, 'exit3', {}, 100), web(webPort));
+      s = serve();
+      ok('the second failing: the first is stopped, and the app never starts', (await s.ended()) === 1 && events().includes('db SIGTERM') && !started('web') && !(await listening(dbPort)) && (await stackGone()));
+
+      // --skip: it is simply not there.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'silent', { exports: { DATABASE_URL: 'x' } }));
+      s = serve('--skip=db');
+      ok('--skip of a dependency: nothing waits for it, it never runs, its export is absent', (await until(() => started('web'), 5000)) && !started('db') && !('DATABASE_URL' in envOf('web')));
+      await dev('stop', '--offset=0');
+      await s.ended();
+
+      // A stop while it waits: every road ends with nothing else started.
+      for (const [how, stop, want] of [
+        ['dev stop', () => dev('stop', '--offset=0'), 0],
+        ['Ctrl+C', () => process.kill(-s.pid, 'SIGINT'), 130],
+      ]) {
+        [dbPort, webPort] = [await freePort(), await freePort()];
+        declareApp(web(webPort), dep('db', dbPort, 'silent', { ready: { tcp: 'db', timeout: 60 } }));
+        s = serve();
+        await until(() => started('db'), 5000);
+        await until(async () => (await stacks())[0]?.waitingFor === 'db', 3000);
+        await stop();
+        ok(`${how} during the wait: the stack ends (${want}) at once, never starting the rest`, (await s.ended()) === want && !started('web') && (await stackGone()));
+      }
+
+      // Orphans: the serve killed outright, while waiting and while up. The dependency holds the stack's lock.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'silent', { ready: { tcp: 'db', timeout: 60 } }));
+      s = serve();
+      await until(() => started('db'), 5000);
+      await until(async () => (await stacks())[0]?.waitingFor === 'db', 3000);
+      process.kill(s.pid, 'SIGKILL');
+      await s.ended();
+      ok('the serve SIGKILLed during the wait: the stack is ORPHANED, the dependency its survivor', (await stacks())[0]?.state === 'orphaned');
+      const orphanWaiting = await dev('stop', '--offset=0');
+      ok('…dev stop ends it, and the rest never started', orphanWaiting.code === 0 && events().includes('db SIGTERM') && !started('web') && (await stackGone()));
+
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'listen'));
+      s = serve();
+      await until(() => listening(webPort), 5000);
+      process.kill(s.pid, 'SIGKILL');
+      await s.ended();
+      ok('the serve SIGKILLed once up: ORPHANED, both still running', (await stacks())[0]?.state === 'orphaned' && (await listening(dbPort)) && (await listening(webPort)));
+      const orphanUp = await dev('stop', '--offset=0');
+      ok('…dev stop ends both, ports free', orphanUp.code === 0 && !(await listening(dbPort)) && !(await listening(webPort)) && (await stackGone()));
+
+      // `with`: told nothing until the stack is ready, then everything.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'listen', { exports: { DATABASE_URL: 'pg:${PORT:db}' } }, 800));
+      s = serve('--task=site:dev-stack');
+      await until(() => started('db'), 5000);
+      const withDep = await dev('with', 'site', '--timeout=15', '--', 'sh', '-c', 'echo "url=$DATABASE_URL"; test -n "$BASE_URL"');
+      ok('dev with waits past the dependency, and runs with its export', withDep.code === 0 && withDep.out.includes(`url=pg:${dbPort}`) && started('web'));
+      await dev('stop', '--offset=0');
+      await s.ended();
+
+      // A dry run says it.
+      declareApp(web(webPort), dep('db', dbPort, 'listen', { exports: { DATABASE_URL: 'pg:${PORT:db}' } }));
+      const dry = await dev('serve', 'site', '--dry-run', '--no-shared-browser', '--port-offset=0');
+      ok('a dry run shows the dependency, its readiness, and the export in the sibling\'s env', /db \(dependency\) →/.test(dry.out) && /until ready: TCP port \d+, at most 5s/.test(dry.out) && dry.out.includes(`DATABASE_URL=pg:${dbPort}`));
+    } finally {
+      for (const p of serves) {
+        try {
+          process.kill(-p.pid, 'SIGKILL');
+        } catch {
+          /* already down */
+        }
+      }
+    }
+  }
+
+  console.log('dev run: a launcher as a stack of its own (real processes)');
+  {
+    const owner = { DEV_OWNER: 'seam-engine', CLAUDE_CODE_SESSION_ID: '' };
+    const dev = (...args) =>
+      new Promise((res) => {
+        const p = spawn('sh', [join(engine, 'dev'), ...args], { cwd: repo, env: { ...process.env, ...owner }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        p.stdout.on('data', (d) => (out += d));
+        p.stderr.on('data', (d) => (out += d));
+        p.on('exit', (code, signal) => res({ code: code ?? signal, out, pid: p.pid }));
+      });
+    const stacks = async () => JSON.parse((await dev('ps', '--json')).out);
+    const locks = () => (existsSync(join(repo, '.bespunky', 'run', 'locks')) ? readdirSync(join(repo, '.bespunky', 'run', 'locks')) : []);
+    const port = await freePort();
+    ok('run without --ports, or without a command, is refused', (await dev('run', 'x', '--', 'true')).code === 1 && (await dev('run', 'x', `--ports=a=${port}`)).code === 1);
+    ok('run takes no flag of another command', /unknown flag for run/.test((await dev('run', 'x', `--ports=a=${port}`, '--abandon', '--', 'true')).out));
+    const said = await dev('run', 'launcher', `--ports=db=${port},other=${port + 1}`, '--', 'sh', '-c', 'echo "off=$PORT_OFFSET db=$PORT_DB other=$PORT_OTHER run=$DEV_RUN dir=$DEV_STACK_DIR tmp=$DEV_STACK_TMP lock=$DEV_STACK_LOCK"; test -d "$DEV_STACK_DIR" && test -d "$DEV_STACK_TMP" && flock -n -s "$DEV_STACK_LOCK" true');
+    ok('the command gets what a process of a serve gets, plus DEV_RUN', said.code === 0 && said.out.includes(`off=0 db=${port} other=${port + 1} run=launcher dir=${join(repo, '.bespunky', 'run', 'launcher@0')}`) && /tmp=\/tmp\/bespunky-[0-9a-f]{12} lock=\S+\.lock/.test(said.out));
+    ok('…and the stack is gone with it (record, lock)', (await stacks()).length === 0 && locks().length === 0);
+    ok("the command's exit status is the run's", (await dev('run', 'launcher', `--ports=db=${port}`, '--', 'sh', '-c', 'exit 7')).code === 7);
+    ok('…a command that cannot start fails it', (await dev('run', 'launcher', `--ports=db=${port}`, '--', join(repo, 'no-such-launcher'))).code !== 0);
+    ok('…and a nested stack does not inherit DEV_RUN', !('DEV_RUN' in planApp(validate({ apps: { a: { processes: [{ id: 'x', cmd: 'x', ports: { x: 1 } }] } } }), 'a', { offset: 0, tree: '/', baseEnv: { DEV_RUN: 'outer' } }).primary.env));
+
+    // Alive: named in ps, stopped by handle, one signal; a second claim refused, leaving no lock of its own behind.
+    const got = join(repo, 'run-got');
+    writeFileSync(join(repo, 'launcher.mjs'), `import { createServer } from 'node:http';
+import { appendFileSync } from 'node:fs';
+const server = createServer((_, r) => r.end('ok')).listen(Number(process.env.PORT_DB), '127.0.0.1');
+process.on('SIGTERM', () => { appendFileSync(${JSON.stringify(got)}, 'SIGTERM\\n'); server.close(); process.exit(5); });
+`);
+    const launcher = spawn('sh', [join(engine, 'dev'), 'run', 'launcher', '--label=a launcher, run directly', `--ports=db=${port}`, '--', 'node', join(repo, 'launcher.mjs')], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...owner } });
+    const launcherExit = new Promise((res) => launcher.on('exit', (code) => res(code)));
+    try {
+      ok('a running launcher is bound on its claimed port', await until(() => listening(port), 5000));
+      const [rec] = await stacks();
+      ok('…ps names it by its --label, its claimer the run, one process', rec?.key === 'launcher@0' && rec.label === 'a launcher, run directly' && rec.pid === launcher.pid && rec.processes.length === 1 && rec.state === 'live');
+      const before = locks().length;
+      const twice = await dev('run', 'launcher', `--ports=db=${port}`, '--', 'true');
+      ok('…a second run of it is refused, naming the first, and leaves no lock behind', twice.code === 1 && /offset 0 is held — launcher@0 \(live/.test(twice.out) && locks().length === before);
+      const stopped = await dev('stop', 'launcher', '--offset=0');
+      ok('…dev stop stops it by handle, one SIGTERM, ports free', stopped.code === 0 && /ports free/.test(stopped.out) && readFileSync(got, 'utf8') === 'SIGTERM\n' && !(await listening(port)));
+      ok('…the run exits with its status, and the stack is gone', (await launcherExit) === 5 && (await stacks()).length === 0 && locks().length === 0);
+    } finally {
+      try {
+        process.kill(-launcher.pid, 'SIGKILL');
+      } catch {
+        /* stopped */
+      }
+    }
+
+    // A launcher that re-executes itself through the verb is one script with one contract.
+    writeFileSync(join(repo, 'reexec.sh'), `#!/bin/sh
+if [ -z "\${DEV_STACK_DIR:-}" ]; then exec node ${join(engine, 'dev.mjs')} run reexec --ports=db=${port} -- sh "$0" "$@"; fi
+echo "args=$* run=$DEV_RUN"
+`);
+    const again = await new Promise((res) => {
+      const p = spawn('sh', [join(repo, 'reexec.sh'), 'a b', 'c'], { cwd: repo, env: { ...process.env, ...owner, DEV_STACK_DIR: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      p.stdout.on('data', (d) => (out += d));
+      p.on('exit', (code) => res({ code, out }));
+    });
+    ok('a launcher re-executing itself through run keeps its arguments, and runs once', again.code === 0 && again.out.includes('args=a b c run=reexec') && again.out.match(/args=/g).length === 1);
+
+    // `claim --label`: the name is the caller's, and the verb names no one.
+    const lockFile = join(repo, '.bespunky', 'run', 'locks', 'label.lock');
+    writeFileSync(lockFile, '');
+    const holderProc = spawn('bash', ['-c', 'exec 9<"$0"; flock -s 9; echo held; exec sleep 60', lockFile], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    await new Promise((res) => holderProc.stdout.once('data', res));
+    try {
+      const labelled = await dev('claim', 'firebase', `--pid=${holderProc.pid}`, `--lock=${lockFile}`, `--ports=hub=${port}`, '--label=named by its caller');
+      ok('claim --label names the stack', labelled.code === 0 && (await stacks())[0]?.label === 'named by its caller');
+    } finally {
+      process.kill(-holderProc.pid, 'SIGKILL');
+    }
+    await until(async () => (await stacks()).length === 0, 3000);
+    await dev('release', 'firebase@0', `--lock=${lockFile}`);
+    const unnamed = await dev('claim', 'firebase', '--pid=1', `--lock=${lockFile}`, '--ports=hub=1', '--label');
+    ok('…a bare --label is refused', unnamed.code === 1 && /--label needs a value/.test(unnamed.out));
+  }
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }
