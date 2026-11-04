@@ -12,7 +12,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { createServer } from 'node:net';
 import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { NoClosureHere, ensureTools } from './tools.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -401,7 +401,7 @@ scenario('the sweep: data of a removed worktree is set aside and reported, resto
   rmSync(gone, { recursive: true, force: true });
   const stack = await start(dir);
   ok(!existsSync(join(home, hash)), 'moved from where it was');
-  const restore = new RegExp(`mv '([^']+)' '${join(home, hash).replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\$&')}'`).exec(stack.log());
+  const restore = new RegExp(`mv -T '([^']+)' '${join(home, hash).replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\$&')}'`).exec(stack.log());
   ok(stack.log().includes('set aside the Postgres data of') && stack.log().includes(gone) && restore && existsSync(restore[1]), 'and reported, naming the tree and the mv that restores it');
   ok(restore && existsSync(join(restore[1], 'tree')), 'with the record and the clusters beside it');
   stop(stack);
@@ -419,14 +419,41 @@ scenario('the sweep: a tree renamed, with its parent still here, loses nothing: 
   const away = `${dir}-away`;
   renameSync(dir, away);
   const other = await start(fixture());
-  const restore = /mv '([^']+)' '([^']+)'/.exec(other.log());
-  ok(Boolean(restore) && existsSync(restore[1]), 'it was set aside, and the start says how to restore it');
+  const printed = /^.*?(mv -T '[^']+' '[^']+')$/m.exec(other.log())?.[1];
+  ok(Boolean(printed), 'it was set aside, and the start says how to restore it');
   stop(other);
   await untilEnded(other);
   renameSync(away, dir);
-  renameSync(restore[1], restore[2]);
+  execFileSync('sh', ['-c', printed]);
   const back = await start(dir, { offset: first.offset });
-  ok(sql(back.port, 'SELECT name FROM thing') === 'seeded', 'tree and data back: the same rows');
+  ok(sql(back.port, 'SELECT name FROM thing') === 'seeded' && !back.log().includes('creating a new database'), 'the printed command, run for real: tree and data back, the same rows');
+  stop(back);
+  await untilEnded(back);
+});
+
+scenario('the sweep: a tree that comes back and starts first is told, and the printed command swaps its data back', async () => {
+  const dir = fixture();
+  addMigration(dir);
+  addSeed(dir);
+  const first = await start(dir);
+  sql(first.port, "INSERT INTO thing VALUES (2, 'mine')");
+  stop(first);
+  await untilEnded(first);
+  const away = `${dir}-away`;
+  renameSync(dir, away);
+  const other = await start(fixture());
+  stop(other);
+  await untilEnded(other);
+  renameSync(away, dir);
+  const fresh = await start(dir, { offset: first.offset });
+  ok(sql(fresh.port, 'SELECT count(*) FROM thing') === '1', 'a new, empty database, seeded');
+  const printed = /(rm -rf '[^']+' && mv -T '[^']+' '[^']+')$/m.exec(fresh.log())?.[1];
+  ok(fresh.log().includes('earlier data was set aside') && Boolean(printed), 'and that start names the earlier data and the command');
+  stop(fresh);
+  await untilEnded(fresh);
+  execFileSync('sh', ['-c', printed]);
+  const back = await start(dir, { offset: first.offset });
+  ok(sql(back.port, "SELECT name FROM thing WHERE id = 2") === 'mine', 'the printed command, run for real: the earlier rows are back');
   stop(back);
   await untilEnded(back);
 });
@@ -516,7 +543,7 @@ scenario('a failed bring-up names the road back, which works', async () => {
   addMigration(dir, '20260101000000_earlier.sql', '-- migrate:up\nCREATE TABLE earlier (id int);\n\n-- migrate:down\n');
   const failed = await start(dir, { offset, expectFailure: true, timeoutMs: 30_000 });
   await untilEnded(failed);
-  ok(failed.code !== 0 && failed.log().includes(`postgres:reset --offset=${offset}`), `an out-of-order migration fails the start, and names reset (${failed.log().trim().split('\n').at(-1)})`);
+  ok(failed.code !== 0 && failed.log().includes(`postgres:reset --stack=postgres@${offset}`), `an out-of-order migration fails the start, and names reset (${failed.log().trim().split('\n').at(-1)})`);
   ok(ps(dir).length === 0, 'nothing is running after it');
   const reset = launcher(dir, 'reset', `--offset=${offset}`);
   ok(reset.status === 0 && /is reset/.test(reset.stdout), `reset boots a stack for it, with nothing running (${reset.status}: ${reset.stderr.trim().split('\n').at(-1)})`);
@@ -530,6 +557,56 @@ scenario('a failed bring-up names the road back, which works', async () => {
   ok(broken.status !== 0 && /migrations or seeds themselves/.test(broken.stderr + broken.stdout) && ps(dir).length === 0, 'a migration that fails from nothing: reset says so, and stops');
 });
 
+scenario('a serve that failed: reset acts on THAT stack\'s data, the next serve comes up, and a start elsewhere names how to get back', async () => {
+  const dir = fixture();
+  addMigration(dir, '20260201000000_later.sql');
+  writeFileSync(join(dir, '.bespunky/dev.json'), JSON.stringify({ apps: { web: { processes: [
+    { id: 'postgres', cmd: ['node', 'tools/postgres/postgres.mjs', 'serve'], ports: { postgres: 5432 }, dependency: true, ready: { cmd: 'test -f "${STACK_DIR}/postgres.ready"', timeout: 120 } },
+    { id: 'app', cmd: ['sh', '-c', 'exec sleep 300'], ports: { app: 4600 }, primary: true },
+  ] } } }, null, 2));
+  const offset = await freeOffset();
+  const serve = () => {
+    const log = join(dir, `.serve-${Date.now()}.log`);
+    const child = spawn('sh', ['-c', `exec "${process.execPath}" tools/dev/dev.mjs serve web --port-offset=${offset} --no-shared-browser >> '${log}' 2>&1`], { cwd: dir, env: baseEnv(), detached: true, stdio: 'ignore' });
+    const handle = { dir, child, offset, key: `web@${offset}`, port: 5432 + offset, log: () => readFileSync(log, 'utf8'), ended: false };
+    child.on('exit', (code) => Object.assign(handle, { ended: true, code }));
+    started.push(handle);
+    return handle;
+  };
+  const marker = join(dir, `.bespunky/run/web@${offset}/postgres.ready`);
+  const until = async (handle) => {
+    for (let i = 0; i < 2400 && !handle.ended && !existsSync(marker); i++) await sleep(25);
+  };
+  const stopWeb = async (handle) => {
+    // Not `dev`: a synchronous stop blocks this process from reaping the serve, and would wait out its whole timeout on a zombie.
+    await new Promise((done) => spawn(process.execPath, ['tools/dev/dev.mjs', 'stop', 'web', `--offset=${offset}`], { cwd: dir, env: baseEnv(), stdio: 'ignore' }).on('exit', done));
+    await untilEnded(handle, 30_000);
+  };
+  const first = serve();
+  await until(first);
+  sql(first.port, "INSERT INTO thing VALUES (1, 'old')");
+  await stopWeb(first);
+  addMigration(dir, '20260101000000_earlier.sql', '-- migrate:up\nCREATE TABLE earlier (id int);\n\n-- migrate:down\n');
+  const failed = serve();
+  await until(failed);
+  await untilEnded(failed, 30_000);
+  const advice = new RegExp(`postgres:reset --stack=web@${offset}`);
+  ok(failed.code !== 0 && advice.test(failed.log()), 'the failed serve names reset of its own stack');
+  const reset = launcher(dir, 'reset', `--stack=web@${offset}`);
+  ok(reset.status === 0 && /is reset/.test(reset.stdout), `reset exits 0 (${reset.stderr.trim().split('\n').at(-1)})`);
+  ok(ps(dir).length === 0, 'and leaves nothing running');
+  const next = serve();
+  await until(next);
+  ok(!next.ended && sql(next.port, "SELECT to_regclass('earlier')") === 'earlier' && sql(next.port, 'SELECT count(*) FROM thing') === '0', 'the next serve comes up on the rebuilt database, without the old row');
+  await stopWeb(next);
+  let elsewhere = await freeOffset();
+  while (elsewhere === offset) elsewhere = await freeOffset();
+  const other = await start(dir, { offset: elsewhere });
+  ok(other.log().includes(`tools/dev/dev serve web --port-offset=${offset}`), 'a start elsewhere names how to get back to a serve\'s data, which --port-offset alone would not');
+  stop(other);
+  await untilEnded(other);
+});
+
 scenario('a linked worktree with no block asked for: a block of its own, never the base one, and the same one each time', async () => {
   const main = fixture();
   addMigration(main);
@@ -537,7 +614,18 @@ scenario('a linked worktree with no block asked for: a block of its own, never t
   git('-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A');
   git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'a migration');
   const dir = `${main}-linked`;
-  git('worktree', 'add', '-q', '-b', 'linked', dir);
+  // A worktree's natural block comes from its branch name, so a fixed name is a fixed port: every run at once, on any machine, would
+  // want the same one, and whichever lost took the next block and read as "not the same one again". And a port in the ephemeral
+  // range can be anybody's outgoing connection for a moment. So: a name of this run's own, whose natural block is free and below it.
+  const { blockForKey, isPortFree, portBlock } = await import(pathToFileURL(join(main, 'tools/dev/lib/ports.mjs')));
+  const { blocks, step } = portBlock([5432]);
+  let branch;
+  for (let i = 0; !branch; i++) {
+    const name = `linked-${process.pid}-${i}`;
+    const port = 5432 + blockForKey(name, blocks) * step;
+    if (port < 32768 && (await isPortFree(port))) branch = name;
+  }
+  git('worktree', 'add', '-q', '-b', branch, dir);
   // Not `start`, which always asks for a block: this is the launcher deciding, and the engine's refusal is not what guards it here.
   const bare = () => {
     const logFile = join(dir, `.bare-${Date.now()}.log`);
@@ -564,7 +652,7 @@ scenario('a linked worktree with no block asked for: a block of its own, never t
   await untilEnded(first);
   const second = bare();
   const again = await untilRow();
-  ok(again?.offset === row?.offset, `the same one again (${again?.key})`);
+  ok(again?.offset === row?.offset, `the same one again (${again?.key}, first ${row?.key})`);
   Object.assign(second, { key: again?.key, offset: again?.offset, port: again?.ports.postgres });
   stop(second);
   await untilEnded(second);

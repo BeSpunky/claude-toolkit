@@ -71,39 +71,57 @@ export function executedCommands(script: string): string[] {
 /** What fires for a pull request and never for a line. */
 const PULL_REQUEST_EVENTS = new Set(['pull_request', 'pull_request_target', 'merge_group']);
 
+/** An event only a pull request's checks hang off. `types: [closed]` is what a merge fires: a pipeline deploying `if: merged` runs on it. */
 function onlyPullRequests(on: unknown): boolean {
-  const events = typeof on === 'string' ? [on] : Array.isArray(on) ? on : on && typeof on === 'object' ? Object.keys(on) : [];
-  return events.length > 0 && events.every((event) => PULL_REQUEST_EVENTS.has(event));
+  if (typeof on === 'string') return PULL_REQUEST_EVENTS.has(on);
+  if (Array.isArray(on)) return on.length > 0 && on.every((event) => PULL_REQUEST_EVENTS.has(event));
+  if (!on || typeof on !== 'object') return false;
+  const events = Object.entries(on);
+  return events.length > 0 && events.every(([event, config]) => PULL_REQUEST_EVENTS.has(event) && ![(config as { types?: unknown } | null)?.types].flat().includes('closed'));
 }
 
-/** Every `run` script in a workflow's jobs. A file that does not parse runs nothing on GitHub either. */
-function runScripts(workflow: string): string[] {
-  let parsed: unknown;
+/** The expressions in a value: every `${{ … }}` of every string in it, however deep. */
+function expressionsIn(value: unknown): string[] {
+  if (typeof value === 'string') return [...value.matchAll(/\$\{\{(.*?)\}\}/gs)].map(([, body]) => body);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(expressionsIn);
+  return [];
+}
+
+/** The `secrets` context itself: not a word in a string literal, not `github.secrets`, and `toJSON(secrets)` as much as `secrets.X`. */
+const readsSecrets = (expression: string): boolean => /(?<![.\w-])secrets\b/.test(expression.replace(/'(?:[^']|'')*'/g, "''"));
+
+interface Step {
+  run?: unknown;
+  uses?: unknown;
+}
+
+/**
+ * Can this job's commands hold a secret? Its own env and the workflow's, and its `run` steps. A `uses:` step's expressions go to
+ * that action: a coverage upload's token beside `dbmate up` says nothing about what dbmate connects to.
+ */
+function jobHoldsSecrets(job: { env?: unknown; steps?: unknown }, workflowEnv: unknown): boolean {
+  const steps = (Array.isArray(job.steps) ? job.steps : []) as Step[];
+  return expressionsIn([workflowEnv, job.env, steps.filter((step) => !step?.uses)]).some(readsSecrets);
+}
+
+/**
+ * Does this workflow run a command any of `signals` recognises as a deploy, or one of `credentialed` in a job holding a secret?
+ * A file that does not parse runs nothing on GitHub either.
+ */
+export function workflowDeploys(workflow: string, signals: readonly RegExp[], credentialed: readonly RegExp[] = []): boolean {
+  let parsed: { on?: unknown; env?: unknown; jobs?: unknown } | null;
   try {
     parsed = parse(workflow);
   } catch {
-    return [];
-  }
-  if (onlyPullRequests((parsed as { on?: unknown } | null)?.on)) return [];
-  const jobs = (parsed as { jobs?: unknown } | null)?.jobs;
-  if (!jobs || typeof jobs !== 'object') return [];
-  return Object.values(jobs).flatMap((job) => {
-    const steps = (job as { steps?: unknown } | null)?.steps;
-    if (!Array.isArray(steps)) return [];
-    return steps.flatMap((step) => (typeof step?.run === 'string' ? [step.run as string] : []));
-  });
-}
-
-/** Does this workflow use a secret? Read from the parsed file, so a comment saying so does not count. */
-export function referencesSecrets(workflow: string): boolean {
-  try {
-    return /\bsecrets\s*(?:\.|\[)/.test(JSON.stringify(parse(workflow)) ?? '');
-  } catch {
     return false;
   }
-}
-
-/** Does this workflow run a command any of `signals` recognises as a deploy? */
-export function workflowDeploys(workflow: string, signals: readonly RegExp[]): boolean {
-  return runScripts(workflow).some((script) => executedCommands(script).some((command) => signals.some((signal) => signal.test(command))));
+  if (onlyPullRequests(parsed?.on) || !parsed?.jobs || typeof parsed.jobs !== 'object') return false;
+  const env = parsed.env;
+  return Object.values(parsed.jobs).some((job: { env?: unknown; steps?: unknown } | null) => {
+    if (!job) return false;
+    const steps = (Array.isArray(job.steps) ? job.steps : []) as Step[];
+    const commands = steps.flatMap((step) => (typeof step?.run === 'string' ? executedCommands(step.run) : []));
+    const any = (patterns: readonly RegExp[]) => commands.some((command) => patterns.some((pattern) => pattern.test(command)));
+    return any(signals) || (any(credentialed) && jobHoldsSecrets(job, env));
+  });
 }

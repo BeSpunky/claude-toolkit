@@ -23,7 +23,11 @@ export const postgresCiProvider: CiDeployProvider = {
   deploySignals: [/\bpostgres\.mjs\s+deploy\b/],
   credentialedDeploySignals: [/\bdbmate[^\s]*\s+(?:\S+\s+)*?(?:up|migrate)\b/],
   deployStage: 'schema',
-  deployEnv: { [POSTGRES_DEPLOY_VAR]: `\${{ secrets[format('${POSTGRES_DEPLOY_VAR}_{0}', needs.resolve.outputs.environment_token)] }}` },
+  // Each secret by its literal name, so the runner is handed only these; the job's environment picks one. A name that is empty
+  // ends the chain empty, never at another environment's: `&&` fails over to `||`, and the next comparison is false.
+  deployEnv: (environments) => ({
+    [POSTGRES_DEPLOY_VAR]: `\${{ ${environments.map((name) => `needs.resolve.outputs.environment == '${name}' && secrets.${postgresDeploySecret(name)}`).join(' || ')} || '' }}`,
+  }),
   deployTargets: (tree: Tree) => {
     const home = postgresHome(tree);
     if (!home) return [];

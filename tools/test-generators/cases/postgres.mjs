@@ -275,9 +275,10 @@ export default {
       },
       expect: (tree, t) => {
         const workflow = tree.read('.github/workflows/deploy.yml', 'utf8') ?? '';
-        t.ok(workflow.includes("POSTGRES_DEPLOY_URL: ${{ secrets[format('POSTGRES_DEPLOY_URL_{0}', needs.resolve.outputs.environment_token)] }}"), `the secret reaches the deploy step, by the environment's own name:\n${workflow}`);
-        t.ok(/environment=production; environment_token=PRODUCTION; /.test(workflow), 'resolve says that name');
-        t.ok(!workflow.includes('secrets.POSTGRES_DEPLOY_URL'), 'nothing a repo-level secret of the plain name could fill in for');
+        t.ok(workflow.includes("POSTGRES_DEPLOY_URL: ${{ needs.resolve.outputs.environment == 'production' && secrets.POSTGRES_DEPLOY_URL_PRODUCTION || '' }}"), `the secret reaches the deploy step, by the environment's own name:\n${workflow}`);
+        t.ok(!workflow.includes('secrets.POSTGRES_DEPLOY_URL '), 'nothing a repo-level secret of the plain name could fill in for');
+        t.ok(!workflow.includes('secrets['), 'no dynamic index, which would hand the runner every secret');
+        t.ok(Boolean(requireFromRepo('yaml').parse(workflow).jobs.deploy), 'and it is YAML');
         t.ok(!workflow.includes('id-token: write'), 'no OIDC: the job cannot mint a token');
         const install = workflow.indexOf('Install dbmate');
         t.ok(install > 0 && install < workflow.indexOf('POSTGRES_DEPLOY_URL: ${{'), 'the stock runner gets dbmate, before the step that needs it');
@@ -315,7 +316,7 @@ export default {
       expect: (tree, t, ctx) => {
         const provider = ctx.load('layers/registry').layer('postgres').ciDeploy;
         t.ok(provider.deployStage === 'schema', 'before every code deploy');
-        t.equal(provider.deployEnv, { POSTGRES_DEPLOY_URL: "${{ secrets[format('POSTGRES_DEPLOY_URL_{0}', needs.resolve.outputs.environment_token)] }}" }, 'the URL from a secret');
+        t.equal(provider.deployEnv(['production', 'uat-eu.1']), { POSTGRES_DEPLOY_URL: "${{ needs.resolve.outputs.environment == 'production' && secrets.POSTGRES_DEPLOY_URL_PRODUCTION || needs.resolve.outputs.environment == 'uat-eu.1' && secrets.POSTGRES_DEPLOY_URL_UAT_EU_1 || '' }}" }, 'each environment names its own secret literally');
         t.equal(ctx.load('generators/postgres/ci-provider').postgresDeploySecret('uat-eu.1'), 'POSTGRES_DEPLOY_URL_UAT_EU_1', 'upper case, and only what a secret name holds');
         t.ok(provider.oidc === undefined, 'no OIDC');
         t.equal(provider.deployTargets(tree), [{ project: 'postgres', target: 'deploy' }], 'its deploy target');

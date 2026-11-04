@@ -22,7 +22,6 @@
 // configuration (written by the ci generator), and the deploy runs with `-c ci-<environment>` — a target without
 // that configuration runs its default one, untouched.
 import type { CiDeployProvider, CiDeployStage } from '../../layers/descriptor';
-import { environmentSecretSuffix } from '../_utils/deploy-contract';
 import type { PackageManager } from '../_utils/package-manager';
 import { COREPACK_VERSION } from '../_utils/versions';
 import { ACTIONS, uses } from './actions';
@@ -110,10 +109,10 @@ const STAGES: readonly CiDeployStage[] = ['schema', 'code'];
 const STEP_ENV = ['PROJECTS', 'CONFIGURATION', 'STAGE_PROJECTS', 'EARLIER_PROJECTS'];
 
 /** The `deployEnv` of the providers sharing one step. One step holds one value per name, so a clash is refused. */
-function providerEnv(providers: readonly CiDeployProvider[]): string[] {
+function providerEnv(providers: readonly CiDeployProvider[], environments: readonly string[]): string[] {
   const owner = new Map<string, string>(STEP_ENV.map((name) => [name, 'the deploy step']));
   return providers.flatMap((provider) =>
-    Object.entries(provider.deployEnv ?? {}).map(([name, value]) => {
+    Object.entries((typeof provider.deployEnv === 'function' ? provider.deployEnv(environments) : provider.deployEnv) ?? {}).map(([name, value]) => {
       const taken = owner.get(name);
       if (taken) throw new Error(`[ci] ${provider.id} and ${taken} both declare the deploy env var ${name}; one step holds one value.`);
       owner.set(name, provider.id);
@@ -140,7 +139,7 @@ function deploySteps(input: WorkflowInput): string[] {
     '          PROJECTS: ${{ needs.prepare.outputs.projects }}',
     `          CONFIGURATION: ${ciConfiguration('${{ needs.resolve.outputs.environment }}')}`,
     ...scope,
-    ...providerEnv(inStage(stage)),
+    ...providerEnv(inStage(stage), [...new Set(input.lines.filter((line) => !line.blocked).map((line) => line.environment))]),
     '        run: |',
     ...run.map((line) => `          ${line}`),
   ];
@@ -170,7 +169,7 @@ export function renderWorkflow(input: WorkflowInput): string {
     `          ${i ? 'elif' : 'if'} bound ${quote(branchRefRegex(line.branch))}; then`,
     ...(line.blocked
       ? [`            echo ${bashQuote(`::error::${line.blocked}`)} >&2`, '            exit 1']
-      : [`            environment=${line.environment}; environment_token=${environmentSecretSuffix(line.environment)}; full=${line.full}`]),
+      : [`            environment=${line.environment}; full=${line.full}`]),
   ]);
   const auth = input.providers.map((provider) => `${provider.setupSteps?.() ?? ''}${provider.authSteps()}`.replace(/^(?=.)/gm, '      ')).join('');
   const cache = installedPaths(input.packageManager, input.yarnBerry).map((path) => `            ${path}`);
@@ -208,7 +207,6 @@ export function renderWorkflow(input: WorkflowInput): string {
     '    runs-on: ubuntu-latest',
     '    outputs:',
     '      environment: ${{ steps.binding.outputs.environment }}',
-    '      environment_token: ${{ steps.binding.outputs.environment_token }}',
     '      full: ${{ steps.binding.outputs.full }}',
     '    steps:',
     "      # The branch model's `ci` bindings: which environment this branch deploys into. A glob's `*` never",
@@ -223,7 +221,7 @@ export function renderWorkflow(input: WorkflowInput): string {
     '            echo "::error::Branch $GITHUB_REF_NAME has no ci deploy binding in the branch model (.bespunky/branches.json) — nothing deploys from it." >&2',
     '            exit 1',
     '          fi',
-    '          { echo "environment=$environment"; echo "environment_token=$environment_token"; echo "full=$full"; } >> "$GITHUB_OUTPUT"',
+    '          { echo "environment=$environment"; echo "full=$full"; } >> "$GITHUB_OUTPUT"',
     '',
     '  prepare:',
     '    name: Install and choose what to deploy',

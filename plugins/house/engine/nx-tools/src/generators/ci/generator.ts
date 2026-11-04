@@ -32,7 +32,7 @@ import { CI_SKILL_POINTERS } from './skill-pointers';
 import { nodeVersionFile, projectNode } from '../_utils/node-version';
 import { isYarnBerry } from '../_utils/package-manager';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
-import { referencesSecrets, workflowDeploys } from './foreign-pipeline';
+import { workflowDeploys } from './foreign-pipeline';
 import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, WORKFLOW_HEADER, type WiredLine } from './workflow';
 
 export { MARKER };
@@ -423,10 +423,7 @@ function foreignDeployWorkflows(tree: Tree, ownedFiles: readonly string[]): stri
     .filter((name) => /\.ya?ml$/.test(name))
     .map((name) => `${dir}/${name}`)
     .filter((path) => !ownedFiles.includes(path))
-    .filter((path) => {
-      const workflow = tree.read(path, 'utf8') ?? '';
-      return workflowDeploys(workflow, DEPLOYS) || (referencesSecrets(workflow) && workflowDeploys(workflow, CREDENTIALED));
-    });
+    .filter((path) => workflowDeploys(tree.read(path, 'utf8') ?? '', DEPLOYS, CREDENTIALED));
 }
 
 function readMarker(tree: Tree): Marker {

@@ -8,7 +8,7 @@
 //   <data home>/<hash of the tree>/<app>@<offset>/<major>/identity   its system_identifier, written once, before the rename
 //   <data home>/<hash of the tree>/<app>@<offset>/<major>/owner      the hostname running it; its mtime is the heartbeat
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -67,3 +67,11 @@ export const dataDir = (home) => join(home, 'data');
 export const identityFile = (home) => join(home, 'identity');
 export const ownerFile = (home) => join(home, 'owner');
 export const originFile = (dir) => join(dir, 'origin');
+
+/** The stacks of this tree that hold a cluster of `major`, by key: a serve's is `<app>@<offset>`, a stack of its own's `postgres@<offset>`. */
+export function stacksWithData(major) {
+  if (!existsSync(treeHome())) return [];
+  return readdirSync(treeHome(), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(identityFile(clusterHome(entry.name, major))))
+    .map((entry) => entry.name);
+}

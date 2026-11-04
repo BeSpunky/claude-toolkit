@@ -188,7 +188,7 @@ function sweepTree(dir, home) {
   }
   const aside = join(home, `${SWEPT}${Date.now()}-${basename(dir)}`);
   renameSync(dir, aside);
-  log(`set aside the Postgres data of ${tree}, which no longer exists (${clusters.map((c) => `${c.stack} on ${c.major}`).join(', ') || 'no clusters'}): ${aside}. A start deletes it after ${SWEPT_KEPT_DAYS} days. If the tree comes back, restore it first: mv '${aside}' '${dir}'`);
+  log(`set aside the Postgres data of ${tree}, which no longer exists (${clusters.map((c) => `${c.stack} on ${c.major}`).join(', ') || 'no clusters'}): ${aside}. A start deletes it after ${SWEPT_KEPT_DAYS} days. If the tree comes back, restore it before it starts again: mv -T '${aside}' '${dir}'`);
 }
 
 /**
@@ -220,6 +220,10 @@ async function ensureCluster(key, major, { signal }) {
   }
   const others = readdirSync(treeHome(), { withFileTypes: true }).filter((d) => d.isDirectory() && d.name !== key).map((d) => d.name);
   const otherMajors = readdirSync(stackHome(key)).filter((name) => !name.startsWith('.'));
+  const setAside = existsSync(dataHome()) ? readdirSync(dataHome()).filter((name) => name.startsWith(SWEPT) && name.endsWith(`-${basename(treeHome())}`)).sort().at(-1) : undefined;
+  if (setAside) {
+    log(`this tree's earlier data was set aside when the tree seemed gone: ${join(dataHome(), setAside)}. This start makes a new, empty one. To have the earlier one back, stop this stack, then: rm -rf '${treeHome()}' && mv -T '${join(dataHome(), setAside)}' '${treeHome()}'`);
+  }
   log(`creating a new database for ${key} (Postgres ${major})${others.length ? `. This tree has separate data on ${others.join(', ')}` : ''}${otherMajors.length ? `. Data of Postgres ${otherMajors.join(', ')} stays beside it, unused` : ''}.`);
   const sibling = join(stackHome(key), `.init-${randomBytes(4).toString('hex')}`);
   mkdirSync(sibling);
@@ -262,6 +266,11 @@ function lastRan(home) {
  * is another database. Nothing else would say so when that block's cluster already exists: migrations would land beside the data
  * being worked on. Asked before this start touches its own cluster.
  */
+const startCommandOf = (key) => {
+  const [app, offset] = key.split('@');
+  return app === PORT_NAME ? verbCommand('start', `--port-offset=${offset}`) : `tools/dev/dev serve ${app} --port-offset=${offset}`;
+};
+
 function warnIfNotTheUsualData(key, major) {
   if (!existsSync(treeHome())) return;
   const usual = readdirSync(treeHome(), { withFileTypes: true })
@@ -269,7 +278,7 @@ function warnIfNotTheUsualData(key, major) {
     .map((d) => ({ key: d.name, home: clusterHome(d.name, major), ran: lastRan(clusterHome(d.name, major)) }))
     .sort((a, b) => b.ran - a.ran)[0];
   if (!usual || usual.ran <= lastRan(clusterHome(key, major))) return;
-  log(`this is ${key}, and this tree last ran on ${usual.key}, whose data is in ${dataDir(usual.home)}. This stack has a database of its own, without those rows. To work on them: see what holds that block (tools/dev/dev ps), then start with --port-offset=${usual.key.split('@')[1]}.`);
+  log(`this is ${key}, and this tree last ran on ${usual.key}, whose data is in ${dataDir(usual.home)}. This stack has a database of its own, without those rows. To work on them: see what holds that block (tools/dev/dev ps), then run ${startCommandOf(usual.key)}`);
 }
 
 /**
@@ -370,7 +379,7 @@ export async function serve({ resetThenStop = false } = {}) {
     if (failure instanceof Refusal) {
       failure.message += resetThenStop
         ? `\nThat is from an empty database, so the migrations or seeds themselves need fixing. The server stopped with it.`
-        : `\nThe server stopped with it. Fix the cause and start again, or, if the database itself is what is wrong, rebuild it from its migrations (this drops its data): ${verbCommand('reset', `--offset=${key.split('@')[1]}`)}`;
+        : `\nThe server stopped with it. Fix the cause and start again, or, if the database itself is what is wrong, rebuild it from its migrations (this drops its data): ${verbCommand('reset', `--stack=${key}`)}`;
     }
     throw failure;
   }

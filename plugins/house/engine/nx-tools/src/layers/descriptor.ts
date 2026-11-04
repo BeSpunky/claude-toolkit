@@ -258,12 +258,12 @@ interface CiDeployProviderShape {
   /** When this provider's targets deploy. Absent: `code`. */
   deployStage?: CiDeployStage;
   /**
-   * Env vars its deploys read, name → a GitHub expression. A secret named per environment is
-   * `\${{ secrets[format('NAME_{0}', needs.resolve.outputs.environment_token)] }}` (`environmentSecretSuffix`), which a
-   * repo-level secret of the plain name cannot fill in for. On the deploy step of this provider's stage only, so a schema credential never reaches a
+   * Env vars its deploys read, name → a GitHub expression; as a function of the environments the workflow deploys into, for a
+   * secret named per environment (`environmentSecretSuffix`), which a repo-level secret of the plain name cannot fill in for.
+   * Name each secret literally: indexing `secrets[...]` hands the runner every secret there is. On the deploy step of this provider's stage only, so a schema credential never reaches a
    * code deploy. Never a literal secret, and never `deployOptions`: those are committed to `project.json`.
    */
-  deployEnv?: Readonly<Record<string, string>>;
+  deployEnv?: Readonly<Record<string, string>> | ((environments: readonly string[]) => Readonly<Record<string, string>>);
   /**
    * Present when `authSteps` exchanges GitHub's OIDC token. `why` is rendered beside `id-token: write`, which the
    * deploy job holds only if an active provider asks: a token-based provider's job never gets to mint one.

@@ -27,7 +27,7 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 | wire | tripwire, dogfood boot, image e2e, sweep rule; on this branch | yes | returned |
 | docs | new skill, README, CLAUDE.md, tips; on this branch | yes | returned |
 | review | sanity review | yes | returned |
-| gate | upgrade --local, dogfood-consumer, rebuild | yes | pending |
+| gate | push + PR green, upgrade --local, dogfood-consumer, rebuild | yes | dispatched |
 
 ## Results
 
@@ -83,3 +83,6 @@ D4 answered. Asked whether to push the branch and open a pull request to develop
 All applied. D12 departs: a command-line regex plus the base port, since a range also catches other services' shifted ports. Generators 412 passed, 35 skipped; layers 112; migrations 417; scaffold and test-postgres ok. Unproven: `secrets[format()]` and the dbmate step on real GitHub, the regex in real VS Code, the launcher probe in real images.
 ORCHESTRATOR DECISION: keep the hostname in the sweep record. A worktree removed before a rebuild is named on every start until removed by hand: noisy, and it never deletes on a guess.
 Next: correctness pass (last of the budget), then push and PR, then gate.
+
+### correctness pass (returned; budget 12 of 12 spent)
+Eight findings, fixed by the reviewer with tests: reset acts on the tree's `<app>@N` cluster; a returning tree is told of its quarantine and the restore command is run for real; `types:[closed]` counts as deploying; only `run` steps' `secrets` count, in the same job; static literal secret references, no `secrets[`; tripwire branch per run (cause inferred: fixed port 7432). Generators 426 passed, 35 skipped; rest green.
