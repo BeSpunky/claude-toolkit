@@ -116,7 +116,7 @@ deb_archive() { printf '%s\n' "$HOUSE_DEB_ARCHIVES" | sed 's/#.*//' | awk -v kin
 for id in $(printf '%s\n' "$HOUSE_DEB_ARCHIVES" | sed 's/#.*//' | awk '$1 == "tool" { print $2 }'); do
   version="$(deb_archive closure "$id" | awk -v codename="$codename" '$3 == codename { print $4 }')"
   if [ -z "$version" ]; then
-    echo "[os-packages] '$id' has no closure for this Debian release ('${codename:-unknown}'; it has: $(deb_archive closure "$id" | awk '{ print $3 }' | tr '\n' ' ')) — it cannot be installed here" >&2
+    echo "[os-packages] '$id' has no closure for this Debian release ('${codename:-unknown}'; it has: $(deb_archive closure "$id" | awk '{ print $3 }' | tr '\n' ' ')) — it cannot be installed here. A newer house toolkit may cover this release: upgrade it. If this devcontainer names its own image, use a tag on one of those releases." >&2
     pending="$pending !$id"
   elif [ -z "$(deb_archive deb "$id" | awk -v codename="$codename" -v arch="$arch" '$3 == codename && $4 == arch')" ]; then
     echo "[os-packages] '$id' has no closure for this architecture ($arch) on $codename — it cannot be installed here" >&2

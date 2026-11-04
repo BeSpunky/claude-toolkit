@@ -188,13 +188,19 @@ export interface LayerDescriptor {
 // the options ITS OWN deploy targets take in that environment, the steps that authenticate the job, and the
 // one-time cloud setup. A provider's options reach only its own targets (a `ci-<environment>` Nx configuration on
 // each), so several providers — and a project's own deploy targets — compose without seeing each other's flags.
+//
+// WHICH PROVIDERS A LINE MUST NAME. Every provider active in the workspace deploys on every bound line, so a line names
+// exactly the ones that need a value from it. A provider with a `targetLabel` needs one: a line naming none is blocked
+// (a red run on every push; a `ci` key states intent to deploy, and a note is how deploys stopped silently). A provider
+// without one (a database reached through its GitHub environment's `DATABASE_URL`) needs nothing, and a line may leave it
+// out. A provider a required layer's provider `supersedes` is not active at all.
 
 /** One environment a provider deploys into, as the `ci` layer resolved it from the branch model. */
 export interface CiEnvironment {
   /** The deployment environment (a GitHub environment) — the binding's `ci.environment`. */
   name: string;
-  /** This provider's target in it (the binding's `ci.providers.<id>`). */
-  target: string;
+  /** This provider's target in it (the binding's `ci.providers.<id>`). Absent only for a provider that needs none and was not given one. */
+  target?: string;
   /** The branches that deploy into it, as names and globs. */
   branches: string[];
   /**
@@ -211,15 +217,36 @@ export interface CiEnvironment {
  */
 export type CiDeployStage = 'schema' | 'code';
 
-export interface CiDeployProvider {
+/** A provider a line must give a target: without one, that line is blocked. */
+export interface TargetedCiDeployProvider extends CiDeployProviderShape {
+  /** What a binding's `ci.providers.<id>` value IS here (`.firebaserc alias`): how the messages ask for a missing one. */
+  targetLabel: string;
+  /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
+  deployOptions(target: string): Record<string, unknown>;
+}
+
+/** A provider a line need not name: what it deploys into comes from the line's GitHub environment. */
+export interface TargetlessCiDeployProvider extends CiDeployProviderShape {
+  targetLabel?: undefined;
+  /** The options its deploy targets take; `target` only if a line chose to give one. Absent: nothing to configure. */
+  deployOptions?(target?: string): Record<string, unknown>;
+}
+
+export type CiDeployProvider = TargetedCiDeployProvider | TargetlessCiDeployProvider;
+
+interface CiDeployProviderShape {
   /** The provider id a binding names (`ci.providers.<id>`). */
   id: string;
   title: string;
-  /** What a binding's `ci.providers.<id>` value IS here (`.firebaserc alias`): how the messages ask for a missing one. */
-  targetLabel: string;
   /**
-   * How a workflow the house did not write shows it already deploys through this provider, tested per line with
-   * comments stripped. Read from EVERY registered provider, worn or not: a repo running its own `firebase deploy` has
+   * The id of a provider this one REPLACES, belonging to a layer this layer `requires` (the `ci` generator refuses any
+   * other). A layer that specializes another deploys through its own provider, so the required layer's is not active
+   * where this one is: not its auth, its credentials, its options, or its demand for a target.
+   */
+  supersedes?: string;
+  /**
+   * How a workflow the house did not write shows it already deploys through this provider, tested against each command
+   * its `run` steps execute (ci/foreign-pipeline.ts). Read from EVERY registered provider, worn or not: a repo running its own `firebase deploy` has
    * a pipeline whether or not it wears `firebase`, and a second deploy workflow beside it is the worst outcome.
    */
   deploySignals: readonly RegExp[];
@@ -236,10 +263,11 @@ export interface CiDeployProvider {
    * deploy job holds only if an active provider asks: a token-based provider's job never gets to mint one.
    */
   oidc?: { why: string };
-  /** The deploy targets this provider's layer owns in this workspace — the ONLY targets its options reach. */
+  /**
+   * The deploy targets this provider's layer owns in this workspace — the ONLY targets its options reach. Two providers
+   * may share one: their options compose on it (see `composeOptions`, ci/generator.ts), and they must share a stage.
+   */
   deployTargets(tree: Tree): { project: string; target: string }[];
-  /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
-  deployOptions(target: string): Record<string, unknown>;
   /**
    * GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. They run before
    * the deploy steps and without `deployEnv`, which only those steps hold: reach a secret here through `secrets.*`.

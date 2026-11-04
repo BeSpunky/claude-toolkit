@@ -5,7 +5,9 @@
 //   - a project's own `<provider> deploy` pipeline going unseen, so a second deploying workflow lands beside it;
 //   - code deploying before its schema, or after its schema failed;
 //   - a schema credential reaching a code deploy's environment;
-//   - a token-based deploy job still able to mint a cloud token.
+//   - a token-based deploy job still able to mint a cloud token;
+//   - two providers on one deploy target, the last one's args silently winning;
+//   - a provider a binding has no value for blocking a line, or a replaced one still deploying beside its replacement.
 //
 // The generated bash is RUN (`bash --noprofile --norc -eo pipefail`, what `shell: bash` runs on GitHub), against a stub
 // package manager that records the deploys, so order and failure are observed rather than read off the text.
@@ -72,6 +74,20 @@ const withFake = (layers, provider = fakedb) => async (tree, ctx) => {
     delete js.ciDeploy;
   }
 };
+/** The same for several layers at once: `{ <layer id>: <provider> }`. */
+const withFakes = (layers, byLayer) => async (tree, ctx) => {
+  const { layer } = ctx.load('layers/registry');
+  for (const [id, provider] of Object.entries(byLayer)) layer(id).ciDeploy = provider;
+  try {
+    await ctx.load('generators/ci/generator').default(tree, { layers });
+  } finally {
+    for (const id of Object.keys(byLayer)) delete layer(id).ciDeploy;
+  }
+};
+/** A provider that needs no target: what it deploys into comes from the line's GitHub environment. */
+const { targetLabel: _label, deployOptions: _options, ...targetless } = fakedb;
+/** Sharing `@acme/db:deploy` with `fakedb`, as a provider built on it would. Only `js` requires `nx`, so `js` can replace `nx`'s. */
+const overdb = { ...fakedb, id: 'overdb', targetLabel: 'overdb project ref', deploySignals: [/\boverdb\s+push\b/], deployEnv: { OVERDB_TOKEN: '${{ secrets.OVERDB_TOKEN }}' }, deployOptions: (target) => ({ args: `--over=${target}` }), authSteps: () => "- name: Check the overdb token\n  run: 'true'\n" };
 const BOTH = ['nx', 'node', 'js', 'firebase', 'ci'];
 const FAKE_ONLY = ['nx', 'node', 'js', 'ci'];
 const FIREBASE_ONLY = ['nx', 'node', 'firebase', 'ci'];
@@ -118,6 +134,33 @@ function deployStages(text, selection, opts) {
   if (schema.status !== 0) return { schema };
   return { schema, code: runBash(script(text, 'Deploy'), env, opts) };
 }
+
+const workflowRunning = (run) => `on: push\njobs:\n  d:\n    steps:\n      - run: ${JSON.stringify(run)}\n`;
+const t3 = (tree) => JSON.parse(tree.read('.bespunky/ci.json', 'utf8'));
+/** What a `run` script holds, and whether reading it should find a deploy. */
+const FOREIGN = [
+  ['a plain command', 'firebase deploy --only functions', true],
+  ['a package-manager prefix', 'npx firebase deploy', true],
+  ['an env prefix', 'FORCE=1 firebase deploy', true],
+  ['the second of a chain', 'echo starting && firebase deploy', true],
+  ['inside an if', 'if [ -n "$X" ]; then firebase deploy; fi', true],
+  ['a later line', 'echo starting\nyarn nx affected -t deploy', true],
+  ['a continued line', 'firebase \\\n  deploy', true],
+  ['after a heredoc', 'cat > f <<EOF\nhi\nEOF\nfirebase deploy', true],
+  ['in a heredoc fed to a shell', 'bash <<EOF\nfirebase deploy\nEOF', true],
+  ['in `bash -c`', 'bash -c "firebase deploy"', true],
+  ['an echo', 'echo firebase deploy', false],
+  ['a quoted echo', 'echo "firebase deploy"', false],
+  ['a printf', "printf 'run firebase deploy\\n'", false],
+  ['an echo in a then', 'if true; then echo firebase deploy; fi', false],
+  ['an echo piped on', 'echo firebase deploy | tee out', false],
+  ['a comment', 'true # firebase deploy', false],
+  ['a heredoc to the summary', 'cat >> "$GITHUB_STEP_SUMMARY" <<EOF\nfirebase deploy\nEOF', false],
+  ['a dash heredoc', "cat <<-'DOC'\n\tyarn nx affected -t deploy\n\tDOC", false],
+  ['a chain character inside quotes', 'echo "a; firebase deploy"', false],
+];
+
+const t2 = (tree) => JSON.parse(tree.read('db/project.json', 'utf8')).targets.deploy.configurations;
 
 export default {
   name: 'ci layer · the provider seam',
@@ -329,6 +372,91 @@ export default {
       run: withFake(FAKE_ONLY),
       expect: (tree, t) => t.exists(WF),
     },
+    ...FOREIGN.map(([name, run, deploys]) => ({
+      name: `foreign pipeline: ${name} ${deploys ? 'is' : 'is not'} a deploy`,
+      once: 'asserts one pure reading',
+      setup: () => workspace(),
+      run: () => {},
+      expect: (tree, t, ctx) => {
+        const signals = [/\bfirebase\s+deploy\b/, /-t\s+deploy\b/];
+        t.equal(ctx.load('generators/ci/foreign-pipeline').workflowDeploys(workflowRunning(run), signals), deploys, run);
+      },
+    })),
+    {
+      name: 'foreign pipeline: the text outside `run` is not a deploy, whatever it says',
+      once: 'asserts one pure reading',
+      setup: () => workspace(),
+      run: () => {},
+      expect: (tree, t, ctx) => {
+        const text = 'name: firebase deploy\non: push\ndefaults:\n  run:\n    shell: bash\nenv:\n  NOTE: firebase deploy\njobs:\n  d:\n    name: firebase deploy\n    steps:\n      - name: firebase deploy\n        uses: actions/checkout@v5\n        with:\n          ref: firebase deploy\n';
+        t.equal(ctx.load('generators/ci/foreign-pipeline').workflowDeploys(text, [/\bfirebase\s+deploy\b/]), false);
+        t.equal(ctx.load('generators/ci/foreign-pipeline').workflowDeploys('jobs: [unclosed', [/./]), false, 'and a file that does not parse runs nothing');
+      },
+    },
+    {
+      name: 'an unrelated workflow with a signal in an `echo` does not delete the owned workflow',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: async (tree, ctx) => {
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        tree.write('.github/workflows/notes.yml', 'on: push\njobs:\n  n:\n    steps:\n      - run: echo "remember to firebase deploy"\n');
+        ctx.mark = ctx.logs.length;
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.exists(WF);
+        t.ok(!ctx.logs.slice(ctx.mark).some((l) => /removed \.github\/workflows\/deploy\.yml|No deploy workflow/.test(l)), ctx.logs.join(' | '));
+        t.equal(t.json('.bespunky/ci.json').files.includes(WF), true);
+      },
+    },
+    {
+      name: 'a real pipeline arriving beside the owned workflow: the owned one still goes, and says so',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: async (tree, ctx) => {
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        tree.write('.github/workflows/mine.yml', 'on: push\njobs:\n  d:\n    steps:\n      - run: |\n          echo starting\n          firebase deploy\n');
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.missing(WF);
+        t.ok(/mine\.yml/.test(t.json('.bespunky/ci.json').pending ?? ''), 'pending names it');
+      },
+    },
+    {
+      name: 'the owned workflow is recognised by what the generator wrote, with its marker lost',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: async (tree, ctx) => {
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        tree.delete('.bespunky/ci.json');
+        ctx.first = tree.read(WF, 'utf8');
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(t.read(WF), ctx.first, 'rewritten, not taken for a pipeline of the project\'s own');
+        t.equal(t.json('.bespunky/ci.json').pending, undefined);
+        t.ok(t.json('.bespunky/ci.json').files.includes(WF), 'and owned again');
+      },
+    },
+    {
+      name: 'a workflow the project put at the owned path is theirs, though the marker still lists it',
+      once: 'two runs across replacing the file',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: async (tree, ctx) => {
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        tree.write(WF, 'name: theirs\non: push\njobs:\n  d:\n    steps:\n      - run: firebase deploy\n');
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+        ctx.deploying = tree.read(WF, 'utf8');
+        ctx.pending = t3(tree).pending;
+        tree.write(WF, 'name: quiet\non: push\njobs: {}\n');
+        await withFake(FIREBASE_ONLY)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(/name: theirs/.test(ctx.deploying), 'a deploying replacement is kept');
+        t.ok(/deploy\.yml/.test(ctx.pending ?? ''), `and is the pipeline: ${ctx.pending}`);
+        t.has(WF, 'name: quiet');
+        t.ok(ctx.logs.some((l) => /deploy\.yml exists and the house did not write it/.test(l)), 'a quiet one is kept too, and reported');
+        t.ok(!t.json('.bespunky/ci.json').files.includes(WF), 'and is no longer recorded as owned');
+      },
+    },
     {
       name: 'a blocked binding beside a pipeline of the project\'s own: nothing of the house\'s stopped, so it is a note',
       setup: () => {
@@ -342,6 +470,148 @@ export default {
         t.ok(!ctx.logs.some((l) => /HUMAN_STEP: main deploys nothing/.test(l)), 'no human step');
         t.ok(ctx.logs.some((l) => /\[ci\] main deploys nothing until/.test(l)), 'a note');
       },
+    },
+    {
+      name: 'two providers on one deploy target: each one\'s args reach it, in provider order',
+      setup: fixture(lines(['main', 'production', { fakedb: 'base-ref', overdb: 'over-ref' }])),
+      run: withFakes(['nx', 'node', 'js', 'ci'], { nx: fakedb, js: overdb }),
+      expect: (tree, t) => {
+        t.equal(t.json('db/project.json').targets.deploy.configurations['ci-production'], { args: '--ref=base-ref --over=over-ref' }, 'neither overwrites the other');
+        t.equal(t.json('.bespunky/ci.json').configurations, { '@acme/db:deploy': ['ci-production'] });
+      },
+    },
+    {
+      name: 'two providers giving one target the same args: said once',
+      setup: fixture(lines(['main', 'production', { fakedb: 'same', overdb: 'same' }])),
+      run: withFakes(['nx', 'node', 'js', 'ci'], { nx: fakedb, js: { ...overdb, deployOptions: (target) => ({ args: `--ref=${target}` }) } }),
+      expect: (tree, t) => t.equal(t.json('db/project.json').targets.deploy.configurations['ci-production'], { args: '--ref=same' }),
+    },
+    {
+      name: 'two providers disagreeing on one option of one target, or sharing it across stages, is refused by name',
+      once: 'asserts the refusal, which writes nothing',
+      setup: fixture(lines(['main', 'production', { fakedb: 'a', overdb: 'b' }])),
+      run: async (tree, ctx) => {
+        ctx.refused = [];
+        const attempts = [
+          { ...overdb, deployOptions: () => ({ cwd: 'x' }) },
+          { ...overdb, deployStage: 'code' },
+        ];
+        for (const over of attempts) {
+          try {
+            await withFakes(['nx', 'node', 'js', 'ci'], { nx: { ...fakedb, deployOptions: () => ({ cwd: 'y' }) }, js: over })(tree, ctx);
+          } catch (error) {
+            ctx.refused.push(error.message);
+          }
+        }
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(ctx.refused.length, 2, ctx.refused.join(' | '));
+        t.ok(/option "cwd" on @acme\/db:deploy/.test(ctx.refused[0]), ctx.refused[0]);
+        t.ok(/fakedb \(schema\) and overdb \(code\) share @acme\/db:deploy/.test(ctx.refused[1]), ctx.refused[1]);
+      },
+    },
+    {
+      name: 'a provider with no target: a line naming only the others deploys, nothing blocks, and it gets no empty configuration',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: withFake(BOTH, targetless),
+      expect: (tree, t, ctx) => {
+        const text = t.read(WF);
+        const resolved = runBash(script(text, 'binding'), { GITHUB_REF: 'refs/heads/main' });
+        t.equal(resolved.status, 0, 'the line resolves');
+        t.ok(resolved.output.includes('environment=production'), resolved.output);
+        t.has(WF, "STAGE_PROJECTS: '@acme/db'");
+        t.ok(stepText(text, 'Deploy schema').includes('FAKEDB_URL: ${{ secrets.FAKEDB_URL }}'), 'its credentials reach its stage');
+        t.equal(t.json('db/project.json').targets.deploy.configurations, undefined, 'nothing to configure, so its default configuration runs');
+        t.equal(t.json('apps/functions/project.json').targets.deploy.configurations['ci-production'], { args: '--project=default --non-interactive' }, 'the named one is configured');
+        t.equal(t.json('.bespunky/ci.json').cloud.fakedb, { production: { branches: ['main'] } }, 'recorded with no target');
+        t.ok(!ctx.logs.some((l) => /HUMAN_STEP: main deploys nothing/.test(l)), 'nothing blocked');
+      },
+    },
+    {
+      name: 'a provider with no target alone: a line naming nothing deploys, and the "add a binding" message asks for nothing of it',
+      setup: fixture(lines(['main', 'production', {}], ['development', 'dev', {}])),
+      run: withFake(FAKE_ONLY, targetless),
+      expect: (tree, t) => {
+        t.equal(runBash(script(t.read(WF), 'binding'), { GITHUB_REF: 'refs/heads/development' }).status, 0);
+        t.equal(Object.keys(t.json('.bespunky/ci.json').cloud.fakedb), ['production', 'dev']);
+      },
+    },
+    {
+      name: 'a provider with no target that a line names anyway: with options the value reaches them; without, a note says it is ignored',
+      once: 'two runs across changing the provider',
+      setup: fixture(lines(['main', 'production', { fakedb: 'given' }], ['development', 'dev', {}])),
+      run: async (tree, ctx) => {
+        await withFake(FAKE_ONLY, { ...targetless, deployOptions: (target) => (target ? { args: `--ref=${target}` } : {}) })(tree, ctx);
+        ctx.configs = t2(tree);
+        ctx.mark = ctx.logs.length;
+        await withFake(FAKE_ONLY, targetless)(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(ctx.configs, { 'ci-production': { args: '--ref=given' } }, 'named: reaches its options. Unnamed: no configuration');
+        t.ok(ctx.logs.slice(ctx.mark).some((l) => /main: provider "fakedb" takes no target — the value is ignored/.test(l)), ctx.logs.join(' | '));
+        t.equal(t.json('db/project.json').targets.deploy.configurations, undefined, 'and what it wrote before goes');
+      },
+    },
+    {
+      name: 'a provider with a target stays required: a line naming only the others is blocked (the user settled this: "yes, fail CI")',
+      setup: fixture(lines(['main', 'production', { firebase: 'default' }])),
+      run: withFake(BOTH),
+      expect: (tree, t) => t.equal(runBash(script(t.read(WF), 'binding'), { GITHUB_REF: 'refs/heads/main' }).status, 1),
+    },
+    {
+      name: 'supersedes: the required layer\'s provider is gone from auth, credentials, options and the demand for a target',
+      setup: fixture(lines(['main', 'production', { overdb: 'over-ref' }])),
+      run: withFakes(['nx', 'node', 'js', 'ci'], { nx: fakedb, js: { ...overdb, supersedes: 'fakedb' } }),
+      expect: (tree, t) => {
+        const text = t.read(WF);
+        t.equal(runBash(script(text, 'binding'), { GITHUB_REF: 'refs/heads/main' }).status, 0, 'the line is not blocked by the replaced provider');
+        t.equal(t.json('db/project.json').targets.deploy.configurations['ci-production'], { args: '--over=over-ref' }, 'only its args');
+        t.has(WF, 'OVERDB_TOKEN: ${{ secrets.OVERDB_TOKEN }}');
+        t.hasNot(WF, 'FAKEDB_URL');
+        t.hasNot(WF, 'Check the token');
+        t.has(WF, 'Check the overdb token');
+        t.equal(Object.keys(t.json('.bespunky/ci.json').cloud), ['overdb']);
+      },
+    },
+    {
+      name: 'supersedes: it demands its own target, and a line naming the replaced one is told which to name',
+      setup: fixture(lines(['main', 'production', { fakedb: 'old-ref' }])),
+      run: withFakes(['nx', 'node', 'js', 'ci'], { nx: fakedb, js: { ...overdb, supersedes: 'fakedb' } }),
+      expect: (tree, t, ctx) => {
+        const resolved = runBash(script(t.read(WF), 'binding'), { GITHUB_REF: 'refs/heads/main' });
+        t.equal(resolved.status, 1, 'blocked');
+        t.ok(resolved.out.includes('"overdb": "<overdb project ref>"'), resolved.out);
+        t.ok(ctx.logs.some((l) => /provider "fakedb" is superseded by "overdb" here — ignored\. Name "overdb" instead/.test(l)), ctx.logs.join(' | '));
+      },
+    },
+    {
+      name: 'supersedes: a project moving onto the replacing layer loses the old args, and the old setup is offered for rollback',
+      once: 'two runs across adding a layer',
+      setup: fixture(lines(['main', 'production', { fakedb: 'base-ref', overdb: 'over-ref' }])),
+      run: async (tree, ctx) => {
+        const base = { ...fakedb, isSetUp: () => true, retireStep: (env) => `roll back ${env.name}`, files: (_tree, envs) => [{ path: 'tools/fakedb-setup.txt', content: envs.map((e) => `${e.name} ${e.retired ? 'retired' : 'active'}`).join('\n') }] };
+        await withFakes(['nx', 'node', 'ci'], { nx: base })(tree, ctx);
+        ctx.mark = ctx.logs.length;
+        await withFakes(['nx', 'node', 'js', 'ci'], { nx: base, js: { ...overdb, supersedes: 'fakedb' } })(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(t.json('db/project.json').targets.deploy.configurations['ci-production'], { args: '--over=over-ref' });
+        t.ok(ctx.logs.slice(ctx.mark).some((l) => /HUMAN_STEP: roll back production/.test(l)), ctx.logs.join(' | '));
+        t.has('tools/fakedb-setup.txt', 'production retired');
+      },
+    },
+    {
+      name: 'supersedes: only a provider of a layer it requires, because nothing else guarantees the two are worn together',
+      once: 'asserts the refusal, which writes nothing',
+      setup: fixture(lines(['main', 'production', {}])),
+      run: async (tree, ctx) => {
+        try {
+          await withFakes(['nx', 'node', 'js', 'ci'], { node: fakedb, js: { ...overdb, supersedes: 'fakedb' } })(tree, ctx);
+        } catch (error) {
+          ctx.refused = error.message;
+        }
+      },
+      expect: (tree, t, ctx) => t.ok(/js layer's provider supersedes "fakedb", which no layer it requires provides/.test(ctx.refused ?? ''), ctx.refused),
     },
     {
       name: 'the rendered workflow with stages and a blocked line is still valid YAML of the shape GitHub reads',

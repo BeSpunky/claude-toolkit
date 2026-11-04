@@ -23,7 +23,7 @@
 // trigger guessed wrong ships from the wrong line). The marker still records the layer, so the upgrade after the
 // model gains a binding writes it without being asked again.
 import { type Tree, formatFiles, logger, readProjectConfiguration } from '@nx/devkit';
-import { type CiDeployProvider, type CiEnvironment } from '../../layers/descriptor';
+import { type CiDeployProvider, type CiDeployStage, type CiEnvironment } from '../../layers/descriptor';
 import { LAYERS, detectLayers, layer } from '../../layers/registry';
 import { branchModelFromOption, readBranchModel, type BranchModel, type BranchProjection } from '../_utils/branch-model';
 import { nxInvocation } from '../_utils/nx-host';
@@ -32,7 +32,8 @@ import { CI_SKILL_POINTERS } from './skill-pointers';
 import { nodeVersionFile, projectNode } from '../_utils/node-version';
 import { isYarnBerry } from '../_utils/package-manager';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
-import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, type WiredLine } from './workflow';
+import { workflowDeploys } from './foreign-pipeline';
+import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, WORKFLOW_HEADER, type WiredLine } from './workflow';
 
 export { MARKER };
 
@@ -44,7 +45,7 @@ export interface CiSchema {
 }
 
 interface CloudEntry {
-  target: string;
+  target?: string;
   branches: string[];
   /** No binding names it any more; rendered only so its recorded setup can be rolled back. */
   retired?: boolean;
@@ -68,23 +69,45 @@ const ABOUT =
   'ci-<environment> configurations it wrote on provider deploy targets. Never hand-edit.';
 
 /** What a binding's `providers` would hold for these providers — how every message asks for one. */
-const providersExample = (providers: readonly CiDeployProvider[]): string =>
-  providers.length ? `"providers": { ${providers.map((p) => `"${p.id}": "<${p.targetLabel}>"`).join(', ')} }` : '"providers": {}';
+const providersExample = (providers: readonly CiDeployProvider[]): string => {
+  const targeted = providers.filter((p) => p.targetLabel !== undefined);
+  return targeted.length ? `"providers": { ${targeted.map((p) => `"${p.id}": "<${p.targetLabel}>"`).join(', ')} }` : '"providers": {}';
+};
+
+/**
+ * The providers these layers wear, and those of them that deploy: all but the ones another's `supersedes` names. Only a
+ * layer that requires another may replace its provider, since that is what guarantees the two are worn together.
+ */
+function resolveProviders(layers: readonly string[]): { worn: CiDeployProvider[]; active: CiDeployProvider[] } {
+  const wearing = layers.map((id) => layer(id)).filter((entry) => entry.ciDeploy);
+  const superseded = new Set<string>();
+  for (const entry of wearing) {
+    const id = entry.ciDeploy?.supersedes;
+    if (!id) continue;
+    if (!entry.requires.some((required) => layer(required).ciDeploy?.id === id)) {
+      throw new Error(`[ci] The ${entry.id} layer's provider supersedes "${id}", which no layer it requires provides.`);
+    }
+    superseded.add(id);
+  }
+  const worn = wearing.flatMap((entry) => (entry.ciDeploy ? [entry.ciDeploy] : []));
+  return { worn, active: worn.filter((provider) => !superseded.has(provider.id)) };
+}
 
 export default async function ciGenerator(tree: Tree, options: CiSchema = {}): Promise<void> {
   const layers = options.layers?.length ? options.layers : detectLayers(tree);
-  const providers = layers.map((id) => layer(id).ciDeploy).filter((p): p is CiDeployProvider => Boolean(p));
+  const { worn, active: providers } = resolveProviders(layers);
   const previous = readMarker(tree);
   const model: BranchModel =
     options.branchProjection !== undefined ? branchModelFromOption(options.branchProjection) : readBranchModel(tree);
 
   const notes: string[] = [];
   const { throughBranchModelSkill } = pluginPointerValues(tree, CI_SKILL_POINTERS);
-  const { lines, environments, pending } = resolve(model, providers, notes, throughBranchModelSkill);
+  const { lines, environments, pending } = resolve(model, providers, worn, notes, throughBranchModelSkill);
 
   // ── environments no binding names any more, whose cloud setup is still recorded: kept until rolled back ──────
+  // A superseded provider is worn and deploys nowhere, so what it set up in the cloud is rolled back the same way.
   const retired = new Map<string, CiEnvironment[]>();
-  for (const provider of providers) {
+  for (const provider of worn) {
     const active = new Set((environments.get(provider.id) ?? []).map((env) => env.name));
     for (const [name, entry] of Object.entries(previous.cloud[provider.id] ?? {})) {
       if (active.has(name)) continue;
@@ -100,7 +123,8 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
 
   // ── what the house writes this run ──────────────────────────────────────────────────────────────────────
   const wanted = new Map<string, { content: string; mode?: number }>();
-  const foreign = foreignDeployWorkflows(tree, previous.files);
+  const ownedFiles = currentlyOwned(tree, previous.files);
+  const foreign = foreignDeployWorkflows(tree, ownedFiles);
   const deployable = lines.filter((line) => !line.blocked);
   const blocked = lines.filter((line) => line.blocked);
   let reason = pending;
@@ -122,20 +146,20 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
         throughBranchModelSkill,
       }),
     });
-    if (previous.files.includes(WORKFLOW) && /^\s*id-token:\s*write/m.test(tree.read(WORKFLOW, 'utf8') ?? '') && !/^\s*id-token:\s*write/m.test(wanted.get(WORKFLOW)!.content)) {
+    if (ownedFiles.includes(WORKFLOW) && /^\s*id-token:\s*write/m.test(tree.read(WORKFLOW, 'utf8') ?? '') && !/^\s*id-token:\s*write/m.test(wanted.get(WORKFLOW)!.content)) {
       notes.push(`${WORKFLOW} no longer holds \`id-token: write\`: no provider this project wears exchanges GitHub's OIDC token. A deploy target of your own that fetches that token itself (npm provenance, cosign) now fails; if you have one, run the deploy from a workflow of your own, and the house steps aside.`);
     }
     if (projectNode(tree).state !== 'declared') notes.push(`the workflow reads Node from ${nodeVersionFile(tree)}, which declares none here — add .nvmrc (one line: the Node major) or the deploy job fails at setup-node.`);
   }
   // The providers' human-run setup is useful whoever runs the pipeline, so it follows the bindings (and the
   // retired environments still to roll back), not the workflow.
-  for (const provider of providers) {
+  for (const provider of worn) {
     const envs = [...(environments.get(provider.id) ?? []), ...(retired.get(provider.id) ?? [])];
     if (envs.length && provider.files) for (const file of provider.files(tree, envs)) wanted.set(file.path, file);
   }
 
   // ── write what is owned; never what is not ───────────────────────────────────────────────────────────────
-  const owned = new Set(previous.files);
+  const owned = new Set(ownedFiles);
   const files: string[] = [];
   for (const [path, file] of wanted) {
     if (tree.exists(path) && !owned.has(path)) {
@@ -145,7 +169,7 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
     tree.write(path, file.content, file.mode ? { mode: file.mode } : undefined);
     files.push(path);
   }
-  for (const path of previous.files) {
+  for (const path of ownedFiles) {
     if (!wanted.has(path) && tree.exists(path)) {
       tree.delete(path);
       notes.push(`removed ${path} — nothing in the branch model calls for it any more.`);
@@ -161,9 +185,9 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
   // own pipeline, or a file at its path) nothing has stopped, so it is an ordinary note.
   for (const line of blocked) (files.includes(WORKFLOW) ? human : notes).push(line.blocked!);
   const cloud: Marker['cloud'] = {};
-  for (const provider of providers) {
+  for (const provider of worn) {
     for (const env of environments.get(provider.id) ?? []) {
-      (cloud[provider.id] ??= {})[env.name] = { target: env.target, branches: env.branches };
+      (cloud[provider.id] ??= {})[env.name] = { ...(env.target === undefined ? {} : { target: env.target }), branches: env.branches };
       const before = previous.cloud[provider.id]?.[env.name];
       const changed = !before || before.retired || before.target !== env.target || before.branches.join(',') !== env.branches.join(',');
       if (changed && provider.humanStep && files.length) human.push(provider.humanStep(env));
@@ -197,12 +221,15 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
  *     schema never landed;
  *   - throwing would fail the rest of the upgrade over a fact only a human can supply (the target), part-way through a
  *     plan of separate generator runs.
- * The environment stays held and its named providers keep their configurations and setup: nothing about them changed,
+ * The environment stays held and its other providers keep their configurations and setup: nothing about them changed,
  * and treating it as retired would ask a human to roll back the identity of a line about to deploy again.
+ *
+ * Only a provider with a `targetLabel` can be missing. One without deploys on this line whether it is named or not.
  */
 function resolve(
   model: BranchModel,
   providers: readonly CiDeployProvider[],
+  worn: readonly CiDeployProvider[],
   notes: string[],
   throughBranchModelSkill: string,
 ): { lines: WiredLine[]; environments: Map<string, CiEnvironment[]>; pending?: string } {
@@ -231,16 +258,20 @@ function resolve(
       continue;
     }
     for (const id of Object.keys(binding.ci.providers)) {
-      if (!providers.some((p) => p.id === id)) notes.push(`${binding.line}: provider "${id}" is not a layer this project wears — ignored.`);
+      const active = providers.find((p) => p.id === id);
+      if (active && active.targetLabel === undefined && !active.deployOptions) notes.push(`${binding.line}: provider "${id}" takes no target — the value is ignored, and it deploys here all the same.`);
+      if (active) continue;
+      const replacedBy = worn.some((p) => p.id === id) ? providers.find((p) => p.supersedes === id) : undefined;
+      notes.push(replacedBy ? `${binding.line}: provider "${id}" is superseded by "${replacedBy.id}" here — ignored. Name "${replacedBy.id}" instead.` : `${binding.line}: provider "${id}" is not a layer this project wears — ignored.`);
     }
     bound.set(binding.ci.environment, binding.line);
-    const named = providers.filter((p) => p.id in binding.ci!.providers);
-    for (const provider of named) {
+    const missing = providers.filter((p) => p.targetLabel !== undefined && !(p.id in binding.ci!.providers));
+    for (const provider of providers.filter((p) => !missing.includes(p))) {
       const envs = environments.get(provider.id) ?? [];
-      envs.push({ name: binding.ci.environment, target: binding.ci.providers[provider.id], branches: [binding.line] });
+      const target = binding.ci.providers[provider.id];
+      envs.push({ name: binding.ci.environment, ...(target === undefined ? {} : { target }), branches: [binding.line] });
       environments.set(provider.id, envs);
     }
-    const missing = providers.filter((p) => !named.includes(p));
     lines.push({
       branch: binding.line,
       environment: binding.ci.environment,
@@ -276,6 +307,28 @@ function unprotected(binding: BranchProjection['deploys'][number], projection: B
   return undefined;
 }
 
+/** What a provider's deploy targets take in an environment. A targeted provider is in an environment only with its target. */
+function optionsFor(provider: CiDeployProvider, env: CiEnvironment): Record<string, unknown> {
+  if (provider.targetLabel === undefined) return provider.deployOptions?.(env.target) ?? {};
+  if (env.target === undefined) throw new Error(`[ci] ${provider.id} reached "${env.name}" with no target.`);
+  return provider.deployOptions(env.target);
+}
+
+/**
+ * Two providers' options on ONE deploy target, in one configuration, because Nx applies only one: each provider's `args`
+ * reach the deploy, in provider order. Any other option has one value, so two providers disagreeing on it is refused:
+ * dropping either would deploy with the wrong one and say nothing. Toolkit code decides this, never a project.
+ */
+function composeOptions(current: Record<string, unknown>, next: Record<string, unknown>, where: string): Record<string, unknown> {
+  const composed = { ...current };
+  for (const [key, value] of Object.entries(next)) {
+    if (!(key in composed) || composed[key] === value) composed[key] = value;
+    else if (key === 'args' && typeof composed[key] === 'string' && typeof value === 'string') composed[key] = `${composed[key]} ${value}`;
+    else throw new Error(`[ci] Two providers set the option "${key}" on ${where} differently; one configuration holds one value.`);
+  }
+  return composed;
+}
+
 /**
  * The `ci-<environment>` configuration on every provider deploy target, for every environment — and the removal of
  * every one this layer wrote that is no longer wanted. A configuration of that name the house did not write is
@@ -289,13 +342,23 @@ function writeConfigurations(
   notes: string[],
 ): Record<string, string[]> {
   const wanted = new Map<string, { project: string; target: string; configs: Map<string, Record<string, unknown>> }>();
+  const stages = new Map<string, { stage: CiDeployStage; id: string }>();
   for (const provider of providers) {
     const envs = environments.get(provider.id) ?? [];
     if (!envs.length) continue;
+    const stage = provider.deployStage ?? 'code';
     for (const { project, target } of provider.deployTargets(tree)) {
       const key = `${project}:${target}`;
+      // A project deploys once, in one step, holding that stage's credentials: the other provider's would be missing.
+      const sharing = stages.get(key);
+      if (sharing && sharing.stage !== stage) throw new Error(`[ci] ${sharing.id} (${sharing.stage}) and ${provider.id} (${stage}) share ${key}, and a deploy target runs in one stage.`);
+      stages.set(key, { stage, id: provider.id });
       const entry = wanted.get(key) ?? { project, target, configs: new Map() };
-      for (const env of envs) entry.configs.set(ciConfiguration(env.name), provider.deployOptions(env.target));
+      for (const env of envs) {
+        const name = ciConfiguration(env.name);
+        const options = optionsFor(provider, env);
+        if (Object.keys(options).length) entry.configs.set(name, composeOptions(entry.configs.get(name) ?? {}, options, key));
+      }
       wanted.set(key, entry);
     }
   }
@@ -337,7 +400,18 @@ const splitKey = (key: string): [string, string] => {
   return [key.slice(0, at), key.slice(at + 1)];
 };
 
-/** Workflows the house did not write that already deploy on push — the project's own pipeline. */
+/**
+ * What the house owns now: the marker's record, but the workflow only while it is what the generator wrote. Its header
+ * answers both ways: a project that replaced the file keeps it though the marker still lists it, and a generated file
+ * whose marker was lost is still recognised, instead of being taken for a pipeline of the project's own because it deploys.
+ */
+function currentlyOwned(tree: Tree, recorded: readonly string[]): string[] {
+  const generated = tree.exists(WORKFLOW) && (tree.read(WORKFLOW, 'utf8') ?? '').startsWith(`${WORKFLOW_HEADER}\n`);
+  const others = recorded.filter((path) => path !== WORKFLOW);
+  return generated ? [...others, WORKFLOW] : others;
+}
+
+/** Workflows the house did not write that already deploy — the project's own pipeline. */
 function foreignDeployWorkflows(tree: Tree, ownedFiles: readonly string[]): string[] {
   const dir = '.github/workflows';
   if (!tree.exists(dir)) return [];
@@ -347,12 +421,7 @@ function foreignDeployWorkflows(tree: Tree, ownedFiles: readonly string[]): stri
     .filter((name) => /\.ya?ml$/.test(name))
     .map((name) => `${dir}/${name}`)
     .filter((path) => !ownedFiles.includes(path))
-    .filter((path) =>
-      (tree.read(path, 'utf8') ?? '')
-        .split('\n')
-        .map((line) => line.replace(/(^|\s)#.*$/, ''))
-        .some((line) => DEPLOYS.some((re) => re.test(line))),
-    );
+    .filter((path) => workflowDeploys(tree.read(path, 'utf8') ?? '', DEPLOYS));
 }
 
 function readMarker(tree: Tree): Marker {

@@ -6,7 +6,7 @@ import { type Platform, setProjectPlatform, platformTag } from './platform';
 import { type Classification, classifyWorkspace, violations } from './classify';
 import { type PlatformExternals, tableExternals, withDeclared } from './externals';
 import { workspaceStacks } from '../adapters/workspace';
-import { firewallSnippet, insertPlatformFirewall, readDeclaredBans } from './firewall';
+import { addFirewallBans, firewallSnippet, hasPlatformFirewall, insertPlatformFirewall, readDeclaredBans, recordStacks, recordedStacks } from './firewall';
 import { registerPlatformSync } from './sync';
 import { ESLINT_CONFIGS } from '../generators/_utils/lint-inference';
 import { nxInvocation } from '../generators/_utils/nx-host';
@@ -62,7 +62,8 @@ export interface ClassifyReport {
  *     (evidence only, every inference reported, what nothing settles left for a human), and the sync generator that
  *     classifies the projects created later on `nx sync` is registered (generators/platform-sync);
  *   - an EXISTING firewall is project state, whichever capability brought it: never re-written here, so a second
- *     capability asking is a no-op. (The 0.49 shape is migration 0.50.0's to upgrade.)
+ *     capability asking is a no-op. It only gains what a stack it has not met yet bans (`ensureStackBans`). (The 0.49
+ *     shape is migration 0.50.0's to upgrade.)
  *
  * @param who the generator asking — for the log.
  */
@@ -79,6 +80,10 @@ export function ensurePlatformFirewall(tree: Tree, who: string): void {
     }
     return;
   }
+  if (hasPlatformFirewall(tree.read(FIREWALL_CONFIG, 'utf8') ?? '')) {
+    ensureStackBans(tree, who);
+    return;
+  }
   const externals = platformExternals(tree);
   const edit = insertPlatformFirewall(tree.read(FIREWALL_CONFIG, 'utf8') ?? '', FIREWALL_CONFIG, externals, nx);
   if ('refused' in edit) {
@@ -90,11 +95,46 @@ export function ensurePlatformFirewall(tree: Tree, who: string): void {
     return;
   }
   if (!edit.changes.length) return;
-  tree.write(FIREWALL_CONFIG, edit.source);
+  tree.write(FIREWALL_CONFIG, withStacksRecorded(edit.source, tree));
   for (const change of edit.changes) logger.info(`[${who}] ${FIREWALL_CONFIG}: ${change}.`);
   for (const note of edit.notes) logger.warn(`[${who}] ${FIREWALL_CONFIG}: ${note}.`);
   registerPlatformSync(tree);
   classifyUntaggedProjects(tree, { who, nx, externals });
+}
+
+/** The stacks this workspace wears that ban anything: a stack with an empty list has nothing to give a firewall. */
+const banningStacks = (tree: Tree) => workspaceStacks(tree).filter((stack) => stack.webOnlyImports.length);
+
+/** A new firewall holds every worn stack's bans already (`platformExternals`), so it starts out having met them. */
+function withStacksRecorded(source: string, tree: Tree): string {
+  const stacks = banningStacks(tree).map((stack) => stack.id);
+  return stacks.length ? recordStacks(source, stacks) : source;
+}
+
+/**
+ * An existing firewall meeting a stack it has not been given: what that stack bans is added to the two constraints that
+ * ban web-only packages, additively, once. The record is what makes it once: a project that removes one of those bans
+ * afterwards has decided, and a later upgrade must not put it back. A firewall from before the record cannot say, so
+ * on its first run a ban it removed comes back, reported, and then stays removed.
+ *
+ * WHAT THIS IS NOT: a way to move a stack's LIST. Once met, a stack is never read here again, so a change to its
+ * `webOnlyImports` owes a rung like any change to the table (tools/test-generators, platform-firewall-seam).
+ */
+function ensureStackBans(tree: Tree, who: string): void {
+  const source = tree.read(FIREWALL_CONFIG, 'utf8') ?? '';
+  const recorded = recordedStacks(source);
+  const met = banningStacks(tree).filter((stack) => !recorded.includes(stack.id));
+  if (!met.length) return;
+  const bans = [...new Set(met.flatMap((stack) => stack.webOnlyImports))];
+  const edit = addFirewallBans(source, FIREWALL_CONFIG, { server: bans, shared: bans });
+  const stacks = met.map((stack) => stack.id).join(', ');
+  if ('refused' in edit) {
+    logger.warn(`[${who}] ${FIREWALL_CONFIG} was left as it is: ${edit.refused}. For ${stacks}, ban these from platform:server and platform:shared by hand: ${bans.join(', ')}.`);
+    return;
+  }
+  tree.write(FIREWALL_CONFIG, recordStacks(edit.source, [...recorded, ...met.map((stack) => stack.id)]));
+  for (const change of edit.changes) logger.info(`[${who}] ${FIREWALL_CONFIG}: ${change}, for ${stacks}. If you removed one on purpose, remove it again: it stays removed from here on.`);
+  for (const note of edit.notes) logger.warn(`[${who}] ${FIREWALL_CONFIG}: ${note}.`);
 }
 
 /** Why a project was left without a platform, as one sentence. */

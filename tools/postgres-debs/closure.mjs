@@ -220,3 +220,10 @@ export function render(table, asOf) {
   lines.push('} as const;', '');
   return lines.join('\n');
 }
+
+/** A `<name> = [...] as const` pin read out of versions.ts's text. */
+export function pinnedList(versionsSource, name) {
+  const match = new RegExp(`${name} = \\[([^\\]]*)\\] as const`).exec(versionsSource);
+  if (!match) throw new Error(`${name} is not in versions.ts as a one-line list`);
+  return [...match[1].matchAll(/'([^']+)'/g)].map(([, value]) => value);
+}
