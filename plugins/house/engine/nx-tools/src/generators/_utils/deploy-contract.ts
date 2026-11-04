@@ -8,7 +8,8 @@
 // HOW `affected` SEES A FILE. A file inside the project's root marks the project affected anyway, and `default` covers
 // its hash. A file OUTSIDE it marks the project affected only as a `{workspaceRoot}/…` input of one of its targets:
 // Nx matches each changed file against that path with minimatch (`getImplicitlyTouchedProjects`), so the path is a FILE
-// or a GLOB. A bare directory matches nothing beneath it, and nothing says so: write `supabase/migrations/**/*`.
+// or a GLOB. A bare directory matches nothing beneath it, and nothing says so at run time, so it is refused here, when the
+// target is declared, naming the glob to write.
 // Never the deploy RUNNERS: a toolkit release that only rewrites them ships nothing new, so it must not mark a deploy
 // affected.
 //
@@ -19,7 +20,7 @@
 // What this does not hold: whether a file is watched at DEPLOY time. A deploy whose shipping set is known when the
 // generator runs (a schema folder) is fully stated here. One that reads it at run time (Firebase's rules, from
 // firebase.json) needs its own check that the two have not drifted: firebase-deploy-rules.mjs.tpl.
-import type { TargetConfiguration, TargetDependencyConfig } from '@nx/devkit';
+import type { TargetConfiguration, TargetDependencyConfig, Tree } from '@nx/devkit';
 import type { TargetContract } from './house-targets';
 
 /** A task a deploy runs after: a target of this project, or one elsewhere (`{ projects, target }`). */
@@ -30,7 +31,7 @@ export interface DeploySpec {
   command: string;
   /** The project's own inputs (`default`, `^default`, a named input) — what covers the files inside its root. */
   inputs: readonly string[];
-  /** Workspace-relative files or globs (never a bare directory, see the header) that change what ships. */
+  /** Workspace-relative files or globs that change what ships. A bare directory is refused (see the header). */
   watches: readonly string[];
   /**
    * What must run first, every time: part of the contract. Never another project's `deploy`: the order between deploys
@@ -41,6 +42,28 @@ export interface DeploySpec {
   gates?: readonly DeployDependency[];
 }
 
+const stripDotSlash = (path: string) => path.replace(/^\.\//, '');
+
+/**
+ * Throw unless every watched path can match a file. A glob can. A path that is a file can, and so can one that will be,
+ * if its name says file. A directory cannot, and neither can a missing path with no extension: it is a directory the
+ * generator has not seeded yet, or a file the name cannot vouch for (seed that file first, and it passes as a file).
+ */
+function refuseBareDirectories(tree: Tree, projectRoot: string, watches: readonly string[]): void {
+  for (const watched of watches) {
+    const path = stripDotSlash(watched);
+    if (/[*?[\]{}()!]/.test(path) || tree.isFile(path)) continue;
+    const directory = path === '' || path === '.' || path.endsWith('/') || tree.exists(path);
+    if (!directory && /\.[^/]*$/.test(path)) continue;
+    const glob = `${path.replace(/\/$/, '') || '.'}/**/*`;
+    throw new Error(
+      `The deploy target of ${projectRoot} watches '${watched}', which ${directory ? 'is a directory' : 'does not exist and has no extension, so it reads as a directory'}. ` +
+        `Nx matches a changed file against a watched path as a file or a glob, so nothing beneath a bare directory marks the deploy affected, and nothing would say so. ` +
+        `Watch '${glob}' instead${directory ? '' : ' (or, if it is a file, seed it before declaring the deploy)'}.`,
+    );
+  }
+}
+
 /**
  * `watches` as `{workspaceRoot}/…` inputs: what is inside the project's own root is dropped, because `default` covers
  * it and its own files already mark it affected. A project at the workspace root owns nothing by path this way, so
@@ -48,7 +71,7 @@ export interface DeploySpec {
  */
 export function watchedInputs(projectRoot: string, watches: readonly string[]): string[] {
   const inside = (path: string) => projectRoot !== '.' && (path === projectRoot || path.startsWith(`${projectRoot}/`));
-  return [...new Set(watches.map((path) => path.replace(/^\.\//, '')))]
+  return [...new Set(watches.map(stripDotSlash))]
     .filter((path) => !inside(path))
     .map((path) => `{workspaceRoot}/${path}`);
 }
@@ -58,9 +81,11 @@ export function watchedInputs(projectRoot: string, watches: readonly string[]): 
  * `contract: { deploy: contract }` and `targets: { deploy: target }`.
  */
 export function deployTarget(
+  tree: Tree,
   projectRoot: string,
   spec: DeploySpec,
 ): { target: TargetConfiguration; contract: TargetContract[string] } {
+  refuseBareDirectories(tree, projectRoot, spec.watches);
   const never = { cache: false, parallelism: false };
   const requires = [...(spec.requires ?? [])];
   const dependsOn = [...requires, ...(spec.gates ?? [])];
