@@ -16,10 +16,15 @@ Budget 12 (default): core 1+2, wire 1, reviewer 1+5, correctness pass 1 = 11, re
 ## Units
 | id | branch | re-runnable | status |
 |---|---|---|---|
-| core | feat/hps3-core | yes, its own branch | dispatched |
-| wire | tripwire, dogfood, image job | yes | pending |
-| docs | with wire | yes | pending |
+| core | feat/hps3-core | yes, its own branch | returned, item 9 resumed |
+| wire | tripwire, dogfood, image job, docs; feat/hps3-wire | yes | dispatched |
+| docs | with wire | yes | dispatched |
 | review | sanity review | yes | pending |
 | gate | push + PR green, upgrade --local, dogfood, rebuild, real hosted project | yes | pending |
 
 ## Results
+
+### core (returned; feat/hps3-core 72bb7ce1..58ceb272, trace handoffs/seam3-core.md; spent 0 of 2)
+Layer, provider port, keeper with lock, detached reset, config.toml line edits, folder move, preflight, CI provider, house docs, `avoidPorts` in the engine. CLI 3.0.0, still latest. Real runs: every 6b rule, kill -9 and adoption, real serve, worktree, new and add-layer. test-supabase 79; layers 113; generators 451, 35 skipped; migrations 417.
+Departures: blocks avoid 10000-32767 (the runtime refuses 10000-19999); identity is data_directory + port, since system_identifier changes on reset; reset only with migrations, no ledger, no public tables; one stack per tree; dead trees' data named, not removed; keeper polls owner.json; Debian postgresql-client stays; no .mcp.json, official plugin not enabled, start prints a local `claude mcp add`; types, secrets, functions unbuilt.
+ORCHESTRATOR DECISIONS: accept blocks in the ephemeral range, clashes are loud. Secret stays POSTGRES_DEPLOY_URL_<ENV>. Amend ARCHITECTURE with departures 1-3, additively. Item 9 is not left out: ARCHITECTURE's shape names types, secrets and functions, and the mission is "correctly and officially". Resumed to core.
