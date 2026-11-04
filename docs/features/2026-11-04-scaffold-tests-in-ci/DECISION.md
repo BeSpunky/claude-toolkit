@@ -1,6 +1,9 @@
 ---
 effort: scaffold-tests-in-ci
-summary: Make the scaffold tests pass in CI, red since bf44dc16, and give a failed TCP readiness probe its reason on dual-stack machines.
+status: concluded
+concluded: 2026-11-04
+summary: The scaffold tests pass in CI again, and a refused TCP readiness probe keeps its reason on dual-stack machines (nx-tools 0.52.2).
+tags: [ci, tests, dev-engine]
 ---
 
 ## Causes, as found
