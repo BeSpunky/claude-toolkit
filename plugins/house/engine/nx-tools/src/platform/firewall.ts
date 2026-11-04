@@ -35,7 +35,7 @@
 // about it is written where the developer — or Claude — looks next: a comment above `platformConstraints`, naming
 // the one command that fixes the common case (`platform`, which infers and sets a project's tag).
 //
-// Two writers, one model: `insertPlatformFirewall` (a workspace gaining the firewall — firebase-emulators) and
+// Two writers, one model: `insertPlatformFirewall` (a workspace gaining the firewall — `ensurePlatformFirewall`) and
 // `upgradePlatformFirewall` (a workspace carrying the 0.49 shape — two ban-only constraints inside the project's own
 // `depConstraints` — migration 0.50.0). Both splice text located through the TypeScript AST, so the surrounding
 // file keeps its formatting. `readDeclaredBans` is the third reader: what the config bans, for the classifier.

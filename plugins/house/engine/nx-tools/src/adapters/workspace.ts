@@ -1,9 +1,10 @@
 // WHICH STACKS THIS WORKSPACE WEARS — the adapter registry read against the layer registry.
 //
 // "The most specific stack whose layer is present and which has port X" is a question generators asked, each in its
-// own words (the stack that creates the first app, binds a new design system, creates a library by default). It lives here, ONCE, and in its own module for a structural
-// reason: the adapter registry must not import the layer registry — layer descriptors import the adapter
-// registry (the web layer recognises dev-servers through it), and the reverse edge made the two a cycle.
+// own words (the stack that creates the first app, binds a new design system, creates a library by default). It lives
+// here, ONCE, and in its own module for a structural reason: the adapter registry must not import the layer registry —
+// layer descriptors import the adapter registry (the web layer recognises dev-servers through it), and the reverse
+// edge made the two a cycle.
 import type { Tree } from '@nx/devkit';
 import { ADAPTERS, type Port, type StackAdapter } from './registry';
 import { isPresent } from '../layers/registry';

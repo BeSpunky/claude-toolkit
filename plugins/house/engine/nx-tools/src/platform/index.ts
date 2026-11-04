@@ -6,13 +6,14 @@ import { type Platform, setProjectPlatform, platformTag } from './platform';
 import { type Classification, classifyWorkspace, violations } from './classify';
 import { type PlatformExternals, tableExternals, withDeclared } from './externals';
 import { workspaceStacks } from '../adapters/workspace';
-import { readDeclaredBans } from './firewall';
+import { firewallSnippet, insertPlatformFirewall, readDeclaredBans } from './firewall';
+import { registerPlatformSync } from './sync';
+import { nxInvocation } from '../generators/_utils/nx-host';
 
 export * from './platform';
 export { matchesExternal, isNodeBuiltin, type PlatformExternals, type DeclaredBans } from './externals';
 export { classifyWorkspace, holdsCode, isCodeProject, violations, type Classification, type Violation } from './classify';
 export {
-  insertPlatformFirewall,
   upgradePlatformFirewall,
   readDeclaredBans,
   hasPlatformFirewall,
@@ -47,6 +48,40 @@ export interface ClassifyReport {
   tagged: Array<{ project: string; platform: Platform }>;
   /** Code projects left without a platform: mixed, or nothing binds them to one — each reported with the command. */
   unresolved: string[];
+}
+
+/**
+ * Give this workspace the platform firewall — what any capability that brings a second platform calls (Firebase's
+ * Cloud Functions, a database driver that must never reach a browser bundle). Best-effort, and safe on every run:
+ *   - no root flat ESLint config: nothing to write into, so nothing happens — lint is what enforces the firewall;
+ *   - a config it cannot edit safely: left alone, and the reason and a snippet to paste are logged;
+ *   - the firewall arriving: it comes over projects nobody classified, so they are classified in the same act
+ *     (evidence only, every inference reported, what nothing settles left for a human), and the sync generator that
+ *     classifies the projects created later on `nx sync` is registered (generators/platform-sync);
+ *   - an EXISTING firewall is project state, whichever capability brought it: never re-written here, so a second
+ *     capability asking is a no-op. (The 0.49 shape is migration 0.50.0's to upgrade.)
+ *
+ * @param who the generator asking — for the log.
+ */
+export function ensurePlatformFirewall(tree: Tree, who: string): void {
+  if (!tree.exists(FIREWALL_CONFIG)) return;
+  const externals = platformExternals(tree);
+  const nx = nxInvocation(tree).command;
+  const edit = insertPlatformFirewall(tree.read(FIREWALL_CONFIG, 'utf8') ?? '', FIREWALL_CONFIG, externals, nx);
+  if ('refused' in edit) {
+    logger.warn(
+      `[${who}] Did not insert the platform firewall into ${FIREWALL_CONFIG}: ${edit.refused}. Add it by hand, then ` +
+        `classify every project (${platformCommand(nx, '<project>')}):\n` +
+        firewallSnippet(externals, nx),
+    );
+    return;
+  }
+  if (!edit.changes.length) return;
+  tree.write(FIREWALL_CONFIG, edit.source);
+  for (const change of edit.changes) logger.info(`[${who}] ${FIREWALL_CONFIG}: ${change}.`);
+  for (const note of edit.notes) logger.warn(`[${who}] ${FIREWALL_CONFIG}: ${note}.`);
+  registerPlatformSync(tree);
+  classifyUntaggedProjects(tree, { who, nx, externals });
 }
 
 /** Why a project was left without a platform, as one sentence. */

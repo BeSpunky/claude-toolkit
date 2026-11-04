@@ -19,7 +19,7 @@ import { isBuiltin } from 'node:module';
 export interface PlatformExternals {
   /** Browser-only: the Firebase client SDK (and its modular packages) and every client framework the workspace wears. */
   readonly web: readonly string[];
-  /** Server-only: the Firebase Admin and Functions SDKs, Google Cloud's server clients, Node HTTP servers. */
+  /** Server-only: the Firebase Admin and Functions SDKs, Google Cloud's server clients, Node HTTP servers, Postgres drivers. */
   readonly server: readonly string[];
   /** Bound to SOME platform by the project's own config, which does not say which (a ban only `platform:shared` declares). */
   readonly unsided: readonly string[];
@@ -34,6 +34,19 @@ const SERVER_ONLY = [
   // Google Cloud's Node clients (Secret Manager, Storage, Pub/Sub, …): service-account credentials, gRPC.
   '@google-cloud/*',
   'express', 'express/*',
+  // Postgres clients that open a TCP connection with credentials, or bind libpq: no browser build, no browser
+  // condition in their exports (read from each package, 2026-11). NOT here, because the package does run in a browser
+  // and a shared schema or a client page may honestly import it: `@supabase/supabase-js`, `@electric-sql/pglite`,
+  // `@prisma/client` (browser export), `knex` (browser field), `kysely`, `drizzle-orm` (schema and query builders),
+  // `@neondatabase/serverless` (an explicit `disableWarningInBrowsers` option).
+  'pg', 'pg/*',
+  'pg-native', 'pg-native/*',
+  'pg-pool', 'pg-pool/*',
+  'pg-cursor', 'pg-cursor/*',
+  'pg-query-stream', 'pg-query-stream/*',
+  'pg-promise', 'pg-promise/*',
+  'postgres', 'postgres/*',
+  'slonik', 'slonik/*',
 ];
 const WEB_ONLY = [
   'firebase', 'firebase/*',
