@@ -99,7 +99,7 @@ export const provider = {
     try {
       const result = await cli(['db', 'push', `--remote=${bare}`, '--yes'], { env: { PGPASSFILE: passfile } });
       const said = hide(`${result.stdout}${result.stderr}`).trim();
-      if (said) console.log(said);
+      if (said) console.log(`${said}`);
       if (result.code !== 0) throw new Refusal(`Migrating ${target.display} failed (supabase exit ${result.code}). What already ran stays, recorded in its ledger.`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
