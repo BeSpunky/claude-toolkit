@@ -13,6 +13,7 @@
 //           "ports": { "app": 8000 },                       // name → BASE port; every port shifts by one offset
 //           "env": { "KEY": "value" },                      // optional; values substitute like cmd
 //           "exports": { "KEY": "127.0.0.1:${PORT:app}" },  // optional; what a DEPENDENT of the stack is told (below)
+//           "avoidPorts": ["20000-32767"],                  // optional; no port of the stack may land there, at any offset
 //           "primary": true,                                // optional; the process the app URL points at
 //           "dependency": true,                             // optional; the stack waits for it (below)
 //           "ready": { "http": "/" },                       // what "up" means: for the primary (optional) or a dependency (required)
@@ -65,6 +66,8 @@
 //               --skip'ed process's advice is never given
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { parsePortRange } from './ports.mjs';
 
 export const DECLARATION_PATH = '.bespunky/dev.json';
 
@@ -153,6 +156,7 @@ export function validate(decl) {
       for (const field of ['env', 'exports']) {
         if (p[field] !== undefined && (!isObject(p[field]) || !Object.values(p[field]).every((v) => typeof v === 'string'))) fail(`${pat}.${field}`, 'must map names to strings');
       }
+      if (p.avoidPorts !== undefined && (!Array.isArray(p.avoidPorts) || !p.avoidPorts.every((range) => parsePortRange(range)))) fail(`${pat}.avoidPorts`, 'must list port ranges, "<low>-<high>"');
       if (p.primary !== undefined && typeof p.primary !== 'boolean') fail(`${pat}.primary`, 'must be a boolean');
       if (p.primary) {
         primaries++;

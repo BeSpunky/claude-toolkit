@@ -58,7 +58,7 @@ const copy = (from, to) => {
 };
 copy(FILES, engine);
 const load = (rel) => import(pathToFileURL(join(engine, rel)).href);
-const { portBlock, blockForKey, resolvePortOffset, isPortFree } = await load('lib/ports.mjs');
+const { offsetCandidates, parsePortRange, portBlock, blockForKey, resolvePortOffset, isPortFree } = await load('lib/ports.mjs');
 const { validate, planApp, pickApp } = await load('lib/declaration.mjs');
 const { parseArgs } = await load('dev.mjs');
 const { parseWorktrees, worktreeSlug } = await load('lib/worktrees.mjs');
@@ -76,6 +76,17 @@ try {
   ok('…the base stack still serves (--port-offset=0)', (await resolvePortOffset('0', highBase)) === 0);
   ok('…the main tree still takes the free base ports on auto', (await resolvePortOffset('auto', { ...highBase, isMain: true })) === 0);
   ok('…and a serve that must SHIFT is refused plainly', await throws(() => resolvePortOffset('auto', highBase)));
+
+  // A stack whose tools allocate ports for themselves keeps its declared ones out of where they allocate from.
+  const avoided = { key: 'k', isMain: true, block: portBlock([5432, 5441]), avoid: [parsePortRange('20000-32767')] };
+  const { offsets } = offsetCandidates('auto', avoided);
+  ok('avoidPorts: auto never offers a block that lands in the range, and offers the rest', offsets.length > 10 && offsets.every((o) => 5441 + o < 20000 || 5432 + o > 32767) && offsets[0] === 0);
+  ok('avoidPorts: a block is out from where it first touches the range to where it last does', offsets.includes(14000) && !offsets.includes(15000) && !offsets.includes(27000) && offsets.includes(28000));
+  ok('avoidPorts: an explicit offset inside is refused, by name', await throws(() => Promise.resolve().then(() => offsetCandidates('20000', avoided))));
+  ok('avoidPorts: an explicit offset clear of it is honoured', offsetCandidates('6000', avoided).offsets[0] === 6000);
+  ok('avoidPorts: a range is <low>-<high>, in order, of ports', parsePortRange('32767-20000') === null && parsePortRange('nope') === null && parsePortRange('1-70000') === null);
+  ok('avoidPorts: the declaration holds it to that', await throws(() => Promise.resolve().then(() => validate({ apps: { a: { processes: [{ id: 'x', cmd: 'x', primary: true, ports: { x: 1000 }, ready: { http: '/' }, avoidPorts: ['nope'] }] } } }))));
+  ok('avoidPorts: the flag on `dev run`', parseArgs(['run', 'a', '--ports=x=1', '--avoid-ports=20000-32767', '--', 'c']).avoidPorts?.[0]?.[1] === 32767);
 
   const free = async () => true;
   const busy = (...ports) => async (p) => !ports.includes(p);
