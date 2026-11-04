@@ -33,6 +33,11 @@ on:
       - '!tools/check-runner-image/devcontainer.sh' # devcontainer-image-e2e.yml's; it reaches neither the fallback nor its image
       - '!tools/check-runner-image/postgres-image.sh' # devcontainer-image-e2e.yml's, likewise
       - '!tools/check-runner-image/postgres-image.inside.sh'
+      - '!tools/check-runner-image/postgres-image.launcher.sh'
+      - '!tools/check-runner-image/image-case.lib.sh'
+      - '!tools/check-runner-image/supabase-image.sh'
+      - '!tools/check-runner-image/supabase-image.inside.sh'
+      - '!tools/check-runner-image/supabase-image.launcher.sh'
       - '.github/workflows/runner-image-e2e.yml'
 
 permissions:

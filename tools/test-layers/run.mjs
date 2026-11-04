@@ -1254,6 +1254,9 @@ checkAsync('postgres closures: the table covers the pins, is exactly what its to
   for (const major of versions.POSTGRES_MAJORS) {
     for (const codename of versions.POSTGRES_DEB_CODENAMES) ok(imageCovers.has(`${major}/${codename}`), `tools/check-runner-image/postgres-image.sh has no case for Postgres ${major} on ${codename}`);
   }
+  // Likewise the Supabase job's: every release the house composes, and a launcher boot on each that has a Node of its own.
+  const supabaseCases = readFileSync(new URL('../check-runner-image/supabase-image.sh', import.meta.url), 'utf8').match(/^sb-[^|]*\|[^|]*\|[^|]*\|[^|]*\|\w+$/gm) ?? [];
+  for (const codename of versions.POSTGRES_DEB_CODENAMES) ok(supabaseCases.some((line) => { const fields = line.split('|'); return fields[4] === codename && fields[1] === 'node'; }), `tools/check-runner-image/supabase-image.sh has no case booting on ${codename}`);
   for (const major of versions.POSTGRES_MAJORS) {
     const closures = POSTGRES_CLOSURES[major] ?? {};
     ok(Object.keys(closures).join() === versions.POSTGRES_DEB_CODENAMES.join(), `Postgres ${major}'s codenames are not the pins: ${Object.keys(closures)}`);

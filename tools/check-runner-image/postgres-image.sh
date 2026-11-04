@@ -29,8 +29,8 @@ ENGINE="$ROOT/plugins/house/engine"
 VERSIONS="$ENGINE/nx-tools/src/generators/_utils/versions.ts"
 MCR=mcr.microsoft.com/devcontainers
 
-notice() { echo "$2"; [ -z "${GITHUB_ACTIONS:-}" ] || echo "::$1::$2"; }
-summary() { [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+# shellcheck source=image-case.lib.sh
+. "$HERE/image-case.lib.sh"
 
 DBMATE_VERSION="$(sed -n "s/^export const DBMATE_VERSION = '\([^']*\)'.*/\1/p" "$VERSIONS")"
 [ -n "$DBMATE_VERSION" ] || { notice error "No DBMATE_VERSION in $VERSIONS: COULD NOT RUN."; exit 2; }
@@ -60,46 +60,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-FINDINGS=0
-COULD_NOT=0
-CASE=""
-# The status FIRST: `check "says $(x)" $?` would hand it the status of that `$(x)`, and every check would pass.
-check() {   # <holds? 0/non-zero> <what>
-  if [ "$1" -eq 0 ]; then echo "  ok   $2"; else notice error "FAILED ($CASE): $2"; FINDINGS=1; CASE_RED=1; fi
-}
-could_not() { notice error "COULD NOT RUN ($CASE): $1"; COULD_NOT=1; CASE_RED=1; }
-says() { grep -qF -- "$2" "$1"; }
-value() { sed -n "s/^$2=//p" "$1" | head -n 1; }
-equal() {   # <file> <fact> <wanted> <what>
-  [ "$(value "$1" "$2")" = "$3" ]; check $? "$4 (it says '$(value "$1" "$2")')"
-}
-starts() {   # <file> <fact> <wanted prefix> <what>
-  case "$(value "$1" "$2")" in "$3"*) check 0 "$4" ;; *) check 1 "$4 (it says '$(value "$1" "$2")')" ;; esac
-}
-json_field() { sed -n "s/^[[:space:]]*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1; }
-
-# Lines of the installer's own output in a plain BuildKit log: `#7 3.21 [os-packages] …`, never the step's header.
-installer_lines() { sed -n 's/^#[0-9]* [0-9.]* \(\[os-packages\].*\)$/\1/p' "$1"; }
-
-project_for() {   # <preset>: prints the project's directory, making it the first time. Fails when `new` does.
-  local preset="$1" dir="$WORK/pg-$1" flags=()
-  if [ ! -d "$dir" ]; then
-    [ "$preset" = agent ] || flags=("--preset=$preset")
-    echo "One project, made with this checkout on Node $(node --version 2>/dev/null): house.sh new --local ${flags[*]-} --add-layer=postgres" >&2
-    if ! PROJECTS_DIR="$WORK" bash "$ENGINE/house.sh" new --local ${flags[@]+"${flags[@]}"} --add-layer=postgres "pg-$preset" < /dev/null > "$WORK/new-$preset.log" 2>&1; then
-      tail -n 40 "$WORK/new-$preset.log" >&2
-      return 1
-    fi
-  fi
-  echo "$dir"
-}
-
 run_case() {
   local preset="$2" node="$3" major="$4" image="$5" codename="$6" project
   CASE="$1"; CASE_RED=0
   echo; echo "=== $CASE: Postgres $major on $image ($codename), the $preset preset"
 
-  if ! project="$(project_for "$preset")"; then
+  if ! project="$(project_for pg postgres "$preset")"; then
     could_not "house.sh new --local failed: no project to generate from"; summary "| $CASE | could not run |"; return
   fi
   if ! docker pull -q "$image" > "$WORK/pull.log" 2>&1; then
