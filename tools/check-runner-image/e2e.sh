@@ -70,7 +70,9 @@ grep -q "^NEW_OK .*image=$IMAGE " "$LOG"; check "it ran on $IMAGE, not the host'
 DIR="$WORK/projects/$PROJECT"
 [ -f "$DIR/HOUSE.md" ]; check "$PROJECT/HOUSE.md exists" $?
 # What only a real engine can show: a fake docker writes as this user whatever the run asked for.
-[ -e "$DIR" ] && [ -z "$(find "$DIR" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; check "everything in it belongs to uid $(id -u)" $?
+# The uid first: a `$(id -u)` in check's arguments would replace the `$?` beside it, and this could never fail.
+ME="$(id -u)"
+[ -e "$DIR" ] && [ -z "$(find "$DIR" ! -user "$ME" -print -quit 2>/dev/null)" ]; check "everything in it belongs to uid $ME" $?
 [ "$(cat "$DIR/.nvmrc" 2>/dev/null)" = "$MAJOR" ]; check ".nvmrc is the Node the fallback ran on ($MAJOR)" $?
 grep -q '"packageManager": *"yarn@' "$DIR/package.json" 2>/dev/null; check "package.json declares the yarn it was made with" $?
 
