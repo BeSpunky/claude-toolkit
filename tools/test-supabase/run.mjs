@@ -30,7 +30,7 @@ const { build, load, dispose } = compilePayload('bespunky-test-supabase');
 const { compose, renderOsPackagesScript } = requireFromRepo(join(build, 'src/generators/devcontainer/compose'));
 const { layer } = load('layers/registry');
 const { SUPABASE_CLI_VERSION: PIN } = load('generators/_utils/versions');
-const { SUPABASE_PORTS } = load('generators/supabase/dev-fragment');
+const FRAGMENT = { supabaseFragment: load('generators/supabase/dev-fragment').supabaseFragment().processes };
 const fragment = layer('supabase').devcontainer;
 const script = renderOsPackagesScript(compose([{ id: 'supabase', fragment: { image: { ref: 'img', remoteUser: 'node' }, archives: fragment.archives } }], { nodeMajor: '22' }));
 dispose();
@@ -176,6 +176,8 @@ scenario('start: the real keeper under the real engine; status JSON, owner.json,
   const dir = fixture();
   const stack = await start(dir);
   check(!stack.failed, `started: ${JSON.stringify(stack.failed)}`);
+  const drifted = execFileSync('git', ['status', '--porcelain', 'supabase/config.toml', 'supabase/supabase.lock', 'supabase/.gitignore'], { cwd: dir, encoding: 'utf8' });
+  check(drifted === '', `a first start rewrote what the layer seeds (generators/supabase/seed): ${drifted}`);
   const status = JSON.parse(sb(dir, ['status', '--output-format', 'json']).stdout);
   check(status.runtime === 'native' && status.owner === 'reachable' && status.lifecycle === 'running', `status: ${status.runtime} ${status.owner} ${status.lifecycle}`);
   check(status.composition?.members?.find((m) => m.service === 'database')?.health === 'healthy', 'status lists a healthy database member');
@@ -339,6 +341,87 @@ scenario('a reset runs to completion: a stop waits, a signal at its caller does 
   await stop(third);
 });
 
+scenario('a reset with nothing running boots, resets and stops; and it is the road back from whatever an interrupted reset left', async () => {
+  const dir = fixture();
+  const stack = await start(dir);
+  check(!stack.failed, `started: ${JSON.stringify(stack.failed)}`);
+  sb(dir, ['db', 'query', 'create table public.drift(v text);']);
+  await stop(stack);
+  const booted = launcher(dir, 'reset');
+  check(booted.status === 0, `reset with nothing running: ${booted.stdout}${booted.stderr}`);
+  check(!ps(dir).length && JSON.parse(sb(dir, ['status', '--output-format', 'json']).stdout).owner !== 'reachable', 'it stopped again');
+
+  const again = await start(dir);
+  check(!again.failed, `started: ${JSON.stringify(again.failed)}`);
+  check(rows(dir, "select to_regclass('public.drift')::text r")[0].r === null, 'the drift went with it');
+  // The hazard itself, by hand, past the launcher's lock: a stop landing in the middle of the CLI's own reset.
+  const reset = spawn(join(toolsBin, 'supabase'), ['db', 'reset', '--agent', 'no'], { cwd: dir, env: cliEnv(), stdio: 'ignore' });
+  const resetEnded = new Promise((done) => reset.on('exit', done));
+  await sleep(800);
+  sb(dir, ['stop']);
+  await resetEnded;
+  await Promise.race([again.exit, sleep(15_000)]);
+  const rebuilt = launcher(dir, 'reset');
+  check(rebuilt.status === 0, `whatever it left, a reset rebuilds it: ${rebuilt.stdout.slice(-300)}${rebuilt.stderr.slice(-300)}`);
+  const third = await start(dir);
+  check(!third.failed, `then it starts: ${JSON.stringify(third.failed)}`);
+  check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'migrated and seeded');
+  await stop(third);
+});
+
+scenario('a git worktree has a stack of its own', async () => {
+  const dir = fixture();
+  const stack = await start(dir);
+  check(!stack.failed, `started: ${JSON.stringify(stack.failed)}`);
+  const main = stackIdOf(dir);
+  await stop(stack);
+  const worktree = join(scratch, `wt-${fixtures}`);
+  execFileSync('git', ['worktree', 'add', '-qb', 'wt', worktree], { cwd: dir, stdio: 'ignore' });
+  const other = await start(worktree);
+  check(!other.failed, `started: ${JSON.stringify(other.failed)}`);
+  check(stackIdOf(worktree) !== main, 'another stack');
+  check(rows(worktree, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'migrated and seeded on its own');
+  await stop(other);
+  spawnSync(join(toolsBin, 'supabase'), ['stack', 'destroy', '--yes'], { cwd: worktree, env: cliEnv(), stdio: 'ignore', timeout: 60_000 });
+});
+
+scenario('a real serve: the keeper as a dependency, its exports reach a sibling, a stop takes both', async () => {
+  const dir = fixture();
+  const seen = join(scratch, 'sibling-saw');
+  const { supabaseFragment } = FRAGMENT;
+  const declaration = {
+    apps: {
+      site: {
+        processes: [
+          ...supabaseFragment,
+          { id: 'app', cmd: ['node', '-e', `require('fs').writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ url: process.env.DATABASE_URL, api: process.env.SUPABASE_URL })); require('http').createServer((q, r) => r.end('ok')).listen(process.env.PORT_APP, '127.0.0.1')`], ports: { app: 4200 }, primary: true, ready: { http: '/' } },
+        ],
+      },
+    },
+  };
+  mkdirSync(join(dir, '.bespunky'), { recursive: true });
+  writeFileSync(join(dir, '.bespunky/dev.json'), JSON.stringify(declaration, null, 2));
+  const log = join(scratch, 'serve.log');
+  const serve = spawn(process.execPath, ['tools/dev/dev.mjs', 'serve', 'site', '--no-shared-browser'], { cwd: dir, env: baseEnv(), detached: true, stdio: ['ignore', openSync(log, 'a'), openSync(log, 'a')] });
+  running.push({ dir, child: serve });
+  const served = new Promise((done) => serve.on('exit', (code) => done({ code })));
+  const deadline = Date.now() + 240_000;
+  while (!existsSync(seen) && Date.now() < deadline) await sleep(250);
+  check(existsSync(seen), `the app started: ${readFileSync(log, 'utf8').slice(-600)}`);
+  const row = ps(dir)[0];
+  const saw = JSON.parse(readFileSync(seen, 'utf8'));
+  check(new URL(saw.url).port === String(row.ports.postgres) && new URL(saw.url).pathname === '/postgres', `DATABASE_URL reached the sibling: ${saw.url}`);
+  check(new URL(saw.api).port === String(row.ports['supabase-api']), `SUPABASE_URL: ${saw.api}`);
+  check(Object.values(row.ports).every((port) => port < 10000 || port > 32767), `auto stayed out of the runtime's range: ${JSON.stringify(row.ports)}`);
+  check(row.key === `site@${row.offset}` && row.offset !== 0, `an agent's auto, off the base ports: ${row.key}`);
+  const id = stackIdOf(dir);
+  const owner = ownerPid(id);
+  const stopped = dev(dir, 'stop', 'site', `--offset=${row.offset}`);
+  const end = await Promise.race([served, sleep(30_000).then(() => ({ hung: true }))]);
+  check(stopped.status === 0 && !end.hung, `the stop: ${stopped.stdout}${stopped.stderr} ${JSON.stringify(end)}`);
+  check(!existsSync(`/proc/${owner}`) && !listening(row.ports.postgres) && !listening(row.ports.app), 'the stack and the app are gone');
+});
+
 scenario('refusals: an env file, a block in the CLI\'s range, a second stack in a tree, another stack\'s port', async () => {
   const dir = fixture();
   writeFileSync(join(dir, '.env'), 'SUPABASE_DB_PORT=1\n');
@@ -369,7 +452,7 @@ try {
   console.error(`  FAIL ${error.stack ?? error}`);
 } finally {
   for (const { dir, child } of running) {
-    if (child.exitCode === null && child.signalCode === null) {
+    if (child?.exitCode === null && child.signalCode === null) {
       try {
         process.kill(child.pid, 'SIGTERM');
       } catch {}

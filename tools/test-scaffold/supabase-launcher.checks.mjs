@@ -300,6 +300,23 @@ try {
   owner.kill('SIGKILL');
   check('the owner gone unasked ends the keeper as a failure, without a stop', (await k.ended) === 1 && callsOf('stop').length === 0 && /owner went away/.test(k.said()), k.said());
 
+  console.log('the preflight');
+  const probe = (cwd, ...args) => spawnSync(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', join(GENERATORS, '../../../house-probe.mts'), ...args], { cwd, encoding: 'utf8' });
+  const project = join(scratch, 'probed');
+  mkdirSync(join(project, '.bespunky'), { recursive: true });
+  writeFileSync(join(project, '.bespunky/postgres.json'), '{ "major": 18 }\n');
+  check('a project declaring 18 is refused, with the fix', /^supabase-major-mismatch\t.*"major": 17/.test(probe(project, '--ensure=supabase').stdout), probe(project, '--ensure=supabase').stdout);
+  check('…and only where supabase is in play', probe(project, '--ensure=postgres').stdout === '', probe(project, '--ensure=postgres').stdout);
+  writeFileSync(join(project, '.bespunky/postgres.json'), '{ "major": 17 }\n');
+  check('17 passes', probe(project, '--ensure=supabase').stdout === '', probe(project, '--ensure=supabase').stdout);
+  mkdirSync(join(project, 'supabase/migrations'), { recursive: true });
+  mkdirSync(join(project, 'postgres/migrations'), { recursive: true });
+  writeFileSync(join(project, 'supabase/config.toml'), '[db]\nmajor_version = 16\n[inbucket]\nenabled = true\n');
+  writeFileSync(join(project, 'postgres/migrations/1_a.sql'), '');
+  writeFileSync(join(project, 'supabase/migrations/1_a.sql'), '');
+  const said = probe(project, '--evident=postgres,supabase').stdout;
+  check('a config it cannot run, a v2 config, and two folders are refused before anything is written', /^supabase-major-mismatch\t/m.test(said) && /^supabase-config-outdated\t/m.test(said) && /^supabase-migrations-twice\t/m.test(said), said);
+
   // The lock.
   console.log('the lock');
   const { withStackLock } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-keeper.mjs')));
