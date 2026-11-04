@@ -14,6 +14,7 @@ export * from './platform';
 export { matchesExternal, isNodeBuiltin, type PlatformExternals, type DeclaredBans } from './externals';
 export { classifyWorkspace, holdsCode, isCodeProject, violations, type Classification, type Violation } from './classify';
 export {
+  addFirewallBans,
   upgradePlatformFirewall,
   readDeclaredBans,
   hasPlatformFirewall,

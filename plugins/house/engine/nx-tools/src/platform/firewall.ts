@@ -35,10 +35,11 @@
 // about it is written where the developer — or Claude — looks next: a comment above `platformConstraints`, naming
 // the one command that fixes the common case (`platform`, which infers and sets a project's tag).
 //
-// Two writers, one model: `insertPlatformFirewall` (a workspace gaining the firewall — `ensurePlatformFirewall`) and
+// Three writers, one model: `insertPlatformFirewall` (a workspace gaining the firewall — `ensurePlatformFirewall`),
 // `upgradePlatformFirewall` (a workspace carrying the 0.49 shape — two ban-only constraints inside the project's own
-// `depConstraints` — migration 0.50.0). Both splice text located through the TypeScript AST, so the surrounding
-// file keeps its formatting. `readDeclaredBans` is the third reader: what the config bans, for the classifier.
+// `depConstraints` — migration 0.50.0) and `addFirewallBans` (an existing firewall gaining bans — a migration, with
+// its own frozen list). All splice text located through the TypeScript AST, so the surrounding file keeps its
+// formatting. `readDeclaredBans` is the reader: what the config bans, for the classifier.
 import { applyChangesToString, ChangeType, type StringChange } from '@nx/devkit';
 import {
   loadTypeScript,
@@ -50,7 +51,7 @@ import {
   type TsSourceFile,
 } from '../generators/_utils/typescript-api';
 import { type Platform, PLATFORMS, PLATFORM_MEANING, platformTag, reachable } from './platform';
-import type { DeclaredBans, PlatformExternals } from './externals';
+import { type DeclaredBans, type PlatformExternals, matchesExternal } from './externals';
 import { LINTED_FILES, SSR_SERVER_FILES, TEST_FILES, TOOL_CONFIG_FILES } from './scopes';
 
 /** The marker the guidance comment opens with. */
@@ -296,13 +297,92 @@ export function upgradePlatformFirewall(source: string, sourcePath: string, exte
 }
 
 /**
+ * Add `additions` to the ban lists of an existing firewall, as text at the end of each list. Everything the project
+ * did to a list stays: only what no entry already covers is added, so a project's own wider pattern (`pg*`) counts. The
+ * values are the CALLER'S: a migration passes its own frozen copy, never the live table (./externals). A platform with
+ * no constraint, or whose list is not an array literal, is left and named in `notes`; `refused` when
+ * `platformConstraints` itself cannot be read.
+ */
+export function addFirewallBans(source: string, sourcePath: string, additions: Partial<Record<Platform, readonly string[]>>): FirewallEdit {
+  const ts = loadTypeScript();
+  if (!ts) return { refused: 'no usable TypeScript to read it with' };
+  const sf = parse(ts, source, sourcePath);
+  const array = constraintsArray(ts, sf);
+  if (!array) return { refused: `\`${CONSTRAINTS}\` is not an array literal this can extend` };
+
+  const edits: StringChange[] = [];
+  const changes: string[] = [];
+  const notes: string[] = [];
+  for (const platform of PLATFORMS) {
+    const wanted = additions[platform];
+    if (!wanted) continue;
+    const tag = platformTag(platform);
+    const list = banList(ts, array, tag);
+    if (typeof list === 'string') {
+      notes.push(`${tag} ${list}, so these were not added: ${wanted.join(', ')}`);
+      continue;
+    }
+    const have = list.elements.filter((e) => ts.isStringLiteral(e)).map((e) => (e as { text: string }).text);
+    const missing = wanted.filter((pkg) => !have.some((pattern) => matchesExternal(pattern, pkg)));
+    if (!missing.length) continue;
+    edits.push(...appendToList(source, sf, list, missing));
+    changes.push(`${tag} now bans ${missing.join(', ')}`);
+  }
+  return { source: edits.length ? applyChangesToString(source, edits) : source, changes, notes };
+}
+
+/** The `bannedExternalImports` array of the constraint for `tag`, or why there is none (as a sentence's predicate). */
+function banList(ts: ClassicTypeScript, array: TsArrayLiteralExpression, tag: string): TsArrayLiteralExpression | string {
+  for (const element of array.elements) {
+    if (!ts.isObjectLiteralExpression(element)) continue;
+    const properties = element.properties.filter((p) => ts.isPropertyAssignment(p)) as TsPropertyAssignment[];
+    const source = properties.find((p) => keyOf(ts, p) === 'sourceTag')?.initializer;
+    if (!source || !ts.isStringLiteral(source) || source.text !== tag) continue;
+    const list = properties.find((p) => keyOf(ts, p) === 'bannedExternalImports')?.initializer;
+    if (!list) return `has no \`bannedExternalImports\` in ${CONSTRAINTS}`;
+    return ts.isArrayLiteralExpression(list) ? list : `has a \`bannedExternalImports\` that is not an array literal`;
+  }
+  return `has no constraint in ${CONSTRAINTS}`;
+}
+
+/** The text changes that put `items` at the end of `list`, in the list's own style: one per line, or inline. */
+function appendToList(source: string, sf: TsSourceFile, list: TsArrayLiteralExpression, items: readonly string[]): StringChange[] {
+  const insert = (index: number, text: string): StringChange => ({ type: ChangeType.Insert, index, text });
+  const last = list.elements[list.elements.length - 1];
+  if (!last) return [insert(list.getStart(sf) + 1, quoted(items))];
+
+  const end = last.getEnd();
+  const comma = /^\s*,/.exec(source.slice(end));
+  const after = comma ? end + comma[0].length : end;
+  if (!source.slice(list.getStart(sf), end).includes('\n')) {
+    const text = quoted(items);
+    return [insert(after, comma ? ` ${text},` : `, ${text}`)];
+  }
+  // One per line: below the last entry, past a comment that trails it, at its indentation.
+  const lineStart = source.lastIndexOf('\n', last.getStart(sf)) + 1;
+  const indent = /^[ \t]*/.exec(source.slice(lineStart))![0];
+  const rest = /^[ \t]*(\/\/[^\n]*)?(?=\r?\n)/.exec(source.slice(after));
+  const lines = items.map((item, i) => `\n${indent}'${item}'${comma || i < items.length - 1 ? ',' : ''}`).join('');
+  const at = after + (rest ? rest[0].length : 0);
+  return comma ? [insert(at, lines)] : [insert(end, ','), insert(at, lines)];
+}
+
+/**
  * What the project's firewall bans, per platform constraint — the 0.50 `platformConstraints`, else the 0.49
  * constraints — or null when the config has neither (or cannot be read).
  */
 export function readDeclaredBans(source: string, sourcePath: string): DeclaredBans | null {
   const ts = loadTypeScript();
   if (!ts) return null;
-  const sf = parse(ts, source, sourcePath);
+  const array = constraintsArray(ts, parse(ts, source, sourcePath));
+  const constraints = array ? readConstraints(ts, array) : legacyConstraints(source, sourcePath) ?? [];
+  if (!constraints.length) return null;
+  const banned = (platform: Platform) => constraints.find((c) => c.platform === platform)?.banned ?? [];
+  return { web: banned('web'), server: banned('server'), shared: banned('shared') };
+}
+
+/** The `platformConstraints` array — the one list a project edits. */
+function constraintsArray(ts: ClassicTypeScript, sf: TsSourceFile): TsArrayLiteralExpression | null {
   let array: TsArrayLiteralExpression | null = null;
   const visit = (node: TsNode): void => {
     if (array) return;
@@ -313,10 +393,7 @@ export function readDeclaredBans(source: string, sourcePath: string): DeclaredBa
     ts.forEachChild(node, visit);
   };
   visit(sf);
-  const constraints = array ? readConstraints(ts, array as TsArrayLiteralExpression) : legacyConstraints(source, sourcePath) ?? [];
-  if (!constraints.length) return null;
-  const banned = (platform: Platform) => constraints.find((c) => c.platform === platform)?.banned ?? [];
-  return { web: banned('web'), server: banned('server'), shared: banned('shared') };
+  return array;
 }
 
 interface DeclaredConstraint {

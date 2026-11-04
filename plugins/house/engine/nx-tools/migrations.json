@@ -317,6 +317,12 @@
       "layer": "nx",
       "description": "`nx test <library>` exits 1 on a library the house left with no spec: navigation-core and a Jest-tested design system lost their generator's demo, an adopt-extracted shim lost its implementation, and Vitest and Jest fail on no tests. Sets `passWithNoTests: true` in the library's runner config, which is where it reaches an inferred target; a spec that fails still fails. A library with its own spec has nothing to do. Another executor, a config already deciding, several runner configs or a config without the generators' shape is left and reported, with the reason.",
       "implementation": "./src/migrations/0.51.2/pass-libraries-with-no-specs"
+    },
+    "ban-postgres-drivers-from-web": {
+      "version": "0.52.0",
+      "layer": "firebase",
+      "description": "An existing platform firewall gains the Postgres drivers (pg, pg-native, pg-pool, pg-cursor, pg-query-stream, pg-promise, postgres, slonik, each with its subpaths) in the ban lists of platform:web and platform:shared. The firewall is project state, so the table change reaches only a workspace gaining one. Additive: only what no entry already covers, in the list's own style; a project with no firewall gets none. A resulting lint failure is a real leak, and is logged as one. A list that cannot be read as an array, a dropped constraint and an un-upgraded 0.49 shape are reported.",
+      "implementation": "./src/migrations/0.52.0/ban-postgres-drivers-from-web"
     }
   }
 }

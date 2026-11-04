@@ -1,5 +1,8 @@
 // THE PLATFORM FIREWALL IS NEUTRAL — any capability that brings a second platform may ask for it, and a stack with no
 // Firebase port still classifies. Firebase's own use of the seam is covered by cases/platform.mjs.
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { requireFromRepo } from '../../test-support/payload.mjs';
 import { workspace, SCOPE } from '../workspaces.mjs';
 
@@ -31,9 +34,37 @@ const DRIVERS = ['pg', 'pg-native', 'pg-pool', 'pg-cursor', 'pg-query-stream', '
 // Each of these runs in a browser, or a shared schema honestly imports it: banning one would be a false fact.
 const BROWSER_CAPABLE = ['@supabase/supabase-js', '@electric-sql/pglite', '@prisma/client', 'knex', 'kysely', 'drizzle-orm', '@neondatabase/serverless'];
 
+// The table as 0.51.3 released it: what every existing firewall was written from.
+const RELEASED_SERVER = ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*', 'firebase-functions-test', 'firebase-functions-test/*', '@google-cloud/*', 'express', 'express/*'];
+const RELEASED_WEB = ['firebase', 'firebase/*', '@firebase/*', 'rxfire', 'rxfire/*'];
+// Each rung that adds to an existing firewall, with what it adds. An addition to the table owes one.
+const BAN_RUNGS = ['migrations/0.52.0/ban-postgres-drivers-from-web'];
+const STOCK_FIREWALL = join(dirname(fileURLToPath(import.meta.url)), '../../test-migrations/cases/0.52.0-stock-firewall/eslint.config.mjs');
+
 export default {
   name: 'platform firewall · a neutral seam',
   cases: [
+    {
+      // The firewall is project state, so the table reaches only a workspace gaining one. An edit to it with no rung
+      // leaves every existing project behind, silently, and each rung freezes its own list, so nothing else compares them.
+      name: 'the table is what was released plus what the rungs add: a table that moves without a rung is red',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        tree.write('eslint.config.mjs', readFileSync(STOCK_FIREWALL, 'utf8'));
+        for (const rung of BAN_RUNGS) await ctx.load(rung).default(tree);
+      },
+      expect: (tree, t, ctx) => {
+        const table = ctx.load('platform/externals').tableExternals([]);
+        const added = BAN_RUNGS.flatMap((rung) => ctx.load(rung).DRIVER_BANS);
+        const message = 'the table moved: existing firewalls need a rung (src/migrations) carrying the change; add it to BAN_RUNGS';
+        t.equal([...table.server], [...RELEASED_SERVER, ...added], message);
+        t.equal([...table.web], RELEASED_WEB, message);
+        // …and a migrated firewall bans exactly what a new one does, in the same order.
+        const fw = ctx.load('platform/firewall');
+        const fresh = fw.readDeclaredBans(fw.insertPlatformFirewall(ESLINT, 'eslint.config.mjs', ctx.load('platform/externals').tableExternals(['@angular/*']), 'yarn nx').source, 'eslint.config.mjs');
+        t.equal(bans(tree, ctx), fresh, 'a migrated firewall and a new one agree');
+      },
+    },
     {
       name: 'a capability that is not Firebase gets the whole firewall: drivers banned from web and shared, projects classified, sync registered',
       setup: () => {
