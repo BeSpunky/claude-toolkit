@@ -170,7 +170,7 @@ export async function serve() {
     if (await bringUp()) {
       writeFileSync(join(stackDir, READY_MARKER), `${new Date().toISOString()}\n`);
       log(`ready on 127.0.0.1:${port}: ${localUrl(port)}`);
-      log(`stop it with: tools/dev/dev stop ${key}`);
+      log(`stop it with: tools/dev/dev stop ${key.split('@')[0]} --offset=${key.split('@')[1]}`);
     }
   } catch (error) {
     if (!stopped()) failure = error;
