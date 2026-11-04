@@ -16,7 +16,7 @@ Budget 12 (default): core 1+2, wire 1, reviewer 1+5, correctness pass 1 = 11, re
 ## Units
 | id | branch | re-runnable | status |
 |---|---|---|---|
-| core | feat/hps3-core | yes, its own branch | returned, item 9 resumed |
+| core | feat/hps3-core | yes, its own branch | returned |
 | wire | tripwire, dogfood, image job, docs; feat/hps3-wire | yes | dispatched |
 | docs | with wire | yes | dispatched |
 | review | sanity review | yes | pending |
@@ -28,3 +28,7 @@ Budget 12 (default): core 1+2, wire 1, reviewer 1+5, correctness pass 1 = 11, re
 Layer, provider port, keeper with lock, detached reset, config.toml line edits, folder move, preflight, CI provider, house docs, `avoidPorts` in the engine. CLI 3.0.0, still latest. Real runs: every 6b rule, kill -9 and adoption, real serve, worktree, new and add-layer. test-supabase 79; layers 113; generators 451, 35 skipped; migrations 417.
 Departures: blocks avoid 10000-32767 (the runtime refuses 10000-19999); identity is data_directory + port, since system_identifier changes on reset; reset only with migrations, no ledger, no public tables; one stack per tree; dead trees' data named, not removed; keeper polls owner.json; Debian postgresql-client stays; no .mcp.json, official plugin not enabled, start prints a local `claude mcp add`; types, secrets, functions unbuilt.
 ORCHESTRATOR DECISIONS: accept blocks in the ephemeral range, clashes are loud. Secret stays POSTGRES_DEPLOY_URL_<ENV>. Amend ARCHITECTURE with departures 1-3, additively. Item 9 is not left out: ARCHITECTURE's shape names types, secrets and functions, and the mission is "correctly and officially". Resumed to core.
+
+### core, item 9 (returned; 58ceb272..c03873a3)
+Targets `postgres:gen-types`, `new-function`, `secrets-set`. Types real, class C `.bespunky/supabase.json`. Functions class C, served by the stack, proven by real calls; deploy follows schema, refused under an agent. Secrets through a verb, value by stdin; real CLI against a fake local API. Limits: under /tmp 404, under node_modules BOOT_ERROR, a value with all three quote kinds or a line break refused. Needs an account: real upload, a secret reaching a function, token scopes.
+Wire must rebase on c03873a3.
