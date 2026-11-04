@@ -68,3 +68,39 @@ Nothing to migrate from this unit: the launcher is an owned template, the rest i
 - `CLAUDE.md` commands table: a row for `postgres-image.sh`, and the dogfood row's new steps and the `postgres` alias. The docs unit committed a tripwire CI line (8b026ecc) and may have covered part of this.
 - Any doc saying the sweep drops whatever is not visible: the rule is now "removal proven, or kept and named".
 - `seam2-core.md`'s last "not proven" line is answered above.
+
+## Second pass: the orchestrator's decisions on the findings above (7fe6e36c, fae801a2)
+
+This supersedes the red dogfood row and "for the orchestrator" above, which stay as the record of what was found.
+
+1. **Wrapper host.** `NxInvocation.spawn` (`['node', '.nx/nxw.js']` / `['node_modules/.bin/nx']`). **Departure from "beside `bin`":** `bin` is removed, not kept: its only two readers (the Nx fragment and the Firebase fragment) moved to `spawn`, so nothing could still use it. HOUSE.md's wrapper part names the trap of a hand-written `./nx`. `silentUnderNx` also resolves from `.nx/installation`; `tools/test-generators/cases/serve-executor.mjs` covers each host.
+   - **No rung, by decision:** no preset creates an app on a wrapper host, so no preset-made project holds `./nx`.
+   - **Stated against that:** the frozen rung `0.35.0/declare-dev-processes` writes `./nx` for a wrapper host, and an earlier toolkit's seeding did too, so a project that hand-added a dev-server on a wrapper host could hold it. The HOUSE.md line is what such a project gets.
+2. **Shared volume.** `<cluster>/owner`: the hostname, its mtime the heartbeat, every 10 s, fresh under 30 s. A fresh one from another host refuses before anything of the cluster is touched, `postmaster.pid` included. A stale one is taken over. The sweep keeps a dir with a fresh one. A clean stop lets go.
+   - **Beyond the brief:** a running server whose owner file another host has taken stops and exits 1, since that is the state the file exists to prevent.
+   - Fakes in `postgres-launcher.checks.mjs`, one real-binary scenario in `tools/test-postgres`.
+3. **Deploy.** Refused first under `CLAUDECODE=1`, whatever `CI` says; HOUSE.md, README and the `new` skill say so. Tested with CI set and unset. It keys on Claude Code's variable only: another agent is held only by the no-terminal refusal.
+4. **HUMAN_STEP.** `humanStep` on the provider: `! gh secret set POSTGRES_DEPLOY_URL --env <environment>`, prompting for the value. Printed when the environment first appears or its branches change, once. Flags checked with `gh secret set --help` and `gh api --help`. Never run against a real repository, including the `gh api --method PUT` line it offers for a missing environment.
+5. **Docs.** CLAUDE.md rows (image check, dogfood steps, tripwire), sweep and heartbeat wording in HOUSE.md, README and the `new` skill.
+
+### What the heartbeat does not cover
+
+- **An orphan.** A launcher killed outright leaves a server nobody beats for. Another container takes the data over 30 s later, and two postmasters are possible. Needs a same-named checkout, a kill -9 of the launcher and a start elsewhere.
+- **Two containers with one hostname** (a fixed `--hostname` in `runArgs`) read as one host.
+- **A check-then-write window** between two starts in the same milliseconds. Not atomic.
+- **Fresh after a very fast rebuild:** refused until the 30 s pass, and the message says so.
+- **Two containers really sharing are observed only by staging:** the other host is a written file, in one container. No test has two real containers.
+- The sweep's own limit above stands where no heartbeat runs: a stopped stack in a same-named clone's worktree can still be swept by the other clone.
+
+### Final results
+
+| What | Result |
+|---|---|
+| `tools/test-layers` | 112 passed, 0 failed |
+| `tools/test-generators` | 393 passed, 0 failed, 35 skipped |
+| `CI=true tools/test-scaffold/run.sh` | all passed, 29 files |
+| `tools/test-postgres/run.mjs` | all ok |
+| `tools/check-runner-image/test.sh` | PASS |
+| dogfood `--released=main --only=new-postgres,new-postgres-node,add-layer-postgres` | PASS, 107 passed, 0 failed, 0 skipped |
+
+Generator-seeded served app: now closed on both hosts, amd64 trixie. Everything under "Not proven, and only a real run can" still stands.
