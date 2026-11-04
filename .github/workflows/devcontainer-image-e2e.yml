@@ -1,6 +1,7 @@
 # A GENERATED devcontainer on a REAL engine and REAL images: docker build of what this checkout generates, for each Node and
 # package manager in tools/check-runner-image/devcontainer.sh, then the post-create's package-manager step as the image's
-# non-root user. Fixtures can state what the installer decides and nothing about whether a real image lets it through, and a
+# non-root user. And, for a project wearing `postgres` (tools/check-runner-image/postgres-image.sh), every major the house offers on
+# every Debian release it composes, on both architectures: the real `apt-get satisfy`, then a real initdb and boot as that user. Fixtures can state what the installer decides and nothing about whether a real image lets it through, and a
 # house devcontainer has no Docker, so this is where that gets observed at all.
 #
 # Its own workflow, not a job in runner-image-e2e.yml: that one tests the fallback, and keeps the payload's generators out of
@@ -24,7 +25,12 @@ on:
       - 'plugins/house/engine/nx-tools/src/generators/devcontainer/compose.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/package-manager.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/postgres/major.ts'
+      - 'plugins/house/engine/nx-tools/src/layers/postgres.ts'
       - 'tools/check-runner-image/devcontainer.sh'
+      - 'tools/check-runner-image/postgres-image.sh'
+      - 'tools/check-runner-image/postgres-image.inside.sh'
       - 'tools/check-runner-image/test.sh'
       - '.github/workflows/devcontainer-image-e2e.yml'
 
@@ -51,3 +57,23 @@ jobs:
         run: bash tools/check-runner-image/test.sh
       - name: Every case, on real images
         run: bash tools/check-runner-image/devcontainer.sh
+
+  # Its own job, since each architecture is a runner, and a red one must not hide the other or the cases above.
+  postgres-images:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    strategy:
+      fail-fast: false
+      matrix:
+        # The closures hold both, and the installer picks by architecture, so a package gone from one is only seen on that one.
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    # Sequential: one project per preset, regenerated per case. A case is about four minutes, unobserved until the first real run.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      # 22.18+, as above. The server's Node is none: the image's tools are asked directly.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: A project wearing postgres, on real images, at every major and Debian release
+        run: bash tools/check-runner-image/postgres-image.sh
