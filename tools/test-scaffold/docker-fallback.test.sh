@@ -6,8 +6,8 @@
 # with exit 1 and no project — the run's own failure replaced by the failure of its cleanup. Nothing here had changed.
 #
 # What is asserted, against a fake `docker` that records every call and plays the part it is told to (no image, no
-# network): the image comes from HOUSE_NODE_MAJOR and from no registry; a missing package manager stops the run before
-# the program starts; a program that dies reports itself with its own exit code, does not chown what does not exist,
+# network): the image comes from HOUSE_NODE_MAJOR and from no registry; a missing package manager, or a declared yarn
+# the image's yarn cannot reach, stops the run before the program starts; a program that dies reports itself with its own exit code, does not chown what does not exist,
 # and is never pushed to GitHub; a failed chown ends a run that had otherwise succeeded with its own exit code, but only
 # after that run's report, because the work is done and the report is the record of it.
 set -uo pipefail
@@ -41,7 +41,11 @@ done
 image="$1"; shift
 case "$1 ${2:-}" in
   'chown '*)              what=chown ;;
-  'bash -lc')             case "$3" in 'command -v "$1"') what=probe ;; *) what=program ;; esac ;;
+  'bash -lc')             case "$3" in
+                            'command -v "$1"')  what=probe ;;
+                            '"$1" --version')   what=version ;;
+                            *)                  what=program ;;
+                          esac ;;
   'node /tool/'*)         what=program ;;
   *)                      what=unknown ;;
 esac
@@ -49,6 +53,7 @@ echo "$what" >> "$CALLS"
 echo "$what image=$image args=$before" >> "$CALLS.argv"
 case "$what" in
   probe)   [ "$4" = "_" ] && echo "tool=$5" >> "$CALLS.argv"; exit "${FAKE_PROBE_RC:-0}" ;;
+  version) echo "${FAKE_YARN_VERSION-1.22.22}"; exit "${FAKE_VERSION_RC:-0}" ;;
   chown)   exit "${FAKE_CHOWN_RC:-0}" ;;
   program) [ -z "${FAKE_CREATES:-}" ] || mkdir -p "$FAKE_CREATES"
            exit "${FAKE_PROGRAM_RC:-0}" ;;
@@ -201,6 +206,71 @@ grep -qF "UPGRADE_FAILED" <<< "$out" && fail "a completed upgrade reported as fa
 [ "$(tail -2 <<< "$out" | cut -d' ' -f1 | head -1)" = "OWNERSHIP_UNRESTORED" ] && ok "the ownership line is last" || fail "order: $out"
 tail -1 <<< "$out" | grep -qF "sudo chown -R $(id -u):$(id -g) '$proj'" && ok "…with the exact repair" || fail "no repair: $out"
 [ ! -e "$proj/.bespunky-upgrade.lock" ] && ok "the lock is released" || fail "lock left behind"
+
+echo "── upgrade: a declared yarn the image cannot reach"
+declare_yarn() {   # <packageManager value, or nothing>
+  rm -f "$proj/.yarnrc.yml" "$proj/.yarnrc" "$TMP/projects/.yarnrc.yml"
+  printf '{%s}\n' "${1:+\"packageManager\":\"$1\"}" > "$proj/package.json"
+  touch "$proj/yarn.lock"
+  git -C "$proj" add -A && git -C "$proj" commit -qm "$1"
+}
+refused() {   # <label>
+  [ "$rc" -eq 1 ] && ok "$1: exit 1" || fail "$1: exit $rc: $out"
+  grep -qx "UPGRADE_REFUSED: runner-image" <<< "$out" && ok "$1: UPGRADE_REFUSED: runner-image" || fail "$1: no refusal code: $out"
+  called program && fail "$1: the program ran anyway" || ok "$1: the program never started"
+  [ -z "$(git -C "$proj" status --porcelain)" ] && ok "$1: the tree is untouched, no lock" || fail "$1: written: $(git -C "$proj" status --porcelain)"
+}
+passes() {   # <label>
+  [ "$rc" -eq 0 ] && called program && ok "$1: runs" || fail "$1: rc=$rc: $out"
+}
+declare_yarn "yarn@4.1.0+sha512.abc"
+upgrade
+refused "yarn 4 on image yarn 1"
+grep -qF "declares yarn@4.1.0+sha512.abc with no yarnPath" <<< "$out" && grep -qF "has yarn 1.22.22" <<< "$out" && ok "names the declaration and what the image answered" || fail "no clear error: $out"
+grep -qF "Node 22.18+ with yarn@4.1.0+sha512.abc on this machine's PATH runs natively" <<< "$out" && ok "names the native route, with the yarn it takes" || fail "no route: $out"
+upgrade FAKE_YARN_VERSION=$'a banner from a login shell\n1.22.22'
+refused "the version is the answer's last line"
+grep -qF "has yarn 1.22.22" <<< "$out" && ok "…and not the shell's noise" || fail "read: $out"
+upgrade FAKE_VERSION_RC=125
+refused "the version cannot be asked"
+grep -qF "could not read the yarn version" <<< "$out" && ok "says it could not ask" || fail "no clear error: $out"
+upgrade FAKE_YARN_VERSION=
+refused "an empty answer"
+upgrade FAKE_YARN_VERSION=4.2.0
+passes "the image's real yarn is the declared major"
+echo 'nodeLinker: node-modules' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+refused ".yarnrc.yml without a yarnPath"
+echo '# yarnPath: .yarn/releases/yarn-4.1.0.cjs' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+refused "a commented-out yarnPath"
+echo 'yarnPath: .yarn/releases/yarn-4.1.0.cjs' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+passes "yarnPath in .yarnrc.yml"
+grep -qx version "$CALLS" && fail "a yarnPath still asked the image" || ok "…asking the image nothing"
+declare_yarn "yarn@4.1.0"
+echo 'yarn-path ".yarn/releases/yarn-4.1.0.cjs"' > "$proj/.yarnrc"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+passes "yarn-path in .yarnrc"
+declare_yarn "yarn@4.1.0"
+echo 'yarnPath: ../.yarn/releases/yarn-4.1.0.cjs' > "$TMP/projects/.yarnrc.yml"
+upgrade
+passes "yarnPath in the directory above, which the container mounts"
+rm -f "$TMP/projects/.yarnrc.yml"
+declare_yarn "yarn@1.22.22"
+upgrade
+passes "yarn 1 on image yarn 1"
+declare_yarn ""
+upgrade
+passes "a yarn.lock with no declaration"
+grep -qx version "$CALLS" && fail "no declaration still asked the image" || ok "…asking the image nothing"
+git -C "$proj" rm -qf yarn.lock; echo '{"packageManager":"npm@99.0.0"}' > "$proj/package.json"; git -C "$proj" add -A; git -C "$proj" commit -qm npm
+upgrade
+passes "npm is not refused by version"
+echo '{"packageManager":"pnpm@99.0.0"}' > "$proj/package.json"; git -C "$proj" add -A; git -C "$proj" commit -qm pnpm
+upgrade
+passes "pnpm present in the image is not refused by version"
+grep -qx version "$CALLS" && fail "asked for a version of a non-yarn package manager" || ok "…asking no version"
 
 # The native path has its own road to the same report. Its fake yarn is the program's first real command; the real Node
 # stays, because that is what chooses the native path.

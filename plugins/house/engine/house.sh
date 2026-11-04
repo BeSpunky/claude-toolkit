@@ -358,10 +358,15 @@ APP_ARG="${2:-}"   # the app name AS GIVEN — a scaffold refuses one when nothi
 # Otherwise the lockfile says it. With no signal at all, the house default is the right guess.
 # Echoes `<pm> <source>` — the source matters, because "we read your lockfile" and "you told us nothing so
 # we picked the house default" are different claims and only one of them should sound like a detection.
+# Echoes the project's `packageManager` declaration (`yarn@4.1.0+sha…`), or nothing that names one.
+declared_package_manager() {
+  { grep -m1 '"packageManager"' "$1/package.json" 2>/dev/null || true; } \
+    | sed -E 's/.*"packageManager"[[:space:]]*:[[:space:]]*"([a-z]+@[^"]*)".*/\1/'
+}
 detect_package_manager() {
   local dir="$1" declared
-  declared="$(grep -m1 '"packageManager"' "$dir/package.json" 2>/dev/null \
-    | sed -E 's/.*"packageManager"[[:space:]]*:[[:space:]]*"([a-z]+)@.*/\1/')"
+  declared="$(declared_package_manager "$dir")"
+  declared="${declared%%@*}"
   case "$declared" in
     yarn | npm | pnpm) echo "$declared packageManager-field"; return ;;
   esac
@@ -2377,8 +2382,42 @@ report_ownership_unrestored() {
   echo "OWNERSHIP_UNRESTORED $TARGET (exit $1): could not hand it back to $(id -un); files in it may be owned by root." >&2
   echo "  repair     : sudo chown -R $(id -u):$(id -g) '$TARGET'" >&2
 }
-if [ "$RUNTIME" = "docker" ] && ! container_require_command "$IMAGE" "$PM"; then
-  echo "       Node 22.18+ with $PM on this machine's PATH runs natively, with no image (without --docker)." >&2
+# Presence is not enough for a declared yarn. The image's yarn reaches a different release only through the project's
+# yarnPath; without one, yarn 1 stops at the first install ("This project's package.json defines packageManager…"),
+# after the lock. The files are the ones yarn 1 itself reads (observed on 1.22.22): `.yarnrc.yml`'s yarnPath and
+# `.yarnrc`'s yarn-path, in the project and above it; above it stops at PROJECTS_DIR, the most the container can see.
+# npm is left out because it does not enforce a major, and a pnpm the image lacks has already stopped at the presence
+# check. A declaration with no version number has no major to compare, so it passes as it always did.
+yarn_path_reaches_project() {
+  local dir
+  for dir in "$TARGET" "$PROJECTS_DIR"; do
+    grep -qE '^["'\'']?yarnPath["'\'']?[[:space:]]*:[[:space:]]*[^[:space:]#]' "$dir/.yarnrc.yml" 2>/dev/null && return 0
+    grep -qE '^"?yarn-path"?[[:space:]]+[^[:space:]#]' "$dir/.yarnrc" 2>/dev/null && return 0
+  done
+  return 1
+}
+_native_pm="$PM"
+image_honours_declared_yarn() {
+  local declared imaged rc=0
+  [ "$PM" = "yarn" ] || return 0
+  declared="$(declared_package_manager "$TARGET")"
+  case "$declared" in yarn@[0-9]*) ;; *) return 0 ;; esac
+  yarn_path_reaches_project && return 0
+  imaged="$(container_command_version "$IMAGE" yarn)" || rc=$?
+  imaged="${imaged##*$'\n'}"
+  case "$rc:$imaged" in
+    0:[0-9]*) ;;
+    *) echo "ERROR: could not read the yarn version of $IMAGE (docker exit $rc, answer '$imaged'), and this project declares $declared. Nothing was written." >&2
+       return 1 ;;
+  esac
+  declared="${declared#yarn@}"
+  [ "${declared%%.*}" != "${imaged%%.*}" ] || return 0
+  echo "ERROR: this project declares yarn@$declared with no yarnPath, and $IMAGE has yarn $imaged, which cannot reach it. Nothing was written." >&2
+  _native_pm="yarn@$declared"
+  return 1
+}
+if [ "$RUNTIME" = "docker" ] && ! { container_require_command "$IMAGE" "$PM" && image_honours_declared_yarn; }; then
+  echo "       Node 22.18+ with $_native_pm on this machine's PATH runs natively, with no image (without --docker)." >&2
   if [ "$MODE" = "new" ]; then
     report_new_failed 1
   else

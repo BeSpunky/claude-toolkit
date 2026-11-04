@@ -107,3 +107,10 @@ container_require_command() {
   esac
   return 1
 }
+
+# Echo what the image's own copy of a command says its version is, asked the way container_require_command asks, and
+# away from any project: inside one, yarn would answer for the release that project dispatches to.
+#   $1 image   $2 command
+container_command_version() {
+  container_run_as_host_user -e HOME=/home/node "$1" bash -lc '"$1" --version' _ "$2"
+}
