@@ -5,7 +5,7 @@ The house **directives** that govern every change in this project — {{#plugin-
 
 @HOUSE.rules.md
 
-The **mechanical how-to** — the stack{{#design-system}} · the design system{{/design-system}}{{#web}} · serve · worktrees · the shared browser{{/web}}{{#firebase}} · Firebase{{/firebase}} · generators · Nx{{#web}} · Playwright{{/web}} — lives in **[`HOUSE.md`](HOUSE.md)**. **Read it before you branch{{#design-system}}, style{{/design-system}}{{#web}}, serve, drive the browser{{/web}}, or reach for a house command.**
+The **mechanical how-to** — the stack{{#design-system}} · the design system{{/design-system}}{{#web}} · serve · worktrees · the shared browser{{/web}}{{#firebase}} · Firebase{{/firebase}}{{#postgres}} · Postgres{{/postgres}} · generators · Nx{{#web}} · Playwright{{/web}} — lives in **[`HOUSE.md`](HOUSE.md)**. **Read it before you branch{{#design-system}}, style{{/design-system}}{{#web}}, serve, drive the browser{{/web}}, or reach for a house command.**
 
 Both files are **generator-owned**, regenerated on every `house.sh upgrade` to match the installed `@bespunky/nx-tools`. **Never hand-edit them** — this project's own guidance goes below, outside these markers.
 <!-- @bespunky/house-tooling:end -->

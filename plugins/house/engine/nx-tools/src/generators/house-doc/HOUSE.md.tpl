@@ -3,7 +3,7 @@
 
 # HOUSE.md — house tooling & conventions
 
-> The **mechanical how-to** for this project: the stack{{#design-system}}, the design system{{/design-system}}{{#web}}, serving, worktrees, the co-driven browser{{/web}}{{#firebase}}, Firebase{{/firebase}}, the generators, and Nx. The house **directives** — the rules that must hold on every change — are NOT here: they live in [`HOUSE.rules.md`](HOUSE.rules.md), which `CLAUDE.md` **imports** so they are always in context. **Generator-owned — never hand-edit** (both files are regenerated from `@bespunky/nx-tools` on every `house.sh upgrade`). `CLAUDE.md` carries this project's own notes.
+> The **mechanical how-to** for this project: the stack{{#design-system}}, the design system{{/design-system}}{{#web}}, serving, worktrees, the co-driven browser{{/web}}{{#firebase}}, Firebase{{/firebase}}{{#postgres}}, Postgres{{/postgres}}, the generators, and Nx. The house **directives** — the rules that must hold on every change — are NOT here: they live in [`HOUSE.rules.md`](HOUSE.rules.md), which `CLAUDE.md` **imports** so they are always in context. **Generator-owned — never hand-edit** (both files are regenerated from `@bespunky/nx-tools` on every `house.sh upgrade`). `CLAUDE.md` carries this project's own notes.
 
 ## Stack
 
@@ -155,7 +155,7 @@ It auto-derives a **port offset** from the tree you're in — the **main tree pr
 
 ### Running stacks — find them, stop them by handle
 
-Every serve is a **stack** — one app, from one tree, on one port offset (`<app>@<offset>`). The engine (`tools/dev/`) is one generator-owned artifact, written by the `dev` generator for the `web`{{#firebase}} and `firebase`{{/firebase}} layer{{#firebase}}s{{/firebase}}.{{#firebase}} So is an emulator suite run on its own (`firebase@<offset>`, `{{NX}} run firebase:emulators`) and a seed build's private suite (`seed-build@<offset>`).{{/firebase}} Before it starts anything, a stack **claims** its port block and writes its **run record** (its PID, owner, ports) under the self-ignoring `.bespunky/run/` — one claim at a time across every worktree, so two serves started in the same second never land on one block: `auto` takes the next free block, an explicit `--port-offset` that another stack holds is refused naming that stack and its stop command. Each process gets the stack's own state dir as `DEV_STACK_DIR`, its own short temp dir as `DEV_STACK_TMP` (`/tmp/bespunky-<hash>`){{#firebase}} — the emulator suite keeps its hub locator and its Functions workers' sockets there, so two suites of this repo never export each other's data or answer each other's calls{{/firebase}} — and, when the app is opened with URL switches (`url` in `dev.json`), the same query as `DEV_URL_QUERY`, so a server rendering the app resolves what the page was opened with{{#firebase}} (`{{#nx-serve}}--no-emulators{{/nx-serve}}{{^nx-serve}}--skip=emulators{{/nx-serve}}` → `emulate=none` for the browser **and** for SSR){{/firebase}}.
+Every serve is a **stack** — one app, from one tree, on one port offset (`<app>@<offset>`). The engine (`tools/dev/`) is one generator-owned artifact, written by the `dev` generator.{{#firebase}} So is an emulator suite run on its own (`firebase@<offset>`, `{{NX}} run firebase:emulators`) and a seed build's private suite (`seed-build@<offset>`).{{/firebase}} Before it starts anything, a stack **claims** its port block and writes its **run record** (its PID, owner, ports) under the self-ignoring `.bespunky/run/` — one claim at a time across every worktree, so two serves started in the same second never land on one block: `auto` takes the next free block, an explicit `--port-offset` that another stack holds is refused naming that stack and its stop command. Each process gets the stack's own state dir as `DEV_STACK_DIR`, its own short temp dir as `DEV_STACK_TMP` (`/tmp/bespunky-<hash>`){{#firebase}} — the emulator suite keeps its hub locator and its Functions workers' sockets there, so two suites of this repo never export each other's data or answer each other's calls{{/firebase}} — and, when the app is opened with URL switches (`url` in `dev.json`), the same query as `DEV_URL_QUERY`, so a server rendering the app resolves what the page was opened with{{#firebase}} (`{{#nx-serve}}--no-emulators{{/nx-serve}}{{^nx-serve}}--skip=emulators{{/nx-serve}}` → `emulate=none` for the browser **and** for SSR){{/firebase}}.
 
 ```bash
 tools/dev/dev ps                             # every running stack, in every worktree: app@offset, owner, pid, ports (listening or not)
@@ -368,6 +368,34 @@ A first-class **staging** environment is opt-in — `house.sh add-layer --stagin
 **`firebase.config.ts` is generator-owned and rewritten in full on every upgrade** — it holds no per-project values by design, so there's no "is it customized?" guess to freeze it behind template improvements. Change behavior where it belongs: **config** (emulator toggles, the `firebase` web config, `databaseId`, `functionsRegion`) in `environment.ts` / `environment.<env>.ts`; **providers** in `app.config.ts` beside `provideAppFirebase()`. Editing `firebase.config.ts` directly means the next sync silently reverts it.
 {{/angular}}
 {{/firebase}}
+{{#postgres}}
+
+## Postgres
+
+**A server per stack.** `{{NX}} run postgres:start` runs one in the foreground as a stack of its own (`postgres@<offset>`); an app the dev engine serves gets its own as a dependency (`.bespunky/dev.json`), which is up, migrated and seeded before anything of the app starts, and hands every sibling **`DATABASE_URL`** and **`DIRECT_DATABASE_URL`** at that stack's port. Two names for one local server, because every pooled host makes them two in production: runtime traffic reads the first, migrations and replication need the second. Each stack has its own data, so a worktree's database is never another's. An agent starts its own with `node tools/postgres/postgres.mjs start`, which lands on a shifted block, and stops it by the handle it prints.
+
+| Target | What it does |
+| --- | --- |
+| `postgres:start` | A server of its own, until stopped. `--port-offset=<n>` picks the block |
+| `postgres:migrate` | Apply `postgres/migrations` to this tree's running server (a start does it too) |
+| `postgres:new-migration --name=<lower_snake>` | The next migration file |
+| `postgres:seed` | Apply `postgres/seed/world` again, as one transaction: a failure keeps nothing |
+| `postgres:reset` | Drop the database (connections included), migrate, seed |
+| `postgres:psql` | A client on this stack. `--sql=<statement>` or `--file=<path>` to run one and leave |
+| `postgres:deploy` | Migrate the database `POSTGRES_DEPLOY_URL` names. CI's job (below) |
+
+**Which server a verb means:** this tree's running one, read from `tools/dev/dev ps`. None running: it names the target that starts one. Several: it requires `--offset=<n>` and lists them.
+
+**The major is `.bespunky/postgres.json`** (`{ "major": 18 }`, yours from the day it is seeded): match it to your production host, because a migration using `uuidv7()` or a virtual generated column would not run on a 17 host. It decides what the image installs, so changing it means a rebuild. Data is kept per major, and a new major starts empty.
+
+**Migrations are forward-only:** `postgres/migrations/<14 digits>_<lower_snake>.sql`, with `-- migrate:up` and an **empty** `-- migrate:down`; a start or `migrate` refuses anything else before it runs. To undo one, write the next one. They run in order and an older timestamp arriving late is refused (`--strict`), which is what a rebase usually fixes: `{{NX}} run postgres:reset` locally, and a new timestamp. There is no rollback target, deliberately. **Seeds** are `postgres/seed/world/*.sql`, applied in file-name order, once per database; a seed that needs its own transaction control, or a seed file added later to a seeded database, goes through `postgres:reset`.
+
+**Where data lives:** `~/.local/share/bespunky/postgres/`, by tree, stack and major, never in the tree. It survives a rebuild where `~/.local` is persisted; on a devcontainer keeping an image of its own it is not, so a rebuild loses local data and the seed world restores it. Moving to another port block means a fresh database, and the start says so. A start drops the data of trees that no longer exist, and reports what it dropped. Local data is disposable; **anything that must be kept belongs in a migration or a seed.**
+
+**A local verb takes no URL.** It computes the address from the stack, scrubs `PG*`, `DATABASE_URL` and `DBMATE_*` from what it runs, and compares the server's `system_identifier` with the value recorded when this stack's server was created; any difference or doubt is a refusal. **Only `postgres:deploy` reaches another server**, and only by `POSTGRES_DEPLOY_URL`: from CI (the line's GitHub environment holds it as a secret){{#ci}}, in the schema stage, before anything that depends on it deploys{{/ci}}, or from a variable a human sets in a terminal, where it asks them to type the database's name. A `.env` file naming it is refused: Nx would load it into the task. Give it the host's **direct** URL: a transaction pooler is refused. A URL with an empty port, no host, several hosts or a `host=` parameter is refused too, since clients would quietly connect elsewhere.
+
+**A hand-run `nx run-many -t deploy` has no order between deploys**; only the workflow's stages do.{{#platform-firewall}} **Database drivers stay out of browser bundles**: the platform firewall in `eslint.config.mjs` bans `pg`, `postgres` and their kin from `web` and `shared` projects.{{/platform-firewall}}{{^platform-firewall}} **Nothing here keeps a database driver out of a browser bundle:** the platform firewall lives in a root `eslint.config.mjs`, and this repo has none.{{/platform-firewall}}
+{{/postgres}}
 
 ## Branch & release parameters
 

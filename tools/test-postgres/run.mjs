@@ -92,7 +92,8 @@ async function start(dir, { offset, env = {}, expectFailure = false, timeoutMs =
       if (!expectFailure) throw new Error(`the stack ended early (${handle.code}):\n${handle.log()}`);
       return handle;
     }
-    if (existsSync(join(dir, '.bespunky/run', handle.key, 'postgres.ready'))) return handle;
+    // A stack expected to fail is only ever waited out: an orphan on this block still has its own marker.
+    if (!expectFailure && existsSync(join(dir, '.bespunky/run', handle.key, 'postgres.ready'))) return handle;
     await sleep(25);
   }
   throw new Error(`the stack did not become ready:\n${handle.log()}`);
@@ -272,10 +273,11 @@ scenario('a dependent still writing during a stop can finish: smart first, fast 
   addMigration(dir);
   const stack = await start(dir);
   const writer = spawn('psql', ['-X', '-h', '127.0.0.1', '-p', String(stack.port), '-U', 'postgres', '-d', 'app', '-c', "BEGIN; SELECT pg_sleep(1); INSERT INTO thing VALUES (77, 'late'); COMMIT;"], { env: baseEnv(), stdio: 'ignore' });
+  const writerDone = new Promise((done) => writer.on('exit', done));
   await sleep(200);
   stop(stack);
   await untilEnded(stack);
-  await new Promise((done) => writer.on('exit', done));
+  await writerDone;
   const again = await start(dir, { offset: stack.offset });
   ok(sql(again.port, "SELECT count(*) FROM thing WHERE id = 77") === '1', 'the write in flight when the stop came was committed');
   stop(again);
@@ -479,9 +481,11 @@ scenario('as a dependency under `dev serve`: starts first, its exports reach the
   }
   const verb = launcher(dir, 'psql', '--sql=SELECT count(*) FROM thing');
   ok(verb.status === 0 && verb.stdout.includes('1'), 'a verb finds the served stack by its tree');
-  const stopped = dev(dir, 'stop', 'web', `--offset=${offset}`);
+  // Not spawnSync: the serve is this process's child, and it could not be reaped while this process blocked, so the stop
+  // would wait out its whole timeout on a zombie.
+  const stopped = await new Promise((done) => spawn(process.execPath, ['tools/dev/dev.mjs', 'stop', 'web', `--offset=${offset}`], { cwd: dir, env: baseEnv(), stdio: 'ignore' }).on('exit', done));
   for (let i = 0; i < 400 && code === undefined; i++) await sleep(25);
-  ok(stopped.status === 0 && code === 0, `stopped cleanly (${code})`);
+  ok(stopped === 0 && code === 0, `stopped cleanly (stop ${stopped}, serve ${code})`);
   rmSync(join(dir, '.app-saw'));
   addMigration(dir, '20260109000000_bad.sql', '-- migrate:up\nCREATE TABLE nope (;\n-- migrate:down\n');
   const failed = spawnSync(process.execPath, ['tools/dev/dev.mjs', 'serve', 'web', `--port-offset=${offset}`, '--no-shared-browser'], { cwd: dir, env: baseEnv(), encoding: 'utf8', timeout: 60_000 });

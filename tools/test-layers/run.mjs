@@ -1637,6 +1637,71 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   rmSync(dir, { recursive: true, force: true });
 });
 
+// Postgres. The server and dbmate are in the IMAGE (a closure and a bare binary, both sha-pinned, neither under a mount), and
+// what must outlive a rebuild is under the persisted ~/.local: the clusters, through the launcher's data home, and psql's
+// history, which would otherwise land in $HOME. No mount of its own. And no database URL in anything committed.
+checkAsync('postgres: in the image by exact pin, on the wrapper host too; its state lives in the persisted ~/.local; no URL in the devcontainer', async (ok) => {
+  const { DBMATE_DOWNLOADS, DBMATE_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const { POSTGRES_CLOSURES } = require_(join(BUILD, 'src/generators/_utils/postgres-closures'));
+  const tree = wrapperRepo();
+  const a = await artifacts(tree, ['nx', 'agent', 'postgres']);
+  const home = `/home/${a.dc.remoteUser ?? 'vscode'}`;
+  for (const [arch, { url, sha256 }] of Object.entries(DBMATE_DOWNLOADS)) ok(a.osScript.includes(`dbmate ${DBMATE_VERSION} ${arch} ${sha256} ${url} bin`), `the installer lacks dbmate's ${arch} line`);
+  ok(a.osScript.includes(POSTGRES_CLOSURES['18'].trixie.version), 'the installer lacks the default major\'s closure');
+  ok(shParses(a.osScript), 'the installer does not parse');
+  ok(a.dc.containerEnv?.PSQL_HISTORY === `${home}/.local/share/bespunky/postgres/psql_history`, `psql's history would not survive a rebuild: ${a.dc.containerEnv?.PSQL_HISTORY}`);
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.local,type=volume`)), '~/.local, the clusters\' home, is not a persisted volume');
+  const without = await artifacts(wrapperRepo(), ['nx', 'agent']);
+  ok(a.dc.mounts.length === without.dc.mounts.length, 'the layer added a mount: its state belongs in a persisted XDG home');
+  ok(!/postgres(ql)?:\/\//.test(a.dcText), 'a database URL in devcontainer.json is inherited by every process, and committed');
+  ok(a.house.includes('## Postgres') && a.rules.includes('## Postgres') && a.claude.includes('Postgres'), 'the house docs have no Postgres section');
+  ok(a.house.includes('./nx run postgres:start'), 'the docs do not render this host\'s Nx');
+  ok(!without.house.includes('## Postgres') && !without.rules.includes('## Postgres'), 'a project without the layer reads about it');
+  // A project with no bare-binary tool must keep the installer it has: moving its bytes would rebuild its image for nothing.
+  const firebase = createTreeWithEmptyWorkspace();
+  writeJson(firebase, 'firebase.json', {});
+  const f = await artifacts(firebase, ['nx', 'agent', 'node', 'firebase']);
+  ok(!f.osScript.includes('case "$url" in') && f.osScript.includes('tar -xzf "$download/archive.tar.gz"'), 'a tarball-only installer changed shape');
+  ok(!f.osScript.includes('{{'), 'a tarball-only installer kept a placeholder');
+});
+
+checkAsync('postgres: a bare binary installs for real through the generated installer, unprivileged, and a tampered one is refused', async (ok) => {
+  const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const { createHash } = await import('node:crypto');
+  const dir = mkdtempSync(join(tmpdir(), 'bespunky-binary-archive-'));
+  const body = '#!/bin/sh\necho fake-tool-1\n';
+  const stubs = join(dir, 'stubs');
+  mkdirSync(stubs);
+  writeFileSync(join(stubs, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+  writeFileSync(join(stubs, 'apt-get'), '#!/bin/sh\n', { mode: 0o755 });
+  writeFileSync(join(stubs, 'dpkg-query'), "#!/bin/sh\nprintf 'install ok installed'\n", { mode: 0o755 });
+  // curl refuses nothing here: a stub stands in for the download, since the composer only accepts https.
+  writeFileSync(join(stubs, 'curl'), `#!/bin/sh\nwhile [ "$#" -gt 1 ]; do case "$1" in -o) out="$2"; shift ;; esac; shift; done\ncp '${join(dir, 'served')}' "$out"\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'served'), body);
+  const sha256 = createHash('sha256').update(body).digest('hex');
+  const render = (hash) => renderOsPackagesScript(compose([{ id: 't', fragment: { image: { ref: 'img', remoteUser: 'node' }, archives: [{ format: 'binary', id: 'fake-tool', version: '1.0.0', downloads: { amd64: { url: 'https://example.com/fake-tool-linux-amd64', sha256: hash }, arm64: { url: 'https://example.com/fake-tool-linux-arm64', sha256: hash } } }] } }], { nodeMajor: '22' }));
+  const root = join(dir, 'root');
+  mkdirSync(root);
+  const script = join(dir, 'install.sh');
+  writeFileSync(script, render(sha256));
+  ok(shParses(readFileSync(script, 'utf8')), 'the rendered installer does not parse');
+  execFileSync('sh', [script], { env: { PATH: `${stubs}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: root }, stdio: 'ignore' });
+  const link = join(root, 'usr/local/bin/fake-tool');
+  ok(existsSync(link) && execFileSync(link, { encoding: 'utf8' }).trim() === 'fake-tool-1', 'the binary is not on PATH, executable, under its own name');
+  ok(readlinkSync(join(root, 'opt/bespunky/fake-tool/current')) === '1.0.0', '`current` does not name the pin');
+  const tampered = join(dir, 'root2');
+  mkdirSync(tampered);
+  writeFileSync(script, render('0'.repeat(64)));
+  let failed = false;
+  try {
+    execFileSync('sh', [script], { env: { PATH: `${stubs}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: tampered }, stdio: 'ignore' });
+  } catch {
+    failed = true;
+  }
+  ok(failed && !existsSync(join(tampered, 'usr/local/bin/fake-tool')), 'a binary that does not match its sha256 was installed');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 // The Firebase CLI is the PROJECT's pinned devDependency (0.50.0), not an image feature: no second `firebase` on PATH,
 // and nothing new to persist — firebase-tools keeps its login in ~/.config/configstore (configstore's XDG home) and its
 // emulator downloads in ~/.cache/firebase, both inside the agent layer's persisted volumes asserted above. gcloud keeps
