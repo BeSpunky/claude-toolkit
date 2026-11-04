@@ -1,0 +1,71 @@
+# The Postgres TRIPWIRE (tools/test-postgres/run.mjs): the generated launcher against the REAL pinned server and dbmate, under
+# the real dev engine: the stop roads, the orphan, recovery, the sweep, dbmate's real reading of the environment, and whether a
+# server on the right port is the right server. What a fake cannot show.
+#
+# Network-bound (the pinned closure and dbmate, once per cache), so it is NOT on every push and NOT in the pre-push hook: weekly,
+# on demand, and whenever the code that depends on it, or a pin, changes. The launcher's contract with the engine (`dev ps --json`,
+# the stop roads) is half of what it tests, so the engine's templates are on the list.
+#
+# IN A HOUSE IMAGE, because of two refusals: ubuntu-latest is no Debian the closures cover, and initdb will not run as root. So the
+# job's container is an image the house composes, GitHub's steps run as root as it expects, and the driver as the image's own user.
+name: postgres tripwire
+
+on:
+  schedule:
+    - cron: '53 4 * * 1' # Mondays 04:53 UTC
+  workflow_dispatch:
+  push:
+    branches: [main, development]
+    paths:
+      - 'plugins/house/engine/nx-tools/src/generators/postgres/**'
+      - 'plugins/house/engine/nx-tools/src/layers/postgres.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts' # the pinned dbmate and majors
+      - 'plugins/house/engine/nx-tools/src/generators/devcontainer/house.packages.sh.tpl' # the driver installs through it
+      - 'plugins/house/engine/nx-tools/src/generators/dev/files/**'
+      - 'tools/test-postgres/**'
+      - '.github/workflows/postgres-tripwire.yml'
+  pull_request:
+    paths:
+      - 'plugins/house/engine/nx-tools/src/generators/postgres/**'
+      - 'plugins/house/engine/nx-tools/src/layers/postgres.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/devcontainer/house.packages.sh.tpl'
+      - 'plugins/house/engine/nx-tools/src/generators/dev/files/**'
+      - 'tools/test-postgres/**'
+      - '.github/workflows/postgres-tripwire.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postgres-tripwire-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tripwire:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/devcontainers/typescript-node:24
+      options: --user root
+    timeout-minutes: 30
+    env:
+      POSTGRES_TOOLS_CACHE: /var/cache/bespunky-postgres-tools
+    steps:
+      - uses: actions/checkout@v5
+      # The tools install into a directory named by the closure's version, so what the key adds is only when to look again.
+      - uses: actions/cache@v4
+        with:
+          path: /var/cache/bespunky-postgres-tools
+          key: postgres-tools-${{ hashFiles('plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts', 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts', 'plugins/house/engine/nx-tools/src/generators/devcontainer/house.packages.sh.tpl', 'tools/test-postgres/tools.mjs') }}
+      - name: Hand the tree and the cache to the image's user
+        run: |
+          mkdir -p "$POSTGRES_TOOLS_CACHE"
+          chown -R node:node . "$POSTGRES_TOOLS_CACHE"
+      # The driver compiles the payload to read the fragment, and that needs the repo's own dependencies.
+      - name: Install the repo's dependencies
+        run: runuser -u node -- env HOME=/home/node yarn install --frozen-lockfile
+      - name: Check the launcher against the pinned server and dbmate
+        run: runuser -u node -- env HOME=/home/node node tools/test-postgres/run.mjs
