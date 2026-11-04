@@ -61,7 +61,7 @@ wait "$START"
 echo "launcher.exit.rc=$?"
 (exec 3<> "/dev/tcp/127.0.0.1/$PORT") 2> /dev/null && echo "launcher.port=open" || echo "launcher.port=closed"
 # By its state, since an exited daemon stays a zombie where PID 1 reaps nothing.
-echo "launcher.left=$(ps -eo stat=,args= | awk '$1 !~ /^Z/ && /__supabase_stack_/ && !/awk/' | head -n 1 | cut -c1-120)"
+echo "launcher.left=$(ps -eo stat=,args= | awk '$1 !~ /^Z/ && $3 ~ /^__supabase_stack_/' | head -n 1 | cut -c1-120)"
 [ "$READY" = yes ] || sed 's/^/  start: /' start.log | tail -n 30
 sed 's/^/  stop: /' stop.log | tail -n 5
 echo "probe=done"
