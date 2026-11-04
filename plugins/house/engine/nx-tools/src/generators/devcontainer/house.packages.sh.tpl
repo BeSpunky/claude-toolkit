@@ -50,11 +50,29 @@ HOUSE_DEB_ARCHIVES='
 '
 
 {{/DEB_ARCHIVES}}
+{{#CODENAME}}
+# This image's Debian release, the one key of everything below that is built or named per release. The base image tags move
+# across releases, so it is read here, never assumed.
+codename="$(sed -n 's/^VERSION_CODENAME=//p' "${HOUSE_PACKAGES_ROOT:-}/etc/os-release" 2>/dev/null | tr -d '"')"
+
+{{/CODENAME}}
+{{#CODENAME_PACKAGES}}
+# Packages a Debian release names its own way, one line per group and release: `<group> <codename> <names…>`.
+HOUSE_PACKAGES_BY_CODENAME='
+{{HOUSE_PACKAGES_BY_CODENAME}}
+'
+by_codename() { printf '%s\n' "$HOUSE_PACKAGES_BY_CODENAME" | sed 's/#.*//' | awk 'NF >= 3'; }
+
+{{/CODENAME_PACKAGES}}
 # Every list: the house's, then each file given (the project's own). Comments and blanks dropped, de-duplicated in
 # order; CR stripped, so a list saved with Windows line endings still reads. A token that is not a Debian package NAME
 # is refused here, before it can reach a root apt-get command line.
 wanted() {
-  { printf '%s\n' "$HOUSE_PACKAGES"; for list in "$@"; do [ -f "$list" ] && cat "$list"; done; } |
+  { printf '%s\n' "$HOUSE_PACKAGES"
+{{#CODENAME_PACKAGES}}
+    by_codename | awk -v codename="$codename" '$2 == codename { for (i = 3; i <= NF; i++) print $i }'
+{{/CODENAME_PACKAGES}}
+    for list in "$@"; do [ -f "$list" ] && cat "$list"; done; } |
     tr -d '\r' | sed 's/#.*//' | tr -s ' \t' '\n\n' | sed '/^$/d' | awk '!seen[$0]++' |
     while read -r name; do
       case "$name" in
@@ -72,6 +90,16 @@ done
 # The archive tools to install (found below).
 {{/ARCHIVE_TOOLS}}
 pending=""
+{{#CODENAME_PACKAGES}}
+
+# A group with no list for this release: reported, and the exit fails. The rest still installs.
+for id in $(by_codename | awk '{ print $1 }' | awk '!seen[$0]++'); do
+  if [ -z "$(by_codename | awk -v id="$id" -v codename="$codename" '$1 == id && $2 == codename')" ]; then
+    echo "[os-packages] '$id' has no package list for this Debian release ('${codename:-unknown}'; it has: $(by_codename | awk -v id="$id" '$1 == id { print $2 }' | tr '\n' ' ')) — it cannot be installed here. A newer house toolkit may cover this release: upgrade it. If this devcontainer names its own image, use a tag on one of those releases." >&2
+    pending="$pending !$id"
+  fi
+done
+{{/CODENAME_PACKAGES}}
 {{#ARCHIVE_TOOLS}}
 
 # Where the archives go. HOUSE_PACKAGES_ROOT re-roots both directories — for the toolkit's own tests, never set in a build.
@@ -104,11 +132,8 @@ done
 {{/ARCHIVES}}
 {{#DEB_ARCHIVES}}
 
-# This image's Debian release, as a closure is keyed by it. A closure is linked against ONE release's libraries, and the
-# base image tags move across releases: another release is refused, never run on libraries it was not built for.
-codename="$(sed -n 's/^VERSION_CODENAME=//p' "${HOUSE_PACKAGES_ROOT:-}/etc/os-release" 2>/dev/null | tr -d '"')"
-
-# The lines of one kind (`tool`, `closure`, `deb`) for one tool (comments and blanks dropped).
+# A closure is linked against ONE Debian release's libraries: another release is refused, never run on libraries it was not
+# built for. The lines of one kind (`tool`, `closure`, `deb`) for one tool (comments and blanks dropped).
 deb_archive() { printf '%s\n' "$HOUSE_DEB_ARCHIVES" | sed 's/#.*//' | awk -v kind="$1" -v id="$2" '$1 == kind && $2 == id'; }
 
 # Pending, as `deb:<id>`: each closure not installed AT this release's version — and, as `!<id>`, each with nothing for
@@ -312,6 +337,9 @@ status=0
 if [ -n "$missing" ]; then
   install_packages || status=1
 fi
+{{#CODENAME_PACKAGES}}
+case " $pending " in *' !'*) status=1 ;; esac
+{{/CODENAME_PACKAGES}}
 {{#ARCHIVE_TOOLS}}
 for id in $pending; do
   case "$id" in

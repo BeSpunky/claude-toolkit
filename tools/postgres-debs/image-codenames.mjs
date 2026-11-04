@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// THE TRIPWIRE FOR A FLOATING IMAGE: has an image the house composes moved to a Debian release with no Postgres closure?
+// THE TRIPWIRE FOR A FLOATING IMAGE: has an image the house composes moved to a Debian release with no Postgres closure, or no
+// Chromium package list?
 //
 // A closure is linked against one Debian release's libraries, so the table is keyed by codename (POSTGRES_DEB_CODENAMES),
 // while the images float: `base:debian` and `typescript-node:<major>` move to a new Debian on Microsoft's schedule, with no
 // commit here. The generated installer refuses a release it has no closure for, by name, but that refusal lands in a
-// consumer's image build. This says so first. Pinning the tags would not settle it: an adopted image picks its own
+// consumer's image build. Chromium's OS packages are keyed the same way (their names differ per release, _utils/playwright-deps.ts)
+// and refused the same way. This says so first. Pinning the tags would not settle it: an adopted image picks its own
 // release anyway, and the installer's refusal covers that one.
 //
 // HOW, WITH NO DOCKER AND NO PULL: a floating tag and the tag that names its release are the same manifest. `22` has the
@@ -15,7 +17,7 @@
 // image or a new major is checked with no edit here.
 //
 // IT FAILS WHEN UPSTREAM MOVES, so it runs on a schedule (.github/workflows/upstream-tables.yml), never per push. When red:
-// add the codename to POSTGRES_DEB_CODENAMES, run project.mjs --write, and release. Exit 0 ok, 1 no closure, 2 could not tell.
+// the message names which table lacks the release and how to add it; then release. Exit 0 ok, 1 a table lacks it, 2 could not tell.
 //
 //   node tools/postgres-debs/image-codenames.mjs
 import { readFileSync, readdirSync } from 'node:fs';
@@ -31,8 +33,15 @@ const SRC = join(ROOT, 'plugins/house/engine/nx-tools/src');
  * nothing is moving any more: the entry holds for this codename alone, so a move still fails.
  */
 export const KNOWN_OUTSIDE = {
-  'mcr.microsoft.com/devcontainers/typescript-node:14': { codename: 'bullseye', why: 'Node 14 reached end of life in 2023 and its image stays on bullseye. A project on it is refused by the installer, by name.' },
+  'mcr.microsoft.com/devcontainers/typescript-node:14': { codename: 'bullseye', why: 'Node 14 reached end of life in 2023 and its image stays on bullseye. A project on it is refused by the installer, by name, for a closure and for Chromium\'s list alike.' },
 };
+
+/** The Debian releases Chromium's package lists cover, read out of the generated table's text. */
+export function chromiumCodenames(source) {
+  const codenames = [...source.matchAll(/^ {2}([a-z]+): \[$/gm)].map(([, codename]) => codename);
+  if (!codenames.length) throw new Error('no release in playwright-deps.ts: its shape moved, so nothing could be checked against it');
+  return codenames;
+}
 
 /** Tags that are not a Debian release though they may share a digest with one. */
 const NOT_A_RELEASE = new Set(['latest', 'dev', 'debian', 'ubuntu', 'alpine']);
@@ -112,16 +121,23 @@ async function main() {
   const codenames = {};
   for (const image of images) codenames[image] = await codenameOf(image, tagsOf);
 
-  const results = judge(codenames, closures);
-  for (const { image, codename, verdict } of results) {
-    if (verdict === 'ok') console.log(`ok       ${image} → ${codename}`);
-    if (verdict === 'known') console.log(`known    ${image} → ${codename}: ${KNOWN_OUTSIDE[image].why}`);
-    if (verdict === 'missing') console.error(`MOVED    ${image} → ${codename}, and the closures cover only ${closures.join(', ')}. A project on this image cannot install Postgres: its image build fails. Add "${codename}" to POSTGRES_DEB_CODENAMES (versions.ts), run node tools/postgres-debs/project.mjs --write, review, and release.`);
-    if (verdict === 'unknown') console.error(`UNKNOWN  ${image}: no tag naming a release has this tag's digest (or several do), so its release cannot be told from the registry.`);
+  const tables = [
+    { what: 'the Postgres closures', covers: closures, fix: 'add it to POSTGRES_DEB_CODENAMES and run tools/postgres-debs/project.mjs --write' },
+    { what: "Chromium's package lists", covers: chromiumCodenames(readFileSync(join(SRC, 'generators/_utils/playwright-deps.ts'), 'utf8')), fix: 'add it to PLATFORMS in tools/playwright-deps/project.mjs and run it with --write' },
+  ];
+  const verdicts = new Set();
+  for (const { what, covers, fix } of tables) {
+    for (const { image, codename, verdict } of judge(codenames, covers)) {
+      verdicts.add(verdict);
+      if (verdict === 'ok') console.log(`ok       ${image} → ${codename} (${what})`);
+      if (verdict === 'known') console.log(`known    ${image} → ${codename}: ${KNOWN_OUTSIDE[image].why}`);
+      if (verdict === 'missing') console.error(`MOVED    ${image} → ${codename}, and ${what} cover only ${covers.join(', ')}. A project on this image cannot build it: ${fix}, then release.`);
+      if (verdict === 'unknown') console.error(`UNKNOWN  ${image}: no tag naming a release has this tag's digest (or several do), so its release cannot be told from the registry.`);
+    }
   }
-  if (results.some((result) => result.verdict === 'missing')) process.exit(1);
-  if (results.some((result) => result.verdict === 'unknown')) process.exit(2);
-  console.log(`ok: all ${images.length} composed images are on a release with a closure (${closures.join(', ')}) or stated above`);
+  if (verdicts.has('missing')) process.exit(1);
+  if (verdicts.has('unknown')) process.exit(2);
+  console.log(`ok: all ${images.length} composed images are on a release ${tables.map(({ what, covers }) => `${what} cover (${covers.join(', ')})`).join(' and ')}, or stated above`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

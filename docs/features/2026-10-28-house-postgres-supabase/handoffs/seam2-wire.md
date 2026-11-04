@@ -104,3 +104,32 @@ This supersedes the red dogfood row and "for the orchestrator" above, which stay
 | dogfood `--released=main --only=new-postgres,new-postgres-node,add-layer-postgres` | PASS, 107 passed, 0 failed, 0 skipped |
 
 Generator-seeded served app: now closed on both hosts, amd64 trixie. Everything under "Not proven, and only a real run can" still stands.
+
+## Third pass: Chromium's OS packages per Debian release (after the first real CI, PR #1)
+
+Bookworm's image cases failed, and not on Postgres: `js` brings Chromium's group, projected for debian13 only, so `libasound2t64` and friends do not exist there. Pre-existing: any node-host project on `typescript-node:16` or `:18` could not build its image.
+
+- **Projection.** `tools/playwright-deps/project.mjs` projects debian13 and debian12 from the same pin; `CHROMIUM_OS_PACKAGES` is keyed by codename. All 32 names of each list checked by hand against Debian's own indexes, both architectures, none missing.
+- **Group shape.** `OsPackageNames`: `packages`, or `{ id, byCodename }`. `onHouseImageOnly` unchanged: an adopted image gets neither the names nor a refusal.
+- **Installer.** Picks by codename. A release with no list fails by the group's id with the way out, like a closure; the rest still installs, and it fails even with nothing else to install.
+- **Departure from "make that read unconditional":** the read is gated on anything needing it (a per-release group or a closure), so a project with neither keeps its installer's bytes and its cached image layer. A project with Chromium's group gets new bytes and one rebuild.
+- **Tripwire.** `image-codenames.mjs` judges every image against both tables, naming which lacks the release and how to add it. Run for real: all 8 images covered, `typescript-node:14` still the stated exemption.
+- **`postgres-image.sh`.** `bare-node` undone, bookworm cases back on `node`; `[os-packages]` lines on a failed build kept.
+
+**The migrations question: nothing to migrate.** `house.packages.sh` is owned and regenerated every upgrade, the project's `os-packages.txt` is not touched, and no project state changes shape. A Node 16 or 18 node-host project simply starts building; a trixie project with the group rebuilds its layer once, with the same packages.
+
+**Persistence:** nothing to keep. No new tool, only the same packages under the right names.
+
+**Node 18 verdict: it runs.** The launcher and engine, generated templates, on real Node 18.20.8 and real Postgres 18 through `postgres-image.launcher.sh`, on this machine: boot, seed, migrate, `dev stop` 0, launcher exit 0. Read for newer APIs: the engine's `AbortSignal.any` needs 18.17, which the image's latest 18 has.
+
+**FINDING, Node 16: the launcher cannot run.** Real 16.20.2: `ERR_UNKNOWN_BUILTIN_MODULE: node:readline/promises` at load, as a stack trace. The engine's `AbortSignal.any` would fail there too. Fixing the Chromium names means a Node 16 node-host project now builds its image, then its Postgres launcher crashes. Not papered over; left for the orchestrator: a refusal in `add-layer`/the launcher, or a Node floor for the layer.
+
+**Only CI will tell:** the real `apt-get install` of bookworm's list, the launcher inside the bookworm image, arm64 for both.
+
+| What | Exit | Final line |
+|---|---|---|
+| `tools/playwright-deps/project.mjs` | 0 | ok: match playwright-core@1.63.0 (trixie, bookworm) |
+| `tools/test-layers` | 0 | 112 passed, 0 failed |
+| `tools/test-generators` | 0 | 426 passed, 0 failed, 35 skipped |
+| `CI=true tools/test-scaffold/run.sh` | 0 | all passed, 29 files |
+| `tools/check-runner-image/test.sh` | 0 | PASS |

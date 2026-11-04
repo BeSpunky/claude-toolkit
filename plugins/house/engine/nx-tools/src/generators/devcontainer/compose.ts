@@ -31,6 +31,7 @@ import type {
   DevcontainerJson,
   DevcontainerPort,
   DevcontainerPortProcess,
+  OsPackageNames,
   PostCreatePhase,
   PostCreatePiece,
   BinaryTool, TarballTool,
@@ -73,7 +74,7 @@ export interface Composition {
   ports: ComposedPort[];
   portProcesses: DevcontainerPortProcess[];
   initializeCommand: ({ name: string; command: string } & Why)[];
-  osPackages: ({ packages: string[] } & Why)[];
+  osPackages: (OsPackageNames & Why)[];
   archives: (ArchiveTool & Why)[];
   /**
    * The spec the image build provides the project's package manager from (`_utils/package-manager.ts`), when a layer
@@ -249,8 +250,8 @@ export function compose(
     osPackages: all('osPackages')
       .filter(({ item }) => !(source.kind === 'foreign' && (item as { onHouseImageOnly?: boolean }).onHouseImageOnly))
       .map(({ item }) => {
-        const entry = item as { packages: readonly string[]; why?: string };
-        return { packages: [...entry.packages], why: entry.why };
+        const { onHouseImageOnly: _onHouseImageOnly, ...group } = item as OsPackageNames & Why & { onHouseImageOnly?: true };
+        return group;
       }),
     // Distro-neutral (a tarball, tar and curl), so a foreign image gets them too.
     archives: unique(all('archives').map(({ item }) => ({ ...(item as ArchiveTool & Why) })), (entry) => entry.id),
@@ -582,13 +583,30 @@ export function renderOsPackagesScript({ osPackages, archives }: Pick<Compositio
     : osPackages;
   const seen = new Set<string>();
   const lines: string[] = [];
+  // Per-release groups, one each (two layers may share one): `<id> <codename> <names…>`. The installer's own list de-duplicates
+  // them against the rest at run time, which is the only place that knows the release.
+  const perRelease = new Map<string, Extract<OsPackageNames, { id: string }> & Why>();
   for (const group of groups) {
+    if (group.byCodename) {
+      perRelease.set(group.id, group);
+      continue;
+    }
     const fresh = group.packages.filter((name) => !seen.has(name));
     fresh.forEach((name) => seen.add(name));
     if (!fresh.length) continue;
     if (group.why) lines.push(...group.why.split('\n').map((line) => `# ${line}`.trimEnd()));
     lines.push(fresh.join(' '));
   }
+  const codenameLines = [...perRelease.values()].flatMap((group) => [
+    ...(group.why ? group.why.split('\n').map((line) => `# ${line}`.trimEnd()) : []),
+    ...Object.entries(group.byCodename).map(([codename, names]) => {
+      const line = `${group.id} ${codename} ${names.join(' ')}`;
+      if (!ARCHIVE_ID.test(group.id) || !DEBIAN_CODENAME.test(codename) || !names.length || !names.every((name) => DEBIAN_PACKAGE.test(name))) {
+        throw new Error(`[devcontainer] OS package group "${group.id}" is malformed: ${line}`);
+      }
+      return line;
+    }),
+  ]);
   // `<id> <version> <arch> <sha256> <url> <bin>` per architecture — validated here, because the installer runs it as root.
   const archiveLines: string[] = [];
   for (const tool of tarballs) {
@@ -621,7 +639,12 @@ export function renderOsPackagesScript({ osPackages, archives }: Pick<Compositio
   // The archive machinery (the list and its installer) is rendered only when a layer declares an archive tool: a
   // project with none gets no empty list and no code that would loop over it.
   const template = readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8');
-  const script = renderSection(renderSection(renderSection(renderSection(renderSection(template, 'BINARY_ARCHIVES', binaries.length > 0), 'TARBALLS_ONLY', binaries.length === 0), 'ARCHIVES', tarballs.length + binaries.length > 0), 'DEB_ARCHIVES', debClosures.length > 0), 'ARCHIVE_TOOLS', archives.length > 0)
+  const script0 = renderSection(renderSection(renderSection(renderSection(renderSection(template, 'BINARY_ARCHIVES', binaries.length > 0), 'TARBALLS_ONLY', binaries.length === 0), 'ARCHIVES', tarballs.length + binaries.length > 0), 'DEB_ARCHIVES', debClosures.length > 0), 'ARCHIVE_TOOLS', archives.length > 0)
+  // A project with neither reads no release: its installer's bytes, and so its cached image layer, do not move.
+  const rendered = renderSection(renderSection(script0, 'CODENAME_PACKAGES', perRelease.size > 0), 'CODENAME', perRelease.size > 0 || debClosures.length > 0);
+  const script = rendered
+    .split('{{HOUSE_PACKAGES_BY_CODENAME}}')
+    .join(codenameLines.join('\n').split("'").join("'\\''"))
     .split('{{HOUSE_ARCHIVES}}')
     .join(archiveLines.join('\n').split("'").join("'\\''"))
     .split('{{HOUSE_DEB_ARCHIVES}}')
@@ -636,6 +659,8 @@ export function renderOsPackagesScript({ osPackages, archives }: Pick<Compositio
 
 const ARCHIVE_ID = /^[a-z0-9-]+$/;
 const ARCHIVE_VERSION = /^[A-Za-z0-9][A-Za-z0-9.+~-]*$/;
+const DEBIAN_CODENAME = /^[a-z]+$/;
+const DEBIAN_PACKAGE = /^[a-z0-9][a-z0-9.+-]*$/;
 const DEBIAN_ARCH = /^(amd64|arm64)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 /** One apt relation (`libc6 (>= 2.38)`), alternatives (`a | b`) and all, joined by `, ` — what `apt-get satisfy` reads. */

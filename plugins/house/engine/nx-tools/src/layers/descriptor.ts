@@ -297,6 +297,13 @@ interface CiDeployProviderShape {
   retireStep?(environment: CiEnvironment): string;
 }
 
+/**
+ * A group's Debian package names: the same on every release, or per release, for what a release renames (`libasound2` became
+ * `libasound2t64`). The installer picks by the image's own codename, and a release with no list fails the install by the
+ * group's id, like a closure with none: a future Debian must fail loudly, never install half a browser's libraries.
+ */
+export type OsPackageNames = { packages: readonly string[]; byCodename?: never } | { id: string; byCodename: Readonly<Record<string, readonly string[]>>; packages?: never };
+
 /** A `.gitignore` block: a `#` heading (without the `#`) and the entries under it. */
 export interface GitignoreBlock {
   heading: string;
@@ -531,13 +538,11 @@ export interface DevcontainerFragment {
   /** Named `initializeCommand` entries (object form — they run side by side, on the HOST). */
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
   /** Debian packages — composed into the one installer (house.packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
-  osPackages?: readonly ({
-    /** Debian package names. */
-    packages: readonly string[];
+  osPackages?: readonly (OsPackageNames & {
     /**
-     * Names that are right only for the HOUSE images' distro (a projection for Debian 13, like Chromium's libraries):
-     * left out on an adopted devcontainer's foreign image, whose distro the house cannot know — one wrong name fails
-     * the whole apt transaction. Such a group's post-create counterpart installs them by the tool's own means there.
+     * Names that are right only for the HOUSE images' distro (a projection for their Debian releases, like Chromium's
+     * libraries): left out on an adopted devcontainer's foreign image, whose distro the house cannot know — one wrong name
+     * fails the whole apt transaction. Such a group's post-create counterpart installs them by the tool's own means there.
      */
     onHouseImageOnly?: true;
   } & Explained)[];

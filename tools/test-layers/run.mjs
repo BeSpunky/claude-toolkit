@@ -23,7 +23,7 @@
  * Like the migration tests it compiles the payload the way the publisher does and tests the RESULT.
  * Needs `yarn install`.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, readlinkSync, lstatSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -1367,7 +1367,7 @@ checkAsync('chromium: a foreign image keeps Playwright\'s own --with-deps (its d
   const foreign = createTreeWithEmptyWorkspace();
   foreign.write('.devcontainer/devcontainer.json', '{ "image": "python:3.12-bookworm", "remoteUser": "pyuser" }\n');
   const f = await artifacts(foreign, ['nx', 'agent', 'node', 'js', 'web']);
-  ok(!/(^| )libnss3( |$)/m.test(f.osScript), 'a foreign image got the Debian 13 Chromium names (one wrong name fails the whole apt transaction)');
+  ok(!/(^| )libnss3( |$)/m.test(f.osScript), 'a foreign image got the Chromium names meant for the house images (one wrong name fails the whole apt transaction)');
   ok(f.osScript.includes('tigervnc-standalone-server'), 'the distro-neutral web packages must stay on a foreign image');
   ok(f.post.includes('shared-browser" install --with-deps;') && f.post.includes('playwright install --with-deps chromium'), 'a foreign image lost Playwright\'s own --with-deps');
   const house = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js', 'web']);
@@ -1551,12 +1551,68 @@ checkAsync('post-create: web provisions the shared browser through its own runti
   const tree = createTreeWithEmptyWorkspace();
   const both = await artifacts(tree, ['nx', 'agent', 'node', 'js', 'web']);
   ok(both.post.includes('"@playwright/test"') && both.post.includes('playwright install chromium') && !both.post.includes('--with-deps'), 'js+web: both pieces, neither with an apt step');
-  ok((both.osScript.match(/(^| )libnss3( |$)/gm) ?? []).length === 1, 'js+web: Chromium\'s libraries listed twice (the composer must de-duplicate)');
+  ok((both.osScript.match(/^chromium trixie /gm) ?? []).length === 1, 'js+web: Chromium\'s libraries listed twice (the composer must de-duplicate)');
   const js = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js']);
   ok(/(^| )libnss3( |$)/m.test(js.osScript), 'js (no web): @playwright/test\'s Chromium libraries are not image packages');
   const { PLAYWRIGHT_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
   const { CHROMIUM_OS_PACKAGES_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright-deps'));
   ok(CHROMIUM_OS_PACKAGES_VERSION === PLAYWRIGHT_VERSION, `Chromium's OS packages were projected from playwright-core@${CHROMIUM_OS_PACKAGES_VERSION}, the pin is ${PLAYWRIGHT_VERSION} — run: node tools/playwright-deps/project.mjs --write`);
+  // Every release the house images can be on has a list, and a name a release renamed is on the right side of it.
+  const { CHROMIUM_OS_PACKAGES } = require_(join(BUILD, 'src/generators/_utils/playwright-deps'));
+  const { POSTGRES_DEB_CODENAMES } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  ok(POSTGRES_DEB_CODENAMES.every((codename) => CHROMIUM_OS_PACKAGES[codename]?.length), `a release with a Postgres closure has no Chromium list: ${Object.keys(CHROMIUM_OS_PACKAGES)}`);
+  ok(CHROMIUM_OS_PACKAGES.trixie.includes('libasound2t64') && CHROMIUM_OS_PACKAGES.bookworm.includes('libasound2') && !CHROMIUM_OS_PACKAGES.bookworm.includes('libasound2t64'), 'the lists are not each its own release\'s names');
+  const { chromiumCodenames } = await import('../postgres-debs/image-codenames.mjs');
+  ok(chromiumCodenames(readFileSync(join(PAYLOAD, 'src/generators/_utils/playwright-deps.ts'), 'utf8')).join() === Object.keys(CHROMIUM_OS_PACKAGES).join(), 'the weekly tripwire reads other releases than the table holds');
+  let shapeMoved = false;
+  try { chromiumCodenames('export const X = {};'); } catch { shapeMoved = true; }
+  ok(shapeMoved, 'a table the tripwire cannot read is an error, never an empty list');
+
+  // An osPackages group per release, through the real installer: it picks by the image's codename, and refuses one with no list.
+  const { compose: composeGroup, renderOsPackagesScript: renderGroup } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const perRelease = { id: 'browser', byCodename: { trixie: ['libnew', 'shared'], bookworm: ['libold', 'shared'] }, onHouseImageOnly: true, why: "a release's own names" };
+  const composed = (source, ...groups) => composeGroup([{ id: 'x', fragment: { image: { ref: 'img', remoteUser: 'node' }, osPackages: groups } }], { nodeMajor: '22', ...source });
+  const script = renderGroup(composed({}, { packages: ['plain', 'shared'] }, perRelease, perRelease));
+  ok(script.split("\nbrowser trixie ").length === 2, 'two layers sharing a group must render it once');
+  const onRelease = (codename, present = []) => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-by-codename-'));
+    try {
+      const bin = join(dir, 'bin');
+      mkdirSync(bin);
+      mkdirSync(join(dir, 'root/etc'), { recursive: true });
+      if (codename) writeFileSync(join(dir, 'root/etc/os-release'), `ID=debian\nVERSION_CODENAME=${codename}\n`);
+      writeFileSync(join(dir, 'house.packages.sh'), script);
+      writeFileSync(join(bin, 'dpkg-query'), `#!/bin/sh\nfor last; do :; done\nfor p in ${present.join(' ')}; do [ "$p" = "$last" ] && { printf 'install ok installed'; exit 0; }; done\nexit 1\n`, { mode: 0o755 });
+      writeFileSync(join(bin, 'apt-get'), `#!/bin/sh\necho "$*" >> '${join(dir, 'apt.log')}'\n`, { mode: 0o755 });
+      writeFileSync(join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+      const run = spawnSync('sh', ['-c', 'sh "$0" 2>&1', join(dir, 'house.packages.sh')], { env: { PATH: `${bin}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: join(dir, 'root') }, encoding: 'utf8' });
+      const log = existsSync(join(dir, 'apt.log')) ? readFileSync(join(dir, 'apt.log'), 'utf8') : '';
+      return { status: run.status, output: run.stdout, install: log.split('\n').find((line) => line.startsWith('install')) ?? '' };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const trixie = onRelease('trixie');
+  ok(trixie.status === 0 && / plain shared libnew$/.test(trixie.install), `trixie installs its own names, each once: ${trixie.install} ${trixie.output}`);
+  const bookworm = onRelease('bookworm');
+  ok(bookworm.status === 0 && / plain shared libold$/.test(bookworm.install), `bookworm installs its own names: ${bookworm.install} ${bookworm.output}`);
+  const forky = onRelease('forky');
+  ok(forky.status !== 0 && /'browser' has no package list for this Debian release \('forky'; it has: trixie bookworm \)/.test(forky.output) && /upgrade it/.test(forky.output), `a release with no list fails by name, with the way out: ${forky.output}`);
+  ok(/ plain shared$/.test(forky.install), `…and the rest still installs: ${forky.install}`);
+  const forkyDone = onRelease('forky', ['plain', 'shared']);
+  ok(forkyDone.status !== 0 && forkyDone.install === '' && !forkyDone.output.includes('all present'), `with nothing else to install, it still fails: ${forkyDone.output}`);
+  const nowhere = onRelease(undefined);
+  ok(nowhere.status !== 0 && /\('unknown'; it has/.test(nowhere.output), `no readable release fails by name: ${nowhere.output}`);
+  ok(onRelease('bookworm', ['plain', 'shared', 'libold']).output.includes('all present'), 'a container built from this image installs nothing');
+  const adopted = renderGroup(composed({ imageSource: { kind: 'foreign', runsAs: 'node' } }, { packages: ['plain'] }, perRelease));
+  ok(!adopted.includes('libnew') && !adopted.includes('VERSION_CODENAME'), 'onHouseImageOnly keeps its meaning: an adopted image gets neither the names nor a refusal of its release');
+  const plainOnly = renderGroup(composed({}, { packages: ['plain'] }));
+  ok(!/VERSION_CODENAME|HOUSE_PACKAGES_BY_CODENAME|\{\{/.test(plainOnly), 'a project with no per-release group reads no release: its installer, and its cached layer, do not move');
+  for (const [name, group] of [['an id', { id: 'Bad Id', byCodename: { trixie: ['a'] } }], ['a codename', { id: 'x', byCodename: { 'Tri xie': ['a'] } }], ['an empty list', { id: 'x', byCodename: { trixie: [] } }], ['a name', { id: 'x', byCodename: { trixie: ['a; rm -rf /'] } }]]) {
+    let refused = false;
+    try { renderGroup(composed({}, group)); } catch { refused = true; }
+    ok(refused, `a malformed group must be refused before it reaches a root apt-get: ${name}`);
+  }
   ok(bashParses(both.post), 'js+web post-create does not parse');
 });
 

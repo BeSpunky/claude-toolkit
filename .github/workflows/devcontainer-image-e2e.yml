@@ -26,6 +26,7 @@ on:
       - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/package-manager.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/playwright-deps.ts'
       - 'plugins/house/engine/nx-tools/src/layers/postgres.ts'
       - 'plugins/house/engine/nx-tools/src/layers/node.ts'
       - 'plugins/house/engine/nx-tools/src/layers/agent.ts'

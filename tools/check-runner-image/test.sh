@@ -356,7 +356,7 @@ for name; do :; done
 dir="$PROJECTS_DIR/$name"
 mkdir -p "$dir/.bespunky"
 tool="$dir/nx"
-case "$*" in *--preset=node* | *--add-layer=node,*) mkdir -p "$dir/node_modules/.bin"; tool="$dir/node_modules/.bin/nx" ;; esac
+case "$*" in *--preset=node*) mkdir -p "$dir/node_modules/.bin"; tool="$dir/node_modules/.bin/nx" ;; esac
 cat > "$tool" <<'NX'
 #!/usr/bin/env bash
 echo "nx $*" >> "$FAKE_ARGV"
@@ -474,7 +474,7 @@ done
 for id in pg18-trixie-agent pg17-trixie-node24 pg18-bookworm-node18 pg17-bookworm-node18; do
   grep -q "docker build.*-t house-postgres-image-e2e-$id " "$FAKE_ARGV" && ok "it built $id" || fail "it never built $id"
 done
-[ "$(grep -c 'house.sh new' "$FAKE_ARGV")" = 3 ] && ok "one project per kind" || fail "made $(grep -c 'house.sh new' "$FAKE_ARGV") projects"
+[ "$(grep -c 'house.sh new' "$FAKE_ARGV")" = 2 ] && ok "one project per preset" || fail "made $(grep -c 'house.sh new' "$FAKE_ARGV") projects"
 pg_case "one case by name runs only that one" "$ONE" 0 "$ONE" "pg18-trixie-agent"
 pg_case "an unknown case: usage" nope 2 "usage" "PASS"
 pg_case "the build failing: a finding, with the build's words" "$ONE" 1 "docker build exited 0 (it exited 3)" "as node" FAKE_BUILD_RC=3

@@ -5,7 +5,7 @@
 #   - tools/postgres-debs/project.mjs → the Postgres .deb closures (the PGDG archive's signed indexes, every pin still served),
 #     and the pinned dbmate downloads (GitHub, each file against its sha256).
 #   - tools/postgres-debs/image-codenames.mjs → whether every image the house composes is still on a Debian release with a
-#     closure (MCR). No table and no --write: a red run means add the codename, re-project, release. Weekly here, not before
+#     closure and a Chromium package list (MCR). No table and no --write: a red run means add the codename, re-project, release. Weekly here, not before
 #     a publish: the images move on their own schedule, and a publish is not when that reaches anyone.
 #
 # ON A SCHEDULE, NOT ON EVERY PUSH. These checks fail when UPSTREAM moves (a new @angular/fire, a new Node LTS), not
@@ -38,6 +38,7 @@ on:
       - 'plugins/house/engine/nx-tools/src/generators/_utils/gcloud-archive.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/node-facts.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/playwright-deps.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
       - 'plugins/house/engine/nx-tools/src/layers/*.ts' # image-codenames reads which images the layers compose
 
@@ -67,6 +68,6 @@ jobs:
       - name: Check the Postgres closures projection and the pinned dbmate downloads (the PGDG archive, Debian, GitHub)
         if: always()
         run: node tools/postgres-debs/project.mjs --check
-      - name: Check the images the house composes are on a release with a Postgres closure (MCR)
+      - name: Check the images the house composes are on a release with a Postgres closure and a Chromium list (MCR)
         if: always()
         run: node tools/postgres-debs/image-codenames.mjs
