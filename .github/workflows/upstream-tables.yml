@@ -7,6 +7,8 @@
 #   - tools/postgres-debs/image-codenames.mjs → whether every image the house composes is still on a Debian release with a
 #     closure and a Chromium package list (MCR). No table and no --write: a red run means add the codename, re-project, release. Weekly here, not before
 #     a publish: the images move on their own schedule, and a publish is not when that reaches anyone.
+#   - tools/supabase-cli/check.mjs → the pinned Supabase CLI's downloads, each against its sha256 (GitHub). A newer release (npm) and the
+#     native runtime's stage (supabase.com) are ::notice:: lines and can fail nothing. No table and no --write.
 #
 # ON A SCHEDULE, NOT ON EVERY PUSH. These checks fail when UPSTREAM moves (a new @angular/fire, a new Node LTS), not
 # when a commit is wrong. In the per-push test job they turned every unrelated PR red the day upstream released, and —
@@ -34,6 +36,7 @@ on:
       - 'tools/check-runner-image/**'
       - 'plugins/house/engine/container-engine.sh'
       - 'tools/postgres-debs/**'
+      - 'tools/supabase-cli/**'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/firebase-compat.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/gcloud-archive.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/node-facts.ts'
@@ -71,3 +74,6 @@ jobs:
       - name: Check the images the house composes are on a release with a Postgres closure and a Chromium list (MCR)
         if: always()
         run: node tools/postgres-debs/image-codenames.mjs
+      - name: Check the pinned Supabase CLI downloads and matches (GitHub); a newer release and the native runtime's stage are notices (npm, supabase.com)
+        if: always()
+        run: node tools/supabase-cli/check.mjs

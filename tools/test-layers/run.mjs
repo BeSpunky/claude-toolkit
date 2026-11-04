@@ -1234,6 +1234,19 @@ checkAsync('postgres closures: the table covers the pins, is exactly what its to
     unreadable = true;
   }
   ok(unreadable, 'a pin the check cannot read is an error, never an empty list');
+  // The Supabase CLI's upstream check, offline: only a broken pin can fail it, and what it reads must not read as fine when it is not there.
+  const supabaseCheck = await import('../supabase-cli/check.mjs');
+  const cliPins = pinnedDownloads(readFileSync(join(PAYLOAD, 'src/generators/_utils/versions.ts'), 'utf8'), 'SUPABASE_CLI');
+  ok(cliPins.version === versions.SUPABASE_CLI_VERSION, 'the check reads the CLI version the payload pins');
+  ok(JSON.stringify(Object.fromEntries(cliPins.pins.map(({ arch, url, sha256 }) => [arch, { url, sha256 }]))) === JSON.stringify(versions.SUPABASE_CLI_DOWNLOADS), 'the check reads every CLI download the payload pins, as the payload computes it');
+  ok(supabaseCheck.nativeStage('x,"slug":"native-local-runtime","status":{"stage":"Public Alpha","availableOnSelfHosted":true}') === 'Public Alpha', 'the stage, from the page\'s data');
+  ok(supabaseCheck.nativeStage('<div>Stage:</div>  <b>Public Alpha</b>  <div>Available</div>') === 'Public Alpha', 'the stage, from the page\'s words');
+  ok(supabaseCheck.nativeStage('<html>nothing about it</html>') === undefined, 'a page that no longer says is unread, never a stage');
+  ok(supabaseCheck.notices({ pin: '3.0.0', latest: '3.0.0', stage: 'Public Alpha' }).length === 0, 'nothing new: nothing said');
+  ok(/3\.1\.0 is out/.test(supabaseCheck.notices({ pin: '3.0.0', latest: '3.1.0', stage: 'Public Alpha' }).join()), 'a newer release is said');
+  ok(supabaseCheck.notices({ pin: '3.1.0', latest: '3.0.0', stage: 'Public Alpha' }).length === 0, 'an older `latest` is no news');
+  ok(/now "General Availability"/.test(supabaseCheck.notices({ pin: '3.0.0', latest: '3.0.0', stage: 'General Availability' }).join()), 'leaving alpha is said');
+  ok(supabaseCheck.notices({ pin: '3.0.0' }).length === 2, 'what could not be read is said, each');
   ok(Object.keys(POSTGRES_CLOSURES).sort().join() === [...versions.POSTGRES_MAJORS].sort().join(), `the table's majors are not the pins: ${Object.keys(POSTGRES_CLOSURES)} (node tools/postgres-debs/project.mjs --write)`);
   // The image job's table is hand-written, and its header says it covers every major on every release.
   const imageCases = readFileSync(new URL('../check-runner-image/postgres-image.sh', import.meta.url), 'utf8').match(/^pg\d+-[^|]*\|[^|]*\|[^|]*\|\d+\|[^|]*\|\w+$/gm) ?? [];
