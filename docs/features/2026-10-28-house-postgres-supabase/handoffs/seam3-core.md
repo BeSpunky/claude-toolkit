@@ -46,3 +46,6 @@ Needs a rebuild: the installer as root in a real image, SUPABASE_HOME on the rea
 
 ## Owed by wire/docs
 README row and layer list, CLAUDE.md engine section (layer list, the port), `new` skill, a skill if wanted, tips, `.github` workflow for the tripwire and image job, dogfood-consumer road, `tools/check-runner-image` case; `tools/test-supabase` row in CLAUDE.md; `upstream-tables` check for the CLI release.
+
+## To weigh
+With 10000-32767 out, every block but 2000-4000 is above 32767, so inside Linux's ephemeral range. `auto` probes every port and a clash is loud ("Cannot bind"), seen once with a hand-picked offset, so nothing is silent; a stack can still lose a port to an outgoing connection between probe and start, and the next start picks again.

@@ -62,16 +62,18 @@ const baseEnv = () => {
 };
 const cliEnv = () => ({ ...baseEnv(), SUPABASE_HOME: HOME_, SUPABASE_NO_KEYRING: '1', DO_NOT_TRACK: '1' });
 
-/** A free block for every port of the stack, above what the native runtime keeps for itself. */
+const isFree = (port) =>
+  new Promise((done) => {
+    const server = createServer();
+    server.once('error', () => done(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => done(true)));
+  });
+/** A block with every port free, above what the native runtime keeps for itself: an explicit offset is honoured unprobed. */
 const freeOffset = async () => {
   for (;;) {
     const offset = 1000 * (28 + Math.floor(Math.random() * 25));
-    const free = await new Promise((done) => {
-      const server = createServer();
-      server.once('error', () => done(false));
-      server.listen(5432 + offset, '127.0.0.1', () => server.close(() => done(true)));
-    });
-    if (free) return offset;
+    const all = await Promise.all(Array.from({ length: 10 }, (_, i) => isFree(5432 + offset + i)));
+    if (all.every(Boolean)) return offset;
   }
 };
 
