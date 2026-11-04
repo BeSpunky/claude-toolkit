@@ -1683,7 +1683,7 @@ const fakePm = (dir, name, version) => {
  * The installer against a PATH holding only what it is given and the tools it uses. The fake npm logs, and an install
  * lays down the package's binary in its prefix: `--prefix <dir>` if given, else the "global" dir (which `npmFails` refuses).
  */
-const runPmInstaller = (script, spec, { on = {}, behind = {}, shadow, npm = true, npmFails = false } = {}) => {
+const runPmInstaller = (script, spec, { on = {}, behind = {}, shadow, npm = true, npmFails = false, npmLandsAhead = false } = {}) => {
   const dir = mkdtempSync(join(tmpdir(), 'pm-install-'));
   const home = join(dir, 'home');
   const global = join(dir, 'global');
@@ -1716,7 +1716,7 @@ done
 if [ -z "$prefix" ] && [ ${npmFails ? 1 : 0} = 1 ]; then echo EACCES >&2; exit 243; fi
 into="\${prefix:+$prefix/bin}"; into="\${into:-${global}}"
 version="\${package##*@}"; name="\${package%@*}"
-case "$name" in @yarnpkg/cli-dist) name=yarn ;; npm) echo "$version" > '${npmVersionFile}'; exit 0 ;; esac
+case "$name" in @yarnpkg/cli-dist) name=yarn ;; npm) [ ${npmLandsAhead ? 1 : 0} = 1 ] || { echo "$version" > '${npmVersionFile}'; exit 0; } ;; esac
 mkdir -p "$into"
 printf '#!/bin/sh\\n[ "$1" = --version ] && echo %s\\n' "$version" > "$into/$name"; chmod +x "$into/$name"
 `, { mode: 0o755 });
@@ -1790,9 +1790,10 @@ check('package manager: the installer installs only what is not already right, a
     ok(refused.status === 1 && refused.calls.length === 0, `'${hostile}' reached npm: ${JSON.stringify(refused)}`);
   }
 
-  // The install lands EARLIER on PATH than the image's copy: the check after it must see the new one, not the one the
-  // shell remembers (found with real npm: every wrong version on a typescript-node image would report failure).
+  // The install lands EARLIER on PATH than the image's copy (/usr/local/bin vs npm-global/bin on typescript-node): the check
+  // after it must see the new one. npm too, where the script's shell remembers the old one: found with the real npm.
   installs('an image copy behind the prefix', run('yarn@4.5.0', { behind: { yarn: '1.22.22' } }), '@yarnpkg/cli-dist@4.5.0');
+  installs('npm, landing ahead of the image\'s npm', run('npm@10.9.0', { npmLandsAhead: true }), 'npm@10.9.0');
 
   // A prefix this user cannot write (a foreign image's root-owned /usr/local): ~/.local, first on the house's PATH.
   const fallback = run('yarn@1.22.22', { npmFails: true });

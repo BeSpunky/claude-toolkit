@@ -47,8 +47,8 @@ case "$want" in
 esac
 
 # What this command answers from here. In a project, yarn's answer is the project's own yarn when it has a `yarnPath`.
-# A command that cannot answer (corepack's shim with no network) counts as absent. `hash -r`: the shell remembers where it
-# last found a command, so after an install landed earlier on PATH it would go on asking the old copy.
+# A command that cannot answer (corepack's shim with no network) counts as absent. `hash -r`: this shell remembers where it
+# found npm, so after `npm@<x>` landed earlier on PATH it would go on asking the old copy.
 present() { hash -r; command -v "$pm" > /dev/null 2>&1 && "$pm" --version 2> /dev/null < /dev/null | head -n 1 | tr -d ' \r'; }
 
 is_right() {
