@@ -4,7 +4,7 @@
 //   node tools/postgres/postgres.mjs start [--port-offset=<n>]     a stack of its own, in the foreground, until stopped
 //   node tools/postgres/postgres.mjs migrate [--offset=<n>]        apply postgres/migrations to this tree's running server
 //   node tools/postgres/postgres.mjs seed [--offset=<n>]           apply postgres/seed/world again
-//   node tools/postgres/postgres.mjs reset [--offset=<n>]          drop the database, migrate, seed
+//   node tools/postgres/postgres.mjs reset [--offset=<n>]          drop the database, migrate, seed; boots a stack for it if none runs
 //   node tools/postgres/postgres.mjs psql [--offset=<n>] [--sql=<statement>] [--file=<path>]
 //   node tools/postgres/postgres.mjs new-migration --name=<lower_snake>
 //   node tools/postgres/postgres.mjs deploy                        migrate the database POSTGRES_DEPLOY_URL names
@@ -16,9 +16,9 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { BASE_PORT, DATABASE, DEPLOY_URL_VAR, DEV_ENGINE, LAUNCHER, NX, PORT_NAME, ROOT, ROLE, Refusal, dataHome } from './layout.mjs';
-import { addressedStack, assertIdentity } from './stack.mjs';
-import { applySeeds, dbmateMigrate, ensureDatabase, localMigrate, newMigration, seedOnce } from './schema.mjs';
+import { BASE_PORT, DATABASE, DEPLOY_URL_VAR, DEV_ENGINE, LAUNCHER, NX, PORT_NAME, ROOT, ROLE, Refusal, dataHome, isLinkedWorktree } from './layout.mjs';
+import { addressedStack, assertIdentity, runningStacks } from './stack.mjs';
+import { applySeeds, dbmateMigrate, dropDatabase, ensureDatabase, localMigrate, newMigration, seedOnce } from './schema.mjs';
 import { query, scrubbedEnv, tool } from './tools.mjs';
 import { parseDeployUrl } from './url.mjs';
 import { serve } from './server.mjs';
@@ -73,7 +73,16 @@ function start(argv) {
   if (silentUnderNx()) {
     throw new Refusal(`Under an AI agent Nx shows nothing of this while it runs (no port, no stop handle), so it would block silently until the tool call times out. Run the launcher itself, which prints both: node tools/postgres/postgres.mjs start`);
   }
-  const child = spawn(process.execPath, [DEV_ENGINE, 'run', PORT_NAME, '--label=Postgres, run on its own', `--ports=${PORT_NAME}=${BASE_PORT}`, ...(flags['port-offset'] !== undefined ? [`--port-offset=${flags['port-offset']}`] : []), '--', process.execPath, LAUNCHER, 'serve'], {
+  return ownStack('serve', flags['port-offset'], 'Postgres, run on its own');
+}
+
+/**
+ * This launcher's `verb` as a stack of its own: the engine claims the block and hands it the lock. A linked worktree asks for
+ * `auto` when nothing was said, which is a block of its own and the same one every time: the base block is the main tree's.
+ */
+function ownStack(verb, offset, label) {
+  const spec = offset ?? (isLinkedWorktree() ? 'auto' : undefined);
+  const child = spawn(process.execPath, [DEV_ENGINE, 'run', PORT_NAME, `--label=${label}`, `--ports=${PORT_NAME}=${BASE_PORT}`, ...(spec !== undefined ? [`--port-offset=${spec}`] : []), '--', process.execPath, LAUNCHER, verb], {
     cwd: ROOT,
     stdio: 'inherit',
   });
@@ -99,8 +108,12 @@ async function seed(argv) {
 }
 
 async function reset(argv) {
+  const { flags } = parse(argv, ['offset']);
+  const offset = offsetOf(flags);
+  // Nothing to address is what a failed start leaves, and the moment this verb is needed most: boot for it, then stop again.
+  if (!runningStacks().some((stack) => offset === undefined || stack.offset === Number(offset))) return ownStack('serve-reset', offset, 'Postgres, resetting');
   const { stack } = await addressed(argv);
-  await query(stack.port, `DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`, { database: 'postgres' });
+  await dropDatabase(stack.port);
   await ensureDatabase(stack.port);
   await localMigrate(stack.port);
   await seedOnce(stack.port);
@@ -166,7 +179,7 @@ async function deploy(argv) {
   const skipsThePrompt = envFileSetting('CI');
   if (skipsThePrompt) throw new Refusal(`CI is set in ${skipsThePrompt}, and it would skip a deploy's confirmation. Only the runner says it is CI: remove it.`);
   const url = process.env[DEPLOY_URL_VAR];
-  if (!url) throw new Refusal(`${DEPLOY_URL_VAR} is not set. CI sets it from the environment's secret; by hand: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
+  if (!url) throw new Refusal(`${DEPLOY_URL_VAR} is not set. CI sets it from the environment's secret, ${DEPLOY_URL_VAR}_<ENVIRONMENT>; by hand: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
   let target;
   try {
     target = parseDeployUrl(url);
@@ -186,7 +199,7 @@ async function deploy(argv) {
   return 0;
 }
 
-const VERBS = { start, serve: (argv) => (parse(argv, []), serve()), migrate, seed, reset, psql, 'new-migration': createMigration, deploy };
+const VERBS = { start, serve: (argv) => (parse(argv, []), serve()), 'serve-reset': (argv) => (parse(argv, []), serve({ resetThenStop: true })), migrate, seed, reset, psql, 'new-migration': createMigration, deploy };
 
 const [verb, ...argv] = process.argv.slice(2);
 try {

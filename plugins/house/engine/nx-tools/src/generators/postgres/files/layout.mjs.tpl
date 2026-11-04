@@ -3,11 +3,12 @@
 //
 // A SERVER PER STACK. Its data lives outside the tree, under the persisted home, keyed by the tree and the stack:
 //   <data home>/<hash of the tree>/tree                  the tree's path: what the sweep asks about
+//   <data home>/<hash of the tree>/origin                who wrote that: the hostname and the device of the tree's parent
 //   <data home>/<hash of the tree>/<app>@<offset>/<major>/data       the cluster
 //   <data home>/<hash of the tree>/<app>@<offset>/<major>/identity   its system_identifier, written once, before the rename
 //   <data home>/<hash of the tree>/<app>@<offset>/<major>/owner      the hostname running it; its mtime is the heartbeat
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,18 @@ export class Refusal extends Error {}
 /** How this repo invokes Nx, for a sentence that names a target. */
 export const NX = existsSync(join(ROOT, 'nx')) ? './nx' : 'nx';
 
+/** How to run a verb from a sentence. Under an agent, the launcher itself: Nx would show it nothing until the verb ended. */
+export const verbCommand = (verb, args = '') => `${process.env.CLAUDECODE === '1' ? `node tools/postgres/postgres.mjs ${verb}` : `${NX} run postgres:${verb}`}${args && ` ${args}`}`;
+
+/** A linked git worktree, whose `.git` is a file. The base block is the main tree's: it never takes that by default. */
+export function isLinkedWorktree() {
+  try {
+    return statSync(join(ROOT, '.git')).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function declaredMajor() {
   let declared;
   try {
@@ -53,3 +66,4 @@ export const clusterHome = (key, major) => join(stackHome(key), major);
 export const dataDir = (home) => join(home, 'data');
 export const identityFile = (home) => join(home, 'identity');
 export const ownerFile = (home) => join(home, 'owner');
+export const originFile = (dir) => join(dir, 'origin');

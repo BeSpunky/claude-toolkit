@@ -440,6 +440,13 @@ case "$sub" in
     echo "dbmate.row=${FAKE_ROW:-1}"
     echo "stop.rc=${FAKE_STOP_RC:-0}"
     echo "stop.pidfile=${FAKE_PIDFILE:-gone}"
+    echo "launcher.ready=${FAKE_LAUNCHER_READY:-yes}"
+    echo "launcher.row=${FAKE_LAUNCHER_ROW-seeded}"
+    echo "launcher.wal=logical"
+    echo "launcher.migrate.rc=${FAKE_LAUNCHER_MIGRATE_RC:-0}"
+    echo "launcher.column=1"
+    echo "launcher.stop.rc=${FAKE_LAUNCHER_STOP_RC:-0}"
+    echo "launcher.exit.rc=${FAKE_LAUNCHER_EXIT_RC:-0}"
     echo "probe=done"
     exit 0 ;;
 esac
@@ -496,6 +503,10 @@ pg_case "a migration failing: a finding" "$ONE" 1 "a real dbmate migration" "PAS
 pg_case "a migration with no row: a finding" "$ONE" 1 "its row is there" "PASS" FAKE_ROW=0
 pg_case "the stop failing: a finding" "$ONE" 1 "the server stopped" "PASS" FAKE_STOP_RC=1
 pg_case "a pid file left: a finding" "$ONE" 1 "left no pid file" "PASS" FAKE_PIDFILE=left
+pg_case "the launcher not booting: a finding" "$ONE" 1 "the launcher booted it" "PASS" FAKE_LAUNCHER_READY=no
+pg_case "the launcher seeding nothing: a finding" "$ONE" 1 "migrated and seeded" "PASS" FAKE_LAUNCHER_ROW=
+pg_case "the migrate verb failing: a finding" "$ONE" 1 "postgres.mjs migrate exited 0" "PASS" FAKE_LAUNCHER_MIGRATE_RC=1
+pg_case "dev stop failing: a finding" "$ONE" 1 "dev stop exited 0" "PASS" FAKE_LAUNCHER_STOP_RC=1
 pg_case "no base image: could not run" "$ONE" 2 "COULD NOT RUN ($ONE): docker pull" "FAILED" FAKE_PULL_RC=1
 pg_case "an engine error at run: could not run" "$ONE" 2 "docker run exited 125" "FAILED" FAKE_RUN_RC=125
 pg_case "exit 0 with no sentinel: could not run" "$ONE" 2 "before the probe's end" "PASS" FAKE_NO_SENTINEL=1

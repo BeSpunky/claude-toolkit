@@ -106,3 +106,9 @@ Deliberately not first: a supabase-js client port, cloud setup automation, mixed
 - `firebase:reset` appears to reset the wrong directory in a worktree (read, not reproduced). Separate fix, to check.
 - `agent.ts:73` uses a version-less `github-cli` feature, against the stated rule.
 - Coverage to do better than: `dogfood-consumer` never boots the suite; 51 of 114 Firebase iterations reached a human first and one was found by a test.
+
+---
+
+## Note, 2026-11-04: evidence is a tag (amends *The shape*)
+
+*The shape* above says evidence is `postgres/project.json`. The Landing 2 review reproduced that misreading both ways: a library named `postgres` took the verbs while the layer read as absent, and a project of the repo's own at `postgres/` made a plain upgrade start wearing the layer. Decided at the review's list (D3): evidence is the tag `type:postgres`, as `design-system` does; the project is resolved by that tag, and something else holding the name or the folder is refused with the way out. The text above stands as what was proposed.

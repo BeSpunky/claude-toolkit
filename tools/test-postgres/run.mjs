@@ -146,6 +146,8 @@ scenario('cold boot: created, migrated, seeded before ready, and the settings th
   const treeDirs = readdirSync(home).filter((d) => existsSync(join(home, d, 'tree')) && readFileSync(join(home, d, 'tree'), 'utf8').trim() === dir);
   ok(treeDirs.length === 1 && existsSync(join(home, treeDirs[0], stack.key, '18/data/PG_VERSION')), 'data under the data home, keyed by tree, stack and major');
   ok(!existsSync(join(dir, 'postgres/data')), 'nothing in the tree');
+  const postmaster = readFileSync(join(home, treeDirs[0], stack.key, '18/data/postmaster.pid'), 'utf8').split('\n')[0];
+  ok(/bespunky\/postgres\/.+\/data/.test(readFileSync(`/proc/${postmaster}/cmdline`, 'utf8').replaceAll('\0', ' ')), 'its command line is what the devcontainer tells the editor not to forward');
   ok(readFileSync(join(home, treeDirs[0], stack.key, '18/identity'), 'utf8').trim() === sql(stack.port, 'SELECT system_identifier FROM pg_control_system()'), 'the identity record holds the server\'s system_identifier');
   ok(!readdirSync(join(home, treeDirs[0], stack.key)).some((n) => n.startsWith('.init-')), 'no initdb sibling left');
   const out = stop(stack);
@@ -386,7 +388,7 @@ scenario('an interrupted initdb never becomes a cluster; a leftover sibling is s
   await untilEnded(again);
 });
 
-scenario('the sweep: data of a removed worktree is dropped and reported, a live tree\'s is kept', async () => {
+scenario('the sweep: data of a removed worktree is set aside and reported, restorable, and a live tree\'s is kept', async () => {
   const dir = fixture();
   const gone = fixture();
   const a = await start(gone);
@@ -398,11 +400,35 @@ scenario('the sweep: data of a removed worktree is dropped and reported, a live 
   ok(Boolean(hash), 'it had data');
   rmSync(gone, { recursive: true, force: true });
   const stack = await start(dir);
-  ok(!existsSync(join(home, hash)), 'dropped');
-  ok(stack.log().includes('dropped the Postgres data of') && stack.log().includes(gone), 'and reported, naming the tree');
+  ok(!existsSync(join(home, hash)), 'moved from where it was');
+  const restore = new RegExp(`mv '([^']+)' '${join(home, hash).replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\$&')}'`).exec(stack.log());
+  ok(stack.log().includes('set aside the Postgres data of') && stack.log().includes(gone) && restore && existsSync(restore[1]), 'and reported, naming the tree and the mv that restores it');
+  ok(restore && existsSync(join(restore[1], 'tree')), 'with the record and the clusters beside it');
   stop(stack);
   await untilEnded(stack);
   ok(Boolean(dirOf(dir)), 'this tree keeps its own');
+});
+
+scenario('the sweep: a tree renamed, with its parent still here, loses nothing: the printed mv brings its rows back', async () => {
+  const dir = fixture();
+  addMigration(dir);
+  addSeed(dir);
+  const first = await start(dir);
+  stop(first);
+  await untilEnded(first);
+  const away = `${dir}-away`;
+  renameSync(dir, away);
+  const other = await start(fixture());
+  const restore = /mv '([^']+)' '([^']+)'/.exec(other.log());
+  ok(Boolean(restore) && existsSync(restore[1]), 'it was set aside, and the start says how to restore it');
+  stop(other);
+  await untilEnded(other);
+  renameSync(away, dir);
+  renameSync(restore[1], restore[2]);
+  const back = await start(dir, { offset: first.offset });
+  ok(sql(back.port, 'SELECT name FROM thing') === 'seeded', 'tree and data back: the same rows');
+  stop(back);
+  await untilEnded(back);
 });
 
 scenario('the sweep: a tree invisible from here keeps its data, which still works when it comes back', async () => {
@@ -424,7 +450,7 @@ scenario('the sweep: a tree invisible from here keeps its data, which still work
   const other = await start(fixture());
   ok(existsSync(join(home, hash, first.key, '18/data/PG_VERSION')), 'another tree\'s start keeps the cluster');
   ok(other.log().includes(`kept the Postgres data of ${dir}`) && other.log().includes(join(home, hash)), 'and says so, naming the tree and the directory');
-  ok(!other.log().includes(`dropped the Postgres data of ${dir}`), 'and does not say it dropped it');
+  ok(!other.log().includes(`set aside the Postgres data of ${dir}`), 'and does not say it set it aside');
   stop(other);
   await untilEnded(other);
   renameSync(elsewhere, mount);
@@ -490,14 +516,102 @@ scenario('a failed bring-up names the road back, which works', async () => {
   addMigration(dir, '20260101000000_earlier.sql', '-- migrate:up\nCREATE TABLE earlier (id int);\n\n-- migrate:down\n');
   const failed = await start(dir, { offset, expectFailure: true, timeoutMs: 30_000 });
   await untilEnded(failed);
-  const road = /remove (\S+) and start again/.exec(failed.log())?.[1];
-  ok(failed.code !== 0 && Boolean(road), `an out-of-order migration fails the start, and says what to remove (${failed.log().trim().split('\n').at(-1)})`);
-  ok(/No Postgres/.test(launcher(dir, 'reset').stderr), 'the verbs need a running server, which is why');
-  rmSync(road, { recursive: true, force: true });
+  ok(failed.code !== 0 && failed.log().includes(`postgres:reset --offset=${offset}`), `an out-of-order migration fails the start, and names reset (${failed.log().trim().split('\n').at(-1)})`);
+  ok(ps(dir).length === 0, 'nothing is running after it');
+  const reset = launcher(dir, 'reset', `--offset=${offset}`);
+  ok(reset.status === 0 && /is reset/.test(reset.stdout), `reset boots a stack for it, with nothing running (${reset.status}: ${reset.stderr.trim().split('\n').at(-1)})`);
+  ok(ps(dir).length === 0, 'and stops it again: the verb ends, and leaves nothing behind');
   const again = await start(dir, { offset });
   ok(sql(again.port, "SELECT to_regclass('earlier')") === 'earlier' && sql(again.port, "SELECT to_regclass('thing')") === 'thing', 'and that road gives a database with both migrations');
   stop(again);
   await untilEnded(again);
+  addMigration(dir, '20260301000000_broken.sql', '-- migrate:up\nSELECT no_such_function();\n\n-- migrate:down\n');
+  const broken = launcher(dir, 'reset', `--offset=${offset}`);
+  ok(broken.status !== 0 && /migrations or seeds themselves/.test(broken.stderr + broken.stdout) && ps(dir).length === 0, 'a migration that fails from nothing: reset says so, and stops');
+});
+
+scenario('a linked worktree with no block asked for: a block of its own, never the base one, and the same one each time', async () => {
+  const main = fixture();
+  addMigration(main);
+  const git = (...args) => execFileSync('git', args, { cwd: main, stdio: 'ignore' });
+  git('-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A');
+  git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'a migration');
+  const dir = `${main}-linked`;
+  git('worktree', 'add', '-q', '-b', 'linked', dir);
+  // Not `start`, which always asks for a block: this is the launcher deciding, and the engine's refusal is not what guards it here.
+  const bare = () => {
+    const logFile = join(dir, `.bare-${Date.now()}.log`);
+    writeFileSync(logFile, '');
+    const child = spawn('sh', ['-c', `exec "${process.execPath}" tools/postgres/postgres.mjs start >> '${logFile}' 2>&1`], { cwd: dir, env: baseEnv(), detached: true, stdio: 'ignore' });
+    const handle = { dir, child, log: () => readFileSync(logFile, 'utf8'), ended: false };
+    child.on('exit', (code) => Object.assign(handle, { ended: true, code }));
+    started.push(handle);
+    return handle;
+  };
+  const untilRow = async () => {
+    for (let i = 0; i < 2000; i++) {
+      const [row] = ps(dir);
+      if (row && existsSync(join(dir, '.bespunky/run', row.key, 'postgres.ready'))) return row;
+      await sleep(25);
+    }
+    return undefined;
+  };
+  const first = bare();
+  const row = await untilRow();
+  ok(row && row.offset !== 0 && row.ports.postgres !== 5432, `it took a block of its own (${row?.key}, port ${row?.ports.postgres})`);
+  Object.assign(first, { key: row?.key, offset: row?.offset, port: row?.ports.postgres });
+  stop(first);
+  await untilEnded(first);
+  const second = bare();
+  const again = await untilRow();
+  ok(again?.offset === row?.offset, `the same one again (${again?.key})`);
+  Object.assign(second, { key: again?.key, offset: again?.offset, port: again?.ports.postgres });
+  stop(second);
+  await untilEnded(second);
+  ok(ps(dir).length === 0, 'and it stops');
+});
+
+scenario('moved to another block: the start names where this tree last ran, and only then', async () => {
+  const dir = fixture();
+  addMigration(dir);
+  const usual = await start(dir);
+  stop(usual);
+  await untilEnded(usual);
+  let offset = await freeOffset();
+  while (offset === usual.offset) offset = await freeOffset();
+  const moved = await start(dir, { offset });
+  ok(moved.log().includes(`this is ${moved.key}, and this tree last ran on ${usual.key}`) && moved.log().includes(`--port-offset=${usual.offset}`), 'a new block says where the usual data is');
+  stop(moved);
+  await untilEnded(moved);
+  const stays = await start(dir, { offset });
+  ok(!stays.log().includes('this tree last ran on'), 'the same block again says nothing: it is now the usual one');
+  stop(stays);
+  await untilEnded(stays);
+  const back = await start(dir, { offset: usual.offset });
+  ok(back.log().includes(`this tree last ran on ${moved.key}`), 'and an older cluster, with no creating line of its own, says so too');
+  stop(back);
+  await untilEnded(back);
+});
+
+scenario('a server of this data directory that no stack claims: refused, its pid file left alone', async () => {
+  const dir = fixture();
+  const offset = await freeOffset();
+  const first = await start(dir, { offset });
+  // What `pg_ctl` by hand, or a server that lost the stack lock, looks like: on the data, on another port, with no record.
+  const home = join(xdg, 'bespunky/postgres');
+  const hash = readdirSync(home).find((d) => existsSync(join(home, d, 'tree')) && readFileSync(join(home, d, 'tree'), 'utf8').trim() === realpathSync(dir));
+  const data = join(home, hash, first.key, '18/data');
+  stop(first);
+  await untilEnded(first);
+  const stray = await freeOffset();
+  const unclaimed = spawn('postgres', ['-D', data, '-c', `port=${5432 + stray}`, '-c', 'listen_addresses=127.0.0.1', '-c', `unix_socket_directories=${scratch}`], { env: baseEnv(), detached: true, stdio: 'ignore' });
+  for (let i = 0; i < 200 && sql(5432 + stray, 'SELECT 1', 'postgres') !== '1'; i++) await sleep(25);
+  const refused = await start(dir, { offset, expectFailure: true, timeoutMs: 30_000 });
+  await untilEnded(refused);
+  ok(refused.code !== 0 && refused.log().includes('already running'), `refused (${refused.log().trim().split('\n').at(-1)})`);
+  ok(existsSync(join(data, 'postmaster.pid')) && sql(5432 + stray, 'SELECT 1', 'postgres') === '1', 'and that server still answers, its pid file in place');
+  process.kill(unclaimed.pid, 'SIGQUIT');
+  for (let i = 0; i < 200 && existsSync(join(data, 'postmaster.pid')); i++) await sleep(25);
 });
 
 scenario('the heartbeat: another container on this data is refused, a stale one taken over, and a server that lost it stops', async () => {
@@ -571,7 +685,8 @@ scenario('deploy: only what is named, from the environment, never from a file', 
     const refused = deploy({ CI: 'true', POSTGRES_DEPLOY_URL: bad });
     ok(refused.status !== 0 && /is refused/.test(refused.stderr), `refused: ${bad}`);
   }
-  ok(deploy({ CI: 'true', POSTGRES_DEPLOY_URL: 'postgresql://u:p@db-pooler.example.com/app' }).status !== 0, 'a transaction pooler: refused');
+  const pooled = deploy({ CI: 'true', POSTGRES_DEPLOY_URL: 'postgresql://u:p@db-pooler.example.com/app' });
+  ok(pooled.status !== 0 && /transaction pooler/.test(pooled.stderr), 'a transaction pooler: refused, for that reason and not a failed connection');
   writeFileSync(join(dir, '.env'), `POSTGRES_DEPLOY_URL=${url}\n`);
   const fromFile = deploy({ CI: 'true', POSTGRES_DEPLOY_URL: url });
   ok(fromFile.status !== 0 && /never from a file/.test(fromFile.stderr) && sql(remote.port, "SELECT to_regclass('thing')") === '', 'a URL in a .env file: refused, even with the variable set');

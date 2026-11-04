@@ -3,23 +3,30 @@
 //
 // No cloud identity and no OIDC: the credential is the direct URL, a secret of the line's GitHub environment, handed only to
 // the deploy step of this stage. A line names no target for it: what it deploys into is the line's environment.
+//
+// THE SECRET IS NAMED AFTER THE ENVIRONMENT. GitHub falls back from an environment's secret to a repo-level or org-level one of
+// the same name, so with one name, an environment that lacks it would silently migrate whatever that one names.
 import { type Tree, readProjectConfiguration } from '@nx/devkit';
+import { environmentSecretSuffix } from '../_utils/deploy-contract';
 import type { CiDeployProvider, CiEnvironment } from '../../layers/descriptor';
-import { houseProjectHome } from '../_utils/project-files';
+import { postgresHome } from './home';
 import { DBMATE_DOWNLOADS, DBMATE_VERSION } from '../_utils/versions';
 
-export const POSTGRES_DEPLOY_SECRET = 'POSTGRES_DEPLOY_URL';
+/** What the launcher reads. In CI it holds the environment's secret, `POSTGRES_DEPLOY_URL_<ENVIRONMENT>`. */
+export const POSTGRES_DEPLOY_VAR = 'POSTGRES_DEPLOY_URL';
+export const postgresDeploySecret = (environment: string): string => `${POSTGRES_DEPLOY_VAR}_${environmentSecretSuffix(environment)}`;
 
 export const postgresCiProvider: CiDeployProvider = {
   id: 'postgres',
   title: 'Postgres (schema migrations, by dbmate over a direct connection)',
   // `dbmate[^\s]*`: an image (`amacneil/dbmate:2`) or a release binary (`dbmate-linux-amd64`) runs the same migrations.
-  deploySignals: [/\bdbmate[^\s]*\s+(?:\S+\s+)*?(?:up|migrate)\b/, /\bpostgres\.mjs\s+deploy\b/],
+  deploySignals: [/\bpostgres\.mjs\s+deploy\b/],
+  credentialedDeploySignals: [/\bdbmate[^\s]*\s+(?:\S+\s+)*?(?:up|migrate)\b/],
   deployStage: 'schema',
-  deployEnv: { [POSTGRES_DEPLOY_SECRET]: `\${{ secrets.${POSTGRES_DEPLOY_SECRET} }}` },
+  deployEnv: { [POSTGRES_DEPLOY_VAR]: `\${{ secrets[format('${POSTGRES_DEPLOY_VAR}_{0}', needs.resolve.outputs.environment_token)] }}` },
   deployTargets: (tree: Tree) => {
-    const home = houseProjectHome(tree, 'postgres', 'postgres');
-    if (!home.exists) return [];
+    const home = postgresHome(tree);
+    if (!home) return [];
     return readProjectConfiguration(tree, home.name).targets?.deploy ? [{ project: home.name, target: 'deploy' }] : [];
   },
   authSteps: () => '',
@@ -37,7 +44,7 @@ export const postgresCiProvider: CiDeployProvider = {
     ].join('\n'),
   // Prompts for the value, so it reaches neither a command line nor a shell's history.
   humanStep: (env: CiEnvironment) =>
-    `! gh secret set ${POSTGRES_DEPLOY_SECRET} --env ${env.name} — '${env.name}' (branches ${env.branches.join(', ')}) migrates the database this secret names, and its deploy fails until it is set. ` +
+    `! gh secret set ${postgresDeploySecret(env.name)} --env ${env.name} — '${env.name}' (branches ${env.branches.join(', ')}) migrates the database this secret names, and its deploy fails until it is set. ` +
     `It prompts for the host's DIRECT URL (not a pooler). A HUMAN runs it: never paste the URL into chat. ` +
     `If GitHub has no such environment yet: gh api --method PUT repos/{owner}/{repo}/environments/${env.name}`,
 };

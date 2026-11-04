@@ -2,7 +2,7 @@
 // would regress SILENTLY: an address, a refusal, what a child is handed. What needs real binaries is tools/test-postgres.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -24,7 +24,10 @@ fake('dbmate');
 fake('postgres', `case "$*" in --version) echo 'postgres (PostgreSQL) 18.6 (Debian x)' ;; esac`);
 fake('psql', `case "$*" in *pg_control_system*) cat "${scratch}/answer" ;; esac`);
 const say = (answer) => writeFileSync(join(scratch, 'answer'), `${answer}\n`);
-const stacksAre = (rows) => writeFileSync(join(tree, 'tools/dev/dev.mjs'), `process.stdout.write(${JSON.stringify(JSON.stringify(rows))});\n`);
+const engineCalls = join(scratch, 'engine-calls');
+const stacksAre = (rows) =>
+  writeFileSync(join(tree, 'tools/dev/dev.mjs'), `import { appendFileSync } from 'node:fs';\nappendFileSync(${JSON.stringify(engineCalls)}, process.argv.slice(2).join(' ') + '\\n');\nprocess.stdout.write(${JSON.stringify(JSON.stringify(rows))});\n`);
+const lastEngineCall = () => readFileSync(engineCalls, 'utf8').trim().split('\n').filter((line) => !line.startsWith('ps')).at(-1) ?? '';
 const readyState = join(scratch, 'ready-state');
 mkdirSync(readyState, { recursive: true });
 writeFileSync(join(readyState, 'postgres.ready'), '');
@@ -102,17 +105,17 @@ let result = run('migrate');
 check('none running: names the target that starts one', result.status !== 0 && /postgres:start/.test(result.stderr), result.stderr);
 
 stacksAre([row(100, { tree: join(scratch, 'elsewhere') })]);
-result = run('reset');
+result = run('migrate');
 check('another tree\'s stack is not this tree\'s', result.status !== 0 && /postgres:start/.test(result.stderr), result.stderr);
 
 stacksAre([{ ...row(100), ports: { web: 4300 } }]);
-result = run('reset');
+result = run('migrate');
 check('a stack with no Postgres port is not addressed', result.status !== 0 && /postgres:start/.test(result.stderr), result.stderr);
 
 stacksAre([row(100), row(200)]);
 result = run('reset');
 check('several: refused, listing each, asking for --offset', result.status !== 0 && /--offset/.test(result.stderr) && /postgres@100/.test(result.stderr) && /postgres@200/.test(result.stderr), result.stderr);
-result = run('reset', ['--offset=300']);
+result = run('migrate', ['--offset=999']);
 check('an offset that is not running: refused, listing what is', result.status !== 0 && /postgres@100/.test(result.stderr), result.stderr);
 result = run('migrate', ['--offset=abc']);
 check('a non-numeric offset: refused', result.status !== 0 && /whole number/.test(result.stderr), result.stderr);
@@ -293,13 +296,44 @@ check('…not on an Nx with no summary renderer, which streams', result.status =
 result = run('migrate', [], { CLAUDECODE: '1' });
 check('under an agent, a verb with no server names the command that prints its handle', result.status !== 0 && /node tools\/postgres\/postgres\.mjs start/.test(result.stderr), result.stderr);
 
+// ── what reaches the engine when a stack is made ──
+stacksAre([]);
+result = run('reset', ['--offset=300']);
+check('reset with nothing running: boots through dev run, on the offset asked', result.status === 0 && /^run postgres .*--port-offset=300 .*serve-reset$/.test(lastEngineCall()), lastEngineCall());
+stacksAre([row(100)]);
+result = run('reset', ['--offset=300']);
+check('reset of an offset nothing runs on, another running: boots for that one too', /--port-offset=300 .*serve-reset$/.test(lastEngineCall()), lastEngineCall());
+stacksAre([row(100, { state: 'orphaned' })]);
+writeFileSync(engineCalls, '');
+result = run('reset', ['--offset=100']);
+check('reset of an orphan is refused, never booted over', result.status !== 0 && /orphaned/.test(result.stderr) && lastEngineCall() === '', result.stderr);
+stacksAre([]);
+result = run('start');
+check('the main tree: no block asked for, so the engine\'s base block', result.status === 0 && !/--port-offset/.test(lastEngineCall()), lastEngineCall());
+writeFileSync(join(tree, '.git'), 'gitdir: /somewhere/.git/worktrees/x\n');
+result = run('start');
+check('a linked worktree: auto, never the base block', result.status === 0 && /--port-offset=auto/.test(lastEngineCall()), lastEngineCall());
+result = run('reset');
+check('…and a reset with nothing running: auto too', /--port-offset=auto .*serve-reset$/.test(lastEngineCall()), lastEngineCall());
+result = run('start', ['--port-offset=700']);
+check('…unless a block was asked for', /--port-offset=700/.test(lastEngineCall()) && !/auto/.test(lastEngineCall()), lastEngineCall());
+rmSync(join(tree, '.git'));
+
 // ── the sweep: a deletion must be proven ──
 // `~/.local` is a volume, so a tree another container mounts is invisible from this one, and treating it as gone loses its data.
 const sweepHome = join(xdg, 'bespunky/postgres');
-const recordTree = (name, recorded) => {
+const recordTree = (name, recorded, origin = {}) => {
   const dir = join(sweepHome, name);
   mkdirSync(join(dir, 'postgres@0/18/data'), { recursive: true });
   writeFileSync(join(dir, 'tree'), `${recorded}\n`);
+  // The record a start leaves: this host, and the device of the tree's parent, where it can be read.
+  let parentDevice = 0;
+  try {
+    parentDevice = statSync(dirname(recorded)).dev;
+  } catch {
+    // no such parent: nothing to record
+  }
+  writeFileSync(join(dir, 'origin'), `${JSON.stringify({ host: hostname(), parentDevice, ...origin })}\n`);
   return dir;
 };
 const sweep = () =>
@@ -313,6 +347,10 @@ mkdirSync(join(worktrees, 'alive'), { recursive: true });
 writeFileSync(join(scratch, 'a-file'), '');
 const removed = recordTree('removed', join(worktrees, 'removed'));
 const alive = recordTree('alive', join(worktrees, 'alive'));
+const otherHost = recordTree('other-host', join(worktrees, 'gone-host'), { host: 'another-container' });
+const otherDevice = recordTree('other-device', join(worktrees, 'gone-device'), { parentDevice: 1 });
+const noOrigin = recordTree('no-origin', join(worktrees, 'gone-origin'));
+rmSync(join(noOrigin, 'origin'));
 const invisible = recordTree('invisible', join(scratch, 'mounted-elsewhere/project'));
 const deeper = recordTree('deeper', join(scratch, 'mounted-elsewhere/a/b/project'));
 const underFile = recordTree('under-file', join(scratch, 'a-file/project'));
@@ -320,14 +358,18 @@ const relative = recordTree('relative', 'worktrees/removed');
 const blank = recordTree('blank', '');
 const swept = sweep();
 check('the sweep ran', swept.status === 0, swept.stderr);
-check('a removed worktree, its parent here: dropped', !existsSync(removed));
-check('…and reported, naming the tree', swept.stdout.includes(`dropped the Postgres data of ${join(worktrees, 'removed')}`), swept.stdout);
+const asideOf = (name) => readdirSync(sweepHome).find((entry) => entry.startsWith('.swept-') && entry.endsWith(`-${name}`));
+check('a removed worktree, its parent here: set aside, not deleted', !existsSync(removed) && existsSync(join(sweepHome, asideOf('removed') ?? 'none', 'postgres@0/18/data')), swept.stdout);
+check('…and reported, naming the tree and the mv that restores it', swept.stdout.includes(`set aside the Postgres data of ${join(worktrees, 'removed')}`) && swept.stdout.includes(`mv '${join(sweepHome, asideOf('removed') ?? 'none')}' '${removed}'`), swept.stdout);
+check('a tree another host recorded: kept, though it looks removed from here', existsSync(join(otherHost, 'postgres@0/18/data')) && swept.stdout.includes(`kept the Postgres data of ${join(worktrees, 'gone-host')}`), swept.stdout);
+check('a parent on another device than recorded (an unmounted disk): kept', existsSync(join(otherDevice, 'postgres@0/18/data')), swept.stdout);
+check('no record of who wrote it: kept', existsSync(join(noOrigin, 'postgres@0/18/data')), swept.stdout);
 check('a tree that is here: kept, with nothing said', existsSync(alive) && !swept.stdout.includes(join(worktrees, 'alive')), swept.stdout);
 check('a tree whose parent is not here: kept', existsSync(join(invisible, 'postgres@0/18/data')) && existsSync(join(deeper, 'postgres@0/18/data')));
 check('…and reported as kept, naming the tree and the directory to remove', swept.stdout.includes(`kept the Postgres data of ${join(scratch, 'mounted-elsewhere/project')}`) && swept.stdout.includes(invisible), swept.stdout);
 check('a path under a file proves nothing: kept', existsSync(underFile));
 check('a record that is no absolute path proves nothing: kept, though it reads as a removed worktree from here', existsSync(relative) && existsSync(blank), swept.stdout);
-check('nothing was reported dropped but the removed worktree', swept.stdout.match(/dropped the Postgres data/g)?.length === 1, swept.stdout);
+check('nothing was set aside but the removed worktree', swept.stdout.match(/set aside the Postgres data/g)?.length === 1, swept.stdout);
 if (process.getuid?.() !== 0) {
   // Root reads through any mode, so this one cannot be staged as root.
   const sealed = join(scratch, 'sealed');
@@ -364,8 +406,16 @@ const myBeat = beating('mine', join(worktrees, 'gone-c'), hostname());
 const beats = sweep();
 check('the sweep: a tree proven gone with a fresh heartbeat from another host: kept', existsSync(stillBeating));
 check('…and named, with the host', beats.stdout.includes('container other-container is running a server') && beats.stdout.includes(join(worktrees, 'gone-a')), beats.stdout);
-check('the sweep: its heartbeat stale: dropped', !existsSync(staleBeat), beats.stdout);
-check('the sweep: its heartbeat this host\'s own: dropped, no server being there', !existsSync(myBeat), beats.stdout);
+check('the sweep: its heartbeat stale: set aside', !existsSync(staleBeat) && Boolean(asideOf('stale')), beats.stdout);
+check('the sweep: its heartbeat this host\'s own: set aside, no server being there', !existsSync(myBeat) && Boolean(asideOf('mine')), beats.stdout);
+// Only time deletes what was set aside.
+const young = join(sweepHome, `.swept-${Date.now() - 6 * 86_400_000}-young`);
+const old = join(sweepHome, `.swept-${Date.now() - 8 * 86_400_000}-old`);
+mkdirSync(young, { recursive: true });
+mkdirSync(old, { recursive: true });
+const expired = sweep();
+check('set aside under 7 days: still there', existsSync(young), expired.stdout);
+check('set aside over 7 days: deleted, and said', !existsSync(old) && expired.stdout.includes(`deleted ${old}`), expired.stdout);
 rmSync(sweepHome, { recursive: true, force: true });
 
 // A start inside a stack, against a cluster that already exists, and a server that exits at once and says what it found.

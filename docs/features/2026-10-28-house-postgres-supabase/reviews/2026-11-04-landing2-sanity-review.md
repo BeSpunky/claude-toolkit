@@ -39,3 +39,12 @@ L4.11 apt-get transitive dependencies (not observable here); L4.12 pooler assert
 
 ## Process
 L1 bound 127.0.0.1:5432 for seconds by accident (stopped; nothing left). L3 ran deploy-path checks with CLAUDECODE unset against db.invalid and left /home/node/projects/pgw. Budget spent, so no second-round reviewer over the fix diff.
+
+## Decisions applied (uncommitted, on top of 122f2e9d and cbfa12b1)
+D1 reset boots through `dev run` (`serve-reset`), resets, stops; a failed start names it. D2 sweep moves to `.swept-<ms>-<hash>`, prints the restoring `mv`, a start deletes after 7 days; `origin` records host and parent device, a mismatch or no record is unknown and kept. D3 evidence is the tag `type:postgres`, resolved by `postgres/home.ts`; a foreign holder is refused with the way out; note appended to research/ARCHITECTURE.md. D5 `credentialedDeploySignals`, counted only with `secrets.` in the parsed workflow; `uses:` unread. D6 `POSTGRES_DEPLOY_URL_<ENV>` through `needs.resolve.outputs.environment_token` and `secrets[format(...)]`; HUMAN_STEP and docs. D7, D13, D14 in HOUSE.md. D8 `postgres-image.launcher.sh` on node-preset cases, fed by tar over stdin. D9 each hand-declared app is printed its snippet. D10 a start names where this tree last ran. D11 `auto` from a linked worktree. D12 `onAutoForward: ignore`, see the departure below. Leftovers: pooler assertion tightened; `holder` scenario added, and a mutant removing the guard fails it.
+
+Departure on D12: asked for a port range, applied a command-line regex (`bespunky/postgres/.+/data`) plus the base port. Offsets step by the stack's span up to 65535, so a range would also catch every other service's shifted port. portsAttributes takes a regex over the process's command line; the tripwire asserts the real postmaster's command line matches it.
+
+Unproven: `secrets[format(...)]` and the setup step on real GitHub; the regex key in real VS Code; the launcher probe in real images (run here only, directly on trixie with real binaries, it passed).
+
+Consequence of D2 worth weighing: a rebuild changes the container's hostname, so a worktree removed before a rebuild is never proven gone: its data is kept and reported on every start until removed by hand.

@@ -1683,6 +1683,9 @@ checkAsync('postgres: in the image by exact pin, on the wrapper host too; its st
   const home = `/home/${a.dc.remoteUser ?? 'vscode'}`;
   for (const [arch, { url, sha256 }] of Object.entries(DBMATE_DOWNLOADS)) ok(a.osScript.includes(`dbmate ${DBMATE_VERSION} ${arch} ${sha256} ${url} bin`), `the installer lacks dbmate's ${arch} line`);
   ok(a.osScript.includes(POSTGRES_CLOSURES['18'].trixie.version), 'the installer lacks the default major\'s closure');
+  // It trusts every connection on loopback, so a forward hands the host's loopback a superuser. A stack's port moves with its offset.
+  ok(a.dc.portsAttributes?.['5432']?.onAutoForward === 'ignore', 'the base port is left to auto-forward');
+  ok(a.dc.portsAttributes?.['bespunky/postgres/.+/data']?.onAutoForward === 'ignore', 'a shifted stack\'s server is left to auto-forward: its command line is not named');
   ok(shParses(a.osScript), 'the installer does not parse');
   ok(a.dc.containerEnv?.PSQL_HISTORY === `${home}/.local/share/bespunky/postgres/psql_history`, `psql's history would not survive a rebuild: ${a.dc.containerEnv?.PSQL_HISTORY}`);
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.local,type=volume`)), '~/.local, the clusters\' home, is not a persisted volume');

@@ -34,6 +34,8 @@ on:
       - 'tools/check-runner-image/devcontainer.sh'
       - 'tools/check-runner-image/postgres-image.sh'
       - 'tools/check-runner-image/postgres-image.inside.sh'
+      - 'tools/check-runner-image/postgres-image.launcher.sh'
+      - 'plugins/house/engine/nx-tools/src/generators/dev/files/**'
       - 'tools/check-runner-image/test.sh'
       - '.github/workflows/devcontainer-image-e2e.yml'
 

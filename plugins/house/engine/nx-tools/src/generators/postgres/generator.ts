@@ -4,8 +4,9 @@
 //
 // Writes, by class (CLAUDE.md):
 //   A  tools/postgres/*.mjs: the launcher, rewritten every run.
-//   B  postgres/project.json: the targets, three-way merged like every house project's; a project.json island whatever the
-//      workspace's linking when nothing else holds that name, because it has no package of its own and it is this layer's evidence.
+//   B  the project tagged `type:postgres`, by default postgres/project.json: the targets, three-way merged like every house
+//      project's. A project.json island whatever the workspace's linking, because it has no package of its own. The tag is this
+//      layer's evidence (home.ts), and something else holding its name or folder is refused before anything is written.
 //   C  postgres/migrations, postgres/seed/world, .bespunky/postgres.json: seeded once, the project's from then on.
 //
 // A running server is declared in `.bespunky/dev.json` for every served app (`postgres.devFragment`); with nothing served,
@@ -17,14 +18,16 @@ import { requireLayer } from '../../layers/registry';
 import { FIREWALL_CONFIG, ensurePlatformFirewall, hasPlatformFirewall } from '../../platform';
 import { deployTarget } from '../_utils/deploy-contract';
 import { ensureHouseProject, houseProjectHome } from '../_utils/project-files';
+import { readDeclaration } from '../dev/declaration';
 import { POSTGRES_DEFAULT_MAJOR } from '../_utils/versions';
-import { seedServedApps } from '../dev/generator';
+import { seedServedApps, servedProjects } from '../dev/generator';
+import { postgresFragment, POSTGRES_PORT_NAME } from './dev-fragment';
+import { POSTGRES_ROOT, POSTGRES_TAG, postgresHome, refuseForeignHolder } from './home';
 import { POSTGRES_DECLARATION, postgresMajor } from './major';
 
 /** The launcher's files, relative to tools/postgres/: each written from files/<name>.tpl. */
 export const LAUNCHER_FILES = ['postgres.mjs', 'layout.mjs', 'tools.mjs', 'url.mjs', 'stack.mjs', 'schema.mjs', 'server.mjs'] as const;
 export const LAUNCHER_ROOT = 'tools/postgres';
-export const POSTGRES_ROOT = 'postgres';
 export const POSTGRES_MIGRATIONS = `${POSTGRES_ROOT}/migrations`;
 
 const LAUNCH = 'node tools/postgres/postgres.mjs';
@@ -43,16 +46,16 @@ function verbTarget(verb: string, extra: Record<string, unknown> = {}) {
 function ensurePostgresProject(tree: Tree): void {
   // Tooling, with no `projectType`: neither an app nor a library, so layout inference does not read `postgres/` as where this
   // workspace keeps its apps.
-  const tags = ['tooling'];
-  if (!houseProjectHome(tree, POSTGRES_ROOT, POSTGRES_ROOT).exists) {
-    addProjectConfiguration(tree, POSTGRES_ROOT, { root: POSTGRES_ROOT, tags, targets: {} });
-  }
-  const deploy = deployTarget(tree, POSTGRES_ROOT, {
+  const tags = ['tooling', POSTGRES_TAG];
+  const found = postgresHome(tree);
+  if (!found) addProjectConfiguration(tree, POSTGRES_ROOT, { root: POSTGRES_ROOT, tags, targets: {} });
+  const home = found ?? houseProjectHome(tree, POSTGRES_ROOT, POSTGRES_ROOT);
+  const deploy = deployTarget(tree, home.root, {
     command: `${LAUNCH} deploy`,
     inputs: ['default'],
     watches: [`${POSTGRES_MIGRATIONS}/**/*`],
   });
-  ensureHouseProject(tree, 'postgres', houseProjectHome(tree, POSTGRES_ROOT, POSTGRES_ROOT), {
+  ensureHouseProject(tree, 'postgres', home, {
     tags,
     contract: { deploy: deploy.contract },
     targets: {
@@ -72,10 +75,22 @@ function seedFolder(tree: Tree, dir: string, seeded: boolean): void {
   if (seeded) tree.write(`${dir}/.gitkeep`, '');
 }
 
+/** Seeding reaches the apps Nx serves. An app only `.bespunky/dev.json` declares is the project's to wire, so it is told how. */
+function reportHandDeclaredApps(tree: Tree): void {
+  const served = new Set(servedProjects(tree));
+  const [process] = postgresFragment().processes;
+  for (const [app, entry] of Object.entries(readDeclaration(tree)?.apps ?? {})) {
+    const processes = entry.processes ?? [];
+    if (served.has(app) || processes.some((p) => p.id === process.id || POSTGRES_PORT_NAME in (p.ports ?? {}))) continue;
+    logger.info(`[postgres] ${app} is declared by hand in .bespunky/dev.json, so no server was seeded beside it. If it uses this database, add this to its processes:\n${JSON.stringify(process, null, 2)}`);
+  }
+}
+
 export default async function postgresGenerator(tree: Tree): Promise<void> {
   requireLayer(tree, 'agent', 'postgres');
   // Before anything is written: a declaration this toolkit cannot honour stops the run here, naming what it can.
   postgresMajor(tree);
+  if (!postgresHome(tree)) refuseForeignHolder(tree);
 
   for (const file of LAUNCHER_FILES) {
     tree.write(`${LAUNCHER_ROOT}/${file}`, readFileSync(join(__dirname, 'files', `${file}.tpl`), 'utf8'));
@@ -90,6 +105,7 @@ export default async function postgresGenerator(tree: Tree): Promise<void> {
   // The project now exists, which is what the layer's dev fragment asks: every served app gets its server, and on a first
   // scaffold the web layer's own seeding ran before this step.
   seedServedApps(tree, 'postgres');
+  reportHandDeclaredApps(tree);
 
   // A database driver must never reach a browser bundle. Lint is what enforces that: with no root ESLint config there is
   // nothing to enforce it with, and that is said rather than left silent.

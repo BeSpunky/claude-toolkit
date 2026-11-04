@@ -250,11 +250,17 @@ interface CiDeployProviderShape {
    * a pipeline whether or not it wears `firebase`, and a second deploy workflow beside it is the worst outcome.
    */
   deploySignals: readonly RegExp[];
+  /**
+   * Commands that deploy only when they hold a credential, because they are as common against a test database: they count as a
+   * pipeline only in a workflow that references `secrets.`.
+   */
+  credentialedDeploySignals?: readonly RegExp[];
   /** When this provider's targets deploy. Absent: `code`. */
   deployStage?: CiDeployStage;
   /**
-   * Env vars its deploys read, name → a GitHub expression (`${{ secrets.DATABASE_URL }}`, resolved in the line's
-   * GitHub environment). On the deploy step of this provider's stage only, so a schema credential never reaches a
+   * Env vars its deploys read, name → a GitHub expression. A secret named per environment is
+   * `\${{ secrets[format('NAME_{0}', needs.resolve.outputs.environment_token)] }}` (`environmentSecretSuffix`), which a
+   * repo-level secret of the plain name cannot fill in for. On the deploy step of this provider's stage only, so a schema credential never reaches a
    * code deploy. Never a literal secret, and never `deployOptions`: those are committed to `project.json`.
    */
   deployEnv?: Readonly<Record<string, string>>;
@@ -423,6 +429,14 @@ export interface DevcontainerPort extends Explained {
   requireLocalPort?: boolean;
 }
 
+/** Attributes for whatever port a process listens on, when no number or range can name them: a stack's ports move with its offset. */
+export interface DevcontainerPortProcess extends Explained {
+  /** A regular expression over the process's command line. */
+  match: string;
+  label: string;
+  onAutoForward: DevcontainerPort['onAutoForward'];
+}
+
 /**
  * When a post-create piece runs. The composed script runs the phases in this order, and within a phase the
  * pieces in registry order:
@@ -513,6 +527,7 @@ export interface DevcontainerFragment {
   runArgs?: readonly ({ args: readonly string[] } & Explained)[];
   /** Ports this layer serves — `forwardPorts` and `portsAttributes` are both derived from ONE list. */
   ports?: readonly DevcontainerPort[];
+  portProcesses?: readonly DevcontainerPortProcess[];
   /** Named `initializeCommand` entries (object form — they run side by side, on the HOST). */
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
   /** Debian packages — composed into the one installer (house.packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */

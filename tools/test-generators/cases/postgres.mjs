@@ -101,6 +101,74 @@ export default {
       },
     },
     {
+      name: 'evidence is the tag: a project of the repo\'s own at postgres/ does not make this repo wear the layer',
+      once: 'asserts detection, with no generator run',
+      setup: () => {
+        const tree = wearingAgent();
+        addProjectConfiguration(tree, 'db', { root: 'postgres', tags: ['tooling'], targets: {} });
+        return tree;
+      },
+      run: () => {},
+      expect: (tree, t, ctx) => t.ok(!ctx.load('layers/registry').isPresent(tree, 'postgres'), 'not worn'),
+    },
+    ...[
+      ['a library named postgres elsewhere', (tree) => addProjectConfiguration(tree, 'postgres', { root: 'libs/postgres', targets: {} }), /project "postgres" at libs\/postgres/],
+      ['a project of the repo\'s own at postgres/', (tree) => addProjectConfiguration(tree, 'db', { root: 'postgres', targets: {} }), /project "db" at postgres/],
+      ['a package at postgres/', (tree) => tree.write('postgres/package.json', '{ "name": "mine" }\n'), /postgres\/package\.json/],
+    ].map(([what, plant, says]) => ({
+      name: `add-layer postgres over ${what}: refused before anything is written, with the way out`,
+      setup: () => {
+        const tree = wearingAgent();
+        plant(tree);
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        try {
+          await generate(tree, ctx);
+        } catch (error) {
+          ctx.error = error.message;
+        }
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(says.test(ctx.error ?? '') && (ctx.error ?? '').includes('type:postgres'), `said: ${ctx.error}`);
+        t.ok(!tree.exists('tools/postgres/postgres.mjs') && !tree.exists('.bespunky/postgres.json'), 'nothing written');
+      },
+    })),
+    {
+      name: 'a project given the tag is this layer\'s, wherever it lives: the targets join it',
+      setup: () => {
+        const tree = wearingAgent();
+        addProjectConfiguration(tree, 'database', { root: 'libs/database', tags: ['type:postgres'], targets: { own: { command: 'echo' } } });
+        return tree;
+      },
+      run: generate,
+      expect: (tree, t, ctx) => {
+        const { targets } = readProjectConfiguration(tree, 'database');
+        t.ok(Boolean(targets.start) && Boolean(targets.own), 'the verbs joined, its own target stays');
+        t.ok(!tree.exists('postgres/project.json'), 'no second project');
+        t.ok(ctx.postgresLayer === true, 'the layer detects itself');
+        t.equal(ctx.load('layers/registry').layer('postgres').ciDeploy.deployTargets(tree), [{ project: 'database', target: 'deploy' }], 'and CI finds it by the tag');
+      },
+    },
+    {
+      name: 'an app only dev.json declares: left as it is, and told the process to add; quiet once it has one',
+      once: 'it asserts both runs itself',
+      setup: () => {
+        const tree = wearingAgent();
+        tree.write('.bespunky/dev.json', JSON.stringify({ apps: { api: { processes: [{ id: 'api', cmd: ['uvicorn', 'main:app'], primary: true, ports: { http: 8000 } }] }, done: { processes: [{ id: 'postgres', cmd: ['mine'] }] } } }));
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        await generate(tree, ctx);
+        ctx.declared = JSON.parse(tree.read('.bespunky/dev.json', 'utf8'));
+      },
+      expect: (_tree, t, ctx) => {
+        const said = ctx.logs.filter((line) => line.includes('declared by hand'));
+        t.ok(said.length === 1 && said[0].includes('api is declared by hand') && said[0].includes('"dependency": true') && said[0].includes('DATABASE_URL'), `said: ${said.join(' | ')}`);
+        t.equal(ctx.declared.apps.api.processes.map((p) => p.id), ['api'], 'nothing added to it');
+      },
+    },
+    {
       name: 'class B: what the project added to a target survives; what the house owns is re-asserted',
       setup: () => wearingAgent(),
       run: async (tree, ctx) => {
@@ -207,7 +275,9 @@ export default {
       },
       expect: (tree, t) => {
         const workflow = tree.read('.github/workflows/deploy.yml', 'utf8') ?? '';
-        t.ok(workflow.includes('POSTGRES_DEPLOY_URL: ${{ secrets.POSTGRES_DEPLOY_URL }}'), `the secret reaches the deploy step:\n${workflow}`);
+        t.ok(workflow.includes("POSTGRES_DEPLOY_URL: ${{ secrets[format('POSTGRES_DEPLOY_URL_{0}', needs.resolve.outputs.environment_token)] }}"), `the secret reaches the deploy step, by the environment's own name:\n${workflow}`);
+        t.ok(/environment=production; environment_token=PRODUCTION; /.test(workflow), 'resolve says that name');
+        t.ok(!workflow.includes('secrets.POSTGRES_DEPLOY_URL'), 'nothing a repo-level secret of the plain name could fill in for');
         t.ok(!workflow.includes('id-token: write'), 'no OIDC: the job cannot mint a token');
         const install = workflow.indexOf('Install dbmate');
         t.ok(install > 0 && install < workflow.indexOf('POSTGRES_DEPLOY_URL: ${{'), 'the stock runner gets dbmate, before the step that needs it');
@@ -234,7 +304,7 @@ export default {
       expect: (_tree, t, ctx) => {
         const steps = ctx.logs.filter((line) => line.includes('HUMAN_STEP:') && line.includes('POSTGRES_DEPLOY_URL'));
         t.ok(steps.length === 1, `one step for the one environment: ${ctx.logs.join(' | ')}`);
-        t.ok(steps[0]?.includes('gh secret set POSTGRES_DEPLOY_URL --env production'), steps[0]);
+        t.ok(steps[0]?.includes('gh secret set POSTGRES_DEPLOY_URL_PRODUCTION --env production'), steps[0]);
         t.ok(!/--body|-b /.test(steps[0] ?? ''), 'it prompts: the value is on no command line');
       },
     },
@@ -245,14 +315,16 @@ export default {
       expect: (tree, t, ctx) => {
         const provider = ctx.load('layers/registry').layer('postgres').ciDeploy;
         t.ok(provider.deployStage === 'schema', 'before every code deploy');
-        t.equal(provider.deployEnv, { POSTGRES_DEPLOY_URL: '${{ secrets.POSTGRES_DEPLOY_URL }}' }, 'the URL from a secret');
+        t.equal(provider.deployEnv, { POSTGRES_DEPLOY_URL: "${{ secrets[format('POSTGRES_DEPLOY_URL_{0}', needs.resolve.outputs.environment_token)] }}" }, 'the URL from a secret');
+        t.equal(ctx.load('generators/postgres/ci-provider').postgresDeploySecret('uat-eu.1'), 'POSTGRES_DEPLOY_URL_UAT_EU_1', 'upper case, and only what a secret name holds');
         t.ok(provider.oidc === undefined, 'no OIDC');
         t.equal(provider.deployTargets(tree), [{ project: 'postgres', target: 'deploy' }], 'its deploy target');
-        t.ok(provider.deploySignals.some((signal) => signal.test('dbmate --url x up')), 'a foreign `dbmate up` is a pipeline');
-        t.ok(!provider.deploySignals.some((signal) => signal.test('dbmate --help')), '`dbmate --help` is not');
-        for (const command of ['docker run amacneil/dbmate:2 up', 'dbmate-linux-amd64 up', 'ghcr.io/amacneil/dbmate:2.37 --url $U up', 'node tools/postgres/postgres.mjs deploy']) {
-          t.ok(provider.deploySignals.some((signal) => signal.test(command)), `\`${command}\` is a pipeline too`);
+        const credentialed = provider.credentialedDeploySignals;
+        t.ok(!credentialed.some((signal) => signal.test('dbmate --help')), '`dbmate --help` is not a pipeline');
+        for (const command of ['dbmate --url x up', 'docker run amacneil/dbmate:2 up', 'dbmate-linux-amd64 up', 'ghcr.io/amacneil/dbmate:2.37 --url $U up']) {
+          t.ok(credentialed.some((signal) => signal.test(command)), `\`${command}\` is one, holding a credential`);
         }
+        t.ok(provider.deploySignals.some((signal) => signal.test('node tools/postgres/postgres.mjs deploy')), 'the launcher\'s deploy is one, whatever it holds');
       },
     },
   ],

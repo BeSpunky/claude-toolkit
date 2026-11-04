@@ -14,15 +14,22 @@ import type { DevcontainerFragment, LayerDescriptor } from './descriptor';
 import type { Tree } from '@nx/devkit';
 import { postgresCiProvider } from '../generators/postgres/ci-provider';
 import { POSTGRES_BASE_PORT, postgresFragment } from '../generators/postgres/dev-fragment';
+import { POSTGRES_TAG } from '../generators/postgres/home';
 import { postgresMajor } from '../generators/postgres/major';
 import { POSTGRES_CLOSURES } from '../generators/_utils/postgres-closures';
 import { DBMATE_DOWNLOADS, DBMATE_VERSION } from '../generators/_utils/versions';
 
+/** A regular expression over a listening process's command line: `postgres -D <data home>/bespunky/postgres/<tree>/<stack>/<major>/data`. */
+export const POSTGRES_PROCESS_MATCH = 'bespunky/postgres/.+/data';
+
 function devcontainer(tree: Tree): DevcontainerFragment {
   const major = postgresMajor(tree);
   return {
-    // Left to auto-forward: a host GUI client may want it, and nothing outside the container dials it by a fixed number.
-    ports: [{ port: POSTGRES_BASE_PORT, label: 'Postgres', onAutoForward: 'silent' }],
+    // Never forwarded on its own: it trusts every connection on loopback, so a forward hands anything on the host's loopback a
+    // superuser. A stack's port moves with its offset and shares the number space with every other port's offset, so a port range
+    // would catch other services' ports too; what names every stack's server is its command line, which holds its data directory.
+    ports: [{ port: POSTGRES_BASE_PORT, label: 'Postgres', onAutoForward: 'ignore' }],
+    portProcesses: [{ match: POSTGRES_PROCESS_MATCH, label: 'Postgres (a shifted stack)', onAutoForward: 'ignore' }],
     archives: [
       {
         format: 'deb',
@@ -58,7 +65,8 @@ export const postgres: LayerDescriptor = {
   id: 'postgres',
   title: 'Postgres',
   requires: ['agent'],
-  evidence: { files: ['postgres/project.json'] },
+  // The tag, never the path: a project of the repo's own at `postgres/` must not make an upgrade start wearing this layer.
+  evidence: { tags: [POSTGRES_TAG] },
   ensurable: { new: true, upgrade: true },
   ensureHint: '`house.sh add-layer postgres <project>`',
   brings: 'a Postgres server per dev stack through tools/postgres, the postgres:* targets, forward-only migrations by dbmate, and the server and dbmate in the image',

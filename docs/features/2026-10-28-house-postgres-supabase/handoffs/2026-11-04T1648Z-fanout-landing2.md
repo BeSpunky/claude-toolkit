@@ -26,7 +26,7 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 | core | feat/hps2-core | yes, its own branch | returned |
 | wire | tripwire, dogfood boot, image e2e, sweep rule; on this branch | yes | returned |
 | docs | new skill, README, CLAUDE.md, tips; on this branch | yes | returned |
-| review | sanity review | yes | returned, decisions being applied |
+| review | sanity review | yes | returned |
 | gate | upgrade --local, dogfood-consumer, rebuild | yes | pending |
 
 ## Results
@@ -76,3 +76,10 @@ Fixes committed. ORCHESTRATOR DECISIONS on its list, resumed to the reviewer to 
 - D13, D14: stated limits.
 - D4: the user's, asked.
 Remaining budget: 1, a correctness pass over the fix diff.
+
+D4 answered. Asked whether to push the branch and open a pull request to development once the decisions are in, with those jobs passing as a landing condition, the user said: "yes".
+
+### review decisions applied
+All applied. D12 departs: a command-line regex plus the base port, since a range also catches other services' shifted ports. Generators 412 passed, 35 skipped; layers 112; migrations 417; scaffold and test-postgres ok. Unproven: `secrets[format()]` and the dbmate step on real GitHub, the regex in real VS Code, the launcher probe in real images.
+ORCHESTRATOR DECISION: keep the hostname in the sweep record. A worktree removed before a rebuild is named on every start until removed by hand: noisy, and it never deletes on a guess.
+Next: correctness pass (last of the budget), then push and PR, then gate.

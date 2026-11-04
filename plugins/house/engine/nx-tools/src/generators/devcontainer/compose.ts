@@ -30,6 +30,7 @@ import type {
   DevcontainerFragment,
   DevcontainerJson,
   DevcontainerPort,
+  DevcontainerPortProcess,
   PostCreatePhase,
   PostCreatePiece,
   BinaryTool, TarballTool,
@@ -70,6 +71,7 @@ export interface Composition {
   containerEnv: ({ name: string; value: string } & Why)[];
   runArgs: ({ args: string[] } & Why)[];
   ports: ComposedPort[];
+  portProcesses: DevcontainerPortProcess[];
   initializeCommand: ({ name: string; command: string } & Why)[];
   osPackages: ({ packages: string[] } & Why)[];
   archives: (ArchiveTool & Why)[];
@@ -239,6 +241,7 @@ export function compose(
       return { args: entry.args.map(sub), why: entry.why };
     }),
     ports: [...ports.values()],
+    portProcesses: all('portProcesses').map(({ item }) => item as DevcontainerPortProcess),
     initializeCommand: unique(
       all('initializeCommand').map(({ item }) => ({ ...(item as { name: string; command: string; why?: string }) })),
       (entry) => entry.name,
@@ -426,15 +429,21 @@ export function renderDevcontainerJson(name: string, layers: readonly string[], 
   );
   add(
     'portsAttributes',
-    map(c.ports, (port) => ({
-      key: String(port.port),
-      node: value({
-        label: port.label,
-        onAutoForward: port.onAutoForward,
-        ...(port.requireLocalPort ? { requireLocalPort: true } : {}),
+    map(
+      [
+        ...c.ports.map((port) => ({ key: String(port.port), port })),
+        ...c.portProcesses.map((port) => ({ key: port.match, port })),
+      ],
+      ({ key, port }) => ({
+        key,
+        node: value({
+          label: port.label,
+          onAutoForward: port.onAutoForward,
+          ...('requireLocalPort' in port && port.requireLocalPort ? { requireLocalPort: true } : {}),
+        }),
+        why: port.why,
       }),
-      why: port.why,
-    })),
+    ),
     "Labels for the (forwarded or auto-detected) ports; `onAutoForward` sets each one's notification behaviour.",
   );
   add('otherPortsAttributes', value({ onAutoForward: 'silent' }));

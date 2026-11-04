@@ -55,6 +55,8 @@ export async function ensureDatabase(port, { signal } = {}) {
   if (found !== '1') await query(port, `CREATE DATABASE ${DATABASE}`, { database: 'postgres', signal });
 }
 
+export const dropDatabase = (port, { signal } = {}) => query(port, `DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`, { database: 'postgres', signal });
+
 const seedFiles = () => (existsSync(SEEDS) ? readdirSync(SEEDS).filter((name) => name.endsWith('.sql')).sort() : []);
 
 /**

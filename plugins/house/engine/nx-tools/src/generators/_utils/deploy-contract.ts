@@ -42,6 +42,9 @@ export interface DeploySpec {
   gates?: readonly DeployDependency[];
 }
 
+/** An environment as part of a GitHub secret's name, which holds letters, digits and underscores, and reads as upper case. */
+export const environmentSecretSuffix = (environment: string): string => environment.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+
 const stripDotSlash = (path: string) => path.replace(/^\.\//, '');
 
 const isDirectoryPath = (tree: Tree, path: string) => path === '' || path === '.' || path.endsWith('/') || tree.exists(path);

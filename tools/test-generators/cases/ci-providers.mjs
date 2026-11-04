@@ -385,6 +385,21 @@ export default {
       run: withFake(['nx', 'node', 'ci']),
       expect: (tree, t) => t.exists(WF),
     })),
+    ...[
+      ['on: push', 'dbmate --url postgres://postgres@localhost/test up', '', true],
+      ['on: [push, pull_request]', 'dbmate --url postgres://postgres@localhost/test up', '# not ${{ secrets.X }}, a comment\n', true],
+      ['on: push', 'dbmate up', '    env:\n      DATABASE_URL: ${{ secrets.DB }}\n', false],
+      ['on: push', 'dbmate up', "    env:\n      DATABASE_URL: ${{ secrets['DB'] }}\n", false],
+    ].map(([on, command, extra, keeps]) => ({
+      name: `\`${command}\` on ${on}${extra ? ` with ${extra.trim().split('\n').at(-1).trim()}` : ''}: ${keeps ? 'a test, and the owned workflow stays' : 'it holds a credential, so a pipeline'}`,
+      setup: () => {
+        const tree = fixture(lines(['main', 'production', {}]))();
+        tree.write('.github/workflows/own.yml', `${on}\njobs:\n  d:\n${extra}    steps:\n      - run: ${command}\n`);
+        return tree;
+      },
+      run: withFake(['nx', 'node', 'ci']),
+      expect: (tree, t) => (keeps ? t.exists(WF) : t.missing(WF)),
+    })),
     {
       name: 'a signal in a comment is not a pipeline',
       setup: () => {

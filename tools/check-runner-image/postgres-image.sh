@@ -175,6 +175,29 @@ run_case() {
   equal "$facts" stop.rc 0 "the server stopped"
   equal "$facts" stop.pidfile gone "and left no pid file"
 
+  # The node presets' images carry their Node, so the launcher itself runs there. The agent preset's is a devcontainer feature.
+  if [ "$preset" = node ]; then
+    local running="$WORK/launcher-$CASE" stage="$WORK/stage-$CASE" lrc=0
+    mkdir -p "$stage"
+    tar -C "$project" -cf - tools/dev tools/postgres .bespunky | tar -C "$stage" -xf -
+    cp "$HERE/postgres-image.launcher.sh" "$stage/probe.sh"
+    echo "  the launcher, as $user"
+    # bash -c, so `tar` reads the copy from stdin: a bind mount of this runner's temp directory is not readable by the remote user.
+    tar -C "$stage" -cf - . | docker run -i --rm --user "$user" "$tag" bash -c 'd="$(mktemp -d)" && tar -xf - -C "$d" && exec bash "$d/probe.sh" "$d" "$1"' _ "$path" > "$running" 2>&1 || lrc=$?
+    sed 's/^/    /' "$running"
+    if [ "$lrc" -ne 0 ] || ! grep -q '^probe=done$' "$running"; then
+      could_not "docker run exited $lrc before the launcher's probe ended"
+    else
+      equal "$running" launcher.ready yes "the launcher booted it, under the real engine"
+      equal "$running" launcher.row seeded "migrated and seeded before it said ready"
+      equal "$running" launcher.wal logical "with the launcher's own settings"
+      equal "$running" launcher.migrate.rc 0 "postgres.mjs migrate exited 0"
+      equal "$running" launcher.column 1 "and applied the new migration"
+      equal "$running" launcher.stop.rc 0 "dev stop exited 0"
+      equal "$running" launcher.exit.rc 0 "and the launcher ended clean"
+    fi
+  fi
+
   docker image rm -f "$tag" > /dev/null 2>&1
   [ "$CASE_RED" -eq 0 ] && summary "| $CASE ($(value "$facts" arch)) | ok |" || summary "| $CASE ($(value "$facts" arch)) | **red** |"
 }

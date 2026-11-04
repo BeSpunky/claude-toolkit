@@ -22,15 +22,18 @@ import { chmodSync, existsSync, fstatSync, mkdirSync, readdirSync, readFileSync,
 import { hostname } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { NX, PORT_NAME, READY_MARKER, ROLE, ROOT, Refusal, clusterHome, dataDir, dataHome, declaredMajor, identityFile, ownerFile, stackHome, treeHome } from './layout.mjs';
+import { PORT_NAME, READY_MARKER, ROLE, ROOT, Refusal, clusterHome, dataDir, dataHome, declaredMajor, identityFile, originFile, ownerFile, stackHome, treeHome, verbCommand } from './layout.mjs';
 import { assertIdentity } from './stack.mjs';
-import { ensureDatabase, localMigrate, localUrl, seedOnce } from './schema.mjs';
+import { dropDatabase, ensureDatabase, localMigrate, localUrl, seedOnce } from './schema.mjs';
 import { run, scrubbedEnv, tool } from './tools.mjs';
 
 const SMART_STOP_MS = 2000;
 const ACCEPTING_TIMEOUT_MS = 60_000;
 const HEARTBEAT_MS = 10_000;
 const HEARTBEAT_FRESH_MS = 3 * HEARTBEAT_MS;
+const SWEPT = '.swept-';
+const SWEPT_KEPT_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const log = (line) => console.log(`[postgres] ${line}`);
 
@@ -99,10 +102,11 @@ function holdOwnership(home, onLost) {
 
 /**
  * Was this tree removed? Absence alone does not say: `~/.local` is a volume, and a tree another container mounts is invisible
- * from this one. So a deletion must be proven: the parent directory answers, and in it the tree does not. Everything short of
- * that (no such parent, a parent that cannot be read, a record that is no absolute path) is `unknown`.
+ * from this one, and an unmounted disk leaves its mount point. So a deletion must be proven: the host that recorded the tree is
+ * this one, the tree's parent answers on the device it was recorded on, and in it the tree does not. Everything short of that
+ * (no such parent, a parent that cannot be read, another host, another device, a record that is no absolute path) is `unknown`.
  */
-function treeState(tree) {
+function treeState(tree, dir) {
   const look = (path) => {
     try {
       return statSync(path).isDirectory() ? 'directory' : 'file';
@@ -113,13 +117,25 @@ function treeState(tree) {
   if (!isAbsolute(tree)) return 'unknown';
   const here = look(tree);
   if (here !== 'absent') return here === 'unknown' ? 'unknown' : 'here';
-  return look(dirname(tree)) === 'directory' ? 'gone' : 'unknown';
+  if (look(dirname(tree)) !== 'directory') return 'unknown';
+  try {
+    const { host, parentDevice } = JSON.parse(readFileSync(originFile(dir), 'utf8'));
+    return host === hostname() && parentDevice === statSync(dirname(tree)).dev ? 'gone' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function recordTree() {
+  writeFileSync(join(treeHome(), 'tree'), `${ROOT}\n`);
+  writeFileSync(originFile(treeHome()), `${JSON.stringify({ host: hostname(), parentDevice: statSync(dirname(ROOT)).dev })}\n`);
 }
 
 /**
- * Drop the data of every tree proven gone (data lives outside the tree, so removing a worktree cannot take it), and say what
- * went. A tree that cannot be proven gone keeps its data and is named, every start, so a real leftover is not silent. A tree
- * still has its data while a server runs on it: that is left, and named.
+ * Move the data of every tree proven gone aside (data lives outside the tree, so removing a worktree cannot take it), and say
+ * where and how to bring it back. An unmounted or renamed tree is a recoverable event, so the proof above is not trusted with a
+ * deletion: only time deletes, on a later start. A tree that cannot be proven gone keeps its data and is named, every start, so
+ * a real leftover is not silent. A tree still has its data while a server runs on it: that is left, and named.
  */
 export function sweepDeadTrees() {
   const home = dataHome();
@@ -129,24 +145,32 @@ export function sweepDeadTrees() {
     const dir = join(home, entry.name);
     // Housekeeping for another tree never stops this one's start, and another start may be sweeping the same entry.
     try {
-      sweepTree(dir);
+      if (entry.name.startsWith(SWEPT)) expireSwept(dir, entry.name);
+      else sweepTree(dir, home);
     } catch (error) {
       log(`kept what is left of ${dir}: ${error.message}`);
     }
   }
 }
 
-function sweepTree(dir) {
+function expireSwept(dir, name) {
+  const movedAt = Number(name.slice(SWEPT.length).split('-')[0]);
+  if (!movedAt || Date.now() - movedAt < SWEPT_KEPT_DAYS * DAY_MS) return;
+  rmSync(dir, { recursive: true, force: true });
+  log(`deleted ${dir}, set aside ${SWEPT_KEPT_DAYS} days ago.`);
+}
+
+function sweepTree(dir, home) {
   let tree;
   try {
     tree = readFileSync(join(dir, 'tree'), 'utf8').trim();
   } catch {
     return; // being created, or not ours
   }
-  const state = treeState(tree);
+  const state = treeState(tree, dir);
   if (state === 'here') return;
   if (state === 'unknown') {
-    log(`kept the Postgres data of ${tree || 'an unnamed tree'}: it is not visible from here, and nothing proves it was removed. If it was, remove ${dir}.`);
+    log(`kept the Postgres data of ${tree || 'an unnamed tree'}: it is not visible from here, or was recorded by another host or on another device, so nothing proves it was removed. If it was, remove ${dir}.`);
     return;
   }
   const clusters = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((stack) =>
@@ -162,12 +186,9 @@ function sweepTree(dir) {
     log(`${tree} is gone, but a server still runs on its data (${running.map((c) => c.stack).join(', ')}): left alone. tools/dev/dev cannot reach it from here; stop it by its pid in ${running[0].data}/postmaster.pid.`);
     return;
   }
-  // The record goes last: a removal that fails partway must still be recognised as this layer's on the next start.
-  for (const name of readdirSync(dir)) {
-    if (name !== 'tree') rmSync(join(dir, name), { recursive: true, force: true });
-  }
-  rmSync(dir, { recursive: true, force: true });
-  log(`dropped the Postgres data of ${tree}, which no longer exists (${clusters.map((c) => `${c.stack} on ${c.major}`).join(', ') || 'no clusters'}).`);
+  const aside = join(home, `${SWEPT}${Date.now()}-${basename(dir)}`);
+  renameSync(dir, aside);
+  log(`set aside the Postgres data of ${tree}, which no longer exists (${clusters.map((c) => `${c.stack} on ${c.major}`).join(', ') || 'no clusters'}): ${aside}. A start deletes it after ${SWEPT_KEPT_DAYS} days. If the tree comes back, restore it first: mv '${aside}' '${dir}'`);
 }
 
 /**
@@ -188,7 +209,7 @@ async function assertDeclaredMajor(major, { signal }) {
 async function ensureCluster(key, major, { signal }) {
   const home = clusterHome(key, major);
   mkdirSync(treeHome(), { recursive: true });
-  writeFileSync(join(treeHome(), 'tree'), `${ROOT}\n`);
+  recordTree();
   mkdirSync(stackHome(key), { recursive: true });
   for (const leftover of readdirSync(stackHome(key))) {
     if (leftover.startsWith('.init-')) rmSync(join(stackHome(key), leftover), { recursive: true, force: true });
@@ -227,10 +248,37 @@ function serverArgs(data, port, socketDir, key) {
   return ['-D', data, ...Object.entries(settings).flatMap(([name, value]) => ['-c', `${name}=${value}`])];
 }
 
-/** The launcher's own verb under the engine: everything it needs comes from the stack it runs in. */
-export async function serve() {
+/** When a cluster last ran: the server rewrites this file at every start. */
+function lastRan(home) {
+  try {
+    return statSync(join(dataDir(home), 'postmaster.opts')).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * `auto` lands elsewhere when its usual block is busy, as after a killed launcher whose orphan still holds it, and another block
+ * is another database. Nothing else would say so when that block's cluster already exists: migrations would land beside the data
+ * being worked on. Asked before this start touches its own cluster.
+ */
+function warnIfNotTheUsualData(key, major) {
+  if (!existsSync(treeHome())) return;
+  const usual = readdirSync(treeHome(), { withFileTypes: true })
+    .filter((d) => d.isDirectory() && d.name !== key)
+    .map((d) => ({ key: d.name, home: clusterHome(d.name, major), ran: lastRan(clusterHome(d.name, major)) }))
+    .sort((a, b) => b.ran - a.ran)[0];
+  if (!usual || usual.ran <= lastRan(clusterHome(key, major))) return;
+  log(`this is ${key}, and this tree last ran on ${usual.key}, whose data is in ${dataDir(usual.home)}. This stack has a database of its own, without those rows. To work on them: see what holds that block (tools/dev/dev ps), then start with --port-offset=${usual.key.split('@')[1]}.`);
+}
+
+/**
+ * The launcher's own verb under the engine: everything it needs comes from the stack it runs in. `resetThenStop` is `reset` with
+ * no server to address: the bring-up starts from a dropped database, and the stack ends with it.
+ */
+export async function serve({ resetThenStop = false } = {}) {
   const { DEV_STACK_DIR: stackDir, DEV_STACK_TMP: socketDir, [`PORT_${PORT_NAME.toUpperCase()}`]: port } = process.env;
-  if (!stackDir || !socketDir || !port) throw new Refusal(`This verb runs inside a dev stack. Start one: ${NX} run postgres:start`);
+  if (!stackDir || !socketDir || !port) throw new Refusal(`This verb runs inside a dev stack. Start one: ${verbCommand('start')}`);
   try {
     fstatSync(3);
   } catch {
@@ -263,6 +311,7 @@ export async function serve() {
   if (stopped()) return 0;
   sweepDeadTrees();
   assertNotHeldElsewhere(clusterHome(key, major));
+  warnIfNotTheUsualData(key, major);
   const home = await ensureCluster(key, major, { signal });
   if (stopped() || !home) return 0;
   const data = dataDir(home);
@@ -289,6 +338,7 @@ export async function serve() {
     await untilAccepting(port, exited, signal);
     if (stopped()) return false;
     await assertIdentity(stack, { signal });
+    if (resetThenStop) await dropDatabase(port, { signal });
     await ensureDatabase(port, { signal });
     await localMigrate(port, { signal });
     if (stopped()) return false;
@@ -300,9 +350,14 @@ export async function serve() {
   let failure;
   try {
     if (await bringUp()) {
-      writeFileSync(join(stackDir, READY_MARKER), `${new Date().toISOString()}\n`);
-      log(`ready on 127.0.0.1:${port}: ${localUrl(port)}`);
-      log(`stop it with: tools/dev/dev stop ${key.split('@')[0]} --offset=${key.split('@')[1]}`);
+      if (resetThenStop) {
+        log(`${key} is reset: migrated and seeded from nothing. Its server was started for this, and stops now.`);
+        stop();
+      } else {
+        writeFileSync(join(stackDir, READY_MARKER), `${new Date().toISOString()}\n`);
+        log(`ready on 127.0.0.1:${port}: ${localUrl(port)}`);
+        log(`stop it with: tools/dev/dev stop ${key.split('@')[0]} --offset=${key.split('@')[1]}`);
+      }
     }
   } catch (error) {
     if (!stopped()) failure = error;
@@ -312,8 +367,11 @@ export async function serve() {
     await exited;
     clearTimeout(smartBound);
     letGo();
-    // The verbs need a running server, and this one just stopped, so this is the road that remains.
-    if (failure instanceof Refusal) failure.message += `\nThe server stopped with it. To start this stack's database from nothing, remove ${home} and start again; otherwise fix the cause and start again.`;
+    if (failure instanceof Refusal) {
+      failure.message += resetThenStop
+        ? `\nThat is from an empty database, so the migrations or seeds themselves need fixing. The server stopped with it.`
+        : `\nThe server stopped with it. Fix the cause and start again, or, if the database itself is what is wrong, rebuild it from its migrations (this drops its data): ${verbCommand('reset', `--offset=${key.split('@')[1]}`)}`;
+    }
     throw failure;
   }
   const end = await exited;

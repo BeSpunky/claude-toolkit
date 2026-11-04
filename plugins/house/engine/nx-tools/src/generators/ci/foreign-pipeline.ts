@@ -94,6 +94,15 @@ function runScripts(workflow: string): string[] {
   });
 }
 
+/** Does this workflow use a secret? Read from the parsed file, so a comment saying so does not count. */
+export function referencesSecrets(workflow: string): boolean {
+  try {
+    return /\bsecrets\s*(?:\.|\[)/.test(JSON.stringify(parse(workflow)) ?? '');
+  } catch {
+    return false;
+  }
+}
+
 /** Does this workflow run a command any of `signals` recognises as a deploy? */
 export function workflowDeploys(workflow: string, signals: readonly RegExp[]): boolean {
   return runScripts(workflow).some((script) => executedCommands(script).some((command) => signals.some((signal) => signal.test(command))));

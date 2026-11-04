@@ -156,7 +156,7 @@ project-json "executor"[[:space:]]*:[[:space:]]*"@nx/angular:' ;;
     design-system) printf '%s\n' 'project-json "type:design-system"' ;;
     navigation) printf '%s\n' 'project-json "type:navigation"' ;;
     firebase) printf '%s\n' 'file firebase.json' ;;
-    postgres) printf '%s\n' 'file postgres/project.json' ;;
+    postgres) printf '%s\n' 'project-json "type:postgres"' ;;
     ci) printf '%s\n' 'file .bespunky/ci.json' ;;
   esac
 }

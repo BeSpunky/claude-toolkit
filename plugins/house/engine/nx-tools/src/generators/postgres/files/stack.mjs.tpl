@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEV_ENGINE, NX, PORT_NAME, READY_MARKER, ROOT, Refusal, clusterHome, declaredMajor, identityFile } from './layout.mjs';
+import { DEV_ENGINE, PORT_NAME, READY_MARKER, ROOT, Refusal, clusterHome, declaredMajor, identityFile, verbCommand } from './layout.mjs';
 import { query, scrubbedEnv } from './tools.mjs';
 
 const sameTree = (path) => {
@@ -52,8 +52,7 @@ export function addressedStack(offset) {
   if (stacks.length) {
     throw new Refusal(`No usable Postgres stack in this tree:\n${stacks.map(line).join('\n')}\nSee tools/dev/dev ps, which names the command that clears each one.`);
   }
-  // Under an agent, the launcher itself: Nx would show nothing of it, neither the port nor how to stop it.
-  throw new Refusal(`No Postgres is running in this tree. Start one: ${process.env.CLAUDECODE === '1' ? 'node tools/postgres/postgres.mjs start' : `${NX} run postgres:start`} (serving an app starts its own, when it declares one).`);
+  throw new Refusal(`No Postgres is running in this tree. Start one: ${verbCommand('start')} (serving an app starts its own, when it declares one).`);
 }
 
 function usable(stack) {

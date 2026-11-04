@@ -32,7 +32,7 @@ import { CI_SKILL_POINTERS } from './skill-pointers';
 import { nodeVersionFile, projectNode } from '../_utils/node-version';
 import { isYarnBerry } from '../_utils/package-manager';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
-import { workflowDeploys } from './foreign-pipeline';
+import { referencesSecrets, workflowDeploys } from './foreign-pipeline';
 import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, WORKFLOW_HEADER, type WiredLine } from './workflow';
 
 export { MARKER };
@@ -417,12 +417,16 @@ function foreignDeployWorkflows(tree: Tree, ownedFiles: readonly string[]): stri
   if (!tree.exists(dir)) return [];
   // Nx takes a target list after -t or --target(s), by `=` or a space, split by commas or spaces and maybe quoted.
   const DEPLOYS = [/(?:^|\s)(?:-t|--targets?)[=\s]+["']?(?:[\w:][\w:-]*[,\s]+)*deploy\b/, /\bnx\s+run\s+\S+:deploy\b/, /\bnx\s+deploy\b/, ...LAYERS.flatMap((l) => l.ciDeploy?.deploySignals ?? [])];
+  const CREDENTIALED = LAYERS.flatMap((l) => l.ciDeploy?.credentialedDeploySignals ?? []);
   return tree
     .children(dir)
     .filter((name) => /\.ya?ml$/.test(name))
     .map((name) => `${dir}/${name}`)
     .filter((path) => !ownedFiles.includes(path))
-    .filter((path) => workflowDeploys(tree.read(path, 'utf8') ?? '', DEPLOYS));
+    .filter((path) => {
+      const workflow = tree.read(path, 'utf8') ?? '';
+      return workflowDeploys(workflow, DEPLOYS) || (referencesSecrets(workflow) && workflowDeploys(workflow, CREDENTIALED));
+    });
 }
 
 function readMarker(tree: Tree): Marker {
