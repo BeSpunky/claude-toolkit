@@ -35,6 +35,21 @@ HOUSE_ARCHIVES='
 '
 
 {{/ARCHIVES}}
+{{#DEB_ARCHIVES}}
+# Tools published as Debian packages, unpacked WITHOUT dpkg into /opt/bespunky/<id>/<version> (`current` points at it):
+# no maintainer scripts, nothing registered, nothing that can collide with a package this image already holds. The
+# closure is built for one Debian release, so its lines are keyed by codename and arch:
+#   tool    <id> <bin> <library dirs, comma-separated, `*` allowed> [<prune paths, comma-separated>]
+#   closure <id> <codename> <version> <what Debian must supply: an apt relation string, for `apt-get satisfy`>
+#   deb     <id> <codename> <arch> <sha256> <url>
+# Its binaries have no RUNPATH, so each gets a generated WRAPPER in /usr/local/bin that sets LD_LIBRARY_PATH: a plain
+# link would load the system's library of the same name. Validated by the composer; every download is checked against
+# its sha256 before anything on this machine changes.
+HOUSE_DEB_ARCHIVES='
+{{HOUSE_DEB_ARCHIVES}}
+'
+
+{{/DEB_ARCHIVES}}
 # Every list: the house's, then each file given (the project's own). Comments and blanks dropped, de-duplicated in
 # order; CR stripped, so a list saved with Windows line endings still reads. A token that is not a Debian package NAME
 # is refused here, before it can reach a root apt-get command line.
@@ -53,11 +68,11 @@ missing=""
 for name in $(wanted "$@"); do
   dpkg-query -W -f='${Status}' "$name" 2>/dev/null | grep -q ' installed$' || missing="$missing $name"
 done
-{{#ARCHIVES}}
+{{#ARCHIVE_TOOLS}}
 # The archive tools to install (found below).
-{{/ARCHIVES}}
+{{/ARCHIVE_TOOLS}}
 pending=""
-{{#ARCHIVES}}
+{{#ARCHIVE_TOOLS}}
 
 # Where the archives go. HOUSE_PACKAGES_ROOT re-roots both directories — for the toolkit's own tests, never set in a build.
 archive_home="${HOUSE_PACKAGES_ROOT:-}/opt/bespunky"
@@ -69,6 +84,8 @@ case "$(uname -m)" in
   aarch64 | arm64) arch=arm64 ;;
   *) arch="$(uname -m)" ;;
 esac
+{{/ARCHIVE_TOOLS}}
+{{#ARCHIVES}}
 
 # The archive lines for this architecture (comments and blanks dropped).
 archives() { printf '%s\n' "$HOUSE_ARCHIVES" | sed 's/#.*//' | awk -v arch="$arch" 'NF == 6 && $3 == arch'; }
@@ -85,6 +102,30 @@ for id in $(printf '%s\n' "$HOUSE_ARCHIVES" | sed 's/#.*//' | awk 'NF == 6 { pri
   fi
 done
 {{/ARCHIVES}}
+{{#DEB_ARCHIVES}}
+
+# This image's Debian release, as a closure is keyed by it. A closure is linked against ONE release's libraries, and the
+# base image tags move across releases: another release is refused, never run on libraries it was not built for.
+codename="$(sed -n 's/^VERSION_CODENAME=//p' "${HOUSE_PACKAGES_ROOT:-}/etc/os-release" 2>/dev/null | tr -d '"')"
+
+# The lines of one kind (`tool`, `closure`, `deb`) for one tool (comments and blanks dropped).
+deb_archive() { printf '%s\n' "$HOUSE_DEB_ARCHIVES" | sed 's/#.*//' | awk -v kind="$1" -v id="$2" '$1 == kind && $2 == id'; }
+
+# Pending, as `deb:<id>`: each closure not installed AT this release's version — and, as `!<id>`, each with nothing for
+# this Debian release or this architecture (reported, and the exit fails).
+for id in $(printf '%s\n' "$HOUSE_DEB_ARCHIVES" | sed 's/#.*//' | awk '$1 == "tool" { print $2 }'); do
+  version="$(deb_archive closure "$id" | awk -v codename="$codename" '$3 == codename { print $4 }')"
+  if [ -z "$version" ]; then
+    echo "[os-packages] '$id' has no closure for this Debian release ('${codename:-unknown}'; it has: $(deb_archive closure "$id" | awk '{ print $3 }' | tr '\n' ' ')) — it cannot be installed here" >&2
+    pending="$pending !$id"
+  elif [ -z "$(deb_archive deb "$id" | awk -v codename="$codename" -v arch="$arch" '$3 == codename && $4 == arch')" ]; then
+    echo "[os-packages] '$id' has no closure for this architecture ($arch) on $codename — it cannot be installed here" >&2
+    pending="$pending !$id"
+  elif [ "$(readlink "$archive_home/$id/current" 2>/dev/null)" != "$version" ] || [ ! -d "$archive_home/$id/$version" ]; then
+    pending="$pending deb:$id"
+  fi
+done
+{{/DEB_ARCHIVES}}
 if [ -z "$missing$pending" ]; then
   echo "[os-packages] all present — nothing to install"
   exit 0
@@ -160,18 +201,116 @@ install_archive() {
   echo "[os-packages] $id $version installed"
 }
 {{/ARCHIVES}}
+{{#DEB_ARCHIVES}}
+
+# What a closure needs from Debian, by name, in one retried transaction. --no-install-recommends is the point: Recommends
+# would pull in services (systemd, a mail server) the closure never runs.
+satisfy_system_depends() {
+  for attempt in 1 2 3; do
+    if $as_root apt-get update && $as_root env DEBIAN_FRONTEND=noninteractive apt-get satisfy -y --no-install-recommends "$1"; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "[os-packages] attempt $attempt/3 failed (apt mirrors are occasionally flaky over Docker DNS); retrying in $((attempt * 10))s..."
+      sleep $((attempt * 10))
+    fi
+  done
+  return 1
+}
+
+# Is this file a wrapper this installer made for this tool? (Its second line says so.)
+is_wrapper_of() { [ -f "$2" ] && [ ! -L "$2" ] && [ "$(sed -n 2p "$2" 2>/dev/null)" = "# bespunky-house wrapper for $1" ]; }
+
+# One closure at this release's version: download and check EVERY file (a bad one changes nothing on this machine), get
+# what Debian must supply, unpack BESIDE any other release, switch `current`, write the wrappers, then drop the release it
+# replaced and any wrapper it no longer has.
+install_deb_archive() {
+  id="$1"
+  home="$archive_home/$id"
+  version="$(deb_archive closure "$id" | awk -v codename="$codename" '$3 == codename { print $4 }')"
+  system_depends="$(deb_archive closure "$id" | awk -v codename="$codename" '$3 == codename { $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); print }')"
+  bin="$(deb_archive tool "$id" | awk '{ print $3 }')"
+  library_paths="$(deb_archive tool "$id" | awk '{ print $4 }')"
+  prune="$(deb_archive tool "$id" | awk '{ print $5 }')"
+  echo "[os-packages] installing $id $version ($codename, $arch)"
+  download="$(mktemp -d)" || return 1
+  count=0
+  deb_archive deb "$id" | awk -v codename="$codename" -v arch="$arch" '$3 == codename && $4 == arch { print $5, $6 }' > "$download/list"
+  while read -r sha256 url; do
+    count=$((count + 1))
+    if ! curl -fsSL --retry 3 --retry-delay 5 -o "$download/$count.deb" "$url"; then
+      rm -rf "$download"; echo "[os-packages] FAILED to download $url" >&2; return 1
+    fi
+    if ! echo "$sha256  $download/$count.deb" | sha256sum -c - > /dev/null 2>&1; then
+      rm -rf "$download"; echo "[os-packages] FAILED: $url does not match its pinned sha256 — refusing to install it" >&2; return 1
+    fi
+  done < "$download/list"
+  if [ -n "$system_depends" ] && ! satisfy_system_depends "$system_depends"; then
+    rm -rf "$download"; echo "[os-packages] FAILED: Debian could not supply what $id needs: $system_depends" >&2; return 1
+  fi
+  if ! { $as_root mkdir -p "$home" "$archive_links" && $as_root rm -rf "$home/.partial" && $as_root mkdir "$home/.partial"; }; then
+    rm -rf "$download"; echo "[os-packages] FAILED to unpack $id" >&2; return 1
+  fi
+  for deb in "$download"/*.deb; do
+    if ! $as_root dpkg-deb -x "$deb" "$home/.partial"; then
+      rm -rf "$download"; echo "[os-packages] FAILED to unpack $id" >&2; return 1
+    fi
+  done
+  rm -rf "$download"
+  for path in $(printf '%s' "$prune" | tr ',' ' '); do
+    $as_root rm -rf "$home/.partial/$path" || return 1
+  done
+  # The library directories as `current` will name them. `read`, not a word split: a `*` must expand inside the tree only.
+  library_path="$(printf '%s\n' "$library_paths" | tr ',' '\n' | while read -r pattern; do
+    for dir in "$home/.partial"/$pattern; do
+      [ -d "$dir" ] && printf '%s:' "$home/current/${dir#"$home/.partial/"}"
+    done
+  done)"
+  # No trailing `:`: an empty LD_LIBRARY_PATH entry means the current directory.
+  library_path="${library_path%:}"
+  if [ -z "$library_path" ] || [ ! -d "$home/.partial/$bin" ]; then
+    echo "[os-packages] FAILED: $id's closure has no '$bin' or no '$library_paths' — its binaries could not run" >&2; return 1
+  fi
+  $as_root rm -rf "$home/$version" && $as_root mv "$home/.partial" "$home/$version" &&
+    $as_root ln -sfn "$version" "$home/current" || { echo "[os-packages] FAILED to unpack $id" >&2; return 1; }
+  for tool in "$home/$version/$bin"/*; do
+    [ -f "$tool" ] && [ -x "$tool" ] || continue
+    link="$archive_links/${tool##*/}"
+    # Never over somebody else's file: only a free name, or a wrapper this installer made, is (re)written.
+    if { [ -e "$link" ] || [ -L "$link" ]; } && ! is_wrapper_of "$id" "$link"; then
+      echo "[os-packages] $link exists and is not $id's — left alone; $id's ${tool##*/} is at $home/current/$bin" >&2
+      continue
+    fi
+    printf '#!/bin/sh\n# bespunky-house wrapper for %s\nLD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexport LD_LIBRARY_PATH\nexec "%s" "$@"\n' \
+      "$id" "$library_path" "$home/current/$bin/${tool##*/}" | $as_root tee "$link" > /dev/null &&
+      $as_root chmod 755 "$link" || return 1
+  done
+  for link in "$archive_links"/*; do
+    is_wrapper_of "$id" "$link" && [ ! -x "$home/$version/$bin/${link##*/}" ] && $as_root rm -f "$link"
+  done
+  for old in "$home"/*; do
+    [ "${old##*/}" = "$version" ] || [ "${old##*/}" = current ] || $as_root rm -rf "$old"
+  done
+  echo "[os-packages] $id $version installed"
+}
+{{/DEB_ARCHIVES}}
 
 status=0
 if [ -n "$missing" ]; then
   install_packages || status=1
 fi
-{{#ARCHIVES}}
+{{#ARCHIVE_TOOLS}}
 for id in $pending; do
   case "$id" in
     !*) status=1 ;;
+{{#DEB_ARCHIVES}}
+    deb:*) install_deb_archive "${id#deb:}" || status=1 ;;
+{{/DEB_ARCHIVES}}
+{{#ARCHIVES}}
     *) install_archive "$id" || status=1 ;;
+{{/ARCHIVES}}
   esac
 done
-{{/ARCHIVES}}
+{{/ARCHIVE_TOOLS}}
 # Non-zero when anything failed: the image build fails loudly; post-create reports it and carries on.
 exit $status

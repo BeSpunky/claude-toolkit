@@ -274,7 +274,7 @@ export interface GitignoreBlock {
 //   {{remoteUser}}  the user the container runs as
 //   {{nodeMajor}}   the Node major the image / Node feature is pinned to — the project's declared Node (.nvmrc / .node-version / volta.node — _utils/node-version)
 
-/** The Debian architectures the house images run on — what an `ArchiveTool` names its downloads by. */
+/** The Debian architectures the house images run on — what an archive names its downloads by. */
 export type DebianArch = 'amd64' | 'arm64';
 
 /**
@@ -283,8 +283,16 @@ export type DebianArch = 'amd64' | 'arm64';
  * index is a ROLLING window (Google's drops a gcloud release after about a year), so a version pinned there expires
  * and every cache-miss image build fails with it; and a moved pin needs a downgrade, a foreign image may already
  * declare the same repository differently. A versioned archive is kept, so the pin lives as long as the publisher.
+ *
+ * Two formats, one install root and one promise (a sha256 checked before anything is unpacked, `current` naming the
+ * release, a failure that is loud): a tarball, and a closure of `.deb` files.
  */
-export interface ArchiveTool {
+export type ArchiveTool = TarballTool | DebClosureTool;
+
+/** One `.tar.gz` per architecture, carrying everything but libc: its executables are linked straight into PATH. */
+export interface TarballTool {
+  /** The default format: says what `DebClosureTool.format` is the alternative to. */
+  format?: 'tar.gz';
   /** Names its install root, `/opt/bespunky/<id>`: `[a-z0-9-]+`. */
   id: string;
   /** The pinned release; each one is extracted to `/opt/bespunky/<id>/<version>`, `current` pointing at it. */
@@ -293,6 +301,51 @@ export interface ArchiveTool {
   bin: string;
   /** Per architecture: the `.tar.gz` and its sha256 (checked before anything is extracted). Projected, never typed. */
   downloads: Readonly<Record<DebianArch, { url: string; sha256: string }>>;
+}
+
+/**
+ * A tool published as Debian packages, installed WITHOUT dpkg: its `.deb` files are unpacked into a versioned directory
+ * of their own and its executables reached through generated wrappers. Registering them with dpkg instead would run
+ * their maintainer scripts and let them collide with whatever the image already holds (a newer library package removes
+ * the `-dev` package tied to Debian's). Debian's own libraries are the part that CANNOT be pinned — a mirror drops a
+ * superseded build at the next security update — so they are named, not pinned: see `systemDepends`.
+ *
+ * Built for one Debian release's libraries, so it is keyed by codename; an image of any other release fails loudly
+ * rather than running a build against libraries it was not linked with.
+ */
+export interface DebClosureTool {
+  format: 'deb';
+  /** Names its install root, `/opt/bespunky/<id>`: `[a-z0-9-]+`. */
+  id: string;
+  /** The directory inside the unpacked tree whose executables get a wrapper in /usr/local/bin. */
+  bin: string;
+  /**
+   * The directories inside the unpacked tree a wrapper puts on `LD_LIBRARY_PATH`: a `.deb`'s binaries have no RUNPATH,
+   * so a plain link would load the system's copy of a library, or none (and `ldd` would look clean). May use `*`,
+   * so the multiarch directory is not typed once per architecture.
+   */
+  libraryPaths: readonly string[];
+  /** Paths inside the unpacked tree to delete before it goes live (man pages, translations). Exact: no `*`. */
+  prune?: readonly string[];
+  /** Per Debian codename. Projected, never typed. */
+  closures: Readonly<Record<string, DebClosure>>;
+}
+
+/** One Debian release's build of a `DebClosureTool`. */
+export interface DebClosure {
+  /**
+   * Names the release directory, `/opt/bespunky/<id>/<version>`; `current` points at it. Must change whenever ANY file
+   * in the closure does: it is how the installer tells a moved pin from one already in place.
+   */
+  version: string;
+  /**
+   * What the closure needs from Debian itself, as one apt relation string (`liba (>= 1.2), libb`) given to `apt-get
+   * satisfy --no-install-recommends` as root: by name, because a mirror does not keep superseded builds. Recommends
+   * stay out, since they pull in services the closure never runs.
+   */
+  systemDepends: string;
+  /** Per architecture: every `.deb` and its sha256. An architecture missing here fails as loudly as the codename does. */
+  packages: Readonly<Partial<Record<DebianArch, readonly { url: string; sha256: string }[]>>>;
 }
 
 /** A JSON value as it may appear in devcontainer.json. */

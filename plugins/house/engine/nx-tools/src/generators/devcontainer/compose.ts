@@ -26,11 +26,13 @@ import { spawnSync } from 'node:child_process';
 import { parseJson } from '@nx/devkit';
 import type {
   ArchiveTool,
+  DebClosureTool,
   DevcontainerFragment,
   DevcontainerJson,
   DevcontainerPort,
   PostCreatePhase,
   PostCreatePiece,
+  TarballTool,
   VolumeOwnership,
 } from '../../layers/descriptor';
 import type { ClaudePlugins } from '../_utils/layer-contributions';
@@ -561,9 +563,12 @@ function renderVolumeOwnership(template: string, volumes: readonly ComposedVolum
  * across groups; the project's own list is the file it is handed. Then the archive tools, one line per architecture.
  */
 export function renderOsPackagesScript({ osPackages, archives }: Pick<Composition, 'osPackages' | 'archives'>): string {
+  const tarballs = archives.filter((tool): tool is TarballTool & Why => tool.format !== 'deb');
+  const debClosures = archives.filter((tool): tool is DebClosureTool & Why => tool.format === 'deb');
   // An archive is fetched with curl over TLS: the mechanism's own needs, LAST — so it lists only what no layer already does.
+  const fetchedLists = [...(tarballs.length ? ['HOUSE_ARCHIVES'] : []), ...(debClosures.length ? ['HOUSE_DEB_ARCHIVES'] : [])].join(', ');
   const groups = archives.length
-    ? [...osPackages, { packages: ['curl', 'ca-certificates'], why: 'Fetch the versioned archives (HOUSE_ARCHIVES, below) over TLS.' }]
+    ? [...osPackages, { packages: ['curl', 'ca-certificates'], why: `Fetch the versioned archives (${fetchedLists}, below) over TLS.` }]
     : osPackages;
   const seen = new Set<string>();
   const lines: string[] = [];
@@ -576,14 +581,13 @@ export function renderOsPackagesScript({ osPackages, archives }: Pick<Compositio
   }
   // `<id> <version> <arch> <sha256> <url> <bin>` per architecture — validated here, because the installer runs it as root.
   const archiveLines: string[] = [];
-  for (const tool of archives) {
+  for (const tool of tarballs) {
     if (tool.why) archiveLines.push(...tool.why.split('\n').map((line) => `# ${line}`.trimEnd()));
     for (const [arch, { url, sha256 }] of Object.entries(tool.downloads)) {
       const line = `${tool.id} ${tool.version} ${arch} ${sha256} ${url} ${tool.bin}`;
       if (
-        !/^[a-z0-9-]+$/.test(tool.id) || !/^[A-Za-z0-9][A-Za-z0-9.+~-]*$/.test(tool.version) || !/^(amd64|arm64)$/.test(arch) ||
-        !/^[0-9a-f]{64}$/.test(sha256) || !/^https:\/\/[A-Za-z0-9._~:/?=&%+-]+\.tar\.gz$/.test(url) ||
-        !/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(tool.bin) || tool.bin.split('/').includes('..')
+        !ARCHIVE_ID.test(tool.id) || !ARCHIVE_VERSION.test(tool.version) || !DEBIAN_ARCH.test(arch) ||
+        !SHA256.test(sha256) || !/^https:\/\/[A-Za-z0-9._~:/?=&%+-]+\.tar\.gz$/.test(url) || !isInnerPath(tool.bin)
       ) {
         throw new Error(`[devcontainer] archive tool "${tool.id}" is malformed: ${line}`);
       }
@@ -592,15 +596,73 @@ export function renderOsPackagesScript({ osPackages, archives }: Pick<Compositio
   }
   // The archive machinery (the list and its installer) is rendered only when a layer declares an archive tool: a
   // project with none gets no empty list and no code that would loop over it.
-  const script = renderSection(readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8'), 'ARCHIVES', archives.length > 0)
+  const template = readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8');
+  const script = renderSection(renderSection(renderSection(template, 'ARCHIVES', tarballs.length > 0), 'DEB_ARCHIVES', debClosures.length > 0), 'ARCHIVE_TOOLS', archives.length > 0)
     .split('{{HOUSE_ARCHIVES}}')
     .join(archiveLines.join('\n').split("'").join("'\\''"))
+    .split('{{HOUSE_DEB_ARCHIVES}}')
+    .join(debClosures.flatMap(debClosureLines).join('\n').split("'").join("'\\''"))
     .split('{{HOUSE_PACKAGES}}')
     // The list is one single-quoted shell string: a `'` in a why would end it early, so it is closed, escaped, reopened.
     .join(lines.join('\n').split("'").join("'\\''"));
   if (/\{\{[#/]?\w+\}\}/.test(script)) throw new Error(`[devcontainer] house.packages.sh kept an unrendered placeholder: ${/\{\{[#/]?\w+\}\}/.exec(script)![0]}`);
   proveShell(script, 'sh', 'house.packages.sh');
   return script;
+}
+
+const ARCHIVE_ID = /^[a-z0-9-]+$/;
+const ARCHIVE_VERSION = /^[A-Za-z0-9][A-Za-z0-9.+~-]*$/;
+const DEBIAN_ARCH = /^(amd64|arm64)$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+/** One apt relation (`libc6 (>= 2.38)`), alternatives (`a | b`) and all, joined by `, ` — what `apt-get satisfy` reads. */
+const APT_RELATIONS = (() => {
+  const relation = String.raw`[a-z0-9][a-z0-9.+-]*( \((<<|<=|=|>=|>>) [A-Za-z0-9.+~:-]+\))?`;
+  const clause = `${relation}( \\| ${relation})*`;
+  return new RegExp(`^${clause}(, ${clause})*$`);
+})();
+
+/** A relative path that stays inside the tree it names a place in (`*` too, where the path may be a pattern). */
+function isInnerPath(path: string, { pattern = false } = {}): boolean {
+  const segment = pattern ? '[A-Za-z0-9._*-]+' : '[A-Za-z0-9._-]+';
+  return new RegExp(`^${segment}(/${segment})*$`).test(path) && !path.split('/').includes('..');
+}
+
+/**
+ * The lines one `.deb` closure adds to HOUSE_DEB_ARCHIVES (their grammar is in the template), each field validated
+ * here because the installer runs them as root.
+ */
+function debClosureLines(tool: DebClosureTool & Why): string[] {
+  const refuse = (problem: string): never => {
+    throw new Error(`[devcontainer] archive tool "${tool.id}" is malformed: ${problem}`);
+  };
+  if (!ARCHIVE_ID.test(tool.id)) refuse('its id');
+  if (!isInnerPath(tool.bin)) refuse(`bin "${tool.bin}"`);
+  if (!tool.libraryPaths.length || !tool.libraryPaths.every((path) => isInnerPath(path, { pattern: true }))) refuse(`libraryPaths ${JSON.stringify(tool.libraryPaths)}`);
+  const prune = tool.prune ?? [];
+  for (const path of prune) {
+    if (!isInnerPath(path) || tool.bin === path || tool.bin.startsWith(`${path}/`)) refuse(`prune "${path}" (a path inside the tree, not one that holds bin)`);
+  }
+  const codenames = Object.entries(tool.closures);
+  if (!codenames.length) refuse('no closures');
+  const lines = tool.why ? tool.why.split('\n').map((line) => `# ${line}`.trimEnd()) : [];
+  lines.push(['tool', tool.id, tool.bin, tool.libraryPaths.join(','), ...(prune.length ? [prune.join(',')] : [])].join(' '));
+  for (const [codename, closure] of codenames) {
+    if (!/^[a-z][a-z0-9-]*$/.test(codename)) refuse(`codename "${codename}"`);
+    if (!ARCHIVE_VERSION.test(closure.version)) refuse(`${codename}'s version "${closure.version}"`);
+    if (closure.systemDepends && !APT_RELATIONS.test(closure.systemDepends)) refuse(`${codename}'s systemDepends "${closure.systemDepends}"`);
+    lines.push(['closure', tool.id, codename, closure.version, closure.systemDepends].join(' ').trimEnd());
+    const architectures = Object.entries(closure.packages);
+    if (!architectures.length) refuse(`${codename} has no packages`);
+    for (const [arch, debs] of architectures) {
+      if (!DEBIAN_ARCH.test(arch)) refuse(`${codename}'s architecture "${arch}"`);
+      if (!debs?.length) refuse(`${codename}/${arch} has no packages`);
+      for (const { url, sha256 } of debs ?? []) {
+        if (!SHA256.test(sha256) || !/^https:\/\/[A-Za-z0-9._~:/?=&%+-]+\.deb$/.test(url)) refuse(`${codename}/${arch}: ${sha256} ${url}`);
+        lines.push(['deb', tool.id, codename, arch, sha256, url].join(' '));
+      }
+    }
+  }
+  return lines;
 }
 
 /** Keep (markers dropped) or remove every `{{#name}}` … `{{/name}}` block — each marker on a line of its own. */
