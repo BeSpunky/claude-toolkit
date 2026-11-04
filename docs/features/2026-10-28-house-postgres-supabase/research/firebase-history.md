@@ -177,3 +177,226 @@ Found-by codes: **U** the user using or rebuilding · **C** a consumer project's
 | 113 | 10-07 | `48f34705` `458b152f` `d675a58b` `50a1f937` `39f2df40` | Frozen text in seeded files; log lines claiming changes that did not happen | D, R | Words outlive shapes | Rungs retell; logs claim only actual changes |
 | 114 | 10-28 | `94f13d27` `28908efd` | Generated text named skills whose plugin was not enabled | R | No gating | `plugin-pointers`, test |
 
+### Counts
+
+| Family | Iterations | Reached a human or consumer first (U + C) |
+|---|---|---|
+| BR browser addressing | 10 | 5 |
+| CL client SDK and config | 14 | 3 |
+| LC process lifecycle | 14 | 5 |
+| SI stack identity | 8 | 3 |
+| DU data durability, seed | 4 | 3 |
+| PR nothing local reaches production | 11 | 2 |
+| VT version truth | 9 | 3 |
+| CN container, rebuild survival | 16 | 14 |
+| OW ownership | 8 | 5 |
+| UP upstream assumed | 7 | 3 |
+| DP deploy, cloud | 4 | 2 |
+| EN engine, ladder | 6 | 3 |
+| DO the house's words | 3 | 0 |
+| **13 families** | **114** | **51** |
+
+Found by: consumer 30, review 30, author 22, user 21, dogfood 8, verification 1, test or tripwire 1, one row is a design later found wrong. The count is judgement: some rows could sit in two families (#34 is LC and DU; #40 is SI and DU), and each sits in the family of its root cause.
+
+Things the counts hide:
+- **Serve changed shape eight times** (#25-36): parallel run-commands, `emulators:exec`, continuous `dependsOn`, parallel orchestrator, three targets, an executor, the dev engine, then the engine as a non-continuous task. At least two were reversals: 0.6's commit calls its own self-heal "INVERTED from 0.5.x".
+- **Other reversals:** forward ports then not then yes then only for the UI (#1, #2, #10); env-gated then `ngDevMode` (#12, #14); apt repository then archive within a day (#85, #86); ownership by marker then explicit (#90).
+- **Weight is concentrated.** 0.50.0 alone has 23 rungs, 18 of which touch firebase or emulators. The handoff's "10 of the 24 migration folders" checks out (10 folders; 28 files, it said 27), but it reads as spread when it is mostly one version paying for one report.
+- **The 0.50.0 reviews mostly found bugs in fixes written that week** (rows dated 10-07 marked R). Rewriting the dev loop in one day produced the follower design and the hand-built lock, and both were then thrown away.
+
+## 2. Does each family recur, and how much does the handoff's claim explain?
+
+*(unverified)* marks Postgres and Supabase facts from my general knowledge; `postgres.md` and `supabase.md` own them.
+
+| Family | (a) apt Postgres behind a backend | (b) Supabase local stack |
+|---|---|---|
+| BR 10 | **Partly.** The database hop is gone. The **browser-to-backend hop is the same problem**: the backend is an offset process, and a web client needs the origin relay (#7, #8 reapply: foreign proxy config, relay unreported). Tauri on a phone reaching the container is harder than any of it. A host DB GUI is #10 | **Yes** once supabase-js is in a browser: a gateway URL by port, Realtime websocket (#46), Storage resumable upload URLs (#5's `x-goog-upload-url`) *(unverified)*, Auth redirect allow-list vs `<slug>.localhost` and offsets (#6). Backend-only: Studio is #10 |
+| CL 14 | **No**, the mechanism goes. #21-23 are generic and stay (a layer never wired; a rung tested on the author's shapes; a template that does not parse) | **Partly.** One client, not four services, so no per-service files. Env shape, adapter port and prod-bundle cleanliness (#13) return. The handoff's own "serve against plain Postgres until a Supabase-only service is used" **is mixed mode**, the source of #15, #16, #17, #59 |
+| LC 14 | **Partly.** The dev engine and `flock` already paid for #25-33. Export loss (#34, #37, #38) goes: WAL does not need a clean exit *(unverified)*. New: a **shared** server outlives every stack, so who stops it? Stale `postmaster.pid` over a persisted volume *(unverified)*. The handoff names the cause wrongly (see below) | **Yes, changed.** `supabase start` returns and leaves detached containers *(unverified)*: nothing for the engine to supervise, so stop, orphan and readiness are all new. With Docker-outside-of-Docker they outlive the devcontainer and collide across projects on the host (#1 again) |
+| SI 8 | **Yes.** The handoff leaves it open. Per-stack server: socket path limit (#42), port-keyed lock files. Database per stack: naming, 63-char identifiers *(unverified)*, and nothing drops a database when its worktree goes | **Yes, the worst.** `project_id` keys containers and volumes *(unverified)*, which is literally #40's project-id-keyed hub. Ports live in `config.toml`, with no `PORT_OFFSET` knob. A stack is around ten containers, so stack-per-worktree may not be affordable |
+| DU 4 | **Partly.** Durability improves. Seed cascade (#48), logic in a seeded file (#49), cold worktree all recur. New: **a persisted data dir is tied to the Postgres major**, so moving the pin stops the server *(unverified)*. Firebase's export never had this | **Yes.** Volumes, `db reset`, `seed.sql`, plus `auth.users` and Storage objects outside the migrations *(unverified)* |
+| PR 11 | **Yes, and the handoff under-scopes it.** The incident was not a database. It was a local process holding live third-party credentials (#53). The consumer's backend holds Financy and Home Assistant credentials. There is no `demo-` equivalent. Host guards inherit #56's and #59's lessons | **Yes, worse than Firebase.** No offline project id; `supabase link` plus `--linked` commands aim at production *(unverified)*; Edge Functions and `pg_net` are #53 again; `secrets set` is #58 |
+| VT 9 | **Partly.** No framework-to-SDK chain, so #62, #65, #67 shrink. Postgres major, pgvector and driver remain, and PGDG needs #86's check | **Yes.** CLI pins image tags, `db.major_version` must match the host, supabase-js moves fast, CLI's npm package downloads a binary at install (#72-73 fragility) *(unverified)* |
+| CN 16 | **Yes, fully.** None of it was about Firebase. Named volume root ownership (#74, #75) is exactly the handoff's "named volume, like the Playwright cache": that cache is the one that broke. Postinst cluster shadowed by a volume, data dir mode 0700 *(unverified)* | **Yes, the worst.** Docker itself. The user declined DooD here (*"No. I'll do the rebuild"*, `2026-10-06-playwright-deps-layer`), and there is no Docker in the container, so **the "Claude does the verification" model has no road** |
+| OW 8 | **Yes**, smaller surface: `dev.json` processes, targets, `postgresql.conf` fragment | **Yes.** `config.toml` per-key ownership. The house's non-destructive merger is `jsonc-parser`; there is no TOML equivalent preserving comments |
+| UP 7 | **Partly.** Postgres is stable and documented; few surprises | **Yes.** Same character as firebase-tools: a fast CLI with inferred services and undocumented behaviour |
+| DP 4 | **Partly.** A migrate target with correct `inputs`; no IAM if hosting is a connection string | **Yes.** `db push`, `functions deploy`, `secrets set`, link, types, branch-model mapping |
+| EN 6 | **Yes.** No server adapter means nothing for a per-app step to attach to (§6 of the handoff), exactly #21's failure risk | **Yes** |
+| DO 3 | **Yes** | **Yes** |
+
+### Verdict on the handoff's claim
+
+**"Most iterations trace to causes that a backend-held connection removes": not supported.**
+
+- **The most generous honest count is 24 of 114 (21%):** all of BR and CL. Row by row it is nearer **17 (15%)**: BR #3, 4, 5, 6, 9, 10 and CL minus the three generic rows.
+- **Adding its other two table rows does not reach "most":** LC + DU gives 42 of 114 (37%), and those causes are not removed by holding the connection in a backend. They are changed by Postgres being a different product.
+- **Of the 22 items in the report behind 0.50.0, one is browser addressing (A3).** Handoff 2 adds one more.
+- **Of the four things the 0.50.0 brief proved by running, none is:** two SDK copies (VT), data swap (SI), the waiting dev-server (SI), upgrades overwriting edits (OW).
+- **Of 30 consumer-reported rows, 7 are BR or CL.**
+- **Severity runs the other way.** Real messages sent (#53), production values truncated (#58), data loss (#31, #34, #40), `new` failing (#65), all outside BR and CL. The exception is #23.
+
+Where it is right: rows 1, 3 and 5 of its table are correct for the database hop, and the per-service machinery really was expensive. Row by row:
+
+| Handoff row | Finding |
+|---|---|
+| Ports, origin routing: "Gone" | True for Postgres, but moves to the backend's port |
+| Reaping: "Emulators on the JVM leave orphans" | **Wrong cause.** Orphans come from a parent's ungraceful death (`2c421f9f`: "no in-process trap can cover SIGKILL or a container restart"), for any daemon. The data loss came from Nx signalling leaves first (`c141ff85`). Neither is about the JVM |
+| Toggles, provider splitting: "Gone" | True for Postgres. Its own §5 suggestion brings mixed mode back for Supabase |
+| Data, D1: "Replaced by a database per stack" | The durability half is true. D1's root cause was shared discovery state, which recurs. A database per stack is a new lifecycle |
+| Env-shape migrations: "Gone" | True for Postgres; returns with a client port |
+
+Its §4 table is headed Postgres, so it does not literally claim this for Supabase, but §5 treats Supabase as a thin layer on top. **The evidence says Supabase is a Firebase-class effort**: yes on 12 of 13 families (BR on condition of a browser client), partly on CL, and worst of all on the three that cost the most (SI, CN, PR), with Docker unsolved and no observation path. Plan it as a separate, later delivery. `postgres` carries real but bounded risk: expect CN, SI, PR, EN and OW.
+
+## 3. Day-one guarantees
+
+Each is a requirement on the new layer, with what paid for it.
+
+**Nothing local reaches production**
+- [ ] The local run's credentials are inert by default for **every** secret the backend or functions declare, not only the database URL. A real value is a loud opt-in Claude never arms. (#53)
+- [ ] No tree borrows another tree's secrets. Seeds may cascade, secrets may not. (#53, `28e8b6a5` built the cascade; 0.50.0 removed it for secrets)
+- [ ] `seed` and `reset` check the **target**, not the presence of a variable, and have no default fallback host. (#56, R2-8)
+- [ ] Any decision about local vs real comes from evaluating or properly parsing the value with one function shared by all callers, never a regex. Parse `DATABASE_URL` as a URL, including socket and multi-host forms. (#54, #59)
+- [ ] Prefer a structural guarantee over a checklist. Firebase's was the `demo-` id. Postgres needs its own, for example a role or network that cannot reach a host; Supabase must not have a linked project visible to local commands. Then **state the guarantee exactly as enforced**, including where it stops. (#55, `impl/FB.md` "where it stops")
+- [ ] Never fabricate cloud state: link is the human's. (#51)
+- [ ] A secrets push refuses any value whose parsed form differs from its raw text, via stdin, with key names only in output. (#58)
+- [ ] An always-on rule in `HOUSE.rules.md`, because `HOUSE.md` is read on demand. (R2-9)
+- [ ] No database config or local address in a client bundle, grepped from a real production build, and backend-only code kept out by the platform firewall. (#13, E4)
+
+**Stack identity**
+- [ ] Every piece of global state the service keeps (socket, lock, port, name, container, volume) is keyed by stack. Enumerate them by observing a running pair. (#40, #41, U3's "shared root cause")
+- [ ] Two stacks up at once, written to, stopped in **both orders**, each keeping its own data, in a test. (#40)
+- [ ] Deep-worktree paths fit socket limits. (#42)
+- [ ] All ports, nested ones too, in one table the free-port check reads. (#46)
+- [ ] Claim through `tools/dev/dev`, including direct runs and seed builds, which get their own stack. (#43, #44)
+- [ ] Dependents get the address through `dev with`. (#45)
+- [ ] An agent never takes base ports, in code. (S3-9)
+- [ ] Two stacks' lifecycle includes cleanup when a worktree is removed: name who drops its database.
+
+**Lifecycle**
+- [ ] A stop verifiably leaves data intact when it comes via Ctrl+C, `dev stop`, and Nx's tree kill, each observed. (#34)
+- [ ] Stop has a deadline and reports the outcome; a failure names the process. (#37)
+- [ ] Never kill by name or port; a live holder means refuse and name it. (#31)
+- [ ] Declare `continuous` explicitly on every target. (#100)
+- [ ] Write the dev fragment and make the dev generator run for a backend-only workspace. (`882b231c`, `490d7bf3`)
+- [ ] Tools print plain text under `FORCE_COLOR`, and exit codes and stop lines survive `>` capture. (#99, #35)
+
+**Version truth**
+- [ ] Every pin in `_utils/versions.ts`; no floating spec, enforced by `declareDependencies`. (#62)
+- [ ] A derived compat table for anything that moves upstream (Postgres major ↔ pgvector ↔ host; for Supabase CLI ↔ `major_version` ↔ images), checked weekly and before publish, never per push. (`5ac02ef6`)
+- [ ] Projectors skip prereleases and read peers. (#69, #70)
+- [ ] Project-level pins are read from the project, never the machine. (#63)
+- [ ] Refuse an impossible combination in the probe before anything is written. (`a48aa2ba`)
+
+**Container**
+- [ ] OS packages in the cached image layer, never post-create apt. (#83)
+- [ ] **A pin must remain installable for its whole life.** Check the source is not a rolling index before pinning; the house's answer is `archives`, not an apt `repository`. Check PGDG against this explicitly. (#86, `layers/descriptor.ts:254`)
+- [ ] Persistence audit in the same change: where each tool keeps state, by running it. Data dir, logins, config. Say "nothing to keep" in the commit. (#82, `CLAUDE.md` Conventions)
+- [ ] Mount ownership checked on a fresh volume and on a rebuild over an old one. (#74, #75)
+- [ ] Persist through the existing XDG homes where possible; a new mount only for a directory that must be kept whole. Decide what happens to a persisted data dir when the major moves. (user, persist-auth: *"reduce specificity if possible"*)
+- [ ] post-create is unattended, and a network blip degrades instead of half-provisioning. (#76, #84)
+- [ ] No unpinned features; use `{{home}}`, not `${containerEnv:HOME}`; add a PATH entry through the fragment. (#64, #79, `5ae28776`)
+- [ ] A foreign image and an adopted devcontainer work or are refused, and record what was added with `houseWrote()`. (`f0d69059`)
+
+**Ownership**
+- [ ] Class every output A, B or C before writing the generator. No "unnamed middle category": a file is logic or values, never both. (#89)
+- [ ] Per-key ownership of any shared config; project keys and comments survive; never rewrite whole. For TOML this needs a merger that does not yet exist. (#87, sync-fallout §6)
+- [ ] Targets go through `house-targets` three-way merge. (#92)
+- [ ] Seed once, on ensure, never on re-ensure of a project that has it; never write into `app.config.ts` on upgrade. (#91, R5)
+- [ ] Logic never lives in a seeded file. A seed world stays data, and the applier stays owned. (#49)
+- [ ] Nothing seeded can be deployed destructively. (#61)
+- [ ] Reach existing projects' project-owned `dev.json` by a planned path, since it is seeded once. (`declaration.ts:7`, `101af520`)
+
+**Upstream**
+- [ ] Every undocumented or inferred upstream behaviour you rely on gets a named **tripwire** against the real pinned tool, run weekly, on a version bump and on dependent-code change. It observes the real effect, not a getter. (#57, `tools/test-firebase-tools`, `tools/test-angular-ts-solution`)
+- [ ] Name the services you start; never rely on inference. (#97)
+- [ ] Read messages suspiciously and check claims against source or by running. (#95, #98)
+
+**Deploy**
+- [ ] Owned target, correct `inputs`, one build, `cache: false`; `affected` sees schema changes; refuse a declared file the inputs cannot see. (#102, #105)
+- [ ] A failed deploy prints the road to a first deploy, reading real state. (`fbb13812`)
+- [ ] IAM-equivalent is a script the human runs. (B4)
+
+**Process**
+- [ ] **Run it the way a consumer does, before release:** `upgrade --local` on this repo, whole diff read, `tools/dogfood-consumer` with **a real `new --local`** for the preset. (#65, CLAUDE.md gate)
+- [ ] Add dogfood data: real shapes reporting projects grew, and a second upgrade as a no-op.
+- [ ] Container-reaching change: observed in a real rebuild, with a scripted self-check the user runs and Claude reads. (#79; 15/15 in `impl/FIREBASE-CONTAINER-CHECK.md`, 21/21 in playwright-deps)
+- [ ] Observe a **running** system with data before calling safety done. Fixtures encode the author's assumption. (`CLAUDE.md`; every 0.50.0 gate find in `DECISION.md`)
+- [ ] Adversarial review with a read-only reviewer **per area**, then a second round on the fixes. The second round found 5 more HIGHs. (`review/S3.md`)
+- [ ] A "flaky" test is a suspect, not noise. (#38)
+- [ ] Sweep with `git grep` before release. (#81)
+- [ ] State "nothing to migrate" deliberately, then every later shape change is a rung with a fixture and `historicalShapes`. (#110, #22)
+- [ ] The layer's docs, rules, tips and `new` verify table say what is true and are gated by layer. (#112, #113)
+- [ ] Don't defer a known gap. (user, playwright-deps: *"Why would you not include it in the refactor??"*)
+
+## 4. Decisions made and roads rejected
+
+| Decision | Reasoning, source | Bearing on the new layers |
+|---|---|---|
+| **D1: seeds shared, data isolated** | "Fail in opposite directions." First designed as "first stack persists, extras import-only", **re-decided by the user mid-implementation** (`sync-fallout` table, `28e8b6a5`) | Base seed from main, cascaded and copied. Don't redesign. A shared world for extras was already rejected |
+| Declarative user-owned seed world, owned applier | `0d09453f`, `2a43abd9`. Seed is "part of the schema contract" | Project's `world` and migrations class C; runner class A. Note: it took 4 months and a migration to get the applier out |
+| `firebase.json` per-key: `emulators`, `functions` owned | `0d09453f`, `CLAUDE.md` | Same for `config.toml`, but which keys? `emulators` was mostly house; config.toml's `[auth]` and `[api]` are mostly the project's |
+| Ownership is additive, never overwrite | "'Claim only if the file still matches' would have to recognise every devcontainer ever emitted" (`sync-fallout` §6) | Don't sniff. Don't compare to generations |
+| Target ownership per key, three-way | `902e3e90` | Use it; it exists |
+| `--only` derived at run time from `firebase.json` | "Deriving beats baking": project-editable (`11957994`) | Derive from the project's config at launch |
+| **Rejected: `dev` script** | Recursion (`11957994`) | Beware services that launch the dev server |
+| **Rejected: `.firebaserc` generation** | "Both lie about the user's actual cloud state" (`aee834b2`) | No generated project ref |
+| **Rejected: generated notifier seam with a log-only sink** | Opt-in per integration, "the 'remember to do it' model that failed here"; the secrets seam is opt-out and covers what agents write later (`analysis/U2`) | Guard the secret seam, not app code |
+| **Rejected: `.env`-based code-level `FUNCTIONS_EMULATOR` guard** | Same | Same |
+| **Rejected: "one source of truth, two sinks" for secrets** | "The two sinks have opposite safety requirements" (U2) | Local and prod env are separate files, intentionally drifting |
+| **Rejected: secret borrowing from main** | It trades a loud correct failure for a silent dangerous success (U2) | A fresh worktree fails loudly |
+| **Rejected: `requireLocalPort`** | Cannot make a mismatch fail (V) | Don't plan on port fidelity |
+| **Rejected: serving the offset to the page** (handoff 2's suggestion) | "Would have kept the browser coupled to ports" (`INBOUND-HANDOFF-2`) | Origin only |
+| Direct-dial option, no compat | User cancelled and directed "fix everything"; default stays no compat | Nothing to carry |
+| **Rejected: `changeOrigin:false`** for Storage | Breaks behind a Host-rewriting front (W4): rewrite the upload URL | Supabase Storage needs the same test |
+| Regex-keyed proxy keys | Don't work on webpack (FD) | Plain prefixes at segment boundaries |
+| Override env to choose a project | **User: *"Remove it"***. Refused when set | No `DATABASE_URL_OVERRIDE`-style launch-only switch splitting two sides |
+| `serve` non-continuous | "Removes a whole class of bugs… *easy ≠ simple*" | Fragment a process; don't add Nx shapes |
+| Lock via kernel `flock`; two containers on one workspace **refused, not modelled** | `943e4686` | A shared server touches this: who holds what |
+| `stack = (tree, offset)` | PLAN concept 3 | Per-stack database is natural; per-stack Supabase is not |
+| Java via apt, not features | "Structurally network-fragile" (`a3dd1edb`) | Apt or archive, never a feature |
+| **Rejected: apt repository for pinning** | `c28408b3`, `descriptor.ts:254` | The handoff's "PGDG apt repository may be needed" needs this answered first |
+| Claude not baked into the image | "A cached layer would hand back the build-day version" (`dockerfile-layers`) | Self-updating tools stay out of image; pinned ones go in |
+| `~/.config` one volume | User quote above | First look for XDG. Supabase login may not honour it *(unverified)* |
+| Docker in the toolkit's verification | User declined DooD: *"No. I'll do the rebuild. Prepare everything so I come back to you after it and you can verify"* | **Not a general refusal of Docker, and specifically "for this repo"**. Ask the user as its own question for consumers |
+| CI as an opt-in `ci` layer | DECISION | Migration deploy can plug in; don't build a second CI |
+| Emulator `demo-` by default, real only when committed | R2; "the guarantee is stated exactly as enforced, no broader" | Model for wording |
+| Firewall: one rule instance, classifier reads imports as lint does | second instance double-reported (introduced `f687232f`, found S2, fixed G4) | Extend the one rule for a server-only tag |
+| Mixed real-and-emulated per service | Kept, at a price: #15-17, #59, `align-storage`, RESTART NEEDED (`f5e86e64`). B-6 calls partial-real "incoherent for the real service itself" | See §5 |
+
+## 5. What was over-built or regretted
+
+A new layer should deliberately **not** build these at first:
+
+1. **Mixed local and hosted modes.** `EMULATE`, `?emulate=`, `emulator-overrides.ts`, `proxied`, the dev guards, `align-storage`, project-id agreement. The most expensive feature per user value in the history, and it caused both silent real-id bugs (#59). So: local-only Supabase or plain Postgres, one at a time per stack, chosen at launch. The handoff's "serve against plain local Postgres until…" is this road. Don't take it in the first release.
+2. **Hand-built coordination.** Follower, preflight, exit records, `/proc` postscript, claim takeover, heartbeat (#36, #44): built and retired inside one effort. Use `dev claim`, `flock` and the engine as they are. If a shared server seems to need new coordination, prefer one server per stack or fix the seam first.
+3. **A reaper.** `reap-emulators.sh` grew over four months and was retired. `80e665bf` warns about orphans nothing reaps now.
+4. **A new installer path.** The gcloud apt `repository` mechanism existed for a day. Reuse `osPackages` or `archives`.
+5. **Client integration before a client needs it.** Firebase's `firebase-client` port carried 14 CL iterations. The consumer needs no supabase-js on day one; a client port waits for a real consumer.
+6. **Cloud setup automation.** `setup-gcp.sh`, identity pools and rollback records are the only large part **still never run against the real service** (`FC.md`). For Postgres, hosting is a connection string. For Supabase, documentation and a human `supabase link` first.
+7. **Seeded production-affecting files.** Indexes (#61). Seed rules only on first ensure; don't seed anything a deploy would apply. Think before seeding RLS policies as a deployable migration.
+8. **A notifier or provider abstraction in generated code**, per U2.
+9. **Published numbers in generated text.** Bundle figures went stale and were disproved (`2026-11-02-firebase-bundle-numbers`); seeded copies stay wrong forever.
+10. **A multi-wave plan that lands in one day.** Not over-built as such, but the 0.50.0 reviews' HIGHs came from breadth at speed. Slice it: `postgres` core, then observed, then Supabase.
+
+What was **not** over-built, despite appearances: the tripwires, the version projection, the dogfood script, `historicalShapes` and the three-way merge each caught real failures. Build their equivalents early, because retrofitting cost more. Only 1 of 114 rows was found by a test or tripwire; they arrived after most of the damage.
+
+## 6. Open items a new layer inherits
+
+| Item | Source | Why it matters |
+|---|---|---|
+| **`CLAUDE.md` is stale on OS packages**: it says an `osPackages` group "may name the third-party apt `repository`… and pin `name=version` (the firebase layer's `google-cloud-cli`)". The code uses `archives`, and `descriptor.ts:254` forbids the road | `c28408b3`, `CLAUDE.md:61` | Anyone designing PGDG from CLAUDE.md gets the rejected design. Fix it in this effort |
+| **The handoff's "dev.json env"**: exists (`declaration.ts:21`), but `dev.json` is seeded then project-owned, so add-layer on an existing project needs the path `firebaseFragment` uses, and a per-stack value must substitute (`${PORT:…}` only seen so far) | `dev-fragment.ts`, `declaration.ts:7` | A per-stack database name may need a new substitution token. Check with `code-layer-infra` |
+| No Docker in the container: real image builds and any Supabase stack cannot be observed by Claude; the user rebuilds | `dockerfile-layers` "No Docker inside the container" | Blocks the finish gate for Supabase unless solved |
+| One devcontainer image, last layer wins (A4); per-layer parameters on `PlanContext` (A8) | `stack-agnostic` deferred | Postgres options like a major need a home; check A8 before adding a flag |
+| No server adapter; only `angular` makes apps | handoff §6 | A "core only" postgres has nothing to attach to. Same risk as #21 |
+| Firewall limit: a project tagged only by its own non-platform tags cannot be flagged | `impl/G4`, ledger | Backend-only guarantee has this hole |
+| `setup-gcp` and CI never run on real GCP | `FC.md` "Not verified" | Any `ci` plug-in for migrations rides an unproven road |
+| The local guarantee stops at code naming a real resource, and non-Google services | `impl/FB.md` | Inherited wording; the backend's API keys sit in the hole |
+| Emulator JVMs a pre-0.50 stack orphaned are invisible to the claim | `80e665bf` | The engine does not reap. A stray database has no owner either |
+| Nx agent `summary` hides a running task; `nx serve` under an agent fails fast on 23.3; Claude uses `tools/dev/dev` | `5dadb09c`, G1 | Layer docs and targets must assume this |
+| https dev pages: console error only, Storage and Functions force http | FD | Supabase in https dev unknown |
+| Subagent background servers surviving return: unverified | BRIEF "Still unverified" | Cleanup after agent runs of a DB-bearing stack |
+| Tripwire "failed beside a concurrent job and passed alone" | `2026-11-02-release-followups` | A real-service tripwire needs a port-isolation answer; test the tool, don't shrug |
+| A rung importing live utils (0.33.x imports `firebaseProvidersNote`) | `release-followups` review, `stack-agnostic` | Freeze values in any rung for these layers |
+| Next Current Node (27, 2027-04-22): `.nvmrc = node` refused without an image | `angularfire-peer-firebase` | Shared seam only |
+| Nx-defect fixture "pins third-party behaviour… cuts both ways" | `sync-fallout` open question 4 | Policy question for tripwires |
