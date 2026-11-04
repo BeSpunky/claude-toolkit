@@ -757,7 +757,8 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   }
   // The claimer waits for its detached work (an emulator export, ~30 s) before it exits — say what it is waiting on,
   // so a stop that takes half a minute reads as progress, not as a hang. Abandoning: end that work as soon as it shows.
-  const running = () => pids.filter((pid) => isAlive(pid));
+  // Not isAlive: where PID 1 reaps nothing (a container with no init), a stopped orphan stays a zombie forever, and answers `kill -0`.
+  const running = () => pids.filter((pid) => isSameProcess(pid));
   const start = Date.now();
   let next = start + 5000;
   let abandoned = false;

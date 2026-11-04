@@ -36,12 +36,12 @@ DBMATE_VERSION="$(sed -n "s/^export const DBMATE_VERSION = '\([^']*\)'.*/\1/p" "
 [ -n "$DBMATE_VERSION" ] || { notice error "No DBMATE_VERSION in $VERSIONS: COULD NOT RUN."; exit 2; }
 
 # id | preset | .nvmrc | major | the image it must compose | the Debian release that image must be on
-# Bookworm is reached the way a project reaches it: its Node. tools/postgres-debs/image-codenames.mjs is what says which do.
+# Bookworm is reached the way a project reaches it: its Node, here without `web`, which cannot build on bookworm today. tools/postgres-debs/image-codenames.mjs is what says which do.
 CASES="
 pg18-trixie-agent|agent|24|18|$MCR/base:debian|trixie
 pg17-trixie-node24|node|24|17|$MCR/typescript-node:24|trixie
-pg18-bookworm-node18|node|18|18|$MCR/typescript-node:18|bookworm
-pg17-bookworm-node18|node|18|17|$MCR/typescript-node:18|bookworm
+pg18-bookworm-node18|bare-node|18|18|$MCR/typescript-node:18|bookworm
+pg17-bookworm-node18|bare-node|18|17|$MCR/typescript-node:18|bookworm
 "
 
 SELECTED=("$@")
@@ -82,11 +82,16 @@ json_field() { sed -n "s/^[[:space:]]*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\
 installer_lines() { sed -n 's/^#[0-9]* [0-9.]* \(\[os-packages\].*\)$/\1/p' "$1"; }
 
 project_for() {   # <preset>: prints the project's directory, making it the first time. Fails when `new` does.
-  local preset="$1" dir="$WORK/pg-$1" flags=()
+  local preset="$1" dir="$WORK/pg-$1" flags=() layers=postgres
   if [ ! -d "$dir" ]; then
-    [ "$preset" = agent ] || flags=("--preset=$preset")
-    echo "One project, made with this checkout on Node $(node --version 2>/dev/null): house.sh new --local ${flags[*]-} --add-layer=postgres" >&2
-    if ! PROJECTS_DIR="$WORK" bash "$ENGINE/house.sh" new --local ${flags[@]+"${flags[@]}"} --add-layer=postgres "pg-$preset" < /dev/null > "$WORK/new-$preset.log" 2>&1; then
+    # `bare-node` is the node layer with no preset: the node preset wears `web`, whose Chromium packages are named for trixie.
+    case "$preset" in
+      agent) ;;
+      bare-node) layers=node,postgres ;;
+      *) flags=("--preset=$preset") ;;
+    esac
+    echo "One project, made with this checkout on Node $(node --version 2>/dev/null): house.sh new --local ${flags[*]-} --add-layer=$layers" >&2
+    if ! PROJECTS_DIR="$WORK" bash "$ENGINE/house.sh" new --local ${flags[@]+"${flags[@]}"} "--add-layer=$layers" "pg-$preset" < /dev/null > "$WORK/new-$preset.log" 2>&1; then
       tail -n 40 "$WORK/new-$preset.log" >&2
       return 1
     fi
