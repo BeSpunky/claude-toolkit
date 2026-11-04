@@ -303,7 +303,7 @@
     "retire-reap-emulators": {
       "version": "0.50.0",
       "layer": "firebase",
-      "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev claim) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
+      "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev run) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
       "implementation": "./src/migrations/0.50.0/retire-reap-emulators"
     },
     "truthful-angular-library-tests": {

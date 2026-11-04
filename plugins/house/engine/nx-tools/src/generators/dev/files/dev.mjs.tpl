@@ -8,7 +8,6 @@
 //   tools/dev/dev list
 //   tools/dev/dev with  <app> [--task=<project:target>] [--timeout=<s>] -- <command…>
 //   tools/dev/dev run   <app> --ports=<name=port,…> [--label=<text>] [--port-offset=<n|auto>] [--shifted] [--owner=<label>] -- <command…>
-//   tools/dev/dev claim <app> --pid=<pid> --lock=<file> --ports=<name=port,…> [--label=<text>] [--port-offset=<n|auto>] [--shifted]  (scripts)
 //   tools/dev/dev release <key> --lock=<file>                                                                     (scripts)
 //
 // A serve: pick a tree → install it if its declaration says how and it needs it → CLAIM the stack: one port
@@ -25,7 +24,8 @@
 //
 // `run` is the same claim for a LAUNCHER that is a stack of its own — tools/emulators.sh run directly, a seed build's
 // private suite: one identity for everything that binds this project's ports, so a direct run and a serve see each
-// other instead of colliding on a port. `claim` / `release` are its parts, for a process that must itself be the claimer.
+// other instead of colliding on a port. `release` is for what outlives the run and holds its lock: the suite's keeper,
+// last one out.
 //
 // Node built-ins only, and no project node_modules: this must serve a Python or Go repo exactly as it serves
 // an Nx one. `nx serve <app>` (the @bespunky/nx-tools:serve executor) is a thin wrapper over this file.
@@ -209,7 +209,6 @@ const COMMAND_FLAGS = {
   list: [],
   with: ['task', 'timeout'],
   run: ['ports', 'portOffset', 'shifted', 'owner', 'label'],
-  claim: ['pid', 'lock', 'ports', 'portOffset', 'shifted', 'owner', 'label'],
   release: ['lock'],
 };
 
@@ -252,8 +251,7 @@ export function parseArgs(argv) {
         out.skip.push(...takeValue().split(',').map((s) => s.trim()).filter(Boolean));
         break;
       case '--offset':
-      case '--timeout':
-      case '--pid': {
+      case '--timeout': {
         const raw = takeValue();
         const n = Number(raw);
         if (!Number.isInteger(n) || n < 0) throw new UsageError(`${flag} must be a non-negative integer (got '${raw}')`);
@@ -820,7 +818,7 @@ async function stop(opts) {
  * takes the base ports (a seed build must not land on the developer's). No `--port-offset`: the base block — or, under an
  * AI agent, `auto` (it never takes the base ports).
  */
-async function claimOwnStack(opts, worktrees, tree, lock, claimer) {
+async function claimOwnStack(opts, worktrees, tree, lock) {
   const agent = isAgent(process.env);
   const claimed = await claimStack({
     ...scopeOf(worktrees),
@@ -832,7 +830,6 @@ async function claimOwnStack(opts, worktrees, tree, lock, claimer) {
     basePorts: opts.ports,
     lock,
     agent,
-    claimer,
     fields: { owner: ownerOf(process.env, opts.owner), label: opts.label ?? `${opts.app} (run directly)` },
     say: (m) => console.error(`[claim] ${m}`),
   });
@@ -855,7 +852,7 @@ async function run(opts) {
   const say = (m) => console.error(`[run] ${m}`);
   const worktrees = collectWorktrees(ROOT);
   const tree = currentTree(worktrees);
-  const { lock, claim: { record } } = await claimHoldingLock(tree.path, (lockPath) => claimOwnStack(opts, worktrees, tree, lockPath, process.pid));
+  const { lock, claim: { record } } = await claimHoldingLock(tree.path, (lockPath) => claimOwnStack(opts, worktrees, tree, lockPath));
   const { key, offset } = record;
   const dropRecord = recordDropper(scopeOf(worktrees), tree.path, key, lock);
   say(`${key} claimed — tools/dev/dev ps shows it; stop it with Ctrl+C or: ${stopCommand(record, tree)}`);
@@ -880,30 +877,8 @@ async function run(opts) {
 }
 
 /**
- * `claim <app> --pid=<pid> --lock=<file> --ports=<name=port,…>` — a stack (see claimOwnStack) whose claimer is another
- * process (`--pid`, normally a script's `$$`), not this short-lived one, and so is the stack's lock: that process holds
- * `--lock` (a fresh file under .bespunky/run/locks/, flock'ed shared) for its whole life, and the record names it.
- * Prints shell assignments for `eval`: STACK_KEY, STACK_OFFSET, STACK_DIR, STACK_TMP, STACK_RECORD.
- */
-async function claim(opts) {
-  if (!opts.app || opts.pid === undefined || !opts.lock || !opts.ports || !Object.keys(opts.ports).length) {
-    throw new UsageError('claim needs <app> --pid=<pid> --lock=<file> --ports=<name=port,…>');
-  }
-  const worktrees = collectWorktrees(ROOT);
-  const tree = currentTree(worktrees);
-  const { record } = await claimOwnStack(opts, worktrees, tree, opts.lock, opts.pid);
-  const q = (v) => `'${String(v).replace(/'/g, `'\\''`)}'`;
-  console.log(`STACK_KEY=${q(record.key)}`);
-  console.log(`STACK_OFFSET=${q(record.offset)}`);
-  console.log(`STACK_DIR=${q(stackDirOf(tree.path, record.key))}`);
-  console.log(`STACK_TMP=${q(record.tmp)}`);
-  console.log(`STACK_RECORD=${q(join(tree.path, '.bespunky', 'run', `${record.key}.json`))}`);
-  return 0;
-}
-
-/**
- * `release <key> --lock=<file>` — a script's claim, given up: called by each holder AFTER closing its own descriptor of
- * the lock. The record goes only while it is still the claim made with that lock and nothing holds it any more.
+ * `release <key> --lock=<file>` — a stack given up by what outlived its run (a suite's keeper): called by each holder
+ * AFTER closing its own descriptor of the lock. The record goes only while it is still the claim made with that lock and nothing holds it any more.
  */
 function release(opts) {
   if (!opts.app || !opts.lock) throw new UsageError('release needs <key> --lock=<file>');
@@ -996,8 +971,6 @@ async function main(argv) {
       return stop(opts);
     case 'run':
       return run(opts);
-    case 'claim':
-      return claim(opts);
     case 'release':
       return release(opts);
     case 'with':

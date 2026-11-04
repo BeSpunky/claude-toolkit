@@ -438,38 +438,38 @@ process.on('SIGTERM', () => process.exit(0));
         /* stopped */
       }
 
-      // D4: a script's stack claims the same way — a direct emulator run and a serve see each other. The script holds
-      // its own lock (flock'ed before the claim); the record names it.
-      const scriptLock = join(run, 'locks', 'script.lock');
-      const sh = await holder(scriptLock);
-      const unheld = await dev(owner, 'claim', 'firebase', '--pid=1', `--lock=${join(run, 'locks', 'nobody.lock')}`, `--ports=hub=${port}`, '--port-offset=0');
-      ok('a claim whose lock is not held is refused', unheld.code !== 0 && /is not held/.test(unheld.out));
-      const claimed = await dev(owner, 'claim', 'firebase', `--pid=${sh.pid}`, `--lock=${scriptLock}`, `--ports=hub=${port}`);
-      ok(`a script claims its stack for ITS pid — the base block by default for a human (${claimed.out.trim().split('\n')[0]})`, claimed.code === 0 && /^STACK_KEY='firebase@0'$/m.test(claimed.out) && /^STACK_TMP='\/tmp\/bespunky-[0-9a-f]{12}'$/m.test(claimed.out));
+      // D4: a launcher's stack claims the same way — a direct emulator run and a serve see each other.
+      const running = async (env = owner) => {
+        const p = spawn('sh', [join(engine, 'dev'), 'run', 'firebase', `--ports=hub=${port}`, '--', 'sleep', '60'], { cwd: repo, detached: true, stdio: 'ignore', env: { ...process.env, ...env } });
+        const up = await until(() => readStacks([repo]).some((s) => s.pid === p.pid && s.processes.length), 8000);
+        return { p, up, record: readStacks([repo]).find((s) => s.pid === p.pid) };
+      };
+      const killed = async ({ p }) => {
+        process.kill(-p.pid, 'SIGKILL');
+        await until(() => !readStacks([repo]).length, 3000);
+      };
+      const { claimStack } = await load('lib/stacks.mjs');
+      const unheld = await claimStack({ lockRoot: repo, trees: [repo], tree: repo, app: 'firebase', spec: '0', treeKey: 'x', isMain: true, basePorts: { hub: port }, lock: join(run, 'locks', 'nobody.lock'), say: () => {} }).catch((e) => e);
+      ok('a claim whose lock is not held is refused', /is not held/.test(String(unheld?.message)));
+      const direct = await running();
+      ok('a run claims its stack, the base block by default for a human', direct.up && direct.record?.key === 'firebase@0');
       const beside = await dev(owner, 'serve', 'site', '--no-shared-browser', '--port-offset=0');
-      ok("…a serve on the same ports is refused, naming the script's stack", beside.code !== 0 && /firebase@0 \(live, pid /.test(beside.out));
-      await dev(owner, 'release', 'firebase@0', `--lock=${scriptLock}`);
+      ok("…a serve on the same ports is refused, naming the run's stack", beside.code !== 0 && /firebase@0 \(live, pid /.test(beside.out));
+      await dev(owner, 'release', 'firebase@0', `--lock=${direct.record.lock}`);
       ok('…a release while the lock is still held keeps it (the last one out removes it)', existsSync(join(run, 'firebase@0.json')));
-      process.kill(-sh.pid, 'SIGKILL');
-      await until(() => !readStacks([repo]).length, 3000);
-      await dev(owner, 'release', 'firebase@0', `--lock=${scriptLock}`);
-      ok('…once nothing holds it, release gives it up (record, lock, state dir)', !existsSync(join(run, 'firebase@0.json')) && !existsSync(join(run, 'firebase@0')) && !existsSync(scriptLock));
+      await killed(direct);
+      await dev(owner, 'release', 'firebase@0', `--lock=${direct.record.lock}`);
+      ok('…once nothing holds it, release gives it up (record, lock, state dir)', !existsSync(join(run, 'firebase@0.json')) && !existsSync(join(run, 'firebase@0')) && !existsSync(direct.record.lock));
 
       // S3-8: the old claim's last holder lets go LATE — after the key was claimed again. Its release names its own lock,
       // which the new record does not: the new stack keeps its record, state dir and TMPDIR.
-      const lockA = join(run, 'locks', 'a.lock');
-      const a = await holder(lockA);
-      await dev(owner, 'claim', 'firebase', `--pid=${a.pid}`, `--lock=${lockA}`, `--ports=hub=${port}`);
-      process.kill(-a.pid, 'SIGKILL');
-      const lockB = join(run, 'locks', 'b.lock');
-      const b = await holder(lockB);
-      const reclaim = await dev(owner, 'claim', 'firebase', `--pid=${b.pid}`, `--lock=${lockB}`, `--ports=hub=${port}`);
-      const tmpB = /^STACK_TMP='([^']+)'$/m.exec(reclaim.out)?.[1];
-      await dev(owner, 'release', 'firebase@0', `--lock=${lockA}`);
-      ok("S3-8: a late release of the key's OLD claim leaves the new claim alone (record, state dir, TMPDIR)", reclaim.code === 0 && JSON.parse(readFileSync(join(run, 'firebase@0.json'), 'utf8')).lock === lockB && existsSync(join(run, 'firebase@0')) && tmpB && existsSync(tmpB));
-      process.kill(-b.pid, 'SIGKILL');
-      await until(() => !readStacks([repo]).length, 3000);
-      await dev(owner, 'release', 'firebase@0', `--lock=${lockB}`);
+      const first = await running();
+      await killed(first);
+      const second = await running();
+      await dev(owner, 'release', 'firebase@0', `--lock=${first.record.lock}`);
+      ok("S3-8: a late release of the key's OLD claim leaves the new claim alone (record, state dir, TMPDIR)", second.up && JSON.parse(readFileSync(join(run, 'firebase@0.json'), 'utf8')).lock === second.record.lock && existsSync(join(run, 'firebase@0')) && existsSync(second.record.tmp));
+      await killed(second);
+      await dev(owner, 'release', 'firebase@0', `--lock=${second.record.lock}`);
 
       // S3-9: the local-server rule, in code. Under an AI agent the base ports are never taken.
       const agent = { ...owner, CLAUDECODE: '1' };
@@ -477,10 +477,8 @@ process.on('SIGTERM', () => process.exit(0));
       ok('an agent asking for --port-offset=0 is REFUSED, with the reason', zero.code !== 0 && /AI agent never takes the project's base ports/.test(zero.out));
       const auto = await dev(agent, 'serve', 'site', '--no-shared-browser', '--dry-run');
       ok('an agent\'s auto never resolves to offset 0 in the main tree, though it is free', auto.code === 0 && /offset {5}: [1-9]/.test(auto.out));
-      const sh2 = await holder(scriptLock);
-      const agentClaim = await dev(agent, 'claim', 'firebase', `--pid=${sh2.pid}`, `--lock=${scriptLock}`, `--ports=hub=${port}`);
-      ok('…and a script it runs (a direct emulator run, no offset given) lands off the base block', agentClaim.code === 0 && !/^STACK_OFFSET='0'$/m.test(agentClaim.out));
-      process.kill(-sh2.pid, 'SIGKILL');
+      const agentRun = await dev(agent, 'run', 'firebase', `--ports=hub=${port}`, '--', 'sh', '-c', 'echo "off=$PORT_OFFSET"');
+      ok('…and a launcher it runs (a direct emulator run, no offset given) lands off the base block', agentRun.code === 0 && /^off=[1-9]/m.test(agentRun.out));
 
       // S3-20: the stack's TMPDIR in shared /tmp is created private and checked — never adopted from someone else.
       const { stackTmp } = await load('lib/stacks.mjs');
@@ -973,21 +971,8 @@ echo "args=$* run=$DEV_RUN"
     });
     ok('a launcher re-executing itself through run keeps its arguments, and runs once', again.code === 0 && again.out.includes('args=a b c run=reexec') && again.out.match(/args=/g).length === 1);
 
-    // `claim --label`: the name is the caller's, and the verb names no one.
-    const lockFile = join(repo, '.bespunky', 'run', 'locks', 'label.lock');
-    writeFileSync(lockFile, '');
-    const holderProc = spawn('bash', ['-c', 'exec 9<"$0"; flock -s 9; echo held; exec sleep 60', lockFile], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
-    await new Promise((res) => holderProc.stdout.once('data', res));
-    try {
-      const labelled = await dev('claim', 'firebase', `--pid=${holderProc.pid}`, `--lock=${lockFile}`, `--ports=hub=${port}`, '--label=named by its caller');
-      ok('claim --label names the stack', labelled.code === 0 && (await stacks())[0]?.label === 'named by its caller');
-    } finally {
-      process.kill(-holderProc.pid, 'SIGKILL');
-    }
-    await until(async () => (await stacks()).length === 0, 3000);
-    await dev('release', 'firebase@0', `--lock=${lockFile}`);
-    const unnamed = await dev('claim', 'firebase', '--pid=1', `--lock=${lockFile}`, '--ports=hub=1', '--label');
-    ok('…a bare --label is refused', unnamed.code === 1 && /--label needs a value/.test(unnamed.out));
+    const unnamed = await dev('run', 'launcher', `--ports=db=${port}`, '--label', '--', 'true');
+    ok('a bare --label is refused', unnamed.code === 1 && /--label needs a value/.test(unnamed.out));
   }
 } finally {
   rmSync(repo, { recursive: true, force: true });

@@ -8,7 +8,7 @@
 // stack that left it.
 //
 // WHAT REPLACES IT. Every suite now claims its block through the dev engine before anything starts — a serve for its
-// whole stack, a direct run or a seed build for its own (`tools/dev/dev claim`). A block another stack holds is
+// whole stack, a direct run or a seed build for its own (`tools/dev/dev run`). A block another stack holds is
 // refused by name; one this stack's previous run is still saving on is waited for. What a suite starts lives in its
 // keeper's process group, and the keeper ends that group itself when the suite is over (or past its deadline), so the
 // orphans the reaper hunted are not left behind; a stack whose keeper was killed outright keeps its record (ORPHANED)
@@ -49,7 +49,7 @@ export default function update(tree: Tree): void {
 
   if (hadReaper) {
     tree.delete(REAPER);
-    logger.info(`${TAG} removed ${REAPER} — every emulator suite now claims its ports through the dev engine (tools/dev/dev claim).`);
+    logger.info(`${TAG} removed ${REAPER} — every emulator suite now claims its ports through the dev engine (tools/dev/dev run).`);
   }
 
   for (const { path, lines } of callers(tree)) {
