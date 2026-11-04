@@ -37,7 +37,7 @@ Deliberately absent: `@supabase/supabase-js`, `@electric-sql/pglite`, `@prisma/c
 
 ## Verification
 
-- Byte identity: every file of five Firebase fixtures (hybrid and TS-solution, with and without ESLint, Angular evidence, `seedRules`), generated before any change and after. 161 of 165 files identical. The 4 that differ are `eslint.config.mjs`: 1 comment line and the 16 new ban lines in each of `web` and `shared`.
+- Byte identity: every file of five Firebase fixtures (hybrid and TS-solution, with and without ESLint, Angular evidence, `seedRules`), generated before any change and after. 157 of 161 files identical. The 4 that differ are `eslint.config.mjs`: 1 comment line and the 16 new ban lines in each of `web` and `shared`.
 - Existing workspace: the old generator's output re-run through the new generator changes 0 files in all five, the firewall included.
 - Real lint (a scratch workspace with real `eslint` and `@nx/eslint-plugin` 23.1.0): clean `web` and `shared` projects and a `server` project on `pg` and `postgres` pass; `web` importing `pg` or `postgres`, and `shared` importing `pg/lib/index.js`, fail with Nx's ban message.
 - Real Nx CLI (`nx show projects --affected --files=`), now a test case: glob and file outside the root are seen; a bare directory is not.
@@ -46,4 +46,4 @@ Deliberately absent: `@supabase/supabase-js`, `@electric-sql/pglite`, `@prisma/c
 
 - **An existing firewall does not gain the drivers.** It is project state, so a Firebase project that later adds `postgres` keeps a list without `pg`. See the report: a rung, or Landing 2's call.
 - **`HOUSE.md.tpl:29,249`** describes the firewall only inside `{{#firebase}}`, and line 29 says `Node / Cloud Functions`. A `postgres`-only project gets a firewall its docs do not mention. House-doc was out of this unit's scope; owed by Landing 2.
-- **No ESLint config means no firewall, silently** (`ensurePlatformFirewall` returns). Behaviour kept from Firebase. A `postgres` project on the wrapper host has no lint, so nothing keeps `pg` out of a browser bundle. Landing 2 should say so.
+- **No ESLint config means no firewall, silently** (`ensurePlatformFirewall` returns). Behaviour kept from Firebase. A `postgres` project with no root ESLint config (the wrapper host, typically) has nothing that keeps `pg` out of a browser bundle. Landing 2 should say so.
