@@ -16,7 +16,7 @@ Units are independent; each must build and test, so one worktree and branch each
 | seam-installer | feat/hps-installer | returned |
 | finish | docs, firewall rung, leftovers, on the integration branch | returned |
 | review | sanity review of the whole landing | returned |
-| gate | upgrade --local + dogfood-consumer | dispatched |
+| gate | upgrade --local + dogfood-consumer | returned, rebuild pending |
 
 ## Results
 
@@ -49,3 +49,6 @@ Two rungs at 0.52.0: ban-postgres-drivers-from-web; pin-github-cli-feature (a mi
 
 ### review (returned; ledger reviews/2026-11-04-landing1-sanity-review.md)
 Fixes committed. Tests after fixes: migrations 417, generators 318/35 skipped, layers 107, scaffold 28 files. Three batons now out of date, noted in the review ledger. Not covered: scalability, clean code, reuse in depth; no second reviewer over fixes; real GitHub runner, docker build, real launcher, bookworm run.
+
+### Rebase and gate
+development moved 28 commits; rebased onto b154828f, conflicts in docs, workflow.ts header, upstream-tables, package.json version. Backup branch backup/hps-before-rebase (delete at landing). After rebase: migrations 417, generators 325/35 skipped, layers 110, scaffold pass. upgrade --local on chore/hps-gate OK, whole diff read. dogfood-consumer --released=main (0.51.3): 87 passed, 0 failed. Note: --released defaults to development, which fails while development is ahead of npm.
