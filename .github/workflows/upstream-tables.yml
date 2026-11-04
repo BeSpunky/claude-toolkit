@@ -40,6 +40,7 @@ jobs:
   check:
     if: github.repository == 'BeSpunky/claude-toolkit'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4

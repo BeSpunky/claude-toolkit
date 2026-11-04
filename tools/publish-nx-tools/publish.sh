@@ -162,11 +162,9 @@ else
   echo "Base image: $IMAGE"
 
   NPMRC_MOUNT=()
-  [ -f "$NPMRC" ] && NPMRC_MOUNT=(-v "$NPMRC":/home/node/.npmrc:ro)
+  [ -f "$NPMRC" ] && NPMRC_MOUNT=(-v "$NPMRC":"$CONTAINER_HOME"/.npmrc:ro)
 
-  docker run --rm \
-    -u "$(id -u):$(id -g)" \
-    -e HOME=/home/node \
+  container_run_program \
     -v "$ASSETS_DIR":/assets:ro \
     "${NPMRC_MOUNT[@]}" \
     "$IMAGE" \

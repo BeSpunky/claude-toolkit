@@ -30,6 +30,7 @@ import { nxInvocation } from '../_utils/nx-host';
 import { pluginPointerValues } from '../_utils/plugin-pointers';
 import { CI_SKILL_POINTERS } from './skill-pointers';
 import { nodeVersionFile, projectNode } from '../_utils/node-version';
+import { isYarnBerry } from '../_utils/package-manager';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { MARKER, ciConfiguration, renderWorkflow, WORKFLOW, type WiredLine } from './workflow';
 
@@ -109,7 +110,7 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
         providers,
         nx: nx.command,
         packageManager: nx.packageManager,
-        yarnBerry: tree.exists('.yarnrc.yml') || /"packageManager"\s*:\s*"yarn@[2-9]/.test(tree.read('package.json', 'utf8') ?? ''),
+        yarnBerry: isYarnBerry(tree),
         nodeVersionFile: nodeVersionFile(tree),
         throughBranchModelSkill,
       }),

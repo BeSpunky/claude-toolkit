@@ -334,7 +334,7 @@ failure the gate removes. If you find yourself looking for one, the answer is th
 Once the user has chosen and the state is resolved, **re-run this command from the top** rather than resuming
 mid-way. Step 1 may matter again, and the gate is cheap.
 
-- **`runner-image`** — only on the Docker fallback: the image the generators run in cannot run this project's package manager, or could not be run at all (the `ERROR` line above it says which). That includes a project declaring a yarn major the image's yarn is not, with no `yarnPath` for it to dispatch through. Nothing to resolve in the project. Relay it, and offer the way around it: Node 22.18+ with that package manager on the machine's PATH runs natively, with no image.
+- **`runner-image`** — what the generators run on cannot run this project's package manager, or the image could not be run at all (the `ERROR` line above it says which). That includes a project whose yarn the runner's yarn cannot reach with no `yarnPath` to dispatch through: a declared version, or an undeclared yarn 2+ repo, which yarn 1 would rewrite. It fires on the Docker fallback and natively, for a host's yarn. Nothing to resolve in the project, unless it really is on yarn 1 with a stray `.yarnrc.yml`, when declaring that settles it. Relay it, and offer the way around it the line under the `ERROR` names: on the fallback, Node 22.18+ with that package manager on the machine's PATH runs natively, with no image; natively, that yarn on the PATH or a committed `yarnPath`.
 
 ### The rest
 

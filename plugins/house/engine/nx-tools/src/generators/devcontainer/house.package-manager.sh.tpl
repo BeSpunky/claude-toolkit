@@ -102,9 +102,22 @@ esac
 # be able to write the prefix, may not be able to replace a copy the image build installed as root, and an earlier
 # fallback there may be what is shadowing the prefix. A version check after each install is what decides, so a copy that
 # lands behind another on PATH is never reported as done.
+# --ignore-scripts: none of these packages needs one, and with --force a failing one leaves the bin it replaced dangling.
+#
+# As root, what landed goes to whoever owns the prefix. Otherwise the non-root post-create can neither replace nor retire
+# it: npm leaves root-owned `.yarn-*` orphans, then ENOTEMPTY. A prefix root owns needs nothing, and ~/.local covers that.
+hand_back() {
+  [ "$(id -u)" = 0 ] || return 0
+  prefix="$(npm prefix -g)" && owner="$(stat -c %u:%g "$prefix/lib/node_modules")" || return 0
+  [ "${owner%%:*}" != 0 ] || return 0
+  find "$prefix/lib/node_modules" "$prefix/bin" -user 0 -exec chown -h "$owner" {} + || true
+}
 install_with() {
   echo "[package-manager] npm install -g $* $package"
-  npm install -g --force --no-audit --no-fund "$@" "$package" && is_right "$(present)"
+  rc=0
+  npm install -g --force --ignore-scripts --no-audit --no-fund "$@" "$package" || rc=$?
+  hand_back
+  [ "$rc" = 0 ] && is_right "$(present)"
 }
 if install_with; then
   echo "[package-manager] $pm $version installed"

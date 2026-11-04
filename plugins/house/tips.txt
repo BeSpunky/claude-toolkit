@@ -3,6 +3,7 @@
 
 /bespunky-house:upgrade brings a project up to the current house standard in one step — it adds no layer
 An upgrade on a protected branch opens its own worktree off the integration line — it never commits onto a protected line
+A devcontainer installs the package manager package.json declares, whatever its image ships: change packageManager and rebuild
 /bespunky-house:new creates a project: the house DX on Nx — no Angular, no package.json; add only the layers you pick
 Want the house web app? Ask for the angular preset (house.sh new --preset=angular) — Angular, dev loop, design system
 Add only the house DX to any repo: /bespunky-house:add-layer agent

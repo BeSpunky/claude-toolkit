@@ -61,12 +61,26 @@ container_run_as_host_user() {
   fi
 }
 
+# The HOME of everything run in the image as the host user, and it has to be writable by whoever that is: git, npm and
+# yarn all write there, and `git config --global` under `set -e` is the program's first act on a scaffold. /home/node
+# belongs to the image's uid 1000 and is not writable by anyone else (a GitHub runner is 1001, a Mac 501). /tmp exists in
+# every image and every uid can write it, and nothing there outlives the `--rm` container. What it gives up is
+# /home/node's profile files; PATH does not come from them, and container_require_command asks the same way, so a tool
+# only they provided would be reported up front.
+CONTAINER_HOME=/tmp
+
+# `docker run --rm` the way every launcher runs its program in the image, so a check made through this answers for the
+# program. Takes every other `docker run` argument.
+container_run_program() {
+  container_run_as_host_user -e HOME="$CONTAINER_HOME" "$@"
+}
+
 # Hand container-written files back to the invoking host user. Rootful only; a no-op when rootless.
 #   $1 image   $2 host dir to mount at /work   $3.. paths under /work to chown (recursively)
 container_restore_ownership() {
   container_engine_rootless && return 0
   local image="$1" host_dir="$2"; shift 2
-  docker run --rm -v "$host_dir":/work -w /work "$image" chown -R "$(id -u):$(id -g)" "$@"
+  docker run --rm -u 0:0 -v "$host_dir":/work -w /work "$image" chown -R "$(id -u):$(id -g)" "$@"
 }
 
 # Echo the Node major the fallback runs on: the house's own, read from the payload shipped beside this file (one
@@ -75,8 +89,9 @@ container_restore_ownership() {
 #   It is deliberately NOT the newest image on MCR. It used to be, which made every launcher depend on whatever
 #   Microsoft published that day: typescript-node:26 ships neither yarn nor corepack (24 ships yarn 1.22.22), so the
 #   day it appeared `yarn create nx-workspace` stopped working with no change here. A runner needs a known toolchain,
-#   not a new one. Moving HOUSE_NODE_MAJOR past 24 therefore has to answer where yarn comes from, here and in the
-#   generated devcontainer: docs/features/2026-11-02-house-docker-pm/DECISION.md.
+#   not a new one. Moving HOUSE_NODE_MAJOR past 24 therefore has to answer where the fallback's yarn comes from (a
+#   generated devcontainer provides its own, through house.package-manager.sh):
+#   docs/features/2026-11-04-house-docker-open-items/DECISION.md.
 base_image_node_major() {
   local versions major
   versions="$(dirname "${BASH_SOURCE[0]}")/nx-tools/src/generators/_utils/versions.ts"
@@ -99,7 +114,7 @@ base_image_for_major() {
 #   $1 image   $2 command   (docker run exits 125 and up when it could not start the container at all)
 container_require_command() {
   local rc=0
-  container_run_as_host_user -e HOME=/home/node "$1" bash -lc 'command -v "$1"' _ "$2" >/dev/null || rc=$?
+  container_run_program "$1" bash -lc 'command -v "$1"' _ "$2" >/dev/null || rc=$?
   case "$rc" in
     0) return 0 ;;
     1) echo "ERROR: $1 has no '$2', and this run needs it. Nothing was written." >&2 ;;
@@ -112,5 +127,5 @@ container_require_command() {
 # away from any project: inside one, yarn would answer for the release that project dispatches to.
 #   $1 image   $2 command
 container_command_version() {
-  container_run_as_host_user -e HOME=/home/node "$1" bash -lc '"$1" --version' _ "$2"
+  container_run_program "$1" bash -lc '"$1" --version' _ "$2"
 }

@@ -6,10 +6,10 @@
 #   bash tools/check-runner-image/e2e.sh local      --local: packs this working tree, so it needs nothing published
 #   bash tools/check-runner-image/e2e.sh registry   what a consumer gets: installs the version this checkout declares
 #
-# THE REGISTRY ROAD ASKS npm FIRST. It can only be walked once the version in engine/nx-tools/package.json is on npm, and
-# a branch carrying a bump has a version nobody published yet. That is the normal state of such a branch, not a defect
-# in it, so a 404 is a stated SKIP (exit 0), and only an unanswered question fails. The first run on main after the
-# publish walks it.
+# THE REGISTRY ROAD ASKS npm FIRST. It can only be walked once the version in engine/nx-tools/package.json is on npm. On a
+# push that is often not yet the case: a bump's publish is running beside this. So a 404 there is a stated SKIP (exit 0),
+# and the run the finished publish starts walks it. On a schedule, after a publish or by hand there is no such race, so a
+# 404 means the release never reached npm, and it fails.
 #
 # Needs docker and the network, ~5-15 minutes per road; exits 0 pass or skip, 1 fail. .github/workflows/runner-image-e2e.yml.
 set -uo pipefail
@@ -27,10 +27,15 @@ case "$ROAD" in
   registry) FLAGS=(--docker)
     VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ENGINE/nx-tools/package.json" | head -n 1)"
     [ -n "$VERSION" ] || { notice error "No version in $ENGINE/nx-tools/package.json: nothing to look for on npm."; exit 1; }
-    STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "https://registry.npmjs.org/@bespunky/nx-tools/$VERSION" || true)"
+    STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 3 "https://registry.npmjs.org/@bespunky/nx-tools/$VERSION" || true)"
     case "$STATUS" in
       200) echo "@bespunky/nx-tools@$VERSION is on npm: walking the registry road." ;;
-      404) notice notice "SKIP registry road: @bespunky/nx-tools@$VERSION is not on npm yet, so no consumer can install it either. Nothing was observed."
+      404) case "${GITHUB_EVENT_NAME:-}" in
+             schedule | workflow_run | workflow_dispatch)
+               notice error "@bespunky/nx-tools@$VERSION is not on npm, and nothing is publishing it now: the release did not reach it."
+               exit 1 ;;
+           esac
+           notice notice "SKIP registry road: @bespunky/nx-tools@$VERSION is not on npm yet, so no consumer can install it either. Nothing was observed."
            exit 0 ;;
       *)   notice error "Could not tell whether @bespunky/nx-tools@$VERSION is on npm (HTTP '$STATUS')."; exit 1 ;;
     esac ;;
@@ -62,7 +67,12 @@ echo "Verdict ($ROAD road):"
 check "house.sh exited 0 (it exited $rc)" "$rc"
 grep -q "^NEW_OK $WORK/projects/$PROJECT " "$LOG"; check "it reported NEW_OK for $PROJECT" $?
 grep -q "^NEW_OK .*image=$IMAGE " "$LOG"; check "it ran on $IMAGE, not the host's Node" $?
-[ -f "$WORK/projects/$PROJECT/HOUSE.md" ]; check "$PROJECT/HOUSE.md exists" $?
+DIR="$WORK/projects/$PROJECT"
+[ -f "$DIR/HOUSE.md" ]; check "$PROJECT/HOUSE.md exists" $?
+# What only a real engine can show: a fake docker writes as this user whatever the run asked for.
+[ -e "$DIR" ] && [ -z "$(find "$DIR" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; check "everything in it belongs to uid $(id -u)" $?
+[ "$(cat "$DIR/.nvmrc" 2>/dev/null)" = "$MAJOR" ]; check ".nvmrc is the Node the fallback ran on ($MAJOR)" $?
+grep -q '"packageManager": *"yarn@' "$DIR/package.json" 2>/dev/null; check "package.json declares the yarn it was made with" $?
 
 if [ "$FAILED" -ne 0 ]; then
   {

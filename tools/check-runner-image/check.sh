@@ -10,9 +10,9 @@
 # IT DRIFTS WITH UPSTREAM, BY DESIGN, so it runs on a schedule and never on every push:
 # .github/workflows/upstream-tables.yml says why.
 #
-# What is asserted: yarn is there, runs, and is the major below. What is only reported: Node, corepack, pnpm, and whether
-# the run's HOME is writable by this user; none of those stops anything today, and each answers a question somebody will
-# ask when something else breaks.
+# What is asserted: Node is there, yarn is there, runs, and is the major below, and the run's HOME is writable by this
+# user; the program cannot get anywhere without any of them. What is only reported: corepack and pnpm; neither stops
+# anything today, and each answers a question somebody will ask when something else breaks.
 #
 # The exit code separates the two ways to be red, because they want different people doing different things:
 #   0  the image holds the assumption
@@ -33,7 +33,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # on a newer yarn would change all three without saying so.
 EXPECTED_YARN_MAJOR=1
 
-DECISION=docs/features/2026-11-02-house-docker-pm/DECISION.md
+DECISION=docs/features/2026-11-04-house-docker-open-items/DECISION.md
 
 annotate() { [ -z "${GITHUB_ACTIONS:-}" ] || echo "::error title=$1::$2"; }
 summary()  { [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
@@ -57,12 +57,12 @@ broken() {   # <the assumption that broke>
   {
     echo "BROKEN: $IMAGE: $1"
     echo "Nothing in this repo changed: the rolling tag did. Until this is settled, every Docker-path run of house.sh"
-    echo "on a yarn project (new --preset=angular, for one) stops at its up-front check, and generated devcontainers on"
-    echo "this tag lose yarn the same way. To settle it:"
-    echo "  1. Look at it: docker run --rm --pull=always $IMAGE bash -lc 'type -a yarn; yarn --version'"
-    echo "  2. Choose where yarn comes from: the fallback installs it itself (npm install -g yarn@1.22.22 works as the"
-    echo "     node user on :26), or base_image_for_major pins this major by digest for now."
-    echo "  3. The same image builds generated devcontainers, so check their post-create too. Background: $DECISION."
+    echo "on a yarn project (new --preset=angular, for one) stops or dies. Generated devcontainers are not affected:"
+    echo "house.package-manager.sh provides theirs. To settle it:"
+    echo "  1. Look at it: docker run --rm --pull=always $IMAGE bash -lc 'type -a node yarn; yarn --version; ls -ld \$HOME'"
+    echo "  2. Choose where the fallback's yarn comes from: it installs it itself (npm install -g yarn@1.22.22 worked as the"
+    echo "     node user on :26, but the program runs as the host's uid, so it needs a --prefix under its HOME)."
+    echo "     A digest pin was weighed and rejected: it stops security updates. Background: $DECISION."
   } >&2
   exit 1
 }
@@ -75,8 +75,8 @@ echo "Image: $IMAGE (HOUSE_NODE_MAJOR=$MAJOR), pulled fresh"
 echo "Engine: $(container_engine_describe)"
 
 # Ends with a sentinel and exits 0 whatever it found, so a non-zero docker exit or a missing sentinel can only mean the
-# probe did not run to the end. That is what keeps "could not run" and "has no yarn" apart. Same user, HOME and login
-# shell as the program house.sh runs: a tool only a root shell can see would not help it.
+# probe did not run to the end. That is what keeps "could not run" and "has no yarn" apart. Through the seam the program
+# house.sh runs through, in the same login shell: a tool only a root shell can see would not help it.
 # shellcheck disable=SC2016  # it runs in the container.
 PROBE='
 for tool in node yarn corepack pnpm; do
@@ -87,6 +87,7 @@ for tool in node yarn corepack pnpm; do
   echo "$tool.version=$version"
 done
 if [ -w "$HOME" ]; then echo "home.writable=yes"; else echo "home.writable=no"; fi
+echo "uid=$(id -u)"
 echo "probe=done"
 '
 
@@ -95,7 +96,7 @@ trap 'rm -f "$STDERR_FILE"' EXIT
 # --pull=always: this asks what the tag holds TODAY, and a copy cached on this machine would answer for the day it was
 # pulled. No stdin, so a corepack shim that wants to ask before downloading cannot wait for an answer.
 rc=0
-OUTPUT="$(container_run_as_host_user --pull=always -e HOME=/home/node -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+OUTPUT="$(container_run_program --pull=always -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
   "$IMAGE" bash -lc "$PROBE" </dev/null 2>"$STDERR_FILE")" || rc=$?
 EVIDENCE="$(tail -n 5 "$STDERR_FILE")"
 
@@ -115,14 +116,16 @@ report() {   # <tool>  <what its absence means>
   fi
 }
 summary "### $IMAGE"
-echo "What the image holds, as uid $(id -u):"
-report node "Not asserted here, but the program cannot run without it."
+echo "What the image holds, as uid $(fact uid) in the container:"
+report node "(Asserted below.)"
 report yarn "(Asserted below.)"
 report corepack "Nothing here enables it; a project's yarn 2+ needs a yarnPath."
 report pnpm "A pnpm project on the fallback stops at UPGRADE_REFUSED: runner-image, and needs the native route."
-echo "  HOME=/home/node writable: $(fact home.writable)"
-summary "- HOME=/home/node writable by uid $(id -u): $(fact home.writable)"
+echo "  HOME=$CONTAINER_HOME writable: $(fact home.writable)"
+summary "- HOME=$CONTAINER_HOME writable by uid $(fact uid): $(fact home.writable)"
 
+[ -n "$(fact node.path)" ] || broken "has no node"
+[ "$(fact home.writable)" = "yes" ] || broken "HOME=$CONTAINER_HOME is not writable by uid $(fact uid): git, npm and yarn all write there"
 [ -n "$(fact yarn.path)" ] || broken "has no yarn"
 YARN_VERSION="$(fact yarn.version)"
 [ -n "$YARN_VERSION" ] || broken "has yarn at $(fact yarn.path), but 'yarn --version' printed nothing"

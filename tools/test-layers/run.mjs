@@ -1308,8 +1308,10 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.cache,type=volume`)) && !a.dc.mounts.some((m) => m.includes('/.cache/')), '~/.cache is not ONE persisted volume (or a per-tool cache volume crept back)');
   // A package manager the image lacks and the global prefix refuses lands in ~/.local (house.package-manager.sh): the volume
   // keeps it across a rebuild, first on PATH. What the package managers themselves keep was looked at with the real ones:
-  // yarn 1 and pnpm stay inside the XDG homes (~/.cache, ~/.local); yarn 2+'s ~/.yarn/berry is a download cache with no
-  // login in it, left where it is, since YARN_GLOBAL_FOLDER would also move yarn 1's `yarn global` out of ~/.config.
+  // yarn 1 and pnpm's caches and stores stay inside the XDG homes (~/.cache, ~/.local); yarn 2+'s ~/.yarn/berry is a
+  // download cache, left where it is, since YARN_GLOBAL_FOLDER would also move yarn 1's `yarn global` out of ~/.config.
+  // NOT persisted, and known: a registry login in ~/.npmrc (npm, pnpm: true of every node-layer container before this)
+  // and ~/.yarnrc.yml (yarn 2+). A rebuild loses it; see the effort's DECISION.md.
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.local,type=volume`)), '~/.local is not a persisted volume');
   ok(a.dc.remoteEnv.PATH.startsWith(`${home}/.local/bin:`), `~/.local/bin is not first on PATH: ${a.dc.remoteEnv.PATH}`);
   ok(a.post.includes('gh auth setup-git'), 'git is not wired to the gh login');
@@ -1644,6 +1646,16 @@ const PM_SPEC_CASES = [
   ['a tag is no version', { packageManager: 'yarn@latest' }, {}, 'yarn'],
   ['yarnPath hands over, whatever is declared', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'nodeLinker: node-modules\nyarnPath: .yarn/releases/yarn.cjs\n' }, 'yarn'],
   ["yarn 1's yarn-path hands over too", {}, { '.yarnrc': 'yarn-path ".yarn/yarn.js"\n', 'yarn.lock': '' }, 'yarn'],
+  ['yarn-path with a colon hands over', { packageManager: 'yarn@4.5.0' }, { '.yarnrc': 'yarn-path: .yarn/yarn.js\n' }, 'yarn'],
+  ['a quoted yarnPath hands over', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': '"yarnPath": .yarn/yarn.cjs\n' }, 'yarn'],
+  ["a single-quoted yarnPath hands over", { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': "'yarnPath': .yarn/yarn.cjs\n" }, 'yarn'],
+  ['a spaced yarnPath hands over', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'yarnPath : .yarn/yarn.cjs\n' }, 'yarn'],
+  ['a tab after the key still hands over', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'yarnPath:\t.yarn/yarn.cjs\n' }, 'yarn'],
+  ['an empty yarnPath hands over to nothing', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'yarnPath:\nnodeLinker: node-modules\n' }, 'yarn@4.5.0'],
+  ['a yarnPath that is only a comment hands over to nothing', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'yarnPath: # none\n' }, 'yarn@4.5.0'],
+  ['a commented-out yarnPath hands over to nothing', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': '# yarnPath: x\n' }, 'yarn@4.5.0'],
+  ['a number with letters in it is no version', { packageManager: 'pnpm@10-a.b.c' }, {}, 'pnpm'],
+  ['a prerelease of an exact version is one', { packageManager: 'yarn@4.0.0-rc.1' }, {}, 'yarn@4.0.0-rc.1'],
   ['undeclared, classic lockfile', {}, { 'yarn.lock': '# yarn lockfile v1\n' }, 'yarn'],
   ['undeclared, berry lockfile', {}, { 'yarn.lock': '__metadata:\n  version: 8\n' }, 'yarn@berry'],
   ['undeclared, berry config', {}, { '.yarnrc.yml': 'nodeLinker: node-modules\n' }, 'yarn@berry'],
@@ -1651,6 +1663,11 @@ const PM_SPEC_CASES = [
   ['undeclared npm', {}, { 'package-lock.json': '' }, 'npm'],
   ['nothing at all: the house default', {}, {}, 'yarn'],
   ['npm, exact', { packageManager: 'npm@10.9.0' }, {}, 'npm@10.9.0'],
+];
+// Written by hand: JSON.stringify would never give the generator or post-create a manifest this shape.
+const PM_SPEC_RAW_MANIFESTS = [
+  ['minified, a nested declaration after the real one', '{"name":"x","packageManager":"yarn@1.22.22","x":{"packageManager":"pnpm@9.0.0"}}', 'yarn@1.22.22'],
+  ['no declaration at all, under pipefail', '{"name":"x"}', 'yarn'],
 ];
 
 checkAsync('package manager: the spec the image build gets and the one post-create derives are the same rule', async (ok) => {
@@ -1670,6 +1687,16 @@ checkAsync('package manager: the spec the image build gets and the one post-crea
     const ts = packageManagerSpec(tree);
     ok(shell === expected, `${label}: post-create derives ${shell}, expected ${expected}`);
     ok(ts === expected, `${label}: the generator derives ${ts}, expected ${expected}`);
+    rmSync(dir, { recursive: true, force: true });
+  }
+  for (const [label, manifest, expected] of PM_SPEC_RAW_MANIFESTS) {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-spec-'));
+    writeFileSync(join(dir, 'package.json'), manifest);
+    const tree = createTreeWithEmptyWorkspace();
+    tree.write('package.json', manifest);
+    const shell = execFileSync('bash', ['-c', `set -euo pipefail\nWS="$1"\n${detect}\nprintf %s "$PM_SPEC"`, '_', dir], { encoding: 'utf8' });
+    ok(shell === expected, `${label}: post-create derives ${shell}, expected ${expected}`);
+    ok(packageManagerSpec(tree) === expected, `${label}: the generator derives ${packageManagerSpec(tree)}, expected ${expected}`);
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -1705,9 +1732,11 @@ const runPmInstaller = (script, spec, { on = {}, behind = {}, shadow, npm = true
 if [ "$1" = --version ]; then read -r line < '${npmVersionFile}'; echo "$line"; exit 0; fi
 echo "$*" >> '${log}'
 prefix=''
+force=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix="$2"; shift ;;
+    --force) force=1 ;;
     -*|install) ;;
     *) package="$1" ;;
   esac
@@ -1718,6 +1747,8 @@ into="\${prefix:+$prefix/bin}"; into="\${into:-${global}}"
 version="\${package##*@}"; name="\${package%@*}"
 case "$name" in @yarnpkg/cli-dist) name=yarn ;; npm) [ ${npmLandsAhead ? 1 : 0} = 1 ] || { echo "$version" > '${npmVersionFile}'; exit 0; } ;; esac
 mkdir -p "$into"
+# The real npm's refusal when another package holds the bin name in the prefix (seen swapping yarn for @yarnpkg/cli-dist).
+if [ -e "$into/$name" ] && [ -z "$force" ]; then echo EEXIST >&2; exit 1; fi
 printf '#!/bin/sh\\n[ "$1" = --version ] && echo %s\\n' "$version" > "$into/$name"; chmod +x "$into/$name"
 `, { mode: 0o755 });
   }

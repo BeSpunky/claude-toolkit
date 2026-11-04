@@ -4,23 +4,30 @@
 # devcontainer does not, so this is where it gets observed at all.
 #
 # Slow and network-bound, so NOT on every push and not in the pre-push hook: weekly (the image is a rolling tag, so this
-# can go red with no commit here), on demand, and when a push touches what it tests. Work branches are in that list on
-# purpose, unlike the sibling tripwires: there is nowhere else a change to the fallback can get a real-Docker result
-# before it lands. versions.ts is there because HOUSE_NODE_MAJOR, which picks the image, lives in it.
+# can go red with no commit here), on demand, after a publish, and when a push touches what it tests. Every branch counts,
+# unlike the sibling tripwires: there is nowhere else a change to the fallback can get a real-Docker result before it
+# lands, but only if it is pushed. versions.ts is there because HOUSE_NODE_MAJOR, which picks the image, lives in it.
+# It tests the launcher and the image, so the payload's generators stay out of `paths`: they would put two 45-minute
+# ceilings on every payload push, and tools/dogfood-consumer covers them before a release.
 #
-# Two roads. `local` packs this checkout, so it can always run. `registry` is what a consumer gets, and skips with a stated
-# reason while the version this checkout declares is not on npm yet (a branch carrying a bump); see e2e.sh.
+# Two roads. `local` packs this checkout, so it can always run. `registry` is what a consumer gets, which only main holds:
+# elsewhere it would run this house.sh on the published payload, a pair no consumer has. It skips with a stated reason
+# while the version is not on npm yet on a push, and fails if it is still not there otherwise; see e2e.sh.
 name: runner image e2e
 
 on:
   schedule:
     - cron: '53 4 * * 1' # Mondays 04:53 UTC
   workflow_dispatch:
+  workflow_run:
+    workflows: ['Publish nx-tools']
+    types: [completed]
+    branches: [main]
   push:
-    branches: [main, development, 'fix/**', 'feat/**']
+    branches: ['**']
     paths:
-      - 'plugins/house/engine/house.sh'
-      - 'plugins/house/engine/container-engine.sh'
+      - 'plugins/house/engine/*'
+      - 'plugins/house/engine/nx-tools/package.json'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
       - 'tools/check-runner-image/**'
       - '.github/workflows/runner-image-e2e.yml'
@@ -34,7 +41,7 @@ concurrency:
 
 jobs:
   image:
-    if: github.repository == 'BeSpunky/claude-toolkit'
+    if: github.repository == 'BeSpunky/claude-toolkit' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -47,7 +54,6 @@ jobs:
   e2e:
     # Behind the image check: with no yarn in the image these would only repeat its finding, less clearly, twice.
     needs: image
-    if: github.repository == 'BeSpunky/claude-toolkit'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -57,5 +63,7 @@ jobs:
     name: e2e (${{ matrix.road }})
     steps:
       - uses: actions/checkout@v5
+        if: matrix.road == 'local' || github.ref == 'refs/heads/main'
       - name: house.sh new --docker --preset=angular, on the ${{ matrix.road }} road
+        if: matrix.road == 'local' || github.ref == 'refs/heads/main'
         run: bash tools/check-runner-image/e2e.sh ${{ matrix.road }}

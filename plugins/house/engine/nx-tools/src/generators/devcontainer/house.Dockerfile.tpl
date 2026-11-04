@@ -21,8 +21,9 @@ RUN sh /tmp/bespunky-os-packages/house.packages.sh /tmp/bespunky-os-packages/os-
 # The project's package manager, as package.json declared it at the last upgrade: images differ in which they ship.
 # Its own layer, so a package list changing does not reinstall it. `||`: a version that cannot be installed must not
 # stop the container being built. Post-create runs the same script with what package.json says then, and reports it.
+# npm's cache goes with the temp directory, or root's copy of it stays in the layer.
 COPY house.package-manager.sh /tmp/bespunky-package-manager/
-RUN sh /tmp/bespunky-package-manager/house.package-manager.sh '{{PACKAGE_MANAGER_SPEC}}' \
+RUN npm_config_cache=/tmp/bespunky-package-manager/.npm sh /tmp/bespunky-package-manager/house.package-manager.sh '{{PACKAGE_MANAGER_SPEC}}' \
     || echo "[package-manager] not installed in the image; post-create tries again"; \
     rm -rf /tmp/bespunky-package-manager
 {{/PACKAGE_MANAGER}}
