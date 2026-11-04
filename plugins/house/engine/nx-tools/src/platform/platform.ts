@@ -30,7 +30,7 @@ export const isPlatform = (value: unknown): value is Platform => PLATFORMS.inclu
 /** What each platform is, in one line — the ESLint comment, HOUSE.md and the generator's messages all say it so. */
 export const PLATFORM_MEANING: Readonly<Record<Platform, string>> = {
   web: 'browser / SSR code — may depend on web and shared projects',
-  server: 'server-only code (Cloud Functions, Node) — may depend on server and shared projects',
+  server: 'server-only code (Node) — may depend on server and shared projects',
   shared: 'isomorphic code — may depend on shared projects only, and import no platform-specific package',
 };
 

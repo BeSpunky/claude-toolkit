@@ -4,10 +4,15 @@
 //   THE APP       its primary process — the Nx face of the dev loop drives the project's `dev-server` target
 //                 (./nx.ts), on the base port of the stack that owns it (`DevServerPort.basePort`). It decides
 //                 WHETHER a project is served at all.
-//   CAPABILITIES  attach to an app that is served (an emulator suite beside it). They never declare an app on
-//                 their own: an app made only of emulators has nothing to open in a browser. Each is a LAYER's
+//   CAPABILITIES  attach to an app that is served (an emulator suite, a database beside it). They never declare an
+//                 app on their own: an app made only of emulators has nothing to open in a browser. Each is a LAYER's
 //                 `devFragment` (the descriptor), contributed only where that layer is present — so a new
 //                 capability serves beside an app by declaring it on its own descriptor, and nothing here names it.
+//
+// A CAPABILITY WITH NO SERVED APP is a legitimate workspace (a database and no front end yet, a Firebase backend): there
+// is nothing to attach to, so nothing is seeded and no `.bespunky/dev.json` is written. That file is the `web` layer's
+// evidence, so a fragment seeded here would make the project wear a layer it never asked for. The capability's own
+// launcher runs as a stack of its own (`tools/dev/dev run`), and the day an app is served, the next sync attaches it.
 import type { Tree } from '@nx/devkit';
 import { type SeedReport, readDeclaration, seedApp } from '../declaration';
 import { nxDevServerFragment } from './nx';

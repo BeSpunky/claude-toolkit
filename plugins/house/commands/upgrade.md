@@ -438,6 +438,11 @@ set …` lines it prints; you may run those once pasted — they are not secrets
 count against the one `UPGRADE_NEXT` below. A `[ci] No deploy workflow: …` warning is not a human step: relay its
 reason (usually *declare a `ci` binding through the branch-and-release skill*) and offer to do that.
 
+``HUMAN_STEP: <line> deploys nothing until its `ci` binding names a target for <provider>…`` is a different kind of step,
+and an urgent one: that line's pushes now **fail** instead of deploying, until the binding is complete. It grants
+nothing, but the target is a fact only the user has. Relay it first, ask for the target, and on their answer make the
+change through the branch-and-release skill's change procedure, then upgrade again.
+
 ### If the model is undeclared — the proposal and the question (3b)
 
 Unless it was settled before step 4, close the report with the branch-model proposal: the evidence that

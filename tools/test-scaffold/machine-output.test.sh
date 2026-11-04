@@ -30,27 +30,22 @@ ports="$(node "$TMP/tools/emulator-ports.mjs" ports "$TMP/firebase.json")"
 ok "ports: one plain number per line (FORCE_COLOR=1)" "$(grep -qvE '^[0-9]+$' <<<"$ports" && echo 0 || echo 1)"
 ok "ports: lists the declared ports" "$(grep -qx 9099 <<<"$ports" && grep -qx 9150 <<<"$ports" && echo 1 || echo 0)"
 
-# The consumer exactly as tools/seed/build-seeds.sh is: the suite's ports → the dev engine's claim → its offset
+# The consumer exactly as tools/seed/build-seeds.sh is: the suite's ports → the dev engine's run → its offset
 # straight into `shift`. Every hop is parsed by a shell.
 node "$ROOT/tools/test-scaffold/render-engine.mjs" "$TMP"
 claimports="$(node "$TMP/tools/emulator-ports.mjs" claim "$TMP/firebase.json")"
 ok "claim: name=port pairs, plain (FORCE_COLOR=1) — got '$(printf '%q' "$claimports")'" "$(grep -qxE '([a-z-]+=[0-9]+,)*[a-z-]+=[0-9]+' <<<"$claimports" && echo 1 || echo 0)"
-# The script holds its stack's lock (a shared flock) before it claims, exactly as build-seeds.sh does.
-exec {LOCK_FD}>"$TMP/claim.lock"; flock -s "$LOCK_FD"
-if CLAIM="$(cd "$TMP" && node tools/dev/dev.mjs claim seed-build --pid=$$ --lock="$TMP/claim.lock" --shifted --port-offset=auto --ports="$claimports" 2>"$TMP/claim.err")"; then
-  eval "$CLAIM"
-  offset="$STACK_OFFSET"
-  ok "dev claim: a plain shifted offset (FORCE_COLOR=1) — got '$(printf '%q' "$offset")'" "$(grep -qxE '[1-9][0-9]*' <<<"$offset" && echo 1 || echo 0)"
+# The stack's own offset, handed to the command exactly as build-seeds.sh receives it.
+if offset="$(cd "$TMP" && node tools/dev/dev.mjs run seed-build --shifted --port-offset=auto --ports="$claimports" -- sh -c 'printf "%s\n" "$PORT_OFFSET"' 2>"$TMP/claim.err")"; then
+  ok "dev run: a plain shifted offset (FORCE_COLOR=1) — got '$(printf '%q' "$offset")'" "$(grep -qxE '[1-9][0-9]*' <<<"$offset" && echo 1 || echo 0)"
   if node "$TMP/tools/emulator-ports.mjs" shift "$TMP/firebase.json" "$offset" "$TMP/shifted.json" 2>"$TMP/shift.err"; then
     shifted="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).emulators.auth.port))' "$TMP/shifted.json")"
     ok "shift <claimed offset>: accepted and applied (auth $((9099 + offset)))" "$([ "$shifted" = "$((9099 + offset))" ] && echo 1 || echo 0)"
   else
     ok "shift <claimed offset>: accepted ($(cat "$TMP/shift.err"))" 0
   fi
-  exec {LOCK_FD}>&-
-  (cd "$TMP" && node tools/dev/dev.mjs release "$STACK_KEY" --lock="$TMP/claim.lock")
 else
-  ok "dev claim: succeeded ($(cat "$TMP/claim.err"))" 0
+  ok "dev run: succeeded ($(cat "$TMP/claim.err"))" 0
 fi
 
 # ── Static guard: no generator template hands a bare value to console.log/console.info ──────────────

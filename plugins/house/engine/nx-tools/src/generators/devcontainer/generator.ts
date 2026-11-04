@@ -40,6 +40,7 @@ import {
   renderPackageManagerScript,
   renderPostCreate,
 } from './compose';
+import { featureIdentity } from '../_utils/devcontainer-feature';
 import {
   DEVCONTAINER,
   DEVCONTAINER_MARKER as MARKER,
@@ -649,7 +650,7 @@ function mergeIntoExisting(
    * has some can only ever DELETE information, never impose a house choice.
    *
    * The case that proved it: the feature spec permits the string shorthand, so a project may pin a version
-   * on a house feature — `"ghcr.io/devcontainers/features/github-cli": "2.0.0"`. That is a deliberate
+   * on a house feature — `"ghcr.io/devcontainers/features/github-cli:1.1.3": "2.0.0"`. That is a deliberate
    * REFINEMENT of the house's `{}`, not a divergence from it, and it lands here at depth 2. Re-asserting
    * would flatten the pin back to `{}` on every sync while the comment explaining the pin survived
    * beside it — a silent downgrade of somebody's pinned toolchain, in a devcontainer we own.
@@ -704,7 +705,17 @@ function mergeIntoExisting(
     // Present already — recurse one useful level into the containers where "missing sub-key" is the
     // common, safe case, and leave scalars strictly alone.
     if (isPlainObject(value) && isPlainObject(existing[key])) {
-      mergeObject(key, value, existing[key] as Json, edit, appendMissing, conflict);
+      // A feature the project declares under another tag IS this feature: a second key would install it twice.
+      const mine = existing[key] as Json;
+      const theirs = key === 'features' ? Object.keys(mine).filter((id) => !(id in value)).map(featureIdentity) : [];
+      const merged = Object.fromEntries(
+        Object.entries(value).filter(([id]) => {
+          if (id in mine || !theirs.includes(featureIdentity(id))) return true;
+          (mode === 'assert' ? kept : skipped).push(`${key}.${id}`);
+          return false;
+        }),
+      );
+      mergeObject(key, merged, mine, edit, appendMissing, conflict);
     } else if (Array.isArray(value) && Array.isArray(existing[key])) {
       appendMissing([key], value, existing[key] as unknown[]);
     } else if (!sameValue(value, existing[key])) {

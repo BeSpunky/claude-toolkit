@@ -303,7 +303,7 @@
     "retire-reap-emulators": {
       "version": "0.50.0",
       "layer": "firebase",
-      "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev claim) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
+      "description": "Remove tools/reap-emulators.sh: every emulator suite now claims its ports through the dev engine (tools/dev/dev run) \u2014 one stack identity for serves, direct runs and seed builds \u2014 and its keeper ends what it started, so the reaper's PPID==1 orphan hunt is retired. A target or package.json script that still runs it is reported.",
       "implementation": "./src/migrations/0.50.0/retire-reap-emulators"
     },
     "truthful-angular-library-tests": {
@@ -317,6 +317,24 @@
       "layer": "nx",
       "description": "`nx test <library>` exits 1 on a library the house left with no spec: navigation-core and a Jest-tested design system lost their generator's demo, an adopt-extracted shim lost its implementation, and Vitest and Jest fail on no tests. Sets `passWithNoTests: true` in the library's runner config, which is where it reaches an inferred target; a spec that fails still fails. A library with its own spec has nothing to do. Another executor, a config already deciding, several runner configs or a config without the generators' shape is left and reported, with the reason.",
       "implementation": "./src/migrations/0.51.2/pass-libraries-with-no-specs"
+    },
+    "ban-postgres-drivers-from-web": {
+      "version": "0.52.0",
+      "layer": "firebase",
+      "description": "An existing platform firewall gains the Postgres drivers (pg, pg-native, pg-pool, pg-cursor, pg-query-stream, pg-promise, postgres, slonik, each with its subpaths) in the ban lists of platform:web and platform:shared. The firewall is project state, so the table change reaches only a workspace gaining one. Additive: only what no entry already covers, in the list's own style; a project with no firewall gets none. A resulting lint failure is a real leak, and is logged as one. A list that cannot be read as an array, a dropped constraint and an un-upgraded 0.49 shape are reported.",
+      "implementation": "./src/migrations/0.52.0/ban-postgres-drivers-from-web"
+    },
+    "pin-github-cli-feature": {
+      "version": "0.52.0",
+      "layer": "agent",
+      "description": "The github-cli devcontainer feature gets a version: the bare id meant `latest`, and the generator leaves a feature declared under any tag alone, so the key would stay unpinned for good. Where the house wrote the key, or it is `{}` whoever wrote it, the key is renamed with its value and comment kept, the lock pin set to the digest of 1.1.3, the adoption record moved. A key carrying a project's own options, or the same feature under another floating tag, is reported.",
+      "implementation": "./src/migrations/0.52.0/pin-github-cli-feature"
+    },
+    "pin-node-feature": {
+      "version": "0.52.0",
+      "layer": "agent",
+      "description": "The node devcontainer feature moves from its major tag to an exact one: `node:1` moves within v1 with no commit behind it, and the generator leaves a feature declared under any tag alone. Where the house wrote the key, or it is `{}` whoever wrote it, the key is renamed with its value and comment kept, the lock pin set to the digest of 1.7.1, the adoption record moved. A key carrying a project's own options is reported.",
+      "implementation": "./src/migrations/0.52.0/pin-node-feature"
     }
   }
 }

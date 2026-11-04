@@ -550,7 +550,6 @@ const sharedWorkspace = (foreign) =>
  *   lock       the stack's lock (holdStackLock), already held by the claimer — the record names it; it is the stack's life
  *   agent      an AI agent is claiming (isAgent): never the base ports — `auto` skips them, an explicit 0 is refused
  *   fields     the rest of the record (owner, url, label, …)  say       progress lines
- *   claimer    the PID the record names (default: this process) — a script claiming for itself passes its own
  *   dryRun     decide, but write nothing (what `serve --dry-run` prints)
  *   probe      is a port free of anything bound (injected for tests)
  *
@@ -562,7 +561,7 @@ const sharedWorkspace = (foreign) =>
  *
  * Returns `{ record, passed }`: `passed` the stacks holding the preferred block when `auto` had to move off it.
  */
-export async function claimStack({ lockRoot, trees, tree, app, spec, treeKey, isMain, basePorts, lock, agent = false, claimer = process.pid, dryRun = false, fields = {}, say = () => {}, probe = isPortFree, waitMs = 180_000 }) {
+export async function claimStack({ lockRoot, trees, tree, app, spec, treeKey, isMain, basePorts, lock, agent = false, dryRun = false, fields = {}, say = () => {}, probe = isPortFree, waitMs = 180_000 }) {
   const base = Object.values(basePorts);
   const { pinned, offsets } = offsetCandidates(spec, { key: treeKey, isMain: isMain && !agent, block: portBlock(base) });
   if (agent && pinned && offsets[0] === 0) {
@@ -617,8 +616,8 @@ export async function claimStack({ lockRoot, trees, tree, app, spec, treeKey, is
         app,
         tree,
         offset: chosen,
-        pid: claimer,
-        procStart: processStart(claimer),
+        pid: process.pid,
+        procStart: processStart(process.pid),
         lock,
         machine: machineId(),
         host: hostname(),

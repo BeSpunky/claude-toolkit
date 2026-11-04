@@ -24,7 +24,7 @@
 // model gains a binding writes it without being asked again.
 import { type Tree, formatFiles, logger, readProjectConfiguration } from '@nx/devkit';
 import { type CiDeployProvider, type CiEnvironment } from '../../layers/descriptor';
-import { detectLayers, layer } from '../../layers/registry';
+import { LAYERS, detectLayers, layer } from '../../layers/registry';
 import { branchModelFromOption, readBranchModel, type BranchModel, type BranchProjection } from '../_utils/branch-model';
 import { nxInvocation } from '../_utils/nx-host';
 import { pluginPointerValues } from '../_utils/plugin-pointers';
@@ -64,8 +64,12 @@ interface Marker {
 
 const ABOUT =
   'Written by @bespunky/nx-tools (the ci layer). `files` are the files the house owns and rewrites on every upgrade; ' +
-  '`cloud` is what tools/setup-gcp.sh was last rendered for (a change prints a HUMAN_STEP); `configurations` are the ' +
+  "`cloud` is what each provider's human-run setup was last rendered for (a change prints a HUMAN_STEP); `configurations` are the " +
   'ci-<environment> configurations it wrote on provider deploy targets. Never hand-edit.';
+
+/** What a binding's `providers` would hold for these providers — how every message asks for one. */
+const providersExample = (providers: readonly CiDeployProvider[]): string =>
+  providers.length ? `"providers": { ${providers.map((p) => `"${p.id}": "<${p.targetLabel}>"`).join(', ')} }` : '"providers": {}';
 
 export default async function ciGenerator(tree: Tree, options: CiSchema = {}): Promise<void> {
   const layers = options.layers?.length ? options.layers : detectLayers(tree);
@@ -97,6 +101,8 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
   // ── what the house writes this run ──────────────────────────────────────────────────────────────────────
   const wanted = new Map<string, { content: string; mode?: number }>();
   const foreign = foreignDeployWorkflows(tree, previous.files);
+  const deployable = lines.filter((line) => !line.blocked);
+  const blocked = lines.filter((line) => line.blocked);
   let reason = pending;
   if (lines.length && foreign.length) {
     reason =
@@ -108,6 +114,7 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
       content: renderWorkflow({
         lines,
         providers,
+        providerProjects: new Map(providers.map((p) => [p.id, p.deployTargets(tree).map((t) => t.project)])),
         nx: nx.command,
         packageManager: nx.packageManager,
         yarnBerry: isYarnBerry(tree),
@@ -115,6 +122,9 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
         throughBranchModelSkill,
       }),
     });
+    if (previous.files.includes(WORKFLOW) && /^\s*id-token:\s*write/m.test(tree.read(WORKFLOW, 'utf8') ?? '') && !/^\s*id-token:\s*write/m.test(wanted.get(WORKFLOW)!.content)) {
+      notes.push(`${WORKFLOW} no longer holds \`id-token: write\`: no provider this project wears exchanges GitHub's OIDC token. A deploy target of your own that fetches that token itself (npm provenance, cosign) now fails; if you have one, run the deploy from a workflow of your own, and the house steps aside.`);
+    }
     if (projectNode(tree).state !== 'declared') notes.push(`the workflow reads Node from ${nodeVersionFile(tree)}, which declares none here — add .nvmrc (one line: the Node major) or the deploy job fails at setup-node.`);
   }
   // The providers' human-run setup is useful whoever runs the pipeline, so it follows the bindings (and the
@@ -147,6 +157,9 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
 
   // ── the cloud side cannot be regenerated: say what a human must run ──────────────────────────────────────
   const human: string[] = [];
+  // A line failing every push is only loud once the upgrade says so too. With no house workflow here (the project's
+  // own pipeline, or a file at its path) nothing has stopped, so it is an ordinary note.
+  for (const line of blocked) (files.includes(WORKFLOW) ? human : notes).push(line.blocked!);
   const cloud: Marker['cloud'] = {};
   for (const provider of providers) {
     for (const env of environments.get(provider.id) ?? []) {
@@ -165,7 +178,7 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
   tree.write(MARKER, `${JSON.stringify(marker, null, 2)}\n`);
 
   if (reason) logger.warn(`[ci] No deploy workflow: ${reason}`);
-  else logger.info(`[ci] ${WORKFLOW}: deploys ${lines.map((l) => `${l.branch} → ${l.environment}`).join(', ')}.`);
+  else logger.info(`[ci] ${WORKFLOW}: deploys ${deployable.map((l) => `${l.branch} → ${l.environment}`).join(', ') || 'nothing yet'}.`);
   for (const note of notes) logger.warn(`[ci] ${note}`);
   for (const step of human) logger.info(`HUMAN_STEP: ${step}`);
 
@@ -173,9 +186,19 @@ export default async function ciGenerator(tree: Tree, options: CiSchema = {}): P
 }
 
 /**
- * The bindings this pipeline wires: protected branch lines and patterns with a `ci` binding naming every active
- * provider, one line per environment. Everything it cannot (or must not) wire is a NOTE saying why — never a
- * silent gap.
+ * The bindings this pipeline wires: protected branch lines and patterns with a `ci` binding, one line per environment.
+ * Everything it must not wire is a NOTE saying why — never a silent gap.
+ *
+ * A binding that names no target for an active provider is the case a project walks into by adding a layer, on a line
+ * that deploys today. It stays WIRED and BLOCKED: in the triggers, with resolve failing every push and saying what is
+ * missing, so it cannot quietly stop. Why none of the alternatives:
+ *   - dropping the line (or, if it was the last, the whole workflow) is a green repo that deploys nothing;
+ *   - deploying what IS bound runs the new provider's target with no configuration, or skips it and ships code whose
+ *     schema never landed;
+ *   - throwing would fail the rest of the upgrade over a fact only a human can supply (the target), part-way through a
+ *     plan of separate generator runs.
+ * The environment stays held and its named providers keep their configurations and setup: nothing about them changed,
+ * and treating it as retired would ask a human to roll back the identity of a line about to deploy again.
  */
 function resolve(
   model: BranchModel,
@@ -207,24 +230,30 @@ function resolve(
       notes.push(`${binding.line}: its \`ci\` binding is NOT wired — environment "${binding.ci.environment}" is already bound by ${holder}. One line per environment: two lines deploying into one environment race, and leave it running code neither line has.`);
       continue;
     }
-    const missing = providers.filter((p) => !(p.id in binding.ci!.providers));
-    if (missing.length) {
-      notes.push(
-        `${binding.line}: its \`ci\` binding names no target for ${missing.map((p) => p.id).join(', ')} — not wired. ` +
-          `Add "providers": { ${missing.map((p) => `"${p.id}": "<${p.id === 'firebase' ? '.firebaserc alias' : 'target'}>"`).join(', ')} } to it (branch-and-release: changing the model).`,
-      );
-      continue;
-    }
     for (const id of Object.keys(binding.ci.providers)) {
       if (!providers.some((p) => p.id === id)) notes.push(`${binding.line}: provider "${id}" is not a layer this project wears — ignored.`);
     }
     bound.set(binding.ci.environment, binding.line);
-    for (const provider of providers) {
+    const named = providers.filter((p) => p.id in binding.ci!.providers);
+    for (const provider of named) {
       const envs = environments.get(provider.id) ?? [];
       envs.push({ name: binding.ci.environment, target: binding.ci.providers[provider.id], branches: [binding.line] });
       environments.set(provider.id, envs);
     }
-    lines.push({ branch: binding.line, environment: binding.ci.environment, full: binding.kind === 'pattern' });
+    const missing = providers.filter((p) => !named.includes(p));
+    lines.push({
+      branch: binding.line,
+      environment: binding.ci.environment,
+      full: binding.kind === 'pattern',
+      ...(missing.length
+        ? {
+            blocked:
+              `${binding.line} deploys nothing until its \`ci\` binding names a target for ${missing.map((p) => p.id).join(', ')}: every push to it fails. ` +
+              `In .bespunky/branches.json, add to that line's \`deploys.ci.providers\`, beside what it already names: ${missing.map((p) => `"${p.id}": "<${p.targetLabel}>"`).join(', ')}${throughBranchModelSkill}, then upgrade. ` +
+              `If this line should not deploy from CI at all, replace its \`ci\` with a \`note\`.`,
+          }
+        : {}),
+    });
   }
   if (lines.length) return { lines, environments };
   return {
@@ -232,7 +261,7 @@ function resolve(
     environments,
     pending:
       'no protected line in the branch model has a `ci` deploy binding. Add one to each line that should deploy ' +
-      `(e.g. "deploys": { "ci": { "environment": "production", "providers": { "firebase": "default" } } })${throughBranchModelSkill}, then upgrade.`,
+      `(e.g. "deploys": { "ci": { "environment": "production", ${providersExample(providers)} } })${throughBranchModelSkill}, then upgrade.`,
   };
 }
 
@@ -312,7 +341,7 @@ const splitKey = (key: string): [string, string] => {
 function foreignDeployWorkflows(tree: Tree, ownedFiles: readonly string[]): string[] {
   const dir = '.github/workflows';
   if (!tree.exists(dir)) return [];
-  const DEPLOYS = [/\bfirebase\s+deploy\b/, /-t\s+deploy\b/, /--targets?[= ]deploy\b/, /\bnx\s+run\s+\S+:deploy\b/];
+  const DEPLOYS = [/-t\s+deploy\b/, /--targets?[= ]deploy\b/, /\bnx\s+run\s+\S+:deploy\b/, ...LAYERS.flatMap((l) => l.ciDeploy?.deploySignals ?? [])];
   return tree
     .children(dir)
     .filter((name) => /\.ya?ml$/.test(name))

@@ -204,15 +204,46 @@ export interface CiEnvironment {
   retired?: boolean;
 }
 
+/**
+ * WHAT a provider ships, which is what decides when it ships: a `schema` deploy runs, and must succeed, before every
+ * `code` deploy (a provider's or a project's own), because new code against an old schema is an outage. The order of
+ * the stages is the `ci` layer's (`ci/workflow.ts`). A provider states what it deploys, never which others it precedes.
+ */
+export type CiDeployStage = 'schema' | 'code';
+
 export interface CiDeployProvider {
   /** The provider id a binding names (`ci.providers.<id>`). */
   id: string;
   title: string;
+  /** What a binding's `ci.providers.<id>` value IS here (`.firebaserc alias`): how the messages ask for a missing one. */
+  targetLabel: string;
+  /**
+   * How a workflow the house did not write shows it already deploys through this provider, tested per line with
+   * comments stripped. Read from EVERY registered provider, worn or not: a repo running its own `firebase deploy` has
+   * a pipeline whether or not it wears `firebase`, and a second deploy workflow beside it is the worst outcome.
+   */
+  deploySignals: readonly RegExp[];
+  /** When this provider's targets deploy. Absent: `code`. */
+  deployStage?: CiDeployStage;
+  /**
+   * Env vars its deploys read, name → a GitHub expression (`${{ secrets.DATABASE_URL }}`, resolved in the line's
+   * GitHub environment). On the deploy step of this provider's stage only, so a schema credential never reaches a
+   * code deploy. Never a literal secret, and never `deployOptions`: those are committed to `project.json`.
+   */
+  deployEnv?: Readonly<Record<string, string>>;
+  /**
+   * Present when `authSteps` exchanges GitHub's OIDC token. `why` is rendered beside `id-token: write`, which the
+   * deploy job holds only if an active provider asks: a token-based provider's job never gets to mint one.
+   */
+  oidc?: { why: string };
   /** The deploy targets this provider's layer owns in this workspace — the ONLY targets its options reach. */
   deployTargets(tree: Tree): { project: string; target: string }[];
   /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
   deployOptions(target: string): Record<string, unknown>;
-  /** GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. */
+  /**
+   * GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. They run before
+   * the deploy steps and without `deployEnv`, which only those steps hold: reach a secret here through `secrets.*`.
+   */
   authSteps(): string;
   /**
    * Owned files this provider adds (the human-run cloud setup), rendered from the resolved environments — retired
@@ -246,7 +277,7 @@ export interface GitignoreBlock {
 //   {{remoteUser}}  the user the container runs as
 //   {{nodeMajor}}   the Node major the image / Node feature is pinned to — the project's declared Node (.nvmrc / .node-version / volta.node — _utils/node-version)
 
-/** The Debian architectures the house images run on — what an `ArchiveTool` names its downloads by. */
+/** The Debian architectures the house images run on — what an archive names its downloads by. */
 export type DebianArch = 'amd64' | 'arm64';
 
 /**
@@ -255,8 +286,16 @@ export type DebianArch = 'amd64' | 'arm64';
  * index is a ROLLING window (Google's drops a gcloud release after about a year), so a version pinned there expires
  * and every cache-miss image build fails with it; and a moved pin needs a downgrade, a foreign image may already
  * declare the same repository differently. A versioned archive is kept, so the pin lives as long as the publisher.
+ *
+ * Two formats, one install root and one promise (a sha256 checked before anything is unpacked, `current` naming the
+ * release, a failure that is loud): a tarball, and a closure of `.deb` files.
  */
-export interface ArchiveTool {
+export type ArchiveTool = TarballTool | DebClosureTool;
+
+/** One `.tar.gz` per architecture, carrying everything but libc: its executables are linked straight into PATH. */
+export interface TarballTool {
+  /** The default format: says what `DebClosureTool.format` is the alternative to. */
+  format?: 'tar.gz';
   /** Names its install root, `/opt/bespunky/<id>`: `[a-z0-9-]+`. */
   id: string;
   /** The pinned release; each one is extracted to `/opt/bespunky/<id>/<version>`, `current` pointing at it. */
@@ -265,6 +304,51 @@ export interface ArchiveTool {
   bin: string;
   /** Per architecture: the `.tar.gz` and its sha256 (checked before anything is extracted). Projected, never typed. */
   downloads: Readonly<Record<DebianArch, { url: string; sha256: string }>>;
+}
+
+/**
+ * A tool published as Debian packages, installed WITHOUT dpkg: its `.deb` files are unpacked into a versioned directory
+ * of their own and its executables reached through generated wrappers. Registering them with dpkg instead would run
+ * their maintainer scripts and let them collide with whatever the image already holds (a newer library package removes
+ * the `-dev` package tied to Debian's). Debian's own libraries are the part that CANNOT be pinned — a mirror drops a
+ * superseded build at the next security update — so they are named, not pinned: see `systemDepends`.
+ *
+ * Built for one Debian release's libraries, so it is keyed by codename; an image of any other release fails loudly
+ * rather than running a build against libraries it was not linked with.
+ */
+export interface DebClosureTool {
+  format: 'deb';
+  /** Names its install root, `/opt/bespunky/<id>`: `[a-z0-9-]+`. */
+  id: string;
+  /** The directory inside the unpacked tree whose executables get a wrapper in /usr/local/bin. */
+  bin: string;
+  /**
+   * The directories inside the unpacked tree a wrapper puts on `LD_LIBRARY_PATH`: a `.deb`'s binaries have no RUNPATH,
+   * so a plain link would load the system's copy of a library, or none (and `ldd` would look clean). May use `*`,
+   * so the multiarch directory is not typed once per architecture.
+   */
+  libraryPaths: readonly string[];
+  /** Paths inside the unpacked tree to delete before it goes live (man pages, translations). Exact: no `*`. */
+  prune?: readonly string[];
+  /** Per Debian codename. Projected, never typed. */
+  closures: Readonly<Record<string, DebClosure>>;
+}
+
+/** One Debian release's build of a `DebClosureTool`. */
+export interface DebClosure {
+  /**
+   * Names the release directory, `/opt/bespunky/<id>/<version>`; `current` points at it. Must change whenever ANY file
+   * in the closure does: it is how the installer tells a moved pin from one already in place.
+   */
+  version: string;
+  /**
+   * What the closure needs from Debian itself, as one apt relation string (`liba (>= 1.2), libb`) given to `apt-get
+   * satisfy --no-install-recommends` as root: by name, because a mirror does not keep superseded builds. Recommends
+   * stay out, since they pull in services the closure never runs.
+   */
+  systemDepends: string;
+  /** Per architecture: every `.deb` and its sha256. An architecture missing here fails as loudly as the codename does. */
+  packages: Readonly<Partial<Record<DebianArch, readonly { url: string; sha256: string }[]>>>;
 }
 
 /** A JSON value as it may appear in devcontainer.json. */

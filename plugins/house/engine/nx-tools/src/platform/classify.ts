@@ -1,7 +1,7 @@
 // THE PLATFORM CLASSIFIER — infer, from evidence, which platform an untagged project belongs to.
 //
-// Used where a workspace gains the firewall over projects nobody classified (firebase-emulators' first insertion,
-// migration 0.50.0), by the `platform` generator when it is not told, and by `platform-sync` for projects created
+// Used where a workspace gains the firewall over projects nobody classified (`ensurePlatformFirewall`'s first
+// insertion, migration 0.50.0), by the `platform` generator when it is not told, and by `platform-sync` for projects created
 // later. It never guesses: a project is classified only from what it demonstrably is, and every inference says why.
 //
 // IT READS WHAT THE FIREWALL READS. Imports come from ./imports — the same five AST forms Nx's rule visits, never a

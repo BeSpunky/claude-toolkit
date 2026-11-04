@@ -12,11 +12,16 @@
 //   deploy   in the GitHub environment (its protection rules, its variables): the dependencies prepare installed
 //            (restored, never re-installed — no install script runs here, and the one package fetched, the pinned
 //            corepack, is fetched with scripts off), the providers' auth, and the deploys.
-//            The only job with `id-token: write`, and one at a time per ENVIRONMENT.
+//            One at a time per ENVIRONMENT, and the only job that may hold `id-token: write` — which it does only
+//            when an active provider asks (`oidc`).
+// A line whose binding names no target for an active provider stays in the triggers and resolve FAILS it: a red run on
+// every push, naming what is missing. Never a silent gap and never a partial deploy (the ci generator says why).
+// STAGES order the deploy job when one is in play (`CiDeployStage`): one step per stage, each deploying its share of
+// what prepare selected and carrying only its own providers' `deployEnv`; a failed step stops the ones after it.
 // Provider arguments reach only provider targets: each provider's deploy targets carry a `ci-<environment>`
 // configuration (written by the ci generator), and the deploy runs with `-c ci-<environment>` — a target without
 // that configuration runs its default one, untouched.
-import type { CiDeployProvider } from '../../layers/descriptor';
+import type { CiDeployProvider, CiDeployStage } from '../../layers/descriptor';
 import type { PackageManager } from '../_utils/package-manager';
 import { COREPACK_VERSION } from '../_utils/versions';
 import { ACTIONS, uses } from './actions';
@@ -41,11 +46,15 @@ export interface WiredLine {
    * branch deployed in between — so a pattern never deploys a subset.
    */
   full: boolean;
+  /** This line must not deploy until a human acts: what its failing run says instead. */
+  blocked?: string;
 }
 
 export interface WorkflowInput {
   lines: readonly WiredLine[];
   providers: readonly CiDeployProvider[];
+  /** The projects each provider deploys (provider id → its `deployTargets`' projects): what its stage runs. */
+  providerProjects: ReadonlyMap<string, readonly string[]>;
   /** How Nx is invoked on the runner (`yarn nx`, `npx nx`, `pnpm nx`, `./nx`). */
   nx: string;
   /** The package manager (a node host), or undefined on the Nx wrapper host (nothing to install). */
@@ -88,6 +97,66 @@ function installedPaths(pm: PackageManager | undefined, berry: boolean): string[
 }
 
 const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
+const bashQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+
+/** The deploy stages, in the order they run. The last is the default, and also deploys what no provider claims. */
+const STAGES: readonly CiDeployStage[] = ['schema', 'code'];
+
+/** The env names the deploy step itself reads — a provider's `deployEnv` may not take one. */
+const STEP_ENV = ['PROJECTS', 'CONFIGURATION', 'STAGE_PROJECTS', 'EARLIER_PROJECTS'];
+
+/** The `deployEnv` of the providers sharing one step. One step holds one value per name, so a clash is refused. */
+function providerEnv(providers: readonly CiDeployProvider[]): string[] {
+  const owner = new Map<string, string>(STEP_ENV.map((name) => [name, 'the deploy step']));
+  return providers.flatMap((provider) =>
+    Object.entries(provider.deployEnv ?? {}).map(([name, value]) => {
+      const taken = owner.get(name);
+      if (taken) throw new Error(`[ci] ${provider.id} and ${taken} both declare the deploy env var ${name}; one step holds one value.`);
+      owner.set(name, provider.id);
+      return `          ${name}: ${value}`;
+    }),
+  );
+}
+
+/**
+ * The deploy step(s). With no earlier stage in play, one step over everything prepare selected. Otherwise each stage
+ * takes its share of that list: `comm -12` keeps what is selected and in the stage, `comm -23` (the last stage) what
+ * is selected and in no earlier one — and a stage with nothing selected deploys nothing.
+ */
+function deploySteps(input: WorkflowInput): string[] {
+  const inStage = (stage: CiDeployStage) => input.providers.filter((provider) => (provider.deployStage ?? 'code') === stage);
+  const projectsOf = (stage: CiDeployStage) => [...new Set(inStage(stage).flatMap((provider) => input.providerProjects.get(provider.id) ?? []))].sort();
+  const last = STAGES[STAGES.length - 1];
+  const earlier = STAGES.slice(0, -1).filter((stage) => projectsOf(stage).length);
+  const runMany = (projects: string) => `${input.nx} run-many -t deploy --projects="${projects}" --configuration="$CONFIGURATION" --outputStyle=static`;
+  const step = (name: string, stage: CiDeployStage, scope: string[], run: string[]) => [
+    `      - name: ${name}`,
+    '        shell: bash',
+    '        env:',
+    '          PROJECTS: ${{ needs.prepare.outputs.projects }}',
+    `          CONFIGURATION: ${ciConfiguration('${{ needs.resolve.outputs.environment }}')}`,
+    ...scope,
+    ...providerEnv(inStage(stage)),
+    '        run: |',
+    ...run.map((line) => `          ${line}`),
+  ];
+  const share = (comm: string, list: string, stage: CiDeployStage) => [
+    `selected="$(comm ${comm} <(tr , '\\n' <<<"$PROJECTS" | sort) <(tr , '\\n' <<<"$${list}" | sort) | paste -sd, -)"`,
+    'if [ -n "$selected" ]; then',
+    `  ${runMany('$selected')}`,
+    'else',
+    `  echo 'Nothing selected in the ${stage} stage.'`,
+    'fi',
+  ];
+  if (!earlier.length) return step('Deploy', last, [], [runMany('$PROJECTS')]);
+  return [
+    ...earlier.flatMap((stage) => [
+      `      # The ${stage} stage deploys first; a failure here stops every deploy after it.`,
+      ...step(`Deploy ${stage}`, stage, [`          STAGE_PROJECTS: ${quote(projectsOf(stage).join(','))}`], share('-12', 'STAGE_PROJECTS', stage)),
+    ]),
+    ...step('Deploy', last, [`          EARLIER_PROJECTS: ${quote(earlier.flatMap(projectsOf).join(','))}`], share('-23', 'EARLIER_PROJECTS', last)),
+  ];
+}
 
 export function renderWorkflow(input: WorkflowInput): string {
   const branches = [...new Set(input.lines.map((line) => line.branch))];
@@ -95,11 +164,14 @@ export function renderWorkflow(input: WorkflowInput): string {
   const ordered = [...input.lines].sort((a, b) => Number(a.branch.includes('*')) - Number(b.branch.includes('*')));
   const arms = ordered.flatMap((line, i) => [
     `          ${i ? 'elif' : 'if'} bound ${quote(branchRefRegex(line.branch))}; then`,
-    `            environment=${line.environment}; full=${line.full}`,
+    ...(line.blocked
+      ? [`            echo ${bashQuote(`::error::${line.blocked}`)} >&2`, '            exit 1']
+      : [`            environment=${line.environment}; full=${line.full}`]),
   ]);
   const auth = input.providers.map((provider) => provider.authSteps().replace(/^(?=.)/gm, '      ')).join('');
   const cache = installedPaths(input.packageManager, input.yarnBerry).map((path) => `            ${path}`);
   const key = 'deploy-deps-${{ github.run_id }}';
+  const oidc = [...new Set(input.providers.flatMap((provider) => (provider.oidc ? [provider.oidc.why] : [])))];
 
   return [
     '# Generated by @bespunky/nx-tools (the `ci` layer) — OWNED: rewritten on every house upgrade. Never hand-edit it.',
@@ -207,7 +279,7 @@ export function renderWorkflow(input: WorkflowInput): string {
     '      cancel-in-progress: false',
     '    permissions:',
     '      contents: read',
-    "      id-token: write # keyless cloud auth: GitHub's OIDC token, exchanged by Workload Identity Federation",
+    ...(oidc.length ? [`      id-token: write # ${oidc.join('; ')}`] : []),
     '    steps:',
     `      - uses: ${uses(ACTIONS.checkout)}`,
     `      - uses: ${uses(ACTIONS.setupNode)}`,
@@ -221,13 +293,7 @@ export function renderWorkflow(input: WorkflowInput): string {
     '          path: |',
     ...cache,
     auth.trimEnd(),
-    '      - name: Deploy',
-    '        shell: bash',
-    '        env:',
-    '          PROJECTS: ${{ needs.prepare.outputs.projects }}',
-    `          CONFIGURATION: ${ciConfiguration('${{ needs.resolve.outputs.environment }}')}`,
-    '        run: |',
-    `          ${input.nx} run-many -t deploy --projects="$PROJECTS" --configuration="$CONFIGURATION" --outputStyle=static`,
+    ...deploySteps(input),
     '',
   ]
     .filter((line) => line !== '')

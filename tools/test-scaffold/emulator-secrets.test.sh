@@ -42,7 +42,6 @@ sed -e 's/{{workspaceName}}/testws/g' -e "s|{{appEnvPath}}|$ENV|g" \
     -e "s|{{functionsRoot}}|$FN|g" -e "s|{{functionsDist}}|dist/$FN|g" "$TPL" > "$MAIN/tools/emulators.sh"
 node "$ROOT/tools/test-scaffold/render-engine.mjs" "$MAIN"   # the stack claim (tools/dev) every suite goes through
 node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$MAIN"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$MAIN/tools/emulator-data.sh"
 printf '{ "emulators": { "auth": { "port": 9099 }, "functions": { "port": 5001 } } }\n' > "$MAIN/firebase.json"
 cat > "$MAIN/$ENV" <<'EOF'
 const EMULATE = {

@@ -1,7 +1,7 @@
 // House generator: the stack-free dev engine (`tools/dev/`) + the declarations of the apps the house serves.
 //
-// The ONE owner of tools/dev. Two layers list its step — `web` (the dev loop) and `firebase` (every emulator suite claims
-// its ports through the engine's stack identity) — and the planner runs a step two layers share once.
+// The ONE owner of tools/dev. Any layer may list its step: a capability needs the engine for its stack identity whether
+// or not the project serves anything (`tools/dev/dev run`), and the planner runs a step two layers share once.
 //
 // Two jobs, both on every sync:
 //   1. WRITE THE ENGINE (owned, class A) — tools/dev/dev (a POSIX shim), dev.mjs and lib/*.mjs. Node built-ins
@@ -11,12 +11,16 @@
 //      by the `@bespunky/nx-tools:serve` composer that does not declare one yet, from the adapters that apply
 //      to it (fragments/). Seeding only ADDS process ids; what a project already declares is never rewritten.
 //
+// WITH NOTHING SERVED, only the first job applies: tools/dev is written and nothing is seeded (fragments/index.ts). In
+// particular `.bespunky/dev.json` is not created: that file is the `web` layer's evidence, and a capability must not
+// make a project wear `web` by asking for the engine.
+//
 // A project the house knows nothing about (Vite outside Nx, uvicorn, `go run`) writes its declaration by hand
 // and is served by the same engine — the declaration is the contract, the adapters are conveniences.
 import { type Tree, formatFiles, getProjects, logger } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectLayers, requireLayer } from '../../layers/registry';
+import { LAYERS, detectLayers, isPresent } from '../../layers/registry';
 import { seedFromAdapters } from './fragments';
 import { SERVE_EXECUTOR } from '../_utils/dev-server';
 
@@ -27,6 +31,7 @@ export const ENGINE_FILES = [
   'lib/browser.mjs',
   'lib/declaration.mjs',
   'lib/ports.mjs',
+  'lib/ready.mjs',
   'lib/stack.mjs',
   'lib/stacks.mjs',
   'lib/worktrees.mjs',
@@ -63,10 +68,25 @@ export function seedServedApps(tree: Tree, tag: string): void {
   }
 }
 
+/** The engine belongs to a workspace wearing a layer that lists its step; which layers those are is theirs to say. */
+function requireEngineLayer(tree: Tree): void {
+  const owners = LAYERS.filter((entry) => entry.generators?.workspace?.some((step) => step.generator === 'dev'));
+  if (owners.some((entry) => isPresent(tree, entry.id))) return;
+  const present = detectLayers(tree);
+  throw new Error(
+    `[dev] needs a layer that brings the dev engine (${owners.map((entry) => entry.id).join(', ')}), and this workspace has none of them.\n` +
+      `  present: ${present.length ? present.join(', ') : '(none)'}\n` +
+      owners.map((entry) => `  add ${entry.id} with: ${entry.ensureHint}`).join('\n'),
+  );
+}
+
 export default async function devGenerator(tree: Tree, _options: DevSchema = {}): Promise<void> {
-  // The web layer's dev loop — and the firebase layer's stack identity: its emulator suites claim their ports here.
-  if (!detectLayers(tree).includes('firebase')) requireLayer(tree, 'web', 'dev');
+  requireEngineLayer(tree);
   writeEngine(tree);
   seedServedApps(tree, 'dev');
+  if (servedProjects(tree).length === 0) {
+    const waiting = LAYERS.filter((entry) => entry.devFragment && isPresent(tree, entry.id)).map((entry) => entry.id);
+    if (waiting.length) logger.info(`[dev] tools/dev written; nothing here is served, so nothing was declared for ${waiting.join(', ')} (it runs through tools/dev/dev run until an app is served).`);
+  }
   await formatFiles(tree);
 }

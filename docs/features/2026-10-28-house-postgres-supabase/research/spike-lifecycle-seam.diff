@@ -1,0 +1,111 @@
+--- seam-base/tools/dev/lib/declaration.mjs	2026-11-04 06:33:37.647298364 +0000
++++ seam/tools/dev/lib/declaration.mjs	2026-11-04 06:33:37.662233033 +0000
+@@ -114,7 +114,9 @@
+         primaries++;
+         if (!Object.keys(p.ports ?? {}).length) fail(`${pat}.primary`, 'the primary process must declare a port');
+       }
+-      if (p.ready !== undefined && !(isObject(p.ready) && typeof p.ready.http === 'string')) fail(`${pat}.ready`, 'must be { "http": "<path>" }');
++      if (p.dependency !== undefined && typeof p.dependency !== 'boolean') fail(`${pat}.dependency`, 'must be a boolean');
++      if (p.ready !== undefined && !(isObject(p.ready) && (typeof p.ready.http === 'string' || typeof p.ready.cmd === 'string'))) fail(`${pat}.ready`, 'must be { "http": "<path>" } or { "cmd": "<shell>" }');
++      if (p.dependency && typeof p.ready?.cmd !== 'string') fail(`${pat}.ready`, 'a dependency must declare { "cmd": "<shell>" }, what "ready" means');
+       for (const [j, u] of (p.url ?? []).entries()) {
+         if (!isObject(u) || typeof u.param !== 'string' || typeof u.value !== 'string' || !URL_WHEN.includes(u.when ?? 'always')) {
+           fail(`${pat}.url[${j}]`, `must be { "param", "value", "when"?: ${URL_WHEN.join('|')} }`);
+@@ -232,10 +234,13 @@
+     ...(query.size ? { DEV_URL_QUERY: query.toString() } : {}),
+   };
+ 
++  // What a stack dependency exports reaches every sibling: how DATABASE_URL gets to a process without editing it.
++  const depExports = Object.assign({}, ...app.processes.filter((p) => p.dependency && !skip.includes(p.id)).map((p) => Object.fromEntries(Object.entries(p.exports ?? {}).map(([k, v]) => [k, subst(v, `apps.${appName}.${p.id}.exports.${k}`)]))));
+   const processes = app.processes.map((p) => {
+     const where = `apps.${appName}.${p.id}`;
+     const extra = p.id === primary.id ? passthrough : [];
+     const added = {
++      ...(p.dependency ? {} : depExports),
+       ...Object.fromEntries(Object.entries(p.env ?? {}).map(([k, v]) => [k, subst(v, `${where}.env.${k}`)])),
+       ...portEnv,
+       ...stackEnv,
+@@ -255,7 +260,9 @@
+       added,
+       env: { ...inherited, ...added },
+       exports: Object.fromEntries(Object.entries(p.exports ?? {}).map(([k, v]) => [k, subst(v, `${where}.exports.${k}`)])),
+-      ready: p.ready ? subst(p.ready.http, `${where}.ready`) : '/',
++      ready: p.ready?.http ? subst(p.ready.http, `${where}.ready`) : '/',
++      dependency: Boolean(p.dependency),
++      readyCmd: p.ready?.cmd ? subst(p.ready.cmd, `${where}.ready`) : undefined,
+     };
+   });
+ 
+--- seam-base/tools/dev/lib/stack.mjs	2026-11-04 06:33:37.648593562 +0000
++++ seam/tools/dev/lib/stack.mjs	2026-11-04 06:35:03.849078090 +0000
+@@ -79,7 +79,7 @@
+ 
+     const procs = new Array(children.length);
+     const done = new Array(children.length).fill(false);
+-    let remaining = children.length;
++    let remaining = 0; // of those spawned: a sibling held back behind a failed dependency never starts, so nothing waits for it
+     let stopping = false;
+     let failed = false;
+     const failures = [];
+@@ -142,6 +142,9 @@
+       // shape it takes: a non-zero exit, a SIGKILL from the OOM killer, a segfault. Reading every signal as a
+       // clean stop made `nx serve` report success for a stack that had crashed.
+       const interrupted = signal === 'SIGINT' || code === 130;
++      // A dependency that ends with siblings still held back behind it: they never start, and even a 0 is a failure.
++      const heldBack = children[i].dependency && children.some((c, j) => !c.dependency && !procs[j]);
++      if (heldBack && !stopping && !interrupted && code === 0) { failed = true; failures.push({ id: children[i].id, code, signal }); }
+       if (!stopping && !interrupted && code !== 0) {
+         failed = true;
+         failures.push({ id: children[i].id, code, signal });
+@@ -150,7 +153,7 @@
+       // the group stop it is (onGroupStop) — signalling the siblings again here would be the double signal.
+       if (interrupted && !stopping) onGroupStop();
+ 
+-      if (!stopping && remaining > 1) {
++      if (!stopping && (remaining > 1 || heldBack)) {
+         log?.(`${children[i].id} exited (${signal ?? code}) — stopping the rest of the stack.`);
+         stopping = true;
+         runOnStop();
+@@ -164,7 +167,8 @@
+       }
+     };
+ 
+-    children.forEach((child, i) => {
++    const start = (child, i) => {
++      remaining++;
+       const stdio = lockFd === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', lockFd];
+       const proc = child.shell
+         ? spawn('sh', ['-c', child.command], { cwd, env: child.env, stdio })
+@@ -183,6 +187,32 @@
+         settle(i, 1);
+       });
+       proc.on('exit', (code, signal) => settle(i, code, signal));
++    };
++
++    // Dependencies first; everything else once each has passed its readiness command. A dependency that exits, or
++    // a stop, ends the wait: settle() has already stopped the stack, so nothing else starts.
++    const isDep = (c) => c.dependency;
++    children.forEach((c, i) => isDep(c) && start(c, i));
++    const awaitReady = async (c, i) => {
++      const deadline = Date.now() + (c.readyTimeoutMs ?? 120000);
++      while (!done[i] && !stopping) {
++        const ok = await new Promise((r) => spawn('sh', ['-c', c.readyCmd], { cwd, env: c.env, stdio: 'ignore' }).on('exit', (code) => r(code === 0)).on('error', () => r(false)));
++        if (ok) return log?.(`${c.id} is ready.`);
++        if (Date.now() > deadline) {
++          log?.(`${c.id} did not pass its readiness in time — stopping the stack.`);
++          failed = true;
++          failures.push({ id: c.id, code: 'not ready', signal: null });
++          stopping = true;
++          runOnStop();
++          stopRemaining();
++          return;
++        }
++        await new Promise((r) => setTimeout(r, 100));
++      }
++    };
++    const deps = children.map((c, i) => [c, i]).filter(([c]) => isDep(c));
++    Promise.all(deps.map(([c, i]) => awaitReady(c, i))).then(() => {
++      if (!stopping) children.forEach((c, i) => !isDep(c) && start(c, i));
+     });
+   });
+ }

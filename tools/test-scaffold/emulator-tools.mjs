@@ -1,8 +1,9 @@
 // Render the emulator tooling modules into a fixture workspace exactly as the firebase-emulators generator does:
 //   tools/emulator-ports.mjs    — the owned template with the one port table (suite-ports.json) projected in;
 //   tools/emulator-project.mjs  — which project id the suite runs under (offline demo- twin by default);
-//   tools/emulator-secrets.cjs  — what the Functions emulator is given as secrets.
-// The scripts under test (emulators.sh, build-seeds.sh) call all three, so a fixture without them tests nothing real.
+//   tools/emulator-secrets.cjs  — what the Functions emulator is given as secrets;
+//   tools/emulator-data.sh      — where each stack's data lives, and priming it.
+// The scripts under test (emulators.sh, build-seeds.sh) call them, so a fixture without them tests nothing real.
 //
 //   node tools/test-scaffold/emulator-tools.mjs <workspace dir>
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -20,3 +21,4 @@ writeFileSync(join(tools, 'emulator-project.mjs'), template('emulator-project.mj
 const since = /export const CONFIG_DIR_SINCE = '([^']+)'/.exec(template('generator.ts'))?.[1];
 if (!since) throw new Error('generator.ts no longer declares CONFIG_DIR_SINCE');
 writeFileSync(join(tools, 'emulator-secrets.cjs'), template('emulator-secrets.cjs.tpl').split('{{configDirSince}}').join(since));
+writeFileSync(join(tools, 'emulator-data.sh'), template('emulator-data.sh.tpl'));

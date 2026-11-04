@@ -18,8 +18,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TPL="$ROOT/plugins/house/engine/nx-tools/src/generators/firebase-emulators/emulators.sh.tpl"
 
 [ -f "$TPL" ] || { echo "FATAL: emulators.sh.tpl not found at $TPL" >&2; exit 2; }
-grep -q 'seed_dir' "$TPL" || {
-  echo "FATAL: emulators.sh.tpl no longer defines seed_dir — the seed cascade moved or was removed." >&2
+grep -q 'seed_path' "$(dirname "$TPL")/emulator-data.sh.tpl" || {
+  echo "FATAL: emulator-data.sh.tpl no longer defines seed_path — the seed cascade moved or was removed." >&2
   exit 2
 }
 
@@ -38,7 +38,6 @@ sed -e 's/{{workspaceName}}/testws/g' -e 's|{{appEnvPath}}|apps/demo/src/environ
   "$TPL" > "$MAIN/tools/emulators.sh"
 node "$ROOT/tools/test-scaffold/render-engine.mjs" "$MAIN"   # the stack claim (tools/dev) every suite goes through
 node "$ROOT/tools/test-scaffold/emulator-tools.mjs" "$MAIN"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$MAIN/tools/emulator-data.sh"
 chmod +x "$MAIN/tools/"*.sh
 printf '{ "emulators": { "auth": { "port": 9099 } } }\n' > "$MAIN/firebase.json"
 # The seed itself: the metadata file is what both the script and firebase treat as "this is a world".

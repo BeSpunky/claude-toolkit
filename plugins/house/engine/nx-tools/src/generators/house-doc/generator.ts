@@ -31,6 +31,7 @@
 // leave the hook nagging forever with no way to fix it. HOUSE.md is the opposite: root-level, unambiguously
 // committed, generator-owned, rewritten on every sync — and already the file the hook stats to decide
 // whether this is even a house project. One file, one truth, no new gitignore surface.
+import { FIREWALL_CONFIG, hasPlatformFirewall } from '../../platform';
 import { nxInvocation } from '../_utils/nx-host';
 import { type Tree, formatFiles } from '@nx/devkit';
 import { retireInlineHouseSections } from '../_utils/inline-house-sections';
@@ -121,6 +122,9 @@ export default async function houseDocGenerator(
   // before firebase.json exists to detect).
   const flags: Record<string, boolean> = Object.fromEntries([...docSections(active)].map((flag) => [flag, true]));
   flags.firebase = firebase;
+  // Whether the config CARRIES the firewall, whichever capability asked for it (`ensurePlatformFirewall`): with no root
+  // ESLint config there is none, and the docs must not promise one.
+  flags['platform-firewall'] = tree.exists(FIREWALL_CONFIG) && hasPlatformFirewall(tree.read(FIREWALL_CONFIG, 'utf8') ?? '');
   // THE PLUGINS THIS PROJECT ENABLES — `plugin-<name>` for each one `.claude/settings.json` turns on. A doc that names
   // a toolkit skill or agent is an instruction to use it, so every such passage is gated on its plugin, and a project
   // that does not enable it is never told to call something it lacks. The settings — not the layers' `claudePlugins`

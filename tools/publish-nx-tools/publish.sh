@@ -129,11 +129,11 @@ fi
 # --- the upstream tables are current -----------------------------------------------------------------------------
 # What the payload KNOWS about upstream (generators/_utils/firebase-compat.ts: Angular → @angular/fire → firebase,
 # firebase-tools' peers, Cloud Functions' runtimes, gcloud's archive; node-facts.ts: Node's LTS lines and the
-# typescript-node images that exist) is a projection frozen into every project that installs this version. Publishing
+# typescript-node images that exist; postgres-closures.ts: every pinned Postgres .deb and its sha256) is a projection frozen into every project that installs this version. Publishing
 # a stale one ships stale advice to every consumer for as long as they stay on it — so a publish re-asks upstream
 # first and stops on drift. (The per-push test job deliberately does NOT: an upstream release would turn every
 # unrelated PR red. A weekly schedule raises the alarm instead — .github/workflows/upstream-tables.yml.)
-for table in firebase-compat node-facts; do
+for table in firebase-compat node-facts postgres-debs; do
   node "$REPO_ROOT/tools/$table/project.mjs" || {
     echo "ERROR: the $table upstream check did not pass — its own message above says why (drift → run it with --write," >&2
     echo "       review, commit, re-run; a crash → fix the cause, e.g. run \`yarn install\` if a module is missing)." >&2

@@ -51,6 +51,14 @@ export interface StackAdapter {
    * Also evidence for the platform classifier: a project this stack builds is at least this platform.
    */
   readonly platform: Platform;
+  /**
+   * Packages (Nx `bannedExternalImports` syntax) that exist only for the browser because THIS stack is what puts them
+   * there (Angular: `@angular/*`). Facts about the stack, not about any capability it may wear: the platform table
+   * (`src/platform/externals`) folds them in, so the firewall bans them from server code and the classifier counts
+   * them as web evidence in any workspace wearing the stack. Required, and empty for a stack that binds nothing, so a
+   * new adapter has to answer the question rather than silently contribute nothing.
+   */
+  readonly webOnlyImports: readonly string[];
 
   readonly apps?: AppPort;
   readonly libs?: LibPort;
@@ -218,8 +226,6 @@ export interface DesignSystemPort {
 }
 
 export interface FirebaseClientPort {
-  /** Packages the platform:server firewall bans for this framework (it must never reach Cloud Functions). */
-  readonly serverBannedImports: readonly string[];
   /** Has this app already been given the Firebase client? (the suite's scripts follow the wired app) */
   isWired(tree: Tree, project: string): boolean;
   /**

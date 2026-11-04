@@ -3,6 +3,8 @@
 import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 
+import { describeProbe, waitUntilReady } from './ready.mjs';
+
 /** Every descendant of `pid`, deepest first — read from /proc (Linux; elsewhere none). */
 export function descendants(pid) {
   let entries;
@@ -34,10 +36,19 @@ export function descendants(pid) {
   return out;
 }
 
+// How long a child's exit by SIGINT waits for the engine's own: the same signal to the same group, delivered to one event loop.
+const GROUP_SIGINT_GRACE_MS = 1000;
+
 /**
  * Run the declared processes as parallel children in OUR foreground process group, and resolve when all
- * have exited: `{ success, failures }` — `failures` names each child whose own exit failed the stack
- * (`{ id, code, signal }`), so whoever reports the stack can say WHICH process died, not only that one did.
+ * have exited: `{ success, failures, exits }` — `failures` names each child whose own exit failed the stack
+ * (`{ id, code, signal, why? }`), so whoever reports the stack can say WHICH process died, not only that one did;
+ * `exits` is how each one ended, `{ id: { code, signal } }`.
+ *
+ * THE ORDER. A child marked `dependency` starts first, in the order given, each once the one before it passes its
+ * `ready` probe (at most `readyTimeoutMs`); then every other child starts, at once. A dependency runs for as long as the
+ * stack does, so its own exit is a failure WHATEVER the code. Any end of the wait other than ready (that exit, a stop, the
+ * timeout) means the rest never starts: the stack ends with what was started.
  *
  * Signal discipline (the reason this is bespoke rather than N independent runs) — the rule is decided by WHO
  * delivered the signal, and the signal's name says who that almost always is:
@@ -63,29 +74,35 @@ export function descendants(pid) {
  * The group was never signalled, so each remaining child TREE gets exactly ONE SIGTERM — the stack goes down
  * together instead of leaving orphans.
  *
- * A child is `{ id, command, args, shell, env }`: `shell` runs `command` through `sh -c` (a hand-written
+ * A child is `{ id, command, args, shell, env, dependency?, ready?, readyTimeoutMs? }`: `shell` runs `command` through `sh -c` (a hand-written
  * string command); otherwise `command` + `args` are spawned directly. `onSpawn(id, pid)` hears each one start —
- * how the stack's run record learns its processes' PIDs. `onStop(signal)` hears the stop once — with the signal
+ * how the stack's run record learns its processes' PIDs. `onWaiting(id)` hears each dependency being waited for, and
+ * `onUp()` that every process has been started (only when that happens). `onStop(signal)` hears the stop once — with the signal
  * that asked for it, or none when the stack's own processes ended it (how the engine says who stopped the stack).
  * `lockFd`, the stack's lock (lib/stacks.mjs), is every child's fd 3: each one keeps the stack alive while it runs —
  * so a serve killed outright leaves an ORPHANED stack `dev stop` can still end, not a dead record over live servers.
  */
-export function runStack({ children, cwd, onStop, onSpawn, log, lockFd }) {
+export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log, lockFd }) {
   return new Promise((resolve) => {
     if (children.length === 0) {
-      resolve({ success: true, failures: [] });
+      resolve({ success: true, failures: [], exits: {} });
       return;
     }
 
     const procs = new Array(children.length);
     const done = new Array(children.length).fill(false);
-    let remaining = children.length;
+    const passedReady = new Array(children.length).fill(false);
+    const exits = {};
+    let remaining = 0; // started and not yet ended
     let stopping = false;
     let failed = false;
     const failures = [];
     let stopHandled = false;
+    let groupStopCheck;
+    const waiting = new AbortController(); // ends a dependency's readiness wait the moment the stack stops
 
     const runOnStop = (signal) => {
+      waiting.abort();
       if (stopHandled) return;
       stopHandled = true;
       try {
@@ -135,6 +152,7 @@ export function runStack({ children, cwd, onStop, onSpawn, log, lockFd }) {
     const settle = (i, code, signal) => {
       if (done[i]) return;
       done[i] = true;
+      exits[children[i].id] = { code, signal };
 
       // CLEAN means one of two things: the child exited 0, or it ended on a stop — ours (`stopping`), or the
       // terminal's Ctrl+C, which reached the child as SIGINT (or its shell's 130) in the same instant it reached us,
@@ -142,15 +160,37 @@ export function runStack({ children, cwd, onStop, onSpawn, log, lockFd }) {
       // shape it takes: a non-zero exit, a SIGKILL from the OOM killer, a segfault. Reading every signal as a
       // clean stop made `nx serve` report success for a stack that had crashed.
       const interrupted = signal === 'SIGINT' || code === 130;
-      if (!stopping && !interrupted && code !== 0) {
+      if (!stopping && !interrupted && (code !== 0 || children[i].dependency)) {
         failed = true;
-        failures.push({ id: children[i].id, code, signal });
+        failures.push({
+          id: children[i].id,
+          code,
+          signal,
+          ...(children[i].dependency ? { why: passedReady[i] ? 'a dependency runs for as long as the stack does: it stays in the foreground, so one that daemonises needs a launcher that stays' : 'before it was ready, so nothing else started' } : {}),
+        });
       }
-      // An interrupted child means the terminal stopped the GROUP: every sibling got the same SIGINT. Treat it as
-      // the group stop it is (onGroupStop) — signalling the siblings again here would be the double signal.
-      if (interrupted && !stopping) onGroupStop();
+      // An interrupted child normally means the terminal stopped the GROUP: every sibling got the same SIGINT, and
+      // signalling them again would be the double signal. With no sibling left there is nothing more to learn. With
+      // some, our own SIGINT settles it: it is on its way if the group was signalled. If it never comes, that SIGINT was
+      // aimed at this child alone, so this is a process of the stack ending under the rest, and they get the one SIGTERM.
+      if (interrupted && !stopping) {
+        if (remaining > 1) {
+          clearTimeout(groupStopCheck);
+          groupStopCheck = setTimeout(() => {
+            if (stopping) return;
+            failed = true;
+            failures.push({ id: children[i].id, code, signal });
+            log?.(`${children[i].id} exited (${signal ?? code}), and nobody asked the stack to stop — stopping the rest of it.`);
+            stopping = true;
+            runOnStop();
+            stopRemaining();
+          }, GROUP_SIGINT_GRACE_MS);
+        } else {
+          onGroupStop();
+        }
+      }
 
-      if (!stopping && remaining > 1) {
+      if (!stopping && !interrupted && remaining > 1) {
         log?.(`${children[i].id} exited (${signal ?? code}) — stopping the rest of the stack.`);
         stopping = true;
         runOnStop();
@@ -158,13 +198,15 @@ export function runStack({ children, cwd, onStop, onSpawn, log, lockFd }) {
       }
 
       if (--remaining === 0) {
+        clearTimeout(groupStopCheck);
         cleanup();
         runOnStop();
-        resolve({ success: !failed, failures });
+        resolve({ success: !failed, failures, exits });
       }
     };
 
-    children.forEach((child, i) => {
+    const start = (child, i) => {
+      remaining++;
       const stdio = lockFd === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', lockFd];
       const proc = child.shell
         ? spawn('sh', ['-c', child.command], { cwd, env: child.env, stdio })
@@ -183,6 +225,43 @@ export function runStack({ children, cwd, onStop, onSpawn, log, lockFd }) {
         settle(i, 1);
       });
       proc.on('exit', (code, signal) => settle(i, code, signal));
-    });
+    };
+
+    const inform = (fn, ...args) => {
+      try {
+        fn?.(...args);
+      } catch {
+        /* bookkeeping only — never let it fail the serve */
+      }
+    };
+
+    /** Past its deadline: the stack fails, naming what it waited on and what the last attempt answered. */
+    const notReady = (child, said) => {
+      const seconds = Math.round(child.readyTimeoutMs / 1000);
+      log?.(`${child.id} did not become ready within ${seconds}s — stopping the stack.`);
+      failed = true;
+      failures.push({ id: child.id, why: `it did not become ready within ${seconds}s (${describeProbe(child.ready)}${said ? `; last answer: ${said}` : ''}), so nothing else started` });
+      stopping = true;
+      runOnStop();
+      stopRemaining();
+    };
+
+    (async () => {
+      for (const [i, child] of children.entries()) {
+        if (!child.dependency) continue;
+        start(child, i);
+        inform(onWaiting, child.id);
+        log?.(`waiting for ${child.id} to be ready (${describeProbe(child.ready)})…`);
+        const { ok, said } = await waitUntilReady(child.ready, { cwd, env: child.env, signal: waiting.signal, timeoutMs: child.readyTimeoutMs });
+        // It ended (settle() has already reported it, and the stack may be down by now) or the stack was stopped.
+        // Either way nothing else starts: the one place that decides it, whichever process was the last one running.
+        if (stopping || done[i]) return;
+        if (!ok) return notReady(child, said);
+        passedReady[i] = true;
+        log?.(`${child.id} is ready.`);
+      }
+      children.forEach((child, i) => child.dependency || start(child, i));
+      inform(onUp);
+    })();
   });
 }

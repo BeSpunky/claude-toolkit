@@ -11,7 +11,7 @@
 //   node tools/emulator-ports.mjs ports <firebase.json>                 every occupied port, one per line
 //   node tools/emulator-ports.mjs shift <firebase.json> <offset> <out>  write a copy with every port shifted
 //   node tools/emulator-ports.mjs claim <firebase.json>                 every occupied port as name=port,… — the
-//                                                                       `--ports` of `tools/dev/dev claim`
+//                                                                       `--ports` of `tools/dev/dev run`
 //
 // Node built-ins only.
 //

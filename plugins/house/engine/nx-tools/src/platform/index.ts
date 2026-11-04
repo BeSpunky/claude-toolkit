@@ -5,14 +5,17 @@ import { type Tree, logger } from '@nx/devkit';
 import { type Platform, setProjectPlatform, platformTag } from './platform';
 import { type Classification, classifyWorkspace, violations } from './classify';
 import { type PlatformExternals, tableExternals, withDeclared } from './externals';
-import { workspaceStacksWith } from '../adapters/workspace';
-import { readDeclaredBans } from './firewall';
+import { workspaceStacks } from '../adapters/workspace';
+import { firewallSnippet, insertPlatformFirewall, readDeclaredBans } from './firewall';
+import { registerPlatformSync } from './sync';
+import { ESLINT_CONFIGS } from '../generators/_utils/lint-inference';
+import { nxInvocation } from '../generators/_utils/nx-host';
 
 export * from './platform';
 export { matchesExternal, isNodeBuiltin, type PlatformExternals, type DeclaredBans } from './externals';
 export { classifyWorkspace, holdsCode, isCodeProject, violations, type Classification, type Violation } from './classify';
 export {
-  insertPlatformFirewall,
+  addFirewallBans,
   upgradePlatformFirewall,
   readDeclaredBans,
   hasPlatformFirewall,
@@ -33,8 +36,8 @@ export const FIREWALL_CONFIG = 'eslint.config.mjs';
  * own firewall bans — so the classifier never calls a project `shared` that the config's own lists then fail.
  */
 export function platformExternals(tree: Tree): PlatformExternals {
-  // Each stack names its own framework (Angular: `@angular/*`) — the same list it hands the server firewall.
-  const table = tableExternals(workspaceStacksWith(tree, 'firebase').flatMap((stack) => stack.firebase.serverBannedImports));
+  // Each stack names its own framework (Angular: `@angular/*`), whatever capabilities the workspace wears.
+  const table = tableExternals(workspaceStacks(tree).flatMap((stack) => stack.webOnlyImports));
   if (!tree.exists(FIREWALL_CONFIG)) return table;
   return withDeclared(table, readDeclaredBans(tree.read(FIREWALL_CONFIG, 'utf8') ?? '', FIREWALL_CONFIG));
 }
@@ -47,6 +50,51 @@ export interface ClassifyReport {
   tagged: Array<{ project: string; platform: Platform }>;
   /** Code projects left without a platform: mixed, or nothing binds them to one — each reported with the command. */
   unresolved: string[];
+}
+
+/**
+ * Give this workspace the platform firewall — what any capability that brings a second platform calls (Firebase's
+ * Cloud Functions, a database driver that must never reach a browser bundle). Best-effort, and safe on every run:
+ *   - no root ESLint config: nothing to write into, so nothing happens — lint is what enforces the firewall;
+ *   - a root ESLint config under another name: the firewall has a single home, so none is written, and the log says so;
+ *   - a config it cannot edit safely: left alone, and the reason and a snippet to paste are logged;
+ *   - the firewall arriving: it comes over projects nobody classified, so they are classified in the same act
+ *     (evidence only, every inference reported, what nothing settles left for a human), and the sync generator that
+ *     classifies the projects created later on `nx sync` is registered (generators/platform-sync);
+ *   - an EXISTING firewall is project state, whichever capability brought it: never re-written here, so a second
+ *     capability asking is a no-op. (The 0.49 shape is migration 0.50.0's to upgrade.)
+ *
+ * @param who the generator asking — for the log.
+ */
+export function ensurePlatformFirewall(tree: Tree, who: string): void {
+  const nx = nxInvocation(tree).command;
+  if (!tree.exists(FIREWALL_CONFIG)) {
+    const other = ESLINT_CONFIGS.find((file) => tree.exists(file));
+    if (other) {
+      logger.warn(
+        `[${who}] No platform firewall: it is written only into ${FIREWALL_CONFIG}, and this workspace's ESLint config is ${other}, so nothing keeps server code out of a browser bundle. ` +
+          `Add it there by hand, then classify every project (${platformCommand(nx, '<project>')}):\n` +
+          firewallSnippet(platformExternals(tree), nx),
+      );
+    }
+    return;
+  }
+  const externals = platformExternals(tree);
+  const edit = insertPlatformFirewall(tree.read(FIREWALL_CONFIG, 'utf8') ?? '', FIREWALL_CONFIG, externals, nx);
+  if ('refused' in edit) {
+    logger.warn(
+      `[${who}] Did not insert the platform firewall into ${FIREWALL_CONFIG}: ${edit.refused}. Add it by hand, then ` +
+        `classify every project (${platformCommand(nx, '<project>')}):\n` +
+        firewallSnippet(externals, nx),
+    );
+    return;
+  }
+  if (!edit.changes.length) return;
+  tree.write(FIREWALL_CONFIG, edit.source);
+  for (const change of edit.changes) logger.info(`[${who}] ${FIREWALL_CONFIG}: ${change}.`);
+  for (const note of edit.notes) logger.warn(`[${who}] ${FIREWALL_CONFIG}: ${note}.`);
+  registerPlatformSync(tree);
+  classifyUntaggedProjects(tree, { who, nx, externals });
 }
 
 /** Why a project was left without a platform, as one sentence. */

@@ -264,15 +264,15 @@ export default {
       setup: () => {
         const tree = workspace();
         tree.write('eslint.config.mjs', ESLINT);
-        lib(tree, 'packages/db', { 'src/index.ts': "import { Pool } from 'pg';\nexport const p = Pool;\n" });
+        lib(tree, 'packages/db', { 'src/index.ts': "import { Client } from 'acme-private-client';\nexport const p = Client;\n" });
         return tree;
       },
       run: async (tree, ctx) => {
         await ctx.load('generators/firebase-emulators/generator').default(tree, { workspaceName: SCOPE });
-        tree.write('eslint.config.mjs', tree.read('eslint.config.mjs', 'utf8').replace("bannedExternalImports: [\n      'firebase-admin',", "bannedExternalImports: [\n      'pg',\n      'firebase-admin',"));
+        tree.write('eslint.config.mjs', tree.read('eslint.config.mjs', 'utf8').replace("bannedExternalImports: [\n      'firebase-admin',", "bannedExternalImports: [\n      'acme-private-client',\n      'firebase-admin',"));
         await platform(ctx)(tree, { project: 'db' });
       },
-      expect: (tree, t) => t.ok(tags(tree, 'db').includes('platform:server'), `db (pg, banned for web by the config): ${tags(tree, 'db')}`),
+      expect: (tree, t) => t.ok(tags(tree, 'db').includes('platform:server'), `db (a package the table does not know, banned for web by the config): ${tags(tree, 'db')}`),
     },
     {
       name: 'platform <project> with no evidence, or on tooling: refused — shared is stated, never inferred',
