@@ -58,8 +58,7 @@ echo "Container engine: $(container_engine_describe)"
 container_require_command "$IMAGE" yarn
 
 # --- run the tool inside the container; ~/projects at /work, the tool dir read-only at /tool ---
-container_run_as_host_user \
-  -e HOME=/home/node \
+container_run_program \
   -v "$PROJECTS_DIR":/work -v "$TOOL_DIR":/tool:ro -w /work \
   "$IMAGE" \
   node /tool/extract-tool.mjs --from "/work/$FROM_BASE" --into "/work/$INTO_BASE" "${PASS[@]}"

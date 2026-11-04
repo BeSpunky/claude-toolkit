@@ -334,7 +334,7 @@ failure the gate removes. If you find yourself looking for one, the answer is th
 Once the user has chosen and the state is resolved, **re-run this command from the top** rather than resuming
 mid-way. Step 1 may matter again, and the gate is cheap.
 
-- **`runner-image`** — only on the Docker fallback: the image the generators run in cannot run this project's package manager, or could not be run at all (the `ERROR` line above it says which). Nothing to resolve in the project. Relay it, and offer the way around it: Node 22.18+ with that package manager on the machine's PATH runs natively, with no image.
+- **`runner-image`** — what the generators run on cannot run this project's package manager, or the image could not be run at all (the `ERROR` line above it says which). That includes a project whose yarn the runner's yarn cannot reach with no `yarnPath` to dispatch through: a declared version, or an undeclared yarn 2+ repo, which yarn 1 would rewrite. It fires on the Docker fallback and natively, for a host's yarn. Nothing to resolve in the project, unless it really is on yarn 1 with a stray `.yarnrc.yml`, when declaring that settles it. Relay it, and offer the way around it the line under the `ERROR` names: on the fallback, Node 22.18+ with that package manager on the machine's PATH runs natively, with no image; natively, that yarn on the PATH or a committed `yarnPath`.
 
 ### The rest
 
@@ -379,6 +379,13 @@ mid-way. Step 1 may matter again, and the gate is cheap.
 **The upgrade is finished when it prints `UPGRADE_OK`. It does not need running again** — say so, because two or
 three passes used to be the habit and people still expect it. **But `UPGRADE_OK` means the run completed, not that
 the result builds** — never report it as a verification.
+
+**`OWNERSHIP_UNRESTORED <path> (exit <n>)` under an `UPGRADE_OK`** (Docker fallback only, non-zero exit): the upgrade
+completed and its report is true, but the container that hands the tree back to the user failed, so files may be
+owned by root. It does not need running again. Relay the `repair` line under it; the user runs it, because it needs
+`sudo`. Report the rest as usual, and run `UPGRADE_VERIFY` after the repair. `UPGRADE_NEXT: unknown` here means git
+refused the tree: re-check what changed once it is repaired. After an `UPGRADE_FAILED` the same line only adds the
+repair: that run's own exit code and report stand.
 
 ### Verify what it rewrote — `UPGRADE_VERIFY`
 
@@ -448,7 +455,7 @@ report two, and never invent one the line didn't ask for:
 | `none` | Nothing further. Say it plainly — silence here reads as "restart to be safe", which is the habit we are retiring. |
 | `restart-session` | Restart Claude Code when convenient, to pick up `.claude/settings.json` / `.mcp.json`. **No rebuild.** |
 | `rebuild-container` | Run **Dev Containers: Rebuild Container** when convenient. It *subsumes* the restart — do not also ask for one. |
-| `unknown` | The run had no git base to compare against; say so and name the three paths it would have checked. |
+| `unknown` | Git could not compare the tree with a base (none recorded, or it refuses a tree whose ownership was not restored); say so and name the three paths it would have checked. |
 
 **Never perform the boundary yourself** — no rebuild, no restart, no reload of plugins on your own
 initiative. The script states the fact, the user chooses the moment; both actions throw away the session

@@ -37,6 +37,7 @@ import {
   renderDevcontainerJson,
   renderHouseDockerfile,
   renderOsPackagesScript,
+  renderPackageManagerScript,
   renderPostCreate,
 } from './compose';
 import {
@@ -48,6 +49,7 @@ import {
 } from '../_utils/devcontainer-provenance';
 import { assertNodeImage, nodeVersionFile, projectNodeMajor, LIVE_NODE_FACTS } from '../_utils/node-version';
 import { devcontainerNode } from '../_utils/node-spec';
+import { packageManagerSpec } from '../_utils/package-manager';
 
 type Json = Record<string, unknown>;
 
@@ -132,12 +134,13 @@ export default async function devcontainerGenerator(
   // The probe follows from the mounts: every workspace bind source it guarantees is one a contributor declared.
   const bindSources = workspaceBindSources(declared);
   const contributors: Contributor[] = bindSources.length ? [...declared, { id: 'host-probe', fragment: HOST_PROBE }] : declared;
-  const houseComposition = compose(contributors, { nodeMajor });
+  const pmSpec = packageManagerSpec(tree);
+  const houseComposition = compose(contributors, { nodeMajor, packageManagerSpec: pmSpec });
   // An ADOPTED devcontainer that keeps an image of its own runs as THAT image's user: the house's mount targets
   // (`{{home}}/.claude`, …) must follow it, and no house `remoteUser` may be added to an image that may not have
   // that user at all — a container that cannot start is the worst thing an additive merge could produce.
   const imageSource = adoptedImageSource(tree, houseComposition.image.ref);
-  const composition = imageSource.kind === 'build' ? houseComposition : compose(contributors, { nodeMajor, imageSource });
+  const composition = imageSource.kind === 'build' ? houseComposition : compose(contributors, { nodeMajor, imageSource, packageManagerSpec: pmSpec });
   // The image is tagged with the project's Node where the house's image is actually USED (built from house.Dockerfile,
   // or referenced as is) — so a major mcr publishes no image for is refused by name here, not at image pull.
   if (imageSource.kind !== 'foreign' && /\/typescript-node:/.test(houseComposition.image.ref)) assertNodeImage(tree, nodeMajor);
@@ -287,6 +290,7 @@ function isHouseFile(tree: Tree, path: string): boolean {
 
 const HOUSE_DOCKERFILE_PATH = `.devcontainer/${HOUSE_DOCKERFILE}`;
 const OS_PACKAGES_SCRIPT = '.devcontainer/house.packages.sh';
+const PACKAGE_MANAGER_SCRIPT = '.devcontainer/house.package-manager.sh';
 const OS_PACKAGES_LIST = '.devcontainer/os-packages.txt';
 const GITATTRIBUTES = '.devcontainer/.gitattributes';
 /** LF in every checkout: a CRLF copy of a shell script dies in dash (`set: Illegal option -`) — the IMAGE BUILD fails. */
@@ -308,6 +312,8 @@ const OS_PACKAGES_STUB = `# This project's own OS (Debian) packages. THIS FILE I
 /**
  * The image's files beside devcontainer.json:
  *   house.packages.sh — the one installer (OWNED). Always: post-create runs it too, whatever the image.
+ *   house.package-manager.sh — provides the project's package manager (OWNED). While a layer asks for one, whatever the
+ *                       image, because post-create runs it too; a house-written one leaves with the layer.
  *   house.Dockerfile  — OWNED, written while it is or can safely become the image (build / house-ref); on a foreign
  *                       image it would build the WRONG base, so it is not offered — and a house-written one is removed.
  *   os-packages.txt   — the project's list, SEEDED once.
@@ -324,6 +330,8 @@ function writeImageFiles(tree: Tree, composition: Composition): void {
   };
   // 0o755 so the shebang/mode rule holds in the output; it is invoked as `sh <path>`, so the mode is not load-bearing.
   owned(OS_PACKAGES_SCRIPT, renderOsPackagesScript(composition), 0o755);
+  if (composition.packageManager) owned(PACKAGE_MANAGER_SCRIPT, renderPackageManagerScript(), 0o755);
+  else if (tree.exists(PACKAGE_MANAGER_SCRIPT) && isHouseFile(tree, PACKAGE_MANAGER_SCRIPT)) tree.delete(PACKAGE_MANAGER_SCRIPT);
   if (composition.imageSource.kind === 'foreign') {
     if (tree.exists(HOUSE_DOCKERFILE_PATH) && isHouseFile(tree, HOUSE_DOCKERFILE_PATH)) tree.delete(HOUSE_DOCKERFILE_PATH);
   } else {

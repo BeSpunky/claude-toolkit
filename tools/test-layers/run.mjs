@@ -24,7 +24,7 @@
  * Needs `yarn install`.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, readlinkSync, lstatSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, readlinkSync, lstatSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ASSETS, PAYLOAD, compilePayload, requireFromRepo, requireInstalled } from '../test-support/payload.mjs';
@@ -1306,6 +1306,14 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   ok(a.dc.mounts.filter((m) => m.includes(`target=${home}/.config`)).length === 1, 'not exactly ONE mount for ~/.config (one per tool crept back?)');
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.config,type=volume`)), '~/.config is not a persisted volume');
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.cache,type=volume`)) && !a.dc.mounts.some((m) => m.includes('/.cache/')), '~/.cache is not ONE persisted volume (or a per-tool cache volume crept back)');
+  // A package manager the image lacks and the global prefix refuses lands in ~/.local (house.package-manager.sh): the volume
+  // keeps it across a rebuild, first on PATH. What the package managers themselves keep was looked at with the real ones:
+  // yarn 1 and pnpm's caches and stores stay inside the XDG homes (~/.cache, ~/.local); yarn 2+'s ~/.yarn/berry is a
+  // download cache, left where it is, since YARN_GLOBAL_FOLDER would also move yarn 1's `yarn global` out of ~/.config.
+  // NOT persisted, and known: a registry login in ~/.npmrc (npm, pnpm: true of every node-layer container before this)
+  // and ~/.yarnrc.yml (yarn 2+). A rebuild loses it; see the effort's DECISION.md.
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.local,type=volume`)), '~/.local is not a persisted volume');
+  ok(a.dc.remoteEnv.PATH.startsWith(`${home}/.local/bin:`), `~/.local/bin is not first on PATH: ${a.dc.remoteEnv.PATH}`);
   ok(a.post.includes('gh auth setup-git'), 'git is not wired to the gh login');
   const start = a.post.indexOf("# --- Claude Code's account record");
   const piece = a.post.slice(start, a.post.indexOf('\n# --- ', start + 1));
@@ -1604,7 +1612,7 @@ checkAsync('post-create detects the package manager with the generators\' own ru
   const { detectPackageManager } = require_(join(BUILD, 'src/generators/_utils/package-manager'));
   const a = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node']);
   const start = a.post.indexOf('if [ -f "$WS/package.json" ]; then');
-  const block = a.post.slice(start, a.post.indexOf('\nfi\n', start) + 4).replace(/^\s*\$PM_INSTALL\s*$/m, '');
+  const block = a.post.slice(start, a.post.indexOf('\nfi\n', start) + 4).replace(/^\s*\$PM_INSTALL\s*$/m, '').replace(/^\s*sh "\$WS\/\.devcontainer\/house\.package-manager\.sh".*$/m, '');
   ok(start >= 0 && !block.includes('{{'), 'the node-install piece rendered its detection');
   const cases = [
     [{ packageManager: 'pnpm@9.0.0' }, ['yarn.lock']],
@@ -1625,6 +1633,264 @@ checkAsync('post-create detects the package manager with the generators\' own ru
     ok(shell === ts, `${JSON.stringify(pkg)} + ${locks.join(',') || 'no lockfile'}: post-create says ${shell}, the generators ${ts}`);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// The container must HAVE the project's package manager: the image decides what exists, and post-create's install runs
+// under `set -e`. The derivation is one rule in two languages, so they are run against each other; the installer is RUN
+// against a fake npm and fake package managers, since what it installs is the behaviour worth pinning.
+const PM_SPEC_CASES = [
+  ['exact', { packageManager: 'yarn@1.22.22' }, {}, 'yarn@1.22.22'],
+  ['corepack hash stripped', { packageManager: 'pnpm@9.1.0+sha512.abc' }, {}, 'pnpm@9.1.0'],
+  ['a line', { packageManager: 'yarn@4' }, {}, 'yarn@4'],
+  ['a range is no version: installing it would float', { packageManager: 'pnpm@^9.0.0' }, {}, 'pnpm'],
+  ['a tag is no version', { packageManager: 'yarn@latest' }, {}, 'yarn'],
+  ['yarnPath hands over, whatever is declared', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'nodeLinker: node-modules\nyarnPath: .yarn/releases/yarn.cjs\n' }, 'yarn'],
+  ["yarn 1's yarn-path hands over too", {}, { '.yarnrc': 'yarn-path ".yarn/yarn.js"\n', 'yarn.lock': '' }, 'yarn'],
+  ['yarn-path with a colon hands over', { packageManager: 'yarn@4.5.0' }, { '.yarnrc': 'yarn-path: .yarn/yarn.js\n' }, 'yarn'],
+  ['a quoted yarnPath hands over', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': '"yarnPath": .yarn/yarn.cjs\n' }, 'yarn'],
+  ["a single-quoted yarnPath hands over", { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': "'yarnPath': .yarn/yarn.cjs\n" }, 'yarn'],
+  ['a spaced yarnPath hands over', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'yarnPath : .yarn/yarn.cjs\n' }, 'yarn'],
+  ['a tab after the key still hands over', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'yarnPath:\t.yarn/yarn.cjs\n' }, 'yarn'],
+  ['an empty yarnPath hands over to nothing', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'yarnPath:\nnodeLinker: node-modules\n' }, 'yarn@4.5.0'],
+  ['a yarnPath that is only a comment hands over to nothing', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': 'yarnPath: # none\n' }, 'yarn@4.5.0'],
+  ['a commented-out yarnPath hands over to nothing', { packageManager: 'yarn@4.5.0' }, { '.yarnrc.yml': '# yarnPath: x\n' }, 'yarn@4.5.0'],
+  ['a number with letters in it is no version', { packageManager: 'pnpm@10-a.b.c' }, {}, 'pnpm'],
+  ['a prerelease of an exact version is one', { packageManager: 'yarn@4.0.0-rc.1' }, {}, 'yarn@4.0.0-rc.1'],
+  ['undeclared, classic lockfile', {}, { 'yarn.lock': '# yarn lockfile v1\n' }, 'yarn'],
+  ['undeclared, berry lockfile', {}, { 'yarn.lock': '__metadata:\n  version: 8\n' }, 'yarn@berry'],
+  ['undeclared, berry config', {}, { '.yarnrc.yml': 'nodeLinker: node-modules\n' }, 'yarn@berry'],
+  ['undeclared pnpm', {}, { 'pnpm-lock.yaml': '' }, 'pnpm'],
+  ['undeclared npm', {}, { 'package-lock.json': '' }, 'npm'],
+  ['nothing at all: the house default', {}, {}, 'yarn'],
+  ['npm, exact', { packageManager: 'npm@10.9.0' }, {}, 'npm@10.9.0'],
+];
+// Written by hand: JSON.stringify would never give the generator or post-create a manifest this shape.
+const PM_SPEC_RAW_MANIFESTS = [
+  ['minified, a nested declaration after the real one', '{"name":"x","packageManager":"yarn@1.22.22","x":{"packageManager":"pnpm@9.0.0"}}', 'yarn@1.22.22'],
+  ['no declaration at all, under pipefail', '{"name":"x"}', 'yarn'],
+];
+
+checkAsync('package manager: the spec the image build gets and the one post-create derives are the same rule', async (ok) => {
+  const { packageManagerSpec, packageManagerShellDetection } = require_(join(BUILD, 'src/generators/_utils/package-manager'));
+  const detect = packageManagerShellDetection();
+  ok(packageManagerSpec(wrapperRepo()) === undefined, 'a repo with no package.json has no package manager to provide');
+  for (const [label, pkg, files, expected] of PM_SPEC_CASES) {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-spec-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', ...pkg }, null, 2));
+    const tree = createTreeWithEmptyWorkspace();
+    writeJson(tree, 'package.json', { name: 'x', ...pkg });
+    for (const [file, text] of Object.entries(files)) {
+      writeFileSync(join(dir, file), text);
+      tree.write(file, text);
+    }
+    const shell = execFileSync('bash', ['-c', `set -euo pipefail\nWS="$1"\n${detect}\nprintf %s "$PM_SPEC"`, '_', dir], { encoding: 'utf8' });
+    const ts = packageManagerSpec(tree);
+    ok(shell === expected, `${label}: post-create derives ${shell}, expected ${expected}`);
+    ok(ts === expected, `${label}: the generator derives ${ts}, expected ${expected}`);
+    rmSync(dir, { recursive: true, force: true });
+  }
+  for (const [label, manifest, expected] of PM_SPEC_RAW_MANIFESTS) {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-spec-'));
+    writeFileSync(join(dir, 'package.json'), manifest);
+    const tree = createTreeWithEmptyWorkspace();
+    tree.write('package.json', manifest);
+    const shell = execFileSync('bash', ['-c', `set -euo pipefail\nWS="$1"\n${detect}\nprintf %s "$PM_SPEC"`, '_', dir], { encoding: 'utf8' });
+    ok(shell === expected, `${label}: post-create derives ${shell}, expected ${expected}`);
+    ok(packageManagerSpec(tree) === expected, `${label}: the generator derives ${packageManagerSpec(tree)}, expected ${expected}`);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A package manager at a version, as a script answering `--version` the way the real one does. */
+const fakePm = (dir, name, version) => {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, name), `#!/bin/sh\n[ "$1" = --version ] && echo ${version}\n`, { mode: 0o755 });
+};
+/**
+ * The installer against a PATH holding only what it is given and the tools it uses. The fake npm logs, and an install
+ * lays down the package's binary in its prefix: `--prefix <dir>` if given, else the "global" dir (which `npmFails` refuses).
+ */
+const runPmInstaller = (script, spec, { on = {}, behind = {}, shadow, npm = true, npmFails = false, npmLandsAhead = false } = {}) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pm-install-'));
+  const home = join(dir, 'home');
+  const global = join(dir, 'global');
+  const tools = join(dir, 'tools');
+  const log = join(dir, 'npm.log');
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  mkdirSync(global);
+  mkdirSync(tools);
+  for (const tool of ['awk', 'head', 'tr', 'id', 'sh', 'mkdir', 'chmod']) symlinkSync(execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim(), join(tools, tool));
+  const { npm: npmVersion = '11.0.0', ...others } = on;
+  for (const [name, version] of Object.entries(others)) fakePm(global, name, version);
+  // The image's own copy, BEHIND the prefix an install lands in (/usr/local/bin vs npm-global/bin on typescript-node).
+  for (const [name, version] of Object.entries(behind)) fakePm(tools, name, version);
+  const npmVersionFile = join(dir, 'npm.version');
+  writeFileSync(npmVersionFile, `${npmVersion}\n`);
+  if (shadow) fakePm(join(home, '.local/bin'), ...shadow);
+  if (npm) {
+    writeFileSync(join(tools, 'npm'), `#!/bin/sh
+if [ "$1" = --version ]; then read -r line < '${npmVersionFile}'; echo "$line"; exit 0; fi
+echo "$*" >> '${log}'
+prefix=''
+force=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prefix) prefix="$2"; shift ;;
+    --force) force=1 ;;
+    -*|install) ;;
+    *) package="$1" ;;
+  esac
+  shift
+done
+if [ -z "$prefix" ] && [ ${npmFails ? 1 : 0} = 1 ]; then echo EACCES >&2; exit 243; fi
+into="\${prefix:+$prefix/bin}"; into="\${into:-${global}}"
+version="\${package##*@}"; name="\${package%@*}"
+case "$name" in @yarnpkg/cli-dist) name=yarn ;; npm) [ ${npmLandsAhead ? 1 : 0} = 1 ] || { echo "$version" > '${npmVersionFile}'; exit 0; } ;; esac
+mkdir -p "$into"
+# The real npm's refusal when another package holds the bin name in the prefix (seen swapping yarn for @yarnpkg/cli-dist).
+if [ -e "$into/$name" ] && [ -z "$force" ]; then echo EEXIST >&2; exit 1; fi
+printf '#!/bin/sh\\n[ "$1" = --version ] && echo %s\\n' "$version" > "$into/$name"; chmod +x "$into/$name"
+`, { mode: 0o755 });
+  }
+  const file = join(dir, 'house.package-manager.sh');
+  writeFileSync(file, script);
+  // ~/.local/bin first and the global prefix after it, as in a house container.
+  const env = { PATH: `${join(home, '.local/bin')}:${global}:${tools}`, HOME: home };
+  let status = 0;
+  let output = '';
+  const shell = execFileSync('sh', ['-c', 'command -v sh'], { encoding: 'utf8' }).trim();
+  try {
+    output = execFileSync(shell, ['-c', 'sh "$0" "$1" 2>&1', file, spec], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    status = error.status;
+    output = `${error.stdout}${error.stderr}`;
+  }
+  const calls = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [];
+  const inLocal = readdirSync(join(home, '.local/bin'));
+  rmSync(dir, { recursive: true, force: true });
+  return { status, calls, output, inLocal };
+};
+
+check('package manager: the installer installs only what is not already right, and never floats', (ok) => {
+  const { renderPackageManagerScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const { PACKAGE_MANAGER_PINS } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const script = renderPackageManagerScript();
+  ok(shParses(script) && !script.includes('{{'), 'the rendered script does not parse, or kept a placeholder');
+  ok(script.includes('Generated by @bespunky/nx-tools:devcontainer'), 'no provenance line: the next run would take it for the project\'s own');
+  for (const [pm, versions] of Object.entries(PACKAGE_MANAGER_PINS)) {
+    for (const version of versions) ok(/^\d+\.\d+\.\d+$/.test(version), `the pin ${pm} ${version} is not exact`);
+  }
+  const berry = PACKAGE_MANAGER_PINS.yarn.find((version) => !version.startsWith('1.'));
+  const classic = PACKAGE_MANAGER_PINS.yarn[0];
+  const pnpm = PACKAGE_MANAGER_PINS.pnpm[0];
+  const run = (...args) => runPmInstaller(script, ...args);
+  const quiet = (label, result) => ok(result.status === 0 && result.calls.length === 0, `${label}: expected no install, got ${JSON.stringify(result)}`);
+  const installs = (label, result, package_) =>
+    ok(result.status === 0 && result.calls.length === 1 && result.calls[0].endsWith(` ${package_}`) && result.calls[0].includes('-g'), `${label}: expected one global install of ${package_}, got ${JSON.stringify(result)}`);
+
+  // Already right: nothing happens, whichever way the project asked.
+  quiet('exact, present', run('yarn@1.22.22', { on: { yarn: '1.22.22' } }));
+  quiet('no version, any present', run('yarn', { on: { yarn: '1.22.19' } }));
+  quiet('a line, within it', run('yarn@4', { on: { yarn: '4.5.0' } }));
+  quiet('a major.minor line, within it', run('pnpm@9.1', { on: { pnpm: '9.1.4' } }));
+  quiet('berry, on berry', run('yarn@berry', { on: { yarn: '3.8.0' } }));
+  quiet('npm, no version', run('npm', { on: { npm: '11.0.0' } }));
+
+  // Missing (typescript-node:26's yarn, pnpm on an image with none).
+  installs('exact, missing', run('yarn@1.22.22'), 'yarn@1.22.22');
+  installs('no version, missing: the pin', run('yarn'), `yarn@${classic}`);
+  installs('pnpm, no version, missing: the pin', run('pnpm'), `pnpm@${pnpm}`);
+  installs('pnpm, exact, missing', run('pnpm@9.15.9'), 'pnpm@9.15.9');
+  installs('a line, missing: the pin of that line', run('yarn@4'), `@yarnpkg/cli-dist@${berry}`);
+
+  // Wrong version: yarn@4 with no yarnPath on an image with yarn 1 — yarn 2+ is a different npm package.
+  installs('yarn 4 over yarn 1', run('yarn@4.5.0', { on: { yarn: '1.22.22' } }), '@yarnpkg/cli-dist@4.5.0');
+  installs('yarn 1 over another yarn 1', run('yarn@1.22.22', { on: { yarn: '1.22.19' } }), 'yarn@1.22.22');
+  installs('berry evidence on yarn 1: the berry pin', run('yarn@berry', { on: { yarn: '1.22.22' } }), `@yarnpkg/cli-dist@${berry}`);
+  installs('npm, exact, wrong', run('npm@10.9.0', { on: { npm: '11.0.0' } }), 'npm@10.9.0');
+  // A line is compared by its dots: 10.34.9 is not within 10.3, and the pin is not either, so nothing fits.
+  ok(run('pnpm@10.3', { on: { pnpm: '10.34.9' } }).status === 1, 'a line was compared as a string prefix');
+
+  // Refused, having said why, with nothing installed.
+  const noPin = run('pnpm@7', { on: { pnpm: '10.0.0' } });
+  ok(noPin.status === 1 && noPin.calls.length === 0 && noPin.output.includes('Declare an exact one'), `a line the house has no pin of must not float: ${JSON.stringify(noPin)}`);
+  const noNpm = run('pnpm@9.15.9', { npm: false });
+  ok(noNpm.status === 1 && noNpm.output.includes('has no npm'), `an image with no npm is named: ${JSON.stringify(noNpm)}`);
+  for (const hostile of ['yarn@1.0.0;id', 'yarn@$(id)', 'yarn@-g', 'bun@1.0.0', '']) {
+    const refused = run(hostile);
+    ok(refused.status === 1 && refused.calls.length === 0, `'${hostile}' reached npm: ${JSON.stringify(refused)}`);
+  }
+
+  // The install lands EARLIER on PATH than the image's copy (/usr/local/bin vs npm-global/bin on typescript-node): the check
+  // after it must see the new one. npm too, where the script's shell remembers the old one: found with the real npm.
+  installs('an image copy behind the prefix', run('yarn@4.5.0', { behind: { yarn: '1.22.22' } }), '@yarnpkg/cli-dist@4.5.0');
+  installs('npm, landing ahead of the image\'s npm', run('npm@10.9.0', { npmLandsAhead: true }), 'npm@10.9.0');
+
+  // A prefix this user cannot write (a foreign image's root-owned /usr/local): ~/.local, first on the house's PATH.
+  const fallback = run('yarn@1.22.22', { npmFails: true });
+  ok(fallback.status === 0 && fallback.calls.length === 2 && fallback.calls[1].includes('--prefix') && fallback.inLocal.includes('yarn'), `no fallback to ~/.local: ${JSON.stringify(fallback)}`);
+  // An earlier fallback's copy shadows a good global install: the version check after the install is what notices.
+  const shadowed = run('yarn@1.22.22', { shadow: ['yarn', '1.22.19'] });
+  ok(shadowed.status === 0 && shadowed.calls.length === 2 && shadowed.calls[1].includes('--prefix'), `a shadowed install was reported as done: ${JSON.stringify(shadowed)}`);
+});
+
+checkAsync('package manager: the image layer states what package.json declares; every image source gets the script; post-create survives an image without it', async (ok) => {
+  const nodeRepo = (pkg = {}) => {
+    const tree = createTreeWithEmptyWorkspace();
+    writeJson(tree, 'package.json', { name: 'shop', ...pkg });
+    return tree;
+  };
+  const script = (tree) => tree.read('.devcontainer/house.package-manager.sh', 'utf8');
+  const layers = ['nx', 'agent', 'node'];
+
+  const tree = nodeRepo({ packageManager: 'pnpm@9.15.9' });
+  const a = await artifacts(tree, layers);
+  ok(a.dockerfile.includes("house.package-manager.sh 'pnpm@9.15.9'"), `the image layer does not state the declared version:\n${a.dockerfile}`);
+  ok(a.dockerfile.includes('COPY house.package-manager.sh /tmp/') && !/\{\{/.test(a.dockerfile), 'the script is not copied from the build context, or a placeholder survived');
+  ok(a.dockerfile.indexOf('house.packages.sh') < a.dockerfile.indexOf('house.package-manager.sh'), 'the package manager layer comes after the OS packages');
+  ok(a.dc.build?.context === '.', 'the build context moved: package.json is deliberately not in it');
+  ok(a.post.includes('.devcontainer/house.package-manager.sh" "$PM_SPEC"') && a.post.indexOf('house.package-manager.sh') < a.post.indexOf('$PM_INSTALL\n'), 'post-create does not provide the package manager before it installs');
+  ok(script(tree)?.includes('HOUSE_PINS'), 'the script was not written');
+  ok(bashParses(a.post), 'post-create.sh does not parse');
+  ok((await artifacts(nodeRepo({ packageManager: 'yarn@4.5.0' }), layers)).dockerfile.includes("'yarn@4.5.0'"), 'the spec is not the project\'s');
+  ok((await artifacts(nodeRepo({ packageManager: 'yarn@latest' }), layers)).dockerfile.includes("house.package-manager.sh 'yarn'"), 'a tag reached the image layer');
+
+  // No layer asks: no script, no layer; a house-written script left by an earlier run goes with the layer.
+  const wrapper = wrapperRepo();
+  const w = await artifacts(wrapper, ['nx', 'agent']);
+  ok(!w.dockerfile.includes('package-manager') && !wrapper.exists('.devcontainer/house.package-manager.sh'), 'a repo with no package.json got a package manager layer');
+  const left = nodeRepo();
+  await artifacts(left, layers);
+  await artifacts(left, ['nx', 'agent']);
+  ok(!left.exists('.devcontainer/house.package-manager.sh'), 'the script outlived the layer that asked for it');
+
+  // An adopted devcontainer with an image of its own: no Dockerfile, the same script, post-create runs it.
+  const foreign = nodeRepo({ packageManager: 'yarn@1.22.22' });
+  foreign.write('.devcontainer/devcontainer.json', '{ "image": "node:26", "remoteUser": "node" }\n');
+  const f = await artifacts(foreign, layers);
+  ok(!foreign.exists('.devcontainer/house.Dockerfile') && script(foreign)?.includes('HOUSE_PINS'), 'a foreign image is not covered by the script');
+  ok(f.post.includes('house.package-manager.sh" "$PM_SPEC"'), 'an adopted post-create does not provide the package manager');
+  // ... and a script at that path the house did not write stays the project's.
+  const theirs = nodeRepo();
+  theirs.write('.devcontainer/house.package-manager.sh', '#!/bin/sh\necho ours\n');
+  await artifacts(theirs, layers);
+  ok(script(theirs) === '#!/bin/sh\necho ours\n', 'a project file at the house path was overwritten');
+
+  // THE BUG: the rendered piece, under post-create's own `set -euo pipefail`, on an image with no yarn. A fake npm provides it.
+  const dir = mkdtempSync(join(tmpdir(), 'pm-post-create-'));
+  const bin = join(dir, 'bin');
+  const ws = join(dir, 'ws');
+  const log = join(dir, 'yarn.log');
+  mkdirSync(join(ws, '.devcontainer'), { recursive: true });
+  mkdirSync(bin);
+  writeFileSync(join(ws, 'package.json'), JSON.stringify({ name: 'x', packageManager: 'yarn@1.22.22' }, null, 2));
+  writeFileSync(join(ws, '.devcontainer/house.package-manager.sh'), script(tree));
+  writeFileSync(join(bin, 'npm'), `#!/bin/sh\nprintf '#!/bin/sh\\n[ "$1" = --version ] && echo 1.22.22 || echo "yarn $*" >> "${log}"\\n' > '${bin}/yarn'; chmod +x '${bin}/yarn'\n`, { mode: 0o755 });
+  const start = a.post.indexOf('if [ -f "$WS/package.json" ]; then');
+  const piece = a.post.slice(start, a.post.indexOf('\nfi\n', start) + 4);
+  const output = execFileSync('bash', ['-c', `set -euo pipefail\nexec < /dev/null\nWS="$1"\ncd "$WS"\n${piece}`, '_', ws], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir }, encoding: 'utf8' });
+  ok(readFileSync(log, 'utf8').trim() === 'yarn install --non-interactive', `post-create did not install with the yarn it provided:\n${output}`);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 // A6 — the dev-server base port is the owning stack's; a dev-server nobody can place is reported, not guessed.

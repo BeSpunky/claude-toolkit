@@ -10,13 +10,15 @@
 //   prepare  checkout, install (every dependency's install scripts), nx-set-shas, and the list of projects to
 //            deploy. It has NO `id-token` — nothing it runs can mint a cloud token.
 //   deploy   in the GitHub environment (its protection rules, its variables): the dependencies prepare installed
-//            (restored, never re-installed — no install script runs here), the providers' auth, and the deploys.
+//            (restored, never re-installed — no install script runs here, and the one package fetched, the pinned
+//            corepack, is fetched with scripts off), the providers' auth, and the deploys.
 //            The only job with `id-token: write`, and one at a time per ENVIRONMENT.
 // Provider arguments reach only provider targets: each provider's deploy targets carry a `ci-<environment>`
 // configuration (written by the ci generator), and the deploy runs with `-c ci-<environment>` — a target without
 // that configuration runs its default one, untouched.
 import type { CiDeployProvider } from '../../layers/descriptor';
 import type { PackageManager } from '../_utils/package-manager';
+import { COREPACK_VERSION } from '../_utils/versions';
 import { ACTIONS, uses } from './actions';
 import { branchRefRegex } from './refs';
 
@@ -63,9 +65,20 @@ function installStep(pm: PackageManager | undefined, berry: boolean): string[] {
   return [...corepack(pm), `      - run: ${command}`];
 }
 
-/** The package manager at the version package.json declares (`packageManager`), through Node's corepack. */
+/**
+ * The package manager at the version package.json declares (`packageManager`), through a corepack of our own pin: the
+ * Node comes from the project's file and Node 25+ ships none, so nothing here may rest on what a Node, or the runner's
+ * system Node behind it, happens to carry. On every Node, not branched on its major: a Node that still bundles one is
+ * overwritten by the same pin, which leaves one road to test. `--ignore-scripts` because deploy holds `id-token`.
+ */
 function corepack(pm: PackageManager | undefined): string[] {
-  return !pm || pm === 'npm' ? [] : ["      # The package manager at the version package.json declares (`packageManager`), through Node's corepack.", '      - run: corepack enable'];
+  if (!pm || pm === 'npm') return [];
+  return [
+    '      # The package manager at the version package.json declares (`packageManager`), through a pinned corepack:',
+    "      # Node 25+ ships none, and the project's Node decides which one this is.",
+    `      - run: npm install -g --ignore-scripts corepack@${COREPACK_VERSION}`,
+    '      - run: corepack enable',
+  ];
 }
 
 /** What prepare hands deploy: the installed dependencies (or, on the Nx wrapper host, the wrapper's Nx install). */

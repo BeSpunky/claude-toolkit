@@ -241,5 +241,19 @@ invoke "$r" ""
 ok "no git base survives set -e" "$([ "$DIED" = 0 ] && echo 1 || echo 0)" "the reporter exited non-zero"
 ok "no git base reports 'unknown', never 'none'" "$([ "$UPGRADE_NEXT" = unknown ] && echo 1 || echo 0)" "got '$UPGRADE_NEXT'"
 
+# ── a tree git refuses ────────────────────────────────────────────────────────────────────────────
+# A chown that failed leaves a tree owned by someone else, and host-side git then refuses it ("dubious ownership"). The
+# knob is git's own: the same refusal, with no root needed. Reading that as "nothing changed" would report `none`, and
+# the failed listing used to kill the script under set -e, taking the report with it.
+r="$(fixture refused)"
+base="$(git -C "$r" rev-parse HEAD)"
+printf '{"mounts":["x"]}\n' > "$r/.devcontainer/devcontainer.json"
+export GIT_TEST_ASSUME_DIFFERENT_OWNER=1
+git -C "$r" rev-parse HEAD >/dev/null 2>&1 && ok "the knob makes git refuse the tree" 0 "git answered, so this case tests nothing"
+invoke "$r" "$base"
+unset GIT_TEST_ASSUME_DIFFERENT_OWNER
+ok "a refused tree survives set -e" "$([ "$DIED" = 0 ] && echo 1 || echo 0)" "the reporter exited non-zero"
+ok "a refused tree reports 'unknown', never 'none'" "$([ "$UPGRADE_NEXT" = unknown ] && echo 1 || echo 0)" "got '$UPGRADE_NEXT'"
+
 if [ "$FAILED" = 0 ]; then echo "  UPGRADE_NEXT reporter: all cases passed"; fi
 exit "$FAILED"

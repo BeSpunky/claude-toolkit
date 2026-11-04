@@ -1,0 +1,70 @@
+# The engine's Docker fallback on a REAL engine and a REAL image: `house.sh new --docker --preset=angular`, end to end
+# (tools/check-runner-image/e2e.sh). The per-push scaffold tests drive it against a fake docker, which proves what the
+# launcher decides and nothing about whether the image lets the program through. GitHub's runner has Docker; a house
+# devcontainer does not, so this is where it gets observed at all.
+#
+# Slow and network-bound, so NOT on every push and not in the pre-push hook: weekly (the image is a rolling tag, so this
+# can go red with no commit here), on demand, after a publish, and when a push touches what it tests. Every branch counts,
+# unlike the sibling tripwires: there is nowhere else a change to the fallback can get a real-Docker result before it
+# lands, but only if it is pushed. versions.ts is there because HOUSE_NODE_MAJOR, which picks the image, lives in it.
+# It tests the launcher and the image, so the payload's generators stay out of `paths`: they would put two 45-minute
+# ceilings on every payload push, and tools/dogfood-consumer covers them before a release.
+#
+# Two roads. `local` packs this checkout, so it can always run. `registry` is what a consumer gets, which only main holds:
+# elsewhere it would run this house.sh on the published payload, a pair no consumer has. It skips with a stated reason
+# while the version is not on npm yet on a push, and fails if it is still not there otherwise; see e2e.sh.
+name: runner image e2e
+
+on:
+  schedule:
+    - cron: '53 4 * * 1' # Mondays 04:53 UTC
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Publish nx-tools']
+    types: [completed]
+    branches: [main]
+  push:
+    branches: ['**']
+    paths:
+      - 'plugins/house/engine/*'
+      - 'plugins/house/engine/nx-tools/package.json'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
+      - 'tools/check-runner-image/**'
+      - '!tools/check-runner-image/devcontainer.sh' # devcontainer-image-e2e.yml's; it reaches neither the fallback nor its image
+      - '.github/workflows/runner-image-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-image-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    if: github.repository == 'BeSpunky/claude-toolkit' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: The checks' own branches, against a fake docker
+        run: bash tools/check-runner-image/test.sh
+      - name: What the real image holds
+        run: bash tools/check-runner-image/check.sh
+
+  e2e:
+    # Behind the image check: with no yarn in the image these would only repeat its finding, less clearly, twice.
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        road: [local, registry]
+    name: e2e (${{ matrix.road }})
+    steps:
+      - uses: actions/checkout@v5
+        if: matrix.road == 'local' || github.ref == 'refs/heads/main'
+      - name: house.sh new --docker --preset=angular, on the ${{ matrix.road }} road
+        if: matrix.road == 'local' || github.ref == 'refs/heads/main'
+        run: bash tools/check-runner-image/e2e.sh ${{ matrix.road }}

@@ -58,6 +58,8 @@ export const node: LayerDescriptor = {
         why: 'node_modules on a volume, not the bind mount — installs and module resolution at native speed.',
       },
     ],
+    // Its image, or an adopted one, may ship no such package manager (typescript-node:26 ships neither yarn nor corepack).
+    packageManager: true,
     postCreate: [{ phase: 'install', piece: 'node-install' }],
   },
   docSections: ['node'],

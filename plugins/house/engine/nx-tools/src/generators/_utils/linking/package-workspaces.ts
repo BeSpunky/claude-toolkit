@@ -14,7 +14,7 @@
 import { type Tree, readJson, logger } from '@nx/devkit';
 import { updateManifest } from '../dependencies';
 import { dirname } from 'node:path';
-import { detectPackageManager } from '../package-manager';
+import { detectPackageManager, isYarnBerry } from '../package-manager';
 import { workspacePath } from './shared';
 
 const PNPM_WORKSPACE = 'pnpm-workspace.yaml';
@@ -138,17 +138,4 @@ export function workspaceDependencySpec(tree: Tree): 'workspace:*' | '*' {
  */
 export function isWorkspaceLinkRange(tree: Tree, range: string): boolean {
   return range.startsWith('workspace:') || range === workspaceDependencySpec(tree);
-}
-
-/**
- * Yarn 2+ ("berry") vs yarn 1 ("classic"), from the repo's own evidence — never by spawning `yarn --version`,
- * which answers for whatever yarn is on this machine's PATH, not for the repo: a declared `packageManager:
- * yarn@<major>`, else berry's own config file (`.yarnrc.yml`), else a berry lockfile (it opens with
- * `__metadata:`). None of them → classic, the yarn that predates all three.
- */
-function isYarnBerry(tree: Tree): boolean {
-  const declared = /"packageManager"\s*:\s*"yarn@(\d+)/.exec(tree.read('package.json', 'utf-8') ?? '')?.[1];
-  if (declared) return Number(declared) >= 2;
-  if (tree.exists('.yarnrc.yml')) return true;
-  return /^__metadata:/m.test(tree.read('yarn.lock', 'utf-8') ?? '');
 }

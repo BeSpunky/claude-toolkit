@@ -6,9 +6,10 @@
 # with exit 1 and no project — the run's own failure replaced by the failure of its cleanup. Nothing here had changed.
 #
 # What is asserted, against a fake `docker` that records every call and plays the part it is told to (no image, no
-# network): the image comes from HOUSE_NODE_MAJOR and from no registry; a missing package manager stops the run before
-# the program starts; a program that dies reports itself with its own exit code, does not chown what does not exist,
-# and is never pushed to GitHub; a failed chown still ends a run that had otherwise succeeded.
+# network): the image comes from HOUSE_NODE_MAJOR and from no registry; a missing package manager, or a declared yarn
+# the image's yarn cannot reach, stops the run before the program starts; a program that dies reports itself with its own exit code, does not chown what does not exist,
+# and is never pushed to GitHub; a failed chown ends a run that had otherwise succeeded with its own exit code, but only
+# after that run's report, because the work is done and the report is the record of it.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -40,7 +41,11 @@ done
 image="$1"; shift
 case "$1 ${2:-}" in
   'chown '*)              what=chown ;;
-  'bash -lc')             case "$3" in 'command -v "$1"') what=probe ;; *) what=program ;; esac ;;
+  'bash -lc')             case "$3" in
+                            'command -v "$1"')  what=probe ;;
+                            '"$1" --version')   what=version ;;
+                            *)                  what=program ;;
+                          esac ;;
   'node /tool/'*)         what=program ;;
   *)                      what=unknown ;;
 esac
@@ -48,6 +53,8 @@ echo "$what" >> "$CALLS"
 echo "$what image=$image args=$before" >> "$CALLS.argv"
 case "$what" in
   probe)   [ "$4" = "_" ] && echo "tool=$5" >> "$CALLS.argv"; exit "${FAKE_PROBE_RC:-0}" ;;
+  version) [ -z "${FAKE_LOCK_DIR:-}" ] || [ ! -e "$FAKE_LOCK_DIR" ] || echo "lock held when asked" >> "$CALLS.argv"
+           echo "${FAKE_YARN_VERSION-1.22.22}"; exit "${FAKE_VERSION_RC:-0}" ;;
   chown)   exit "${FAKE_CHOWN_RC:-0}" ;;
   program) [ -z "${FAKE_CREATES:-}" ] || mkdir -p "$FAKE_CREATES"
            exit "${FAKE_PROGRAM_RC:-0}" ;;
@@ -100,8 +107,14 @@ called gh && ok "the GitHub step runs" || fail "the GitHub step never ran, so 'n
 p="$(argv probe)"; g="$(argv program)"
 [ "${p%% args=*}" = "probe image=${IMAGE_REF:=mcr.microsoft.com/devcontainers/typescript-node:$major}" ] && [ "${g%% args=*}" = "program image=$IMAGE_REF" ] \
   && ok "probe and program use the house image" || fail "images: $p / $g"
-case "$p" in *"-u $(id -u):$(id -g)"*"-e HOME=/home/node"*) ok "the probe has the program's user and HOME" ;; *) fail "probe: $p" ;; esac
-case "$g" in *"-u $(id -u):$(id -g)"*"-e HOME=/home/node"*) ok "…and so does the program" ;; *) fail "program: $g" ;; esac
+# A uid other than the image's 1000 has to be able to write it, so never /home/node (the program's first act on a
+# scaffold is `git config --global`, under set -e).
+container_home="$(. "$ENGINE/container-engine.sh"; echo "$CONTAINER_HOME")"
+[ "$container_home" = "/tmp" ] && ok "HOME is somewhere every uid can write" || fail "CONTAINER_HOME is $container_home"
+case "$p" in *"-u $(id -u):$(id -g)"*"-e HOME=$container_home"*) ok "the probe has the program's user and HOME" ;; *) fail "probe: $p" ;; esac
+case "$g" in *"-e NPM_CONFIG_PREFIX=$container_home/"*) ok "the program's global prefix is one its user can write (yarn create links its binary there)" ;; *) fail "program prefix: $g" ;; esac
+case "$g" in *"-u $(id -u):$(id -g)"*"-e HOME=$container_home"*) ok "…and so does the program" ;; *) fail "program: $g" ;; esac
+case "$(argv chown)" in *" -u 0:0"*) ok "the chown asks for root, not for the image's default user" ;; *) fail "chown: $(argv chown)" ;; esac
 grep -qx "tool=yarn" "$CALLS.argv" && ok "it asks for yarn" || fail "asked: $(cat "$CALLS.argv")"
 rm -rf "$TMP/projects/shop"
 
@@ -148,13 +161,21 @@ echo "── the program dies and the chown fails too"
 scaffold FAKE_PROGRAM_RC=3 FAKE_CHOWN_RC=9 "FAKE_CREATES=$TMP/projects/shop"
 [ "$rc" -eq 3 ] && ok "the program's failure is the one reported" || fail "exit $rc, not 3"
 grep -q "^NEW_FAILED" <<< "$out" && ok "NEW_FAILED still printed" || fail "no NEW_FAILED: $out"
+grep -qF "sudo chown -R" <<< "$out" && ok "…and the repair, for the partial tree" || fail "no repair: $out"
 rm -rf "$TMP/projects/shop"
 
 echo "── the program succeeds and the chown fails"
 scaffold FAKE_CHOWN_RC=9 "FAKE_CREATES=$TMP/projects/shop"
 [ "$rc" -eq 9 ] && ok "ends the run with the chown's exit code" || fail "exit $rc, not 9"
-grep -qF "could not hand" <<< "$out" && ok "says why" || fail "no clear error: $out"
+grep -q "^NEW_OK $TMP/projects/shop" <<< "$out" && ok "the completed run's NEW_OK still prints" || fail "no NEW_OK: $out"
+grep -q "^OWNERSHIP_UNRESTORED $TMP/projects/shop (exit 9)" <<< "$out" && ok "says the ownership was not restored" || fail "no clear error: $out"
+grep -qF "sudo chown -R $(id -u):$(id -g) '$TMP/projects/shop'" <<< "$out" && ok "gives the exact repair" || fail "no repair: $out"
+[ "$(grep -nE '^(NEW_OK|OWNERSHIP_UNRESTORED)' <<< "$out" | cut -d: -f2 | cut -d' ' -f1 | tr '\n' ' ')" = "NEW_OK OWNERSHIP_UNRESTORED " ] \
+  && ok "the repair comes last, under the report" || fail "order: $out"
+grep -qF "NEW_FAILED" <<< "$out" && fail "a completed scaffold reported as failed" || ok "no NEW_FAILED"
 called gh && fail "published with ownership unrestored" || ok "nothing published"
+grep -qF "GITHUB_SKIP: ownership not restored" <<< "$out" && ok "says why it was not published" || fail "no GITHUB_SKIP: $out"
+rm -rf "$TMP/projects/shop"
 
 # An upgrade reports in its own vocabulary, and the pre-write stop has to leave the project as it was.
 proj="$TMP/projects/existing"
@@ -182,6 +203,183 @@ upgrade FAKE_PROGRAM_RC=3 FAKE_CHOWN_RC=9
 [ "$rc" -eq 3 ] && ok "the program's own exit code" || fail "exit $rc, not 3: $out"
 grep -q "^UPGRADE_FAILED" <<< "$out" && ok "UPGRADE_FAILED" || fail "no UPGRADE_FAILED: $out"
 grep -qF "NEW_FAILED" <<< "$out" && fail "an upgrade reported as a scaffold" || ok "no NEW_FAILED"
+
+echo "── upgrade: the program succeeds and the chown fails"
+upgrade FAKE_CHOWN_RC=9
+[ "$rc" -eq 9 ] && ok "ends with the chown's exit code" || fail "exit $rc, not 9: $out"
+grep -q "^UPGRADE_NEXT: " <<< "$out" && ok "UPGRADE_NEXT still prints" || fail "no UPGRADE_NEXT: $out"
+grep -q "^UPGRADE_OK $proj" <<< "$out" && ok "UPGRADE_OK still prints" || fail "no UPGRADE_OK: $out"
+grep -qF "UPGRADE_FAILED" <<< "$out" && fail "a completed upgrade reported as failed" || ok "no UPGRADE_FAILED"
+[ "$(tail -2 <<< "$out" | cut -d' ' -f1 | head -1)" = "OWNERSHIP_UNRESTORED" ] && ok "the ownership line is last" || fail "order: $out"
+tail -1 <<< "$out" | grep -qF "sudo chown -R $(id -u):$(id -g) '$proj'" && ok "…with the exact repair" || fail "no repair: $out"
+[ ! -e "$proj/.bespunky-upgrade.lock" ] && ok "the lock is released" || fail "lock left behind"
+
+echo "── upgrade: a declared yarn the image cannot reach"
+declare_yarn() {   # <packageManager value, or nothing>
+  rm -f "$proj/.yarnrc.yml" "$proj/.yarnrc" "$TMP/projects/.yarnrc.yml"
+  printf '{%s}\n' "${1:+\"packageManager\":\"$1\"}" > "$proj/package.json"
+: > "$proj/yarn.lock"
+  git -C "$proj" add -A && git -C "$proj" commit -qm "declare ${1:-nothing}"
+}
+refused() {   # <label>
+  [ "$rc" -eq 1 ] && ok "$1: exit 1" || fail "$1: exit $rc: $out"
+  grep -qx "UPGRADE_REFUSED: runner-image" <<< "$out" && ok "$1: UPGRADE_REFUSED: runner-image" || fail "$1: no refusal code: $out"
+  called program && fail "$1: the program ran anyway" || ok "$1: the program never started"
+  [ -z "$(git -C "$proj" status --porcelain)" ] && ok "$1: the tree is untouched, no lock" || fail "$1: written: $(git -C "$proj" status --porcelain)"
+}
+passes() {   # <label>
+  [ "$rc" -eq 0 ] && called program && ok "$1: runs" || fail "$1: rc=$rc: $out"
+}
+declare_yarn "yarn@4.1.0+sha512.abc"
+upgrade
+refused "yarn 4 on image yarn 1"
+grep -qF "declares yarn@4.1.0+sha512.abc with no yarnPath" <<< "$out" && grep -qF "has yarn 1.22.22" <<< "$out" && ok "names the declaration and what the image answered" || fail "no clear error: $out"
+grep -qF "Node 22.18+ with yarn@4.1.0+sha512.abc on this machine's PATH runs natively" <<< "$out" && ok "names the native route, with the yarn it takes" || fail "no route: $out"
+upgrade FAKE_YARN_VERSION=$'a banner from a login shell\n1.22.22'
+refused "the version is the answer's last line"
+grep -qF "has yarn 1.22.22" <<< "$out" && ok "…and not the shell's noise" || fail "read: $out"
+upgrade "FAKE_LOCK_DIR=$proj/.bespunky-upgrade.lock"
+refused "yarn 4, with the lock watched"
+grep -qF "lock held" "$CALLS.argv" && fail "the version was asked with the lock held, so the refusal comes too late" || ok "the refusal comes before the lock"
+grep -qx version "$CALLS" && ok "…and that watch saw the question asked" || fail "no version was asked, so the watch proves nothing"
+case "$(argv version)" in *"-e HOME=$container_home"*) ok "the version is asked with the program's HOME" ;; *) fail "version: $(argv version)" ;; esac
+upgrade FAKE_VERSION_RC=125
+refused "the version cannot be asked"
+grep -qF "could not read the yarn version" <<< "$out" && ok "says it could not ask" || fail "no clear error: $out"
+upgrade FAKE_YARN_VERSION=
+refused "an empty answer"
+upgrade FAKE_YARN_VERSION=4.2.0
+passes "the image's real yarn is the declared major"
+echo 'nodeLinker: node-modules' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+refused ".yarnrc.yml without a yarnPath"
+echo '# yarnPath: .yarn/releases/yarn-4.1.0.cjs' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+refused "a commented-out yarnPath"
+echo 'yarnPath:' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+refused "a yarnPath with no value"
+echo '"yarnPath": .yarn/releases/yarn-4.1.0.cjs' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+passes "a quoted yarnPath"
+declare_yarn "yarn@4.1.0"
+echo '#yarn-path ".yarn/releases/yarn-4.1.0.cjs"' > "$proj/.yarnrc"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+refused "a commented-out yarn-path"
+declare_yarn "yarn@4.1.0"
+echo 'yarn-path: .yarn/releases/yarn-4.1.0.cjs' > "$proj/.yarnrc"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+passes "yarn-path with a colon"
+for spec in yarn@1 yarn@stable yarn@^4 yarn@2.4.3; do
+  declare_yarn "$spec"
+  upgrade
+  refused "$spec, which yarn 1's own check refuses"
+done
+declare_yarn "yarn@1.22.19+sha1.abc"
+upgrade
+passes "another yarn 1 with a hash"
+declare_yarn "yarn@0.28.4"
+upgrade
+passes "yarn 0, which yarn 1's own check accepts"
+declare_yarn ""
+echo 'nodeLinker: node-modules' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+refused "undeclared, on a .yarnrc.yml"
+grep -qF "on yarn 2+" <<< "$out" && grep -qF "yarn@<x.y.z>" <<< "$out" && ok "says why, and how to declare yarn 1" || fail "no clear error: $out"
+echo 'yarnPath: .yarn/releases/yarn-4.1.0.cjs' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+passes "undeclared, with a yarnPath"
+declare_yarn ""
+printf '__metadata:\n  version: 8\n' > "$proj/yarn.lock"; git -C "$proj" add -A; git -C "$proj" commit -qm lock
+upgrade
+refused "undeclared, on a yarn 2+ lockfile"
+upgrade FAKE_YARN_VERSION=4.2.0
+passes "undeclared yarn 2+ on a runner with yarn 2+"
+declare_yarn "yarn@4.1.0"
+echo 'yarnPath: .yarn/releases/yarn-4.1.0.cjs' > "$proj/.yarnrc.yml"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+passes "yarnPath in .yarnrc.yml"
+grep -qx version "$CALLS" && fail "a yarnPath still asked the image" || ok "…asking the image nothing"
+declare_yarn "yarn@4.1.0"
+echo 'yarn-path ".yarn/releases/yarn-4.1.0.cjs"' > "$proj/.yarnrc"; git -C "$proj" add -A; git -C "$proj" commit -qm rc
+upgrade
+passes "yarn-path in .yarnrc"
+declare_yarn "yarn@4.1.0"
+echo 'yarnPath: ../.yarn/releases/yarn-4.1.0.cjs' > "$TMP/projects/.yarnrc.yml"
+upgrade
+passes "yarnPath in the directory above, which the container mounts"
+rm -f "$TMP/projects/.yarnrc.yml"
+declare_yarn "yarn@1.22.22"
+upgrade
+passes "yarn 1 on image yarn 1"
+declare_yarn ""
+upgrade
+passes "a yarn.lock with no declaration"
+grep -qx version "$CALLS" && fail "no declaration still asked the image" || ok "…asking the image nothing"
+git -C "$proj" rm -qf yarn.lock; echo '{"packageManager":"npm@99.0.0"}' > "$proj/package.json"; git -C "$proj" add -A; git -C "$proj" commit -qm npm
+upgrade
+passes "npm is not refused by version"
+echo '{"packageManager":"pnpm@99.0.0"}' > "$proj/package.json"; git -C "$proj" add -A; git -C "$proj" commit -qm pnpm
+upgrade
+passes "pnpm present in the image is not refused by version"
+grep -qx version "$CALLS" && fail "asked for a version of a non-yarn package manager" || ok "…asking no version"
+
+# The native path has its own road to the same report. Its fake yarn is the program's first real command; the real Node
+# stays, because that is what chooses the native path.
+echo "── native: the program dies"
+mkdir -p "$TMP/native-bin"; cp "$TMP/bin/"* "$TMP/native-bin/"
+cat > "$TMP/native-bin/yarn" <<'FAKE'
+#!/usr/bin/env bash
+[ -z "${FAKE_CREATES:-}" ] || mkdir -p "$FAKE_CREATES"
+exit 7
+FAKE
+chmod +x "$TMP/native-bin/yarn"
+native() {
+  : > "$CALLS"
+  out="$(env PATH="$TMP/native-bin:$PATH" PROJECTS_DIR="$TMP/projects" "$@" bash "$HOUSE_SH" new --github --preset=angular shop 2>&1)"
+  rc=$?
+}
+native
+grep -qF "running the generators natively" <<< "$out" && ok "takes the native path" || fail "not native, so this case tests nothing: $out"
+[ "$rc" -eq 7 ] && ok "the program's own exit code" || fail "exit $rc, not 7: $out"
+grep -q "^NEW_FAILED $TMP/projects/shop (exit 7)" <<< "$out" && ok "NEW_FAILED, naming the project" || fail "no NEW_FAILED: $out"
+grep -qF "not created" <<< "$out" && ok "says nothing was created" || fail "does not say what is left: $out"
+grep -qF "UPGRADE_FAILED" <<< "$out" && fail "a scaffold reported as an upgrade" || ok "no upgrade advice"
+grep -qF "OWNERSHIP_UNRESTORED" <<< "$out" && fail "the native path has no ownership to restore" || ok "no ownership line"
+called gh && fail "tried to publish a failed scaffold" || ok "nothing published"
+native "FAKE_CREATES=$TMP/projects/shop"
+[ "$rc" -eq 7 ] && grep -qF "partly created" <<< "$out" && ok "a partial project is named" || fail "rc=$rc: $out"
+called gh && fail "tried to publish a partial scaffold" || ok "nothing published"
+
+# A host's yarn 1 is the same dead end as the image's, and on an undeclared yarn 2+ repo it silently rewrites the lockfile.
+echo "── native: a yarn the host's yarn cannot reach"
+cat > "$TMP/native-bin/yarn" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then pwd >> "$CALLS.yarn-cwd"; echo "$FAKE_HOST_YARN"; exit 0; fi
+echo yarn-ran >> "$CALLS"
+exit 0
+FAKE
+native_upgrade() {
+  : > "$CALLS"
+  out="$(env PATH="$TMP/native-bin:$PATH" PROJECTS_DIR="$TMP/projects" "$@" bash "$HOUSE_SH" upgrade --yes "$proj" 2>&1)"
+  rc=$?
+}
+declare_yarn "yarn@4.1.0"
+: > "$CALLS.yarn-cwd"
+native_upgrade FAKE_HOST_YARN=1.22.22
+grep -qF "running the generators natively" <<< "$out" && ok "takes the native path" || fail "not native, so this case tests nothing: $out"
+[ "$rc" -eq 1 ] && grep -qx "UPGRADE_REFUSED: runner-image" <<< "$out" && ok "a declared yarn 4 on a host yarn 1 is refused" || fail "rc=$rc: $out"
+grep -qF "this machine has yarn 1.22.22" <<< "$out" && ok "names the machine, not an image" || fail "no clear error: $out"
+grep -qF "Put yarn@4.1.0 on this machine's PATH" <<< "$out" && ok "gives the native way out" || fail "no route: $out"
+grep -qx yarn-ran "$CALLS" && fail "yarn ran anyway" || ok "yarn never ran"
+[ "$(head -1 "$CALLS.yarn-cwd")" = "$proj" ] && ok "asked from inside the project, where a corepack shim answers for it" || fail "asked from $(cat "$CALLS.yarn-cwd")"
+[ -z "$(git -C "$proj" status --porcelain)" ] && ok "the tree is untouched" || fail "written: $(git -C "$proj" status --porcelain)"
+declare_yarn ""
+printf '__metadata:\n  version: 8\n' > "$proj/yarn.lock"; git -C "$proj" add -A; git -C "$proj" commit -qm lock
+native_upgrade FAKE_HOST_YARN=1.22.22
+[ "$rc" -eq 1 ] && grep -qx "UPGRADE_REFUSED: runner-image" <<< "$out" && ok "an undeclared yarn 2+ repo on a host yarn 1 is refused" || fail "rc=$rc: $out"
+grep -q '^__metadata:' "$proj/yarn.lock" && ok "…and its lockfile is still its own" || fail "the lockfile was rewritten"
+rm -rf "$TMP/projects/shop"
 
 echo "── extract-tool"
 mkdir -p "$TMP/projects/from" "$TMP/projects/into"

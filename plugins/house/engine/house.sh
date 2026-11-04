@@ -347,6 +347,12 @@ fi
 [ "$#" -le 2 ] || { echo "ERROR: too many arguments — expected at most <project> [app-name], got: $*" >&2; exit 1; }
 APP_ARG="${2:-}"   # the app name AS GIVEN — a scaffold refuses one when nothing it ensures creates an app
 
+# Echoes the project's `packageManager` declaration (`yarn@4.1.0+sha…`), or nothing.
+declared_package_manager() {
+  { grep -m1 '"packageManager"' "$1/package.json" 2>/dev/null || true; } \
+    | sed -nE 's/.*"packageManager"[[:space:]]*:[[:space:]]*"([a-z]+@[^"]*)".*/\1/p'
+}
+
 # --- whose package manager is this? ---------------------------------------------------------------------------
 # A SCAFFOLD creates the project, so it sets the house standard: yarn. AN UPGRADE does not get that choice. The
 # package manager is a decision the project already made, encoded in a lockfile its whole team and its CI
@@ -360,8 +366,8 @@ APP_ARG="${2:-}"   # the app name AS GIVEN — a scaffold refuses one when nothi
 # we picked the house default" are different claims and only one of them should sound like a detection.
 detect_package_manager() {
   local dir="$1" declared
-  declared="$(grep -m1 '"packageManager"' "$dir/package.json" 2>/dev/null \
-    | sed -E 's/.*"packageManager"[[:space:]]*:[[:space:]]*"([a-z]+)@.*/\1/')"
+  declared="$(declared_package_manager "$dir")"
+  declared="${declared%%@*}"
   case "$declared" in
     yarn | npm | pnpm) echo "$declared packageManager-field"; return ;;
   esac
@@ -1386,7 +1392,7 @@ if [ -n \"\$_um\" ]; then
   _um_pc=\"\$(house_post_create .)\"
   _um_then='then re-run the upgrade.'
   [ -n \"\$_um_pc\" ] && _um_then=\"then re-run the container's post-create (bash \$_um_pc), and re-run the upgrade.\"
-  _refuse unwritable-mounts \"[preflight] unwritable-mounts: directories this upgrade must write into are not writable by \$(id -un).
+  _refuse unwritable-mounts \"[preflight] unwritable-mounts: directories this upgrade must write into are not writable by \$(id -un 2>/dev/null || id -u).
 \$_um_list
            A named-volume mount point is created ROOT-OWNED by Docker; unless the container's post-create
            reclaims it, every install into it fails with EACCES — this upgrade's included.
@@ -2371,8 +2377,83 @@ report_new_failed() {
   fi
   [ "$GITHUB" != "1" ] || echo "  github     : not published." >&2
 }
-if [ "$RUNTIME" = "docker" ] && ! container_require_command "$IMAGE" "$PM"; then
-  echo "       Node 22.18+ with $PM on this machine's PATH runs natively, with no image (without --docker)." >&2
+# A chown that failed says so once, with the repair. After a failed run it comes before that run's own report; after a
+# good one it comes last, under the report, because the work is done and this is the one thing left to do.
+report_ownership_unrestored() {
+  echo "OWNERSHIP_UNRESTORED $TARGET (exit $1): could not hand it back to $(id -un); files in it may be owned by root." >&2
+  echo "  repair     : sudo chown -R $(id -u):$(id -g) '$TARGET'" >&2
+}
+# Presence is not enough for yarn. A runner's yarn reaches a different release only through the project's yarnPath;
+# without one, yarn 1 stops at the first install ("This project's package.json defines packageManager…"), after the lock,
+# or, on a yarn 2+ repo that declares nothing, rewrites its lockfile to v1 and exits 0. Asked on both runtimes, because a
+# host's yarn 1 does the same as the image's. npm is left out because it does not enforce a major, and a pnpm the image
+# lacks has already stopped at the presence check.
+#
+# THE SAME RULE, IN THE PAYLOAD: _utils/package-manager.ts (what a yarnPath looks like, what evidence says yarn 2+). This
+# copy exists because no Node can be assumed on this path; change them together. tools/test-layers runs the shapes through
+# the payload's copy, tools/test-scaffold through this one. The files are the ones yarn itself reads: `.yarnrc.yml`'s
+# yarnPath and `.yarnrc`'s yarn-path, in the project and above it; above it stops at PROJECTS_DIR, the most the container
+# can see.
+yarn_path_reaches_project() {
+  local dir
+  for dir in "$TARGET" "$PROJECTS_DIR"; do
+    grep -qE '^["'\'']?yarnPath["'\'']?[[:space:]]*:[[:space:]]*[^[:space:]#]' "$dir/.yarnrc.yml" 2>/dev/null && return 0
+    grep -qE '^"?yarn-path"?:?[[:space:]]+[^[:space:]#]' "$dir/.yarnrc" 2>/dev/null && return 0
+  done
+  return 1
+}
+yarn_berry_evidence() {
+  [ -f "$TARGET/.yarnrc.yml" ] || grep -qs '^__metadata:' "$TARGET/yarn.lock"
+}
+# The image's own copy, away from any project. On the host, from inside the project: a host's `yarn` may be corepack's
+# shim, which answers for the release this project would get, while yarn 1 answers for itself.
+runner_yarn_version() {
+  if [ "$RUNTIME" = "docker" ]; then
+    container_command_version "$IMAGE" yarn
+  else
+    (cd "$TARGET" && yarn --version </dev/null)
+  fi
+}
+_native_pm="$PM"
+_runner_named="this machine"
+[ "$RUNTIME" != "docker" ] || _runner_named="$IMAGE"
+runner_honours_yarn() {
+  local declared version _wanted rc=0
+  [ "$PM" = "yarn" ] || return 0
+  declared="$(declared_package_manager "$TARGET")"
+  case "$declared" in yarn@*) declared="${declared#yarn@}" ;; *) declared="" ;; esac
+  [ -n "$declared" ] || yarn_berry_evidence || return 0
+  yarn_path_reaches_project && return 0
+  _wanted="yarn 2+"
+  [ -z "$declared" ] || _wanted="yarn@$declared"
+  version="$(runner_yarn_version)" || rc=$?
+  version="${version##*$'\n'}"
+  case "$rc:$version" in
+    0:[0-9]*) ;;
+    *) echo "ERROR: could not read the yarn version of $_runner_named (exit $rc, answer '$version'), and this project needs $_wanted. Nothing was written." >&2
+       return 1 ;;
+  esac
+  case "$version" in
+    # Yarn 1's own rule (/^yarn@[01]\./ in its cli.js), which is why `yarn@1`, `yarn@stable` and `yarn@^4` do not pass.
+    [01].*) case "$declared" in [01].*) return 0 ;; esac ;;
+    # A yarn 2+ only has an opinion on a version it can compare.
+    *) case "$declared" in "" | "${version%%.*}" | "${version%%.*}".* | [!0-9]*) return 0 ;; esac ;;
+  esac
+  if [ -n "$declared" ]; then
+    echo "ERROR: this project declares yarn@$declared with no yarnPath, and $_runner_named has yarn $version, which cannot reach it. Nothing was written." >&2
+  else
+    echo "ERROR: this repo is on yarn 2+ (a .yarnrc.yml or a yarn 2+ yarn.lock) with no yarnPath, and $_runner_named has yarn $version, which would rewrite its lockfile or fail. Nothing was written." >&2
+    echo "       If it really is on yarn 1, say so: \"packageManager\": \"yarn@<x.y.z>\" in package.json." >&2
+  fi
+  _native_pm="$_wanted"
+  return 1
+}
+if ! { { [ "$RUNTIME" != "docker" ] || container_require_command "$IMAGE" "$PM"; } && runner_honours_yarn; }; then
+  if [ "$RUNTIME" = "docker" ]; then
+    echo "       Node 22.18+ with $_native_pm on this machine's PATH runs natively, with no image (without --docker)." >&2
+  else
+    echo "       Put $_native_pm on this machine's PATH, or commit a yarnPath for it, then re-run." >&2
+  fi
   if [ "$MODE" = "new" ]; then
     report_new_failed 1
   else
@@ -2426,7 +2507,7 @@ if [ "$MODE" = "upgrade" ]; then
   printf '*\n' > "$UPGRADE_LOCK/.gitignore" 2>/dev/null || true
 
   # Released on ANY exit, including the refusals above this line's own guards and every early failure below.
-  trap 'rm -rf "$UPGRADE_LOCK"' EXIT INT TERM
+  trap 'rm -rf "$UPGRADE_LOCK" || true' EXIT INT TERM
 
 fi
 
@@ -2478,6 +2559,7 @@ fi
 # committed, no restore point (that line scrolled past hundreds of install messages ago), and no answer to
 # the only two questions anyone has at that moment: what state is my project in, and is re-running safe?
 INNER_RC=0
+OWNERSHIP_RC=0
 if [ "$RUNTIME" = "native" ]; then
   # Native: the generators run in THIS environment, as the invoking user, writing straight to the host
   # tree — so no mounts, no uid mapping, and no root-owned-files fixup are needed. $INNER's roots are
@@ -2486,8 +2568,8 @@ if [ "$RUNTIME" = "native" ]; then
 else
   _inner_env_args=()
   for _kv in "${INNER_ENV[@]}"; do _inner_env_args+=(-e "$_kv"); done
-  container_run_as_host_user \
-    -e HOME=/home/node "${_inner_env_args[@]}" \
+  container_run_program \
+    "${_inner_env_args[@]}" \
     -v "$PROJECTS_DIR":/work -v "$ENGINE_DIR":/engine:ro -w /work \
     "$IMAGE" \
     bash -lc "$INNER" || INNER_RC=$?
@@ -2501,15 +2583,12 @@ else
   # container-engine.sh. Runs before the gh push so git operations on the tree don't hit permission
   # errors. (The native path never creates foreign-owned files, so it needs none of this.)
   # A scaffold that died early has no tree to hand back, and a chown of nothing under set -e would replace the run's
-  # real failure with its own. A failed chown only ends a run that had otherwise succeeded: the reason the run died
-  # is the one to report.
+  # real failure with its own. A failed chown never replaces the run's own outcome: after a dead run, the reason it
+  # died is the exit code to report; after a good run, the work is done and its report still has to reach the reader,
+  # so the chown's code is kept for the very end of this script.
   if [ -e "$TARGET" ]; then
-    _own_rc=0
-    container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT_DIR_NAME" || _own_rc=$?
-    if [ "$_own_rc" -ne 0 ]; then
-      echo "ERROR: could not hand $TARGET back to $(id -un) (exit $_own_rc) — files in it may be owned by root." >&2
-      [ "$INNER_RC" -ne 0 ] || exit "$_own_rc"
-    fi
+    container_restore_ownership "$IMAGE" "$PROJECTS_DIR" "/work/$PROJECT_DIR_NAME" || OWNERSHIP_RC=$?
+    [ "$OWNERSHIP_RC" -eq 0 ] || [ "$INNER_RC" -eq 0 ] || report_ownership_unrestored "$OWNERSHIP_RC"
   fi
 fi
 
@@ -2520,9 +2599,15 @@ fi
 # just get a remote to push to.
 # Never fail the scaffold over a missing/unauthenticated gh — the local repo already exists.
 # A scaffold that died is never published: there is no finished repo to push, and pushing is what can't be taken back.
+# Nor is one whose ownership was not restored: host-side git may be refused the tree or unable to read part of it, so a
+# push could publish less than the project, or nothing. It is a skip with the command to run after the repair, the same
+# as a missing gh: the local repo is complete.
 GITHUB_RESULT=""
 if [ "$INNER_RC" -ne 0 ]; then
   :
+elif [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ] && [ "$OWNERSHIP_RC" -ne 0 ]; then
+  GITHUB_RESULT="GITHUB_SKIP: ownership not restored — local repo only (after the repair below, run 'gh repo create $PROJECT --private --source \"$TARGET\" --remote=origin --push')"
+  echo "$GITHUB_RESULT" >&2
 elif [ "$MODE" = "new" ] && [ "$GITHUB" = "1" ]; then
   if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
     GITHUB_RESULT="GITHUB_SKIP: gh not found or not authenticated — local repo only (run 'gh auth login', then 'gh repo create $PROJECT --private --source \"$TARGET\" --remote=origin --push')"
@@ -2615,7 +2700,8 @@ fi
 #   restart-session    session-scoped config moved, but nothing that needs a new container.
 #   none               nothing this run wrote requires either. The common case, and worth saying plainly:
 #                      silence here has previously been read as "probably restart, to be safe".
-#   unknown            no git base to compare against, so the honest answer is that it cannot tell.
+#   unknown            git cannot compare this tree with a base (none recorded, or git refuses a tree whose ownership
+#                      was not restored), so the honest answer is that it cannot tell.
 #
 # SEPARATELY, `UPGRADE_RELOAD` names the generated GUIDANCE files that changed. These are `@`-imported at
 # session start too, but their content needs no restart at all — reading the file puts it in context
@@ -2636,6 +2722,10 @@ _upgrade_next() {   # <target> <base-sha|''> [container verdict: same|changed|''
   UPGRADE_NEXT="unknown"
   UPGRADE_RELOAD=""
   [ -n "$base" ] || return 0
+  # A tree git refuses (root-owned after a failed chown: "dubious ownership") is "cannot tell", not "nothing changed".
+  # Without this the empty answer below reads as `none`, or the failed listing kills the script under set -e, before
+  # any report prints.
+  git -C "$target" rev-parse --verify --quiet "$base^{commit}" >/dev/null 2>&1 || return 0
   # Committed deltas (the migration ladder commits as it goes) + working-tree edits + brand-new untracked
   # files, which `git diff` alone would miss entirely — and a first retrofit creates most of these files.
   # BOTH RELATIVE TO THE PROJECT. `ls-files` answers relative to its -C directory, but `diff --name-only` answers
@@ -2706,7 +2796,7 @@ if [ "$MODE" = "upgrade" ]; then
     none)
       echo "  Nothing this run wrote needs a new session or a container rebuild." ;;
     unknown)
-      echo "  No git base to compare against, so this run cannot tell what changed. If .devcontainer/,"
+      echo "  Git could not compare this tree with a base, so this run cannot tell what changed. If .devcontainer/,"
       echo "  .claude/settings.json or .mcp.json moved, rebuild or restart accordingly." ;;
   esac
   if [ -n "$UPGRADE_RELOAD" ]; then
@@ -2725,7 +2815,7 @@ else
   # detected and upgraded. So: the layer set house-doc STAMPED (the final, detected one — firebase included when
   # present), and the app only when it exists (as the project graph resolved it).
   _final_layers="$(grep -o '@bespunky/house-tooling:stamp[^>]*' "$TARGET/HOUSE.md" 2>/dev/null | head -1 \
-    | grep -o 'layers=[a-z0-9,-]*' | head -1 | cut -d= -f2)"
+    | grep -o 'layers=[a-z0-9,-]*' | head -1 | cut -d= -f2 || true)"
   # The app's root, as the program resolved it from the project graph (`_resolve_upgrade_app`), handed over through
   # the lock's state file — empty when the app is not one of the workspace's apps, and then not printed.
   _app_dir=""
@@ -2746,4 +2836,10 @@ else
     echo "UPGRADE_VERIFY: nothing was built, linted or tested. Before landing it: $NX_RUN affected -t build lint test --base=$RESTORE_SHA"
   fi
   _upgrade_attention "${UPGRADE_LOCK:-}"
+fi
+
+# The report above is complete and true: the program finished. What is left is the one thing it could not do.
+if [ "$OWNERSHIP_RC" -ne 0 ]; then
+  report_ownership_unrestored "$OWNERSHIP_RC"
+  exit "$OWNERSHIP_RC"
 fi

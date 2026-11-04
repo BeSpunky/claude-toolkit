@@ -404,6 +404,11 @@ export interface DevcontainerFragment {
    * installs the new release beside the old one, switches `current`, and removes the old one. See `ArchiveTool`.
    */
   archives?: readonly (ArchiveTool & Explained)[];
+  /**
+   * This layer's post-create runs the project's package manager, so the container must have it: the image build provides
+   * what package.json declares (a cached layer), and post-create re-checks it. See `devcontainer/house.package-manager.sh.tpl`.
+   */
+  packageManager?: true;
   /** Post-create pieces. */
   postCreate?: readonly PostCreatePiece[];
 }
