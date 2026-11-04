@@ -12,3 +12,4 @@ Branch feat/hps3-core. Written as it goes; newest at the bottom.
 
 ## Log
 - Engine: `avoidPorts` (process field) and `dev run --avoid-ports`. Why the engine changes: `auto` picks a block by hash, so a keeper's refusal alone would refuse the same tree forever.
+- Generator + provider seam + keeper written; generator cases green. Evidence is a tag on the postgres project: the verbs stay postgres:*, so no second project.
