@@ -499,6 +499,57 @@ function records(trees) {
 }
 
 /**
+ * ONE STACK AS `dev ps --json` PRINTS IT — the engine's PUBLIC address of a running stack: a launcher, a script or a target
+ * reads this and nothing else. The record behind it is the engine's own, free to change; a field here is a contract, so
+ * it is only added to, never renamed or dropped, and `tools/test-scaffold` holds the exact key set. The output is a JSON
+ * array of these, every worktree's, in no promised order.
+ *
+ *   key         `<app>@<offset>`, the stack's name
+ *   app         the app, or a `dev run`'s <app>
+ *   tree        absolute path of its worktree, as git spells it: compare by REAL path to pick out your own tree
+ *   treeLabel   that worktree's branch, for people
+ *   offset      the port offset (number)
+ *   state       live | finishing | orphaned | foreign (lib/stacks.mjs recordState); a foreign one has no portStates or detached
+ *   pid         its claimer. `owner` who it belongs to. `host` the machine that claimed it. `startedAt` ISO 8601
+ *   ports       { name: resolved port } — every port it binds, offset included
+ *   portStates  [{ name, port, listening }] — the same ports, asked just now
+ *   exports     { NAME: value } — what `dev with` hands a command, `{}` for the moment before a serve has planned. A serve:
+ *               BASE_URL, DEV_URL, DEV_URL_QUERY (if any), PORT_OFFSET, PORT_<NAME> and what the declaration's processes
+ *               export, plus DEV_STACK. A `dev run`: PORT_OFFSET, PORT_<NAME> and DEV_STACK, since it has no declaration.
+ *   tmp         its TMPDIR (DEV_STACK_TMP)
+ *   stateDir    its state dir (DEV_STACK_DIR): where a process leaves what a reader outside the stack needs, such as a ready mark
+ *   processes   [{ id, pid }] — what the engine started
+ *   detached    [{ id, pid, status, doing, log }] — detached work still running (`doing` and `log` only if it says)
+ *   label, task, url, waitingFor   each only when it applies: what `ps` calls it, the Nx task it runs as, the app's URL
+ *               (a serve), and the dependency it is still waiting on (no process that depends on it has started)
+ */
+export function publicStack(s) {
+  return {
+    key: s.key,
+    app: s.app,
+    tree: s.tree,
+    treeLabel: s.treeLabel,
+    offset: s.offset,
+    state: s.state,
+    pid: s.pid,
+    owner: s.owner,
+    host: s.host,
+    startedAt: s.startedAt,
+    ports: s.ports ?? {},
+    portStates: s.portStates ?? [],
+    exports: s.exports ?? {},
+    tmp: s.tmp,
+    stateDir: stackDir(s.tree, s.key),
+    processes: (s.processes ?? []).map(({ id, pid }) => ({ id, pid })),
+    detached: (s.detached ?? []).map(({ id, pid, status, doing, log }) => ({ id, pid, status, doing, log })),
+    label: s.label,
+    task: s.task,
+    url: s.url,
+    waitingFor: s.waitingFor,
+  };
+}
+
+/**
  * Remove every DEAD stack of `trees` (record, lock, state dir, TMPDIR), and every orphan TMPDIR of this user whose
  * stack's lock is free (its record went some other way: a removed worktree, a `git clean`). CALL ONLY UNDER THE
  * CLAIM LOCK — that is what makes "dead" stay true until the files are gone: no claim can interleave.

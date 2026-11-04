@@ -15,8 +15,12 @@ export function isWrapperHosted(tree: Tree): boolean {
 export interface NxInvocation {
   /** How a PERSON runs nx here, as the docs print it: `./nx`, `yarn nx`, `pnpm nx`, `npx nx`. */
   command: string;
-  /** What a PROCESS spawns, relative to the tree root — no package manager in between. */
-  bin: string;
+  /**
+   * What a PROCESS spawns, relative to the tree root, as a command and its first arguments: no package manager in between, and
+   * nothing that outlives a signal. Not `./nx` on the wrapper host: that is Nx's own bash script, whose last line runs node with
+   * no `exec`, so a stop aimed at the process kills the script and leaves Nx, and whatever it runs, holding the port.
+   */
+  spawn: readonly string[];
   /** Nx is installed by the package manager into node_modules (else: the wrapper's `.nx/installation`). */
   nodeHost: boolean;
   /** The package manager, on a node host. */
@@ -28,10 +32,10 @@ export interface NxInvocation {
  * it detected), and is meaningless on the wrapper host.
  */
 export function nxInvocation(tree: Tree, packageManager?: string): NxInvocation {
-  if (isWrapperHosted(tree)) return { command: './nx', bin: './nx', nodeHost: false };
+  if (isWrapperHosted(tree)) return { command: './nx', spawn: ['node', '.nx/nxw.js'], nodeHost: false };
   const pm =
     packageManager && packageManager in PACKAGE_MANAGERS
       ? (packageManager as PackageManager)
       : (detectPackageManager(tree) ?? DEFAULT_PACKAGE_MANAGER);
-  return { command: PACKAGE_MANAGERS[pm].nx, bin: 'node_modules/.bin/nx', nodeHost: true, packageManager: pm };
+  return { command: PACKAGE_MANAGERS[pm].nx, spawn: ['node_modules/.bin/nx'], nodeHost: true, packageManager: pm };
 }

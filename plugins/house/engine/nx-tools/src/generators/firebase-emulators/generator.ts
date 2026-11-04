@@ -118,7 +118,7 @@ import { nodeVersionFile, projectNodeMajor } from '../_utils/node-version';
 import { FIREBASE_ADMIN_VERSION, FIREBASE_FUNCTIONS_VERSION, FIREBASE_TOOLS_VERSION } from '../_utils/versions';
 import { FUNCTIONS_NODE_RUNTIMES } from '../_utils/firebase-compat';
 import { pluginPointerRenderer } from '../_utils/plugin-pointers';
-import { deployTarget } from '../_utils/deploy-contract';
+import { canMatchAFile, deployTarget } from '../_utils/deploy-contract';
 import { FIREBASE_SKILL_POINTERS } from './skill-pointers';
 
 interface FirebaseEmulatorsSchema {
@@ -577,7 +577,7 @@ function ensureFunctionsProject(
   // THE DEPLOY CONTRACT (header). Nx builds (and lints) what ships — firebase.json carries no predeploy. The command
   // is `firebase deploy --only functions` through the deploy runner: on a failure it prints the road to a first deploy
   // (login → alias → deploy → CI) instead of ending on Firebase's bare "have you run firebase login?".
-  const deploy = deployTarget(root, {
+  const deploy = deployTarget(tree, root, {
     command: 'node tools/firebase-deploy.mjs --only functions',
     inputs: ['default', '^default'],
     watches: FIREBASE_ROOT_FILES,
@@ -740,10 +740,14 @@ function ensureFirebaseProject(tree: Tree, suite: HouseProjectHome, functions: H
   // THE DEPLOY CONTRACT (header): the Firestore rules, Firestore indexes and Storage rules firebase.json declares —
   // derived when it runs, so a rule set declared later deploys without an upgrade — and nothing it does not declare: a
   // project whose rules live only in the console gets a no-op that says how to adopt them. Nothing to build.
-  const deploy = deployTarget(suite.root, {
+  // `rulesFiles` is the project's own firebase.json: a path in it that nothing can watch is theirs to fix, not a reason to stop an upgrade.
+  for (const unwatchable of rulesFiles.filter((path) => !canMatchAFile(tree, path))) {
+    logger.warn(`[firebase] firebase.json declares '${unwatchable}', which does not exist and reads as a directory, so a change to it will not mark the deploy affected.`);
+  }
+  const deploy = deployTarget(tree, suite.root, {
     command: 'node tools/firebase-deploy-rules.mjs',
     inputs: ['default'],
-    watches: [...FIREBASE_ROOT_FILES, ...rulesFiles, ...CONVENTIONAL_RULES_FILES],
+    watches: [...FIREBASE_ROOT_FILES, ...rulesFiles.filter((path) => canMatchAFile(tree, path)), ...CONVENTIONAL_RULES_FILES],
   });
 
   ensureHouseProject(tree, 'firebase-emulators', suite, {

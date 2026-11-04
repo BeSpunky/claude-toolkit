@@ -37,8 +37,17 @@ const BROWSER_CAPABLE = ['@supabase/supabase-js', '@electric-sql/pglite', '@pris
 // The table as 0.51.3 released it: what every existing firewall was written from.
 const RELEASED_SERVER = ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*', 'firebase-functions-test', 'firebase-functions-test/*', '@google-cloud/*', 'express', 'express/*'];
 const RELEASED_WEB = ['firebase', 'firebase/*', '@firebase/*', 'rxfire', 'rxfire/*'];
+// Each stack's own list as released. A firewall meets a stack once, so a list that moves reaches no existing firewall without a rung.
+const RELEASED_STACK_BANS = { angular: ['@angular/*'], js: [] };
 // Each rung that adds to an existing firewall, with what it adds. An addition to the table owes one.
 const BAN_RUNGS = ['migrations/0.52.0/ban-postgres-drivers-from-web'];
+/** A workspace that gained a firewall before it wore Angular, and the same one wearing it now. */
+const firewallBeforeAngular = (ctx, tree, edit = (source) => source) => {
+  tree.write('eslint.config.mjs', ESLINT);
+  seam(ctx).ensurePlatformFirewall(tree, WHO);
+  tree.write('eslint.config.mjs', edit(tree.read('eslint.config.mjs', 'utf8')));
+  writeJson(tree, 'package.json', { ...readJson(tree, 'package.json'), devDependencies: { ...readJson(tree, 'package.json').devDependencies, '@nx/angular': '23.1.0' } });
+};
 const STOCK_FIREWALL = join(dirname(fileURLToPath(import.meta.url)), '../../test-migrations/cases/0.52.0-stock-firewall/eslint.config.mjs');
 
 export default {
@@ -81,6 +90,105 @@ export default {
         const fw = ctx.load('platform/firewall');
         const fresh = fw.readDeclaredBans(fw.insertPlatformFirewall(ESLINT, 'eslint.config.mjs', ctx.load('platform/externals').tableExternals(['@angular/*']), 'yarn nx').source, 'eslint.config.mjs');
         t.equal(bans(tree, ctx), fresh, 'a migrated firewall and a new one agree');
+      },
+    },
+    {
+      name: 'a stack\'s own list that moves without a rung is red',
+      once: 'compares two constants',
+      setup: () => workspace(),
+      run: () => {},
+      expect: (tree, t, ctx) => {
+        const lists = Object.fromEntries(ctx.load('adapters/registry').ADAPTERS.map((stack) => [stack.id, [...stack.webOnlyImports]]));
+        t.equal(lists, RELEASED_STACK_BANS, 'a stack moved its webOnlyImports: existing firewalls need a rung carrying the change. A new stack: add it here');
+      },
+    },
+    {
+      name: 'an existing firewall meets a later stack: its bans join server and shared, once, and what the project added stays',
+      once: 'two generator runs across a stack arriving',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        firewallBeforeAngular(ctx, tree, (source) => source.replace("'rxfire/*',", "'rxfire/*',\n      'my-native-thing',"));
+        ctx.before = tree.read('eslint.config.mjs', 'utf8');
+        ctx.mark = ctx.logs.length;
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+        ctx.once = tree.read('eslint.config.mjs', 'utf8');
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(!/@angular/.test(ctx.before), 'the fixture starts without it');
+        const after = tree.read('eslint.config.mjs', 'utf8');
+        t.equal(after, ctx.once, 'a second run changes nothing');
+        const declared = bans(tree, ctx);
+        t.ok(declared.server.includes('@angular/*') && declared.shared.includes('@angular/*'), 'server and shared ban it');
+        t.ok(!declared.web.includes('@angular/*'), 'web does not');
+        t.ok(declared.server.includes('my-native-thing'), "the project's addition stays");
+        t.equal(after.replace(/^.*@angular.*\n/gm, '').replace(/^\/\/ House: this firewall.*\n/m, ''), ctx.before, 'and nothing else moved');
+        t.ok(ctx.logs.slice(ctx.mark).some((l) => l.includes(`[${WHO}]`) && l.includes('@angular/*')), 'the log says what was added');
+      },
+    },
+    {
+      name: 'a ban the project removes after meeting a stack stays removed',
+      once: 'three runs across a project edit',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        firewallBeforeAngular(ctx, tree);
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+        tree.write('eslint.config.mjs', tree.read('eslint.config.mjs', 'utf8').replace(/^.*'@angular\/\*'.*\n/gm, ''));
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+      },
+      expect: (tree, t) => t.ok(!tree.read('eslint.config.mjs', 'utf8').includes("'@angular/*'"), 'not put back'),
+    },
+    {
+      name: 'a wider pattern of the project\'s already covers a stack\'s ban, and the stack still counts as met',
+      once: 'two runs across a stack arriving',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        firewallBeforeAngular(ctx, tree, (source) => source.replaceAll("'rxfire/*',", "'rxfire/*',\n      '@angular*',"));
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(!tree.read('eslint.config.mjs', 'utf8').includes("'@angular/*'"), 'nothing added');
+        t.equal(ctx.load('platform/firewall').recordedStacks(tree.read('eslint.config.mjs', 'utf8')), ['angular']);
+      },
+    },
+    {
+      name: 'a firewall arriving with a stack already worn starts having met it, so asking again changes nothing',
+      setup: () => {
+        const tree = workspace();
+        tree.write('eslint.config.mjs', ESLINT);
+        writeJson(tree, 'package.json', { ...readJson(tree, 'package.json'), devDependencies: { ...readJson(tree, 'package.json').devDependencies, '@nx/angular': '23.1.0' } });
+        return tree;
+      },
+      run: (tree, ctx) => seam(ctx).ensurePlatformFirewall(tree, WHO),
+      expect: (tree, t, ctx) => {
+        const source = tree.read('eslint.config.mjs', 'utf8');
+        t.equal(ctx.load('platform/firewall').recordedStacks(source), ['angular']);
+        t.ok(/House: this firewall.*\nconst platformConstraints/.test(source), 'recorded directly above the constraints');
+      },
+    },
+    {
+      name: 'a stack with nothing to ban leaves an existing firewall alone, byte for byte',
+      once: 'two runs across a stack arriving',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        tree.write('eslint.config.mjs', ESLINT);
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+        ctx.before = tree.read('eslint.config.mjs', 'utf8');
+        writeJson(tree, 'package.json', { ...readJson(tree, 'package.json'), devDependencies: { ...readJson(tree, 'package.json').devDependencies, '@nx/js': '23.1.0' } });
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+      },
+      expect: (tree, t, ctx) => t.equal(tree.read('eslint.config.mjs', 'utf8'), ctx.before),
+    },
+    {
+      name: 'a firewall whose lists are computed is left, and told what to ban by hand on every run until it is met',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        firewallBeforeAngular(ctx, tree, () => "const platformConstraints = build();\nexport default [];\n");
+        seam(ctx).ensurePlatformFirewall(tree, WHO);
+      },
+      expect: (tree, t, ctx) => {
+        t.equal(tree.read('eslint.config.mjs', 'utf8'), "const platformConstraints = build();\nexport default [];\n");
+        t.ok(ctx.logs.some((l) => /was left as it is/.test(l) && l.includes('@angular/*') && l.includes('platform:server')), ctx.logs.join(' | '));
       },
     },
     {

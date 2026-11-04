@@ -38,7 +38,7 @@
 // Three writers, one model: `insertPlatformFirewall` (a workspace gaining the firewall — `ensurePlatformFirewall`),
 // `upgradePlatformFirewall` (a workspace carrying the 0.49 shape — two ban-only constraints inside the project's own
 // `depConstraints` — migration 0.50.0) and `addFirewallBans` (an existing firewall gaining bans — a migration, with
-// its own frozen list). All splice text located through the TypeScript AST, so the surrounding file keeps its
+// its own frozen list, or `ensurePlatformFirewall` meeting a stack for the first time). All splice text located through the TypeScript AST, so the surrounding file keeps its
 // formatting. `readDeclaredBans` is the reader: what the config bans, for the classifier.
 import { applyChangesToString, ChangeType, type StringChange } from '@nx/devkit';
 import {
@@ -294,6 +294,25 @@ export function upgradePlatformFirewall(source: string, sourcePath: string, exte
     ],
     notes: [...notes, ...edit.notes],
   };
+}
+
+/** The comment above `platformConstraints` recording the stacks whose web-only bans this firewall was given. */
+const STACKS_RECORD = '// House: this firewall has been given the web-only bans of these stacks:';
+
+/** The stacks `recordStacks` wrote into this config. */
+export function recordedStacks(source: string): string[] {
+  const line = source.split('\n').find((text) => text.trimStart().startsWith(STACKS_RECORD));
+  return line ? line.trimStart().slice(STACKS_RECORD.length).split(',').map((id) => id.trim()).filter(Boolean) : [];
+}
+
+/** `source` with the record saying `stacks`: its line replaced, or a new one directly above `platformConstraints`. */
+export function recordStacks(source: string, stacks: readonly string[]): string {
+  const line = `${STACKS_RECORD} ${stacks.join(', ')}`;
+  const lines = source.split('\n');
+  const existing = lines.findIndex((text) => text.trimStart().startsWith(STACKS_RECORD));
+  if (existing >= 0) lines[existing] = line;
+  else lines.splice(lines.findIndex((text) => new RegExp(`^\\s*(export\\s+)?(const|let|var)\\s+${CONSTRAINTS}\\b`).test(text)), 0, line);
+  return lines.join('\n');
 }
 
 /**

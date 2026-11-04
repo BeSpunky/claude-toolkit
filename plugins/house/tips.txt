@@ -27,3 +27,11 @@ Node is one project fact: .nvmrc (or .node-version / volta.node) — the devcont
 firebase in a house project is the repo's own pinned firebase-tools — the same CLI on every machine and in CI
 gcloud in a house Firebase container is pinned in the image — a rebuild never moves it, and its login stays in ~/.config/gcloud
 A database in .bespunky/dev.json: "dependency": true starts it first, nothing else starts until its "ready" passes, and its exports reach every sibling
+A Postgres database on any stack: /bespunky-house:add-layer postgres — a server per dev stack, each worktree with its own data
+node tools/postgres/postgres.mjs start runs a server on its own; serving an app starts one first, migrated and seeded, and hands the app DATABASE_URL
+node tools/postgres/postgres.mjs new-migration --name=add_users writes the next migration. Forward-only: to undo one, write the next one
+Local Postgres in a bad state? node tools/postgres/postgres.mjs reset drops the database, migrates and seeds from nothing
+node tools/postgres/postgres.mjs psql opens a client on this tree's server with no URL: local verbs compute the address and check the server's identity
+Going to a real database? node tools/postgres/postgres.mjs deploy reads POSTGRES_DEPLOY_URL from CI, or from you at a terminal. It wants the direct URL, not a transaction pooler
+The Postgres major is .bespunky/postgres.json: match it to your production host, run the house upgrade, then rebuild the container. A new major starts empty
+tools/dev/dev ps --json is the public shape for a script: every running stack, its state and its ports

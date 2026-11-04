@@ -68,6 +68,26 @@ export const POSTGRES_DEB_CODENAMES = ['trixie', 'bookworm'] as const;
 export const POSTGRES_DEB_ARCHITECTURES = ['amd64', 'arm64'] as const;
 export const POSTGRES_EXTENSIONS = ['pgvector'] as const;
 
+/** The major a project is seeded with (`.bespunky/postgres.json`, then the project's own fact): the newest that hosts offer. */
+export const POSTGRES_DEFAULT_MAJOR = '18';
+
+/**
+ * dbmate, the migration runner of the `postgres` layer, in the IMAGE: a bare static binary, because a repo wearing the layer
+ * may have no node_modules. GitHub keeps every release's assets. The sha256s are the release's own `digest`s, checked here
+ * against the downloaded files (2026-11-04). Moving it: change all three, then `node tools/test-postgres/run.mjs`.
+ */
+export const DBMATE_VERSION = '2.37.0';
+export const DBMATE_DOWNLOADS = {
+  amd64: {
+    url: `https://github.com/amacneil/dbmate/releases/download/v${DBMATE_VERSION}/dbmate-linux-amd64`,
+    sha256: 'f855e99a0f0a81322014bf686b1cb820d2b4d8074e4eadafd64b851b80ecb15a',
+  },
+  arm64: {
+    url: `https://github.com/amacneil/dbmate/releases/download/v${DBMATE_VERSION}/dbmate-linux-arm64`,
+    sha256: '42de2bf27989192b9ca8db4cfaa0a9d6b4aee154a03abef30239b7186b1baf82',
+  },
+} as const;
+
 /** The Cloud Functions runtime SDKs — the workspace root AND the deploy manifest (functions/package.json) read these. */
 export const FIREBASE_ADMIN_VERSION = '^13.6.0';
 export const FIREBASE_FUNCTIONS_VERSION = '^7.0.0';

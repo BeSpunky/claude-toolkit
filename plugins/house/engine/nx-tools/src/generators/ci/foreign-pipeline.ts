@@ -1,0 +1,127 @@
+// DOES THIS WORKFLOW DEPLOY? — what keeps the house from writing a second deploy workflow, read from what it RUNS.
+//
+// The answer deletes the owned deploy.yml, so text is not enough: a workflow that says `firebase deploy` in an `echo`, a
+// step name, an env value or a heredoc written to the job summary deploys nothing. Only the commands in a step's `run`
+// count, and a command that only prints its arguments is not running them. It stays a reading of shell, not a shell:
+// a deploy inside a quoted `$(...)` of an `echo` goes unseen, and an unknown command mentioning a signal counts, because
+// taking a real pipeline for an unrelated one puts two deploys on one push, the worse of the two errors. A workflow only a pull
+// request triggers deploys no line, whatever it runs: that is where a test runs its migrations against a service container.
+// A `uses:` step or job is not read: what it runs is not in this file.
+import { parse } from 'yaml';
+
+/** Commands that only print what they are given. */
+const PRINTS = new Set(['echo', 'printf', ':']);
+/** Words that precede a command without being it. */
+const SHELL_KEYWORDS = new Set(['if', 'then', 'elif', 'else', 'while', 'until', 'do', '!', '{', '(', 'time']);
+/** Commands that run the text a heredoc gives them, so its body is commands too. */
+const RUNS_STDIN = /^(?:\S*\/)?(?:ba|da|z)?sh$/;
+
+/** The word a simple command runs: past shell keywords and `NAME=value` prefixes. */
+function commandWord(command: string): string {
+  const words = command.trim().split(/\s+/);
+  const at = words.findIndex((word) => !SHELL_KEYWORDS.has(word) && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+  return at < 0 ? '' : words[at];
+}
+
+/** One line of shell cut at its unquoted `;`, `&`, `|` and at a comment, so each part is one simple command. */
+function simpleCommands(line: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote = '';
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (quote) {
+      if (char === '\\' && quote === '"') current += char + (line[++i] ?? '');
+      else {
+        if (char === quote) quote = '';
+        current += char;
+      }
+    } else if (char === '\\') {
+      current += char + (line[++i] ?? '');
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+    } else if (char === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
+      break;
+    } else if (char === ';' || char === '&' || char === '|') {
+      parts.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  return [...parts, current].filter((part) => part.trim());
+}
+
+/** The commands a `run` script executes: printing commands and heredocs fed to anything but a shell are left out. */
+export function executedCommands(script: string): string[] {
+  const lines = script.replace(/\\\r?\n/g, ' ').split(/\r?\n/);
+  const commands: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const parts = simpleCommands(lines[i]);
+    commands.push(...parts.filter((part) => !PRINTS.has(commandWord(part))));
+    const heredoc = /<<-?\s*["']?([A-Za-z_][A-Za-z0-9_]*)["']?/.exec(lines[i].replace(/<<</g, ''));
+    if (!heredoc || parts.some((part) => RUNS_STDIN.test(commandWord(part)))) continue;
+    while (i + 1 < lines.length && lines[i + 1].trim() !== heredoc[1]) i++;
+    i++;
+  }
+  return commands;
+}
+
+/** What fires for a pull request and never for a line. */
+const PULL_REQUEST_EVENTS = new Set(['pull_request', 'pull_request_target', 'merge_group']);
+
+/** An event only a pull request's checks hang off. `types: [closed]` is what a merge fires: a pipeline deploying `if: merged` runs on it. */
+function onlyPullRequests(on: unknown): boolean {
+  if (typeof on === 'string') return PULL_REQUEST_EVENTS.has(on);
+  if (Array.isArray(on)) return on.length > 0 && on.every((event) => PULL_REQUEST_EVENTS.has(event));
+  if (!on || typeof on !== 'object') return false;
+  const events = Object.entries(on);
+  return events.length > 0 && events.every(([event, config]) => PULL_REQUEST_EVENTS.has(event) && ![(config as { types?: unknown } | null)?.types].flat().includes('closed'));
+}
+
+/** The expressions in a value: every `${{ … }}` of every string in it, however deep. */
+function expressionsIn(value: unknown): string[] {
+  if (typeof value === 'string') return [...value.matchAll(/\$\{\{(.*?)\}\}/gs)].map(([, body]) => body);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(expressionsIn);
+  return [];
+}
+
+/** The `secrets` context itself: not a word in a string literal, not `github.secrets`, and `toJSON(secrets)` as much as `secrets.X`. */
+const readsSecrets = (expression: string): boolean => /(?<![.\w-])secrets\b/.test(expression.replace(/'(?:[^']|'')*'/g, "''"));
+
+interface Step {
+  run?: unknown;
+  uses?: unknown;
+}
+
+/**
+ * Can this job's commands hold a secret? Its own env and the workflow's, and its `run` steps. A `uses:` step's expressions go to
+ * that action: a coverage upload's token beside `dbmate up` says nothing about what dbmate connects to.
+ */
+function jobHoldsSecrets(job: { env?: unknown; steps?: unknown }, workflowEnv: unknown): boolean {
+  const steps = (Array.isArray(job.steps) ? job.steps : []) as Step[];
+  return expressionsIn([workflowEnv, job.env, steps.filter((step) => !step?.uses)]).some(readsSecrets);
+}
+
+/**
+ * Does this workflow run a command any of `signals` recognises as a deploy, or one of `credentialed` in a job holding a secret?
+ * A file that does not parse runs nothing on GitHub either.
+ */
+export function workflowDeploys(workflow: string, signals: readonly RegExp[], credentialed: readonly RegExp[] = []): boolean {
+  let parsed: { on?: unknown; env?: unknown; jobs?: unknown } | null;
+  try {
+    parsed = parse(workflow);
+  } catch {
+    return false;
+  }
+  if (onlyPullRequests(parsed?.on) || !parsed?.jobs || typeof parsed.jobs !== 'object') return false;
+  const env = parsed.env;
+  return Object.values(parsed.jobs).some((job: { env?: unknown; steps?: unknown } | null) => {
+    if (!job) return false;
+    const steps = (Array.isArray(job.steps) ? job.steps : []) as Step[];
+    const commands = steps.flatMap((step) => (typeof step?.run === 'string' ? executedCommands(step.run) : []));
+    const any = (patterns: readonly RegExp[]) => commands.some((command) => patterns.some((pattern) => pattern.test(command)));
+    return any(signals) || (any(credentialed) && jobHoldsSecrets(job, env));
+  });
+}

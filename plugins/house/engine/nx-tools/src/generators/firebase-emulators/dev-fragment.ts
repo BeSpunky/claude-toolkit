@@ -69,7 +69,7 @@ export function firebaseFragment(tree: Tree): DevFragment {
     processes: [
       {
         id: 'emulators',
-        cmd: [nxInvocation(tree).bin, 'run', `${FIREBASE_PROJECT}:${EMULATORS_TARGET}`],
+        cmd: [...nxInvocation(tree).spawn, 'run', `${FIREBASE_PROJECT}:${EMULATORS_TARGET}`],
         env: { ...NX_TREE_ENV },
         ports,
         exports: emulatorExports(ports),

@@ -18,7 +18,7 @@
       "items": {
         "type": "string"
       },
-      "description": "The layers this devcontainer serves (nx, agent, node, js, web, angular, design-system, navigation, firebase). The devcontainer is COMPOSED from their fragments (layers/<id>.ts `devcontainer`): the image (a neutral Debian base with Node as a feature unless a stack layer such as `node` brings its own), features, extensions, settings, mounts, env, run args, ports, OS packages and post-create pieces. Defaults to DETECTING them from the workspace; the sync passes them explicitly because it knows what it is about to ensure."
+      "description": "The layers this devcontainer serves (nx, agent, node, js, web, angular, design-system, navigation, firebase, postgres, ci). The devcontainer is COMPOSED from their fragments (layers/<id>.ts `devcontainer`): the image (a neutral Debian base with Node as a feature unless a stack layer such as `node` brings its own), features, extensions, settings, mounts, env, run args, ports, OS packages and post-create pieces. Defaults to DETECTING them from the workspace; the sync passes them explicitly because it knows what it is about to ensure."
     },
     "voice": {
       "type": "boolean",

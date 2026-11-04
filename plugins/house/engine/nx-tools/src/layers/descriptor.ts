@@ -188,13 +188,19 @@ export interface LayerDescriptor {
 // the options ITS OWN deploy targets take in that environment, the steps that authenticate the job, and the
 // one-time cloud setup. A provider's options reach only its own targets (a `ci-<environment>` Nx configuration on
 // each), so several providers — and a project's own deploy targets — compose without seeing each other's flags.
+//
+// WHICH PROVIDERS A LINE MUST NAME. Every provider active in the workspace deploys on every bound line, so a line names
+// exactly the ones that need a value from it. A provider with a `targetLabel` needs one: a line naming none is blocked
+// (a red run on every push; a `ci` key states intent to deploy, and a note is how deploys stopped silently). A provider
+// without one (a database reached through a secret of its GitHub environment) needs nothing, and a line may leave it
+// out. A provider a required layer's provider `supersedes` is not active at all.
 
 /** One environment a provider deploys into, as the `ci` layer resolved it from the branch model. */
 export interface CiEnvironment {
   /** The deployment environment (a GitHub environment) — the binding's `ci.environment`. */
   name: string;
-  /** This provider's target in it (the binding's `ci.providers.<id>`). */
-  target: string;
+  /** This provider's target in it (the binding's `ci.providers.<id>`). Absent only for a provider that needs none and was not given one. */
+  target?: string;
   /** The branches that deploy into it, as names and globs. */
   branches: string[];
   /**
@@ -211,40 +217,73 @@ export interface CiEnvironment {
  */
 export type CiDeployStage = 'schema' | 'code';
 
-export interface CiDeployProvider {
+/** A provider a line must give a target: without one, that line is blocked. */
+export interface TargetedCiDeployProvider extends CiDeployProviderShape {
+  /** What a binding's `ci.providers.<id>` value IS here (`.firebaserc alias`): how the messages ask for a missing one. */
+  targetLabel: string;
+  /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
+  deployOptions(target: string): Record<string, unknown>;
+}
+
+/** A provider a line need not name: what it deploys into comes from the line's GitHub environment. */
+export interface TargetlessCiDeployProvider extends CiDeployProviderShape {
+  targetLabel?: undefined;
+  /** The options its deploy targets take; `target` only if a line chose to give one. Absent: nothing to configure. */
+  deployOptions?(target?: string): Record<string, unknown>;
+}
+
+export type CiDeployProvider = TargetedCiDeployProvider | TargetlessCiDeployProvider;
+
+interface CiDeployProviderShape {
   /** The provider id a binding names (`ci.providers.<id>`). */
   id: string;
   title: string;
-  /** What a binding's `ci.providers.<id>` value IS here (`.firebaserc alias`): how the messages ask for a missing one. */
-  targetLabel: string;
   /**
-   * How a workflow the house did not write shows it already deploys through this provider, tested per line with
-   * comments stripped. Read from EVERY registered provider, worn or not: a repo running its own `firebase deploy` has
+   * The id of a provider this one REPLACES, belonging to a layer this layer `requires` (the `ci` generator refuses any
+   * other). A layer that specializes another deploys through its own provider, so the required layer's is not active
+   * where this one is: not its auth, its credentials, its options, or its demand for a target.
+   */
+  supersedes?: string;
+  /**
+   * How a workflow the house did not write shows it already deploys through this provider, tested against each command
+   * its `run` steps execute (ci/foreign-pipeline.ts). Read from EVERY registered provider, worn or not: a repo running its own `firebase deploy` has
    * a pipeline whether or not it wears `firebase`, and a second deploy workflow beside it is the worst outcome.
    */
   deploySignals: readonly RegExp[];
+  /**
+   * Commands that deploy only when they hold a credential, because they are as common against a test database: they count as a
+   * pipeline only in a workflow that references `secrets.`.
+   */
+  credentialedDeploySignals?: readonly RegExp[];
   /** When this provider's targets deploy. Absent: `code`. */
   deployStage?: CiDeployStage;
   /**
-   * Env vars its deploys read, name → a GitHub expression (`${{ secrets.DATABASE_URL }}`, resolved in the line's
-   * GitHub environment). On the deploy step of this provider's stage only, so a schema credential never reaches a
+   * Env vars its deploys read, name → a GitHub expression; as a function of the environments the workflow deploys into, for a
+   * secret named per environment (`environmentSecretSuffix`), which a repo-level secret of the plain name cannot fill in for.
+   * Name each secret literally: indexing `secrets[...]` hands the runner every secret there is. On the deploy step of this provider's stage only, so a schema credential never reaches a
    * code deploy. Never a literal secret, and never `deployOptions`: those are committed to `project.json`.
    */
-  deployEnv?: Readonly<Record<string, string>>;
+  deployEnv?: Readonly<Record<string, string>> | ((environments: readonly string[]) => Readonly<Record<string, string>>);
   /**
    * Present when `authSteps` exchanges GitHub's OIDC token. `why` is rendered beside `id-token: write`, which the
    * deploy job holds only if an active provider asks: a token-based provider's job never gets to mint one.
    */
   oidc?: { why: string };
-  /** The deploy targets this provider's layer owns in this workspace — the ONLY targets its options reach. */
+  /**
+   * The deploy targets this provider's layer owns in this workspace — the ONLY targets its options reach. Two providers
+   * may share one: their options compose on it (see `composeOptions`, ci/generator.ts), and they must share a stage.
+   */
   deployTargets(tree: Tree): { project: string; target: string }[];
-  /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
-  deployOptions(target: string): Record<string, unknown>;
   /**
    * GitHub Actions steps (YAML, as a list of `- …` items at column 0) that authenticate the deploy job. They run before
    * the deploy steps and without `deployEnv`, which only those steps hold: reach a secret here through `secrets.*`.
    */
   authSteps(): string;
+  /**
+   * GitHub Actions steps (same form) that put on the runner what this provider's deploy needs and no project install brings.
+   * Before `authSteps`, and with no secret. Pin and check what they fetch: the deploy that follows holds a credential.
+   */
+  setupSteps?(): string;
   /**
    * Owned files this provider adds (the human-run cloud setup), rendered from the resolved environments — retired
    * ones included, so the tool that undoes their setup outlives their binding.
@@ -257,6 +296,13 @@ export interface CiDeployProvider {
   /** The HUMAN_STEP that undoes a retired environment's cloud setup — printed on every upgrade until it is done. */
   retireStep?(environment: CiEnvironment): string;
 }
+
+/**
+ * A group's Debian package names: the same on every release, or per release, for what a release renames (`libasound2` became
+ * `libasound2t64`). The installer picks by the image's own codename, and a release with no list fails the install by the
+ * group's id, like a closure with none: a future Debian must fail loudly, never install half a browser's libraries.
+ */
+export type OsPackageNames = { packages: readonly string[]; byCodename?: never } | { id: string; byCodename: Readonly<Record<string, readonly string[]>>; packages?: never };
 
 /** A `.gitignore` block: a `#` heading (without the `#`) and the entries under it. */
 export interface GitignoreBlock {
@@ -287,10 +333,10 @@ export type DebianArch = 'amd64' | 'arm64';
  * and every cache-miss image build fails with it; and a moved pin needs a downgrade, a foreign image may already
  * declare the same repository differently. A versioned archive is kept, so the pin lives as long as the publisher.
  *
- * Two formats, one install root and one promise (a sha256 checked before anything is unpacked, `current` naming the
- * release, a failure that is loud): a tarball, and a closure of `.deb` files.
+ * Three formats, one install root and one promise (a sha256 checked before anything is unpacked, `current` naming the
+ * release, a failure that is loud): a tarball, a single executable, and a closure of `.deb` files.
  */
-export type ArchiveTool = TarballTool | DebClosureTool;
+export type ArchiveTool = TarballTool | BinaryTool | DebClosureTool;
 
 /** One `.tar.gz` per architecture, carrying everything but libc: its executables are linked straight into PATH. */
 export interface TarballTool {
@@ -303,6 +349,17 @@ export interface TarballTool {
   /** The directory inside the archive whose executables are linked into /usr/local/bin — first on PATH, ahead of /usr/bin. */
   bin: string;
   /** Per architecture: the `.tar.gz` and its sha256 (checked before anything is extracted). Projected, never typed. */
+  downloads: Readonly<Record<DebianArch, { url: string; sha256: string }>>;
+}
+
+/** One statically linked executable per architecture, published bare (dbmate): installed as `<id>` and linked into PATH. */
+export interface BinaryTool {
+  format: 'binary';
+  /** Names its install root, `/opt/bespunky/<id>`, and the executable: `[a-z0-9-]+`. */
+  id: string;
+  /** The pinned release; extracted to `/opt/bespunky/<id>/<version>`, `current` pointing at it. */
+  version: string;
+  /** Per architecture: the executable and its sha256 (checked before it is installed). */
   downloads: Readonly<Record<DebianArch, { url: string; sha256: string }>>;
 }
 
@@ -377,6 +434,14 @@ export interface DevcontainerPort extends Explained {
   forward?: boolean;
   /** Prompt instead of silently remapping when the host port is taken (exact-port keys only). */
   requireLocalPort?: boolean;
+}
+
+/** Attributes for whatever port a process listens on, when no number or range can name them: a stack's ports move with its offset. */
+export interface DevcontainerPortProcess extends Explained {
+  /** A regular expression over the process's command line. */
+  match: string;
+  label: string;
+  onAutoForward: DevcontainerPort['onAutoForward'];
 }
 
 /**
@@ -469,16 +534,15 @@ export interface DevcontainerFragment {
   runArgs?: readonly ({ args: readonly string[] } & Explained)[];
   /** Ports this layer serves — `forwardPorts` and `portsAttributes` are both derived from ONE list. */
   ports?: readonly DevcontainerPort[];
+  portProcesses?: readonly DevcontainerPortProcess[];
   /** Named `initializeCommand` entries (object form — they run side by side, on the HOST). */
   initializeCommand?: readonly ({ name: string; command: string } & Explained)[];
   /** Debian packages — composed into the one installer (house.packages.sh) the image build runs as ONE cached layer. Never an apt step in a postCreate piece: that reinstalls on every rebuild. */
-  osPackages?: readonly ({
-    /** Debian package names. */
-    packages: readonly string[];
+  osPackages?: readonly (OsPackageNames & {
     /**
-     * Names that are right only for the HOUSE images' distro (a projection for Debian 13, like Chromium's libraries):
-     * left out on an adopted devcontainer's foreign image, whose distro the house cannot know — one wrong name fails
-     * the whole apt transaction. Such a group's post-create counterpart installs them by the tool's own means there.
+     * Names that are right only for the HOUSE images' distro (a projection for their Debian releases, like Chromium's
+     * libraries): left out on an adopted devcontainer's foreign image, whose distro the house cannot know — one wrong name
+     * fails the whole apt transaction. Such a group's post-create counterpart installs them by the tool's own means there.
      */
     onHouseImageOnly?: true;
   } & Explained)[];

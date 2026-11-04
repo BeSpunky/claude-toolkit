@@ -30,9 +30,11 @@ import type {
   DevcontainerFragment,
   DevcontainerJson,
   DevcontainerPort,
+  DevcontainerPortProcess,
+  OsPackageNames,
   PostCreatePhase,
   PostCreatePiece,
-  TarballTool,
+  BinaryTool, TarballTool,
   VolumeOwnership,
 } from '../../layers/descriptor';
 import type { ClaudePlugins } from '../_utils/layer-contributions';
@@ -70,8 +72,9 @@ export interface Composition {
   containerEnv: ({ name: string; value: string } & Why)[];
   runArgs: ({ args: string[] } & Why)[];
   ports: ComposedPort[];
+  portProcesses: DevcontainerPortProcess[];
   initializeCommand: ({ name: string; command: string } & Why)[];
-  osPackages: ({ packages: string[] } & Why)[];
+  osPackages: (OsPackageNames & Why)[];
   archives: (ArchiveTool & Why)[];
   /**
    * The spec the image build provides the project's package manager from (`_utils/package-manager.ts`), when a layer
@@ -239,6 +242,7 @@ export function compose(
       return { args: entry.args.map(sub), why: entry.why };
     }),
     ports: [...ports.values()],
+    portProcesses: all('portProcesses').map(({ item }) => item as DevcontainerPortProcess),
     initializeCommand: unique(
       all('initializeCommand').map(({ item }) => ({ ...(item as { name: string; command: string; why?: string }) })),
       (entry) => entry.name,
@@ -246,8 +250,8 @@ export function compose(
     osPackages: all('osPackages')
       .filter(({ item }) => !(source.kind === 'foreign' && (item as { onHouseImageOnly?: boolean }).onHouseImageOnly))
       .map(({ item }) => {
-        const entry = item as { packages: readonly string[]; why?: string };
-        return { packages: [...entry.packages], why: entry.why };
+        const { onHouseImageOnly: _onHouseImageOnly, ...group } = item as OsPackageNames & Why & { onHouseImageOnly?: true };
+        return group;
       }),
     // Distro-neutral (a tarball, tar and curl), so a foreign image gets them too.
     archives: unique(all('archives').map(({ item }) => ({ ...(item as ArchiveTool & Why) })), (entry) => entry.id),
@@ -426,15 +430,21 @@ export function renderDevcontainerJson(name: string, layers: readonly string[], 
   );
   add(
     'portsAttributes',
-    map(c.ports, (port) => ({
-      key: String(port.port),
-      node: value({
-        label: port.label,
-        onAutoForward: port.onAutoForward,
-        ...(port.requireLocalPort ? { requireLocalPort: true } : {}),
+    map(
+      [
+        ...c.ports.map((port) => ({ key: String(port.port), port })),
+        ...c.portProcesses.map((port) => ({ key: port.match, port })),
+      ],
+      ({ key, port }) => ({
+        key,
+        node: value({
+          label: port.label,
+          onAutoForward: port.onAutoForward,
+          ...('requireLocalPort' in port && port.requireLocalPort ? { requireLocalPort: true } : {}),
+        }),
+        why: port.why,
       }),
-      why: port.why,
-    })),
+    ),
     "Labels for the (forwarded or auto-detected) ports; `onAutoForward` sets each one's notification behaviour.",
   );
   add('otherPortsAttributes', value({ onAutoForward: 'silent' }));
@@ -563,22 +573,40 @@ function renderVolumeOwnership(template: string, volumes: readonly ComposedVolum
  * across groups; the project's own list is the file it is handed. Then the archive tools, one line per architecture.
  */
 export function renderOsPackagesScript({ osPackages, archives }: Pick<Composition, 'osPackages' | 'archives'>): string {
-  const tarballs = archives.filter((tool): tool is TarballTool & Why => tool.format !== 'deb');
+  const tarballs = archives.filter((tool): tool is TarballTool & Why => tool.format === undefined || tool.format === 'tar.gz');
+  const binaries = archives.filter((tool): tool is BinaryTool & Why => tool.format === 'binary');
   const debClosures = archives.filter((tool): tool is DebClosureTool & Why => tool.format === 'deb');
   // An archive is fetched with curl over TLS: the mechanism's own needs, LAST — so it lists only what no layer already does.
-  const fetchedLists = [...(tarballs.length ? ['HOUSE_ARCHIVES'] : []), ...(debClosures.length ? ['HOUSE_DEB_ARCHIVES'] : [])].join(', ');
+  const fetchedLists = [...(tarballs.length + binaries.length ? ['HOUSE_ARCHIVES'] : []), ...(debClosures.length ? ['HOUSE_DEB_ARCHIVES'] : [])].join(', ');
   const groups = archives.length
     ? [...osPackages, { packages: ['curl', 'ca-certificates'], why: `Fetch the versioned archives (${fetchedLists}, below) over TLS.` }]
     : osPackages;
   const seen = new Set<string>();
   const lines: string[] = [];
+  // Per-release groups, one each (two layers may share one): `<id> <codename> <names…>`. The installer's own list de-duplicates
+  // them against the rest at run time, which is the only place that knows the release.
+  const perRelease = new Map<string, Extract<OsPackageNames, { id: string }> & Why>();
   for (const group of groups) {
+    if (group.byCodename) {
+      perRelease.set(group.id, group);
+      continue;
+    }
     const fresh = group.packages.filter((name) => !seen.has(name));
     fresh.forEach((name) => seen.add(name));
     if (!fresh.length) continue;
     if (group.why) lines.push(...group.why.split('\n').map((line) => `# ${line}`.trimEnd()));
     lines.push(fresh.join(' '));
   }
+  const codenameLines = [...perRelease.values()].flatMap((group) => [
+    ...(group.why ? group.why.split('\n').map((line) => `# ${line}`.trimEnd()) : []),
+    ...Object.entries(group.byCodename).map(([codename, names]) => {
+      const line = `${group.id} ${codename} ${names.join(' ')}`;
+      if (!ARCHIVE_ID.test(group.id) || !DEBIAN_CODENAME.test(codename) || !names.length || !names.every((name) => DEBIAN_PACKAGE.test(name))) {
+        throw new Error(`[devcontainer] OS package group "${group.id}" is malformed: ${line}`);
+      }
+      return line;
+    }),
+  ]);
   // `<id> <version> <arch> <sha256> <url> <bin>` per architecture — validated here, because the installer runs it as root.
   const archiveLines: string[] = [];
   for (const tool of tarballs) {
@@ -594,10 +622,29 @@ export function renderOsPackagesScript({ osPackages, archives }: Pick<Compositio
       archiveLines.push(line);
     }
   }
+  // The same line, with the directory the executable is placed in as its <bin>, and a URL that is not a tarball's.
+  for (const tool of binaries) {
+    if (tool.why) archiveLines.push(...tool.why.split('\n').map((line) => `# ${line}`.trimEnd()));
+    for (const [arch, { url, sha256 }] of Object.entries(tool.downloads)) {
+      const line = `${tool.id} ${tool.version} ${arch} ${sha256} ${url} bin`;
+      if (
+        !ARCHIVE_ID.test(tool.id) || !ARCHIVE_VERSION.test(tool.version) || !DEBIAN_ARCH.test(arch) ||
+        !SHA256.test(sha256) || !/^https:\/\/[A-Za-z0-9._~:/?=&%+-]+$/.test(url) || url.endsWith('.tar.gz')
+      ) {
+        throw new Error(`[devcontainer] archive tool "${tool.id}" is malformed: ${line}`);
+      }
+      archiveLines.push(line);
+    }
+  }
   // The archive machinery (the list and its installer) is rendered only when a layer declares an archive tool: a
   // project with none gets no empty list and no code that would loop over it.
   const template = readFileSync(join(__dirname, 'house.packages.sh.tpl'), 'utf8');
-  const script = renderSection(renderSection(renderSection(template, 'ARCHIVES', tarballs.length > 0), 'DEB_ARCHIVES', debClosures.length > 0), 'ARCHIVE_TOOLS', archives.length > 0)
+  const script0 = renderSection(renderSection(renderSection(renderSection(renderSection(template, 'BINARY_ARCHIVES', binaries.length > 0), 'TARBALLS_ONLY', binaries.length === 0), 'ARCHIVES', tarballs.length + binaries.length > 0), 'DEB_ARCHIVES', debClosures.length > 0), 'ARCHIVE_TOOLS', archives.length > 0)
+  // A project with neither reads no release: its installer's bytes, and so its cached image layer, do not move.
+  const rendered = renderSection(renderSection(script0, 'CODENAME_PACKAGES', perRelease.size > 0), 'CODENAME', perRelease.size > 0 || debClosures.length > 0);
+  const script = rendered
+    .split('{{HOUSE_PACKAGES_BY_CODENAME}}')
+    .join(codenameLines.join('\n').split("'").join("'\\''"))
     .split('{{HOUSE_ARCHIVES}}')
     .join(archiveLines.join('\n').split("'").join("'\\''"))
     .split('{{HOUSE_DEB_ARCHIVES}}')
@@ -612,6 +659,8 @@ export function renderOsPackagesScript({ osPackages, archives }: Pick<Compositio
 
 const ARCHIVE_ID = /^[a-z0-9-]+$/;
 const ARCHIVE_VERSION = /^[A-Za-z0-9][A-Za-z0-9.+~-]*$/;
+const DEBIAN_CODENAME = /^[a-z]+$/;
+const DEBIAN_PACKAGE = /^[a-z0-9][a-z0-9.+-]*$/;
 const DEBIAN_ARCH = /^(amd64|arm64)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 /** One apt relation (`libc6 (>= 2.38)`), alternatives (`a | b`) and all, joined by `, ` — what `apt-get satisfy` reads. */

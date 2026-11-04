@@ -88,7 +88,9 @@ function silentUnderNx(root: string): boolean {
   const style = process.env.NX_DEFAULT_OUTPUT_STYLE;
   if (style && style !== 'summary') return false;
   try {
-    const nx = dirname(require.resolve('nx/package.json', { paths: [root] }));
+    // `.nx/installation` is where a wrapper host keeps Nx, so it is asked first: a root lookup walks up the directories, and
+    // can answer with some other project's Nx.
+    const nx = dirname(require.resolve('nx/package.json', { paths: [join(root, '.nx/installation'), root] }));
     return ['dist/src', 'src'].some((at) => existsSync(join(nx, at, 'tasks-runner/life-cycles/summary-terminal-output-life-cycle.js')));
   } catch {
     return false;

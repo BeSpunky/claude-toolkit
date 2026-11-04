@@ -24,7 +24,7 @@ const ensure = (tree, ctx) => {
   const { deployTarget } = ctx.load('generators/_utils/deploy-contract');
   const { ensureHouseProject, houseProjectHome } = ctx.load('generators/_utils/project-files');
   const home = houseProjectHome(tree, CANONICAL_ROOT, CANONICAL_ROOT);
-  const deploy = deployTarget(home.root, SPEC);
+  const deploy = deployTarget(tree, home.root, SPEC);
   ensureHouseProject(tree, 'a-database-capability', home, {
     projectType: 'application',
     tags: ['platform:server', 'tooling'],
@@ -95,18 +95,50 @@ export default {
       },
     },
     {
-      name: 'a bare directory watches nothing beneath it: why the contract asks for a glob',
+      name: 'a bare directory watches nothing beneath it: why the contract refuses one',
       setup: () => workspace(),
       run: async (tree, ctx) => {
         const { deployTarget } = ctx.load('generators/_utils/deploy-contract');
         const { ensureHouseProject, houseProjectHome } = ctx.load('generators/_utils/project-files');
         const home = houseProjectHome(tree, CANONICAL_ROOT, CANONICAL_ROOT);
-        const deploy = deployTarget(home.root, { ...SPEC, watches: ['schema/migrations'] });
+        // The input a bare directory would have become, written by hand: deployTarget no longer lets one through.
+        const deploy = deployTarget(tree, home.root, { ...SPEC, watches: [] });
+        deploy.target.inputs.push('{workspaceRoot}/schema/migrations');
         ensureHouseProject(tree, 'a-database-capability', home, { tags: [], contract: { deploy: deploy.contract }, targets: { deploy: deploy.target } });
       },
       expect: (tree, t) => {
         const file = 'schema/migrations/20261104000000_add.sql';
         t.equal(affectedBy(tree, [file])[file], [], 'the failure is silent, so this case is the proof that it is one');
+      },
+    },
+    {
+      name: 'a bare directory in watches is refused where it is declared, naming the glob to write; a file or a glob passes',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        const { deployTarget } = ctx.load('generators/_utils/deploy-contract');
+        tree.write('schema/migrations/1_a.sql', '');
+        tree.write('Dockerfile', '');
+        const refusal = (watch) => {
+          try {
+            deployTarget(tree, 'database', { ...SPEC, watches: [watch] });
+            return null;
+          } catch (err) {
+            return err.message;
+          }
+        };
+        ctx.refused = Object.fromEntries(['schema/migrations', './schema/migrations', 'schema/migrations/', 'schema', 'not/seeded/yet', '.'].map((w) => [w, refusal(w)]));
+        ctx.passed = ['schema/migrations/**/*', 'Dockerfile', 'schema/migrations/1_a.sql', 'firestore.rules', 'not/seeded/yet/**/*', './a/b.toml', '.firebaserc'].map((w) => [w, refusal(w)]);
+        ctx.insideOwnRoot = refusal('database/migrations');
+      },
+      expect: (_tree, t, ctx) => {
+        t.ok(ctx.refused['schema/migrations'].includes("'schema/migrations/**/*'"), 'an existing directory: refused, with the glob');
+        t.ok(ctx.refused['./schema/migrations'].includes("'schema/migrations/**/*'"), '…however it is spelled');
+        t.ok(ctx.refused['schema/migrations/'].includes("'schema/migrations/**/*'"), '…a trailing slash too');
+        t.ok(ctx.refused.schema.includes("'schema/**/*'"), '…any depth');
+        t.ok(ctx.refused['not/seeded/yet'].includes("'not/seeded/yet/**/*'") && ctx.refused['not/seeded/yet'].includes('seed it'), 'a missing path with no extension: refused, naming both fixes');
+        t.ok(ctx.refused['.'].includes("'./**/*'"), 'the workspace root is a directory');
+        t.equal(ctx.passed.filter(([, message]) => message), [], 'a file (with or without an extension), a future file and a glob pass');
+        t.ok(ctx.insideOwnRoot, "one inside the project's own root is refused too: `default` covers it, but the spelling is still wrong");
       },
     },
     {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The runner-image checks' own decisions, against a fake docker and a fake curl: no image, no network, seconds. Whether a
-# real image passes is what check.sh, e2e.sh and devcontainer.sh are for; this only proves that each answer they can get produces the
+# real image passes is what check.sh, e2e.sh, devcontainer.sh and postgres-image.sh are for; this only proves that each answer they can get produces the
 # right exit code and the right words, because a checker whose red branches have never run is a checker nobody can trust.
 set -uo pipefail
 
@@ -333,6 +333,188 @@ out="$(env PATH="$DC/bin:$PATH" GITHUB_ACTIONS= HOME="$TMP" FAKE_YARN_PIN="$YARN
 [ "$got" = 1 ] && ok "two cases, a build failing: a finding" || fail "two cases, a build failing: exit $got"
 case "$out" in *"=== pnpm-node26"*) ok "a red case does not stop the next" ;; *) fail "a red case stopped the next" ;; esac
 out="$(PATH="$TMP/nodocker" GITHUB_ACTIONS= "$TMP/nodocker/bash" "$HERE/devcontainer.sh" 2>&1)"; got=$?
+if [ "$got" = 2 ] && case "$out" in *"no docker on PATH"*) true ;; *) false ;; esac; then
+  ok "no docker: could not run (exit 2)"
+else
+  fail "no docker: exit $got: $out"
+fi
+
+# postgres-image.sh, the same way: a fake docker answering as a right image would, a stand-in house.sh whose project's `nx` writes
+# what the real generator does, and each fault must turn into the right exit and words. The inside's own lines are real: they
+# were run against the real tools, and a real image is what the job is for.
+PG="$TMP/pg"
+mkdir -p "$PG/bin" "$PG/state" "$PG/tree/tools/check-runner-image" "$PG/tree/plugins/house/engine/nx-tools/src/generators/_utils"
+cp "$HERE/postgres-image.sh" "$HERE/postgres-image.inside.sh" "$PG/tree/tools/check-runner-image/"
+cp "$ROOT/plugins/house/engine/nx-tools/src/generators/_utils/versions.ts" "$PG/tree/plugins/house/engine/nx-tools/src/generators/_utils/"
+export FAKE_PG_STATE="$PG/state"
+DBMATE_PIN="$(sed -n "s/^export const DBMATE_VERSION = '\([^']*\)'.*/\1/p" "$ROOT/plugins/house/engine/nx-tools/src/generators/_utils/versions.ts")"
+cat > "$PG/tree/plugins/house/engine/house.sh" <<'FAKE'
+#!/usr/bin/env bash
+echo "house.sh $*" >> "$FAKE_ARGV"
+[ "${FAKE_NEW_RC:-0}" -eq 0 ] || { echo "the project could not be made"; exit "$FAKE_NEW_RC"; }
+for name; do :; done
+dir="$PROJECTS_DIR/$name"
+mkdir -p "$dir/.bespunky"
+tool="$dir/nx"
+case "$*" in *--preset=node*) mkdir -p "$dir/node_modules/.bin"; tool="$dir/node_modules/.bin/nx" ;; esac
+cat > "$tool" <<'NX'
+#!/usr/bin/env bash
+echo "nx $*" >> "$FAKE_ARGV"
+[ "${FAKE_NX_RC:-0}" -eq 0 ] || { echo "the generator threw"; exit "$FAKE_NX_RC"; }
+node="$(cat .nvmrc)"
+major="$(sed 's/[^0-9]//g' .bespunky/postgres.json)"
+case "$PWD" in *pg-agent) image=mcr.microsoft.com/devcontainers/base:debian; user=vscode ;; *) image="mcr.microsoft.com/devcontainers/typescript-node:$node"; user=node ;; esac
+[ -z "${FAKE_WRONG_FROM:-}" ] || image=mcr.microsoft.com/devcontainers/other:1
+[ -z "${FAKE_WRONG_MAJOR:-}" ] || major=16
+mkdir -p .devcontainer
+cat > .devcontainer/devcontainer.json <<JSON
+{
+  "build": {
+    "dockerfile": "house.Dockerfile",
+    "context": "."
+  },
+  "remoteUser": "$user",
+  "remoteEnv": {
+    "PATH": "/home/$user/.local/bin:\${containerEnv:PATH}"
+  }
+}
+JSON
+echo "FROM $image" > .devcontainer/house.Dockerfile
+{
+  echo "tool postgres usr/lib/postgresql/$major/bin usr/lib/*-linux-gnu x"
+  [ -n "${FAKE_NO_CLOSURE:-}" ] || {
+    echo "closure postgres trixie $major.6-aaaa libc6"
+    echo "closure postgres bookworm $major.6-bbbb libc6"
+  }
+} > .devcontainer/house.packages.sh
+NX
+chmod +x "$tool"
+FAKE
+cat > "$PG/bin/docker" <<'FAKE'
+#!/usr/bin/env bash
+sub="$1"; shift
+echo "docker $sub $*" >> "$FAKE_ARGV"
+case "$sub" in
+  pull) [ "${FAKE_PULL_RC:-0}" -eq 0 ] || echo "manifest unknown"; exit "${FAKE_PULL_RC:-0}" ;;
+  build)
+    while [ "$#" -gt 0 ]; do case "$1" in -f) file="$2"; shift ;; -t) tag="$2"; shift ;; esac; shift; done
+    case "$tag" in *bookworm*) closure_of=bbbb; codename=bookworm ;; *) closure_of=aaaa; codename=trixie ;; esac
+    case "$tag" in *pg17*) major=17 ;; *) major=18 ;; esac
+    echo "$major $codename" > "$FAKE_PG_STATE/$tag"
+    # The step's header states words of the installer on every build, as BuildKit prints it.
+    echo "#7 [2/2] RUN sh house.packages.sh && echo [os-packages] postgres $major.6-$closure_of installed"
+    [ "${FAKE_BUILD_RC:-0}" -eq 0 ] || { echo '#7 ERROR: apt-get satisfy could not be done'; exit "$FAKE_BUILD_RC"; }
+    [ -n "${FAKE_CACHED:-}" ] && { echo '#7 CACHED'; exit 0; }
+    [ -n "${FAKE_NO_SERVER:-}" ] || {
+      echo "#7 1.00 [os-packages] installing postgres $major.6-$closure_of ($codename, amd64)"
+      echo "#7 9.00 [os-packages] postgres $major.6-$closure_of installed"
+    }
+    [ -n "${FAKE_NO_DBMATE:-}" ] || echo "#7 9.10 [os-packages] dbmate $FAKE_DBMATE_PIN installed"
+    exit 0 ;;
+  run)
+    cat > /dev/null
+    [ "${FAKE_RUN_RC:-0}" -eq 0 ] || { echo "OCI runtime create failed"; exit "$FAKE_RUN_RC"; }
+    args="$*"
+    tag="$(printf '%s\n' "$@" | grep '^house-postgres-image-e2e-')"
+    read -r major codename < "$FAKE_PG_STATE/$tag"
+    echo "args=$args"
+    [ -n "${FAKE_NO_SENTINEL:-}" ] && exit 0
+    bin="${FAKE_BIN:-/usr/local/bin}"
+    echo "uid=${FAKE_UID:-1000}"
+    echo "codename=${FAKE_CODENAME:-$codename}"
+    echo "arch=amd64"
+    for tool in postgres psql initdb pg_ctl pg_dump pg_controldata pg_isready dbmate; do
+      if [ "$tool" = "${FAKE_NO_TOOL:-}" ]; then echo "path.$tool="; else echo "path.$tool=$bin/$tool"; fi
+    done
+    echo "wrapper.postgres=${FAKE_WRAPPER-# bespunky-house wrapper for postgres}"
+    echo "version.postgres=postgres (PostgreSQL) ${FAKE_PG_VERSION:-$major.6} (Debian x)"
+    echo "version.psql=psql (PostgreSQL) ${FAKE_PG_VERSION:-$major.6} (Debian x)"
+    echo "version.dbmate=dbmate version ${FAKE_DBMATE_ANSWER:-$FAKE_DBMATE_PIN}"
+    echo "initdb.rc=${FAKE_INITDB_RC:-0}"
+    echo "boot.rc=${FAKE_BOOT_RC:-0}"
+    echo "ready.rc=${FAKE_READY_RC:-0}"
+    echo "control.identifier=${FAKE_IDENTIFIER-7123456789012345678}"
+    echo "server.version=${FAKE_SERVER_VERSION:-$major.6 (Debian x)}"
+    echo "server.vector=${FAKE_VECTOR-0.8.7}"
+    echo "dbmate.rc=${FAKE_DBMATE_RC:-0}"
+    echo "dbmate.row=${FAKE_ROW:-1}"
+    echo "stop.rc=${FAKE_STOP_RC:-0}"
+    echo "stop.pidfile=${FAKE_PIDFILE:-gone}"
+    echo "launcher.ready=${FAKE_LAUNCHER_READY:-yes}"
+    echo "launcher.row=${FAKE_LAUNCHER_ROW-seeded}"
+    echo "launcher.wal=logical"
+    echo "launcher.migrate.rc=${FAKE_LAUNCHER_MIGRATE_RC:-0}"
+    echo "launcher.column=1"
+    echo "launcher.stop.rc=${FAKE_LAUNCHER_STOP_RC:-0}"
+    echo "launcher.exit.rc=${FAKE_LAUNCHER_EXIT_RC:-0}"
+    echo "probe=done"
+    exit 0 ;;
+esac
+exit 0
+FAKE
+chmod +x "$PG/bin/docker"
+
+pg_case() {   # <name> <cases, space-separated, or empty for all> <expected rc> <must say> <must NOT say> [ENV=VAL…]
+  local name="$1" cases="$2" want="$3" say="$4" not="$5" got out; shift 5
+  : > "$FAKE_ARGV"; rm -f "$PG/state/"*
+  # shellcheck disable=SC2086
+  out="$(env PATH="$PG/bin:$PATH" GITHUB_ACTIONS= GITHUB_STEP_SUMMARY= HOME="$TMP" FAKE_DBMATE_PIN="$DBMATE_PIN" "$@" bash "$PG/tree/tools/check-runner-image/postgres-image.sh" $cases 2>&1)"; got=$?
+  if [ "$got" != "$want" ]; then fail "$name: exit $got, wanted $want"; printf '%s\n' "$out" | tail -n 15 | sed 's/^/       /'; return; fi
+  case "$out" in *"$say"*) ;; *) fail "$name: never said '$say'"; printf '%s\n' "$out" | tail -n 15 | sed 's/^/       /'; return ;; esac
+  if [ -n "$not" ]; then case "$out" in *"$not"*) fail "$name: wrongly said '$not'"; return ;; esac; fi
+  ok "$name (exit $got)"
+}
+
+echo "postgres-image.sh"
+ONE=pg17-bookworm-node18
+pg_case "every case on a right image passes" "" 0 "PASS" "FAILED"
+for want in "new --local --add-layer=postgres pg-agent" "new --local --preset=node --add-layer=postgres pg-node" "nx g @bespunky/nx-tools:devcontainer pg-node --no-interactive" "--no-cache --progress=plain -f" "--user vscode" "--user node" "typescript-node:18" "base:debian"; do
+  grep -qF -- "$want" "$FAKE_ARGV" && ok "the run carries $want" || fail "the run lacks $want"
+done
+for id in pg18-trixie-agent pg17-trixie-node24 pg18-bookworm-node18 pg17-bookworm-node18; do
+  grep -q "docker build.*-t house-postgres-image-e2e-$id " "$FAKE_ARGV" && ok "it built $id" || fail "it never built $id"
+done
+[ "$(grep -c 'house.sh new' "$FAKE_ARGV")" = 2 ] && ok "one project per preset" || fail "made $(grep -c 'house.sh new' "$FAKE_ARGV") projects"
+pg_case "one case by name runs only that one" "$ONE" 0 "$ONE" "pg18-trixie-agent"
+pg_case "an unknown case: usage" nope 2 "usage" "PASS"
+pg_case "the build failing: a finding, with the build's words" "$ONE" 1 "docker build exited 0 (it exited 3)" "as node" FAKE_BUILD_RC=3
+pg_case "the build's tail is shown" "$ONE" 1 "apt-get satisfy could not be done" "" FAKE_BUILD_RC=3
+pg_case "a cached layer printing nothing: a finding, though the step's header says the words" "$ONE" 1 "the server is installed" "PASS" FAKE_CACHED=1
+pg_case "the installer not installing the server: a finding" "$ONE" 1 "the bookworm closure, 17.6-bbbb" "PASS" FAKE_NO_SERVER=1
+pg_case "the installer not installing dbmate: a finding" "$ONE" 1 "dbmate $DBMATE_PIN is installed" "PASS" FAKE_NO_DBMATE=1
+pg_case "a Dockerfile from another image: a finding" "$ONE" 1 "is FROM mcr.microsoft.com/devcontainers/typescript-node:18" "PASS" FAKE_WRONG_FROM=1
+pg_case "an installer of another major: a finding" "$ONE" 1 "holds Postgres 17's tools" "PASS" FAKE_WRONG_MAJOR=1
+pg_case "no closure for the release: a finding" "$ONE" 1 "has a bookworm closure" "docker build exited" FAKE_NO_CLOSURE=1
+pg_case "the generator failing: a finding" "$ONE" 1 "the devcontainer generator ran" "PASS" FAKE_NX_RC=4
+pg_case "an image on another release: a finding" "$ONE" 1 "the image is on bookworm (it says 'forky')" "PASS" FAKE_CODENAME=forky
+pg_case "running as root: a finding" "$ONE" 1 "a user who is not root" "PASS" FAKE_UID=0
+pg_case "a tool missing from PATH: a finding" "$ONE" 1 "pg_dump is on PATH, from /usr/local/bin (it says '')" "PASS" FAKE_NO_TOOL=pg_dump
+pg_case "a tool from elsewhere: a finding" "$ONE" 1 "postgres is on PATH, from /usr/local/bin (it says '/usr/bin/postgres')" "PASS" FAKE_BIN=/usr/bin
+pg_case "the server not behind its wrapper: a finding" "$ONE" 1 "through its generated wrapper" "PASS" FAKE_WRAPPER=
+pg_case "another minor answering: a finding" "$ONE" 1 "is the pin, 17.6" "PASS" FAKE_PG_VERSION=17.5
+pg_case "another dbmate answering: a finding" "$ONE" 1 "dbmate --version is the pin" "PASS" FAKE_DBMATE_ANSWER=0.0.1
+pg_case "initdb failing: a finding" "$ONE" 1 "a real initdb" "PASS" FAKE_INITDB_RC=1
+pg_case "the boot failing: a finding" "$ONE" 1 "the server booted" "PASS" FAKE_BOOT_RC=1
+pg_case "the server answering another version: a finding" "$ONE" 1 "the server answers, at 17.6" "PASS" FAKE_SERVER_VERSION=9.9
+pg_case "pgvector not loading, as psql really says it: a finding" "$ONE" 1 "pgvector loads" "PASS" "FAKE_VECTOR=HINT:  The extension must first be installed on the system where PostgreSQL is running."
+pg_case "pg_isready not answering: a finding" "$ONE" 1 "pg_isready answers" "PASS" FAKE_READY_RC=2
+pg_case "pg_controldata reading nothing: a finding" "$ONE" 1 "pg_controldata reads" "PASS" FAKE_IDENTIFIER=
+pg_case "a migration failing: a finding" "$ONE" 1 "a real dbmate migration" "PASS" FAKE_DBMATE_RC=1
+pg_case "a migration with no row: a finding" "$ONE" 1 "its row is there" "PASS" FAKE_ROW=0
+pg_case "the stop failing: a finding" "$ONE" 1 "the server stopped" "PASS" FAKE_STOP_RC=1
+pg_case "a pid file left: a finding" "$ONE" 1 "left no pid file" "PASS" FAKE_PIDFILE=left
+pg_case "the launcher not booting: a finding" "$ONE" 1 "the launcher booted it" "PASS" FAKE_LAUNCHER_READY=no
+pg_case "the launcher seeding nothing: a finding" "$ONE" 1 "migrated and seeded" "PASS" FAKE_LAUNCHER_ROW=
+pg_case "the migrate verb failing: a finding" "$ONE" 1 "postgres.mjs migrate exited 0" "PASS" FAKE_LAUNCHER_MIGRATE_RC=1
+pg_case "dev stop failing: a finding" "$ONE" 1 "dev stop exited 0" "PASS" FAKE_LAUNCHER_STOP_RC=1
+pg_case "no base image: could not run" "$ONE" 2 "COULD NOT RUN ($ONE): docker pull" "FAILED" FAKE_PULL_RC=1
+pg_case "an engine error at run: could not run" "$ONE" 2 "docker run exited 125" "FAILED" FAKE_RUN_RC=125
+pg_case "exit 0 with no sentinel: could not run" "$ONE" 2 "before the probe's end" "PASS" FAKE_NO_SENTINEL=1
+pg_case "no project: could not run" "$ONE" 2 "COULD NOT RUN ($ONE): house.sh new" "FAILED" FAKE_NEW_RC=9
+out="$(env PATH="$PG/bin:$PATH" GITHUB_ACTIONS= HOME="$TMP" FAKE_DBMATE_PIN="$DBMATE_PIN" FAKE_BUILD_RC=3 bash "$PG/tree/tools/check-runner-image/postgres-image.sh" pg18-bookworm-node18 pg17-bookworm-node18 2>&1)"; got=$?
+[ "$got" = 1 ] && ok "two cases, a build failing: a finding" || fail "two cases, a build failing: exit $got"
+case "$out" in *"=== pg17-bookworm-node18"*) ok "a red case does not stop the next" ;; *) fail "a red case stopped the next" ;; esac
+out="$(PATH="$TMP/nodocker" GITHUB_ACTIONS= "$TMP/nodocker/bash" "$HERE/postgres-image.sh" 2>&1)"; got=$?
 if [ "$got" = 2 ] && case "$out" in *"no docker on PATH"*) true ;; *) false ;; esac; then
   ok "no docker: could not run (exit 2)"
 else

@@ -23,7 +23,7 @@
  * Like the migration tests it compiles the payload the way the publisher does and tests the RESULT.
  * Needs `yarn install`.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, readlinkSync, lstatSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -1066,6 +1066,7 @@ checkAsync('image: a .deb closure unpacks at its pin behind wrappers, satisfies 
     writeFileSync(join(root, 'etc/os-release'), 'ID=debian\nVERSION_CODENAME=forky\n');
     const forky = runIt(render(tool('4.0-dddd', [a2])));
     ok(forky.status !== 0 && /no closure for this Debian release \('forky'; it has: trixie \)/.test(forky.output) && forky.calls.length === 0, `an unknown codename did not fail loudly: ${JSON.stringify(forky)}`);
+    ok(/upgrade it/.test(forky.output) && /use a tag on one of those releases/.test(forky.output), `the refusal did not give the way out: ${forky.output}`);
     rmSync(join(root, 'etc/os-release'));
     const unreadable = runIt(render(tool('4.0-dddd', [a2])));
     ok(unreadable.status !== 0 && /'unknown'/.test(unreadable.output), `an image with no os-release did not fail loudly: ${JSON.stringify(unreadable)}`);
@@ -1170,7 +1171,24 @@ checkAsync('persistence: an archive tool needs no mount, and no layer mounts ove
 // publish): it covers the pins, it is exactly what the tool writes (so a hand-edit shows), and the selection rules hold
 // against indexes with the futures that would break them.
 checkAsync('postgres closures: the table covers the pins, is exactly what its tool renders, and libpq5 is selected by major', async (ok) => {
-  const { buildClosure, parsePackages, render, selectPackages, signedBy } = await import('../postgres-debs/closure.mjs');
+  const { buildClosure, parsePackages, pinnedDownloads, render, selectPackages, signedBy } = await import('../postgres-debs/closure.mjs');
+  {
+    // The floating-image tripwire's reading, OFFLINE: the network half is tools/postgres-debs/image-codenames.mjs, weekly.
+    const { KNOWN_OUTSIDE, codenameByDigest, composedImages, judge, releaseTags } = await import('../postgres-debs/image-codenames.mjs');
+    const layersDir = join(PAYLOAD, 'src/layers');
+    const images = composedImages(readdirSync(layersDir).filter((f) => f.endsWith('.ts')).map((f) => readFileSync(join(layersDir, f), 'utf8')), [22, 24]);
+    ok(['mcr.microsoft.com/devcontainers/base:debian', 'mcr.microsoft.com/devcontainers/typescript-node:22', 'mcr.microsoft.com/devcontainers/typescript-node:24'].every((image) => images.includes(image)), `the tripwire lost a composed image: ${images}`);
+    ok(images.every((image) => !image.includes('{{')), `a ref left a token unexpanded: ${images}`);
+    const baseTags = releaseTags('debian', ['debian', 'trixie', 'latest', 'debian-13', 'bookworm', 'dev']);
+    ok(baseTags.map((c) => c.codename).join() === 'trixie,bookworm', `base's release tags: ${JSON.stringify(baseTags)}`);
+    const nodeTags = releaseTags('22', ['22', '22-trixie', '22-bookworm', '2-bookworm', '220-trixie', '22-trixie-amd64']);
+    ok(nodeTags.map((c) => c.codename).join() === 'trixie,bookworm', `a node major's release tags: ${JSON.stringify(nodeTags)}`);
+    const candidates = [{ codename: 'trixie', digest: 'a' }, { codename: 'bookworm', digest: 'b' }];
+    ok(codenameByDigest('a', candidates) === 'trixie' && codenameByDigest('z', candidates) === undefined && codenameByDigest('a', [...candidates, { codename: 'forky', digest: 'a' }]) === undefined, 'a digest must name exactly one release');
+    const verdicts = Object.fromEntries(judge({ on: 'trixie', moved: 'forky', blind: undefined, kept: 'bullseye', keptMoved: 'buster' }, ['trixie', 'bookworm'], { kept: { codename: 'bullseye' }, keptMoved: { codename: 'bullseye' } }).map((r) => [r.image, r.verdict]));
+    ok(verdicts.on === 'ok' && verdicts.moved === 'missing' && verdicts.blind === 'unknown' && verdicts.kept === 'known' && verdicts.keptMoved === 'missing', `the tripwire's verdicts: ${JSON.stringify(verdicts)}`);
+    ok(Object.values(KNOWN_OUTSIDE).every((entry) => entry.codename && entry.why), 'an exemption states its codename and its reason');
+  }
   // A status of a good signature by another key in the keyring: the key file served may hold more than PGDG's.
   const statusBy = (primary) => `[GNUPG:] GOODSIG ABCD someone\n[GNUPG:] VALIDSIG SUBKEY 2026-11-04 1 0 4 0 1 10 01 ${primary}\n`;
   ok(signedBy(statusBy('AAAA'), 'AAAA') && !signedBy(statusBy('BBBB'), 'AAAA') && !signedBy('[GNUPG:] GOODSIG ABCD someone\n', 'AAAA'), 'a signature is not held to the fingerprint');
@@ -1180,7 +1198,24 @@ checkAsync('postgres closures: the table covers the pins, is exactly what its to
   const source = readFileSync(join(PAYLOAD, 'src/generators/_utils/postgres-closures.ts'), 'utf8');
   ok(render(POSTGRES_CLOSURES, POSTGRES_CLOSURES_AS_OF) === source, 'postgres-closures.ts is not what its tool renders (hand-edited?): node tools/postgres-debs/project.mjs --write');
   ok(/^\d{4}-\d{2}-\d{2}$/.test(POSTGRES_CLOSURES_AS_OF), 'the table has no as-of date');
+  // What the weekly check reads the dbmate pins with: a pin it cannot read must not read as a pin that is fine.
+  const dbmatePins = pinnedDownloads(readFileSync(join(PAYLOAD, 'src/generators/_utils/versions.ts'), 'utf8'), 'DBMATE');
+  ok(dbmatePins.version === versions.DBMATE_VERSION, 'the check reads the dbmate version the payload pins');
+  ok(JSON.stringify(Object.fromEntries(dbmatePins.pins.map(({ arch, url, sha256 }) => [arch, { url, sha256 }]))) === JSON.stringify(versions.DBMATE_DOWNLOADS), 'the check reads every dbmate download the payload pins, as the payload computes it');
+  let unreadable = false;
+  try {
+    pinnedDownloads("export const NOPE_VERSION = '1';", 'NOPE');
+  } catch {
+    unreadable = true;
+  }
+  ok(unreadable, 'a pin the check cannot read is an error, never an empty list');
   ok(Object.keys(POSTGRES_CLOSURES).sort().join() === [...versions.POSTGRES_MAJORS].sort().join(), `the table's majors are not the pins: ${Object.keys(POSTGRES_CLOSURES)} (node tools/postgres-debs/project.mjs --write)`);
+  // The image job's table is hand-written, and its header says it covers every major on every release.
+  const imageCases = readFileSync(new URL('../check-runner-image/postgres-image.sh', import.meta.url), 'utf8').match(/^pg\d+-[^|]*\|[^|]*\|[^|]*\|\d+\|[^|]*\|\w+$/gm) ?? [];
+  const imageCovers = new Set(imageCases.map((line) => { const fields = line.split('|'); return `${fields[3]}/${fields[5]}`; }));
+  for (const major of versions.POSTGRES_MAJORS) {
+    for (const codename of versions.POSTGRES_DEB_CODENAMES) ok(imageCovers.has(`${major}/${codename}`), `tools/check-runner-image/postgres-image.sh has no case for Postgres ${major} on ${codename}`);
+  }
   for (const major of versions.POSTGRES_MAJORS) {
     const closures = POSTGRES_CLOSURES[major] ?? {};
     ok(Object.keys(closures).join() === versions.POSTGRES_DEB_CODENAMES.join(), `Postgres ${major}'s codenames are not the pins: ${Object.keys(closures)}`);
@@ -1332,7 +1367,7 @@ checkAsync('chromium: a foreign image keeps Playwright\'s own --with-deps (its d
   const foreign = createTreeWithEmptyWorkspace();
   foreign.write('.devcontainer/devcontainer.json', '{ "image": "python:3.12-bookworm", "remoteUser": "pyuser" }\n');
   const f = await artifacts(foreign, ['nx', 'agent', 'node', 'js', 'web']);
-  ok(!/(^| )libnss3( |$)/m.test(f.osScript), 'a foreign image got the Debian 13 Chromium names (one wrong name fails the whole apt transaction)');
+  ok(!/(^| )libnss3( |$)/m.test(f.osScript), 'a foreign image got the Chromium names meant for the house images (one wrong name fails the whole apt transaction)');
   ok(f.osScript.includes('tigervnc-standalone-server'), 'the distro-neutral web packages must stay on a foreign image');
   ok(f.post.includes('shared-browser" install --with-deps;') && f.post.includes('playwright install --with-deps chromium'), 'a foreign image lost Playwright\'s own --with-deps');
   const house = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js', 'web']);
@@ -1516,12 +1551,68 @@ checkAsync('post-create: web provisions the shared browser through its own runti
   const tree = createTreeWithEmptyWorkspace();
   const both = await artifacts(tree, ['nx', 'agent', 'node', 'js', 'web']);
   ok(both.post.includes('"@playwright/test"') && both.post.includes('playwright install chromium') && !both.post.includes('--with-deps'), 'js+web: both pieces, neither with an apt step');
-  ok((both.osScript.match(/(^| )libnss3( |$)/gm) ?? []).length === 1, 'js+web: Chromium\'s libraries listed twice (the composer must de-duplicate)');
+  ok((both.osScript.match(/^chromium trixie /gm) ?? []).length === 1, 'js+web: Chromium\'s libraries listed twice (the composer must de-duplicate)');
   const js = await artifacts(createTreeWithEmptyWorkspace(), ['nx', 'agent', 'node', 'js']);
   ok(/(^| )libnss3( |$)/m.test(js.osScript), 'js (no web): @playwright/test\'s Chromium libraries are not image packages');
   const { PLAYWRIGHT_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
   const { CHROMIUM_OS_PACKAGES_VERSION } = require_(join(BUILD, 'src/generators/_utils/playwright-deps'));
   ok(CHROMIUM_OS_PACKAGES_VERSION === PLAYWRIGHT_VERSION, `Chromium's OS packages were projected from playwright-core@${CHROMIUM_OS_PACKAGES_VERSION}, the pin is ${PLAYWRIGHT_VERSION} — run: node tools/playwright-deps/project.mjs --write`);
+  // Every release the house images can be on has a list, and a name a release renamed is on the right side of it.
+  const { CHROMIUM_OS_PACKAGES } = require_(join(BUILD, 'src/generators/_utils/playwright-deps'));
+  const { POSTGRES_DEB_CODENAMES } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  ok(POSTGRES_DEB_CODENAMES.every((codename) => CHROMIUM_OS_PACKAGES[codename]?.length), `a release with a Postgres closure has no Chromium list: ${Object.keys(CHROMIUM_OS_PACKAGES)}`);
+  ok(CHROMIUM_OS_PACKAGES.trixie.includes('libasound2t64') && CHROMIUM_OS_PACKAGES.bookworm.includes('libasound2') && !CHROMIUM_OS_PACKAGES.bookworm.includes('libasound2t64'), 'the lists are not each its own release\'s names');
+  const { chromiumCodenames } = await import('../postgres-debs/image-codenames.mjs');
+  ok(chromiumCodenames(readFileSync(join(PAYLOAD, 'src/generators/_utils/playwright-deps.ts'), 'utf8')).join() === Object.keys(CHROMIUM_OS_PACKAGES).join(), 'the weekly tripwire reads other releases than the table holds');
+  let shapeMoved = false;
+  try { chromiumCodenames('export const X = {};'); } catch { shapeMoved = true; }
+  ok(shapeMoved, 'a table the tripwire cannot read is an error, never an empty list');
+
+  // An osPackages group per release, through the real installer: it picks by the image's codename, and refuses one with no list.
+  const { compose: composeGroup, renderOsPackagesScript: renderGroup } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const perRelease = { id: 'browser', byCodename: { trixie: ['libnew', 'shared'], bookworm: ['libold', 'shared'] }, onHouseImageOnly: true, why: "a release's own names" };
+  const composed = (source, ...groups) => composeGroup([{ id: 'x', fragment: { image: { ref: 'img', remoteUser: 'node' }, osPackages: groups } }], { nodeMajor: '22', ...source });
+  const script = renderGroup(composed({}, { packages: ['plain', 'shared'] }, perRelease, perRelease));
+  ok(script.split("\nbrowser trixie ").length === 2, 'two layers sharing a group must render it once');
+  const onRelease = (codename, present = []) => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-by-codename-'));
+    try {
+      const bin = join(dir, 'bin');
+      mkdirSync(bin);
+      mkdirSync(join(dir, 'root/etc'), { recursive: true });
+      if (codename) writeFileSync(join(dir, 'root/etc/os-release'), `ID=debian\nVERSION_CODENAME=${codename}\n`);
+      writeFileSync(join(dir, 'house.packages.sh'), script);
+      writeFileSync(join(bin, 'dpkg-query'), `#!/bin/sh\nfor last; do :; done\nfor p in ${present.join(' ')}; do [ "$p" = "$last" ] && { printf 'install ok installed'; exit 0; }; done\nexit 1\n`, { mode: 0o755 });
+      writeFileSync(join(bin, 'apt-get'), `#!/bin/sh\necho "$*" >> '${join(dir, 'apt.log')}'\n`, { mode: 0o755 });
+      writeFileSync(join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+      const run = spawnSync('sh', ['-c', 'sh "$0" 2>&1', join(dir, 'house.packages.sh')], { env: { PATH: `${bin}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: join(dir, 'root') }, encoding: 'utf8' });
+      const log = existsSync(join(dir, 'apt.log')) ? readFileSync(join(dir, 'apt.log'), 'utf8') : '';
+      return { status: run.status, output: run.stdout, install: log.split('\n').find((line) => line.startsWith('install')) ?? '' };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const trixie = onRelease('trixie');
+  ok(trixie.status === 0 && / plain shared libnew$/.test(trixie.install), `trixie installs its own names, each once: ${trixie.install} ${trixie.output}`);
+  const bookworm = onRelease('bookworm');
+  ok(bookworm.status === 0 && / plain shared libold$/.test(bookworm.install), `bookworm installs its own names: ${bookworm.install} ${bookworm.output}`);
+  const forky = onRelease('forky');
+  ok(forky.status !== 0 && /'browser' has no package list for this Debian release \('forky'; it has: trixie bookworm \)/.test(forky.output) && /upgrade it/.test(forky.output), `a release with no list fails by name, with the way out: ${forky.output}`);
+  ok(/ plain shared$/.test(forky.install), `…and the rest still installs: ${forky.install}`);
+  const forkyDone = onRelease('forky', ['plain', 'shared']);
+  ok(forkyDone.status !== 0 && forkyDone.install === '' && !forkyDone.output.includes('all present'), `with nothing else to install, it still fails: ${forkyDone.output}`);
+  const nowhere = onRelease(undefined);
+  ok(nowhere.status !== 0 && /\('unknown'; it has/.test(nowhere.output), `no readable release fails by name: ${nowhere.output}`);
+  ok(onRelease('bookworm', ['plain', 'shared', 'libold']).output.includes('all present'), 'a container built from this image installs nothing');
+  const adopted = renderGroup(composed({ imageSource: { kind: 'foreign', runsAs: 'node' } }, { packages: ['plain'] }, perRelease));
+  ok(!adopted.includes('libnew') && !adopted.includes('VERSION_CODENAME'), 'onHouseImageOnly keeps its meaning: an adopted image gets neither the names nor a refusal of its release');
+  const plainOnly = renderGroup(composed({}, { packages: ['plain'] }));
+  ok(!/VERSION_CODENAME|HOUSE_PACKAGES_BY_CODENAME|\{\{/.test(plainOnly), 'a project with no per-release group reads no release: its installer, and its cached layer, do not move');
+  for (const [name, group] of [['an id', { id: 'Bad Id', byCodename: { trixie: ['a'] } }], ['a codename', { id: 'x', byCodename: { 'Tri xie': ['a'] } }], ['an empty list', { id: 'x', byCodename: { trixie: [] } }], ['a name', { id: 'x', byCodename: { trixie: ['a; rm -rf /'] } }]]) {
+    let refused = false;
+    try { renderGroup(composed({}, group)); } catch { refused = true; }
+    ok(refused, `a malformed group must be refused before it reaches a root apt-get: ${name}`);
+  }
   ok(bashParses(both.post), 'js+web post-create does not parse');
 });
 
@@ -1634,6 +1725,74 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   rmSync(join(config, 'backups'), { recursive: true });
   run();
   ok(!existsSync(join(config, '.claude.json')), 'with no backups, nothing is invented');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// Postgres. The server and dbmate are in the IMAGE (a closure and a bare binary, both sha-pinned, neither under a mount), and
+// what must outlive a rebuild is under the persisted ~/.local: the clusters, through the launcher's data home, and psql's
+// history, which would otherwise land in $HOME. No mount of its own. And no database URL in anything committed.
+checkAsync('postgres: in the image by exact pin, on the wrapper host too; its state lives in the persisted ~/.local; no URL in the devcontainer', async (ok) => {
+  const { DBMATE_DOWNLOADS, DBMATE_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const { POSTGRES_CLOSURES } = require_(join(BUILD, 'src/generators/_utils/postgres-closures'));
+  const tree = wrapperRepo();
+  const a = await artifacts(tree, ['nx', 'agent', 'postgres']);
+  const home = `/home/${a.dc.remoteUser ?? 'vscode'}`;
+  for (const [arch, { url, sha256 }] of Object.entries(DBMATE_DOWNLOADS)) ok(a.osScript.includes(`dbmate ${DBMATE_VERSION} ${arch} ${sha256} ${url} bin`), `the installer lacks dbmate's ${arch} line`);
+  ok(a.osScript.includes(POSTGRES_CLOSURES['18'].trixie.version), 'the installer lacks the default major\'s closure');
+  // It trusts every connection on loopback, so a forward hands the host's loopback a superuser. A stack's port moves with its offset.
+  ok(a.dc.portsAttributes?.['5432']?.onAutoForward === 'ignore', 'the base port is left to auto-forward');
+  ok(a.dc.portsAttributes?.['bespunky/postgres/.+/data']?.onAutoForward === 'ignore', 'a shifted stack\'s server is left to auto-forward: its command line is not named');
+  ok(shParses(a.osScript), 'the installer does not parse');
+  ok(a.dc.containerEnv?.PSQL_HISTORY === `${home}/.local/share/bespunky/postgres/psql_history`, `psql's history would not survive a rebuild: ${a.dc.containerEnv?.PSQL_HISTORY}`);
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.local,type=volume`)), '~/.local, the clusters\' home, is not a persisted volume');
+  const without = await artifacts(wrapperRepo(), ['nx', 'agent']);
+  ok(a.dc.mounts.length === without.dc.mounts.length, 'the layer added a mount: its state belongs in a persisted XDG home');
+  ok(!/postgres(ql)?:\/\//.test(a.dcText), 'a database URL in devcontainer.json is inherited by every process, and committed');
+  ok(a.house.includes('## Postgres') && a.rules.includes('## Postgres') && a.claude.includes('Postgres'), 'the house docs have no Postgres section');
+  ok(a.house.includes('./nx run postgres:start'), 'the docs do not render this host\'s Nx');
+  ok(!without.house.includes('## Postgres') && !without.rules.includes('## Postgres'), 'a project without the layer reads about it');
+  // A project with no bare-binary tool must keep the installer it has: moving its bytes would rebuild its image for nothing.
+  const firebase = createTreeWithEmptyWorkspace();
+  writeJson(firebase, 'firebase.json', {});
+  const f = await artifacts(firebase, ['nx', 'agent', 'node', 'firebase']);
+  ok(!f.osScript.includes('case "$url" in') && f.osScript.includes('tar -xzf "$download/archive.tar.gz"'), 'a tarball-only installer changed shape');
+  ok(!f.osScript.includes('{{'), 'a tarball-only installer kept a placeholder');
+});
+
+checkAsync('postgres: a bare binary installs for real through the generated installer, unprivileged, and a tampered one is refused', async (ok) => {
+  const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
+  const { createHash } = await import('node:crypto');
+  const dir = mkdtempSync(join(tmpdir(), 'bespunky-binary-archive-'));
+  const body = '#!/bin/sh\necho fake-tool-1\n';
+  const stubs = join(dir, 'stubs');
+  mkdirSync(stubs);
+  writeFileSync(join(stubs, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+  writeFileSync(join(stubs, 'apt-get'), '#!/bin/sh\n', { mode: 0o755 });
+  writeFileSync(join(stubs, 'dpkg-query'), "#!/bin/sh\nprintf 'install ok installed'\n", { mode: 0o755 });
+  // curl refuses nothing here: a stub stands in for the download, since the composer only accepts https.
+  writeFileSync(join(stubs, 'curl'), `#!/bin/sh\nwhile [ "$#" -gt 1 ]; do case "$1" in -o) out="$2"; shift ;; esac; shift; done\ncp '${join(dir, 'served')}' "$out"\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'served'), body);
+  const sha256 = createHash('sha256').update(body).digest('hex');
+  const render = (hash) => renderOsPackagesScript(compose([{ id: 't', fragment: { image: { ref: 'img', remoteUser: 'node' }, archives: [{ format: 'binary', id: 'fake-tool', version: '1.0.0', downloads: { amd64: { url: 'https://example.com/fake-tool-linux-amd64', sha256: hash }, arm64: { url: 'https://example.com/fake-tool-linux-arm64', sha256: hash } } }] } }], { nodeMajor: '22' }));
+  const root = join(dir, 'root');
+  mkdirSync(root);
+  const script = join(dir, 'install.sh');
+  writeFileSync(script, render(sha256));
+  ok(shParses(readFileSync(script, 'utf8')), 'the rendered installer does not parse');
+  execFileSync('sh', [script], { env: { PATH: `${stubs}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: root }, stdio: 'ignore' });
+  const link = join(root, 'usr/local/bin/fake-tool');
+  ok(existsSync(link) && execFileSync(link, { encoding: 'utf8' }).trim() === 'fake-tool-1', 'the binary is not on PATH, executable, under its own name');
+  ok(readlinkSync(join(root, 'opt/bespunky/fake-tool/current')) === '1.0.0', '`current` does not name the pin');
+  const tampered = join(dir, 'root2');
+  mkdirSync(tampered);
+  writeFileSync(script, render('0'.repeat(64)));
+  let failed = false;
+  try {
+    execFileSync('sh', [script], { env: { PATH: `${stubs}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: tampered }, stdio: 'ignore' });
+  } catch {
+    failed = true;
+  }
+  ok(failed && !existsSync(join(tampered, 'usr/local/bin/fake-tool')), 'a binary that does not match its sha256 was installed');
   rmSync(dir, { recursive: true, force: true });
 });
 

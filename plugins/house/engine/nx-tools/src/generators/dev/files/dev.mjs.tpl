@@ -37,11 +37,12 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { attachBrowser, detachRoute, foreignOwner, sharedBrowserUrl } from './lib/browser.mjs';
-import { DECLARATION_PATH, DeclarationError, declaredPorts, loadDeclaration, pickApp, planApp, primaryOf, runEnv } from './lib/declaration.mjs';
+import { DECLARATION_PATH, DeclarationError, declaredPorts, loadDeclaration, pickApp, planApp, primaryOf, runEnv, runExports } from './lib/declaration.mjs';
 import { PortError, isPortFree, portBlock } from './lib/ports.mjs';
 import { describeProbe, probeOnce } from './lib/ready.mjs';
-import { descendants, runStack } from './lib/stack.mjs';
+import { describeEnd, descendants, runStack } from './lib/stack.mjs';
 import {
+  RUN_DIR,
   ClaimError,
   claimStack,
   describe,
@@ -55,6 +56,7 @@ import {
   ownerOf,
   processStart,
   pruneDead,
+  publicStack,
   readStacks,
   removeRecord,
   stackDir as stackDirOf,
@@ -187,6 +189,7 @@ const USAGE = `Usage:
 
 serve  serves an app declared in ${DECLARATION_PATH}. --worktree with no value picks one interactively.
 ps     lists the running stacks of every worktree (app@offset, owner, pid, ports and whether each is listening).
+       --json is the public address of a stack, for scripts: tree, app, offset, ports, exports (lib/stacks.mjs publicStack).
 stop   stops a stack by its handle and confirms its ports are free. --offset names one (the serve printed its stop
        command); without it, your one stack in this tree. --all-mine: every stack of your owner label, in any tree.
        A Claude Code session is ONE owner for itself and all its subagents, so under it a stack must be NAMED
@@ -574,9 +577,11 @@ async function serve(opts) {
   const detached = await awaitDetached(tree.path, key, { say: log });
   for (const w of detached.finished) (w.code ? warn : log)(`${w.id}: ${w.result ?? `ended (code ${w.code ?? 0})`}`);
   if (!result.success) reportFailure(result.failures, plan, detached);
-  else if (detached.ok) log(`${key} stopped cleanly${stopSignal ? ` (asked by ${stoppedBy(stackDir, stopSignal)})` : ''}.`);
+  reportUnclean(result.unclean, warn);
+  answerStopRequest(tree.path, key, result);
+  if (result.success && detached.ok && !result.unclean.length) log(`${key} stopped cleanly${stopSignal ? ` (asked by ${stoppedBy(stackDir, stopSignal)})` : ''}.`);
   dropRecord();
-  if (!result.success || !detached.ok) return 1;
+  if (!result.success || !detached.ok || result.unclean.length) return 1;
   return stopSignal === 'SIGINT' ? INTERRUPTED : 0;
 }
 
@@ -589,8 +594,7 @@ function reportFailure(failures, plan, detached) {
   err('✖ the stack FAILED and was stopped:');
   for (const f of failures) {
     const proc = plan.running.find((p) => p.id === f.id);
-    const end = f.code === undefined ? '' : `exited ${f.signal ? `on ${f.signal}` : `with code ${f.code}`}`;
-    err(`  ${f.id} ${[end, f.why].filter(Boolean).join(' ')}${proc ? ` — it ran: ${proc.display}` : ''}`);
+    err(`  ${f.id} ${describeEnd(f)}${proc ? ` — it ran: ${proc.display}` : ''}`);
   }
   err('  Its output is above.');
   // The detached work's own log is the one place the cause is sure to be (an emulator suite that cannot start says
@@ -609,6 +613,11 @@ function reportFailure(failures, plan, detached) {
   }
 }
 
+/** Say which processes were told to stop and did not end the way a stop ends. Their own output, above, says why. */
+function reportUnclean(unclean, say) {
+  for (const u of unclean) say(`${u.id} did not shut down cleanly: ${describeEnd(u)}. Its output is above.`);
+}
+
 /**
  * WHO STOPPED THE STACK — said as it stops. `dev stop` leaves a STOP REQUEST in the stack's state dir before it
  * signals (stopOne); otherwise the signal is all there is to go by.
@@ -624,6 +633,30 @@ function stoppedBy(stackDir, signal) {
   if (signal === 'SIGINT') return 'a Ctrl+C (SIGINT)';
   if (signal) return `a ${signal} sent to its serve (pid ${process.pid})`;
   return undefined;
+}
+
+/**
+ * HOW THE STOP WENT — for the `dev stop` that asked, which sees only that the claimer is gone, not how its processes ended.
+ * Left beside the state dir, which may go with the stack; not `.json`, so no reader takes it for a record. Written only
+ * when a `dev stop` asked and something went wrong, and that stop takes it (stopOne), so nothing accumulates.
+ */
+const stopReportFile = (tree, key) => join(tree, RUN_DIR, `${key}.stop-report`);
+
+function answerStopRequest(tree, key, { failures, unclean }) {
+  const wrong = [...failures, ...unclean].map((f) => `${f.id} ${describeEnd(f)}`);
+  if (wrong.length && existsSync(join(stackDirOf(tree, key), STOP_REQUEST))) writeFileSync(stopReportFile(tree, key), wrong.join('; '));
+}
+
+/** The answer to a stop, once its claimer is gone: what went wrong, or nothing. Taken: it answers this stop alone. */
+function takeStopReport(tree, key) {
+  const file = stopReportFile(tree, key);
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return '';
+  } finally {
+    rmSync(file, { force: true });
+  }
 }
 
 /** The exact command that stops a stack, as printed for whoever holds its handle. */
@@ -658,7 +691,7 @@ async function ps(opts) {
     rows.push({ ...s, treeLabel: label(s), portStates: s.state === 'foreign' ? [] : await portStates(s), detached: s.state === 'foreign' ? [] : unfinished(s.tree, s.key) });
   }
   if (opts.json) {
-    console.log(JSON.stringify(rows, null, 2));
+    console.log(JSON.stringify(rows.map(publicStack), null, 2));
     return 0;
   }
   if (!rows.length) {
@@ -699,6 +732,7 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   const known = detachedWork(stackDirOf(record.tree, record.key));
   // Who asked — read by the serve as it ends, and said there (see stoppedBy).
   if (record.state === 'live') {
+    takeStopReport(record.tree, record.key); // one a stop died before reading is not this stop's answer
     try {
       writeFileSync(join(stackDirOf(record.tree, record.key), STOP_REQUEST), `${JSON.stringify({ by: ownerOf(process.env), pid: process.pid, at: new Date().toISOString() })}\n`);
     } catch {
@@ -723,7 +757,8 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   }
   // The claimer waits for its detached work (an emulator export, ~30 s) before it exits — say what it is waiting on,
   // so a stop that takes half a minute reads as progress, not as a hang. Abandoning: end that work as soon as it shows.
-  const running = () => pids.filter((pid) => isAlive(pid));
+  // Not isAlive: where PID 1 reaps nothing (a container with no init), a stopped orphan stays a zombie forever, and answers `kill -0`.
+  const running = () => pids.filter((pid) => isSameProcess(pid));
   const start = Date.now();
   let next = start + 5000;
   let abandoned = false;
@@ -743,6 +778,8 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   if (running().length) {
     return { ok: false, why: `pid ${running().join(', ')} still shutting down after ${Math.round(timeoutMs / 1000)}s — nothing was killed; check again with tools/dev/dev ps` };
   }
+  const wrong = takeStopReport(record.tree, record.key);
+  if (wrong) say(`did not shut down cleanly: ${wrong}. Its serve's output says more.`);
   if (abandon && unfinished(record.tree, record.key).length) await abandonDetached(record.tree, record.key, say);
   // The claimer reported its own detached work; one that died without waiting for it (or a finishing stack) has not.
   const detached = await awaitDetached(record.tree, record.key, { say, known });
@@ -763,7 +800,7 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   if (held.length) {
     return { ok: false, why: `stopped, but still listening: ${held.map((p) => `${p.name}=${p.port}`).join(', ')} — not this stack's process any more; find the holder with: ss -ltnp 'sport = :${held[0].port}'` };
   }
-  return { ok: true };
+  return wrong ? { ok: false, why: 'stopped and its ports are free, but not cleanly (above)' } : { ok: true };
 }
 
 async function stop(opts) {
@@ -855,11 +892,13 @@ async function run(opts) {
   const { lock, claim: { record } } = await claimHoldingLock(tree.path, (lockPath) => claimOwnStack(opts, worktrees, tree, lockPath));
   const { key, offset } = record;
   const dropRecord = recordDropper(scopeOf(worktrees), tree.path, key, lock);
+  record.exports = { ...runExports(record), DEV_STACK: key };
+  writeRecord(record);
   say(`${key} claimed — tools/dev/dev ps shows it; stop it with Ctrl+C or: ${stopCommand(record, tree)}`);
 
   const [command, ...args] = opts.passthrough;
   const id = opts.app;
-  const { exits } = await runStack({
+  const result = await runStack({
     children: [{ id, command, args, shell: false, env: runEnv(process.env, { app: opts.app, ports: record.ports, offset, stackDir: stackDirOf(tree.path, key), stackTmp: record.tmp, stackLock: lock.path }) }],
     cwd: process.cwd(),
     lockFd: lock.fd,
@@ -870,8 +909,10 @@ async function run(opts) {
     },
   });
   const detached = await awaitDetached(tree.path, key, { say });
+  reportUnclean(result.unclean, say);
+  answerStopRequest(tree.path, key, result);
   dropRecord();
-  const { code, signal } = exits[id];
+  const { code, signal } = result.exits[id];
   const status = code ?? 128 + (osConstants.signals[signal] ?? 0);
   return status === 0 && !detached.ok ? 1 : status;
 }
