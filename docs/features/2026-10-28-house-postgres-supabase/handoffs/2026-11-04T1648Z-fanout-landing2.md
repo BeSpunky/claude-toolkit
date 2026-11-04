@@ -24,9 +24,9 @@ Budget 12 (default): debts-ci 1, debts-engine 1, core 1+2, wire 1, reviewer 1+5 
 | debts-ci | feat/hps2-ci | yes, its own branch | returned |
 | debts-engine | feat/hps2-engine | yes, its own branch | returned |
 | core | feat/hps2-core | yes, its own branch | returned |
-| wire | tripwire, dogfood boot, image e2e, sweep rule; on this branch | yes | returned, fixes dispatched |
+| wire | tripwire, dogfood boot, image e2e, sweep rule; on this branch | yes | returned |
 | docs | new skill, README, CLAUDE.md, tips; on this branch | yes | returned |
-| review | sanity review | yes | pending |
+| review | sanity review | yes | dispatched |
 | gate | upgrade --local, dogfood-consumer, rebuild | yes | pending |
 
 ## Results
@@ -56,3 +56,6 @@ ORCHESTRATOR DECISIONS, resumed to wire:
 - Deploy refuses under CLAUDECODE=1, CI=1 or not: a human runs it, or CI.
 - HUMAN_STEP names the deploy secret.
 - Local verbs do not check the stack's owner: same tree, same data. Left, deliberately.
+
+### wire fixes (returned; 7fe6e36c..c25fe7e1)
+Wrapper host fixed (`spawn` replaces `bin`, guard fires), heartbeat with a server stopping on lost ownership, deploy refused under CLAUDECODE=1, HUMAN_STEP added, docs. Layers 112; generators 393 passed, 35 skipped; scaffold ok; test-postgres ok; check-runner-image test PASS; dogfood 107 passed, 0 failed. Unproven: real images, tripwire workflow, rebuild, hosted database, two real containers. Heartbeat gaps: orphaned server after 30s, identical hostnames, simultaneous starts. Old rung 0.35.0 can still write `./nx`.
