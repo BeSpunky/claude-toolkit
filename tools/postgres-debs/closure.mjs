@@ -227,3 +227,16 @@ export function pinnedList(versionsSource, name) {
   if (!match) throw new Error(`${name} is not in versions.ts as a one-line list`);
   return [...match[1].matchAll(/'([^']+)'/g)].map(([, value]) => value);
 }
+
+/**
+ * The bare binaries pinned in versions.ts under `<name>_VERSION` and `<name>_DOWNLOADS`, as `{ arch, url, sha256 }`. No signed
+ * index stands behind these, so unlike a closure there is nothing to project: the pin is checked against the file itself.
+ */
+export function pinnedDownloads(versionsSource, name) {
+  const version = new RegExp(`${name}_VERSION = '([^']+)'`).exec(versionsSource)?.[1];
+  const block = new RegExp(`${name}_DOWNLOADS = \\{([\\s\\S]*?)\\n\\} as const`).exec(versionsSource)?.[1];
+  if (!version || !block) throw new Error(`${name}_VERSION or ${name}_DOWNLOADS is not in versions.ts in its usual shape`);
+  const pins = [...block.matchAll(/(\w+): \{\s*url: `([^`]+)`,\s*sha256: '([0-9a-f]{64})',?\s*\}/g)].map(([, arch, url, sha256]) => ({ arch, url: url.replaceAll(`\${${name}_VERSION}`, version), sha256 }));
+  if (!pins.length || pins.some(({ url }) => url.includes('${'))) throw new Error(`${name}_DOWNLOADS could not be read out of versions.ts`);
+  return { version, pins };
+}

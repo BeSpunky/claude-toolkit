@@ -2,7 +2,8 @@
 #   - tools/firebase-compat/project.mjs → Angular → @angular/fire → firebase, firebase-tools' peers, Cloud Functions'
 #     Node runtimes (from npm), and gcloud's versioned archive (still served, projection for the pin);
 #   - tools/node-facts/project.mjs → Node's LTS lines and the typescript-node image majors (nodejs.org, MCR);
-#   - tools/postgres-debs/project.mjs → the Postgres .deb closures (the PGDG archive's signed indexes, every pin still served).
+#   - tools/postgres-debs/project.mjs → the Postgres .deb closures (the PGDG archive's signed indexes, every pin still served),
+#     and the pinned dbmate downloads (GitHub, each file against its sha256).
 #   - tools/postgres-debs/image-codenames.mjs → whether every image the house composes is still on a Debian release with a
 #     closure (MCR). No table and no --write: a red run means add the codename, re-project, release. Weekly here, not before
 #     a publish: the images move on their own schedule, and a publish is not when that reaches anyone.
@@ -62,7 +63,7 @@ jobs:
       - name: Check the Docker fallback's image still has yarn (real docker run, MCR)
         if: always()
         run: bash tools/check-runner-image/check.sh
-      - name: Check the Postgres closures projection (the PGDG archive, Debian)
+      - name: Check the Postgres closures projection and the pinned dbmate downloads (the PGDG archive, Debian, GitHub)
         if: always()
         run: node tools/postgres-debs/project.mjs --check
       - name: Check the images the house composes are on a release with a Postgres closure (MCR)

@@ -1171,7 +1171,7 @@ checkAsync('persistence: an archive tool needs no mount, and no layer mounts ove
 // publish): it covers the pins, it is exactly what the tool writes (so a hand-edit shows), and the selection rules hold
 // against indexes with the futures that would break them.
 checkAsync('postgres closures: the table covers the pins, is exactly what its tool renders, and libpq5 is selected by major', async (ok) => {
-  const { buildClosure, parsePackages, render, selectPackages, signedBy } = await import('../postgres-debs/closure.mjs');
+  const { buildClosure, parsePackages, pinnedDownloads, render, selectPackages, signedBy } = await import('../postgres-debs/closure.mjs');
   {
     // The floating-image tripwire's reading, OFFLINE: the network half is tools/postgres-debs/image-codenames.mjs, weekly.
     const { KNOWN_OUTSIDE, codenameByDigest, composedImages, judge, releaseTags } = await import('../postgres-debs/image-codenames.mjs');
@@ -1198,6 +1198,17 @@ checkAsync('postgres closures: the table covers the pins, is exactly what its to
   const source = readFileSync(join(PAYLOAD, 'src/generators/_utils/postgres-closures.ts'), 'utf8');
   ok(render(POSTGRES_CLOSURES, POSTGRES_CLOSURES_AS_OF) === source, 'postgres-closures.ts is not what its tool renders (hand-edited?): node tools/postgres-debs/project.mjs --write');
   ok(/^\d{4}-\d{2}-\d{2}$/.test(POSTGRES_CLOSURES_AS_OF), 'the table has no as-of date');
+  // What the weekly check reads the dbmate pins with: a pin it cannot read must not read as a pin that is fine.
+  const dbmatePins = pinnedDownloads(readFileSync(join(PAYLOAD, 'src/generators/_utils/versions.ts'), 'utf8'), 'DBMATE');
+  ok(dbmatePins.version === versions.DBMATE_VERSION, 'the check reads the dbmate version the payload pins');
+  ok(JSON.stringify(Object.fromEntries(dbmatePins.pins.map(({ arch, url, sha256 }) => [arch, { url, sha256 }]))) === JSON.stringify(versions.DBMATE_DOWNLOADS), 'the check reads every dbmate download the payload pins, as the payload computes it');
+  let unreadable = false;
+  try {
+    pinnedDownloads("export const NOPE_VERSION = '1';", 'NOPE');
+  } catch {
+    unreadable = true;
+  }
+  ok(unreadable, 'a pin the check cannot read is an error, never an empty list');
   ok(Object.keys(POSTGRES_CLOSURES).sort().join() === [...versions.POSTGRES_MAJORS].sort().join(), `the table's majors are not the pins: ${Object.keys(POSTGRES_CLOSURES)} (node tools/postgres-debs/project.mjs --write)`);
   for (const major of versions.POSTGRES_MAJORS) {
     const closures = POSTGRES_CLOSURES[major] ?? {};

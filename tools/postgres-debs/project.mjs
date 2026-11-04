@@ -10,13 +10,18 @@
 // sha256 it signs → each .deb's sha256, which the installer checks. Debian's indexes are read too, but only to ask
 // whether `apt-get satisfy` could work: nothing is pinned from them, so TLS is enough there.
 //
+// DBMATE, THE LAYER'S OTHER PINNED DOWNLOAD, IS CHECKED HERE TOO, and only here: bare binaries from GitHub with no index behind
+// them, so nothing is projected and `--check` fetches each one against its sha256. A release asset can be replaced or removed,
+// and a consumer's cache-miss image build is where that would otherwise surface.
+//
 // IT DRIFTS WITH UPSTREAM, BY DESIGN: a new Postgres minor makes the check fail. That is the staleness alarm for a server
 // whose minors are security releases — re-run with --write, review the diff, decide whether existing projects need a
 // migration. It also HEADs every committed pin, because a pin that stops downloading fails consumers' cache-miss image
 // builds, and a table frozen in their payload takes a release to repair. So it runs on a SCHEDULE and before every
 // payload publish (.github/workflows/upstream-tables.yml, tools/publish-nx-tools/publish.sh), never per push.
 //
-//   node tools/postgres-debs/project.mjs [--check]   the generated file matches the archive today, and every pin downloads
+//   node tools/postgres-debs/project.mjs [--check]   the generated file matches the archive today, every closure pin downloads,
+//                                                    and every dbmate pin downloads and matches its sha256
 //   node tools/postgres-debs/project.mjs --write     regenerate it
 //
 // Whether the images the house composes are still on a release this table covers is its neighbour, ./image-codenames.mjs.
@@ -28,7 +33,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildClosure, debianSupplies, parsePackages, parseRelations, pinnedList, render, selectPackages, signedBy } from './closure.mjs';
+import { buildClosure, debianSupplies, parsePackages, parseRelations, pinnedDownloads, pinnedList, render, selectPackages, signedBy } from './closure.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const UTILS = join(ROOT, 'plugins/house/engine/nx-tools/src/generators/_utils');
@@ -130,6 +135,19 @@ async function goneFrom(text) {
   return { checked: urls.length, gone };
 }
 
+/** Fetch each pinned binary whole, because a HEAD cannot say a release asset was replaced. Nothing downloaded is executed. */
+async function brokenDownloads(pins) {
+  const faults = await Promise.all(
+    pins.map(async ({ url, sha256 }) => {
+      const response = await fetch(url);
+      if (!response.ok) return `${url} → HTTP ${response.status}`;
+      const found = createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
+      return found === sha256 ? undefined : `${url} is sha256 ${found}, pinned ${sha256}`;
+    }),
+  );
+  return faults.filter(Boolean);
+}
+
 const previous = existsSync(OUT) ? readFileSync(OUT, 'utf8') : '';
 const previousDate = /POSTGRES_CLOSURES_AS_OF = '([^']+)'/.exec(previous)?.[1];
 const table = await project();
@@ -142,13 +160,17 @@ if (process.argv.includes('--write')) {
   console.log(`${unchanged ? 'unchanged' : 'wrote'} ${OUT} (Postgres ${MAJORS.join(', ')} on ${CODENAMES.join(', ')})`);
 } else {
   const { checked, gone } = await goneFrom(previous);
+  const dbmate = pinnedDownloads(VERSIONS, 'DBMATE');
+  const dbmateFaults = await brokenDownloads(dbmate.pins);
   if (gone.length) {
     console.error(`GONE, as of ${previousDate}'s table: ${gone.length} of ${checked} pinned files no longer download — consumers' cache-miss image builds fail on these. Run with --write and release:\n  ${gone.join('\n  ')}`);
-    process.exit(1);
+  }
+  if (dbmateFaults.length) {
+    console.error(`DBMATE ${dbmate.version}: consumers' cache-miss image builds fail on these, and a payload release is the only repair. Move DBMATE_VERSION and DBMATE_DOWNLOADS (versions.ts), then run node tools/test-postgres/run.mjs:\n  ${dbmateFaults.join('\n  ')}`);
   }
   if (!unchanged) {
     console.error(`DRIFT: ${OUT} (as of ${previousDate ?? 'never'}) is not what the archive says today (a new Postgres or extension build, or a POSTGRES_* pin moved) — run: node tools/postgres-debs/project.mjs --write, review the diff, and decide whether existing projects need a migration.`);
-    process.exit(1);
   }
-  console.log(`ok: the Postgres closures match the archive as of ${previousDate}, and all ${checked} pinned files download`);
+  if (gone.length || dbmateFaults.length || !unchanged) process.exit(1);
+  console.log(`ok: the Postgres closures match the archive as of ${previousDate}, all ${checked} pinned files download, and dbmate ${dbmate.version}'s ${dbmate.pins.length} downloads match their sha256`);
 }

@@ -129,7 +129,7 @@ fi
 # --- the upstream tables are current -----------------------------------------------------------------------------
 # What the payload KNOWS about upstream (generators/_utils/firebase-compat.ts: Angular → @angular/fire → firebase,
 # firebase-tools' peers, Cloud Functions' runtimes, gcloud's archive; node-facts.ts: Node's LTS lines and the
-# typescript-node images that exist; postgres-closures.ts: every pinned Postgres .deb and its sha256) is a projection frozen into every project that installs this version. Publishing
+# typescript-node images that exist; postgres-closures.ts: every pinned Postgres .deb and its sha256; versions.ts' dbmate pins, each file against its sha256) is a projection frozen into every project that installs this version. Publishing
 # a stale one ships stale advice to every consumer for as long as they stay on it — so a publish re-asks upstream
 # first and stops on drift. (The per-push test job deliberately does NOT: an upstream release would turn every
 # unrelated PR red. A weekly schedule raises the alarm instead — .github/workflows/upstream-tables.yml.)
