@@ -52,4 +52,4 @@ A process's own `env` beats an export. A `--skip`ped dependency exports nothing,
 - A real `nx serve` or `nx run firebase:emulators` above the wrapper: Nx's kill sequence is simulated by `emulators-stop.test.sh`.
 - `dogfood-consumer` and `house.sh upgrade --local`: the landing gate.
 - A real launcher: the dependency cases use a fixture process.
-- `CLAUDE.md` still describes `dev claim`-era wording in its dev-loop paragraph only by implication. It is the docs unit's, so it was left alone.
+- `CLAUDE.md` and `README.md`: their dev-loop text does not yet mention dependencies or `dev run`. Left for the docs unit.
