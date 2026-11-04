@@ -1066,6 +1066,7 @@ checkAsync('image: a .deb closure unpacks at its pin behind wrappers, satisfies 
     writeFileSync(join(root, 'etc/os-release'), 'ID=debian\nVERSION_CODENAME=forky\n');
     const forky = runIt(render(tool('4.0-dddd', [a2])));
     ok(forky.status !== 0 && /no closure for this Debian release \('forky'; it has: trixie \)/.test(forky.output) && forky.calls.length === 0, `an unknown codename did not fail loudly: ${JSON.stringify(forky)}`);
+    ok(/upgrade it/.test(forky.output) && /use a tag on one of those releases/.test(forky.output), `the refusal did not give the way out: ${forky.output}`);
     rmSync(join(root, 'etc/os-release'));
     const unreadable = runIt(render(tool('4.0-dddd', [a2])));
     ok(unreadable.status !== 0 && /'unknown'/.test(unreadable.output), `an image with no os-release did not fail loudly: ${JSON.stringify(unreadable)}`);
@@ -1171,6 +1172,23 @@ checkAsync('persistence: an archive tool needs no mount, and no layer mounts ove
 // against indexes with the futures that would break them.
 checkAsync('postgres closures: the table covers the pins, is exactly what its tool renders, and libpq5 is selected by major', async (ok) => {
   const { buildClosure, parsePackages, render, selectPackages, signedBy } = await import('../postgres-debs/closure.mjs');
+  {
+    // The floating-image tripwire's reading, OFFLINE: the network half is tools/postgres-debs/image-codenames.mjs, weekly.
+    const { KNOWN_OUTSIDE, codenameByDigest, composedImages, judge, releaseTags } = await import('../postgres-debs/image-codenames.mjs');
+    const layersDir = join(PAYLOAD, 'src/layers');
+    const images = composedImages(readdirSync(layersDir).filter((f) => f.endsWith('.ts')).map((f) => readFileSync(join(layersDir, f), 'utf8')), [22, 24]);
+    ok(['mcr.microsoft.com/devcontainers/base:debian', 'mcr.microsoft.com/devcontainers/typescript-node:22', 'mcr.microsoft.com/devcontainers/typescript-node:24'].every((image) => images.includes(image)), `the tripwire lost a composed image: ${images}`);
+    ok(images.every((image) => !image.includes('{{')), `a ref left a token unexpanded: ${images}`);
+    const baseTags = releaseTags('debian', ['debian', 'trixie', 'latest', 'debian-13', 'bookworm', 'dev']);
+    ok(baseTags.map((c) => c.codename).join() === 'trixie,bookworm', `base's release tags: ${JSON.stringify(baseTags)}`);
+    const nodeTags = releaseTags('22', ['22', '22-trixie', '22-bookworm', '2-bookworm', '220-trixie', '22-trixie-amd64']);
+    ok(nodeTags.map((c) => c.codename).join() === 'trixie,bookworm', `a node major's release tags: ${JSON.stringify(nodeTags)}`);
+    const candidates = [{ codename: 'trixie', digest: 'a' }, { codename: 'bookworm', digest: 'b' }];
+    ok(codenameByDigest('a', candidates) === 'trixie' && codenameByDigest('z', candidates) === undefined && codenameByDigest('a', [...candidates, { codename: 'forky', digest: 'a' }]) === undefined, 'a digest must name exactly one release');
+    const verdicts = Object.fromEntries(judge({ on: 'trixie', moved: 'forky', blind: undefined, kept: 'bullseye', keptMoved: 'buster' }, ['trixie', 'bookworm'], { kept: { codename: 'bullseye' }, keptMoved: { codename: 'bullseye' } }).map((r) => [r.image, r.verdict]));
+    ok(verdicts.on === 'ok' && verdicts.moved === 'missing' && verdicts.blind === 'unknown' && verdicts.kept === 'known' && verdicts.keptMoved === 'missing', `the tripwire's verdicts: ${JSON.stringify(verdicts)}`);
+    ok(Object.values(KNOWN_OUTSIDE).every((entry) => entry.codename && entry.why), 'an exemption states its codename and its reason');
+  }
   // A status of a good signature by another key in the keyring: the key file served may hold more than PGDG's.
   const statusBy = (primary) => `[GNUPG:] GOODSIG ABCD someone\n[GNUPG:] VALIDSIG SUBKEY 2026-11-04 1 0 4 0 1 10 01 ${primary}\n`;
   ok(signedBy(statusBy('AAAA'), 'AAAA') && !signedBy(statusBy('BBBB'), 'AAAA') && !signedBy('[GNUPG:] GOODSIG ABCD someone\n', 'AAAA'), 'a signature is not held to the fingerprint');

@@ -19,6 +19,8 @@
 //   node tools/postgres-debs/project.mjs [--check]   the generated file matches the archive today, and every pin downloads
 //   node tools/postgres-debs/project.mjs --write     regenerate it
 //
+// Whether the images the house composes are still on a release this table covers is its neighbour, ./image-codenames.mjs.
+//
 // Needs node, gpg, bzip2 and xz. Nothing downloaded is executed.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -26,17 +28,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildClosure, debianSupplies, parsePackages, parseRelations, render, selectPackages, signedBy } from './closure.mjs';
+import { buildClosure, debianSupplies, parsePackages, parseRelations, pinnedList, render, selectPackages, signedBy } from './closure.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const UTILS = join(ROOT, 'plugins/house/engine/nx-tools/src/generators/_utils');
 const OUT = join(UTILS, 'postgres-closures.ts');
 const VERSIONS = readFileSync(join(UTILS, 'versions.ts'), 'utf8');
-const pinned = (name) => {
-  const match = new RegExp(`${name} = \\[([^\\]]*)\\] as const`).exec(VERSIONS);
-  if (!match) throw new Error(`${name} is not in versions.ts as a one-line list`);
-  return [...match[1].matchAll(/'([^']+)'/g)].map(([, value]) => value);
-};
+const pinned = (name) => pinnedList(VERSIONS, name);
 const MAJORS = pinned('POSTGRES_MAJORS');
 const CODENAMES = pinned('POSTGRES_DEB_CODENAMES');
 const ARCHITECTURES = pinned('POSTGRES_DEB_ARCHITECTURES');
