@@ -1,0 +1,61 @@
+# The engine's Docker fallback on a REAL engine and a REAL image: `house.sh new --docker --preset=angular`, end to end
+# (tools/check-runner-image/e2e.sh). The per-push scaffold tests drive it against a fake docker, which proves what the
+# launcher decides and nothing about whether the image lets the program through. GitHub's runner has Docker; a house
+# devcontainer does not, so this is where it gets observed at all.
+#
+# Slow and network-bound, so NOT on every push and not in the pre-push hook: weekly (the image is a rolling tag, so this
+# can go red with no commit here), on demand, and when a push touches what it tests. Work branches are in that list on
+# purpose, unlike the sibling tripwires: there is nowhere else a change to the fallback can get a real-Docker result
+# before it lands. versions.ts is there because HOUSE_NODE_MAJOR, which picks the image, lives in it.
+#
+# Two roads. `local` packs this checkout, so it can always run. `registry` is what a consumer gets, and skips with a stated
+# reason while the version this checkout declares is not on npm yet (a branch carrying a bump); see e2e.sh.
+name: runner image e2e
+
+on:
+  schedule:
+    - cron: '53 4 * * 1' # Mondays 04:53 UTC
+  workflow_dispatch:
+  push:
+    branches: [main, development, 'fix/**', 'feat/**']
+    paths:
+      - 'plugins/house/engine/house.sh'
+      - 'plugins/house/engine/container-engine.sh'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
+      - 'tools/check-runner-image/**'
+      - '.github/workflows/runner-image-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-image-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: The checks' own branches, against a fake docker
+        run: bash tools/check-runner-image/test.sh
+      - name: What the real image holds
+        run: bash tools/check-runner-image/check.sh
+
+  e2e:
+    # Behind the image check: with no yarn in the image these would only repeat its finding, less clearly, twice.
+    needs: image
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        road: [local, registry]
+    name: e2e (${{ matrix.road }})
+    steps:
+      - uses: actions/checkout@v5
+      - name: house.sh new --docker --preset=angular, on the ${{ matrix.road }} road
+        run: bash tools/check-runner-image/e2e.sh ${{ matrix.road }}

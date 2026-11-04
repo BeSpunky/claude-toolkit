@@ -9,6 +9,12 @@
 # (a red scheduled run is the alarm: re-project with --write, review, decide whether existing projects need a
 # migration), on demand, on a push that touches a projection or its projector, and before every payload publish
 # (tools/publish-nx-tools/publish.sh), which is where a stale table would actually reach consumers.
+#
+# The third check is the same kind of fact with no table: tools/check-runner-image/check.sh pulls the rolling image the
+# engine's Docker fallback runs on (typescript-node:<HOUSE_NODE_MAJOR>) and asks whether it still has yarn. Microsoft can
+# change that on any day with no commit here, so it is an upstream alarm like the others; a red run says what to decide,
+# and there is no --write. It stays out of publish.sh because a publish is not the moment that image reaches anyone: every
+# fallback run pulls it. The whole fallback on that image is .github/workflows/runner-image-e2e.yml.
 name: upstream tables
 
 on:
@@ -20,6 +26,8 @@ on:
     paths:
       - 'tools/firebase-compat/**'
       - 'tools/node-facts/**'
+      - 'tools/check-runner-image/**'
+      - 'plugins/house/engine/container-engine.sh'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/firebase-compat.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/gcloud-archive.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/node-facts.ts'
@@ -44,3 +52,6 @@ jobs:
       - name: Check the Node facts projection (nodejs.org, MCR)
         if: always()
         run: node tools/node-facts/project.mjs
+      - name: Check the Docker fallback's image still has yarn (real docker run, MCR)
+        if: always()
+        run: bash tools/check-runner-image/check.sh
