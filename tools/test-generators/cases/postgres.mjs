@@ -32,6 +32,7 @@ const inEveryCell = MATRIX.map(({ layout, link, label }) => ({
     for (const file of LAUNCHER) t.ok(tree.exists(`tools/postgres/${file}`), `tools/postgres/${file}`);
     t.ok(tree.exists('postgres/project.json') && !tree.exists('postgres/package.json'), 'a project.json island');
     t.ok(ctx.postgresLayer === true, 'the evidence is there');
+    t.ok(readProjectConfiguration(tree, 'postgres').projectType === undefined, 'no projectType: layout inference must not read postgres/ as the apps directory');
     t.ok(ctx.webLayer === false, 'the project does not start wearing web');
     t.ok(!tree.exists('.bespunky/dev.json'), 'nothing served: no declaration');
     const { targets } = readProjectConfiguration(tree, 'postgres');
@@ -165,6 +166,25 @@ export default {
       setup: () => wearingAgent(),
       run: generate,
       expect: (_tree, t, ctx) => t.ok(ctx.logs.join('\n').includes('No platform firewall here'), `said: ${ctx.logs.join(' | ')}`),
+    },
+    {
+      name: 'with the ci layer: a line that names no target still deploys it, in the schema stage, with its secret and no id-token',
+      setup: () => {
+        const tree = wearingAgent({ pm: 'yarn-berry' });
+        tree.write('.bespunky/branches.json', JSON.stringify({ schema: 1, projection: { schema: 1, integration: 'development', production: ['main'], productionPatterns: [], chain: ['development', 'main'], protected: ['development', 'main'], protectedPatterns: [], workBase: 'development', summary: 'development → main', deploys: [{ kind: 'line', line: 'main', ci: { environment: 'production', providers: {} } }] } }, null, 2));
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        await generate(tree, ctx);
+        await ctx.load('generators/ci/generator').default(tree, { layers: ['nx', 'agent', 'postgres', 'ci'] });
+      },
+      expect: (tree, t) => {
+        const workflow = tree.read('.github/workflows/deploy.yml', 'utf8') ?? '';
+        t.ok(workflow.includes('POSTGRES_DEPLOY_URL: ${{ secrets.POSTGRES_DEPLOY_URL }}'), `the secret reaches the deploy step:\n${workflow}`);
+        t.ok(!workflow.includes('id-token: write'), 'no OIDC: the job cannot mint a token');
+        const { targets } = readProjectConfiguration(tree, 'postgres');
+        t.ok(!JSON.stringify(targets.deploy).includes('postgresql://'), 'no URL in project.json');
+      },
     },
     {
       name: 'the layer as a CI provider: a schema stage, its URL from a secret, no OIDC, its own deploy target',

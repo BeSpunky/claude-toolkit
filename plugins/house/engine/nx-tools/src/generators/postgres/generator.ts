@@ -41,17 +41,18 @@ function verbTarget(verb: string, extra: Record<string, unknown> = {}) {
 }
 
 function ensurePostgresProject(tree: Tree): void {
+  // Tooling, with no `projectType`: neither an app nor a library, so layout inference does not read `postgres/` as where this
+  // workspace keeps its apps.
   const tags = ['tooling'];
   if (!houseProjectHome(tree, POSTGRES_ROOT, POSTGRES_ROOT).exists) {
-    addProjectConfiguration(tree, POSTGRES_ROOT, { root: POSTGRES_ROOT, projectType: 'application', tags, targets: {} });
+    addProjectConfiguration(tree, POSTGRES_ROOT, { root: POSTGRES_ROOT, tags, targets: {} });
   }
-  const deploy = deployTarget(POSTGRES_ROOT, {
+  const deploy = deployTarget(tree, POSTGRES_ROOT, {
     command: `${LAUNCH} deploy`,
     inputs: ['default'],
     watches: [`${POSTGRES_MIGRATIONS}/**/*`],
   });
   ensureHouseProject(tree, 'postgres', houseProjectHome(tree, POSTGRES_ROOT, POSTGRES_ROOT), {
-    projectType: 'application',
     tags,
     contract: { deploy: deploy.contract },
     targets: {
