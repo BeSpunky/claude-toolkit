@@ -287,10 +287,10 @@ export type DebianArch = 'amd64' | 'arm64';
  * and every cache-miss image build fails with it; and a moved pin needs a downgrade, a foreign image may already
  * declare the same repository differently. A versioned archive is kept, so the pin lives as long as the publisher.
  *
- * Two formats, one install root and one promise (a sha256 checked before anything is unpacked, `current` naming the
- * release, a failure that is loud): a tarball, and a closure of `.deb` files.
+ * Three formats, one install root and one promise (a sha256 checked before anything is unpacked, `current` naming the
+ * release, a failure that is loud): a tarball, a single executable, and a closure of `.deb` files.
  */
-export type ArchiveTool = TarballTool | DebClosureTool;
+export type ArchiveTool = TarballTool | BinaryTool | DebClosureTool;
 
 /** One `.tar.gz` per architecture, carrying everything but libc: its executables are linked straight into PATH. */
 export interface TarballTool {
@@ -303,6 +303,17 @@ export interface TarballTool {
   /** The directory inside the archive whose executables are linked into /usr/local/bin — first on PATH, ahead of /usr/bin. */
   bin: string;
   /** Per architecture: the `.tar.gz` and its sha256 (checked before anything is extracted). Projected, never typed. */
+  downloads: Readonly<Record<DebianArch, { url: string; sha256: string }>>;
+}
+
+/** One statically linked executable per architecture, published bare (dbmate): installed as `<id>` and linked into PATH. */
+export interface BinaryTool {
+  format: 'binary';
+  /** Names its install root, `/opt/bespunky/<id>`, and the executable: `[a-z0-9-]+`. */
+  id: string;
+  /** The pinned release; extracted to `/opt/bespunky/<id>/<version>`, `current` pointing at it. */
+  version: string;
+  /** Per architecture: the executable and its sha256 (checked before it is installed). */
   downloads: Readonly<Record<DebianArch, { url: string; sha256: string }>>;
 }
 

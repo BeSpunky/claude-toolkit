@@ -192,7 +192,15 @@ install_archive() {
   fetch_checked "$sha256" "$url" "$download/archive.tar.gz" || { rm -rf "$download"; return 1; }
   $as_root mkdir -p "$home" "$archive_links" &&
     $as_root rm -rf "$home/.partial" && $as_root mkdir "$home/.partial" &&
+{{#TARBALLS_ONLY}}
     $as_root tar -xzf "$download/archive.tar.gz" -C "$home/.partial" --no-same-owner &&
+{{/TARBALLS_ONLY}}
+{{#BINARY_ARCHIVES}}
+    case "$url" in
+      *.tar.gz) $as_root tar -xzf "$download/archive.tar.gz" -C "$home/.partial" --no-same-owner ;;
+      *) $as_root mkdir -p "$home/.partial/$bin" && $as_root cp "$download/archive.tar.gz" "$home/.partial/$bin/$id" && $as_root chmod 0755 "$home/.partial/$bin/$id" ;;
+    esac &&
+{{/BINARY_ARCHIVES}}
     $as_root rm -rf "$home/$version" && $as_root mv "$home/.partial" "$home/$version" &&
     $as_root ln -sfn "$version" "$home/current" || { rm -rf "$download"; echo "[os-packages] FAILED to unpack $id" >&2; return 1; }
   rm -rf "$download"

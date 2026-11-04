@@ -46,6 +46,11 @@
       "schema": "./src/generators/angular-ai/schema.json",
       "description": "Wire Angular's official AI tooling into the project. Writes project-scoped .mcp.json declaring the Angular CLI MCP server (`npx -y @angular/cli mcp`, always-latest) with its DEFAULT knowledge tools (get_best_practices, search_documentation, find_examples, ai_tutor, onpush_zoneless_migration); the experimental exec tools (build/devserver/test/e2e) are deliberately omitted because an integrated Nx workspace has no root angular.json and Nx owns those targets. Merges into any existing .mcp.json (preserves user-added servers). The Angular agent skills (angular-developer, angular-new-app) are NOT vendored here — post-create.sh fetches them fresh from github.com/angular/skills into .claude/skills/ on every container build; this generator just keeps that cache out of git."
     },
+    "postgres": {
+      "factory": "./src/generators/postgres/generator",
+      "schema": "./src/generators/postgres/schema.json",
+      "description": "The Postgres layer: the launcher (tools/postgres, Node built-ins only), the postgres project's targets (start, migrate, new-migration, seed, reset, psql, deploy), postgres/migrations, postgres/seed/world and .bespunky/postgres.json. A server per dev stack, declared in .bespunky/dev.json for every served app. Workspace-level, no inputs; idempotent."
+    },
     "firebase-emulators": {
       "factory": "./src/generators/firebase-emulators/generator",
       "schema": "./src/generators/firebase-emulators/schema.json",

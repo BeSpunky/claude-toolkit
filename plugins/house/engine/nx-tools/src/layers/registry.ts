@@ -31,6 +31,7 @@ import { angular } from './angular';
 import { designSystem } from './design-system';
 import { navigation } from './navigation';
 import { firebase } from './firebase';
+import { postgres } from './postgres';
 import { ci } from './ci';
 
 export type { LayerDescriptor, LayerId } from './descriptor';
@@ -42,7 +43,7 @@ export type { LayerDescriptor, LayerId } from './descriptor';
  * projection (`node tools/test-layers/run.mjs --write`).
  */
 // `ci` LAST: it composes the deploy providers the layers before it contribute (`ciDeploy`).
-const REGISTERED: readonly LayerDescriptor[] = [nx, agent, node, js, web, angular, designSystem, navigation, firebase, ci];
+const REGISTERED: readonly LayerDescriptor[] = [nx, agent, node, js, web, angular, designSystem, navigation, firebase, postgres, ci];
 
 /** The layer that is ALWAYS ensured, beneath everything else. */
 export const FLOOR: LayerId = nx.id;
