@@ -1,7 +1,8 @@
 # The STALENESS ALARM for what the payload knows about upstream — projections of registries the house does not control:
 #   - tools/firebase-compat/project.mjs → Angular → @angular/fire → firebase, firebase-tools' peers, Cloud Functions'
 #     Node runtimes (from npm), and gcloud's versioned archive (still served, projection for the pin);
-#   - tools/node-facts/project.mjs → Node's LTS lines and the typescript-node image majors (nodejs.org, MCR).
+#   - tools/node-facts/project.mjs → Node's LTS lines and the typescript-node image majors (nodejs.org, MCR);
+#   - tools/postgres-debs/project.mjs → the Postgres .deb closures (the PGDG archive's signed indexes, every pin still served).
 #
 # ON A SCHEDULE, NOT ON EVERY PUSH. These checks fail when UPSTREAM moves (a new @angular/fire, a new Node LTS), not
 # when a commit is wrong. In the per-push test job they turned every unrelated PR red the day upstream released, and —
@@ -28,9 +29,11 @@ on:
       - 'tools/node-facts/**'
       - 'tools/check-runner-image/**'
       - 'plugins/house/engine/container-engine.sh'
+      - 'tools/postgres-debs/**'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/firebase-compat.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/gcloud-archive.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/node-facts.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
 
 permissions:
@@ -56,3 +59,6 @@ jobs:
       - name: Check the Docker fallback's image still has yarn (real docker run, MCR)
         if: always()
         run: bash tools/check-runner-image/check.sh
+      - name: Check the Postgres closures projection (the PGDG archive, Debian)
+        if: always()
+        run: node tools/postgres-debs/project.mjs --check

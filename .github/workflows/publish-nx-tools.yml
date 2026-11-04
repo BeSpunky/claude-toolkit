@@ -27,6 +27,7 @@ on:
       - 'tools/publish-nx-tools/**'
       - 'tools/firebase-compat/**'
       - 'tools/node-facts/**'
+      - 'tools/postgres-debs/**'
       - '.github/workflows/publish-nx-tools.yml'
   workflow_dispatch:
     inputs:
@@ -108,7 +109,7 @@ jobs:
             console.log('migrations reachable: max <= '+pkg.version);
           "
 
-      # publish.sh re-asks upstream (tools/firebase-compat, tools/node-facts) before publishing, and those tools
+      # publish.sh re-asks upstream (tools/firebase-compat, tools/node-facts, tools/postgres-debs) before publishing, and those tools
       # require the repo's own devDependencies (semver) — so the job installs them, exactly as the weekly
       # upstream-tables job does. Without this, a clean runner crashed there and nothing was published (0.50.0).
       - name: Install the repo's tooling dependencies
