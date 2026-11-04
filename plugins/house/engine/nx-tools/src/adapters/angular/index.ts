@@ -101,6 +101,7 @@ export const angular: StackAdapter = {
   },
 
   platform: 'web',
+  webOnlyImports: ['@angular/*'],
 
   ownsApp(project) {
     return ANGULAR_APP_BUILDERS.has(project.targets?.build?.executor ?? '');

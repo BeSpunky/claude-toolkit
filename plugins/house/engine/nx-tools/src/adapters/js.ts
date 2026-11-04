@@ -28,6 +28,7 @@ export const js: StackAdapter = {
   layer: 'js',
   executors: JS_EXECUTORS,
   platform: 'shared',
+  webOnlyImports: [],
 
   ownsProject(tree, project) {
     try {

@@ -35,9 +35,6 @@ const blankCredentials = (source: string): string =>
   ['projectId', 'apiKey', 'appId', 'authDomain'].reduce((text, key) => text.split(`{{${key}}}`).join(''), source);
 
 export const angularFirebaseClient: FirebaseClientPort = {
-  // The browser SDK and Angular have no place in the functions runtime.
-  serverBannedImports: ['@angular/*'],
-
   chooseFrameworkVersion: pinAngularForFirebase,
 
   isWired(tree, project) {

@@ -5,7 +5,7 @@ import { type Tree, logger } from '@nx/devkit';
 import { type Platform, setProjectPlatform, platformTag } from './platform';
 import { type Classification, classifyWorkspace, violations } from './classify';
 import { type PlatformExternals, tableExternals, withDeclared } from './externals';
-import { workspaceStacksWith } from '../adapters/workspace';
+import { workspaceStacks } from '../adapters/workspace';
 import { readDeclaredBans } from './firewall';
 
 export * from './platform';
@@ -33,8 +33,8 @@ export const FIREWALL_CONFIG = 'eslint.config.mjs';
  * own firewall bans — so the classifier never calls a project `shared` that the config's own lists then fail.
  */
 export function platformExternals(tree: Tree): PlatformExternals {
-  // Each stack names its own framework (Angular: `@angular/*`) — the same list it hands the server firewall.
-  const table = tableExternals(workspaceStacksWith(tree, 'firebase').flatMap((stack) => stack.firebase.serverBannedImports));
+  // Each stack names its own framework (Angular: `@angular/*`), whatever capabilities the workspace wears.
+  const table = tableExternals(workspaceStacks(tree).flatMap((stack) => stack.webOnlyImports));
   if (!tree.exists(FIREWALL_CONFIG)) return table;
   return withDeclared(table, readDeclaredBans(tree.read(FIREWALL_CONFIG, 'utf8') ?? '', FIREWALL_CONFIG));
 }
