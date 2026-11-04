@@ -26,10 +26,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** What a failed `start` says after a reset was interrupted: nothing but a rebuild recovers these. */
 const WEDGED = /\.supabase-postgres-init-pending|postmaster\.opts|partial lifecycle state|no recorded identity/;
 
+/** A running process's kernel start time. A zombie has none: where PID 1 reaps nothing (a container with no init), a dead holder stays in the table for good. */
 const processStart = (pid) => {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'latin1');
-    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return fields[0] === 'Z' ? undefined : fields[19];
   } catch {
     return undefined;
   }

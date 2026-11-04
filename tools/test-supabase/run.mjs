@@ -15,7 +15,8 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { compilePayload, requireFromRepo } from '../test-support/payload.mjs';
+import { compilePayload } from '../test-support/payload.mjs';
+import { ensureCli } from './tools.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '../..');
@@ -27,31 +28,11 @@ const cache = process.env.SUPABASE_TOOLS_CACHE || join(tmpdir(), 'bespunky-supab
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 // ── the CLI, through the installer the project gets ──
-const { build, load, dispose } = compilePayload('bespunky-test-supabase');
-const { compose, renderOsPackagesScript } = requireFromRepo(join(build, 'src/generators/devcontainer/compose'));
-const { layer } = load('layers/registry');
+const { load, dispose } = compilePayload('bespunky-test-supabase');
 const { SUPABASE_CLI_VERSION: PIN } = load('generators/_utils/versions');
 const FRAGMENT = { supabaseFragment: load('generators/supabase/dev-fragment').supabaseFragment().processes };
-const fragment = layer('supabase').devcontainer;
-const script = renderOsPackagesScript(compose([{ id: 'supabase', fragment: { image: { ref: 'img', remoteUser: 'node' }, archives: fragment.archives } }], { nodeMajor: '22' }));
 dispose();
-
-const toolsRoot = join(cache, `cli-${PIN}`);
-const toolsBin = join(toolsRoot, 'usr/local/bin');
-if (!existsSync(join(toolsBin, 'supabase'))) {
-  console.log(`installing the pinned CLI into ${toolsRoot}...`);
-  rmSync(toolsRoot, { recursive: true, force: true });
-  const stubs = join(cache, 'stubs');
-  mkdirSync(join(toolsRoot, 'etc'), { recursive: true });
-  mkdirSync(stubs, { recursive: true });
-  writeFileSync(join(toolsRoot, 'etc/os-release'), 'ID=debian\nVERSION_CODENAME=trixie\n');
-  writeFileSync(join(stubs, 'apt-get'), '#!/bin/sh\n', { mode: 0o755 });
-  writeFileSync(join(stubs, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
-  writeFileSync(join(stubs, 'dpkg-query'), "#!/bin/sh\nprintf 'install ok installed'\n", { mode: 0o755 });
-  const file = join(cache, 'house.packages.sh');
-  writeFileSync(file, script);
-  execFileSync('sh', [file], { env: { PATH: `${stubs}:${process.env.PATH}`, HOUSE_PACKAGES_ROOT: toolsRoot }, stdio: ['ignore', 'ignore', 'inherit'] });
-}
+const { bin: toolsBin } = ensureCli({ cache });
 const xdg = join(cache, 'xdg');
 const HOME_ = join(xdg, 'supabase');
 const hadSupabaseDir = existsSync(join(process.env.HOME, '.supabase'));
@@ -149,6 +130,15 @@ const stop = async (stack) => {
   return { result, end };
 };
 const listening = (port) => spawnSync('bash', ['-c', `exec 3<>/dev/tcp/127.0.0.1/${port}`]).status === 0;
+/** Running, and not just in the table: a stack's daemon is PID 1's to reap, and in a job container PID 1 reaps nothing (.github/workflows/supabase-tripwire.yml). */
+const isRunning = (pid) => {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'latin1');
+    return stat.slice(stat.lastIndexOf(')') + 2)[0] !== 'Z';
+  } catch {
+    return false;
+  }
+};
 const ownerPid = (id) => JSON.parse(readFileSync(join(HOME_, 'stacks', id, 'owner.json'), 'utf8')).pid;
 
 let failures = 0;
@@ -235,7 +225,7 @@ scenario('start: the real keeper under the real engine; status JSON, owner.json,
   const id = status.identity.id;
   const { end } = await stop(stack);
   check(end.code === 0, `stop: ${JSON.stringify(end)}`);
-  check(!listening(stack.port) && !existsSync(`/proc/${owner.pid}`), 'stopped: the port and the owner are gone');
+  check(!listening(stack.port) && !isRunning(owner.pid), 'stopped: the port and the owner are gone');
   check(JSON.parse(sb(dir, ['status', '--output-format', 'json']).stdout).owner !== 'reachable', 'the CLI agrees');
 
   // data kept; same block resumes
@@ -285,7 +275,7 @@ scenario('keeper signals: TERM stops the stack; kill -9 of the owner ends the ke
   process.kill(Number(keeperRows[0]), 'SIGKILL');
   await Promise.race([second.exit, sleep(15_000)]);
   await sleep(500);
-  check(listening(second.port) && existsSync(`/proc/${owner}`), 'the accepted gap: the stack runs on');
+  check(listening(second.port) && isRunning(owner), 'the accepted gap: the stack runs on');
   check(!ps(dir).some((row) => row.offset === stack.offset && row.state === 'live'), 'and the engine no longer shows it live');
 
   const third = await start(dir, { offset: stack.offset });
@@ -293,7 +283,7 @@ scenario('keeper signals: TERM stops the stack; kill -9 of the owner ends the ke
   check(ownerPid(id) === owner, 'the same owner');
   check(rows(dir, "select to_regclass('public.adopted')::text r")[0].r === 'adopted', 'the same data');
   const { end } = await stop(third);
-  check(end.code === 0 && !existsSync(`/proc/${owner}`), `and stops it: ${JSON.stringify(end)}`);
+  check(end.code === 0 && !isRunning(owner), `and stops it: ${JSON.stringify(end)}`);
 
   // Adopted across blocks: a keeper killed, the next start on another block moves the stack.
   const fourth = await start(dir, { offset: stack.offset });
@@ -422,7 +412,7 @@ scenario('a real serve: the keeper as a dependency, its exports reach a sibling,
   const stopped = dev(dir, 'stop', 'site', `--offset=${row.offset}`);
   const end = await Promise.race([served, sleep(30_000).then(() => ({ hung: true }))]);
   check(stopped.status === 0 && !end.hung, `the stop: ${stopped.stdout}${stopped.stderr} ${JSON.stringify(end)}`);
-  check(!existsSync(`/proc/${owner}`) && !listening(row.ports.postgres) && !listening(row.ports.app), 'the stack and the app are gone');
+  check(!isRunning(owner) && !listening(row.ports.postgres) && !listening(row.ports.app), 'the stack and the app are gone');
 });
 
 // Outside the system temp dir: the Edge Runtime has a filesystem of its own under /tmp. And not under node_modules, where a function's

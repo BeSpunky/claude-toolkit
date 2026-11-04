@@ -426,6 +426,18 @@ try {
   check('a live holder does, and `giveUp` is how to stop waiting', (await withStackLock(async () => 'ran', { giveUp: () => true })) === undefined);
   holder.kill('SIGKILL');
   rmSync(join(treeHome, 'supabase.lock'), { force: true });
+  // Where PID 1 reaps nothing (a container with no init, a CI job's), a holder killed as an orphan stays in the table for good, its start time and all.
+  const parent = spawn('sh', ['-c', 'sleep 0.05 & echo $!; exec sleep 20'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const zombie = (await new Promise((resolve) => parent.stdout.once('data', resolve))).toString().trim();
+  const fieldsOf = () => {
+    const raw = readFileSync(`/proc/${zombie}/stat`, 'latin1');
+    return raw.slice(raw.lastIndexOf(')') + 2).split(' ');
+  };
+  for (let waited = 0; fieldsOf()[0] !== 'Z' && waited < 40; waited++) await new Promise((resolve) => setTimeout(resolve, 50));
+  writeFileSync(join(treeHome, 'supabase.lock'), `${zombie} ${fieldsOf()[19]}\n`);
+  check('a zombie holder does not hold it', fieldsOf()[0] === 'Z' && (await Promise.race([withStackLock(async () => true), new Promise((resolve) => setTimeout(() => resolve(false), 3000))])));
+  parent.kill('SIGKILL');
+  rmSync(join(treeHome, 'supabase.lock'), { force: true });
 } catch (error) {
   failed += 1;
   console.error(`FAIL ${error.stack ?? error}`);
