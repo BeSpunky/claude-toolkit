@@ -39,10 +39,21 @@ export function descendants(pid) {
 // How long a child's exit by SIGINT waits for the engine's own: the same signal to the same group, delivered to one event loop.
 const GROUP_SIGINT_GRACE_MS = 1000;
 
+/** The signals a stop is made of, and the status a process reports having ended on one (128 + signal: the shell's, and Nx's). */
+const STOP_SIGNALS = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
+
+/** Did a process told to stop end the way a stop ends? Anything else is a shutdown that failed: a non-zero exit of its own, a SIGKILL, a segfault. */
+const endedByStop = (code, signal) => code === 0 || signal in STOP_SIGNALS || Object.values(STOP_SIGNALS).includes(code);
+
+/** How an entry of `failures` or `unclean` ended, in words: how it exited (if it did) and why that matters (if said). */
+export const describeEnd = ({ code, signal, why }) => [code === undefined ? '' : `exited ${signal ? `on ${signal}` : `with code ${code}`}`, why].filter(Boolean).join(' ');
+
 /**
  * Run the declared processes as parallel children in OUR foreground process group, and resolve when all
- * have exited: `{ success, failures, exits }` — `failures` names each child whose own exit failed the stack
+ * have exited: `{ success, failures, unclean, exits }` — `failures` names each child whose own exit failed the stack
  * (`{ id, code, signal, why? }`), so whoever reports the stack can say WHICH process died, not only that one did;
+ * `unclean` each child that was told to stop and did not end the way a stop ends (`{ id, code, signal }`): its shutdown
+ * failed, whichever way the stack came down, and it does not change `success` — the stack did not fail, its stop did;
  * `exits` is how each one ended, `{ id: { code, signal } }`.
  *
  * THE ORDER. A child marked `dependency` starts first, in the order given, each once the one before it passes its
@@ -85,7 +96,7 @@ const GROUP_SIGINT_GRACE_MS = 1000;
 export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log, lockFd }) {
   return new Promise((resolve) => {
     if (children.length === 0) {
-      resolve({ success: true, failures: [], exits: {} });
+      resolve({ success: true, failures: [], unclean: [], exits: {} });
       return;
     }
 
@@ -97,6 +108,7 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
     let stopping = false;
     let failed = false;
     const failures = [];
+    const unclean = [];
     let stopHandled = false;
     let groupStopCheck;
     const waiting = new AbortController(); // ends a dependency's readiness wait the moment the stack stops
@@ -153,6 +165,7 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
       if (done[i]) return;
       done[i] = true;
       exits[children[i].id] = { code, signal };
+      if (stopping && !endedByStop(code, signal)) unclean.push({ id: children[i].id, code, signal });
 
       // CLEAN means one of two things: the child exited 0, or it ended on a stop — ours (`stopping`), or the
       // terminal's Ctrl+C, which reached the child as SIGINT (or its shell's 130) in the same instant it reached us,
@@ -201,7 +214,7 @@ export function runStack({ children, cwd, onStop, onSpawn, onWaiting, onUp, log,
         clearTimeout(groupStopCheck);
         cleanup();
         runOnStop();
-        resolve({ success: !failed, failures, exits });
+        resolve({ success: !failed, failures, unclean, exits });
       }
     };
 
