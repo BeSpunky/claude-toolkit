@@ -101,7 +101,7 @@ hash -r
 echo "pm.path=$(command -v "$PM")"
 echo "pm.version=$("$PM" --version 2>/dev/null </dev/null | head -n 1)"
 PREFIX="$(npm prefix -g)"
-echo "orphans=$(find "$PREFIX/lib/node_modules" "$HOME/.local/lib/node_modules" -mindepth 1 -maxdepth 2 -type d -name '.*' 2>/dev/null | xargs)"
+echo "orphans=$(find "$PREFIX/lib/node_modules" "$HOME/.local/lib/node_modules" -mindepth 1 -maxdepth 2 -type d \( -path '*/node_modules/.*' -o -path '*/node_modules/@*/.*' \) 2>/dev/null | xargs)"
 echo "dangling=$(find "$PREFIX/bin" "$HOME/.local/bin" -xtype l 2>/dev/null | xargs)"
 echo "rootowned=$(find "$PREFIX/lib/node_modules" "$PREFIX/bin" -user 0 2>/dev/null | wc -l)"
 echo "probe=done"
