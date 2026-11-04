@@ -12,6 +12,11 @@
 if [ -f "$WS/package.json" ]; then
 {{PM_DETECT}}
   echo "[post-create] package manager: $PM"
+  # The image decides which package managers exist, not the project, and an unguarded install dies on one it lacks. The
+  # same script the image build ran, now with what package.json says today: nothing to do in a current house image.
+  # Not fatal here: if it could not help, it said why, and the install below decides whether that matters.
+  sh "$WS/.devcontainer/house.package-manager.sh" "$PM_SPEC" || echo "[post-create] WARNING: could not provide $PM_SPEC (see above)."
+  hash -r
   # Unattended: yarn 1 PROMPTS when a pinned version cannot be resolved — and with no input attached (this script
   # runs with stdin at /dev/null) it draws the prompt, reads nothing and exits 0 with nothing installed. Its own flag
   # makes it fail instead. Only yarn 1 has (and needs) the flag: yarn 2+ refuses it; npm and pnpm never wait on input.

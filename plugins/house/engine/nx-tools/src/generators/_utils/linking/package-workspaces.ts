@@ -14,7 +14,7 @@
 import { type Tree, readJson, logger } from '@nx/devkit';
 import { updateManifest } from '../dependencies';
 import { dirname } from 'node:path';
-import { detectPackageManager } from '../package-manager';
+import { detectPackageManager, hasYarnBerryEvidence } from '../package-manager';
 import { workspacePath } from './shared';
 
 const PNPM_WORKSPACE = 'pnpm-workspace.yaml';
@@ -149,6 +149,5 @@ export function isWorkspaceLinkRange(tree: Tree, range: string): boolean {
 function isYarnBerry(tree: Tree): boolean {
   const declared = /"packageManager"\s*:\s*"yarn@(\d+)/.exec(tree.read('package.json', 'utf-8') ?? '')?.[1];
   if (declared) return Number(declared) >= 2;
-  if (tree.exists('.yarnrc.yml')) return true;
-  return /^__metadata:/m.test(tree.read('yarn.lock', 'utf-8') ?? '');
+  return hasYarnBerryEvidence(tree);
 }

@@ -15,6 +15,7 @@
 //   osPackages     ONE list, de-duplicated, each group commented with its `why`, embedded in the one installer
 //                  (house.packages.sh) the image build runs as a cached layer — and post-create, for what is missing
 //   archives       ONE list by id (first contributor wins), installed by that same installer after the packages
+//   packageManager any contributor asks: the workspace's spec is rendered into the image, in a layer of its own
 //   postCreate     pieces run by phase (prepare → OS packages (missing only) → install → plugins → provision), registry order,
 //                  after ONE derived section that reclaims every volume's ownership (see `volumeOwnership`)
 //
@@ -34,6 +35,7 @@ import type {
 } from '../../layers/descriptor';
 import type { ClaudePlugins } from '../_utils/layer-contributions';
 import { packageManagerShellDetection } from '../_utils/package-manager';
+import { PACKAGE_MANAGER_PINS } from '../_utils/versions';
 
 export interface Contributor {
   /** A layer id, or an intent's name (`voice`). */
@@ -69,6 +71,11 @@ export interface Composition {
   initializeCommand: ({ name: string; command: string } & Why)[];
   osPackages: ({ packages: string[] } & Why)[];
   archives: (ArchiveTool & Why)[];
+  /**
+   * The spec the image build provides the project's package manager from (`_utils/package-manager.ts`), when a layer
+   * asks for one and the workspace has a package.json.
+   */
+  packageManager?: string;
   postCreate: (PostCreatePiece & { from: string })[];
 }
 
@@ -102,7 +109,7 @@ export type ImageSource = { kind: 'build' } | { kind: 'house-ref' } | { kind: 'f
 
 export function compose(
   contributors: readonly Contributor[],
-  tokens: { nodeMajor: string; imageSource?: ImageSource },
+  tokens: { nodeMajor: string; imageSource?: ImageSource; packageManagerSpec?: string },
 ): Composition {
   const source: ImageSource = tokens.imageSource ?? { kind: 'build' };
   // The image first, because `{{home}}` — which other fragments use — follows its user.
@@ -242,6 +249,7 @@ export function compose(
       }),
     // Distro-neutral (a tarball, tar and curl), so a foreign image gets them too.
     archives: unique(all('archives').map(({ item }) => ({ ...(item as ArchiveTool & Why) })), (entry) => entry.id),
+    ...(tokens.packageManagerSpec && contributors.some((entry) => entry.fragment.packageManager) ? { packageManager: tokens.packageManagerSpec } : {}),
     postCreate: unique(
       all('postCreate').map(({ item, from }) => ({ ...(item as PostCreatePiece), from })),
       (entry) => entry.piece,
@@ -600,9 +608,25 @@ function renderSection(template: string, name: string, keep: boolean): string {
   return template.replace(new RegExp(`^\\{\\{#${name}\\}\\}\\n([\\s\\S]*?)^\\{\\{/${name}\\}\\}\\n`, 'gm'), keep ? '$1' : '');
 }
 
-/** `.devcontainer/house.Dockerfile` — FROM the composed image, then the OS packages as one cached layer. */
+/**
+ * `.devcontainer/house.package-manager.sh` — the one script the image build and post-create both run to make the
+ * project's package manager available (see the template). Holds the pins and no project fact, so its cached layer moves
+ * only when a pin or the spec the Dockerfile hands it does.
+ */
+export function renderPackageManagerScript(): string {
+  const pins = Object.entries(PACKAGE_MANAGER_PINS).flatMap(([pm, versions]) => versions.map((version) => `${pm} ${version}`));
+  const script = readFileSync(join(__dirname, 'house.package-manager.sh.tpl'), 'utf8').split('{{HOUSE_PINS}}').join(pins.join('\n'));
+  proveShell(script, 'sh', 'house.package-manager.sh');
+  return script;
+}
+
+/** `.devcontainer/house.Dockerfile` — FROM the composed image, the OS packages as one cached layer, then the package manager as another. */
 export function renderHouseDockerfile(c: Composition): string {
-  return readFileSync(join(__dirname, 'house.Dockerfile.tpl'), 'utf8').split('{{IMAGE}}').join(c.image.ref);
+  return renderSection(readFileSync(join(__dirname, 'house.Dockerfile.tpl'), 'utf8'), 'PACKAGE_MANAGER', c.packageManager !== undefined)
+    .split('{{IMAGE}}')
+    .join(c.image.ref)
+    .split('{{PACKAGE_MANAGER_SPEC}}')
+    .join(c.packageManager ?? '');
 }
 
 /**

@@ -53,8 +53,25 @@ export const FIREBASE_FUNCTIONS_VERSION = '^7.0.0';
 export const TYPESCRIPT_UTILS_VERSION = '0.1.0-alpha.0';
 
 /**
- * The Node major a project with no Node at all is seeded with (its `.nvmrc`). Only a seed: from then on the project's Node file is
- * the one source — the devcontainer image, the functions `engines` and the docs read it, and no upgrade moves it.
+ * The house's own Node major, with two jobs. It seeds the `.nvmrc` of a project with no Node at all; from then on the project's
+ * Node file is the one source (the devcontainer image, the functions `engines` and the docs read it) and no upgrade moves it.
+ * And it picks the image house.sh's Docker fallback runs on (engine/container-engine.sh reads this line by regex, so keep its shape).
  * Must be a GA Cloud Functions runtime (tools/test-layers checks it against the projected table).
+ * BEFORE MOVING IT PAST 24, answer where the fallback's yarn comes from: typescript-node:26 ships neither yarn nor corepack, and
+ * the fallback refuses an image without its project's package manager. A generated devcontainer no longer has this problem on any
+ * image (`PACKAGE_MANAGER_PINS` below); the fallback runs before any project exists, so that cannot answer for it.
  */
 export const HOUSE_NODE_MAJOR = '24';
+
+/**
+ * The package-manager version a devcontainer installs when its image lacks what the project uses and the project names
+ * no exact version (an exact `packageManager` is installed as written): the first of each is the default, and yarn has
+ * one per line, because yarn 2+ is a different package from yarn 1. npm has none: npm is what installs the others.
+ * Rendered into .devcontainer/house.package-manager.sh. Moving one moves only what a later install picks: nothing to
+ * migrate, since no project's file records it. pnpm is the 10 line: Node >=18.12, and the lockfile format 9 and 10 share.
+ */
+export const PACKAGE_MANAGER_PINS: Readonly<Record<'yarn' | 'pnpm' | 'npm', readonly string[]>> = {
+  yarn: ['1.22.22', '4.18.1'],
+  pnpm: ['10.34.9'],
+  npm: [],
+};
