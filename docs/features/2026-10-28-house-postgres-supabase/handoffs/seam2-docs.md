@@ -21,7 +21,7 @@
 - **A verb does not check the owner.** With one stack running in a tree, `postgres:reset` acts on it whoever started it. `reference/postgres.md` says so.
 - **Nothing tells a human to set the secret.** The `ci` generator prints no `HUMAN_STEP` for `POSTGRES_DEPLOY_URL`; the docs state `gh secret set`, and the deploy fails naming the variable.
 - `gh secret set POSTGRES_DEPLOY_URL --env <environment>` is from `gh`'s documented interface, not run here.
-- `tools/test-postgres` has no CI wiring as of this note, so its commands row claims none.
+- `tools/test-postgres` is wired by `postgres-tripwire.yml`; its commands row says so.
 
 ## Owed
 `bespunky-house` and `bespunky-workflow` bumps. The `plugin.json` description changed, so `marketplace.json` drifts until `nx release` derives it.
