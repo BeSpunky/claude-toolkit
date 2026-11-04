@@ -10,19 +10,35 @@
 // loses local data and the seed world restores it. The server and dbmate are in the image and keep no state of their own.
 // `~/.pgpass` and `~/.pg_service.conf` are deliberately not kept: every local verb scrubs them away, and a deploy's URL never
 // lives in a file.
-import type { DevcontainerFragment, LayerDescriptor } from './descriptor';
+import type { DevcontainerFragment, LayerDescriptor, LayerId } from './descriptor';
 import type { Tree } from '@nx/devkit';
 import { postgresCiProvider } from '../generators/postgres/ci-provider';
-import { POSTGRES_BASE_PORT, postgresFragment } from '../generators/postgres/dev-fragment';
+import { POSTGRES_BASE_PORT, localServerFragment } from '../generators/postgres/dev-fragment';
 import { POSTGRES_TAG } from '../generators/postgres/home';
 import { postgresMajor } from '../generators/postgres/major';
+import { supabaseWorn } from '../generators/postgres/provider';
 import { POSTGRES_CLOSURES } from '../generators/_utils/postgres-closures';
 import { DBMATE_DOWNLOADS, DBMATE_VERSION } from '../generators/_utils/versions';
 
 /** A regular expression over a listening process's command line: `postgres -D <data home>/bespunky/postgres/<tree>/<stack>/<major>/data`. */
 export const POSTGRES_PROCESS_MATCH = 'bespunky/postgres/.+/data';
 
-function devcontainer(tree: Tree): DevcontainerFragment {
+const PSQL_HISTORY = {
+  name: 'PSQL_HISTORY',
+  value: '{{home}}/.local/share/bespunky/postgres/psql_history',
+  why: "psql's history otherwise lands in $HOME, which a rebuild throws away.",
+};
+
+function devcontainer(tree: Tree, active?: ReadonlySet<LayerId>): DevcontainerFragment {
+  // With Supabase, the stack's own Postgres is the local database (Auth, Storage and Realtime cannot use another), so a Debian
+  // server and dbmate would serve nothing. A client stays: `postgres:psql` and `postgres:seed`, which the CLI has no verb for.
+  if (active?.has('supabase') || supabaseWorn(tree)) {
+    return {
+      ports: [{ port: POSTGRES_BASE_PORT, label: 'Postgres (Supabase)', onAutoForward: 'ignore' }],
+      osPackages: [{ packages: ['postgresql-client'], why: 'psql, for postgres:psql and postgres:seed. Debian\'s own: a client of another major reaches the stack\'s server all the same.' }],
+      containerEnv: [PSQL_HISTORY],
+    };
+  }
   const major = postgresMajor(tree);
   return {
     // Never forwarded on its own: it trusts every connection on loopback, so a forward hands anything on the host's loopback a
@@ -51,13 +67,7 @@ function devcontainer(tree: Tree): DevcontainerFragment {
         why: `dbmate ${DBMATE_VERSION}, which runs postgres/migrations: a bare binary, since this repo may have no node_modules.`,
       },
     ],
-    containerEnv: [
-      {
-        name: 'PSQL_HISTORY',
-        value: '{{home}}/.local/share/bespunky/postgres/psql_history',
-        why: "psql's history otherwise lands in $HOME, which a rebuild throws away.",
-      },
-    ],
+    containerEnv: [PSQL_HISTORY],
   };
 }
 
@@ -73,11 +83,12 @@ export const postgres: LayerDescriptor = {
   generators: {
     // The core, then the dev engine: `postgres:start` claims its stack through it, and a repo with nothing served has no
     // `web` layer to bring it. One artifact, one owner; the planner runs a step two layers share once.
-    workspace: [{ generator: 'postgres' }, { generator: 'dev' }],
+    // A run about to ensure Supabase says so: the workspace does not show it yet, and this step must not seed what that one replaces.
+    workspace: [{ generator: 'postgres', args: (ctx) => (ctx.active.has('supabase') ? ['--provider=supabase'] : []) }, { generator: 'dev' }],
   },
   docSections: ['postgres'],
   ciDeploy: postgresCiProvider,
   // Beside every app the dev engine serves, and before it.
-  devFragment: () => postgresFragment(),
+  devFragment: (tree) => localServerFragment(tree),
   devcontainer,
 };

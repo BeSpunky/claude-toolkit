@@ -51,6 +51,11 @@
       "schema": "./src/generators/postgres/schema.json",
       "description": "The Postgres layer: the launcher (tools/postgres, Node built-ins only), the postgres project's targets (start, migrate, new-migration, seed, reset, psql, deploy), postgres/migrations, postgres/seed/world and .bespunky/postgres.json. A server per dev stack, declared in .bespunky/dev.json for every served app. Workspace-level, no inputs; idempotent."
     },
+    "supabase": {
+      "factory": "./src/generators/supabase/generator",
+      "schema": "./src/generators/supabase/schema.json",
+      "description": "The Supabase layer: the launcher's Supabase provider, supabase/config.toml (seeded, then only its owned keys), supabase.lock, the folder move from postgres/migrations to supabase/migrations, and the served apps' process in .bespunky/dev.json. Workspace-level, no inputs; idempotent."
+    },
     "firebase-emulators": {
       "factory": "./src/generators/firebase-emulators/generator",
       "schema": "./src/generators/firebase-emulators/schema.json",

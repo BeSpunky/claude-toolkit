@@ -8,7 +8,13 @@
 // The URLs: runtime and direct are one server locally, and two names, because every pooled host makes them two in production
 // and code that reads the right one locally reads the right one there. They hold no secret: the server trusts loopback and
 // listens nowhere else. The password is for clients that insist on one.
+//
+// WHICH PROVIDER'S PROCESS: `localServerFragment`, one place. The process keeps its id and its command on both, so a served app
+// does not change shape when a project chooses Supabase beyond what the generator reshapes there (generators/supabase/dev-merge.ts).
+import type { Tree } from '@nx/devkit';
 import type { DevFragment } from '../dev/declaration';
+import { supabaseWorn } from './provider';
+import { supabaseFragment } from '../supabase/dev-fragment';
 
 export const POSTGRES_PORT_NAME = 'postgres';
 /** The stack's base port (tools/postgres/layout.mjs says the same, and `tools/test-generators` holds them together). */
@@ -31,3 +37,6 @@ export function postgresFragment(): DevFragment {
     ],
   };
 }
+
+/** The process of whichever provider this project wears. */
+export const localServerFragment = (tree: Tree): DevFragment => (supabaseWorn(tree) ? supabaseFragment() : postgresFragment());

@@ -3,6 +3,12 @@
   "$id": "BeSpunkyPostgres",
   "title": "The Postgres layer: a server per dev stack, forward-only migrations, seeds, a guarded deploy",
   "type": "object",
-  "properties": {},
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": ["native", "supabase"],
+      "description": "Which local server the launcher runs on. Default: what the workspace wears. A run that is about to ensure `supabase` says so, because the workspace does not show it yet."
+    }
+  },
   "additionalProperties": false
 }
