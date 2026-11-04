@@ -110,7 +110,6 @@ function moveMigrations(tree: Tree): void {
     if (name !== '.gitkeep') tree.rename(`${from}/${name}`, `${to}/${name}`);
     else tree.delete(`${from}/${name}`);
   }
-  if (!tree.children(to).length) tree.write(`${to}/.gitkeep`, '');
   const rewritten = retargetReferences(tree);
   if (sql.length) logger.info(`[supabase] moved ${sql.length} migration(s) from ${from} to ${to}: the CLI hard-codes that path, and a project has one folder.`);
   if (rewritten.length) logger.info(`[supabase] retargeted ${from} to ${to} in: ${rewritten.join(', ')}`);

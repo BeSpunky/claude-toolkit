@@ -162,7 +162,7 @@ async function reportLeftovers() {
  * to record, so a project with none has none, and one that has just written its first has rows to keep.
  */
 async function assertLedger() {
-  if (!readdirSync(MIGRATIONS, { withFileTypes: true }).some((entry) => entry.name.endsWith('.sql'))) return;
+  if (!existsSync(MIGRATIONS) || !readdirSync(MIGRATIONS).some((name) => name.endsWith('.sql'))) return;
   const [{ ledger, tables } = {}] = await dbQuery("select to_regclass('supabase_migrations.schema_migrations')::text ledger, (select count(*)::int from pg_tables where schemaname = 'public') tables");
   if (ledger || tables) return;
   log('this stack answers and says it is healthy, and it has no migration ledger and no tables: a reset was interrupted here. Rebuilding it from its migrations.');

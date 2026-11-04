@@ -53,7 +53,8 @@ const inEveryCell = MATRIX.map(({ layout, link, label }) => ({
     t.ok(cli.includes(`PINNED_VERSION = '${ctx.load('generators/_utils/versions').SUPABASE_CLI_VERSION}'`) && !cli.includes('{{'), 'the launcher knows the pin');
     t.ok(!tree.exists('.bespunky/postgres.json'), 'no major of its own: config.toml says');
     t.ok(!tree.exists('postgres/migrations'), 'one migrations folder');
-    t.ok(tree.exists('supabase/migrations/.gitkeep') && tree.exists('postgres/seed/world/.gitkeep'), 'the folders are seeded');
+    t.ok(!tree.exists('supabase/migrations/.gitkeep'), 'no keep file: the CLI says it skipped one, at every start, and it needs no folder');
+    t.ok(tree.exists('postgres/seed/world/.gitkeep'), 'the seeds\' folder is seeded');
     const config = tree.read('supabase/config.toml', 'utf8');
     t.ok(/^stack = true$/m.test(config) && /^sql_paths = \["\.\.\/postgres\/seed\/world\/\*\.sql"\]$/m.test(config) && !config.includes('{{PROJECT_ID'), 'the seeded config');
     t.ok(tree.exists('supabase/supabase.lock') && tree.exists('supabase/.gitignore'), 'the lock and the ignore file');
@@ -96,8 +97,7 @@ export default {
       expect: (tree, t, ctx) => {
         t.ok(tree.exists('supabase/migrations/20260101000000_first.sql') && tree.exists('supabase/migrations/README.txt'), 'moved');
         t.ok(!tree.exists('postgres/migrations'), 'never two');
-        t.ok(!tree.exists('supabase/migrations/.gitkeep'), 'no keep file beside real files');
-        t.ok(tree.read('README.md', 'utf8').includes('supabase/migrations') && !tree.read('README.md', 'utf8').includes('postgres/migrations'), 'a README is retargeted');
+                t.ok(tree.read('README.md', 'utf8').includes('supabase/migrations') && !tree.read('README.md', 'utf8').includes('postgres/migrations'), 'a README is retargeted');
         t.ok(tree.read('.github/workflows/mine.yml', 'utf8').includes('supabase/migrations/**'), 'a workflow\'s paths are retargeted');
         t.ok(tree.read('docs/features/2026-01-01-x/DECISION.md', 'utf8').includes('postgres/migrations'), 'a past record is not rewritten');
         t.ok(tree.read('tools/postgres/layout.mjs', 'utf8').includes('postgres/migrations'), 'the owned launcher is not a reference to rewrite');
@@ -260,6 +260,30 @@ export default {
         t.ok(fragment.containerEnv.some((e) => e.name === 'SUPABASE_NO_KEYRING' && e.value === '1'), 'no keyring');
         t.ok(!fragment.mounts?.length, 'no mount');
         t.ok(!layer('supabase').claudePlugins?.length, 'the official plugin\'s MCP is hosted, unscoped and writes: not enabled by this layer');
+      },
+    },
+    {
+      name: 'the real workflow: the pinned CLI installed and checked, dbmate gone, a secret per environment, no OIDC, and the line needs no target',
+      setup: () => {
+        const tree = workspace({ pm: 'yarn-berry' });
+        tree.write('.nvmrc', '22\n');
+        tree.write('.vscode/.window-identity.json', '{}\n');
+        tree.write('.bespunky/branches.json', JSON.stringify({ schema: 1, projection: { schema: 1, integration: 'development', production: ['main'], productionPatterns: [], chain: ['development', 'main'], protected: ['development', 'main'], protectedPatterns: [], workBase: 'development', summary: 'development → main', deploys: [{ kind: 'line', line: 'main', ci: { environment: 'production', providers: {} } }] } }));
+        return tree;
+      },
+      run: async (tree, ctx) => {
+        await ensureBoth(tree, ctx);
+        await ctx.load('generators/ci/generator').default(tree, { layers: ['nx', 'agent', 'node', 'postgres', 'supabase', 'ci'] });
+      },
+      expect: (tree, t, ctx) => {
+        const workflow = tree.read('.github/workflows/deploy.yml', 'utf8');
+        const { SUPABASE_CLI_DOWNLOADS, SUPABASE_CLI_VERSION } = ctx.load('generators/_utils/versions');
+        t.ok(workflow.includes(`Install the Supabase CLI ${SUPABASE_CLI_VERSION}`) && workflow.includes(SUPABASE_CLI_DOWNLOADS.amd64.sha256), 'the CLI, checked');
+        t.ok(!workflow.includes('dbmate'), 'the replaced provider\'s setup is gone');
+        t.ok(workflow.includes('secrets.POSTGRES_DEPLOY_URL_PRODUCTION') && !workflow.includes('secrets['), 'the secret by its literal name');
+        t.ok(!/^\s*id-token: write/m.test(workflow), 'no OIDC');
+        t.ok(!/::error::/.test(workflow) || !/no target/i.test(workflow), 'the line is not blocked');
+        t.ok(ctx.logs.join('\n').includes('gh secret set POSTGRES_DEPLOY_URL_PRODUCTION') && ctx.logs.join('\n').includes('SESSION pooler'), `the human step: ${ctx.logs.join(' ').slice(0, 300)}`);
       },
     },
     {
