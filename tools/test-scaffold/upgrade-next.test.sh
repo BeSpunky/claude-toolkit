@@ -248,10 +248,11 @@ ok "no git base reports 'unknown', never 'none'" "$([ "$UPGRADE_NEXT" = unknown 
 r="$(fixture refused)"
 base="$(git -C "$r" rev-parse HEAD)"
 printf '{"mounts":["x"]}\n' > "$r/.devcontainer/devcontainer.json"
-export GIT_TEST_ASSUME_DIFFERENT_OWNER=1
+# GitHub's runner images set safe.directory=* in the system config, which would answer the knob, so this case reads none.
+export GIT_TEST_ASSUME_DIFFERENT_OWNER=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 git -C "$r" rev-parse HEAD >/dev/null 2>&1 && ok "the knob makes git refuse the tree" 0 "git answered, so this case tests nothing"
 invoke "$r" "$base"
-unset GIT_TEST_ASSUME_DIFFERENT_OWNER
+unset GIT_TEST_ASSUME_DIFFERENT_OWNER GIT_CONFIG_NOSYSTEM GIT_CONFIG_GLOBAL
 ok "a refused tree survives set -e" "$([ "$DIED" = 0 ] && echo 1 || echo 0)" "the reporter exited non-zero"
 ok "a refused tree reports 'unknown', never 'none'" "$([ "$UPGRADE_NEXT" = unknown ] && echo 1 || echo 0)" "got '$UPGRADE_NEXT'"
 
