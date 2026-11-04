@@ -43,7 +43,7 @@ export async function dbmateMigrate(connection, { signal, onOutput } = {}) {
     const result = await run('dbmate', args, { cwd: dir, env: scrubbedEnv(connection.env), signal });
     if (result.aborted) return;
     const said = onOutput ? onOutput(result.stdout + result.stderr) : result.stdout + result.stderr;
-    if (said.trim()) console.log(said.trim());
+    if (said.trim()) console.log(`${said.trim()}`);
     if (result.code !== 0) throw new Refusal(`Migrating failed (dbmate exit ${result.code}). Nothing after the failed migration ran.`);
   });
 }
