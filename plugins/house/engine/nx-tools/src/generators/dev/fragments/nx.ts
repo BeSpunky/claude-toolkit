@@ -41,12 +41,12 @@ export function nxDevServerFragment(tree: Tree, project: string): DevFragment {
         `stack owns it, so its base port is unknown. Set \`port\` on the target, or declare the app in .bespunky/dev.json.`,
     };
   }
-  const { bin, nodeHost, packageManager } = nxInvocation(tree);
+  const { spawn, nodeHost, packageManager } = nxInvocation(tree);
   return {
     processes: [
       {
         id: 'app',
-        cmd: [bin, 'run', `${project}:${DEV_SERVER_TARGET}`, '--port=${PORT:app}'],
+        cmd: [...spawn, 'run', `${project}:${DEV_SERVER_TARGET}`, '--port=${PORT:app}'],
         env: { ...NX_TREE_ENV },
         ports: { app: base },
         primary: true,

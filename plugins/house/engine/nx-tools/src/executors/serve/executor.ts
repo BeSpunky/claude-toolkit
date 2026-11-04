@@ -88,7 +88,8 @@ function silentUnderNx(root: string): boolean {
   const style = process.env.NX_DEFAULT_OUTPUT_STYLE;
   if (style && style !== 'summary') return false;
   try {
-    const nx = dirname(require.resolve('nx/package.json', { paths: [root] }));
+    // `.nx/installation` is where a wrapper host keeps Nx: it has no node_modules at the root to resolve from.
+    const nx = dirname(require.resolve('nx/package.json', { paths: [root, join(root, '.nx/installation')] }));
     return ['dist/src', 'src'].some((at) => existsSync(join(nx, at, 'tasks-runner/life-cycles/summary-terminal-output-life-cycle.js')));
   } catch {
     return false;
