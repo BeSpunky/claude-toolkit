@@ -1308,7 +1308,8 @@ checkAsync('logins persist: CLAUDE_CONFIG_DIR, ONE ~/.config volume, git wiring 
   ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.cache,type=volume`)) && !a.dc.mounts.some((m) => m.includes('/.cache/')), '~/.cache is not ONE persisted volume (or a per-tool cache volume crept back)');
   // A package manager the image lacks and the global prefix refuses lands in ~/.local (house.package-manager.sh): the volume
   // keeps it across a rebuild, first on PATH. What the package managers themselves keep was looked at with the real ones:
-  // yarn 1 and pnpm's caches and stores stay inside the XDG homes (~/.cache, ~/.local); yarn 2+'s ~/.yarn/berry is a
+  // yarn 1 and pnpm's caches and stores stay inside the XDG homes (~/.cache, ~/.local), except pnpm's store for a project
+  // on the repo's mount, which stays on that mount to hard-link (a cache: ignored by the floor, see layers/nx.ts); yarn 2+'s ~/.yarn/berry is a
   // download cache, left where it is, since YARN_GLOBAL_FOLDER would also move yarn 1's `yarn global` out of ~/.config.
   // NOT persisted, and known: a registry login in ~/.npmrc (npm, pnpm: true of every node-layer container before this)
   // and ~/.yarnrc.yml (yarn 2+). A rebuild loses it; see the effort's DECISION.md.

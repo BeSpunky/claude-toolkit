@@ -58,5 +58,10 @@ export const nx: LayerDescriptor = {
     // that added this line). The upgrade runs on the Nx floor, so the floor owns its lock. (Named
     // `.bespunky-sync.lock/` before 0.39.0; `0.39.0/rename-upgrade-lock` retargets the old line in place.)
     { heading: "The house upgrade's transient lock (machine-local; never committed)", entries: ['.bespunky-upgrade.lock/'] },
+    // pnpm keeps its store on the project's filesystem so it can hard-link. In a house container the repo and $HOME are
+    // separate mounts, so a `pnpm install` from any SUBFOLDER of the repo (a worktree under `.claude/worktrees/` is one)
+    // puts the store at the top of the repo's mount, whatever package manager the project itself uses. A cache, and
+    // deliberately not moved: a store on another mount would cost real pnpm projects their hard links.
+    { heading: "pnpm's store (machine-local; never committed)", entries: ['.pnpm-store'] },
   ],
 };
