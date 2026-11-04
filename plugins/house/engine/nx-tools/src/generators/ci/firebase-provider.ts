@@ -43,6 +43,9 @@ export function refCondition(branches: readonly string[]): string {
 export const firebaseCiProvider: CiDeployProvider = {
   id: 'firebase',
   title: 'Firebase (Cloud Functions, rules, indexes — never App Hosting)',
+  targetLabel: '.firebaserc alias',
+  deploySignals: [/\bfirebase\s+deploy\b/],
+  oidc: { why: "keyless cloud auth: GitHub's OIDC token, exchanged by Workload Identity Federation" },
   deployTargets: (tree: Tree) => {
     const { functions, suite } = firebaseHomes(tree);
     return [functions, suite]

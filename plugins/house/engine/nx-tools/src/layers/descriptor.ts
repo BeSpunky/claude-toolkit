@@ -204,10 +204,38 @@ export interface CiEnvironment {
   retired?: boolean;
 }
 
+/**
+ * WHAT a provider ships, which is what decides when it ships: a `schema` deploy runs, and must succeed, before every
+ * `code` deploy (a provider's or a project's own), because new code against an old schema is an outage. The order of
+ * the stages is the `ci` layer's (`ci/workflow.ts`). A provider states what it deploys, never which others it precedes.
+ */
+export type CiDeployStage = 'schema' | 'code';
+
 export interface CiDeployProvider {
   /** The provider id a binding names (`ci.providers.<id>`). */
   id: string;
   title: string;
+  /** What a binding's `ci.providers.<id>` value IS here (`.firebaserc alias`): how the messages ask for a missing one. */
+  targetLabel: string;
+  /**
+   * How a workflow the house did not write shows it already deploys through this provider, tested per line with
+   * comments stripped. Read from EVERY registered provider, worn or not: a repo running its own `firebase deploy` has
+   * a pipeline whether or not it wears `firebase`, and a second deploy workflow beside it is the worst outcome.
+   */
+  deploySignals: readonly RegExp[];
+  /** When this provider's targets deploy. Absent: `code`. */
+  deployStage?: CiDeployStage;
+  /**
+   * Env vars its deploys read, name → a GitHub expression (`${{ secrets.DATABASE_URL }}`, resolved in the line's
+   * GitHub environment). On the deploy step of this provider's stage only, so a schema credential never reaches a
+   * code deploy. Never a literal secret, and never `deployOptions`: those are committed to `project.json`.
+   */
+  deployEnv?: Readonly<Record<string, string>>;
+  /**
+   * Present when `authSteps` exchanges GitHub's OIDC token. `why` is rendered beside `id-token: write`, which the
+   * deploy job holds only if an active provider asks: a token-based provider's job never gets to mint one.
+   */
+  oidc?: { why: string };
   /** The deploy targets this provider's layer owns in this workspace — the ONLY targets its options reach. */
   deployTargets(tree: Tree): { project: string; target: string }[];
   /** The options a deploy target of this provider takes in an environment whose provider target is `target`. */
