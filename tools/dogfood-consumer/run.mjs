@@ -6,7 +6,7 @@
  *                                       [--workdir=<dir>] [--no-staging] [--keep]
  *   node tools/dogfood-consumer/run.mjs --self-test          (the upstream-cause recognisers on recorded output; offline)
  *
- * NETWORK, MINUTES (~20–40), npm registry + yarn installs. NOT CI and NOT the pre-push hook — a release gate a
+ * NETWORK, MINUTES (~20–45), npm registry + yarn installs. NOT CI and NOT the pre-push hook — a release gate a
  * human (or the agent doing the release) runs before bumping `engine/nx-tools/package.json`. Node built-ins only.
  *
  * ── WHY ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -29,12 +29,25 @@
  *             compiles — house.sh says so itself, in UPGRADE_VERIFY).
  *   new-*     a real `house.sh new --local` with the toolkit under test for EVERY preset: agent, node, angular and
  *             angular + --firebase, each with its sanity facts, and build + lint + test where there is an app to build.
+ *   new-postgres, new-postgres-node
+ *             the `postgres` layer on each host (wrapper, node), from nothing: `new --local --add-layer=postgres`; the project
+ *             gains a served app and an upgrade, so the GENERATORS seed its `.bespunky/dev.json`; then a real `nx serve` with
+ *             the REAL pinned server and dbmate. A migration and a seed applied, the app received DATABASE_URL, the stop
+ *             leaves nothing and frees every port.
+ *   add-layer-postgres
+ *             `add-layer --local postgres` on the upgraded consumer: what it had survives, a second upgrade is a no-op, it
+ *             still builds, lints and passes its tests, and `postgres:start` boots there, with the real tools.
+ *
+ * The real tools come from tools/test-postgres/tools.mjs: the generated installer, unprivileged, into a cache
+ * (POSTGRES_TOOLS_CACHE). So those steps need this checkout's `yarn install`, and a Debian the closures cover; anywhere else they
+ * are SKIPs that say so. Their data stays under the workdir (XDG_DATA_HOME), never in this machine's `~/.local`.
  *
  * `--yes` is passed to the upgrades on purpose and is not the gate being satisfied by a machine: the upgrade
  * target is a throwaway fixture this run created seconds earlier, and running this tool IS the human's consent.
  *
- * Steps (--only, comma-separated; prerequisites are pulled in): released, seed, upgrade, new-agent, new-node,
- * new-angular, new-angular-firebase; aliases `consumer` (= released,seed,upgrade) and `new` (= every new-*).
+ * Steps (--only, comma-separated; prerequisites are pulled in): released, seed, upgrade, add-layer-postgres, new-agent,
+ * new-node, new-angular, new-angular-firebase, new-postgres, new-postgres-node; aliases `consumer` (= released,seed,upgrade),
+ * `new` (= every new-*) and `postgres` (= every step above that wears the layer).
  *
  * ── WHEN THE RELEASED BASELINE IS BROKEN UPSTREAM ───────────────────────────────────────────────────────
  *
@@ -61,6 +74,7 @@ import {
   appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync,
   rmSync, writeFileSync,
 } from 'node:fs';
+import { connect, createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -159,9 +173,14 @@ const PRESETS = {
   'new-angular': { flags: ['--preset=angular'], app: 'web', layers: ['angular', 'design-system', 'web'], host: 'node', verify: true },
   'new-angular-firebase': { flags: ['--preset=angular', '--firebase'], app: 'web', layers: ['angular', 'firebase'], host: 'node', verify: true, firebase: true },
 };
-const STEP_ORDER = ['released', 'seed', 'upgrade', ...Object.keys(PRESETS)];
-const REQUIRES = { seed: ['released'], upgrade: ['seed'] };
-const ALIASES = { consumer: ['released', 'seed', 'upgrade'], new: Object.keys(PRESETS) };
+// The `postgres` layer from nothing, on each host: a separate road because it does not stop at `new` (see stepNewPostgres).
+const POSTGRES_ROADS = {
+  'new-postgres': { flags: ['--add-layer=postgres'], layers: ['nx', 'agent', 'postgres'], host: 'wrapper' },
+  'new-postgres-node': { flags: ['--preset=node', '--add-layer=postgres'], layers: ['nx', 'agent', 'node', 'postgres'], host: 'node' },
+};
+const STEP_ORDER = ['released', 'seed', 'upgrade', 'add-layer-postgres', ...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)];
+const REQUIRES = { seed: ['released'], upgrade: ['seed'], 'add-layer-postgres': ['upgrade'] };
+const ALIASES = { consumer: ['released', 'seed', 'upgrade'], new: [...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)], postgres: ['add-layer-postgres', ...Object.keys(POSTGRES_ROADS)] };
 
 function selectSteps(only) {
   if (!only) return new Set(STEP_ORDER);
@@ -184,6 +203,7 @@ const LOGS = join(WORK, 'logs');
 const RELEASED_TREE = join(WORK, 'released');
 const CONSUMERS = join(WORK, 'consumers'); // PROJECTS_DIR for every house.sh run
 const TMP = join(WORK, 'tmp');             // TMPDIR for every child: whatever it leaves is ours to delete
+const POSTGRES_DATA = join(TMP, 'xdg');    // XDG_DATA_HOME for a real server: never this machine's ~/.local
 for (const d of [LOGS, CONSUMERS, TMP]) mkdirSync(d, { recursive: true });
 for (const d of [RELEASED_TREE]) if (existsSync(d)) { console.error(`${d} already exists — use a fresh --workdir.`); process.exit(2); }
 
@@ -214,13 +234,13 @@ let current = null; // the running child, killed (whole group) on a signal
 
 /** Run a command to its own log file. Resolves { code, out, ms, log }. The child leads its own process group so a
  *  timeout or a Ctrl+C takes down everything it started, not just the shell. */
-function run(label, cmd, args, { cwd, timeoutMs = 30 * 60_000 } = {}) {
+function run(label, cmd, args, { cwd, env = {}, timeoutMs = 30 * 60_000 } = {}) {
   const log = join(LOGS, `${String(++logSeq).padStart(2, '0')}-${label.replace(/[^a-z0-9.-]+/gi, '_')}.log`);
   writeFileSync(log, `$ (cd ${cwd ?? process.cwd()} && ${[cmd, ...args].join(' ')})\n\n`);
   const fd = openSync(log, 'a');
   const t0 = Date.now();
   return new Promise((done) => {
-    const child = spawn(cmd, args, { cwd, env: ENV, stdio: ['ignore', fd, fd], detached: true });
+    const child = spawn(cmd, args, { cwd, env: { ...ENV, ...env }, stdio: ['ignore', fd, fd], detached: true });
     current = child;
     const timer = setTimeout(() => { appendFileSync(log, `\n[dogfood] TIMEOUT after ${timeoutMs / 1000}s — killed\n`); killGroup(child.pid); }, timeoutMs);
     const finish = (code) => {
@@ -232,6 +252,21 @@ function run(label, cmd, args, { cwd, timeoutMs = 30 * 60_000 } = {}) {
     child.on('error', (e) => { appendFileSync(log, `\n[dogfood] spawn error: ${e.message}\n`); finish(127); });
     child.on('exit', (code, sig) => finish(code ?? (sig ? 128 : 1)));
   });
+}
+/** Start something that stays up, to its own log file. The caller stops it the way a consumer would; a run that dies is `cleanup`'s. */
+const services = new Set();
+function background(label, cmd, args, { cwd, env = {} } = {}) {
+  const log = join(LOGS, `${String(++logSeq).padStart(2, '0')}-${label.replace(/[^a-z0-9.-]+/gi, '_')}.log`);
+  writeFileSync(log, `$ (cd ${cwd} && ${[cmd, ...args].join(' ')})\n\n`);
+  const fd = openSync(log, 'a');
+  const child = spawn(cmd, args, { cwd, env: { ...ENV, ...env }, stdio: ['ignore', fd, fd], detached: true });
+  closeSync(fd);
+  const handle = { pid: child.pid, log, code: undefined, ended: false, out: () => readFileSync(log, 'utf8') };
+  services.add(handle);
+  const finish = (code) => { handle.code = code; handle.ended = true; services.delete(handle); };
+  child.on('error', (e) => { appendFileSync(log, `\n[dogfood] spawn error: ${e.message}\n`); finish(127); });
+  child.on('exit', (code, sig) => finish(code ?? (sig ? 128 : 1)));
+  return handle;
 }
 const git = (cwd, ...args) => spawnSync('git', ['-C', cwd, ...args], { env: ENV, encoding: 'utf8' });
 const gitOut = (cwd, ...args) => { const r = git(cwd, ...args); if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr.trim()}`); return r.stdout.trim(); };
@@ -503,7 +538,7 @@ export const onInquiryCreated = onDocumentCreated(
 
 // ── the steps ─────────────────────────────────────────────────────────────────────────────────────────────
 const consumer = { name: 'coach', app: 'web', staging: opts.staging, dir: join(CONSUMERS, 'coach'), integration: null };
-const ok = { released: false, seed: false };
+const ok = { released: false, seed: false, upgrade: false };
 let baseline = null; // { build: Set<failed task>, lint: … } from the seeded consumer, before the upgrade
 
 async function stepReleased() {
@@ -592,7 +627,7 @@ async function stepUpgrade() {
   console.log(`        (first upgrade printed ${reports} report line(s) — read them in ${r1.log})`);
   await verify(step, c.dir, '', baseline);
   await verifyDsComponent(step, c.dir);
-  return true;
+  return (ok.upgrade = true);
 }
 
 /** The check UPGRADE_OK / NEW_OK is not: the workspace builds, lints and passes its tests. `run-many` over every project (a fresh
@@ -695,11 +730,235 @@ async function stepNew(id) {
   }
 }
 
+// ── the postgres layer, for real ──────────────────────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+let postgresEnv;
+/** The environment the real pinned server and dbmate run under, or { skip: why } on a machine the closures do not cover. */
+async function realPostgres() {
+  if (postgresEnv) return postgresEnv;
+  const { NoClosureHere, ensureTools } = await import(join(TOOLKIT, 'tools/test-postgres/tools.mjs'));
+  try {
+    postgresEnv = { ...(await ensureTools()), XDG_DATA_HOME: POSTGRES_DATA, DEV_OWNER: process.env.DEV_OWNER || 'dogfood-consumer' };
+  } catch (error) {
+    if (!(error instanceof NoClosureHere)) throw error;
+    postgresEnv = { skip: error.message };
+  }
+  return postgresEnv;
+}
+
+const canBind = (port) => new Promise((done) => {
+  const server = createServer();
+  server.once('error', () => done(false));
+  server.listen(port, '127.0.0.1', () => server.close(() => done(true)));
+});
+const canConnect = (port) => new Promise((done) => {
+  const socket = connect({ port, host: '127.0.0.1' });
+  const end = (answer) => { socket.destroy(); done(answer); };
+  socket.once('connect', () => end(true));
+  socket.once('error', () => end(false));
+});
+/** A random offset whose every base port lands on a free one: never a base port, and never one a forwarded server holds. */
+async function freeOffset(...bases) {
+  for (let tries = 0; tries < 50; tries++) {
+    const offset = 20000 + Math.floor(Math.random() * 25000);
+    if ((await Promise.all(bases.map((base) => canBind(base + offset)))).every(Boolean)) return offset;
+  }
+  throw new Error('no free port block found');
+}
+async function until(what, ms = 180_000, every = 250) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const answer = await what();
+    if (answer || Date.now() > deadline) return answer;
+    await sleep(every);
+  }
+}
+const psqlIn = (tools, url, sql) => spawnSync('psql', ['-X', '-At', url, '-c', sql], { env: { ...ENV, ...tools, PGCONNECT_TIMEOUT: '5' }, encoding: 'utf8' });
+const devEngine = (dir, tools, ...args) => spawnSync('node', ['tools/dev/dev.mjs', ...args], { cwd: dir, env: { ...ENV, ...tools }, encoding: 'utf8' });
+const stacksIn = (dir, tools) => { try { return JSON.parse(devEngine(dir, tools, 'ps', '--json').stdout); } catch { return null; } };
+/** Whatever of a real server's or this project's is still running: what the stop must not leave. */
+function leftBehind(dir) {
+  const out = [...straysUnder(dir), ...straysUnder(POSTGRES_DATA)];
+  return [...new Map(out.map((s) => [s.pid, s])).values()];
+}
+/** Stop a stack by its handle, the way a consumer does, and hold it to everything a stop promises. Kills what it left, so one failure stays one red row. */
+async function assertStops(step, dir, tools, app, offset, ports, handle) {
+  const stop = devEngine(dir, tools, 'stop', app, `--offset=${offset}`);
+  record(step, `tools/dev/dev stop ${app} exits 0`, stop.status === 0, { detail: stop.status === 0 ? '' : `exit ${stop.status}: ${(stop.stdout + stop.stderr).trim().split('\n').at(-1)?.slice(0, 140)}` });
+  await until(() => handle.ended, 30_000);
+  record(step, 'the stack it stopped ended cleanly', handle.ended && handle.code === 0, { log: handle.log, detail: handle.ended ? (handle.code ? `exit ${handle.code}` : '') : 'still running after 30s' });
+  const stacks = stacksIn(dir, tools);
+  record(step, 'tools/dev/dev ps shows nothing', stacks?.length === 0, { detail: stacks?.length ? stacks.map((row) => `${row.key} ${row.state}`).join(', ') : '' });
+  const listening = (await Promise.all(ports.map(async (port) => ((await canConnect(port)) ? port : null)))).filter(Boolean);
+  record(step, 'every port it held is free', listening.length === 0, { detail: listening.length ? `still listening: ${listening.join(', ')}` : '' });
+  const left = leftBehind(dir);
+  record(step, 'no process left, and no server on its data', left.length === 0, { detail: left.map((s) => `${s.pid} ${s.cmd}`).join(' | ').slice(0, 200) });
+  for (const { pid } of left) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+  if (!handle.ended) killGroup(handle.pid);
+}
+
+/** A served app no stack knows: the dev-server a Python or Go project would have, with a `port`, so the generators can seed it. It says what it was handed. */
+function writeServedFixture(dir, name) {
+  mkdirSync(join(dir, 'apps', name), { recursive: true });
+  writeJson(join(dir, 'apps', name, 'project.json'), {
+    name,
+    root: `apps/${name}`,
+    targets: { 'dev-server': { executor: 'nx:run-commands', options: { command: `node apps/${name}/server.mjs`, port: 4310 } } },
+  });
+  writeFileSync(join(dir, 'apps', name, 'server.mjs'), `import { writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+
+const port = Number(process.argv.find((arg) => arg.startsWith('--port='))?.slice(7));
+writeFileSync('apps/${name}/received.json', JSON.stringify({ port, DATABASE_URL: process.env.DATABASE_URL, DIRECT_DATABASE_URL: process.env.DIRECT_DATABASE_URL }));
+const server = createServer((_request, response) => response.end('up'));
+server.listen(port, '127.0.0.1');
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => server.close(() => process.exit(0)));
+`);
+  writeFileSync(join(dir, '.gitignore'), `${readFileSync(join(dir, '.gitignore'), 'utf8').trimEnd()}\napps/${name}/received.json\n`);
+}
+
+const commitAll = (dir, message) => {
+  gitOut(dir, 'add', '-A');
+  if (gitOut(dir, 'status', '--porcelain')) gitOut(dir, 'commit', '-q', '-m', message);
+};
+
+/** A second upgrade changes nothing. The road's own idempotence, separately from the Angular consumer's. */
+async function assertUpgradeIsNoOp(step, dir, args = []) {
+  const head = gitOut(dir, 'rev-parse', 'HEAD');
+  const r = await run(`${step}-upgrade-again`, 'bash', [HOUSE(TOOLKIT), 'upgrade', '--local', '--yes', '.', ...args], { cwd: dir });
+  const v = upgradeVerdict(r.out);
+  const dirty = gitOut(dir, 'status', '--porcelain');
+  const moved = gitOut(dir, 'rev-parse', 'HEAD') !== head;
+  const idem = r.code === 0 && v.okLine && !v.bad.length && v.next === 'none' && !dirty && !moved;
+  record(step, 'a second upgrade is a no-op', idem, {
+    ms: r.ms, log: r.log,
+    detail: idem ? '' : [r.code && `exit ${r.code}`, v.bad.join(' '), v.next !== 'none' && `UPGRADE_NEXT: ${v.next}`, moved && 'new commits', dirty && `dirty: ${dirty.split('\n').slice(0, 3).join(' | ')}`, !v.okLine && why(r.out)].filter(Boolean).join('; '),
+  });
+}
+
+/** `new`, then the day the project gains a served app and upgrades, then a real serve of what the generators declared. */
+async function stepNewPostgres(id) {
+  const road = POSTGRES_ROADS[id];
+  const dir = join(CONSUMERS, id);
+  const app = 'fixture';
+  const r = await run(id, 'bash', [HOUSE(TOOLKIT), 'new', '--local', ...road.flags, dir], { cwd: CONSUMERS });
+  const good = r.code === 0 && /^NEW_OK /m.test(r.out);
+  if (!record(id, `new --local ${road.flags.join(' ')}`, good, { ms: r.ms, log: r.log, detail: good ? '' : `exit ${r.code}: ${why(r.out)}` })) return;
+  const st = stamp(dir);
+  record(id, 'HOUSE.md stamped with the toolkit version', st.nxTools === TOOLKIT_VERSION, { detail: `nx-tools=${st.nxTools}` });
+  const missing = road.layers.filter((l) => !st.layers.includes(l));
+  record(id, `layers include ${road.layers.join(',')}`, missing.length === 0, { detail: `stamped ${st.layers.join(',')}` });
+  record(id, `${road.host} host`, road.host === 'wrapper' ? existsSync(join(dir, 'nx')) && !existsSync(join(dir, 'package.json')) : existsSync(join(dir, 'package.json')));
+  record(id, 'the launcher, the targets and the seeded major', ['tools/postgres/postgres.mjs', 'tools/dev/dev.mjs', 'postgres/project.json', '.bespunky/postgres.json'].every((f) => existsSync(join(dir, f))));
+  record(id, 'nothing served yet: no .bespunky/dev.json', !existsSync(join(dir, '.bespunky/dev.json')));
+
+  // The project gains an app with a dev-server, and the next upgrade attaches the server to it.
+  gitOut(dir, 'checkout', '-q', '-b', 'feat/served-app');
+  writeServedFixture(dir, app);
+  commitAll(dir, 'feat: an app with a dev-server');
+  const up = await run(`${id}-upgrade`, 'bash', [HOUSE(TOOLKIT), 'upgrade', '--local', '--yes', '.', app], { cwd: dir });
+  const v = upgradeVerdict(up.out);
+  const upgraded = up.code === 0 && v.okLine && !v.bad.length;
+  if (!record(id, `upgrade --local --yes . ${app}`, upgraded, { ms: up.ms, log: up.log, detail: upgraded ? '' : `exit ${up.code}${v.bad.length ? ` ${v.bad.join(' ')}` : ''}: ${why(up.out)}` })) return;
+  commitAll(dir, 'chore: house upgrade (generator output)');
+  const declared = existsSync(join(dir, '.bespunky/dev.json')) ? readJson(join(dir, '.bespunky/dev.json')).apps?.[app]?.processes ?? [] : [];
+  const server = declared.find((p) => p.id === 'postgres');
+  const primary = declared.find((p) => p.id === 'app');
+  const seeded = server?.dependency === true && !server.primary && primary?.primary === true && Boolean(server.exports?.DATABASE_URL) && Boolean(server.exports?.DIRECT_DATABASE_URL);
+  if (!record(id, 'the generators seeded the app, with the server as its dependency', seeded, { detail: seeded ? '' : `declared: ${declared.map((p) => p.id).join(', ') || 'nothing'}` })) return;
+  await assertUpgradeIsNoOp(id, dir, [app]);
+
+  const tools = await realPostgres();
+  if (tools.skip) return record(id, 'a real boot', null, { detail: tools.skip });
+  const [bin, pre] = nx(dir);
+
+  // A migration made by the project's own verb, with the project's own seed.
+  const made = await run(`${id}-new-migration`, bin, [...pre, 'run', 'postgres:new-migration', 'thing'], { cwd: dir, env: tools });
+  const file = listOrNull(join(dir, 'postgres/migrations'))?.split(',').find((name) => name.endsWith('_thing.sql'));
+  if (!record(id, 'nx run postgres:new-migration thing', made.code === 0 && Boolean(file), { ms: made.ms, log: made.log, detail: made.code ? why(made.out) : '' })) return;
+  writeFileSync(join(dir, 'postgres/migrations', file), '-- migrate:up\nCREATE TABLE thing (id int PRIMARY KEY, name text);\n\n-- migrate:down\n');
+  writeFileSync(join(dir, 'postgres/seed/world/01_things.sql'), "INSERT INTO thing VALUES (1, 'seeded');\n");
+
+  const offset = await freeOffset(4310, 5432);
+  const ports = [4310 + offset, 5432 + offset];
+  const received = join(dir, 'apps', app, 'received.json');
+  const t0 = Date.now();
+  // Stream, as the executor's own refusal says: this tool is often an agent's, and Nx shows an agent nothing of a static serve.
+  const serve = background(`${id}-serve`, bin, [...pre, 'serve', app, `--port-offset=${offset}`, '--no-shared-browser'], { cwd: dir, env: { ...tools, NX_DEFAULT_OUTPUT_STYLE: 'stream' } });
+  const up2 = await until(async () => serve.ended || (existsSync(received) && (await canConnect(ports[0]))));
+  const booted = !serve.ended && Boolean(up2);
+  if (!record(id, `nx serve ${app} comes up, its server first`, booted, { ms: Date.now() - t0, log: serve.log, detail: booted ? '' : serve.ended ? `ended, exit ${serve.code}: ${why(serve.out())}` : 'not up after 3 minutes' })) {
+    killGroup(serve.pid);
+    return;
+  }
+  const seen = readJson(received);
+  const url = `postgresql://postgres:postgres@127.0.0.1:${ports[1]}/app?sslmode=disable`;
+  record(id, 'the app received DATABASE_URL, at its own stack\'s port', seen.DATABASE_URL === url, { detail: seen.DATABASE_URL === url ? '' : `received ${seen.DATABASE_URL}` });
+  record(id, 'and DIRECT_DATABASE_URL', seen.DIRECT_DATABASE_URL === url, { detail: seen.DIRECT_DATABASE_URL === url ? '' : `received ${seen.DIRECT_DATABASE_URL}` });
+  record(id, 'the app is on its own stack\'s port', seen.port === ports[0], { detail: `${seen.port}` });
+  const row = psqlIn(tools, seen.DATABASE_URL, 'SELECT name FROM thing');
+  record(id, 'the migration and the seed applied, read through that URL', row.status === 0 && row.stdout.trim() === 'seeded', { detail: row.status === 0 ? row.stdout.trim() : row.stderr.trim().slice(0, 140) });
+  const stamped = psqlIn(tools, seen.DATABASE_URL, 'SELECT version FROM schema_migrations');
+  record(id, 'dbmate recorded the migration', stamped.stdout.trim() === file.split('_')[0], { detail: stamped.stdout.trim().slice(0, 40) });
+  const stack = stacksIn(dir, tools)?.find((candidate) => candidate.offset === offset);
+  record(id, 'tools/dev/dev ps names the stack, live, with both ports', stack?.state === 'live' && stack.ports?.app === ports[0] && stack.ports?.postgres === ports[1], { detail: stack ? `${stack.key} ${stack.state}` : 'no such stack' });
+  await assertStops(id, dir, tools, app, offset, ports, serve);
+}
+
+/** The layer added to a project with history: the upgraded Firebase + Angular consumer. */
+async function stepAddLayerPostgres() {
+  const step = 'add-layer-postgres';
+  if (!ok.upgrade) return skipFor(step, 'add-layer postgres', 'the upgraded consumer is not ready');
+  const c = consumer;
+  const declaredBefore = readJson(join(c.dir, '.bespunky/dev.json')).apps?.[c.app]?.processes?.map((p) => p.id) ?? [];
+  const r = await run(step, 'bash', [HOUSE(TOOLKIT), 'add-layer', '--local', '--yes', 'postgres', '.', c.app], { cwd: c.dir });
+  const v = upgradeVerdict(r.out);
+  const good = r.code === 0 && v.okLine && !v.bad.length;
+  if (!record(step, 'add-layer --local --yes postgres', good, { ms: r.ms, log: r.log, detail: good ? `UPGRADE_NEXT: ${v.next}` : `exit ${r.code}${v.bad.length ? ` ${v.bad.join(' ')}` : ''}: ${why(r.out)}` })) return;
+  commitAll(c.dir, 'chore: add the postgres layer');
+  const st = stamp(c.dir);
+  record(step, 'the stamp wears postgres, and every layer it had', ['postgres', 'firebase', 'angular', 'web'].every((l) => st.layers.includes(l)), { detail: st.layers.join(',') });
+  for (const s of SEEDS.filter((x) => x.survives)) {
+    let res;
+    try { res = s.survives(c); } catch (e) { res = [false, e.message.slice(0, 120)]; }
+    record(step, `survives: ${s.id}`, res[0], { detail: res[1] });
+  }
+  const processes = readJson(join(c.dir, '.bespunky/dev.json')).apps?.[c.app]?.processes ?? [];
+  const ids = processes.map((p) => p.id);
+  const kept = declaredBefore.every((id) => ids.includes(id));
+  const server = processes.find((p) => p.id === 'postgres');
+  record(step, `${c.app} keeps what it served, and gains the server as a dependency`, kept && server?.dependency === true, { detail: ids.join(', ') });
+  const firewall = existsSync(join(c.dir, 'eslint.config.mjs')) ? readFileSync(join(c.dir, 'eslint.config.mjs'), 'utf8') : '';
+  record(step, 'the firewall bans the database driver from a browser bundle', /['"]pg['"]/.test(firewall));
+  const packages = readFileSync(join(c.dir, '.devcontainer/house.packages.sh'), 'utf8');
+  record(step, 'the image installs the server and dbmate', packages.includes('\ndbmate ') && packages.includes('\ntool postgres '));
+  await assertUpgradeIsNoOp(step, c.dir, [c.app]);
+  await verify(step, c.dir, '', baseline);
+
+  const tools = await realPostgres();
+  if (tools.skip) return record(step, 'a real boot', null, { detail: tools.skip });
+  const [bin, pre] = nx(c.dir);
+  const offset = await freeOffset(5432);
+  const key = `postgres@${offset}`;
+  const t0 = Date.now();
+  const start = background(`${step}-start`, bin, [...pre, 'run', 'postgres:start', `--port-offset=${offset}`, '--output-style=static'], { cwd: c.dir, env: tools });
+  const up = await until(() => start.ended || existsSync(join(c.dir, '.bespunky/run', key, 'postgres.ready')));
+  const booted = !start.ended && Boolean(up);
+  if (!record(step, 'nx run postgres:start boots there, on the real server', booted, { ms: Date.now() - t0, log: start.log, detail: booted ? '' : start.ended ? `ended, exit ${start.code}: ${why(start.out())}` : 'not up after 3 minutes' })) {
+    killGroup(start.pid);
+    return;
+  }
+  const answer = psqlIn(tools, `postgresql://postgres@127.0.0.1:${5432 + offset}/app?sslmode=disable`, 'SELECT 1');
+  record(step, 'and answers', answer.stdout.trim() === '1', { detail: answer.status === 0 ? '' : answer.stderr.trim().slice(0, 140) });
+  await assertStops(step, c.dir, tools, 'postgres', offset, [5432 + offset], start);
+}
+
 // ── cleanup ───────────────────────────────────────────────────────────────────────────────────────────────
 let cleaned = false;
 function cleanup() {
   if (cleaned) return; cleaned = true;
   if (current) killGroup(current.pid);
+  for (const service of services) killGroup(service.pid);
   for (const s of straysUnder(WORK)) { try { process.kill(s.pid, 'SIGKILL'); } catch { /* gone */ } }
   if (existsSync(RELEASED_TREE)) {
     spawnSync('git', ['-C', TOOLKIT, 'worktree', 'remove', '--force', RELEASED_TREE], { env: ENV });
@@ -748,7 +1007,9 @@ try {
   if (STEPS.has('released')) await stepReleased();
   if (STEPS.has('seed')) await stepSeed();
   if (STEPS.has('upgrade')) await stepUpgrade();
+  if (STEPS.has('add-layer-postgres')) await stepAddLayerPostgres();
   for (const id of Object.keys(PRESETS)) if (STEPS.has(id)) await stepNew(id);
+  for (const id of Object.keys(POSTGRES_ROADS)) if (STEPS.has(id)) await stepNewPostgres(id);
 } catch (e) {
   record('run', 'tool error', false, { detail: e.stack?.split('\n').slice(0, 2).join(' ') ?? String(e) });
 } finally {
