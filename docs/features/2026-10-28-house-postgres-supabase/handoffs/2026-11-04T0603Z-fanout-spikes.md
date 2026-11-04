@@ -10,12 +10,12 @@ No edges, then the orchestrator reconciles. Budget 12 (default); 3 leaves, none 
 ## Units
 | id | scope | output | status |
 |---|---|---|---|
-| spike-install | pinned .deb closure, real root install in an isolated root | research/spike-install.md | dispatched |
+| spike-install | pinned .deb closure, unprivileged (first version using sudo and chroot was denied by the permission check) | research/spike-install.md | dispatched |
 | spike-lifecycle | foreground Postgres under the real dev engine; in-tree data | research/spike-lifecycle.md | dispatched |
 | spike-native-concurrency | concurrent native Supabase stacks under stress | research/spike-native-concurrency.md | dispatched |
 
 ## Cannot run here
-- A real container rebuild: needs the user, once a branch has a fragment to rebuild from.
+- A real root install of the closure, and a real container rebuild: need the user, once a branch has a fragment to rebuild from.
 - Docker Desktop bind mounts: this host is Linux. arm64. A real hosted project: needs the user's account.
 
 ## Results
