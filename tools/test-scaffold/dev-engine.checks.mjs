@@ -687,7 +687,13 @@ const [name, file, behaviour, port, delay = '0', marker] = process.argv.slice(2)
 const say = (what) => appendFileSync(file, name + ' ' + what + '\\n');
 writeFileSync(file + '.' + name + '.env', JSON.stringify(process.env));
 say('started');
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { say(sig); process.exit(0); });
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => {
+  say(sig);
+  if (behaviour === 'dirty-stop') process.exit(3);
+  if (behaviour === 'killed-on-stop') process.kill(process.pid, 'SIGKILL');
+  if (behaviour === 'signal-code-stop') process.exit(143);
+  process.exit(0);
+});
 setInterval(() => {}, 1000);
 setTimeout(() => {
   if (behaviour === 'exit0') process.exit(0);
@@ -947,6 +953,44 @@ setTimeout(() => {
       await dev('stop', '--offset=0');
       await s.ended();
 
+      // E1: a shutdown that failed is said, by whoever hears about the stop, and "stopped cleanly" means it was.
+      const dirtyWeb = (port, behaviour) => ({ id: 'web', cmd: ['node', proc, 'web', log, behaviour, String(port)], ports: { web: port }, primary: true });
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(dirtyWeb(webPort, 'dirty-stop'), dep('db', dbPort, 'listen'));
+      s = serve();
+      await until(() => listening(webPort), 5000);
+      let asked = await dev('stop', '--offset=0');
+      ok('a dependent whose shutdown fails: dev stop says so, by name and how it ended, non-zero', asked.code === 1 && /web exited with code 3/.test(asked.out) && !/stopped — ports free/.test(asked.out));
+      ok('…the serve reports it too, never "stopped cleanly", and exits non-zero', (await s.ended()) === 1 && /web did not shut down cleanly: exited with code 3/.test(s.out) && !/stopped cleanly/.test(s.out));
+      ok('…the stack is still down, its ports free, the report consumed', (await stackGone()) && !(await listening(webPort)) && !(await listening(dbPort)) && !readdirSync(join(repo, '.bespunky', 'run')).some((f) => f.endsWith('.stop-report')));
+
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(web(webPort), dep('db', dbPort, 'killed-on-stop'));
+      s = serve();
+      await until(() => listening(webPort), 5000);
+      process.kill(s.pid, 'SIGTERM');
+      ok('a dependency SIGKILLed during the stop is not clean either: a stop aimed at the serve reports it', (await s.ended()) === 1 && /db did not shut down cleanly: exited on SIGKILL/.test(s.out) && !/stopped cleanly/.test(s.out) && (await stackGone()));
+
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(dirtyWeb(webPort, 'dirty-stop'), dep('db', dbPort, 'listen'));
+      s = serve();
+      await until(() => listening(webPort), 5000);
+      process.kill(-s.pid, 'SIGINT');
+      ok('…nor is a failed exit on a Ctrl+C', (await s.ended()) === 1 && /web/.test(s.out) && /code 3/.test(s.out) && !/stopped cleanly/.test(s.out) && (await stackGone()));
+
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(dirtyWeb(webPort, 'dirty-stop'), dep('db', dbPort, 'crashes-after'));
+      s = serve();
+      ok('a crash that stops the stack still fails it, and a dependent failing its shutdown under it is named as well', (await s.ended()) === 1 && /the stack FAILED/.test(s.out) && /db exited with code 4/.test(s.out) && /web did not shut down cleanly: exited with code 3/.test(s.out) && (await stackGone()));
+
+      // What every stop that went well looks like: 0, the conventional 128 + signal status (Nx's own), or the signal itself.
+      [dbPort, webPort] = [await freePort(), await freePort()];
+      declareApp(dirtyWeb(webPort, 'signal-code-stop'), { id: 'db', cmd: ['sh', '-c', `exec node -e "require('net').createServer().listen(${dbPort},'127.0.0.1')"`], ports: { db: dbPort }, dependency: true, ready: { tcp: 'db', timeout: 5 } });
+      s = serve();
+      await until(() => listening(webPort), 5000);
+      asked = await dev('stop', '--offset=0');
+      ok('an exit of 143 and a death on the SIGTERM itself are a clean stop: dev stop 0, "stopped cleanly", exit 0', asked.code === 0 && /ports free/.test(asked.out) && (await s.ended()) === 0 && /stopped cleanly/.test(s.out));
+
       // A dry run says it.
       declareApp(web(webPort), dep('db', dbPort, 'listen', { exports: { DATABASE_URL: 'pg:${PORT:db}' } }));
       const dry = await dev('serve', 'site', '--dry-run', '--no-shared-browser', '--port-offset=0');
@@ -1002,7 +1046,7 @@ process.on('SIGTERM', () => { appendFileSync(${JSON.stringify(got)}, 'SIGTERM\\n
       const twice = await dev('run', 'launcher', `--ports=db=${port}`, '--', 'true');
       ok('…a second run of it is refused, naming the first, and leaves no lock behind', twice.code === 1 && /offset 0 is held — launcher@0 \(live/.test(twice.out) && locks().length === before);
       const stopped = await dev('stop', 'launcher', '--offset=0');
-      ok('…dev stop stops it by handle, one SIGTERM, ports free', stopped.code === 0 && /ports free/.test(stopped.out) && readFileSync(got, 'utf8') === 'SIGTERM\n' && !(await listening(port)));
+      ok('…dev stop stops it by handle, one SIGTERM, ports free, and says its shutdown failed (it exits 5 on the stop)', stopped.code === 1 && /launcher exited with code 5/.test(stopped.out) && /stopped and its ports are free, but not cleanly/.test(stopped.out) && readFileSync(got, 'utf8') === 'SIGTERM\n' && !(await listening(port)));
       ok('…the run exits with its status, and the stack is gone', (await launcherExit) === 5 && (await stacks()).length === 0 && locks().length === 0);
     } finally {
       try {

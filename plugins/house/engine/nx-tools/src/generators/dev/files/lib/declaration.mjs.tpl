@@ -227,6 +227,9 @@ const STACK_ENV = ['PORT_OFFSET', 'DEV_URL_QUERY', 'DEV_STACK_DIR', 'DEV_STACK_T
 
 const envName = (port) => `PORT_${port.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 
+/** `PORT_<NAME>` for each port of `ports` (shifted). */
+const portEnvOf = (ports) => Object.fromEntries(Object.entries(ports).map(([name, port]) => [envName(name), String(port)]));
+
 const isStackVariable = (name) => STACK_ENV.includes(name) || name.startsWith('PORT_');
 
 const shellQuote = (word) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
@@ -237,7 +240,7 @@ export function runEnv(baseEnv, { app, ports, offset, stackDir, stackTmp, stackL
   for (const k of STACK_ENV) delete inherited[k];
   return {
     ...inherited,
-    ...Object.fromEntries(Object.entries(ports).map(([name, port]) => [envName(name), String(port)])),
+    ...portEnvOf(ports),
     PORT_OFFSET: String(offset),
     DEV_STACK_DIR: stackDir,
     DEV_STACK_TMP: stackTmp,
@@ -245,6 +248,9 @@ export function runEnv(baseEnv, { app, ports, offset, stackDir, stackTmp, stackL
     DEV_RUN: app,
   };
 }
+
+/** What a `dev run` stack exports, for whoever addresses it through `ps --json`: where it is. It has no declaration to say more. */
+export const runExports = ({ ports, offset }) => ({ PORT_OFFSET: String(offset), ...portEnvOf(ports) });
 
 /**
  * Resolve an app into exactly what a serve runs — pure, so a dry run and a real run cannot disagree.
@@ -297,7 +303,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
     for (const u of p.url ?? []) if (holds(u.when ?? 'always', { skipped: skip.includes(p.id) })) query.set(u.param, subst(u.value, `apps.${appName}.${p.id}.url`));
   }
 
-  const portEnv = Object.fromEntries(Object.entries(ports).map(([name, port]) => [envName(name), String(port)]));
+  const portEnv = portEnvOf(ports);
   // The stack's own identity — set whole, never inherited: what an outer stack left in the environment is removed.
   const inherited = { ...baseEnv };
   for (const k of STACK_ENV) delete inherited[k];
@@ -369,7 +375,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
     DEV_URL: `http://localhost:${primaryPort}/${q}`,
     PORT_OFFSET: String(offset),
     ...(query.size ? { DEV_URL_QUERY: query.toString() } : {}),
-    ...Object.fromEntries(running.flatMap((p) => Object.entries(p.ports)).map(([name, port]) => [envName(name), String(port)])),
+    ...portEnvOf(Object.fromEntries(running.flatMap((p) => Object.entries(p.ports)))),
     ...Object.assign({}, ...running.map((p) => p.exports)),
   };
   return {
