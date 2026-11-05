@@ -17,9 +17,9 @@ Budget 12 (default): core 1+2, wire 1, reviewer 1+5, correctness pass 1 = 11, re
 | id | branch | re-runnable | status |
 |---|---|---|---|
 | core | feat/hps3-core | yes, its own branch | returned |
-| wire | tripwire, dogfood, image job, docs; feat/hps3-wire | yes | dispatched |
-| docs | with wire | yes | dispatched |
-| review | sanity review | yes | pending |
+| wire | tripwire, dogfood, image job, docs; feat/hps3-wire | yes | returned |
+| docs | with wire | yes | returned |
+| review | sanity review | yes | dispatched |
 | gate | push + PR green, upgrade --local, dogfood, rebuild, real hosted project | yes | pending |
 
 ## Results
@@ -32,3 +32,6 @@ ORCHESTRATOR DECISIONS: accept blocks in the ephemeral range, clashes are loud. 
 ### core, item 9 (returned; 58ceb272..c03873a3)
 Targets `postgres:gen-types`, `new-function`, `secrets-set`. Types real, class C `.bespunky/supabase.json`. Functions class C, served by the stack, proven by real calls; deploy follows schema, refused under an agent. Secrets through a verb, value by stdin; real CLI against a fake local API. Limits: under /tmp 404, under node_modules BOOT_ERROR, a value with all three quote kinds or a line break refused. Needs an account: real upload, a secret reaching a function, token scopes.
 Wire must rebase on c03873a3.
+
+### wire and docs (returned; c03873a3..00099713, trace handoffs/seam3-wire.md)
+Tripwire workflow; a non-reaping parent showed a real bug, a zombie holding the stack lock forever, fixed. Image job against fake docker, with the real probes run here. Upstream check tools/supabase-cli/check.mjs. Dogfood roads green, with gen-types and a real function: 146 passed. Docs and tips. Never run: CI workflows, real images, bookworm, arm64; real account flows. Limit: SUPABASE_HOME is always XDG_DATA_HOME/supabase; a project setting XDG_DATA_HOME gets a hand-run CLI on another home. Stated in HOUSE.md by the review if not already.
