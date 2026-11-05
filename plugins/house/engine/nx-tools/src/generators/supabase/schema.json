@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "BeSpunkySupabase",
+  "title": "The Supabase layer: the local stack on the CLI's native runtime, behind the postgres:* targets",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

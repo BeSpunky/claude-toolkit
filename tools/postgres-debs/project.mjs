@@ -34,6 +34,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildClosure, debianSupplies, parsePackages, parseRelations, pinnedDownloads, pinnedList, render, selectPackages, signedBy } from './closure.mjs';
+import { brokenDownloads } from './downloads.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const UTILS = join(ROOT, 'plugins/house/engine/nx-tools/src/generators/_utils');
@@ -136,31 +137,6 @@ async function goneFrom(text) {
 }
 
 /** Fetch each pinned binary whole, because a HEAD cannot say a release asset was replaced. Nothing downloaded is executed. */
-/** A download, retried: a 502 or a dropped connection says nothing about the pin. */
-async function retrying(url) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
-      if (response.status < 500 || attempt === 4) return response;
-    } catch (error) {
-      if (attempt === 4) throw error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
-  }
-}
-
-async function brokenDownloads(pins) {
-  const faults = await Promise.all(
-    pins.map(async ({ url, sha256 }) => {
-      const response = await retrying(url);
-      if (!response.ok) return `${url} → HTTP ${response.status}`;
-      const found = createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
-      return found === sha256 ? undefined : `${url} is sha256 ${found}, pinned ${sha256}`;
-    }),
-  );
-  return faults.filter(Boolean);
-}
-
 const previous = existsSync(OUT) ? readFileSync(OUT, 'utf8') : '';
 const previousDate = /POSTGRES_CLOSURES_AS_OF = '([^']+)'/.exec(previous)?.[1];
 const table = await project();

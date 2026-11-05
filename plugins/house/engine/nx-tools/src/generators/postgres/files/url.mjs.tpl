@@ -43,5 +43,5 @@ export function parseDeployUrl(url) {
   const colon = userinfo.indexOf(':');
   const password = colon < 0 ? '' : userinfo.slice(colon + 1);
   const pooled = parameters.get('pgbouncer') === 'true' || port === '6543' || /-pooler\./.test(host);
-  return { host, port: port ?? '5432', database, password, pooled, sslmode, display: `${host}:${port ?? '5432'}/${database}` };
+  return { host, port: port ?? '5432', database, user: colon < 0 ? userinfo : userinfo.slice(0, colon), password, pooled, sslmode, display: `${host}:${port ?? '5432'}/${database}` };
 }

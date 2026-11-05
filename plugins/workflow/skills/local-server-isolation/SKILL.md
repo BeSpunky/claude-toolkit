@@ -31,6 +31,8 @@ Some stacks have backends the app connects to at **hard-coded** addresses — an
 
 **Worked example — Postgres** (projects wearing the `postgres` layer): its server moves with the stack, a verb acts on this tree's running server even when it is the user's, and another block is another database → [`reference/postgres.md`](reference/postgres.md).
 
+**Worked example — Supabase** (projects wearing the `supabase` layer): only the launcher starts and stops the stack, blocks stay out of 10000-32767, a reset is never interrupted, and identical keys make the URL the only isolation → [`reference/supabase.md`](reference/supabase.md).
+
 ## Teardown — by handle, never by name
 
 A server you cannot name exactly, you cannot stop safely. So **launch it so you hold a handle**, and stop it by that handle — never by a name or a pattern.

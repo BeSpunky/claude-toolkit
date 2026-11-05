@@ -140,6 +140,11 @@ for table in firebase-compat node-facts postgres-debs; do
     exit 1
   }
 done
+# No table behind this one: the pinned Supabase CLI still downloads and matches. A newer release, or the native runtime leaving alpha, is said and stops nothing.
+node "$REPO_ROOT/tools/supabase-cli/check.mjs" || {
+  echo "ERROR: the Supabase CLI pin is broken — its own message above says what to move." >&2
+  exit 1
+}
 
 if [ "$FORCE_DOCKER" = "0" ] && local_node_ok; then
   echo "Node $(node -v) is new enough — publishing locally (no Docker)."

@@ -38,6 +38,17 @@
  *             `add-layer --local postgres` on the upgraded consumer: what it had survives, a second upgrade is a no-op, it
  *             still builds, lints and passes its tests, and `postgres:start` boots there, with the real tools.
  *
+ *   new-supabase
+ *             the `supabase` layer from nothing, on the wrapper host: `new --local --add-layer=supabase`, the same served app, a real
+ *             `nx serve` on the pinned CLI and its native runtime: DATABASE_URL reaches the app, a migration and a seed applied, a stop
+ *             leaves nothing; types by the target; a real Edge Function, made by the target and answering with no restart. About a minute more
+ *             the first time: the stack's artifacts land under the workdir, and go with it. This project alone lives under ~/.cache
+ *             (removed with the run, kept with --keep): the Edge Runtime has its own /tmp, and every function under the real one is a 404.
+ *   add-layer-supabase
+ *             `add-layer --local supabase` on the consumer `add-layer-postgres` left: refused at major 18 with nothing written, then at
+ *             17 the migrations move and references follow, a second upgrade is a no-op, it still builds, lints and passes its tests, and
+ *             `postgres:start` boots the stack there.
+ *
  * The real tools come from tools/test-postgres/tools.mjs: the generated installer, unprivileged, into a cache
  * (POSTGRES_TOOLS_CACHE). So those steps need this checkout's `yarn install`, and a Debian the closures cover; anywhere else they
  * are SKIPs that say so. Their data stays under the workdir (XDG_DATA_HOME), never in this machine's `~/.local`.
@@ -46,8 +57,9 @@
  * target is a throwaway fixture this run created seconds earlier, and running this tool IS the human's consent.
  *
  * Steps (--only, comma-separated; prerequisites are pulled in): released, seed, upgrade, add-layer-postgres, new-agent,
- * new-node, new-angular, new-angular-firebase, new-postgres, new-postgres-node; aliases `consumer` (= released,seed,upgrade),
- * `new` (= every new-*) and `postgres` (= every step above that wears the layer).
+ * new-node, new-angular, new-angular-firebase, new-postgres, new-postgres-node, add-layer-supabase, new-supabase, new-supabase-node; aliases `consumer`
+ * (= released,seed,upgrade), `new` (= every new-*), `postgres` (= every step above that wears that layer, but not its `supabase` ones)
+ * and `supabase` (= the two wearing that one). ONE REAL STACK AT A TIME, always: the steps run in series.
  *
  * ── WHEN THE RELEASED BASELINE IS BROKEN UPSTREAM ───────────────────────────────────────────────────────
  *
@@ -177,10 +189,17 @@ const PRESETS = {
 const POSTGRES_ROADS = {
   'new-postgres': { flags: ['--add-layer=postgres'], layers: ['nx', 'agent', 'postgres'], host: 'wrapper' },
   'new-postgres-node': { flags: ['--preset=node', '--add-layer=postgres'], layers: ['nx', 'agent', 'node', 'postgres'], host: 'node' },
+  'new-supabase': { flags: ['--add-layer=supabase'], layers: ['nx', 'agent', 'postgres', 'supabase'], host: 'wrapper', provider: 'supabase', outsideTmp: true },
+  'new-supabase-node': { flags: ['--preset=node', '--add-layer=supabase'], layers: ['nx', 'agent', 'node', 'postgres', 'supabase'], host: 'node', provider: 'supabase', outsideTmp: true },
 };
-const STEP_ORDER = ['released', 'seed', 'upgrade', 'add-layer-postgres', ...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)];
-const REQUIRES = { seed: ['released'], upgrade: ['seed'], 'add-layer-postgres': ['upgrade'] };
-const ALIASES = { consumer: ['released', 'seed', 'upgrade'], new: [...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)], postgres: ['add-layer-postgres', ...Object.keys(POSTGRES_ROADS)] };
+const STEP_ORDER = ['released', 'seed', 'upgrade', 'add-layer-postgres', 'add-layer-supabase', ...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)];
+const REQUIRES = { seed: ['released'], upgrade: ['seed'], 'add-layer-postgres': ['upgrade'], 'add-layer-supabase': ['add-layer-postgres'] };
+const ALIASES = {
+  consumer: ['released', 'seed', 'upgrade'],
+  new: [...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)],
+  postgres: ['add-layer-postgres', 'new-postgres', 'new-postgres-node'],
+  supabase: ['add-layer-supabase', 'new-supabase', 'new-supabase-node'],
+};
 
 function selectSteps(only) {
   if (!only) return new Set(STEP_ORDER);
@@ -204,6 +223,7 @@ const RELEASED_TREE = join(WORK, 'released');
 const CONSUMERS = join(WORK, 'consumers'); // PROJECTS_DIR for every house.sh run
 const TMP = join(WORK, 'tmp');             // TMPDIR for every child: whatever it leaves is ours to delete
 const POSTGRES_DATA = join(TMP, 'xdg');    // XDG_DATA_HOME for a real server: never this machine's ~/.local
+const SUPABASE_DATA = join(POSTGRES_DATA, 'supabase'); // the launcher's SUPABASE_HOME under that XDG_DATA_HOME, artifacts and all: goes with the workdir
 for (const d of [LOGS, CONSUMERS, TMP]) mkdirSync(d, { recursive: true });
 for (const d of [RELEASED_TREE]) if (existsSync(d)) { console.error(`${d} already exists — use a fresh --workdir.`); process.exit(2); }
 
@@ -212,6 +232,7 @@ const HOUSE = (root) => join(root, 'plugins/house/engine/house.sh');
 if (!existsSync(HOUSE(TOOLKIT))) { console.error(`--toolkit: no house.sh under ${TOOLKIT}`); process.exit(2); }
 const TOOLKIT_VERSION = JSON.parse(readFileSync(join(TOOLKIT, 'plugins/house/engine/nx-tools/package.json'), 'utf8')).version;
 const HOME_PROJECTS = join(homedir(), 'projects');
+const hadSupabaseDir = existsSync(join(homedir(), '.supabase'));
 const homeProjectsBefore = listOrNull(HOME_PROJECTS);
 
 const ENV = {
@@ -285,6 +306,29 @@ function straysUnder(dir) {
     } catch { /* raced or not ours */ }
   }
   return out;
+}
+
+/** Every live process under this run's SUPABASE_HOME, by its environment: a stack daemonises, so its cwd says nothing, and its command line need not name the home. A zombie has no environment, and is not running. */
+function stackProcesses() {
+  const out = [];
+  const mine = `SUPABASE_HOME=${SUPABASE_DATA}\0`;
+  for (const p of readdirSync('/proc')) {
+    if (!/^\d+$/.test(p) || Number(p) === process.pid) continue;
+    try {
+      if (readFileSync(`/proc/${p}/environ`, 'utf8').includes(mine)) out.push({ pid: Number(p), cmd: readFileSync(`/proc/${p}/cmdline`, 'utf8').replace(/\0/g, ' ').trim().slice(0, 120) });
+    } catch { /* raced or not ours */ }
+  }
+  return out;
+}
+
+let outsideTmpDir;
+/** A home for a project serving Edge Functions, outside the system temp dir. One per run, gone with the workdir's other contents. */
+function outsideTmp() {
+  if (outsideTmpDir) return outsideTmpDir;
+  mkdirSync(join(homedir(), '.cache'), { recursive: true });
+  outsideTmpDir = mkdtempSync(join(homedir(), '.cache/dogfood-consumer-'));
+  console.log(`a project beside the workdir, outside /tmp: ${outsideTmpDir}`);
+  return outsideTmpDir;
 }
 
 // ── the record ────────────────────────────────────────────────────────────────────────────────────────────
@@ -538,7 +582,7 @@ export const onInquiryCreated = onDocumentCreated(
 
 // ── the steps ─────────────────────────────────────────────────────────────────────────────────────────────
 const consumer = { name: 'coach', app: 'web', staging: opts.staging, dir: join(CONSUMERS, 'coach'), integration: null };
-const ok = { released: false, seed: false, upgrade: false };
+const ok = { released: false, seed: false, upgrade: false, 'add-layer-postgres': false };
 let baseline = null; // { build: Set<failed task>, lint: … } from the seeded consumer, before the upgrade
 
 async function stepReleased() {
@@ -746,6 +790,39 @@ async function realPostgres() {
   return postgresEnv;
 }
 
+let supabaseEnv;
+/** The environment the real pinned CLI runs under. Its stack's artifacts land under the workdir, so a run is its own proof of a first start. */
+async function realSupabase() {
+  if (supabaseEnv) return supabaseEnv;
+  const { ensureCli } = await import(join(TOOLKIT, 'tools/test-supabase/tools.mjs'));
+  const { bin } = ensureCli();
+  // CI implies `--frozen` to the CLI, and this is a person's road: what a devcontainer sees.
+  supabaseEnv = { PATH: `${bin}:${process.env.PATH}`, XDG_DATA_HOME: POSTGRES_DATA, SUPABASE_HOME: SUPABASE_DATA, SUPABASE_NO_KEYRING: '1', DO_NOT_TRACK: '1', CI: undefined, DEV_OWNER: process.env.DEV_OWNER || 'dogfood-consumer' };
+  return supabaseEnv;
+}
+/** What a project wearing each provider has, and where its server's facts are. `real` is the environment its verbs run under. */
+const LOCAL_SERVERS = {
+  native: {
+    real: realPostgres,
+    files: ['.bespunky/postgres.json'],
+    migrations: 'postgres/migrations',
+    database: 'app',
+    ledger: 'schema_migrations',
+    offsetFrom: 20000,
+    firstBootMs: 180_000,
+  },
+  supabase: {
+    real: realSupabase,
+    files: ['supabase/config.toml', 'supabase/supabase.lock', 'tools/postgres/supabase-keeper.mjs'],
+    migrations: 'supabase/migrations',
+    database: 'postgres',
+    ledger: 'supabase_migrations.schema_migrations',
+    // Clear of what the native runtime keeps and allocates (10000-32767), every process of the block; a keeper refuses anything else.
+    offsetFrom: 29000,
+    firstBootMs: 600_000, // the layer's own bound: a first start downloads the stack
+  },
+};
+
 const canBind = (port) => new Promise((done) => {
   const server = createServer();
   server.once('error', () => done(false));
@@ -758,9 +835,9 @@ const canConnect = (port) => new Promise((done) => {
   socket.once('error', () => end(false));
 });
 /** A random offset whose every base port lands on a free one: never a base port, and never one a forwarded server holds. */
-async function freeOffset(...bases) {
+async function freeOffset(from, ...bases) {
   for (let tries = 0; tries < 50; tries++) {
-    const offset = 20000 + Math.floor(Math.random() * 25000);
+    const offset = from + Math.floor(Math.random() * 25000);
     if ((await Promise.all(bases.map((base) => canBind(base + offset)))).every(Boolean)) return offset;
   }
   throw new Error('no free port block found');
@@ -778,7 +855,7 @@ const devEngine = (dir, tools, ...args) => spawnSync('node', ['tools/dev/dev.mjs
 const stacksIn = (dir, tools) => { try { return JSON.parse(devEngine(dir, tools, 'ps', '--json').stdout); } catch { return null; } };
 /** Whatever of a real server's or this project's is still running: what the stop must not leave. */
 function leftBehind(dir) {
-  const out = [...straysUnder(dir), ...straysUnder(POSTGRES_DATA)];
+  const out = [...straysUnder(dir), ...straysUnder(POSTGRES_DATA), ...stackProcesses()];
   return [...new Map(out.map((s) => [s.pid, s])).values()];
 }
 /** Stop a stack by its handle, the way a consumer does, and hold it to everything a stop promises. Kills what it left, so one failure stays one red row. */
@@ -809,7 +886,7 @@ function writeServedFixture(dir, name) {
 import { createServer } from 'node:http';
 
 const port = Number(process.argv.find((arg) => arg.startsWith('--port='))?.slice(7));
-writeFileSync('apps/${name}/received.json', JSON.stringify({ port, DATABASE_URL: process.env.DATABASE_URL, DIRECT_DATABASE_URL: process.env.DIRECT_DATABASE_URL }));
+writeFileSync('apps/${name}/received.json', JSON.stringify({ port, DATABASE_URL: process.env.DATABASE_URL, DIRECT_DATABASE_URL: process.env.DIRECT_DATABASE_URL, SUPABASE_URL: process.env.SUPABASE_URL }));
 const server = createServer((_request, response) => response.end('up'));
 server.listen(port, '127.0.0.1');
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => server.close(() => process.exit(0)));
@@ -836,12 +913,29 @@ async function assertUpgradeIsNoOp(step, dir, args = []) {
   });
 }
 
+/** With the stack up: the targets a Supabase project has beyond the shared ones, by real calls to the real runtime. Nothing here is hosted. */
+async function assertTypesAndFunctions(step, dir, tools, bin, pre, api) {
+  const typed = await run(`${step}-gen-types`, bin, [...pre, 'run', 'postgres:gen-types'], { cwd: dir, env: tools });
+  const declared = readJson(join(dir, '.bespunky/supabase.json')).types?.out;
+  const types = declared && existsSync(join(dir, declared)) ? readFileSync(join(dir, declared), 'utf8') : '';
+  record(step, `nx run postgres:gen-types writes ${declared}, naming the migrated table`, typed.code === 0 && types.includes('export type Database') && types.includes('thing'), { ms: typed.ms, log: typed.log, detail: typed.code ? why(typed.out) : '' });
+  const made = await run(`${step}-new-function`, bin, [...pre, 'run', 'postgres:new-function', '--name=hello'], { cwd: dir, env: tools });
+  const madeOk = made.code === 0 && existsSync(join(dir, 'supabase/functions/hello/index.ts'));
+  if (!record(step, 'nx run postgres:new-function --name=hello', madeOk, { ms: made.ms, log: made.log, detail: madeOk ? '' : why(made.out) })) return;
+  const said = spawnSync('supabase', ['status', '--output-format', 'json', '--agent', 'no'], { cwd: dir, env: { ...ENV, ...tools }, encoding: 'utf8' });
+  const key = JSON.parse(said.stdout || '{}').env?.PUBLISHABLE_KEY;
+  const answer = await fetch(`http://127.0.0.1:${api}/functions/v1/hello`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, apikey: key, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Dogfood' }), signal: AbortSignal.timeout(120_000) }).then(async (response) => ({ status: response.status, text: await response.text() }), (error) => ({ status: 0, text: String(error) }));
+  record(step, 'the running stack serves it at once, with no restart and no second process', answer.status === 200 && answer.text.includes('Hello Dogfood!'), { detail: `${answer.status} ${answer.text.slice(0, 120)}` });
+}
+
 /** `new`, then the day the project gains a served app and upgrades, then a real serve of what the generators declared. */
 async function stepNewPostgres(id) {
   const road = POSTGRES_ROADS[id];
-  const dir = join(CONSUMERS, id);
+  const local = LOCAL_SERVERS[road.provider ?? 'native'];
+  const home = road.outsideTmp ? outsideTmp() : CONSUMERS;
+  const dir = join(home, id);
   const app = 'fixture';
-  const r = await run(id, 'bash', [HOUSE(TOOLKIT), 'new', '--local', ...road.flags, dir], { cwd: CONSUMERS });
+  const r = await run(id, 'bash', [HOUSE(TOOLKIT), 'new', '--local', ...road.flags, dir], { cwd: home, env: { PROJECTS_DIR: home } });
   const good = r.code === 0 && /^NEW_OK /m.test(r.out);
   if (!record(id, `new --local ${road.flags.join(' ')}`, good, { ms: r.ms, log: r.log, detail: good ? '' : `exit ${r.code}: ${why(r.out)}` })) return;
   const st = stamp(dir);
@@ -849,7 +943,8 @@ async function stepNewPostgres(id) {
   const missing = road.layers.filter((l) => !st.layers.includes(l));
   record(id, `layers include ${road.layers.join(',')}`, missing.length === 0, { detail: `stamped ${st.layers.join(',')}` });
   record(id, `${road.host} host`, road.host === 'wrapper' ? existsSync(join(dir, 'nx')) && !existsSync(join(dir, 'package.json')) : existsSync(join(dir, 'package.json')));
-  record(id, 'the launcher, the targets and the seeded major', ['tools/postgres/postgres.mjs', 'tools/dev/dev.mjs', 'postgres/project.json', '.bespunky/postgres.json'].every((f) => existsSync(join(dir, f))));
+  record(id, 'the launcher, the targets and what the provider seeds', ['tools/postgres/postgres.mjs', 'tools/dev/dev.mjs', 'postgres/project.json', ...local.files].every((f) => existsSync(join(dir, f))));
+  if (road.provider === 'supabase') record(id, 'one place says the major: config.toml', !existsSync(join(dir, '.bespunky/postgres.json')));
   record(id, 'nothing served yet: no .bespunky/dev.json', !existsSync(join(dir, '.bespunky/dev.json')));
 
   // The project gains an app with a dev-server, and the next upgrade attaches the server to it.
@@ -866,42 +961,55 @@ async function stepNewPostgres(id) {
   const primary = declared.find((p) => p.id === 'app');
   const seeded = server?.dependency === true && !server.primary && primary?.primary === true && Boolean(server.exports?.DATABASE_URL) && Boolean(server.exports?.DIRECT_DATABASE_URL);
   if (!record(id, 'the generators seeded the app, with the server as its dependency', seeded, { detail: seeded ? '' : `declared: ${declared.map((p) => p.id).join(', ') || 'nothing'}` })) return;
+  if (road.provider === 'supabase') record(id, 'and the keeper, which keeps its block out of the range the runtime allocates from', server.cmd?.join(' ').includes('tools/postgres/postgres.mjs') && Boolean(server.avoidPorts?.length) && Boolean(server.exports?.SUPABASE_URL), { detail: JSON.stringify(server.avoidPorts) });
   await assertUpgradeIsNoOp(id, dir, [app]);
 
-  const tools = await realPostgres();
+  const tools = await local.real();
   if (tools.skip) return record(id, 'a real boot', null, { detail: tools.skip });
+  // The proof reads through the URL the app received, with a real client, whichever server answers.
+  const client = await realPostgres();
+  if (client.skip) return record(id, 'a real boot', null, { detail: client.skip });
   const [bin, pre] = nx(dir);
 
   // A migration made by the project's own verb, with the project's own seed.
   const made = await run(`${id}-new-migration`, bin, [...pre, 'run', 'postgres:new-migration', 'thing'], { cwd: dir, env: tools });
-  const file = listOrNull(join(dir, 'postgres/migrations'))?.split(',').find((name) => name.endsWith('_thing.sql'));
+  const file = listOrNull(join(dir, local.migrations))?.split(',').find((name) => name.endsWith('_thing.sql'));
   if (!record(id, 'nx run postgres:new-migration thing', made.code === 0 && Boolean(file), { ms: made.ms, log: made.log, detail: made.code ? why(made.out) : '' })) return;
-  writeFileSync(join(dir, 'postgres/migrations', file), '-- migrate:up\nCREATE TABLE thing (id int PRIMARY KEY, name text);\n\n-- migrate:down\n');
+  writeFileSync(join(dir, local.migrations, file), '-- migrate:up\nCREATE TABLE thing (id int PRIMARY KEY, name text);\n\n-- migrate:down\n');
   writeFileSync(join(dir, 'postgres/seed/world/01_things.sql'), "INSERT INTO thing VALUES (1, 'seeded');\n");
 
-  const offset = await freeOffset(4310, 5432);
-  const ports = [4310 + offset, 5432 + offset];
+  // Every port the declaration holds: the generators' word, on either provider.
+  const bases = [4310, ...Object.values(server.ports)];
+  const offset = await freeOffset(local.offsetFrom, ...bases);
+  const ports = bases.map((base) => base + offset);
+  const databasePort = server.ports.postgres + offset;
   const received = join(dir, 'apps', app, 'received.json');
   const t0 = Date.now();
   // Stream, as the executor's own refusal says: this tool is often an agent's, and Nx shows an agent nothing of a static serve.
   const serve = background(`${id}-serve`, bin, [...pre, 'serve', app, `--port-offset=${offset}`, '--no-shared-browser'], { cwd: dir, env: { ...tools, NX_DEFAULT_OUTPUT_STYLE: 'stream' } });
-  const up2 = await until(async () => serve.ended || (existsSync(received) && (await canConnect(ports[0]))));
+  const up2 = await until(async () => serve.ended || (existsSync(received) && (await canConnect(ports[0]))), local.firstBootMs);
   const booted = !serve.ended && Boolean(up2);
-  if (!record(id, `nx serve ${app} comes up, its server first`, booted, { ms: Date.now() - t0, log: serve.log, detail: booted ? '' : serve.ended ? `ended, exit ${serve.code}: ${why(serve.out())}` : 'not up after 3 minutes' })) {
+  if (!record(id, `nx serve ${app} comes up, its server first`, booted, { ms: Date.now() - t0, log: serve.log, detail: booted ? '' : serve.ended ? `ended, exit ${serve.code}: ${why(serve.out())}` : `not up after ${local.firstBootMs / 60_000} minutes` })) {
     killGroup(serve.pid);
     return;
   }
   const seen = readJson(received);
-  const url = `postgresql://postgres:postgres@127.0.0.1:${ports[1]}/app?sslmode=disable`;
+  const url = `postgresql://postgres:postgres@127.0.0.1:${databasePort}/${local.database}?sslmode=disable`;
   record(id, 'the app received DATABASE_URL, at its own stack\'s port', seen.DATABASE_URL === url, { detail: seen.DATABASE_URL === url ? '' : `received ${seen.DATABASE_URL}` });
   record(id, 'and DIRECT_DATABASE_URL', seen.DIRECT_DATABASE_URL === url, { detail: seen.DIRECT_DATABASE_URL === url ? '' : `received ${seen.DIRECT_DATABASE_URL}` });
   record(id, 'the app is on its own stack\'s port', seen.port === ports[0], { detail: `${seen.port}` });
-  const row = psqlIn(tools, seen.DATABASE_URL, 'SELECT name FROM thing');
+  if (road.provider === 'supabase') {
+    const api = server.ports['supabase-api'] + offset;
+    record(id, 'and SUPABASE_URL, at its own stack\'s API, which answers', seen.SUPABASE_URL === `http://127.0.0.1:${api}` && (await canConnect(api)), { detail: seen.SUPABASE_URL });
+  }
+  const row = psqlIn(client, seen.DATABASE_URL, 'SELECT name FROM thing');
   record(id, 'the migration and the seed applied, read through that URL', row.status === 0 && row.stdout.trim() === 'seeded', { detail: row.status === 0 ? row.stdout.trim() : row.stderr.trim().slice(0, 140) });
-  const stamped = psqlIn(tools, seen.DATABASE_URL, 'SELECT version FROM schema_migrations');
-  record(id, 'dbmate recorded the migration', stamped.stdout.trim() === file.split('_')[0], { detail: stamped.stdout.trim().slice(0, 40) });
+  const stamped = psqlIn(client, seen.DATABASE_URL, `SELECT version FROM ${local.ledger}`);
+  record(id, 'the provider\'s ledger recorded the migration', stamped.stdout.trim() === file.split('_')[0], { detail: stamped.stdout.trim().slice(0, 40) });
+  if (road.provider === 'supabase') record(id, 'its daemon is in sight, so "nothing left" below means something', stackProcesses().length > 0);
+  if (road.provider === 'supabase') await assertTypesAndFunctions(id, dir, tools, bin, pre, server.ports['supabase-api'] + offset);
   const stack = stacksIn(dir, tools)?.find((candidate) => candidate.offset === offset);
-  record(id, 'tools/dev/dev ps names the stack, live, with both ports', stack?.state === 'live' && stack.ports?.app === ports[0] && stack.ports?.postgres === ports[1], { detail: stack ? `${stack.key} ${stack.state}` : 'no such stack' });
+  record(id, 'tools/dev/dev ps names the stack, live, with its ports', stack?.state === 'live' && stack.ports?.app === ports[0] && stack.ports?.postgres === databasePort, { detail: stack ? `${stack.key} ${stack.state}` : 'no such stack' });
   await assertStops(id, dir, tools, app, offset, ports, serve);
 }
 
@@ -935,10 +1043,11 @@ async function stepAddLayerPostgres() {
   await assertUpgradeIsNoOp(step, c.dir, [c.app]);
   await verify(step, c.dir, '', baseline);
 
+  ok[step] = true; // what comes next stands on what the project now holds, and this real boot is its own row
   const tools = await realPostgres();
   if (tools.skip) return record(step, 'a real boot', null, { detail: tools.skip });
   const [bin, pre] = nx(c.dir);
-  const offset = await freeOffset(5432);
+  const offset = await freeOffset(LOCAL_SERVERS.native.offsetFrom, 5432);
   const key = `postgres@${offset}`;
   const t0 = Date.now();
   const start = background(`${step}-start`, bin, [...pre, 'run', 'postgres:start', `--port-offset=${offset}`], { cwd: c.dir, env: { ...tools, NX_DEFAULT_OUTPUT_STYLE: 'stream' } });
@@ -953,19 +1062,101 @@ async function stepAddLayerPostgres() {
   await assertStops(step, c.dir, tools, 'postgres', offset, [5432 + offset], start);
 }
 
+/** The layer added to a project that already wears `postgres`, with a migration of its own: the consumer `add-layer-postgres` left. */
+async function stepAddLayerSupabase() {
+  const step = 'add-layer-supabase';
+  if (!ok['add-layer-postgres']) return skipFor(step, 'add-layer supabase', 'the consumer wearing postgres is not ready');
+  const c = consumer;
+  const addLayer = (name) => run(name, 'bash', [HOUSE(TOOLKIT), 'add-layer', '--local', '--yes', 'supabase', '.', c.app], { cwd: c.dir });
+  const local = LOCAL_SERVERS.supabase;
+
+  // What a project on the native server has: a migration, and a line of its own naming the folder.
+  const migration = '20260101000000_thing.sql';
+  writeFileSync(join(c.dir, 'postgres/migrations', migration), '-- migrate:up\nCREATE TABLE public.thing (id int PRIMARY KEY, name text);\n\n-- migrate:down\n');
+  writeFileSync(join(c.dir, 'postgres/seed/world/01_things.sql'), "INSERT INTO public.thing VALUES (1, 'seeded');\n");
+  const note = join(c.dir, 'docs/database.md');
+  mkdirSync(dirname(note), { recursive: true });
+  writeFileSync(note, 'Our schema lives in postgres/migrations.\n');
+  commitAll(c.dir, 'feat: a migration and a seed');
+
+  // Major 18, as this project was seeded: refused, and nothing written.
+  const head = gitOut(c.dir, 'rev-parse', 'HEAD');
+  const refused = await addLayer(`${step}-at-18`);
+  const dirtyAfter = gitOut(c.dir, 'status', '--porcelain');
+  const named = /supabase-major-mismatch|the Supabase stack runs 17/.test(refused.out);
+  record(step, 'at major 18 it is refused, by name', refused.code !== 0 && named, { ms: refused.ms, log: refused.log, detail: refused.code === 0 ? 'it ran' : named ? '' : why(refused.out) });
+  record(step, 'and nothing was written', !dirtyAfter && gitOut(c.dir, 'rev-parse', 'HEAD') === head, { detail: dirtyAfter.split('\n').slice(0, 3).join(' | ') });
+
+  // At 17, the human step the refusal names.
+  writeJson(join(c.dir, '.bespunky/postgres.json'), { major: 17 });
+  commitAll(c.dir, 'chore: postgres 17, to meet the stack');
+  const r = await addLayer(step);
+  const v = upgradeVerdict(r.out);
+  const good = r.code === 0 && v.okLine && !v.bad.length;
+  if (!record(step, 'at 17, add-layer --local --yes supabase', good, { ms: r.ms, log: r.log, detail: good ? `UPGRADE_NEXT: ${v.next}` : `exit ${r.code}${v.bad.length ? ` ${v.bad.join(' ')}` : ''}: ${why(r.out)}` })) return;
+  record(step, 'it names the human step for a hosted database dbmate ran', /HUMAN_STEP: .*migration repair --status applied 20260101000000/.test(r.out), { log: r.log });
+  commitAll(c.dir, 'chore: add the supabase layer');
+
+  const st = stamp(c.dir);
+  record(step, 'the stamp wears supabase, and every layer it had', ['supabase', 'postgres', 'firebase', 'angular', 'web'].every((l) => st.layers.includes(l)), { detail: st.layers.join(',') });
+  for (const s of SEEDS.filter((x) => x.survives)) {
+    let res;
+    try { res = s.survives(c); } catch (e) { res = [false, e.message.slice(0, 120)]; }
+    record(step, `survives: ${s.id}`, res[0], { detail: res[1] });
+  }
+  const moved = existsSync(join(c.dir, 'supabase/migrations', migration)) && !existsSync(join(c.dir, 'postgres/migrations', migration));
+  record(step, 'the migration moved to supabase/migrations, and is in one place', moved);
+  record(step, 'it is a rename to git, so its history follows', gitOut(c.dir, 'log', '--follow', '--format=%s', '--', `supabase/migrations/${migration}`).includes('feat: a migration and a seed'));
+  record(step, 'a reference to the old folder follows it', readFileSync(note, 'utf8').includes('supabase/migrations') && !readFileSync(note, 'utf8').includes('postgres/migrations'));
+  record(step, 'one place says the major: .bespunky/postgres.json is gone', !existsSync(join(c.dir, '.bespunky/postgres.json')));
+  const processes = readJson(join(c.dir, '.bespunky/dev.json')).apps?.[c.app]?.processes ?? [];
+  const server = processes.find((p) => p.id === 'postgres');
+  record(step, `${c.app}'s server became the keeper, its block out of the runtime's range`, server?.dependency === true && Boolean(server.avoidPorts?.length) && Boolean(server.ports?.['supabase-api']), { detail: processes.map((p) => p.id).join(', ') });
+  const packages = readFileSync(join(c.dir, '.devcontainer/house.packages.sh'), 'utf8');
+  record(step, 'the image installs the CLI, and neither the Debian server nor dbmate', /\nsupabase \S+ /.test(packages) && !packages.includes('\ntool postgres ') && !packages.includes('\ndbmate '));
+  await assertUpgradeIsNoOp(step, c.dir, [c.app]);
+  await verify(step, c.dir, '', baseline);
+
+  const tools = await local.real();
+  const client = await realPostgres();
+  if (client.skip) return record(step, 'a real boot', null, { detail: client.skip });
+  const [bin, pre] = nx(c.dir);
+  const bases = Object.values(server.ports);
+  const offset = await freeOffset(local.offsetFrom, ...bases);
+  const key = `postgres@${offset}`;
+  const t0 = Date.now();
+  const start = background(`${step}-start`, bin, [...pre, 'run', 'postgres:start', `--port-offset=${offset}`], { cwd: c.dir, env: { ...tools, NX_DEFAULT_OUTPUT_STYLE: 'stream' } });
+  const up = await until(() => start.ended || existsSync(join(c.dir, '.bespunky/run', key, 'postgres.ready')), local.firstBootMs);
+  const booted = !start.ended && Boolean(up);
+  if (!record(step, 'nx run postgres:start boots the stack there, on the real CLI', booted, { ms: Date.now() - t0, log: start.log, detail: booted ? '' : start.ended ? `ended, exit ${start.code}: ${why(start.out())}` : `not up after ${local.firstBootMs / 60_000} minutes` })) {
+    killGroup(start.pid);
+    return;
+  }
+  const url = `postgresql://postgres:postgres@127.0.0.1:${server.ports.postgres + offset}/${local.database}?sslmode=disable`;
+  const row = psqlIn(client, url, 'SELECT name FROM public.thing');
+  record(step, 'the moved migration and the seed applied', row.stdout.trim() === 'seeded', { detail: row.status === 0 ? row.stdout.trim() : row.stderr.trim().slice(0, 140) });
+  const stamped = psqlIn(client, url, `SELECT version FROM ${local.ledger}`);
+  record(step, 'in the CLI\'s ledger', stamped.stdout.trim() === migration.split('_')[0], { detail: stamped.stdout.trim().slice(0, 40) });
+  record(step, 'its daemon is in sight, so "nothing left" below means something', stackProcesses().length > 0);
+  await assertStops(step, c.dir, tools, 'postgres', offset, bases.map((base) => base + offset), start);
+}
+
 // ── cleanup ───────────────────────────────────────────────────────────────────────────────────────────────
 let cleaned = false;
 function cleanup() {
   if (cleaned) return; cleaned = true;
   if (current) killGroup(current.pid);
   for (const service of services) killGroup(service.pid);
-  for (const s of straysUnder(WORK)) { try { process.kill(s.pid, 'SIGKILL'); } catch { /* gone */ } }
+  for (const s of [...straysUnder(WORK), ...(outsideTmpDir ? straysUnder(outsideTmpDir) : []), ...stackProcesses()]) { try { process.kill(s.pid, 'SIGKILL'); } catch { /* gone */ } }
+  // Port reservations of the stacks this run started. `~/.supabase` follows the passwd home, which no variable moves.
+  if (!hadSupabaseDir) rmSync(join(homedir(), '.supabase'), { recursive: true, force: true });
   if (existsSync(RELEASED_TREE)) {
     spawnSync('git', ['-C', TOOLKIT, 'worktree', 'remove', '--force', RELEASED_TREE], { env: ENV });
     rmSync(RELEASED_TREE, { recursive: true, force: true });
   }
   rmSync(TMP, { recursive: true, force: true });
   if (!opts.keep) rmSync(CONSUMERS, { recursive: true, force: true });
+  if (!opts.keep && outsideTmpDir) rmSync(outsideTmpDir, { recursive: true, force: true });
 }
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, () => { console.error(`\n[dogfood] ${sig} — cleaning up`); cleanup(); summary(); process.exit(130); });
@@ -1008,12 +1199,13 @@ try {
   if (STEPS.has('seed')) await stepSeed();
   if (STEPS.has('upgrade')) await stepUpgrade();
   if (STEPS.has('add-layer-postgres')) await stepAddLayerPostgres();
+  if (STEPS.has('add-layer-supabase')) await stepAddLayerSupabase();
   for (const id of Object.keys(PRESETS)) if (STEPS.has(id)) await stepNew(id);
   for (const id of Object.keys(POSTGRES_ROADS)) if (STEPS.has(id)) await stepNewPostgres(id);
 } catch (e) {
   record('run', 'tool error', false, { detail: e.stack?.split('\n').slice(0, 2).join(' ') ?? String(e) });
 } finally {
-  const strays = straysUnder(WORK);
+  const strays = [...straysUnder(WORK), ...(outsideTmpDir ? straysUnder(outsideTmpDir) : []), ...stackProcesses()];
   record('run', 'no process left under the workdir', strays.length === 0, { detail: strays.map((s) => `${s.pid} ${s.cmd}`).join(' | ').slice(0, 200) });
   record('run', 'nothing written to ~/projects', listOrNull(HOME_PROJECTS) === homeProjectsBefore, { detail: homeProjectsBefore === null && existsSync(HOME_PROJECTS) ? `${HOME_PROJECTS} was created` : '' });
   cleanup();

@@ -1,7 +1,7 @@
 # A GENERATED devcontainer on a REAL engine and REAL images: docker build of what this checkout generates, for each Node and
 # package manager in tools/check-runner-image/devcontainer.sh, then the post-create's package-manager step as the image's
 # non-root user. And, for a project wearing `postgres` (tools/check-runner-image/postgres-image.sh), every major the house offers on
-# every Debian release it composes, on both architectures: the real `apt-get satisfy`, then a real initdb and boot as that user. Fixtures can state what the installer decides and nothing about whether a real image lets it through, and a
+# every Debian release it composes, on both architectures: the real `apt-get satisfy`, then a real initdb and boot as that user. And for a project wearing `supabase` (supabase-image.sh), the pinned CLI on every Debian release on both architectures: no Debian server, a real boot of the alpha native runtime through the launcher. Fixtures can state what the installer decides and nothing about whether a real image lets it through, and a
 # house devcontainer has no Docker, so this is where that gets observed at all.
 #
 # Its own workflow, not a job in runner-image-e2e.yml: that one tests the fallback, and keeps the payload's generators out of
@@ -28,14 +28,20 @@ on:
       - 'plugins/house/engine/nx-tools/src/generators/_utils/postgres-closures.ts'
       - 'plugins/house/engine/nx-tools/src/generators/_utils/playwright-deps.ts'
       - 'plugins/house/engine/nx-tools/src/layers/postgres.ts'
+      - 'plugins/house/engine/nx-tools/src/layers/supabase.ts'
       - 'plugins/house/engine/nx-tools/src/layers/node.ts'
       - 'plugins/house/engine/nx-tools/src/layers/agent.ts'
       - 'plugins/house/engine/nx-tools/src/generators/postgres/**'
+      - 'plugins/house/engine/nx-tools/src/generators/supabase/**'
       - 'plugins/house/engine/nx-tools/src/generators/devcontainer/generator.ts'
       - 'tools/check-runner-image/devcontainer.sh'
       - 'tools/check-runner-image/postgres-image.sh'
       - 'tools/check-runner-image/postgres-image.inside.sh'
       - 'tools/check-runner-image/postgres-image.launcher.sh'
+      - 'tools/check-runner-image/image-case.lib.sh'
+      - 'tools/check-runner-image/supabase-image.sh'
+      - 'tools/check-runner-image/supabase-image.inside.sh'
+      - 'tools/check-runner-image/supabase-image.launcher.sh'
       - 'plugins/house/engine/nx-tools/src/generators/dev/files/**'
       - 'tools/check-runner-image/test.sh'
       - '.github/workflows/devcontainer-image-e2e.yml'
@@ -83,3 +89,22 @@ jobs:
           node-version: 24
       - name: A project wearing postgres, on real images, at every major and Debian release
         run: bash tools/check-runner-image/postgres-image.sh
+
+  # As postgres-images: each architecture is a runner, and the native runtime is its own bundled executable on each.
+  supabase-images:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    # Sequential: one project per preset, regenerated per case. A boot downloads 1.7 GB of artifacts. About six minutes a case, unobserved until the first real run.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      # 22.18+, as above. The launcher's Node is the image's.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: A project wearing supabase, on real images, on every Debian release
+        run: bash tools/check-runner-image/supabase-image.sh

@@ -10,6 +10,7 @@
 //   node tools/postgres/postgres.mjs new-migration --name=<lower_snake>
 //   node tools/postgres/postgres.mjs deploy                        migrate the database POSTGRES_DEPLOY_URL names
 //   node tools/postgres/postgres.mjs serve                         the server inside a dev stack (what dev.json's process runs)
+//   (a provider may bring verbs of its own: `provider.verbs`)
 //
 // LOCAL VERBS TAKE NO URL. They compute the address from this tree's running stack, and check over the connection that the
 // server there is the one that stack created. Only `deploy` reaches a URL it did not compute.
@@ -17,12 +18,11 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { BASE_PORT, DATABASE, DEPLOY_URL_VAR, DEV_ENGINE, LAUNCHER, NX, PORT_NAME, ROOT, ROLE, Refusal, dataHome, declaredMajor, isLinkedWorktree, stacksWithData } from './layout.mjs';
-import { addressedStack, assertIdentity, runningStacks } from './stack.mjs';
-import { applySeeds, dbmateMigrate, dropDatabase, ensureDatabase, localMigrate, newMigration, seedOnce } from './schema.mjs';
-import { query, scrubbedEnv, tool } from './tools.mjs';
+import { DEPLOY_URL_VAR, DEV_ENGINE, LAUNCHER, NX, PORT_NAME, ROOT, Refusal, dataHome, isLinkedWorktree } from './layout.mjs';
+import { addressedStack, runningStacks } from './stack.mjs';
+import { tool } from './tools.mjs';
 import { parseDeployUrl } from './url.mjs';
-import { serve } from './server.mjs';
+import { provider } from './provider.mjs';
 
 process.stdout.on('error', () => {}); // a reader that went away is not this launcher's failure
 process.stderr.on('error', () => {});
@@ -49,7 +49,7 @@ function offsetOf(flags) {
 async function addressed(argv, allowed = ['offset']) {
   const { flags } = parse(argv, allowed);
   const stack = addressedStack(offsetOf(flags));
-  await assertIdentity(stack);
+  await provider.assertIdentity(stack);
   return { stack, flags };
 }
 
@@ -68,7 +68,7 @@ function silentUnderNx() {
 function start(argv) {
   if (process.env.DEV_STACK_DIR) {
     parse(argv, []);
-    return serve();
+    return provider.serve();
   }
   const { flags } = parse(argv, ['port-offset']);
   if (silentUnderNx()) {
@@ -83,7 +83,7 @@ function start(argv) {
  */
 function ownStack(verb, offset, label, app = PORT_NAME) {
   const spec = offset ?? (isLinkedWorktree() ? 'auto' : undefined);
-  const child = spawn(process.execPath, [DEV_ENGINE, 'run', app, `--label=${label}`, `--ports=${PORT_NAME}=${BASE_PORT}`, ...(spec !== undefined ? [`--port-offset=${spec}`] : []), '--', process.execPath, LAUNCHER, verb], {
+  const child = spawn(process.execPath, [DEV_ENGINE, 'run', app, `--label=${label}`, `--ports=${Object.entries(provider.ports).map(([name, port]) => `${name}=${port}`).join(',')}`, ...(provider.avoidPorts.length ? [`--avoid-ports=${provider.avoidPorts.join(',')}`] : []), ...(spec !== undefined ? [`--port-offset=${spec}`] : []), '--', process.execPath, LAUNCHER, verb], {
     cwd: ROOT,
     stdio: 'inherit',
   });
@@ -96,15 +96,15 @@ function ownStack(verb, offset, label, app = PORT_NAME) {
 
 async function migrate(argv) {
   const { stack } = await addressed(argv);
-  await localMigrate(stack.port);
+  await provider.migrate(stack);
   console.log(`[postgres] ${stack.key} is migrated.`);
   return 0;
 }
 
 async function seed(argv) {
   const { stack } = await addressed(argv);
-  const applied = await applySeeds(stack.port);
-  console.log(applied ? `[postgres] applied ${applied} seed file(s) to ${stack.key}.` : '[postgres] postgres/seed/world holds no .sql files.');
+  const applied = await provider.seed(stack);
+  console.log(applied ? `[postgres] applied ${applied} seed file(s) to ${stack.key}.` : `[postgres] ${provider.seedsLabel} holds no .sql files.`);
   return 0;
 }
 
@@ -113,9 +113,9 @@ async function seed(argv) {
  * database nobody uses and leave `web@6000`, the one that failed, as it was. None here: undefined, a fresh stack of its own.
  */
 function stackToReset(asked, offset) {
-  const here = stacksWithData(declaredMajor());
+  const here = provider.stacksWithData();
   if (asked) {
-    if (here.includes(asked)) return asked;
+    if (provider.onePerTree || here.includes(asked)) return asked;
     throw new Refusal(`${asked} has no data in this tree.${here.length ? ` These do: ${here.join(', ')}.` : ''}`);
   }
   const matching = here.filter((key) => offset === undefined || key.endsWith(`@${offset}`));
@@ -134,11 +134,8 @@ async function reset(argv) {
     return key ? ownStack('serve-reset', key.split('@')[1], 'Postgres, resetting', key.split('@')[0]) : ownStack('serve-reset', offset, 'Postgres, resetting');
   }
   const stack = addressedStack(offset);
-  await assertIdentity(stack);
-  await dropDatabase(stack.port);
-  await ensureDatabase(stack.port);
-  await localMigrate(stack.port);
-  await seedOnce(stack.port);
+  await provider.assertIdentity(stack);
+  await provider.reset(stack);
   console.log(`[postgres] ${stack.key} is reset: migrated and seeded from nothing.`);
   return 0;
 }
@@ -147,15 +144,16 @@ async function psql(argv) {
   const { stack, flags } = await addressed(argv, ['offset', 'sql', 'file']);
   mkdirSync(dataHome(), { recursive: true }); // where PSQL_HISTORY points, in the house's devcontainer
   // A statement to run names no startup file: a `\\connect` in one would move it off the server just checked. A session is a human's own.
-  const args = ['-h', '127.0.0.1', '-p', String(stack.port), '-U', ROLE, '-d', DATABASE, ...(flags.sql !== undefined || flags.file !== undefined ? ['-X'] : []), ...(flags.sql !== undefined ? ['-v', 'ON_ERROR_STOP=1', '-c', flags.sql] : []), ...(flags.file !== undefined ? ['-v', 'ON_ERROR_STOP=1', '-f', flags.file] : [])];
+  const client = provider.client(stack);
+  const args = [...client.args, ...(flags.sql !== undefined || flags.file !== undefined ? ['-X'] : []), ...(flags.sql !== undefined ? ['-v', 'ON_ERROR_STOP=1', '-c', flags.sql] : []), ...(flags.file !== undefined ? ['-v', 'ON_ERROR_STOP=1', '-f', flags.file] : [])];
   process.on('SIGINT', () => {}); // Ctrl+C cancels the query in psql, and must not end this parent
-  const child = spawn(tool('psql'), args, { cwd: ROOT, env: scrubbedEnv(), stdio: 'inherit' });
+  const child = spawn(tool('psql'), args, { cwd: ROOT, env: client.env, stdio: 'inherit' });
   return new Promise((resolve) => child.on('exit', (code) => resolve(code ?? 1)));
 }
 
 function createMigration(argv) {
   const { flags, rest } = parse(argv, ['name'], { positionals: 1 });
-  console.log(`[postgres] created ${newMigration(flags.name ?? rest[0])}. Write the up. The down stays empty: migrations are forward-only.`);
+  console.log(`[postgres] created ${provider.newMigration(flags.name ?? rest[0])}. Migrations are forward-only: to undo one, write the next one.`);
   return 0;
 }
 
@@ -180,48 +178,50 @@ function envFileSetting(variable) {
   return undefined;
 }
 
-async function humanConfirms(target) {
+async function humanConfirms(target, flags) {
   // What runners set, and from nowhere else: the prompt is the only thing a stray `CI=false` or a project file could remove.
   if (process.env.CI === 'true' || process.env.CI === '1') return;
   if (!process.stdin.isTTY) {
     throw new Refusal(`Outside CI, a deploy asks a human, and there is no terminal to ask on. Run it yourself in a terminal, or let CI run it.`);
   }
+  const { says, label, word } = provider.confirmation?.(target, flags) ?? { says: `migrates ${target.display}`, label: 'the database\'s name', word: target.database };
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await prompt.question(`This migrates ${target.display}. Type the database's name (${target.database}) to go on: `);
+  const answer = await prompt.question(`This ${says}. Type ${label} (${word}) to go on: `);
   prompt.close();
-  if (answer.trim() !== target.database) throw new Refusal('Not confirmed; nothing ran.');
+  if (answer.trim() !== word) throw new Refusal('Not confirmed; nothing ran.');
 }
 
 async function deploy(argv) {
-  parse(argv, []);
+  const { flags } = parse(argv, provider.deployFlags ?? []);
+  const urlHint = provider.deployUrlHint ?? 'direct URL';
   // First, and whatever CI says: an agent can set CI itself, and it reaches a database nobody asked it to migrate.
-  if (process.env.CLAUDECODE === '1') throw new Refusal(`A deploy is not an agent's to run: a human runs it, or CI does. Hand the user this command to run in a terminal: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
+  if (process.env.CLAUDECODE === '1') throw new Refusal(`A deploy is not an agent's to run: a human runs it, or CI does. Hand the user this command to run in a terminal: ${DEPLOY_URL_VAR}=<${urlHint}> ${NX} run postgres:deploy`);
   const file = envFileSetting(DEPLOY_URL_VAR);
   if (file) throw new Refusal(`${DEPLOY_URL_VAR} is set in ${file}. A deploy's URL comes from CI or from a variable you set yourself, never from a file: remove it.`);
   const skipsThePrompt = envFileSetting('CI');
   if (skipsThePrompt) throw new Refusal(`CI is set in ${skipsThePrompt}, and it would skip a deploy's confirmation. Only the runner says it is CI: remove it.`);
   const url = process.env[DEPLOY_URL_VAR];
-  if (!url) throw new Refusal(`${DEPLOY_URL_VAR} is not set. CI sets it from the environment's secret, ${DEPLOY_URL_VAR}_<ENVIRONMENT>; by hand: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
+  if (!url) throw new Refusal(`${DEPLOY_URL_VAR} is not set. CI sets it from the environment's secret, ${DEPLOY_URL_VAR}_<ENVIRONMENT>; by hand: ${DEPLOY_URL_VAR}=<${urlHint}> ${NX} run postgres:deploy`);
   let target;
   try {
     target = parseDeployUrl(url);
   } catch (error) {
     throw new Refusal(`${DEPLOY_URL_VAR} is refused: ${error.message}`);
   }
-  if (target.pooled) throw new Refusal(`${DEPLOY_URL_VAR} names a transaction pooler (${target.display}). Migrations need a direct connection: use the host's direct URL.`);
+  if (target.pooled) throw new Refusal(`${DEPLOY_URL_VAR} names a transaction pooler (${target.display}). Migrations need a direct connection: use the host's ${urlHint}.`);
+  provider.assertDeployTarget?.(target, flags);
   console.log(`[postgres] deploying migrations to ${target.display}${target.sslmode ? ` (sslmode=${target.sslmode})` : ''}`);
-  await humanConfirms(target);
-  // In the environment, not on the command line: a URL with a password in argv is readable by every process on the machine.
+  await humanConfirms(target, flags);
   const hide = (text) => {
     const withoutUrl = text.split(url).join('***');
     return target.password ? withoutUrl.split(target.password).join('***') : withoutUrl;
   };
-  await dbmateMigrate({ args: ['--env', 'DATABASE_URL'], env: { DATABASE_URL: url } }, { onOutput: hide });
+  await provider.deploy(url, target, hide, flags);
   console.log(`[postgres] ${target.display} is migrated.`);
   return 0;
 }
 
-const VERBS = { start, serve: (argv) => (parse(argv, []), serve()), 'serve-reset': (argv) => (parse(argv, []), serve({ resetThenStop: true })), migrate, seed, reset, psql, 'new-migration': createMigration, deploy };
+const VERBS = { start, serve: (argv) => (parse(argv, []), provider.serve()), 'serve-reset': (argv) => (parse(argv, []), provider.serve({ resetThenStop: true })), migrate, seed, reset, psql, 'new-migration': createMigration, deploy, ...provider.verbs?.({ parse, addressed }) };
 
 const [verb, ...argv] = process.argv.slice(2);
 try {

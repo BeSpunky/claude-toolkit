@@ -11,6 +11,7 @@
 //
 // A running server is declared in `.bespunky/dev.json` for every served app (`postgres.devFragment`); with nothing served,
 // `postgres:start` is a stack of its own through `tools/dev/dev run`. Which of the two is not decided here.
+import { refuseWhatCannotMove } from '../supabase/preflight';
 import { type Tree, addProjectConfiguration, formatFiles, logger } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,14 +23,14 @@ import { ensureHouseProject, houseProjectHome } from '../_utils/project-files';
 import { readDeclaration } from '../dev/declaration';
 import { POSTGRES_DEFAULT_MAJOR } from '../_utils/versions';
 import { seedServedApps, servedProjects } from '../dev/generator';
-import { postgresFragment, POSTGRES_PORT_NAME } from './dev-fragment';
+import { localServerFragment, POSTGRES_PORT_NAME } from './dev-fragment';
 import { POSTGRES_ROOT, POSTGRES_TAG, postgresHome, refuseForeignHolder } from './home';
 import { POSTGRES_DECLARATION, postgresMajor } from './major';
+import { MIGRATIONS_OF, type LocalServerProvider, providerOf } from './provider';
 
 /** The launcher's files, relative to tools/postgres/: each written from files/<name>.tpl. */
-export const LAUNCHER_FILES = ['postgres.mjs', 'layout.mjs', 'tools.mjs', 'url.mjs', 'stack.mjs', 'schema.mjs', 'server.mjs'] as const;
+export const LAUNCHER_FILES = ['postgres.mjs', 'layout.mjs', 'tools.mjs', 'url.mjs', 'stack.mjs', 'schema.mjs', 'server.mjs', 'native.mjs'] as const;
 export const LAUNCHER_ROOT = 'tools/postgres';
-export const POSTGRES_MIGRATIONS = `${POSTGRES_ROOT}/migrations`;
 
 const LAUNCH = 'node tools/postgres/postgres.mjs';
 
@@ -44,7 +45,7 @@ function verbTarget(verb: string, extra: Record<string, unknown> = {}) {
   };
 }
 
-function ensurePostgresProject(tree: Tree): void {
+function ensurePostgresProject(tree: Tree, provider: LocalServerProvider): void {
   // Tooling, with no `projectType`: neither an app nor a library, so layout inference does not read `postgres/` as where this
   // workspace keeps its apps.
   const tags = ['tooling', POSTGRES_TAG];
@@ -54,7 +55,7 @@ function ensurePostgresProject(tree: Tree): void {
   const deploy = deployTarget(tree, home.root, {
     command: `${LAUNCH} deploy`,
     inputs: ['default'],
-    watches: [`${POSTGRES_MIGRATIONS}/**/*`],
+    watches: [`${MIGRATIONS_OF[provider]}/**/*`, ...(provider === 'supabase' ? ['supabase/functions/**/*', 'supabase/config.toml'] : [])],
   });
   ensureHouseProject(tree, 'postgres', home, {
     tags,
@@ -67,6 +68,7 @@ function ensurePostgresProject(tree: Tree): void {
       reset: verbTarget('reset'),
       psql: verbTarget('psql', { tty: true }),
       deploy: deploy.target,
+      ...(provider === 'supabase' ? { 'gen-types': verbTarget('gen-types'), 'new-function': verbTarget('new-function'), 'secrets-set': verbTarget('secrets-set', { tty: true }) } : {}),
     },
   });
 }
@@ -79,7 +81,7 @@ function seedFolder(tree: Tree, dir: string, seeded: boolean): void {
 /** Seeding reaches the apps Nx serves. An app only `.bespunky/dev.json` declares is the project's to wire, so it is told how. */
 function reportHandDeclaredApps(tree: Tree): void {
   const served = new Set(servedProjects(tree));
-  const [process] = postgresFragment().processes;
+  const [process] = localServerFragment(tree).processes;
   for (const [app, entry] of Object.entries(readDeclaration(tree)?.apps ?? {})) {
     const processes = entry.processes ?? [];
     if (served.has(app) || processes.some((p) => p.id === process.id || POSTGRES_PORT_NAME in (p.ports ?? {}))) continue;
@@ -98,10 +100,13 @@ function refuseOldNode(tree: Tree): void {
   }
 }
 
-export default async function postgresGenerator(tree: Tree): Promise<void> {
+export default async function postgresGenerator(tree: Tree, options: { provider?: LocalServerProvider } = {}): Promise<void> {
   requireLayer(tree, 'agent', 'postgres');
+  const provider = providerOf(tree, options.provider);
+  // This step's writes are final before the Supabase step runs, so what that step would refuse is refused here too.
+  if (provider === 'supabase') refuseWhatCannotMove(tree);
   // Before anything is written: a declaration this toolkit cannot honour stops the run here, naming what it can.
-  postgresMajor(tree);
+  if (provider === 'native') postgresMajor(tree);
   refuseOldNode(tree);
   if (!postgresHome(tree)) refuseForeignHolder(tree);
 
@@ -109,12 +114,16 @@ export default async function postgresGenerator(tree: Tree): Promise<void> {
     tree.write(`${LAUNCHER_ROOT}/${file}`, readFileSync(join(__dirname, 'files', `${file}.tpl`), 'utf8'));
   }
 
-  const creating = !tree.exists(POSTGRES_DECLARATION);
-  if (creating) tree.write(POSTGRES_DECLARATION, `${JSON.stringify({ major: Number(POSTGRES_DEFAULT_MAJOR) }, null, 2)}\n`);
-  seedFolder(tree, POSTGRES_MIGRATIONS, creating);
+  // Only the native provider has a major of its own and a folder of its own: with Supabase, both are the stack's (generators/supabase).
+  const creating = provider === 'native' ? !tree.exists(POSTGRES_DECLARATION) : !postgresHome(tree);
+  if (provider === 'native') {
+    tree.write(`${LAUNCHER_ROOT}/provider.mjs`, readFileSync(join(__dirname, 'files', 'provider.mjs.tpl'), 'utf8'));
+    if (creating) tree.write(POSTGRES_DECLARATION, `${JSON.stringify({ major: Number(POSTGRES_DEFAULT_MAJOR) }, null, 2)}\n`);
+    seedFolder(tree, MIGRATIONS_OF.native, creating);
+  }
   seedFolder(tree, `${POSTGRES_ROOT}/seed/world`, creating);
 
-  ensurePostgresProject(tree);
+  ensurePostgresProject(tree, provider);
   // The project now exists, which is what the layer's dev fragment asks: every served app gets its server, and on a first
   // scaffold the web layer's own seeding ran before this step.
   seedServedApps(tree, 'postgres');

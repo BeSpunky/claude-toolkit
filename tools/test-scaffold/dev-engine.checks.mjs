@@ -58,7 +58,7 @@ const copy = (from, to) => {
 };
 copy(FILES, engine);
 const load = (rel) => import(pathToFileURL(join(engine, rel)).href);
-const { portBlock, blockForKey, resolvePortOffset, isPortFree } = await load('lib/ports.mjs');
+const { offsetCandidates, parsePortRange, portBlock, blockForKey, resolvePortOffset, isPortFree } = await load('lib/ports.mjs');
 const { validate, planApp, pickApp } = await load('lib/declaration.mjs');
 const { parseArgs } = await load('dev.mjs');
 const { parseWorktrees, worktreeSlug } = await load('lib/worktrees.mjs');
@@ -76,6 +76,51 @@ try {
   ok('…the base stack still serves (--port-offset=0)', (await resolvePortOffset('0', highBase)) === 0);
   ok('…the main tree still takes the free base ports on auto', (await resolvePortOffset('auto', { ...highBase, isMain: true })) === 0);
   ok('…and a serve that must SHIFT is refused plainly', await throws(() => resolvePortOffset('auto', highBase)));
+
+  // A stack whose tools allocate ports for themselves keeps its declared ones out of where they allocate from.
+  const avoided = { key: 'k', isMain: true, block: portBlock([5432, 5441]), avoid: [parsePortRange('20000-32767')] };
+  const { offsets } = offsetCandidates('auto', avoided);
+  ok('avoidPorts: auto never offers a block that lands in the range, and offers the rest', offsets.length > 10 && offsets.every((o) => 5441 + o < 20000 || 5432 + o > 32767) && offsets[0] === 0);
+  ok('avoidPorts: a block is out from where it first touches the range to where it last does', offsets.includes(14000) && !offsets.includes(15000) && !offsets.includes(27000) && offsets.includes(28000));
+  ok('avoidPorts: an explicit offset inside is refused, by name', await throws(() => Promise.resolve().then(() => offsetCandidates('20000', avoided))));
+  ok('avoidPorts: an explicit offset clear of it is honoured', offsetCandidates('6000', avoided).offsets[0] === 6000);
+  {
+    const { mkdtempSync, rmSync: rm, writeFileSync: write } = await import('node:fs');
+    const { tmpdir: temp } = await import('node:os');
+    const { join: at } = await import('node:path');
+    const dir = mkdtempSync(at(temp(), 'hold-while-'));
+    const held = at(dir, 'installing');
+    const { waitUntilReady } = await load('lib/ready.mjs');
+    const without = await waitUntilReady({ cmd: 'false' }, { timeoutMs: 200 });
+    ok('holdWhile: with none declared, the bound is the bound', without.ok === false);
+    write(held, '');
+    const started = Date.now();
+    setTimeout(() => rm(held), 700);
+    const waited = await waitUntilReady({ cmd: 'false', holdWhile: held }, { timeoutMs: 200 });
+    ok('holdWhile: the bound does not run while the file exists, and runs out after', waited.ok === false && Date.now() - started >= 700);
+    write(held, '');
+    setTimeout(() => write(at(dir, 'up'), ''), 500);
+    ok('holdWhile: a probe that answers meanwhile is answered', (await waitUntilReady({ cmd: `test -f ${at(dir, 'up')}`, holdWhile: held }, { timeoutMs: 100 })).ok === true);
+    // A download of 0.9 s, a boot of 0.3 s, a bound of 0.5 s: the bound has to start when the boot does.
+    rm(at(dir, 'up'));
+    setTimeout(() => rm(held), 900);
+    setTimeout(() => write(at(dir, 'up'), ''), 1200);
+    ok('holdWhile: the bound starts whole when the file goes', (await waitUntilReady({ cmd: `test -f ${at(dir, 'up')}`, holdWhile: held }, { timeoutMs: 500 })).ok === true);
+    rm(at(dir, 'up'));
+    setTimeout(() => write(held, ''), 100);
+    setTimeout(() => rm(held), 700);
+    setTimeout(() => write(at(dir, 'up'), ''), 900);
+    ok('holdWhile: a file that appears after the wait began holds it too', (await waitUntilReady({ cmd: `test -f ${at(dir, 'up')}`, holdWhile: held }, { timeoutMs: 400 })).ok === true);
+    write(held, '');
+    const stuck = await waitUntilReady({ cmd: 'false', holdWhile: held }, { timeoutMs: 100, holdCapMs: 400 });
+    ok('holdWhile: a marker left behind is capped, and says so', stuck.ok === false && /has held this/.test(stuck.said ?? ''));
+    rm(dir, { recursive: true, force: true });
+  }
+  const astride = { key: 'k', isMain: true, block: portBlock([3000, 40000]), avoid: [parsePortRange('10000-32767')] };
+  ok('avoidPorts: it is the ports that must stay out, not the span between them', offsetCandidates('0', astride).offsets[0] === 0 && offsetCandidates('auto', astride).offsets[0] === 0);
+  ok('avoidPorts: a range is <low>-<high>, in order, of ports', parsePortRange('32767-20000') === null && parsePortRange('nope') === null && parsePortRange('1-70000') === null);
+  ok('avoidPorts: the declaration holds it to that', await throws(() => Promise.resolve().then(() => validate({ apps: { a: { processes: [{ id: 'x', cmd: 'x', primary: true, ports: { x: 1000 }, ready: { http: '/' }, avoidPorts: ['nope'] }] } } }))));
+  ok('avoidPorts: the flag on `dev run`', parseArgs(['run', 'a', '--ports=x=1', '--avoid-ports=20000-32767', '--', 'c']).avoidPorts?.[0]?.[1] === 32767);
 
   const free = async () => true;
   const busy = (...ports) => async (p) => !ports.includes(p);
@@ -642,6 +687,9 @@ process.on('SIGTERM', () => { server.close(); process.exit(0); });
     await refused('dependency is not a boolean', web, { ...db, dependency: 'yes' });
     await refused('a dependency with no readiness', web, { ...db, ready: undefined });
     await refused('ready with no kind', web, { ...db, ready: { timeout: 5 } });
+    await refused('holdWhile on tcp, where nothing would honour it', web, { ...db, ready: { tcp: 'db', holdWhile: '/x' } });
+    await refused('holdWhile on http, where nothing would honour it', web, { ...db, ready: { http: '/', holdWhile: '/x' } });
+    await refused('holdWhile on what is not a dependency', { ...web, ready: { cmd: 'true', holdWhile: '/x' } });
     await refused('ready with two kinds', web, { ...db, ready: { tcp: 'db', cmd: 'true' } });
     await refused('ready with an unknown key (a mistyped timeout must not silently mean the default)', web, { ...db, ready: { tcp: 'db', timout: 5 } });
     await refused('ready is not an object', web, { ...db, ready: 'db' });

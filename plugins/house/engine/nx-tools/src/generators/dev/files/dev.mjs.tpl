@@ -7,7 +7,7 @@
 //   tools/dev/dev stop  [app] [--worktree=<x>] [--offset=<n>] [--all-mine] [--owner=<label>] [--any-owner] [--abandon]
 //   tools/dev/dev list
 //   tools/dev/dev with  <app> [--task=<project:target>] [--timeout=<s>] -- <command…>
-//   tools/dev/dev run   <app> --ports=<name=port,…> [--label=<text>] [--port-offset=<n|auto>] [--shifted] [--owner=<label>] -- <command…>
+//   tools/dev/dev run   <app> --ports=<name=port,…> [--label=<text>] [--port-offset=<n|auto>] [--avoid-ports=<low-high,…>] [--shifted] [--owner=<label>] -- <command…>
 //   tools/dev/dev release <key> --lock=<file>                                                                     (scripts)
 //
 // A serve: pick a tree → install it if its declaration says how and it needs it → CLAIM the stack: one port
@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url';
 
 import { attachBrowser, detachRoute, foreignOwner, sharedBrowserUrl } from './lib/browser.mjs';
 import { DECLARATION_PATH, DeclarationError, declaredPorts, loadDeclaration, pickApp, planApp, primaryOf, runEnv, runExports } from './lib/declaration.mjs';
-import { PortError, isPortFree, portBlock } from './lib/ports.mjs';
+import { PortError, isPortFree, parsePortRange, portBlock } from './lib/ports.mjs';
 import { describeProbe, probeOnce } from './lib/ready.mjs';
 import { describeEnd, descendants, runStack } from './lib/stack.mjs';
 import {
@@ -48,6 +48,8 @@ import {
   describe,
   detachedWork,
   groupMembers,
+  isHeld,
+  lockHolders,
   holdStackLock,
   isAgent,
   isAlive,
@@ -185,7 +187,7 @@ const USAGE = `Usage:
   tools/dev/dev stop  [app] [--worktree=<branch|slug|path>] [--offset=<n>] [--all-mine] [--owner=<label>] [--any-owner] [--abandon]
   tools/dev/dev list
   tools/dev/dev with  <app> [--task=<project:target>] [--timeout=<seconds>] -- <command...>
-  tools/dev/dev run   <app> --ports=<name=port,...> [--label=<text>] [--port-offset=<n|auto>] [--shifted] [--owner=<label>] -- <command...>
+  tools/dev/dev run   <app> --ports=<name=port,...> [--label=<text>] [--port-offset=<n|auto>] [--avoid-ports=<low-high,...>] [--shifted] [--owner=<label>] -- <command...>
 
 serve  serves an app declared in ${DECLARATION_PATH}. --worktree with no value picks one interactively.
 ps     lists the running stacks of every worktree (app@offset, owner, pid, ports and whether each is listening).
@@ -211,7 +213,7 @@ const COMMAND_FLAGS = {
   stop: ['worktree', 'offset', 'allMine', 'owner', 'anyOwner', 'abandon'],
   list: [],
   with: ['task', 'timeout'],
-  run: ['ports', 'portOffset', 'shifted', 'owner', 'label'],
+  run: ['avoidPorts', 'ports', 'portOffset', 'shifted', 'owner', 'label'],
   release: ['lock'],
 };
 
@@ -269,6 +271,13 @@ export function parseArgs(argv) {
             return [n, Number(p)];
           }),
         );
+        break;
+      case '--avoid-ports':
+        out.avoidPorts = takeValue().split(',').filter(Boolean).map((range) => {
+          const parsed = parsePortRange(range);
+          if (!parsed) throw new UsageError(`--avoid-ports takes port ranges, <low>-<high> (got '${range}')`);
+          return parsed;
+        });
         break;
       case '--owner':
       case '--lock':
@@ -462,6 +471,7 @@ async function serve(opts) {
       treeKey: worktreeKey(tree),
       isMain: tree.isMain,
       basePorts,
+      avoid: app.processes.filter((p) => !opts.skip.includes(p.id)).flatMap((p) => (p.avoidPorts ?? []).map(parsePortRange)),
       lock: lockPath,
       agent: isAgent(process.env),
       dryRun: opts.dryRun,
@@ -786,6 +796,21 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   for (const w of detached.finished) say(w.result ?? `${w.id} ended (code ${w.code ?? 0})`);
   if (detached.pending.length) return { ok: false, why: `stopped, but its detached work is still finishing (above) — or end it now: ${stopCommandFor(record, { abandon: true })}` };
   if (!detached.ok) return { ok: false, why: `stopped, but ${detached.finished.filter((w) => w.code).map((w) => w.id).join(', ')} did not finish cleanly (above)` };
+  // A FINISHING stack's detached work is what this waited on, and that has ended. Whatever still holds the lock is the rest of the stack,
+  // with no claimer to stop it, and until it lets go the stack is not stopped: free ports say nothing (a process can close them seconds
+  // before it ends), and a stop reporting success would leave the next start refused. Told once, as a claimer would, and waited for.
+  if (record.state === 'finishing' && isHeld(record.lock)) {
+    for (const pid of lockHolders(record.lock).filter((holder) => holder !== process.pid)) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        /* gone */
+      }
+    }
+    const until = Date.now() + timeoutMs;
+    while (isHeld(record.lock) && Date.now() < until) await sleep(200);
+    if (isHeld(record.lock)) return { ok: false, why: `its detached work has finished, and pid ${lockHolders(record.lock).join(', ')} still holds the stack after ${Math.round(timeoutMs / 1000)}s — nothing was killed; check again with tools/dev/dev ps` };
+  }
   if (record.state !== 'live') {
     const all = collectWorktrees(ROOT);
     await withClaimLock(scopeOf(all).lockRoot, () => pruneDead([record.tree]));
@@ -865,6 +890,7 @@ async function claimOwnStack(opts, worktrees, tree, lock) {
     treeKey: worktreeKey(tree),
     isMain: tree.isMain && !opts.shifted,
     basePorts: opts.ports,
+    avoid: opts.avoidPorts ?? [],
     lock,
     agent,
     fields: { owner: ownerOf(process.env, opts.owner), label: opts.label ?? `${opts.app} (run directly)` },

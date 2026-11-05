@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The runner-image checks' own decisions, against a fake docker and a fake curl: no image, no network, seconds. Whether a
-# real image passes is what check.sh, e2e.sh, devcontainer.sh and postgres-image.sh are for; this only proves that each answer they can get produces the
+# real image passes is what check.sh, e2e.sh, devcontainer.sh, postgres-image.sh and supabase-image.sh are for; this only proves that each answer they can get produces the
 # right exit code and the right words, because a checker whose red branches have never run is a checker nobody can trust.
 set -uo pipefail
 
@@ -344,7 +344,7 @@ fi
 # were run against the real tools, and a real image is what the job is for.
 PG="$TMP/pg"
 mkdir -p "$PG/bin" "$PG/state" "$PG/tree/tools/check-runner-image" "$PG/tree/plugins/house/engine/nx-tools/src/generators/_utils"
-cp "$HERE/postgres-image.sh" "$HERE/postgres-image.inside.sh" "$PG/tree/tools/check-runner-image/"
+cp "$HERE/postgres-image.sh" "$HERE/postgres-image.inside.sh" "$HERE/image-case.lib.sh" "$PG/tree/tools/check-runner-image/"
 cp "$ROOT/plugins/house/engine/nx-tools/src/generators/_utils/versions.ts" "$PG/tree/plugins/house/engine/nx-tools/src/generators/_utils/"
 export FAKE_PG_STATE="$PG/state"
 DBMATE_PIN="$(sed -n "s/^export const DBMATE_VERSION = '\([^']*\)'.*/\1/p" "$ROOT/plugins/house/engine/nx-tools/src/generators/_utils/versions.ts")"
@@ -515,6 +515,186 @@ out="$(env PATH="$PG/bin:$PATH" GITHUB_ACTIONS= HOME="$TMP" FAKE_DBMATE_PIN="$DB
 [ "$got" = 1 ] && ok "two cases, a build failing: a finding" || fail "two cases, a build failing: exit $got"
 case "$out" in *"=== pg17-bookworm-node18"*) ok "a red case does not stop the next" ;; *) fail "a red case stopped the next" ;; esac
 out="$(PATH="$TMP/nodocker" GITHUB_ACTIONS= "$TMP/nodocker/bash" "$HERE/postgres-image.sh" 2>&1)"; got=$?
+if [ "$got" = 2 ] && case "$out" in *"no docker on PATH"*) true ;; *) false ;; esac; then
+  ok "no docker: could not run (exit 2)"
+else
+  fail "no docker: exit $got: $out"
+fi
+
+# supabase-image.sh, the same way. The inside's and the launcher's own lines are real: they were run against the real CLI and the real
+# generators' output, and a real image is what the job is for.
+SB="$TMP/sb"
+mkdir -p "$SB/bin" "$SB/tree/tools/check-runner-image" "$SB/tree/plugins/house/engine/nx-tools/src/generators/_utils"
+cp "$HERE/supabase-image.sh" "$HERE/supabase-image.inside.sh" "$HERE/supabase-image.launcher.sh" "$HERE/image-case.lib.sh" "$SB/tree/tools/check-runner-image/"
+cp "$ROOT/plugins/house/engine/nx-tools/src/generators/_utils/versions.ts" "$SB/tree/plugins/house/engine/nx-tools/src/generators/_utils/"
+SUPABASE_PIN="$(sed -n "s/^export const SUPABASE_CLI_VERSION = '\([^']*\)'.*/\1/p" "$ROOT/plugins/house/engine/nx-tools/src/generators/_utils/versions.ts")"
+cat > "$SB/tree/plugins/house/engine/house.sh" <<'FAKE'
+#!/usr/bin/env bash
+echo "house.sh $*" >> "$FAKE_ARGV"
+[ "${FAKE_NEW_RC:-0}" -eq 0 ] || { echo "the project could not be made"; exit "$FAKE_NEW_RC"; }
+for name; do :; done
+dir="$PROJECTS_DIR/$name"
+mkdir -p "$dir/.bespunky" "$dir/tools/dev" "$dir/tools/postgres" "$dir/supabase" "$dir/postgres"
+tool="$dir/nx"
+case "$*" in *--preset=node*) mkdir -p "$dir/node_modules/.bin"; tool="$dir/node_modules/.bin/nx" ;; esac
+cat > "$tool" <<'NX'
+#!/usr/bin/env bash
+echo "nx $*" >> "$FAKE_ARGV"
+[ "${FAKE_NX_RC:-0}" -eq 0 ] || { echo "the generator threw"; exit "$FAKE_NX_RC"; }
+node="$(cat .nvmrc)"
+case "$PWD" in *sb-agent) image=mcr.microsoft.com/devcontainers/base:debian; user=vscode ;; *) image="mcr.microsoft.com/devcontainers/typescript-node:$node"; user=node ;; esac
+[ -z "${FAKE_WRONG_FROM:-}" ] || image=mcr.microsoft.com/devcontainers/other:1
+mkdir -p .devcontainer
+cat > .devcontainer/devcontainer.json <<JSON
+{
+  "build": {
+    "dockerfile": "house.Dockerfile",
+    "context": "."
+  },
+  "containerEnv": {
+    "SUPABASE_HOME": "/home/$user/.local/share/supabase",
+    "SUPABASE_NO_KEYRING": "1",
+    "DO_NOT_TRACK": "1"
+  },
+  "remoteUser": "$user",
+  "remoteEnv": {
+    "PATH": "/home/$user/.local/bin:\${containerEnv:PATH}"
+  }
+}
+JSON
+echo "FROM $image" > .devcontainer/house.Dockerfile
+{
+  echo "# a comment naming dbmate and tool postgres must not read as either"
+  [ -z "${FAKE_DEBIAN_SERVER:-}" ] || echo "tool postgres usr/lib/postgresql/17/bin usr/lib/*-linux-gnu x"
+  [ -z "${FAKE_DBMATE_LINE:-}" ] || echo "dbmate 2.37.0 amd64 x y bin"
+} > .devcontainer/house.packages.sh
+NX
+chmod +x "$tool"
+FAKE
+cat > "$SB/bin/docker" <<'FAKE'
+#!/usr/bin/env bash
+sub="$1"; shift
+echo "docker $sub $*" >> "$FAKE_ARGV"
+case "$sub" in
+  pull) [ "${FAKE_PULL_RC:-0}" -eq 0 ] || echo "manifest unknown"; exit "${FAKE_PULL_RC:-0}" ;;
+  build)
+    # The step's header states words of the installer on every build, as BuildKit prints it.
+    echo "#7 [2/2] RUN sh house.packages.sh && echo [os-packages] supabase $FAKE_SB_PIN installed"
+    [ "${FAKE_BUILD_RC:-0}" -eq 0 ] || { echo '#7 ERROR: the download failed'; exit "$FAKE_BUILD_RC"; }
+    [ -n "${FAKE_CACHED:-}" ] && { echo '#7 CACHED'; exit 0; }
+    [ -n "${FAKE_NO_CLI:-}" ] || echo "#7 9.00 [os-packages] supabase $FAKE_SB_PIN installed"
+    exit 0 ;;
+  run)
+    cat > /dev/null
+    [ "${FAKE_RUN_RC:-0}" -eq 0 ] || { echo "OCI runtime create failed"; exit "$FAKE_RUN_RC"; }
+    echo "args=$*"
+    [ -n "${FAKE_NO_SENTINEL:-}" ] && exit 0
+    case "$*" in
+      *"bash -s"*)
+        tag="$(printf '%s\n' "$@" | grep '^house-supabase-image-e2e-')"
+        case "$tag" in *bookworm*) codename=bookworm ;; *) codename=trixie ;; esac
+        echo "uid=${FAKE_UID:-1000}"
+        echo "home=/home/x"
+        echo "codename=${FAKE_CODENAME:-$codename}"
+        echo "arch=amd64"
+        echo "path.supabase=${FAKE_CLI_PATH-/usr/local/bin/supabase}"
+        echo "path.postgres=${FAKE_POSTGRES_PATH-}"
+        echo "path.dbmate=${FAKE_DBMATE_PATH-}"
+        echo "path.psql=${FAKE_PSQL-/usr/bin/psql}"
+        echo "path.ps=${FAKE_PS-/usr/bin/ps}"
+        echo "path.tar=/usr/bin/tar"
+        echo "version.supabase=${FAKE_CLI_ANSWER:-$FAKE_SB_PIN}"
+        echo "server.anywhere=${FAKE_SERVER_ANYWHERE-}"
+        echo "supabase.home=${FAKE_SB_HOME-/home/x/.local/share/supabase}"
+        echo "supabase.home.writable=${FAKE_SB_WRITABLE:-yes}"
+        ;;
+      *)
+        [ -z "${FAKE_LAUNCHER_NO_SENTINEL:-}" ] && {
+        echo "launcher.ready=${FAKE_LAUNCHER_READY:-yes}"
+        echo "launcher.major=${FAKE_LAUNCHER_MAJOR:-17}"
+        echo "launcher.row=${FAKE_LAUNCHER_ROW-seeded}"
+        echo "launcher.ledger=${FAKE_LAUNCHER_LEDGER-20260101000000}"
+        echo "launcher.migrate.rc=${FAKE_LAUNCHER_MIGRATE_RC:-0}"
+        echo "launcher.column=1"
+        echo "launcher.types=${FAKE_LAUNCHER_TYPES:-1}"
+        echo "launcher.function=${FAKE_LAUNCHER_FUNCTION:-200 Hello Image!}"
+        echo "launcher.stop.rc=${FAKE_LAUNCHER_STOP_RC:-0}"
+        echo "launcher.exit.rc=${FAKE_LAUNCHER_EXIT_RC:-0}"
+        echo "launcher.port=${FAKE_LAUNCHER_PORT:-closed}"
+        echo "launcher.left=${FAKE_LAUNCHER_LEFT-}"
+        } || exit 0
+        ;;
+    esac
+    echo "probe=done"
+    exit 0 ;;
+esac
+exit 0
+FAKE
+chmod +x "$SB/bin/docker"
+
+sb_case() {   # <name> <cases, space-separated, or empty for all> <expected rc> <must say> <must NOT say> [ENV=VAL…]
+  local name="$1" cases="$2" want="$3" say="$4" not="$5" got out; shift 5
+  : > "$FAKE_ARGV"
+  # shellcheck disable=SC2086
+  out="$(env PATH="$SB/bin:$PATH" GITHUB_ACTIONS= GITHUB_STEP_SUMMARY= HOME="$TMP" FAKE_SB_PIN="$SUPABASE_PIN" "$@" bash "$SB/tree/tools/check-runner-image/supabase-image.sh" $cases 2>&1)"; got=$?
+  if [ "$got" != "$want" ]; then fail "$name: exit $got, wanted $want"; printf '%s\n' "$out" | tail -n 15 | sed 's/^/       /'; return; fi
+  case "$out" in *"$say"*) ;; *) fail "$name: never said '$say'"; printf '%s\n' "$out" | tail -n 15 | sed 's/^/       /'; return ;; esac
+  if [ -n "$not" ]; then case "$out" in *"$not"*) fail "$name: wrongly said '$not'"; return ;; esac; fi
+  ok "$name (exit $got)"
+}
+
+echo "supabase-image.sh"
+ONE=sb-bookworm-node18
+sb_case "every case on a right image passes" "" 0 "PASS" "FAILED"
+for want in "new --local --add-layer=supabase sb-agent" "new --local --preset=node --add-layer=supabase sb-node" "nx g @bespunky/nx-tools:devcontainer sb-node --no-interactive" "--no-cache --progress=plain -f" "--user vscode" "--user node" "-e SUPABASE_HOME=/home/node/.local/share/supabase" "-e SUPABASE_NO_KEYRING=1" "typescript-node:18" "base:debian"; do
+  grep -qF -- "$want" "$FAKE_ARGV" && ok "the run carries $want" || fail "the run lacks $want"
+done
+for id in sb-trixie-agent sb-trixie-node24 sb-bookworm-node18; do
+  grep -q "docker build.*-t house-supabase-image-e2e-$id " "$FAKE_ARGV" && ok "it built $id" || fail "it never built $id"
+done
+[ "$(grep -c 'house.sh new' "$FAKE_ARGV")" = 2 ] && ok "one project per preset" || fail "made $(grep -c 'house.sh new' "$FAKE_ARGV") projects"
+[ "$(grep -c 'docker run.*bash -c' "$FAKE_ARGV")" = 2 ] && ok "the launcher on the node presets only" || fail "the launcher ran $(grep -c 'docker run.*bash -c' "$FAKE_ARGV") times"
+sb_case "one case by name runs only that one" "$ONE" 0 "$ONE" "sb-trixie-agent"
+sb_case "an unknown case: usage" nope 2 "usage" "PASS"
+sb_case "the build failing: a finding, with the build's words" "$ONE" 1 "docker build exited 0 (it exited 3)" "as node" FAKE_BUILD_RC=3
+sb_case "the build's tail is shown" "$ONE" 1 "the download failed" "" FAKE_BUILD_RC=3
+sb_case "a cached layer printing nothing: a finding, though the step's header says the words" "$ONE" 1 "the CLI is installed" "PASS" FAKE_CACHED=1
+sb_case "the installer not installing the CLI: a finding" "$ONE" 1 "the CLI is installed" "PASS" FAKE_NO_CLI=1
+sb_case "a Dockerfile from another image: a finding" "$ONE" 1 "is FROM mcr.microsoft.com/devcontainers/typescript-node:18" "PASS" FAKE_WRONG_FROM=1
+sb_case "an installer holding the Debian server: a finding" "$ONE" 1 "holds no Debian server" "PASS" FAKE_DEBIAN_SERVER=1
+sb_case "an installer holding dbmate: a finding" "$ONE" 1 "holds no dbmate" "PASS" FAKE_DBMATE_LINE=1
+sb_case "the generator failing: a finding" "$ONE" 1 "the devcontainer generator ran" "PASS" FAKE_NX_RC=4
+sb_case "an image on another release: a finding" "$ONE" 1 "the image is on bookworm (it says 'forky')" "PASS" FAKE_CODENAME=forky
+sb_case "running as root: a finding" "$ONE" 1 "a user who is not root" "PASS" FAKE_UID=0
+sb_case "the CLI from elsewhere: a finding" "$ONE" 1 "supabase is on PATH, from /usr/local/bin (it says '/usr/bin/supabase')" "PASS" FAKE_CLI_PATH=/usr/bin/supabase
+sb_case "another CLI answering: a finding" "$ONE" 1 "supabase --version is the pin" "PASS" FAKE_CLI_ANSWER=0.0.1
+sb_case "a server on PATH: a finding" "$ONE" 1 "no server on PATH (it says '/usr/local/bin/postgres')" "PASS" FAKE_POSTGRES_PATH=/usr/local/bin/postgres
+sb_case "a server off PATH, on the disk: a finding" "$ONE" 1 "no Debian server under /usr/lib/postgresql" "PASS" FAKE_SERVER_ANYWHERE=/usr/lib/postgresql/17/bin/postgres
+sb_case "dbmate on PATH: a finding" "$ONE" 1 "no dbmate on PATH" "PASS" FAKE_DBMATE_PATH=/usr/local/bin/dbmate
+sb_case "no psql: a finding" "$ONE" 1 "psql is there" "PASS" FAKE_PSQL=
+sb_case "no ps: a finding" "$ONE" 1 "ps is there" "PASS" FAKE_PS=
+sb_case "SUPABASE_HOME outside ~/.local: a finding" "$ONE" 1 "under the persisted ~/.local" "PASS" FAKE_SB_HOME=/home/x/.supabase
+sb_case "SUPABASE_HOME not writable: a finding" "$ONE" 1 "its user can write there" "PASS" FAKE_SB_WRITABLE=no
+sb_case "the launcher not booting: a finding" "$ONE" 1 "the launcher booted the stack" "PASS" FAKE_LAUNCHER_READY=no
+sb_case "another major answering: a finding" "$ONE" 1 "on the stack's own Postgres, 17" "PASS" FAKE_LAUNCHER_MAJOR=15
+sb_case "the launcher seeding nothing: a finding" "$ONE" 1 "migrated and seeded" "PASS" FAKE_LAUNCHER_ROW=
+sb_case "no ledger: a finding" "$ONE" 1 "the CLI's ledger holds the migration" "PASS" FAKE_LAUNCHER_LEDGER=
+sb_case "the migrate verb failing: a finding" "$ONE" 1 "postgres.mjs migrate exited 0" "PASS" FAKE_LAUNCHER_MIGRATE_RC=1
+sb_case "no types: a finding" "$ONE" 1 "gen-types wrote the declared file" "PASS" FAKE_LAUNCHER_TYPES=0
+sb_case "a function not served, as a tree under /tmp answers: a finding" "$ONE" 1 "the running stack serves it" "PASS" "FAKE_LAUNCHER_FUNCTION=404 Function not found"
+sb_case "dev stop failing: a finding" "$ONE" 1 "dev stop exited 0" "PASS" FAKE_LAUNCHER_STOP_RC=1
+sb_case "the keeper ending badly: a finding" "$ONE" 1 "the keeper ended clean" "PASS" FAKE_LAUNCHER_EXIT_RC=1
+sb_case "the port left open: a finding" "$ONE" 1 "the stack's port is closed" "PASS" FAKE_LAUNCHER_PORT=open
+sb_case "the stack left running: a finding" "$ONE" 1 "nothing of the stack is running" "PASS" "FAKE_LAUNCHER_LEFT=Ssl supabase __supabase_stack_host__ x"
+sb_case "the launcher's probe not ending: could not run" "$ONE" 2 "before the launcher's probe ended" "PASS" FAKE_LAUNCHER_NO_SENTINEL=1
+sb_case "no base image: could not run" "$ONE" 2 "COULD NOT RUN ($ONE): docker pull" "FAILED" FAKE_PULL_RC=1
+sb_case "an engine error at run: could not run" "$ONE" 2 "docker run exited 125" "FAILED" FAKE_RUN_RC=125
+sb_case "exit 0 with no sentinel: could not run" "$ONE" 2 "before the probe's end" "PASS" FAKE_NO_SENTINEL=1
+sb_case "no project: could not run" "$ONE" 2 "COULD NOT RUN ($ONE): house.sh new" "FAILED" FAKE_NEW_RC=9
+out="$(env PATH="$SB/bin:$PATH" GITHUB_ACTIONS= HOME="$TMP" FAKE_SB_PIN="$SUPABASE_PIN" FAKE_BUILD_RC=3 bash "$SB/tree/tools/check-runner-image/supabase-image.sh" sb-trixie-node24 sb-bookworm-node18 2>&1)"; got=$?
+[ "$got" = 1 ] && ok "two cases, a build failing: a finding" || fail "two cases, a build failing: exit $got"
+case "$out" in *"=== sb-bookworm-node18"*) ok "a red case does not stop the next" ;; *) fail "a red case stopped the next" ;; esac
+out="$(PATH="$TMP/nodocker" GITHUB_ACTIONS= "$TMP/nodocker/bash" "$HERE/supabase-image.sh" 2>&1)"; got=$?
 if [ "$got" = 2 ] && case "$out" in *"no docker on PATH"*) true ;; *) false ;; esac; then
   ok "no docker: could not run (exit 2)"
 else

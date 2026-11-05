@@ -10,11 +10,13 @@
 // mid-generate, after the migrations had committed.
 //
 //   node house-probe.mts --ensure=<csv> --evident=<csv>      (Node 22.18+: type stripping)
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import * as NODE_FACTS from './nx-tools/src/generators/_utils/node-facts.ts';
 import { devcontainerNode, factsOf, imageGap, resolveProjectNode, stripJsonc } from './nx-tools/src/generators/_utils/node-spec.ts';
 import * as FIREBASE_COMPAT from './nx-tools/src/generators/_utils/firebase-compat.ts';
 import { coherentPair, firebaseToolsAdvice, majorOf, renderAdvice, tableOf } from './nx-tools/src/adapters/angular/angularfire-judge.ts';
+import { configFacts } from './nx-tools/src/generators/supabase/toml-lines.ts';
+import { type MoveFacts, whatCannotMove } from './nx-tools/src/generators/supabase/refusals.ts';
 
 const arg = (name: string) => (process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1] ?? '').split(',').filter(Boolean);
 const layers = new Set([...arg('ensure'), ...arg('evident')]);
@@ -125,6 +127,26 @@ if (layers.has('firebase') && layers.has('angular')) {
       );
     }
   }
+}
+
+// ---- Supabase: the stack runs its own major, and the CLI has one migrations folder -------------------------------
+// The generators' backstop asks the same function (generators/supabase/refusals.ts). A project already wearing the layer has neither a
+// declaration nor a second folder, but its config.toml is its own: one moved off the major this layer runs is refused on every upgrade,
+// and told how to come back, since its stack's data cannot follow.
+if (layers.has('supabase')) {
+  const filesIn = (dir: string) => (existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name) : []);
+  const declared = read('.bespunky/postgres.json');
+  let declaration: MoveFacts['declaration'] = { state: 'absent' };
+  if (declared !== undefined) {
+    try {
+      declaration = { state: 'read', major: JSON.parse(declared).major };
+    } catch {
+      declaration = { state: 'broken' };
+    }
+  }
+  const config = read('supabase/config.toml');
+  const majors = /SUPABASE_MAJORS = \[([^\]]+)\]/.exec(versionsTs)?.[1].match(/\d+/g) ?? [];
+  for (const { code, text } of whatCannotMove({ declaration, config: config === undefined ? undefined : configFacts(config), native: filesIn('postgres/migrations'), supabase: filesIn('supabase/migrations'), majors, cliVersion: constant('SUPABASE_CLI_VERSION') })) refuse(code, text);
 }
 
 for (const [code, text] of refusals) process.stdout.write(`${code}\t${text.replace(/\\/g, '\\\\').replace(/\n/g, '\\n')}\n`);

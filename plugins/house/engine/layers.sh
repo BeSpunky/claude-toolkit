@@ -6,10 +6,10 @@
 # validates the layers to add before anything is installed, and the SessionStart hook, which must stay a few greps.
 # Sourcing it defines variables and functions only; it runs nothing.
 
-HOUSE_LAYERS='nx,agent,node,js,web,angular,design-system,navigation,firebase,postgres,ci'
+HOUSE_LAYERS='nx,agent,node,js,web,angular,design-system,navigation,firebase,postgres,supabase,ci'
 HOUSE_LAYER_FLOOR='nx'
-HOUSE_LAYERS_ENSURABLE_NEW='nx,agent,node,web,angular,design-system,firebase,postgres,ci'
-HOUSE_LAYERS_ENSURABLE_UPGRADE='nx,agent,firebase,postgres,ci'
+HOUSE_LAYERS_ENSURABLE_NEW='nx,agent,node,web,angular,design-system,firebase,postgres,supabase,ci'
+HOUSE_LAYERS_ENSURABLE_UPGRADE='nx,agent,firebase,postgres,supabase,ci'
 HOUSE_PRESETS='agent,node,angular'
 HOUSE_PRESET_DEFAULT='agent'
 HOUSE_LAYOUTS='apps-libs,packages'
@@ -30,6 +30,7 @@ house_layer_title() {
     navigation) printf '%s\n' 'Typed reactive navigation' ;;
     firebase) printf '%s\n' 'Firebase' ;;
     postgres) printf '%s\n' 'Postgres' ;;
+    supabase) printf '%s\n' 'Supabase' ;;
     ci) printf '%s\n' 'CI deploy (GitHub Actions, from the branch model)' ;;
   esac
 }
@@ -47,6 +48,7 @@ house_layer_requires() {
     navigation) printf '%s\n' 'angular' ;;
     firebase) printf '%s\n' 'nx,node' ;;
     postgres) printf '%s\n' 'agent' ;;
+    supabase) printf '%s\n' 'postgres' ;;
     ci) printf '%s\n' 'nx' ;;
   esac
 }
@@ -64,6 +66,7 @@ house_layer_hint() {
     navigation) printf '%s\n' '`nx g @bespunky/nx-tools:navigation-core`' ;;
     firebase) printf '%s\n' '`house.sh add-layer firebase <project>` (or `nx g @bespunky/nx-tools:firebase-emulators [--project=<app>]`)' ;;
     postgres) printf '%s\n' '`house.sh add-layer postgres <project>`' ;;
+    supabase) printf '%s\n' '`house.sh add-layer supabase <project>`' ;;
     ci) printf '%s\n' '`house.sh add-layer ci <project>` (then give each line that should deploy a `ci` binding in the branch model)' ;;
   esac
 }
@@ -81,6 +84,7 @@ house_layer_brings() {
     navigation) printf '%s\n' 'nothing per-sync (its generators are on-demand), but HOUSE.md gains the typed-navigation conventions' ;;
     firebase) printf '%s\n' 'the emulator wiring, the dev engine its suites claim their ports through (tools/dev — one generator, shared with web), the JDK step, and the forwarded emulator ports' ;;
     postgres) printf '%s\n' 'a Postgres server per dev stack through tools/postgres, the postgres:* targets, forward-only migrations by dbmate, and the server and dbmate in the image' ;;
+    supabase) printf '%s\n' 'the Supabase stack on the CLI'\''s native runtime behind the same postgres:* targets, supabase/migrations, the owned keys of supabase/config.toml, and the pinned CLI in the image' ;;
     ci) printf '%s\n' 'the deploy workflow driven by the branch model, and each provider'\''s human-run cloud setup' ;;
   esac
 }
@@ -98,6 +102,7 @@ house_layer_ensurable_new() {
     navigation) printf '%s\n' 'no' ;;
     firebase) printf '%s\n' 'yes' ;;
     postgres) printf '%s\n' 'yes' ;;
+    supabase) printf '%s\n' 'yes' ;;
     ci) printf '%s\n' 'yes' ;;
   esac
 }
@@ -115,6 +120,7 @@ house_layer_ensurable_upgrade() {
     navigation) printf '%s\n' 'no' ;;
     firebase) printf '%s\n' 'yes' ;;
     postgres) printf '%s\n' 'yes' ;;
+    supabase) printf '%s\n' 'yes' ;;
     ci) printf '%s\n' 'yes' ;;
   esac
 }
@@ -157,6 +163,7 @@ project-json "executor"[[:space:]]*:[[:space:]]*"@nx/angular:' ;;
     navigation) printf '%s\n' 'project-json "type:navigation"' ;;
     firebase) printf '%s\n' 'file firebase.json' ;;
     postgres) printf '%s\n' 'project-json "type:postgres"' ;;
+    supabase) printf '%s\n' 'project-json "type:supabase"' ;;
     ci) printf '%s\n' 'file .bespunky/ci.json' ;;
   esac
 }

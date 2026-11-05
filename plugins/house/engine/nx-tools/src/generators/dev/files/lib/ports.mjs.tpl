@@ -29,7 +29,7 @@ export function portBlock(ports) {
   const max = Math.max(...ports);
   const step = Math.ceil((max - min + 1) / STEP_GRAIN) * STEP_GRAIN;
   const blocks = Math.max(0, Math.floor((MAX_PORT - max) / step));
-  return { min, max, step, blocks };
+  return { ports: [...ports], min, max, step, blocks };
 }
 
 /** Stable small hash of a string → a block index in [1, blocks]. Same tree → same block across restarts. */
@@ -75,13 +75,16 @@ export async function allFree(ports, offset, probe) {
  *   key       the tree's stable identity (branch, else path) — its natural block.
  *   isMain    the repository's primary worktree.
  *   block     portBlock() of every declared port.
+ *   avoid     ranges no port of the stack may land in, as [low, high] pairs: a port some tool of the stack allocates for itself
+ *             comes from there, so a declared port in it could lose the race (lib/declaration.mjs, `avoidPorts`).
  *
  * An explicit offset is the one candidate (`pinned: true`). auto: the MAIN tree PREFERS offset 0 — the forwarded
  * ports are the developer's, and an OAuth origin may be registered on them — but takes it only when free; a
  * worktree prefers its natural block; then every other block in turn. The first candidate is the PREFERRED one.
  */
-export function offsetCandidates(spec, { key, isMain = false, block }) {
+export function offsetCandidates(spec, { key, isMain = false, block, avoid = [] }) {
   const s = String(spec ?? '').trim().toLowerCase();
+  const landsIn = (offset) => avoid.find(([low, high]) => block.ports.some((port) => port + offset >= low && port + offset <= high));
 
   if (s !== 'auto') {
     const n = s === '' ? NaN : Number(s);
@@ -89,6 +92,8 @@ export function offsetCandidates(spec, { key, isMain = false, block }) {
       throw new PortError(`--port-offset must be 'auto', 0, or a positive integer (got '${spec}')`);
     }
     if (block.max + n > MAX_PORT) throw new PortError(`--port-offset=${n} pushes declared port ${block.max} past ${MAX_PORT}`);
+    const range = landsIn(n);
+    if (range) throw new PortError(`--port-offset=${n} puts a declared port inside ${range[0]}-${range[1]}, which this stack's tools allocate from. Use --port-offset=auto, or an offset clear of it.`);
     return { pinned: true, offsets: [n] };
   }
 
@@ -103,7 +108,15 @@ export function offsetCandidates(spec, { key, isMain = false, block }) {
     const start = blockForKey(key, block.blocks);
     for (let i = 0; i < block.blocks; i++) offsets.push((((start - 1 + i) % block.blocks) + 1) * block.step);
   }
-  return { pinned: false, offsets };
+  return { pinned: false, offsets: offsets.filter((offset) => !landsIn(offset)) };
+}
+
+/** `"20000-32767"` as `[20000, 32767]`: how a declaration and `--avoid-ports` both write a range. Null when it is not one. */
+export function parsePortRange(text) {
+  const parts = /^(\d+)-(\d+)$/.exec(String(text));
+  if (!parts) return null;
+  const [low, high] = [Number(parts[1]), Number(parts[2])];
+  return low >= 1 && low <= high && high <= MAX_PORT ? [low, high] : null;
 }
 
 /**

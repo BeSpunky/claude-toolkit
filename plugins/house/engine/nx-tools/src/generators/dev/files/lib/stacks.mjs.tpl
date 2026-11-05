@@ -598,6 +598,7 @@ const sharedWorkspace = (foreign) =>
  *   tree, app  the stack's tree and name (key `<app>@<offset>`)
  *   spec       `--port-offset` ('auto' or an offset)          treeKey, isMain   the tree's identity (lib/ports.mjs)
  *   basePorts  { name: base port } — every port the stack will bind; the record holds them shifted
+ *   avoid      [low, high] ranges no port of the stack may land in (lib/ports.mjs)
  *   lock       the stack's lock (holdStackLock), already held by the claimer — the record names it; it is the stack's life
  *   agent      an AI agent is claiming (isAgent): never the base ports — `auto` skips them, an explicit 0 is refused
  *   fields     the rest of the record (owner, url, label, …)  say       progress lines
@@ -612,9 +613,9 @@ const sharedWorkspace = (foreign) =>
  *
  * Returns `{ record, passed }`: `passed` the stacks holding the preferred block when `auto` had to move off it.
  */
-export async function claimStack({ lockRoot, trees, tree, app, spec, treeKey, isMain, basePorts, lock, agent = false, dryRun = false, fields = {}, say = () => {}, probe = isPortFree, waitMs = 180_000 }) {
+export async function claimStack({ lockRoot, trees, tree, app, spec, treeKey, isMain, basePorts, avoid = [], lock, agent = false, dryRun = false, fields = {}, say = () => {}, probe = isPortFree, waitMs = 180_000 }) {
   const base = Object.values(basePorts);
-  const { pinned, offsets } = offsetCandidates(spec, { key: treeKey, isMain: isMain && !agent, block: portBlock(base) });
+  const { pinned, offsets } = offsetCandidates(spec, { key: treeKey, isMain: isMain && !agent, block: portBlock(base), avoid });
   if (agent && pinned && offsets[0] === 0) {
     throw new ClaimError(
       "--port-offset=0 is refused: an AI agent never takes the project's base ports — they are forwarded to the developer's browser, " +

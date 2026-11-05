@@ -31,7 +31,7 @@ export function runningStacks() {
   }
   return rows
     .filter((row) => sameTree(row.tree) && row.ports?.[PORT_NAME])
-    .map((row) => ({ key: row.key, offset: row.offset, port: row.ports[PORT_NAME], state: row.state, starting: row.state === 'live' && !existsSync(join(row.stateDir, READY_MARKER)) }));
+    .map((row) => ({ key: row.key, offset: row.offset, port: row.ports[PORT_NAME], state: row.state, stateDir: row.stateDir, starting: row.state === 'live' && !existsSync(join(row.stateDir, READY_MARKER)) }));
 }
 
 const line = ({ key, port, state, starting }) => `  ${key}: port ${port}, ${starting ? 'starting' : state}`;

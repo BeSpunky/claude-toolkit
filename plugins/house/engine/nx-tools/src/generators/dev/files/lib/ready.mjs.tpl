@@ -10,11 +10,14 @@
 // kind a process uses says nothing about what it is: a port that accepts a connection is not always a server that is
 // ready (a database accepts them before its migrations ran), and a command can ask the real question.
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { get } from 'node:http';
 import { connect } from 'node:net';
 
 const ATTEMPT_MS = 2000;
 const POLL_MS = 150;
+/** How long a `holdWhile` can suspend the bound: a marker left behind, or a download that has stalled, is not waited on for ever. */
+const HOLD_CAP_MS = 3_600_000;
 
 /** The probe, in words — for whoever is told what is being waited on. */
 export function describeProbe(probe) {
@@ -90,9 +93,31 @@ export function probeOnce(probe, { cwd, env, signal } = {}) {
  * Ask until it says yes, the time runs out, or `signal` ends the wait. `{ ok, aborted, said }`; never throws. A command
  * that hangs is killed at the deadline, so a wait is bounded whatever the probe does.
  */
-export async function waitUntilReady(probe, { cwd, env, signal, timeoutMs }) {
+export async function waitUntilReady(probe, { cwd, env, signal, timeoutMs, holdCapMs = HOLD_CAP_MS }) {
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), timeoutMs);
+  let timer = setTimeout(() => deadline.abort(), timeoutMs);
+  // `holdWhile`: a file whose presence says the process is at work that has its own time, a first download. While it exists the bound
+  // does not run, and it starts whole when the file goes, since what it bounds has only then begun.
+  let heldSince;
+  let capped;
+  const watchHold = () => {
+    const held = existsSync(probe.holdWhile);
+    if (held && heldSince === undefined) {
+      heldSince = Date.now();
+      clearTimeout(timer);
+    } else if (held && Date.now() - heldSince >= holdCapMs) {
+      capped = `${probe.holdWhile} has held this for ${Math.round(holdCapMs / 1000)}s`;
+      deadline.abort();
+    } else if (!held && heldSince !== undefined) {
+      heldSince = undefined;
+      timer = setTimeout(() => deadline.abort(), timeoutMs);
+    }
+  };
+  let holdWatch;
+  if (probe.holdWhile) {
+    watchHold();
+    holdWatch = setInterval(watchHold, POLL_MS);
+  }
   const either = AbortSignal.any([deadline.signal, ...(signal ? [signal] : [])]);
   let said;
   try {
@@ -111,8 +136,9 @@ export async function waitUntilReady(probe, { cwd, env, signal, timeoutMs }) {
         either.addEventListener('abort', wake);
       });
     }
-    return { ok: false, aborted: Boolean(signal?.aborted), said };
+    return { ok: false, aborted: Boolean(signal?.aborted), said: capped ?? said };
   } finally {
     clearTimeout(timer);
+    clearInterval(holdWatch);
   }
 }

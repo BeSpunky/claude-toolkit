@@ -28,8 +28,9 @@ export function devcontainerFragments(
   tree: Tree,
   layers: readonly LayerDescriptor[],
 ): { id: LayerId; fragment: DevcontainerFragment }[] {
+  const active = new Set(layers.map((entry) => entry.id));
   return layers.flatMap(({ id, devcontainer }) =>
-    devcontainer ? [{ id, fragment: typeof devcontainer === 'function' ? devcontainer(tree) : devcontainer }] : [],
+    devcontainer ? [{ id, fragment: typeof devcontainer === 'function' ? devcontainer(tree, active) : devcontainer }] : [],
   );
 }
 

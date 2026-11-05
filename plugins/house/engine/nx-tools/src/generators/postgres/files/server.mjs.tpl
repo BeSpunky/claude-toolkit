@@ -64,7 +64,7 @@ function heldElsewhere(home) {
 }
 
 /** Refuse before anything of this cluster is touched, `postmaster.pid` above all. */
-function assertNotHeldElsewhere(home) {
+export function assertNotHeldElsewhere(home) {
   const held = heldElsewhere(home);
   if (!held) return;
   throw new Refusal(
@@ -74,7 +74,7 @@ function assertNotHeldElsewhere(home) {
 }
 
 /** Take the owner file and keep it fresh. `onLost` runs if another host takes it, as one will after this container was paused for too long. Returns how to let go. */
-function holdOwnership(home, onLost) {
+export function holdOwnership(home, onLost) {
   const file = ownerFile(home);
   writeFileSync(file, `${hostname()}\n`);
   const mine = () => {

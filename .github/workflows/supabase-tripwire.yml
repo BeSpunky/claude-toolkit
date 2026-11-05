@@ -1,0 +1,95 @@
+# The Supabase TRIPWIRE (tools/test-supabase/run.mjs): the provider on the REAL pinned CLI and its real native runtime, under the real
+# dev engine: start, the ledger, a reset, the keeper's signals, a real serve, the refusals. The layer rests on an alpha, pinned
+# exactly: this is what says the pin still does what the layer assumes, and what a move of the pin is judged by.
+#
+# Network-bound (the CLI, and 1.7 GB of the stack's artifacts, once per cache) and about four minutes of real stacks, so it is NOT on
+# every push and NOT in the pre-push hook: weekly, on demand, and whenever the code that depends on it, or the pin, changes. The launcher's
+# contract with the engine (`dev ps --json`, `avoidPorts`, the stop roads) is half of what it tests, so the engine's templates are on the list.
+#
+# IN A REAL JOB CONTAINER, on purpose. PID 1 there is GitHub's `tail -f /dev/null`, which reaps nothing, so a stack's daemon that exits
+# stays a zombie: whatever asks "is it gone" by /proc or kill -0 is answered yes for ever. That is how Landing 2 found its zombie bug,
+# and this stack DAEMONISES, so never add `--init` here. And the native runtime will not run as root, so the driver runs as the image's own
+# user, as a house container does. GitHub's steps stay root, as it expects.
+#
+# Nothing here logs in or reaches a hosted project.
+name: supabase tripwire
+
+on:
+  schedule:
+    - cron: '23 3 * * 1' # Mondays 03:23 UTC
+  workflow_dispatch:
+  push:
+    branches: [main, development]
+    paths:
+      - 'plugins/house/engine/nx-tools/src/generators/supabase/**'
+      - 'plugins/house/engine/nx-tools/src/generators/postgres/**'
+      - 'plugins/house/engine/nx-tools/src/layers/supabase.ts'
+      - 'plugins/house/engine/nx-tools/src/layers/postgres.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts' # the pinned CLI
+      - 'plugins/house/engine/nx-tools/src/generators/devcontainer/house.packages.sh.tpl' # the driver installs through it
+      - 'plugins/house/engine/nx-tools/src/generators/devcontainer/compose.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/dev/files/**'
+      - 'plugins/house/engine/compile-generators.mts'
+      - 'tools/test-support/payload.mjs'
+      - 'package.json'
+      - 'yarn.lock'
+      - 'tools/test-supabase/**'
+      - '.github/workflows/supabase-tripwire.yml'
+  pull_request:
+    paths:
+      - 'plugins/house/engine/nx-tools/src/generators/supabase/**'
+      - 'plugins/house/engine/nx-tools/src/generators/postgres/**'
+      - 'plugins/house/engine/nx-tools/src/layers/supabase.ts'
+      - 'plugins/house/engine/nx-tools/src/layers/postgres.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/devcontainer/house.packages.sh.tpl'
+      - 'plugins/house/engine/nx-tools/src/generators/devcontainer/compose.ts'
+      - 'plugins/house/engine/nx-tools/src/generators/dev/files/**'
+      - 'plugins/house/engine/compile-generators.mts'
+      - 'tools/test-support/payload.mjs'
+      - 'package.json'
+      - 'yarn.lock'
+      - 'tools/test-supabase/**'
+      - '.github/workflows/supabase-tripwire.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-tripwire-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tripwire:
+    if: github.repository == 'BeSpunky/claude-toolkit'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/devcontainers/typescript-node:24
+      options: --user root
+    timeout-minutes: 30
+    env:
+      SUPABASE_TOOLS_CACHE: /var/cache/bespunky-supabase-tools
+    steps:
+      - uses: actions/checkout@v5
+      # The CLI installs into a directory named by its version, and the artifacts by their digests, so what the key adds is only when to look
+      # again. The installer is in it because this job triggers on it: a cache hit skips the install, and would stay green over a break.
+      # Never on the schedule: the weekly run boots cold, because a cold start is what a consumer gets, and 1.7 GB of artifacts is what can go away.
+      - uses: actions/cache@v4
+        if: github.event_name != 'schedule'
+        with:
+          path: /var/cache/bespunky-supabase-tools
+          key: supabase-tools-${{ hashFiles('plugins/house/engine/nx-tools/src/generators/_utils/versions.ts', 'plugins/house/engine/nx-tools/src/generators/supabase/seed/supabase.lock.tpl', 'plugins/house/engine/nx-tools/src/generators/devcontainer/house.packages.sh.tpl', 'plugins/house/engine/nx-tools/src/generators/devcontainer/compose.ts', 'tools/test-supabase/tools.mjs') }}
+      # What the layer's fragment asks of the image. The driver's installer stubs apt-get, so these come from here, the real way.
+      - name: The OS packages the layer brings
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends procps tar postgresql-client
+      - name: Hand the tree and the cache to the image's user
+        run: |
+          mkdir -p "$SUPABASE_TOOLS_CACHE"
+          chown -R node:node . "$SUPABASE_TOOLS_CACHE"
+      # The driver compiles the payload to read the fragment, and that needs the repo's own dependencies.
+      - name: Install the repo's dependencies
+        run: runuser -u node -- env HOME=/home/node yarn install --frozen-lockfile
+      - name: Check the provider against the pinned CLI and its native runtime
+        run: runuser -u node -- env HOME=/home/node node tools/test-supabase/run.mjs

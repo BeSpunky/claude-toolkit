@@ -151,9 +151,10 @@ export interface LayerDescriptor {
   /**
    * This layer's devcontainer fragment — composed by the `devcontainer` generator. See `DevcontainerFragment`.
    * DATA, or a pure function of the workspace when part of it is a fact about the project (the emulator ports in
-   * firebase.json) rather than about the layer.
+   * firebase.json) rather than about the layer. `active` is the layer set being composed, when the caller knows it: a run
+   * knows what it is about to ENSURE before the tree reflects it, so a fragment that depends on another layer reads it there.
    */
-  devcontainer?: DevcontainerFragment | ((tree: Tree) => DevcontainerFragment);
+  devcontainer?: DevcontainerFragment | ((tree: Tree, active?: ReadonlySet<LayerId>) => DevcontainerFragment);
   /**
    * The HOUSE.md / HOUSE.rules.md / CLAUDE.md section flags this layer switches on (`{{#flag}}…{{/flag}}` in the
    * house-doc templates). Usually the layer's own id; a layer may also switch on a shared section (`ui`).

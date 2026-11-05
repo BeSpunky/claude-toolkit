@@ -112,3 +112,26 @@ Deliberately not first: a supabase-js client port, cloud setup automation, mixed
 ## Note, 2026-11-04: evidence is a tag (amends *The shape*)
 
 *The shape* above says evidence is `postgres/project.json`. The Landing 2 review reproduced that misreading both ways: a library named `postgres` took the verbs while the layer read as absent, and a project of the repo's own at `postgres/` made a plain upgrade start wearing the layer. Decided at the review's list (D3): evidence is the tag `type:postgres`, as `design-system` does; the project is resolved by that tag, and something else holding the name or the folder is refused with the way out. The text above stands as what was proposed.
+
+---
+
+## Note, 2026-11-04: what the real CLI changed, building `supabase` (amends 6b and 7)
+
+Found running the pinned CLI 3.0.0 under the real dev engine (`tools/test-supabase/run.mjs`). The text above stands as what was proposed.
+
+- **Offset blocks stay out of 10000-32767, not 20000-32767.** The native runtime also refuses a public port in 10000-19999: `Public port 15432 … is inside 10000-19999, which is reserved for native service backends`. The spike's block was 41000, so it never met this. Blocks therefore mostly sit above 32767, in Linux's ephemeral range; `auto` probes every port and a clash is loud. Accepted by the orchestrator.
+- **Identity on Supabase is `data_directory`, not `system_identifier`.** Every `db reset` changes the identifier, a hand's reset included, so a recorded value would refuse a healthy stack. A verb checks that the CLI answers on this stack's port, and that the server keeps its data inside this stack's directory.
+- **"After every start, check the ledger; reset if absent" is narrowed.** A project with no migrations has no ledger at all, and one writing its first migration has rows to keep, so read literally the rule resets every start. A stack is rebuilt only with migrations present, no ledger AND no table in `public`, which is what an interrupted reset leaves.
+
+---
+
+## Note, 2026-11-05: a start never resets, and a download has its own time (amends 6b and 7)
+
+From the Landing 3 review, decided by the orchestrator. The text above stands as what was proposed.
+
+- **"After every start, check the ledger; reset if absent" is replaced.** A real stack lost its rows to that rule when a first migration arrived (`app.*`, `auth.users`). A start now applies forward, by the CLI's non-destructive `db push --include-seed --yes` (`--include-seed` only with `[db.seed]` enabled, since it overrides that; vault included, because a key added later may be what a migration reads) (observed on 3.0.0: `migration up` is local by default, has no `--local`, and never seeds; this road also runs each seed file its `seed_files` table lacks, which a first start and a reset also record, so nothing is seeded twice). A half-built database is repaired by that if it can be. What it cannot apply is a refusal with the error and the exact `postgres:reset`; only that verb destroys. On a new connection, a stack with migrations must then have its ledger. An edited seed file does not run again until a reset: the CLI records its new hash, and says so.
+- **A running reset is the stack's detached work,** in the engine's existing contract, naming the CLI's own pid: `dev stop` of a stack whose claimer was killed waits for it. No engine change for this.
+- **A cold download is its own step,** `supabase stack install --runtime native`: observed on 3.0.0, 40 s cold, under 1 s warm, resumes after a kill, leaves the lock alone. It runs outside the ready bound, by a `holdWhile` a declaration may give a dependency's `ready` when it is a `cmd`: the bound starts whole when the file goes, and the hold is capped at an hour. Additive to the engine, and nothing else declares it.
+- **A stop has a deadline,** `DEV_STOP_TIMEOUT`, ending this keeper's CLI call and its session; never a reset, which is another process's.
+- **Major 17 only.** Nothing is advertised that never ran.
+- **A linked project does not change where a start goes.** Observed on 3.0.0, by the log and strace, and held by a tripwire: linked, with `SUPABASE_DB_PASSWORD` and a token set, `db push` is local unless told `--remote`.

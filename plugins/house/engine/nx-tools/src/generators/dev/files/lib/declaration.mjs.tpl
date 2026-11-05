@@ -13,6 +13,7 @@
 //           "ports": { "app": 8000 },                       // name → BASE port; every port shifts by one offset
 //           "env": { "KEY": "value" },                      // optional; values substitute like cmd
 //           "exports": { "KEY": "127.0.0.1:${PORT:app}" },  // optional; what a DEPENDENT of the stack is told (below)
+//           "avoidPorts": ["20000-32767"],                  // optional; no port of the stack may land there, at any offset
 //           "primary": true,                                // optional; the process the app URL points at
 //           "dependency": true,                             // optional; the stack waits for it (below)
 //           "ready": { "http": "/" },                       // what "up" means: for the primary (optional) or a dependency (required)
@@ -58,13 +59,17 @@
 //                { "cmd": "<shell>" }        the command exits 0, in the process's environment; substitutes like cmd
 //              and, on a dependency, "timeout": <seconds> (default 120), past which the stack fails, naming it. A port
 //              accepting a connection is not always ready: a launcher that migrates and seeds has `cmd` ask for the
-//              marker it writes last, in ${STACK_DIR} (which dies with the stack, so it cannot go stale).
+//              marker it writes last, in ${STACK_DIR} (which dies with the stack, so it cannot go stale). A `cmd` may add
+//              "holdWhile": <a path>: while that file exists, its timeout does not run, for at most an hour, and it starts
+//              whole when the file goes (a first download has its own time).
 //
 // url[].when    always | offset (stack shifted) | running (this process runs) | skipped (--skip'ed)
 // advice[].when always | base (stack on its base ports) | offset | contended (base ports owned elsewhere) — a
 //               --skip'ed process's advice is never given
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { parsePortRange } from './ports.mjs';
 
 export const DECLARATION_PATH = '.bespunky/dev.json';
 
@@ -95,12 +100,13 @@ function validateReady(p, pat) {
   }
   if (!isObject(p.ready)) fail(at, 'must be { "http": "<path>" }, { "tcp": "<port name>" } or { "cmd": "<shell>" }');
   const kinds = READY_KINDS.filter((kind) => p.ready[kind] !== undefined);
-  const stray = Object.keys(p.ready).filter((key) => !READY_KINDS.includes(key) && key !== 'timeout');
+  const stray = Object.keys(p.ready).filter((key) => !READY_KINDS.includes(key) && key !== 'timeout' && key !== 'holdWhile');
   if (kinds.length !== 1 || stray.length) fail(at, `must name exactly one of ${READY_KINDS.join(', ')}${stray.length ? ` (unknown: ${stray.join(', ')})` : ''}`);
   const value = p.ready[kinds[0]];
   if (typeof value !== 'string' || (kinds[0] !== 'http' && value.trim() === '')) fail(`${at}.${kinds[0]}`, 'must be a string');
   if (kinds[0] === 'tcp' && p.ports?.[value] === undefined) fail(`${at}.tcp`, `"${value}" is not a port this process declares (has: ${Object.keys(p.ports ?? {}).join(', ') || 'none'})`);
   if (kinds[0] === 'http' && p.dependency && !Object.keys(p.ports ?? {}).length) fail(`${at}.http`, 'this process declares no port to ask');
+  if (p.ready.holdWhile !== undefined && (!p.dependency || kinds[0] !== 'cmd' || typeof p.ready.holdWhile !== 'string')) fail(`${at}.holdWhile`, 'a path, on a dependency whose ready is a cmd: while that file exists its timeout does not run');
   if (p.ready.timeout !== undefined) {
     if (!p.dependency) fail(`${at}.timeout`, 'only a dependency is waited for, so only a dependency has a timeout');
     if (typeof p.ready.timeout !== 'number' || !(p.ready.timeout > 0)) fail(`${at}.timeout`, 'must be a positive number of seconds');
@@ -153,6 +159,7 @@ export function validate(decl) {
       for (const field of ['env', 'exports']) {
         if (p[field] !== undefined && (!isObject(p[field]) || !Object.values(p[field]).every((v) => typeof v === 'string'))) fail(`${pat}.${field}`, 'must map names to strings');
       }
+      if (p.avoidPorts !== undefined && (!Array.isArray(p.avoidPorts) || !p.avoidPorts.every((range) => parsePortRange(range)))) fail(`${pat}.avoidPorts`, 'must list port ranges, "<low>-<high>"');
       if (p.primary !== undefined && typeof p.primary !== 'boolean') fail(`${pat}.primary`, 'must be a boolean');
       if (p.primary) {
         primaries++;
@@ -324,7 +331,7 @@ export function planApp(decl, appName, { offset, tree, skip = [], passthrough = 
     if (!p.dependency && p.id !== primary.id) return null; // nothing asks: only the primary and a dependency are waited on
     const ready = p.ready ?? { http: '/' };
     if (ready.tcp !== undefined) return { tcp: p.ports[ready.tcp] + offset };
-    if (ready.cmd !== undefined) return { cmd: subst(ready.cmd, `${where}.ready`) };
+    if (ready.cmd !== undefined) return { cmd: subst(ready.cmd, `${where}.ready`), ...(ready.holdWhile === undefined ? {} : { holdWhile: subst(ready.holdWhile, `${where}.ready`) }) };
     const path = subst(ready.http, `${where}.ready`);
     return { http: `http://127.0.0.1:${Object.values(p.ports)[0] + offset}${path.startsWith('/') ? '' : '/'}${path}` };
   };

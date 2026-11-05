@@ -1145,6 +1145,31 @@ check('no layer declares a floating devcontainer feature: a bare id is `latest` 
   }
 });
 
+checkAsync('supabase: the CLI in the image by exact pin; its state in the persisted ~/.local by a literal path; no server of Debian\'s; docs honest', async (ok) => {
+  const { SUPABASE_CLI_DOWNLOADS, SUPABASE_CLI_VERSION } = require_(join(BUILD, 'src/generators/_utils/versions'));
+  const tree = wrapperRepo();
+  const a = await artifacts(tree, ['nx', 'agent', 'postgres', 'supabase']);
+  const home = `/home/${a.dc.remoteUser ?? 'vscode'}`;
+  for (const [arch, { url, sha256 }] of Object.entries(SUPABASE_CLI_DOWNLOADS)) ok(a.osScript.includes(`supabase ${SUPABASE_CLI_VERSION} ${arch} ${sha256} ${url} .`), `the installer lacks the CLI's ${arch} line`);
+  ok(!a.osScript.includes('dbmate') && !a.osScript.includes('postgresql-18'), 'the Debian server or dbmate is still installed: with this layer they serve nothing');
+  ok(/postgresql-client/.test(a.osScript) && /\bprocps\b/.test(a.osScript), 'psql or /bin/ps is missing');
+  // Where the state is, found by running the CLI (layers/supabase.ts): SUPABASE_HOME holds the login, the cache and the stacks.
+  ok(a.dc.containerEnv?.SUPABASE_HOME === `${home}/.local/share/supabase`, `the login and the stacks would not survive a rebuild: ${a.dc.containerEnv?.SUPABASE_HOME}`);
+  ok(a.dc.containerEnv?.SUPABASE_NO_KEYRING === '1', 'without it, `logout` fails on a container with no keyring');
+  ok(a.dc.containerEnv?.DO_NOT_TRACK === '1', 'the CLI sends telemetry by default');
+  ok(a.dc.mounts.some((m) => m.includes(`target=${home}/.local,type=volume`)), '~/.local is not a persisted volume');
+  const without = await artifacts(wrapperRepo(), ['nx', 'agent', 'postgres']);
+  ok(a.dc.mounts.length === without.dc.mounts.length, 'the layer added a mount: its state belongs in a persisted XDG home');
+  ok(a.dc.portsAttributes?.['__supabase_stack_host__']?.onAutoForward === 'ignore', 'a stack\'s ports are left to auto-forward: its superuser password is well known');
+  ok(!/postgres(ql)?:\/\//.test(a.dcText), 'a database URL in devcontainer.json is inherited by every process, and committed');
+  ok(a.house.includes('## Supabase') && a.house.includes('ALPHA') && a.house.includes('accepted gap') && a.house.includes('local only'), 'the house docs do not say what the layer is');
+  ok(!a.house.includes('postgres/migrations/<14 digits>') && a.house.includes('supabase/migrations/<digits>') && !a.house.includes('.bespunky/postgres.json`** ('), 'the docs still describe the native provider');
+  ok(a.rules.includes('only the launcher starts and stops the stack'), 'the rules do not say who starts the stack');
+  ok(a.house.includes('postgres:gen-types') && a.house.includes('postgres:new-function') && a.house.includes('postgres:secrets-set') && a.house.includes('Function not found'), 'the docs do not name the verbs, or the /tmp limit');
+  ok(!without.house.includes('postgres:gen-types'), 'a native project reads about verbs it has not got');
+  ok(!without.house.includes('## Supabase') && !without.rules.includes('only the launcher starts') && without.house.includes('postgres/migrations/<14 digits>'), 'a project on the native provider reads about Supabase');
+  ok(!JSON.stringify(a.settings).includes('supabase@'), 'the official plugin connects to the hosted MCP with write access: not enabled by this layer');
+});
 checkAsync('persistence: an archive tool needs no mount, and no layer mounts over where it is installed', async (ok) => {
   const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
   const fragmentOf = (entry, tree) => (typeof entry.devcontainer === 'function' ? entry.devcontainer(tree) : entry.devcontainer);
@@ -1209,6 +1234,19 @@ checkAsync('postgres closures: the table covers the pins, is exactly what its to
     unreadable = true;
   }
   ok(unreadable, 'a pin the check cannot read is an error, never an empty list');
+  // The Supabase CLI's upstream check, offline: only a broken pin can fail it, and what it reads must not read as fine when it is not there.
+  const supabaseCheck = await import('../supabase-cli/check.mjs');
+  const cliPins = pinnedDownloads(readFileSync(join(PAYLOAD, 'src/generators/_utils/versions.ts'), 'utf8'), 'SUPABASE_CLI');
+  ok(cliPins.version === versions.SUPABASE_CLI_VERSION, 'the check reads the CLI version the payload pins');
+  ok(JSON.stringify(Object.fromEntries(cliPins.pins.map(({ arch, url, sha256 }) => [arch, { url, sha256 }]))) === JSON.stringify(versions.SUPABASE_CLI_DOWNLOADS), 'the check reads every CLI download the payload pins, as the payload computes it');
+  ok(supabaseCheck.nativeStage('x,"slug":"native-local-runtime","status":{"stage":"Public Alpha","availableOnSelfHosted":true}') === 'Public Alpha', 'the stage, from the page\'s data');
+  ok(supabaseCheck.nativeStage('<div>Stage:</div>  <b>Public Alpha</b>  <div>Available</div>') === 'Public Alpha', 'the stage, from the page\'s words');
+  ok(supabaseCheck.nativeStage('<html>nothing about it</html>') === undefined, 'a page that no longer says is unread, never a stage');
+  ok(supabaseCheck.notices({ pin: '3.0.0', latest: '3.0.0', stage: 'Public Alpha' }).length === 0, 'nothing new: nothing said');
+  ok(/3\.1\.0 is out/.test(supabaseCheck.notices({ pin: '3.0.0', latest: '3.1.0', stage: 'Public Alpha' }).join()), 'a newer release is said');
+  ok(supabaseCheck.notices({ pin: '3.1.0', latest: '3.0.0', stage: 'Public Alpha' }).length === 0, 'an older `latest` is no news');
+  ok(/now "General Availability"/.test(supabaseCheck.notices({ pin: '3.0.0', latest: '3.0.0', stage: 'General Availability' }).join()), 'leaving alpha is said');
+  ok(supabaseCheck.notices({ pin: '3.0.0' }).length === 2, 'what could not be read is said, each');
   ok(Object.keys(POSTGRES_CLOSURES).sort().join() === [...versions.POSTGRES_MAJORS].sort().join(), `the table's majors are not the pins: ${Object.keys(POSTGRES_CLOSURES)} (node tools/postgres-debs/project.mjs --write)`);
   // The image job's table is hand-written, and its header says it covers every major on every release.
   const imageCases = readFileSync(new URL('../check-runner-image/postgres-image.sh', import.meta.url), 'utf8').match(/^pg\d+-[^|]*\|[^|]*\|[^|]*\|\d+\|[^|]*\|\w+$/gm) ?? [];
@@ -1216,6 +1254,9 @@ checkAsync('postgres closures: the table covers the pins, is exactly what its to
   for (const major of versions.POSTGRES_MAJORS) {
     for (const codename of versions.POSTGRES_DEB_CODENAMES) ok(imageCovers.has(`${major}/${codename}`), `tools/check-runner-image/postgres-image.sh has no case for Postgres ${major} on ${codename}`);
   }
+  // Likewise the Supabase job's: every release the house composes, and a launcher boot on each that has a Node of its own.
+  const supabaseCases = readFileSync(new URL('../check-runner-image/supabase-image.sh', import.meta.url), 'utf8').match(/^sb-[^|]*\|[^|]*\|[^|]*\|[^|]*\|\w+$/gm) ?? [];
+  for (const codename of versions.POSTGRES_DEB_CODENAMES) ok(supabaseCases.some((line) => { const fields = line.split('|'); return fields[4] === codename && fields[1] === 'node'; }), `tools/check-runner-image/supabase-image.sh has no case booting on ${codename}`);
   for (const major of versions.POSTGRES_MAJORS) {
     const closures = POSTGRES_CLOSURES[major] ?? {};
     ok(Object.keys(closures).join() === versions.POSTGRES_DEB_CODENAMES.join(), `Postgres ${major}'s codenames are not the pins: ${Object.keys(closures)}`);

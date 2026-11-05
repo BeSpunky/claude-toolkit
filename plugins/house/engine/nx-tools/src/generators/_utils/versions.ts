@@ -88,6 +88,27 @@ export const DBMATE_DOWNLOADS = {
   },
 } as const;
 
+/**
+ * The Supabase CLI, in the IMAGE, for the `supabase` layer: one standalone binary (no Node needed), so a repo wearing the layer may
+ * have no node_modules. Its local stack runs on the ALPHA native runtime, so this moves only together with
+ * `node tools/test-supabase/run.mjs`, and with `generators/supabase/seed/`, which that run compares against the real CLI. The
+ * sha256s are the release's own `checksums.txt`, checked against the downloaded amd64 file (2026-11-04). Moving it owes a rung:
+ * a project's `supabase.lock` belongs to it, and is `stack update`d by the project.
+ */
+export const SUPABASE_CLI_VERSION = '3.0.0';
+export const SUPABASE_CLI_DOWNLOADS = {
+  amd64: {
+    url: `https://github.com/supabase/cli/releases/download/v${SUPABASE_CLI_VERSION}/supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz`,
+    sha256: 'eeb61edcd59a4735fcb5e58596574f25d03d420efca779f43ddb307e1cc5c754',
+  },
+  arm64: {
+    url: `https://github.com/supabase/cli/releases/download/v${SUPABASE_CLI_VERSION}/supabase_${SUPABASE_CLI_VERSION}_linux_arm64.tar.gz`,
+    sha256: '243474fb5b491a0df04682fc1941cc5519559a1178ae01c225c633eda2e8acb8',
+  },
+} as const;
+/** The majors the stack backend runs: `[db] major_version` of supabase/config.toml says which. Its default, and what a seeded config says, is the last. */
+export const SUPABASE_MAJORS = ['17'] as const;
+
 /** The Cloud Functions runtime SDKs — the workspace root AND the deploy manifest (functions/package.json) read these. */
 export const FIREBASE_ADMIN_VERSION = '^13.6.0';
 export const FIREBASE_FUNCTIONS_VERSION = '^7.0.0';
