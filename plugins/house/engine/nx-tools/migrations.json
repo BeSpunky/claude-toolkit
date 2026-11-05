@@ -335,6 +335,12 @@
       "layer": "agent",
       "description": "The node devcontainer feature moves from its major tag to an exact one: `node:1` moves within v1 with no commit behind it, and the generator leaves a feature declared under any tag alone. Where the house wrote the key, or it is `{}` whoever wrote it, the key is renamed with its value and comment kept, the lock pin set to the digest of 1.7.1, the adoption record moved. A key carrying a project's own options is reported.",
       "implementation": "./src/migrations/0.52.0/pin-node-feature"
+    },
+    "project-id-from-identity": {
+      "version": "0.54.3",
+      "layer": "supabase",
+      "description": "A seeded Supabase `project_id` of `source`, under create-nx-workspace's `@<workspace>/source` package name, becomes the workspace's identity: 0.54.2 named every node-host project `source`, and config.toml is seeded once. An id anyone chose stays. A stack's data is not keyed by it.",
+      "implementation": "./src/migrations/0.54.3/project-id-from-identity"
     }
   }
 }

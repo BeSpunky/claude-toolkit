@@ -13,7 +13,7 @@
 // second run: a mention of the old path after that is a project's own, and stays.
 import { type Tree, formatFiles, logger, readProjectConfiguration, updateProjectConfiguration, visitNotIgnoredFiles } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
 import { postgresHome } from '../postgres/home';
 import { LAUNCHER_ROOT } from '../postgres/generator';
@@ -21,6 +21,7 @@ import { POSTGRES_DECLARATION } from '../postgres/major';
 import { MIGRATIONS_OF, SUPABASE_TAG } from '../postgres/provider';
 import { readDeclaration } from '../dev/declaration';
 import { SUPABASE_CLI_VERSION } from '../_utils/versions';
+import { workspaceIdentity } from '../_utils/workspace-identity';
 import { mergeServedApps } from './dev-merge';
 import { envFilesRefused } from './env-doors';
 import { refuseWhatCannotMove } from './preflight';
@@ -36,17 +37,8 @@ const SUPABASE_DECLARATION = '.bespunky/supabase.json';
 
 const seed = (name: string) => readFileSync(join(__dirname, 'seed', `${name}.tpl`), 'utf8');
 
-/** A config.toml's `project_id`: the CLI takes any string, and names things after it. A repo with no package.json is named by its folder. */
-const projectId = (tree: Tree): string => {
-  const safe = (name: string): string => name.replace(/^@[^/]+\//, '').replace(/[^\w.-]/g, '-');
-  try {
-    const declared = (JSON.parse(tree.read('package.json', 'utf8') ?? '{}') as { name?: string }).name;
-    if (declared) return safe(declared);
-  } catch {
-    // not a name, then
-  }
-  return safe(basename(tree.root)) || 'app';
-};
+/** A config.toml's `project_id`: who this project is. The CLI takes any string and names things after it, and the file is committed. */
+const projectId = (tree: Tree): string => workspaceIdentity(tree).replace(/[^\w.-]/g, '-') || 'app';
 
 const migrationFilesIn = (tree: Tree, dir: string): string[] => (tree.exists(dir) ? tree.children(dir).filter((name) => tree.isFile(`${dir}/${name}`)) : []);
 

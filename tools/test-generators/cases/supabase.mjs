@@ -1,7 +1,7 @@
 // THE SUPABASE LAYER'S GENERATOR: a provider on the postgres core, the folder move on the run that chooses it, config.toml's owned
 // keys by line, and what must stay the project's. The real CLI is tools/test-supabase.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { REPO, requireFromRepo } from '../../test-support/payload.mjs';
 import { MATRIX, workspace } from '../workspaces.mjs';
 
@@ -161,6 +161,19 @@ export default {
         t.ok(JSON.parse(tree.read('.bespunky/supabase.json', 'utf8')).types.lang === 'python', 'the declaration stays');
         t.ok(tree.read('supabase/functions/mine/index.ts', 'utf8') === '// mine\n', 'the function stays');
         t.ok(tree.read('supabase/.gitignore', 'utf8') === 'mine\n\n# A function\'s local secrets\nfunctions/.env\n', tree.read('supabase/.gitignore', 'utf8'));
+      },
+    },
+    {
+      name: 'the project id is the workspace\'s identity, not create-nx-workspace\'s `@<name>/source`',
+      setup: () => {
+        const tree = wearingAgent();
+        tree.write('package.json', JSON.stringify({ name: '@visi/source' }));
+        return tree;
+      },
+      run: ensureBoth,
+      expect: (tree, t) => {
+        const id = /^project_id = "(.*)"$/m.exec(tree.read('supabase/config.toml', 'utf8'))?.[1];
+        t.ok(id && id !== 'source' && id === basename(tree.root).replace(/[^\w.-]/g, '-'), `named: ${id}`);
       },
     },
     {
