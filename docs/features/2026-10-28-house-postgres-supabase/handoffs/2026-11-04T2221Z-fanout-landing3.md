@@ -20,7 +20,7 @@ Budget 12 (default): core 1+2, wire 1, reviewer 1+5, correctness pass 1 = 11, re
 | wire | tripwire, dogfood, image job, docs; feat/hps3-wire | yes | returned |
 | docs | with wire | yes | returned |
 | review | sanity review | yes | returned |
-| gate | push + PR green, upgrade --local, dogfood, rebuild, real hosted project | yes | pending |
+| gate | push + PR green, upgrade --local, dogfood, rebuild, real hosted project | yes | dispatched |
 
 ## Results
 
@@ -50,3 +50,6 @@ Fixes committed. Worst: a normal start silently wiped real data when a first mig
 ### review decisions applied
 All eight, then amended on the reviewer's doubt: with no ledger a start applies forward by `db push --include-seed --skip-vault --yes` on the local stack; a conflict refuses with the error and reset command, data intact. Only `postgres:reset` destroys. An edited seed does not rerun until a reset. New additive engine key `ready.holdWhile`, declared only by this layer. Supabase 137; generators 462, 35 skipped; layers 113; migrations 417.
 Next: correctness pass, last of this landing's reviewers. Budget: core, wire, reviewer + 5, this = 9 of 12.
+
+### correctness pass (returned)
+Linked project cleared: CLI 3.0.0 is local by default, by the log and strace, with link and hosted credentials set; a tripwire scenario now locks it. Eight findings fixed by the reviewer with tests: seeds ran with seeding disabled; postgres:seed recorded nothing; the ready bound did not rearm after a download; failure reasons printed nothing; vault; a project on 15; a stop reported as a migration failure; holdWhile on http or tcp. Supabase 156; generators 462, 35 skipped.

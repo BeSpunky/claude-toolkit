@@ -101,6 +101,19 @@ try {
     write(held, '');
     setTimeout(() => write(at(dir, 'up'), ''), 500);
     ok('holdWhile: a probe that answers meanwhile is answered', (await waitUntilReady({ cmd: `test -f ${at(dir, 'up')}`, holdWhile: held }, { timeoutMs: 100 })).ok === true);
+    // A download of 0.9 s, a boot of 0.3 s, a bound of 0.5 s: the bound has to start when the boot does.
+    rm(at(dir, 'up'));
+    setTimeout(() => rm(held), 900);
+    setTimeout(() => write(at(dir, 'up'), ''), 1200);
+    ok('holdWhile: the bound starts whole when the file goes', (await waitUntilReady({ cmd: `test -f ${at(dir, 'up')}`, holdWhile: held }, { timeoutMs: 500 })).ok === true);
+    rm(at(dir, 'up'));
+    setTimeout(() => write(held, ''), 100);
+    setTimeout(() => rm(held), 700);
+    setTimeout(() => write(at(dir, 'up'), ''), 900);
+    ok('holdWhile: a file that appears after the wait began holds it too', (await waitUntilReady({ cmd: `test -f ${at(dir, 'up')}`, holdWhile: held }, { timeoutMs: 400 })).ok === true);
+    write(held, '');
+    const stuck = await waitUntilReady({ cmd: 'false', holdWhile: held }, { timeoutMs: 100, holdCapMs: 400 });
+    ok('holdWhile: a marker left behind is capped, and says so', stuck.ok === false && /has held this/.test(stuck.said ?? ''));
     rm(dir, { recursive: true, force: true });
   }
   const astride = { key: 'k', isMain: true, block: portBlock([3000, 40000]), avoid: [parsePortRange('10000-32767')] };
@@ -674,6 +687,9 @@ process.on('SIGTERM', () => { server.close(); process.exit(0); });
     await refused('dependency is not a boolean', web, { ...db, dependency: 'yes' });
     await refused('a dependency with no readiness', web, { ...db, ready: undefined });
     await refused('ready with no kind', web, { ...db, ready: { timeout: 5 } });
+    await refused('holdWhile on tcp, where nothing would honour it', web, { ...db, ready: { tcp: 'db', holdWhile: '/x' } });
+    await refused('holdWhile on http, where nothing would honour it', web, { ...db, ready: { http: '/', holdWhile: '/x' } });
+    await refused('holdWhile on what is not a dependency', { ...web, ready: { cmd: 'true', holdWhile: '/x' } });
     await refused('ready with two kinds', web, { ...db, ready: { tcp: 'db', cmd: 'true' } });
     await refused('ready with an unknown key (a mistyped timeout must not silently mean the default)', web, { ...db, ready: { tcp: 'db', timout: 5 } });
     await refused('ready is not an object', web, { ...db, ready: 'db' });

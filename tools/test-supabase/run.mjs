@@ -107,11 +107,11 @@ const stackIdOf = (dir) => JSON.parse(sb(dir, ['status', '--output-format', 'jso
 
 const running = [];
 /** A keeper in a session of its own, waiting for its ready mark or its end. */
-async function start(dir, { offset, timeoutMs = 300_000 } = {}) {
+async function start(dir, { offset, timeoutMs = 300_000, env = {} } = {}) {
   const chosen = offset ?? (await freeOffset());
   const log = join(scratch, `start-${fixtures}-${chosen}.log`);
   writeFileSync(log, '');
-  const child = spawn(process.execPath, ['tools/postgres/postgres.mjs', 'start', `--port-offset=${chosen}`], { cwd: dir, env: baseEnv(), detached: true, stdio: ['ignore', openSync(log, 'a'), openSync(log, 'a')] });
+  const child = spawn(process.execPath, ['tools/postgres/postgres.mjs', 'start', `--port-offset=${chosen}`], { cwd: dir, env: { ...baseEnv(), ...env }, detached: true, stdio: ['ignore', openSync(log, 'a'), openSync(log, 'a')] });
   const handle = { dir, child, offset: chosen, log, exit: new Promise((done) => child.on('exit', (code, signal) => done({ code, signal }))) };
   running.push(handle);
   const deadline = Date.now() + timeoutMs;
@@ -338,6 +338,112 @@ scenario('an empty stack gets its first migration and seed after a restart, seed
   const reborn = await start(seededAtBirth, { offset: stack.offset });
   check(!reborn.failed && inBorn() === 1, `a restart does not seed what the first start did: ${JSON.stringify(reborn.failed)}`);
   await stop(reborn);
+});
+
+scenario('what a start does with seeds and vault: enabled = false is honoured, postgres:seed is recorded, a vault key added later reaches a migration', async () => {
+  const dir = fixture({ migrations: false });
+  const stack = await start(dir);
+  check(!stack.failed, `started empty: ${JSON.stringify(stack.failed)}`);
+  await stop(stack);
+  writeFileSync(join(dir, 'supabase/migrations/20260101000000_base.sql'), 'create table public.keyed(k int primary key);\n');
+  const off = readFileSync(join(dir, 'supabase/config.toml'), 'utf8');
+  check(/\[db\.seed\]\n[^[]*?enabled = true/.test(off), 'the seeded config has [db.seed] enabled');
+  writeFileSync(join(dir, 'supabase/config.toml'), off.replace(/(\[db\.seed\]\n[^[]*?)enabled = true/, '$1enabled = false'));
+  writeFileSync(join(dir, 'postgres/seed/world/01.sql'), 'insert into public.keyed values (1);\n');
+  const quiet = await start(dir, { offset: stack.offset });
+  check(!quiet.failed, `started: ${JSON.stringify(quiet.failed)}`);
+  const count = () => rows(dir, 'select count(*)::int n from public.keyed')[0].n;
+  check(count() === 0, 'with seeds off, a start seeds nothing');
+  await stop(quiet);
+  writeFileSync(join(dir, 'supabase/config.toml'), off);
+
+  // The verb runs them while a stack is up; a key in them must not then fail the next start.
+  const up = await start(dir, { offset: stack.offset });
+  check(!up.failed, `started: ${JSON.stringify(up.failed)}`);
+  check(count() === 1, 'seeds on: applied');
+  sb(dir, ['db', 'query', 'delete from public.keyed']);
+  sb(dir, ['db', 'query', 'delete from supabase_migrations.seed_files']);
+  const seeded = launcher(dir, 'seed');
+  check(seeded.status === 0 && count() === 1, `postgres:seed: ${seeded.stderr}`);
+  await stop(up);
+  const after = await start(dir, { offset: stack.offset });
+  check(!after.failed && count() === 1, `the next start does not run them again, and does not fail on the key: ${JSON.stringify(after.failed)}`);
+
+  // A key added since the first start, read by the next migration.
+  await stop(after);
+  writeFileSync(join(dir, 'supabase/config.toml'), `${off}\n[db.vault]\nlater_key = "later"\n`);
+  writeFileSync(join(dir, 'supabase/migrations/20260102000000_reads_vault.sql'), "create table public.from_vault as select decrypted_secret v from vault.decrypted_secrets where name = 'later_key';\n");
+  const vaulted = await start(dir, { offset: stack.offset });
+  check(!vaulted.failed, `started: ${JSON.stringify(vaulted.failed)}`);
+  check(rows(dir, 'select v from public.from_vault')[0]?.v === 'later', 'the vault key was there for the migration');
+  await stop(vaulted);
+});
+
+scenario('a linked project: a plain start stays local, whatever is set, and a fake API hears nothing. If a future CLI changes that default, this goes red', async () => {
+  const dir = fixture();
+  const REF = 'abcdefghijklmnopqrst';
+  // In a process of its own: this driver's sync calls block its event loop, and a server here would never answer them.
+  const heard = join(scratch, 'linked-heard');
+  const portFile = join(scratch, 'linked-port');
+  writeFileSync(heard, '');
+  const fake = spawn(process.execPath, ['-e', `
+    const { createServer } = require('node:http');
+    const { appendFileSync, writeFileSync } = require('node:fs');
+    const REF = ${JSON.stringify(REF)};
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on('end', () => {
+        appendFileSync(${JSON.stringify(heard)}, request.method + ' ' + request.url + '\\n');
+        response.setHeader('content-type', 'application/json');
+        if (request.url === '/v1/projects/' + REF) return response.end(JSON.stringify({ id: REF, ref: REF, name: 'fake', organization_id: 'o', organization_slug: 'o', region: 'x', status: 'ACTIVE_HEALTHY', database: { host: '127.0.0.1', version: '17', postgres_engine: '17', release_channel: 'ga' }, created_at: '2020-01-01T00:00:00Z' }));
+        if (request.url.includes('/api-keys')) return response.end(JSON.stringify([{ name: 'anon', api_key: 'a', type: 'legacy' }, { name: 'service_role', api_key: 's', type: 'legacy' }]));
+        response.end(request.url.includes('/config/') ? '{}' : '[]');
+      });
+    });
+    server.listen(0, '127.0.0.1', () => writeFileSync(${JSON.stringify(portFile)}, String(server.address().port)));
+  `], { stdio: 'ignore' });
+  while (!existsSync(portFile) || !readFileSync(portFile, 'utf8')) await sleep(50);
+  const port = Number(readFileSync(portFile, 'utf8'));
+  const seen = () => readFileSync(heard, 'utf8').split('\n').filter(Boolean);
+  const forget = () => writeFileSync(heard, '');
+  const profile = join(scratch, 'linked-profile.yaml');
+  writeFileSync(profile, `name: fake\napi_url: http://127.0.0.1:${port}\nproject_host: localhost\ndashboard_url: http://127.0.0.1:${port}\n`);
+  const token = `sbp_${'0'.repeat(40)}`;
+  const hosted = { SUPABASE_ACCESS_TOKEN: token, SUPABASE_DB_PASSWORD: 'hosted-password' };
+  const linked = sb(dir, ['link', '--project-ref', REF, '--profile', profile, '--yes'], hosted);
+  check(linked.status === 0 && existsSync(join(dir, 'supabase/.link.json')) && seen().length > 0, `linked to the fake: ${linked.status} ${linked.stderr.slice(-300)}`);
+  // The seeded lock, not what `link` observed from a fake: no artifact of another version is what this is about.
+  execFileSync('git', ['checkout', '--', 'supabase/supabase.lock'], { cwd: dir, stdio: 'ignore' });
+  // The profile the launcher's own CLI reads: it scrubs SUPABASE_PROFILE, so through the home.
+  const profileFile = join(HOME_, 'profile');
+  writeFileSync(profileFile, `${profile}\n`);
+  try {
+    // The control: through that file, with these credentials, the CLI does reach the fake. Otherwise silence below proves nothing.
+    forget();
+    sb(dir, ['projects', 'list'], hosted);
+    check(seen().length > 0, 'a command that goes to the API reaches this one');
+    forget();
+    const stack = await start(dir, { env: hosted });
+    check(!stack.failed, `a linked project starts: ${JSON.stringify(stack.failed)}`);
+    check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'migrated and seeded, here');
+    check(!seen().length, `a start says nothing to the API: ${seen().join(', ')}`);
+    forget();
+    // A migration that arrives on a restart goes the applying road, with the credentials in the shell as a human has them.
+    await stop(stack);
+    writeFileSync(join(dir, 'supabase/migrations/20260105000000_after_link.sql'), 'create table public.after_link(v text);\n');
+    const again = await start(dir, { offset: stack.offset, env: hosted });
+    check(!again.failed && rows(dir, "select to_regclass('public.after_link')::text r")[0].r === 'after_link', `applied here: ${JSON.stringify(again.failed)}`);
+    check(!seen().length, `nor does applying forward: ${seen().join(', ')}`);
+    // The very command, past the launcher's scrub: nothing protects this but the CLI's default.
+    writeFileSync(join(dir, 'supabase/migrations/20260106000000_bare.sql'), 'create table public.bare(v text);\n');
+    const bare = sb(dir, ['db', 'push', '--include-seed', '--yes', '--profile', profile], hosted);
+    check(bare.status === 0 && /local stack/.test(`${bare.stdout}${bare.stderr}`) && rows(dir, "select to_regclass('public.bare')::text r")[0].r === 'bare', `db push is local by default, linked and credentialed: ${bare.stdout.slice(-200)}${bare.stderr.slice(-200)}`);
+    check(!seen().length, `and the bare command too: ${seen().join(', ')}`);
+    await stop(again);
+  } finally {
+    rmSync(profileFile, { force: true });
+    fake.kill();
+  }
 });
 
 scenario('the range is the runtime\'s own rule: the CLI refuses a public port in it, whatever the launcher says', async () => {

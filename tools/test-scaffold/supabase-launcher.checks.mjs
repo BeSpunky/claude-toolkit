@@ -169,6 +169,7 @@ try {
   writeFileSync(join(tree, 'supabase/extra.sql'), 'select 3;\n');
   const seeded = run('seed', [], { FAKE_PS: runningStack() });
   const psql = readFileSync(join(calls, 'psql'), 'utf8');
+  check('seed: it records what it ran, as the CLI\'s own seeding does, so a start does not run them again', /supabase_migrations\.seed_files/.test(readFileSync(join(calls, 'psql'), 'utf8')) && /values \('postgres\/seed\/world\/[^']+', '[0-9a-f]{64}'\)/.test(readFileSync(join(calls, 'psql'), 'utf8')), readFileSync(join(calls, 'psql'), 'utf8'));
   check('seed: what config.toml names, in order, in one transaction, in its database', seeded.status === 0 && /--single-transaction\n-f\n\.\.\/postgres\/seed\/world\/01\.sql\n-f\n\.\.\/postgres\/seed\/world\/02\.sql\n-f\nextra\.sql/.test(psql) && psql.includes('-d\npostgres\n') && psql.includes(`-p\n${5432 + OFFSET}\n`), `${seeded.stderr}\n${psql}`);
   rmSync(join(tree, 'postgres/seed/world/note.txt'));
   rmSync(join(tree, 'supabase/extra.sql'));
@@ -399,6 +400,23 @@ try {
   answer('stack-install', 'exit 3\n');
   k = keeper();
   check('a failed download: refused, nothing started', (await k.ended) !== 0 && /stack install failed/.test(k.said()) && !callsOf('start').length, k.said());
+  answer('stack-install', `echo '{"message":"no space left"}'; exit 3\n`);
+  k = keeper();
+  check('and its reason, which only stdout had, is printed', (await k.ended) !== 0 && /no space left/.test(k.said()), k.said());
+  rmSync(join(answers, 'stack-install'));
+  respondsWell();
+  clearCalls();
+  answer('start', `echo '{"stack_changes":[{"key":"[db] major_version"}]}'; exit 1\n`);
+  k = keeper();
+  check('a failed start prints why, which only stdout had', (await k.ended) !== 0 && /stack_changes/.test(k.said()), k.said());
+  respondsWell();
+  clearCalls();
+  writeFileSync(join(tree, 'supabase/config.toml'), readFileSync(join(tree, 'supabase/config.toml'), 'utf8').replace('[db.seed]\nenabled = true', '[db.seed]\nenabled = false'));
+  k = keeper();
+  check('[db.seed] enabled = false: no --include-seed, which would override it', await until(k.ready) && !(callsOf('db').find((call) => call.startsWith('db\npush\n')) ?? 'x--include-seed').includes('--include-seed'), k.said());
+  k.child.kill('SIGTERM');
+  await k.ended;
+  writeFileSync(join(tree, 'supabase/config.toml'), readFileSync(join(tree, 'supabase/config.toml'), 'utf8').replace('[db.seed]\nenabled = false', '[db.seed]\nenabled = true'));
   respondsWell();
   clearCalls();
   answer('stack-install', 'sleep 30\n');
@@ -418,6 +436,15 @@ try {
   const stopAskedAt = Date.now();
   k.child.kill('SIGTERM');
   check('a stalled start is ended at the deadline, said, and stopped', (await k.ended) !== 0 && Date.now() - stopAskedAt < 15_000 && /deadline/.test(k.said()) && callsOf('stop').length === 1, k.said());
+  respondsWell();
+  clearCalls();
+  answer('db-push', 'sleep 60\n');
+  k = keeper({ env: { DEV_STOP_TIMEOUT: '1' } });
+  await until(() => callsOf('db').some((call) => call.startsWith('db\npush\n')));
+  k.child.kill('SIGTERM');
+  const cutSaid = (await k.ended, k.said());
+  check('a stop cutting a migration says it was the stop, and advises nothing destructive', /This was the stop/.test(cutSaid) && !/Migrating or seeding failed/.test(cutSaid) && !/postgres:reset|postgres\.mjs reset/.test(cutSaid) && callsOf('stop').length === 1, cutSaid);
+  answer('db-push', 'echo pushed\n');
   // Never a reset: it outlives the deadline, runs out, and only then does the keeper stop.
   respondsWell();
   clearCalls();
@@ -593,7 +620,7 @@ try {
   check('one version under two names is one migration twice: the ledger keys on the version', /^supabase-migrations-twice\t.*1_b\.sql/m.test(twins), twins);
   rmSync(join(project, 'postgres/migrations/1_b.sql'));
   writeFileSync(join(project, 'supabase/config.toml'), '[db]\nmajor_version = 15\n');
-  check('15 is refused, with why: nothing is advertised that never ran', /^supabase-major-mismatch\t.*major_version = 15.*the one it has been run on/m.test(probe(project, '--evident=postgres,supabase').stdout), probe(project, '--evident=postgres,supabase').stdout);
+  check('15 is refused, with why: nothing is advertised that never ran', /^supabase-major-mismatch\t.*major_version = 15.*the one it has been run on.*supabase stack destroy --yes/m.test(probe(project, '--evident=postgres,supabase').stdout), probe(project, '--evident=postgres,supabase').stdout);
   writeFileSync(join(project, 'supabase/config.toml'), 'experimental.stack = false\n');
   check('a dotted owned key is refused by name', /^supabase-config-shape\t.*experimental\.stack/m.test(probe(project, '--evident=postgres,supabase').stdout), probe(project, '--evident=postgres,supabase').stdout);
   rmSync(join(project, 'supabase/config.toml'));

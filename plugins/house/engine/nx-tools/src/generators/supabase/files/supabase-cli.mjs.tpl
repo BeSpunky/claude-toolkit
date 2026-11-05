@@ -114,6 +114,8 @@ export function installArtifacts() {
 }
 
 const said = ({ stderr, stdout }) => (stderr.trim() || stdout.trim()).split('\n').slice(-12).join('\n');
+/** Why a call under --output-format json failed. Its stderr has been echoed by then, if it was asked to be. */
+export const reasonOf = ({ stderr, stdout }) => (stdout.trim() || stderr.trim()).slice(-1500);
 
 function parsed({ stdout }, what) {
   try {
@@ -201,7 +203,8 @@ export function loopbackPort(url, what) {
 /** A `start`'s outcome: `{ code, text }` when it failed, else `{ id, runtime, ports, env }`. Pins go ONLY here: every other command finds the stack itself. */
 export async function startStack(ports) {
   const result = await cli(['start', '--runtime', 'native', '--output-format', 'json'], { pins: pinsOf(ports), echo: true });
-  if (result.code !== 0) return { code: result.code, text: `${result.stderr}\n${result.stdout}` };
+  // With --output-format json the reason is on stdout, and only stderr was echoed.
+  if (result.code !== 0) return { code: result.code, text: `${result.stderr}\n${result.stdout}`, reason: reasonOf(result) };
   const out = parsed(result, 'start');
   const reported = {};
   for (const [endpoint, name] of Object.entries(ENDPOINT_PORT)) {
@@ -278,10 +281,10 @@ export function vaultSecrets() {
   return names;
 }
 
-/** Does `[db.migrations] enabled = false` say this stack keeps no ledger? A line-level read. */
-export function migrationsEnabled() {
+/** Does `[<section>] enabled = false` say so? A line-level read: the default is on. */
+function enabledIn(section) {
   const lines = readFileSync(CONFIG, 'utf8').split('\n');
-  const start = lines.findIndex((line) => /^\s*\[db\.migrations\]/.test(line));
+  const start = lines.findIndex((line) => line.trim().startsWith(`[${section}]`));
   if (start < 0) return true;
   for (const line of lines.slice(start + 1)) {
     if (/^\s*\[/.test(line)) return true;
@@ -289,6 +292,9 @@ export function migrationsEnabled() {
   }
   return true;
 }
+export const migrationsEnabled = () => enabledIn('db.migrations');
+/** `--include-seed` overrides this, so it is passed only when this is on. */
+export const seedsEnabled = () => enabledIn('db.seed');
 
 /** The `[db.seed] sql_paths` patterns of config.toml, in order, as a line-level read. */
 export function seedPatterns() {

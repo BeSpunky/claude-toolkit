@@ -15,7 +15,7 @@ import { basename, join, sep } from 'node:path';
 import { ROOT, READY_MARKER, Refusal, treeHome, verbCommand } from './layout.mjs';
 import { assertNotHeldElsewhere, holdOwnership } from './server.mjs';
 import { runningStacks } from './stack.mjs';
-import { ALLOCATES_FROM, allStacks, assertNoEnvFileOverride, assertPinnedVersion, checkMigrations, cli, dbQuery, destroyStack, endCliCall, hasMigrations, installArtifacts, migrationsEnabled, ownerRunning, portGap, requestedPorts, startStack, stackStatus, stopStack, supabaseHome } from './supabase-cli.mjs';
+import { ALLOCATES_FROM, allStacks, assertNoEnvFileOverride, assertPinnedVersion, checkMigrations, cli, dbQuery, destroyStack, endCliCall, hasMigrations, installArtifacts, migrationsEnabled, ownerRunning, portGap, reasonOf, requestedPorts, seedsEnabled, startStack, stackStatus, stopStack, supabaseHome } from './supabase-cli.mjs';
 import { withStackLock as lockedBy } from './supabase-lock.mjs';
 
 const OWNER_POLL_MS = 250;
@@ -71,7 +71,7 @@ async function startOnBlock(requested, { rebuildIfWedged }) {
   }
   if (started.code !== undefined) {
     if (WEDGED.test(started.text)) throw new Refusal(`This stack was left half-built, by a reset that was interrupted: the CLI cannot start it. Its data went with that reset. Rebuild it from its migrations: ${verbCommand('reset')}`);
-    throw new Refusal(`supabase start failed (exit ${started.code}), above.`);
+    throw new Refusal(`supabase start failed (exit ${started.code}): ${started.reason}`);
   }
   let gap = portGap(requested, started.ports);
   if (gap.length) {
@@ -80,7 +80,7 @@ async function startOnBlock(requested, { rebuildIfWedged }) {
     log(`adopting this tree's stack, which runs on other ports: ${gap.join(', ')}. Moving it to this block; its data stays.`);
     await stopStack();
     started = await startOrStop(requested);
-    if (started.code !== undefined) throw new Refusal(`supabase start failed (exit ${started.code}), above.`);
+    if (started.code !== undefined) throw new Refusal(`supabase start failed (exit ${started.code}): ${started.reason}`);
     gap = portGap(requested, started.ports);
     if (gap.length) {
       await stopStack();
@@ -105,15 +105,18 @@ async function reportLeftovers() {
   }
 }
 
+/** What a stop that ended a CLI call is: never the failure that call would report, and nothing for anyone to rebuild. */
+const stoppedAtDeadline = () => new Refusal('A stop reached its deadline (DEV_STOP_TIMEOUT) with the CLI still working, and ended that call. This was the stop, not the database: nothing was dropped, and what did not finish did not apply. Start again to carry on.');
+
 /**
  * Everything pending, forward: `db push` against this stack is the CLI's own road, and it destroys nothing whatever the database holds.
  * It applies what its ledger lacks, and runs each seed file its `seed_files` table has not seen, which a first start and a reset also
- * record, so a stack seeded once is not seeded again and one that has only just got its migrations and seeds gets them now. Vault is a
- * hosted concern: a start already handles the local one. What it cannot apply (a conflict, a half-built database) is a refusal, with the
- * error above it and the reset named: only `postgres:reset` destroys.
+ * record, so a stack seeded once is not seeded again and one that has only just got its migrations and seeds gets them now. It writes
+ * `[db.vault]` too, before the migrations: a key added since the first start may be what the next migration reads. What it cannot apply
+ * (a conflict, a half-built database) is a refusal, with the error above it and the reset named: only `postgres:reset` destroys.
  */
 async function applyPending(key) {
-  const pending = await cli(['db', 'push', '--include-seed', '--skip-vault', '--yes'], { echo: true });
+  const pending = await cli(['db', 'push', ...(seedsEnabled() ? ['--include-seed'] : []), '--yes'], { echo: true });
   if (pending.code !== 0) throw new Refusal(`Migrating or seeding failed, above, and nothing was dropped. If the migration is wrong, fix it and start again. If the database itself is what is wrong, rebuild it from its migrations (this drops its data): ${verbCommand('reset', `--stack=${key}`)}`);
   if (!hasMigrations() || !migrationsEnabled()) return;
   // On a new connection: `status` says healthy with a half-built database.
@@ -199,7 +202,7 @@ export async function serve({ resetThenStop = false } = {}) {
   }
   if (installed.code !== 0) {
     letGo();
-    throw new Refusal(`supabase stack install failed (exit ${installed.code}), above: this stack's artifacts did not download. Nothing was started. Starting again resumes it.`);
+    throw new Refusal(`supabase stack install failed (exit ${installed.code}): this stack's artifacts did not download, so nothing was started. Starting again resumes it. ${reasonOf(installed)}`);
   }
   let startedStack;
   try {
@@ -208,7 +211,7 @@ export async function serve({ resetThenStop = false } = {}) {
     // A start cut short may have left its stack half up, with no keeper to stop it.
     if (cut) await withStackLock(stopStack).catch((failure) => log(`and it could not be stopped: ${failure.message}`));
     letGo();
-    throw error;
+    throw cut ? stoppedAtDeadline() : error;
   }
   if (!startedStack) {
     letGo();
@@ -229,9 +232,10 @@ export async function serve({ resetThenStop = false } = {}) {
     // The first error is the cause: a stop failing after it is an addition, never a replacement.
     const notStopped = await stop().then(() => undefined, (failure) => failure);
     const coda = notStopped ? `\nAnd the stack could not be stopped: ${notStopped.message}` : '\nThe stack stopped with it.';
-    if (error instanceof Refusal) error.message += coda;
+    const cause = cut ? stoppedAtDeadline() : error;
+    if (cause instanceof Refusal) cause.message += coda;
     else console.error(`[postgres]${coda}`);
-    throw error;
+    throw cause;
   }
   if (!stopAsked) {
     log(`ready on 127.0.0.1:${requested.postgres}; API ${startedStack.apiUrl}. Keys: supabase status -o env.`);

@@ -60,7 +60,8 @@
 //              and, on a dependency, "timeout": <seconds> (default 120), past which the stack fails, naming it. A port
 //              accepting a connection is not always ready: a launcher that migrates and seeds has `cmd` ask for the
 //              marker it writes last, in ${STACK_DIR} (which dies with the stack, so it cannot go stale). A `cmd` may add
-//              "holdWhile": <a path>: while that file exists, its timeout does not run (a first download has its own time).
+//              "holdWhile": <a path>: while that file exists, its timeout does not run, for at most an hour, and it starts
+//              whole when the file goes (a first download has its own time).
 //
 // url[].when    always | offset (stack shifted) | running (this process runs) | skipped (--skip'ed)
 // advice[].when always | base (stack on its base ports) | offset | contended (base ports owned elsewhere) — a
@@ -105,7 +106,7 @@ function validateReady(p, pat) {
   if (typeof value !== 'string' || (kinds[0] !== 'http' && value.trim() === '')) fail(`${at}.${kinds[0]}`, 'must be a string');
   if (kinds[0] === 'tcp' && p.ports?.[value] === undefined) fail(`${at}.tcp`, `"${value}" is not a port this process declares (has: ${Object.keys(p.ports ?? {}).join(', ') || 'none'})`);
   if (kinds[0] === 'http' && p.dependency && !Object.keys(p.ports ?? {}).length) fail(`${at}.http`, 'this process declares no port to ask');
-  if (p.ready.holdWhile !== undefined && (!p.dependency || typeof p.ready.holdWhile !== 'string')) fail(`${at}.holdWhile`, 'a path, on a dependency: while that file exists its timeout does not run');
+  if (p.ready.holdWhile !== undefined && (!p.dependency || kinds[0] !== 'cmd' || typeof p.ready.holdWhile !== 'string')) fail(`${at}.holdWhile`, 'a path, on a dependency whose ready is a cmd: while that file exists its timeout does not run');
   if (p.ready.timeout !== undefined) {
     if (!p.dependency) fail(`${at}.timeout`, 'only a dependency is waited for, so only a dependency has a timeout');
     if (typeof p.ready.timeout !== 'number' || !(p.ready.timeout > 0)) fail(`${at}.timeout`, 'must be a positive number of seconds');

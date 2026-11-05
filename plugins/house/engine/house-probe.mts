@@ -131,7 +131,8 @@ if (layers.has('firebase') && layers.has('angular')) {
 
 // ---- Supabase: the stack runs its own major, and the CLI has one migrations folder -------------------------------
 // The generators' backstop asks the same function (generators/supabase/refusals.ts). A project already wearing the layer has neither a
-// declaration nor a second folder, so this says nothing to it.
+// declaration nor a second folder, but its config.toml is its own: one moved off the major this layer runs is refused on every upgrade,
+// and told how to come back, since its stack's data cannot follow.
 if (layers.has('supabase')) {
   const filesIn = (dir: string) => (existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name) : []);
   const declared = read('.bespunky/postgres.json');

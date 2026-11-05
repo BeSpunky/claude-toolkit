@@ -3,6 +3,7 @@
 // THE CLI RUNS THE MIGRATIONS AND THE RESET, into its own ledger. What stays here is what it does not guard: forward-only, a file it
 // would skip in silence, the per-stack lock, a reset that runs to completion. Its Postgres is the database: `postgres`, with the
 // stack's well-known password, on loopback. Nothing here is a secret or reaches past this machine, but `deploy`.
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path';
@@ -223,11 +224,17 @@ export const provider = {
     const result = await cli(['migration', 'up'], { echo: true });
     if (result.code !== 0) throw new Refusal('Migrating failed, above. Nothing after the failed migration ran.');
   },
-  /** Again, on purpose: the CLI's own seeding happens only at a first start and a reset, and it has no verb for this. As one transaction. */
+  /**
+   * Again, on purpose: the CLI has no verb for this. As one transaction, with the record its own seeding keeps in the same transaction
+   * (path from the root, sha256 of the file, as observed): without it the next start would run these again, and fail on any key.
+   */
   async seed(stack) {
     const files = seedFiles();
     if (!files.length) return 0;
-    const result = await run('psql', [...psqlArgs(stack.port, DATABASE), '--single-transaction', ...files.flatMap((file) => ['-f', file])], { cwd: SUPABASE_DIR, env: clientEnv() });
+    const literal = (text) => `'${text.replace(/'/g, "''")}'`;
+    const records = files.map((file) => `(${literal(relative(ROOT, join(SUPABASE_DIR, file)))}, '${createHash('sha256').update(readFileSync(join(SUPABASE_DIR, file))).digest('hex')}')`);
+    const record = `create schema if not exists supabase_migrations; create table if not exists supabase_migrations.seed_files (path text not null primary key, hash text not null); insert into supabase_migrations.seed_files (path, hash) values ${records.join(', ')} on conflict (path) do update set hash = excluded.hash`;
+    const result = await run('psql', [...psqlArgs(stack.port, DATABASE), '--single-transaction', ...files.flatMap((file) => ['-f', file]), '-c', record], { cwd: SUPABASE_DIR, env: clientEnv() });
     if (result.code !== 0) throw new Refusal(`Seeding failed, so nothing of it was kept, unless a file committed by itself: ${result.stderr.trim()}`);
     return files.length;
   },
