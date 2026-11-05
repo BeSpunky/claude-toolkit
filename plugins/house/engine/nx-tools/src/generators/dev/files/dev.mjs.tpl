@@ -48,6 +48,8 @@ import {
   describe,
   detachedWork,
   groupMembers,
+  isHeld,
+  lockHolders,
   holdStackLock,
   isAgent,
   isAlive,
@@ -794,6 +796,21 @@ async function stopOne(record, { abandon = false, timeoutMs = DETACHED_TIMEOUT_M
   for (const w of detached.finished) say(w.result ?? `${w.id} ended (code ${w.code ?? 0})`);
   if (detached.pending.length) return { ok: false, why: `stopped, but its detached work is still finishing (above) — or end it now: ${stopCommandFor(record, { abandon: true })}` };
   if (!detached.ok) return { ok: false, why: `stopped, but ${detached.finished.filter((w) => w.code).map((w) => w.id).join(', ')} did not finish cleanly (above)` };
+  // A FINISHING stack's detached work is what this waited on, and that has ended. Whatever still holds the lock is the rest of the stack,
+  // with no claimer to stop it, and until it lets go the stack is not stopped: free ports say nothing (a process can close them seconds
+  // before it ends), and a stop reporting success would leave the next start refused. Told once, as a claimer would, and waited for.
+  if (record.state === 'finishing' && isHeld(record.lock)) {
+    for (const pid of lockHolders(record.lock).filter((holder) => holder !== process.pid)) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        /* gone */
+      }
+    }
+    const until = Date.now() + timeoutMs;
+    while (isHeld(record.lock) && Date.now() < until) await sleep(200);
+    if (isHeld(record.lock)) return { ok: false, why: `its detached work has finished, and pid ${lockHolders(record.lock).join(', ')} still holds the stack after ${Math.round(timeoutMs / 1000)}s — nothing was killed; check again with tools/dev/dev ps` };
+  }
   if (record.state !== 'live') {
     const all = collectWorktrees(ROOT);
     await withClaimLock(scopeOf(all).lockRoot, () => pruneDead([record.tree]));

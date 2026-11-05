@@ -53,3 +53,7 @@ Next: correctness pass, last of this landing's reviewers. Budget: core, wire, re
 
 ### correctness pass (returned)
 Linked project cleared: CLI 3.0.0 is local by default, by the log and strace, with link and hosted credentials set; a tripwire scenario now locks it. Eight findings fixed by the reviewer with tests: seeds ran with seeding disabled; postgres:seed recorded nothing; the ready bound did not rearm after a download; failure reasons printed nothing; vault; a project on 15; a stop reported as a migration failure; holdWhile on http or tcp. Supabase 156; generators 462, 35 skipped.
+
+### First real CI (PR #2, a4b4eaba)
+All green, including the supabase images on amd64 and arm64, except one tripwire scenario, which was a product bug: `dev stop` on a finishing stack returned 0 on free ports while the keeper still held the lock during `supabase stop`. Fixed in dev.mjs: remaining holders are signalled and waited for. Dogfood 247 passed before this fix. Open: a claimer killed during `supabase stop` takes the orphan road, which signals the CLI.
+Pushes use the gh login one at a time, without changing config: git's helper now answers as an account with no write access. Told to the user.

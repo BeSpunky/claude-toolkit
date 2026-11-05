@@ -579,12 +579,28 @@ scenario('a reset runs to completion: a stop waits, a signal at its caller does 
     await sleep(200);
     const waited = dev(dir, 'stop', 'postgres', `--offset=${stack.offset}`);
     check(waited.status === 0, `the stop of an orphan waited: ${waited.stdout}${waited.stderr}`);
+    check(!ps(dir).some((entry) => entry.offset === stack.offset), `and when it says stopped, the stack is gone: ${JSON.stringify(ps(dir))}`);
   }
   await new Promise((done) => (caller2.exitCode === null ? caller2.once('exit', done) : done()));
   const fifth = await start(dir, { offset: stack.offset });
   check(!fifth.failed, `no wedge after it: ${JSON.stringify(fifth.failed)}`);
   check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'and the reset finished');
-  await stop(fifth);
+
+  // The same on a stack that was serving: its keeper does not stop by itself, so one stop has to end it, not report its ports.
+  const claimerOfFifth = fifth.row.pid;
+  const caller3 = spawn(process.execPath, ['tools/postgres/postgres.mjs', 'reset'], { cwd: dir, env: baseEnv(), detached: true, stdio: 'ignore' });
+  const until3 = Date.now() + 120_000;
+  const declaredAt = join(fifth.row.stateDir, 'detached/reset.json');
+  while (Date.now() < until3 && !(existsSync(declaredAt) && readFileSync(declaredAt, 'utf8').includes('"running"'))) await sleep(50);
+  process.kill(claimerOfFifth, 'SIGKILL');
+  await sleep(200);
+  const servingStop = dev(dir, 'stop', 'postgres', `--offset=${stack.offset}`);
+  check(servingStop.status === 0 && !ps(dir).some((entry) => entry.offset === stack.offset), `one stop ends a serving stack whose claimer died mid-reset: ${servingStop.stdout}${servingStop.stderr}`);
+  check(!listening(stack.port), 'its port is closed');
+  await new Promise((done) => (caller3.exitCode === null ? caller3.once('exit', done) : done()));
+  const sixth = await start(dir, { offset: stack.offset });
+  check(!sixth.failed, `and it starts: ${JSON.stringify(sixth.failed)}`);
+  await stop(sixth);
 });
 
 scenario('a reset with nothing running boots, resets and stops; and it is the road back from whatever an interrupted reset left', async () => {
