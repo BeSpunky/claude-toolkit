@@ -1,6 +1,9 @@
 ---
 effort: house-postgres-supabase
-summary: Make Postgres and Supabase first-class house layers, so a project can choose them over Firebase and get the same local dev, seed, safety and deploy story.
+status: concluded
+concluded: 2026-11-05
+summary: Postgres and Supabase are first-class house layers (`postgres` on pinned Debian binaries and dbmate; `supabase` on the CLI's alpha native runtime, no Docker). Hosted Supabase flows shipped unproven, by the user's call.
+tags: [house, layers, postgres, supabase, ci, dev-engine]
 ---
 
 ## Decisions (as they happened)
@@ -17,3 +20,5 @@ summary: Make Postgres and Supabase first-class house layers, so a project can c
 - **2026-11-04 — Landing 1 ships as 0.52.1, and the package stays live.** The rungs stay at 0.52.0, which is never published: later commits touched the payload after that version moved, and the invariants checker requires the version to move after them. No `status:` stamp yet, because Landings 2 and 3 of this effort are still ahead; `summary:` is rewritten when Landing 3 concludes it.
 
 - **2026-11-04 — Landing 2 ready.** Asked whether to push the branch and open a pull request so the new CI jobs run on real images, with those jobs passing as a landing condition, the user answered: *"yes"*. Real CI found what no fixture had: a Chromium package list valid for one Debian release only, so Node 16 and 18 projects could not build their images, and `dev stop` waiting on zombies. Both fixed here. The layer refuses a project below Node 18. nx-tools ships as 0.53.3; 0.53.0 to 0.53.2 were never published. No `status:` stamp: Landing 3 is ahead.
+
+- **2026-11-05 — Landing 3 lands without a real hosted project.** Asked to create a throwaway Supabase project for the last check, with landing now and recording these as unproven as the alternative, and told it was not recommended, the user answered: *"No, land it and we'll iterate later"*. So a real push, a function deploy, a secret reaching a function, `migration repair` and the session pooler from an IPv4 runner were only run against a local fake API, and HOUSE.md and the README say so. Revisiting opens a new dated package.

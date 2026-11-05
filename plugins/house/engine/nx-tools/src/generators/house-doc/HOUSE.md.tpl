@@ -412,6 +412,8 @@ A first-class **staging** environment is opt-in — `house.sh add-layer --stagin
 
 **The local stack runs on the CLI's ALPHA native runtime**, with no container engine: pinned exactly (`supabase --version`), and watched by the toolkit's own tripwire against the real thing. Expect an alpha. It is local only: nothing in `postgres:*` but `deploy` leaves this machine.
 
+**Hosted flows have not been run against a real Supabase project yet:** `postgres:deploy`, a function deploy and `postgres:secrets-set` were tested against a local fake API only, so try them on a throwaway project before you rely on them, and expect to iterate.
+
 **Only the launcher starts and stops it.** A bare `supabase start` missing the port pins moves every port and exits 0; one with new ports on a running stack keeps the old ones and exits 0. The launcher pins them all (`SUPABASE_*_PORT`), compares what comes back with what it asked for, and never passes `--eager`. So `supabase status`, `db diff`, `db query`, `migration list`, `gen types` are yours to run; `start` and `stop` are not. **`supabase db reset` by hand can wedge the stack if anything interrupts it**: use `postgres:reset`, which holds the stack's lock and runs to completion.
 
 **`status` is not the database's health.** It said healthy on a half-built database, and with the shared memory gone. A start checks the migration ledger on a new connection instead, and rebuilds a stack with migrations, no ledger and no tables. If it says a stack was left half-built, `postgres:reset` is the road back; that data went with the interrupted reset. **Never remove `/dev/shm/PostgreSQL.*`:** a live segment is in use by name even when no process maps it, and removing one breaks every new connection of a stack that still reports healthy.
