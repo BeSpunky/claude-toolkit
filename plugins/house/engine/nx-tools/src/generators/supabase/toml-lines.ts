@@ -73,6 +73,10 @@ export const hasTomlSection = (text: string, section: string): boolean => locate
 const OWNED_KEYS = ['db.major_version', 'db.seed.sql_paths', 'experimental.stack'];
 const OWNED_TABLES = ['db', 'db.seed', 'experimental'];
 
+/** A multi-line string holding what reads as an owned line: this reader sees lines, so it would take the text for the setting. The one case of that it can tell. */
+const inMultilineString = (text: string): boolean =>
+  [...text.matchAll(/"""[\s\S]*?"""|'''[\s\S]*?'''/g)].some(([block]) => /^\s*\[(?:db|db\.seed|experimental)\]\s*$|^\s*(?:major_version|sql_paths|stack)\s*=/m.test(block));
+
 /** Each owned key or table spelled so that a line edit would miss it or break the file: dotted, quoted, inline, or in a section written twice. */
 function uneditedShapes(text: string): string[] {
   const found = new Set<string>();
@@ -95,6 +99,7 @@ function uneditedShapes(text: string): string[] {
     if (OWNED_KEYS.includes(full) && !plain) found.add(full);
     if (OWNED_TABLES.includes(full) && assigned[2].startsWith('{')) found.add(full);
   }
+  if (inMultilineString(text)) found.add('a multi-line string holding what reads as one of these lines');
   return [...found];
 }
 

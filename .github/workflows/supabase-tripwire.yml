@@ -73,7 +73,9 @@ jobs:
       - uses: actions/checkout@v5
       # The CLI installs into a directory named by its version, and the artifacts by their digests, so what the key adds is only when to look
       # again. The installer is in it because this job triggers on it: a cache hit skips the install, and would stay green over a break.
+      # Never on the schedule: the weekly run boots cold, because a cold start is what a consumer gets, and 1.7 GB of artifacts is what can go away.
       - uses: actions/cache@v4
+        if: github.event_name != 'schedule'
         with:
           path: /var/cache/bespunky-supabase-tools
           key: supabase-tools-${{ hashFiles('plugins/house/engine/nx-tools/src/generators/_utils/versions.ts', 'plugins/house/engine/nx-tools/src/generators/supabase/seed/supabase.lock.tpl', 'plugins/house/engine/nx-tools/src/generators/devcontainer/house.packages.sh.tpl', 'plugins/house/engine/nx-tools/src/generators/devcontainer/compose.ts', 'tools/test-supabase/tools.mjs') }}

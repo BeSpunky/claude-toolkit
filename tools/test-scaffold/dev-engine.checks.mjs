@@ -84,6 +84,25 @@ try {
   ok('avoidPorts: a block is out from where it first touches the range to where it last does', offsets.includes(14000) && !offsets.includes(15000) && !offsets.includes(27000) && offsets.includes(28000));
   ok('avoidPorts: an explicit offset inside is refused, by name', await throws(() => Promise.resolve().then(() => offsetCandidates('20000', avoided))));
   ok('avoidPorts: an explicit offset clear of it is honoured', offsetCandidates('6000', avoided).offsets[0] === 6000);
+  {
+    const { mkdtempSync, rmSync: rm, writeFileSync: write } = await import('node:fs');
+    const { tmpdir: temp } = await import('node:os');
+    const { join: at } = await import('node:path');
+    const dir = mkdtempSync(at(temp(), 'hold-while-'));
+    const held = at(dir, 'installing');
+    const { waitUntilReady } = await load('lib/ready.mjs');
+    const without = await waitUntilReady({ cmd: 'false' }, { timeoutMs: 200 });
+    ok('holdWhile: with none declared, the bound is the bound', without.ok === false);
+    write(held, '');
+    const started = Date.now();
+    setTimeout(() => rm(held), 700);
+    const waited = await waitUntilReady({ cmd: 'false', holdWhile: held }, { timeoutMs: 200 });
+    ok('holdWhile: the bound does not run while the file exists, and runs out after', waited.ok === false && Date.now() - started >= 700);
+    write(held, '');
+    setTimeout(() => write(at(dir, 'up'), ''), 500);
+    ok('holdWhile: a probe that answers meanwhile is answered', (await waitUntilReady({ cmd: `test -f ${at(dir, 'up')}`, holdWhile: held }, { timeoutMs: 100 })).ok === true);
+    rm(dir, { recursive: true, force: true });
+  }
   const astride = { key: 'k', isMain: true, block: portBlock([3000, 40000]), avoid: [parsePortRange('10000-32767')] };
   ok('avoidPorts: it is the ports that must stay out, not the span between them', offsetCandidates('0', astride).offsets[0] === 0 && offsetCandidates('auto', astride).offsets[0] === 0);
   ok('avoidPorts: a range is <low>-<high>, in order, of ports', parsePortRange('32767-20000') === null && parsePortRange('nope') === null && parsePortRange('1-70000') === null);

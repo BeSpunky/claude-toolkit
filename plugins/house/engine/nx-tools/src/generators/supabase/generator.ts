@@ -20,7 +20,7 @@ import { LAUNCHER_ROOT } from '../postgres/generator';
 import { POSTGRES_DECLARATION } from '../postgres/major';
 import { MIGRATIONS_OF, SUPABASE_TAG } from '../postgres/provider';
 import { readDeclaration } from '../dev/declaration';
-import { SUPABASE_CLI_VERSION, SUPABASE_MAJORS } from '../_utils/versions';
+import { SUPABASE_CLI_VERSION } from '../_utils/versions';
 import { mergeServedApps } from './dev-merge';
 import { envFilesRefused } from './env-doors';
 import { refuseWhatCannotMove } from './preflight';
@@ -30,8 +30,6 @@ export const SUPABASE_LAUNCHER_FILES = ['supabase-cli.mjs', 'supabase-keeper.mjs
 export const SUPABASE_CONFIG = 'supabase/config.toml';
 const SEEDED_SQL_PATHS = '["../postgres/seed/world/*.sql"]';
 const INIT_SQL_PATHS = '["./seed.sql"]';
-/** The major the seeded `supabase.lock` pins. */
-const LOCKED_MAJOR = SUPABASE_MAJORS.at(-1)!;
 const FUNCTION_SECRETS = 'functions/.env';
 /** Class C: where `postgres:gen-types` writes, and in what language. The project's from the day it is seeded. */
 const SUPABASE_DECLARATION = '.bespunky/supabase.json';
@@ -136,12 +134,7 @@ export default async function supabaseGenerator(tree: Tree): Promise<void> {
   const ignored = tree.read('supabase/.gitignore', 'utf8') ?? '';
   if (!ignored.split('\n').some((line) => line.trim() === FUNCTION_SECRETS)) tree.write('supabase/.gitignore', `${ignored.replace(/\n?$/, '\n')}\n# A function's local secrets\n${FUNCTION_SECRETS}\n`);
   if (!tree.exists(SUPABASE_DECLARATION)) tree.write(SUPABASE_DECLARATION, `${JSON.stringify({ types: { out: 'supabase/types/database.ts', lang: 'typescript' } }, null, 2)}\n`);
-  // The seeded lock pins one major. For a config saying another it would be stale from the start, and CI refuses a stale lock: none, then, and the first local start writes its own.
-  const major = tomlValue(tree.read(SUPABASE_CONFIG, 'utf8') ?? '', 'db', 'major_version');
-  if (!tree.exists('supabase/supabase.lock')) {
-    if (major === undefined || major === LOCKED_MAJOR) tree.write('supabase/supabase.lock', seed('supabase.lock'));
-    else logger.info(`[supabase] ${SUPABASE_CONFIG} says major_version = ${major}, and the lock this layer seeds pins ${LOCKED_MAJOR}, so none is seeded. Start the stack once and commit the supabase/supabase.lock it writes, or CI will have none to hold it to.`);
-  }
+  if (!tree.exists('supabase/supabase.lock')) tree.write('supabase/supabase.lock', seed('supabase.lock'));
   for (const { file, name } of envFilesRefused(tree)) {
     logger.info(`HUMAN_STEP: ${file} sets ${name}, and the Supabase CLI reads that file, so every postgres:* verb will refuse until it is renamed. config.toml's env() takes any name, and an app can read it under its own.`);
   }

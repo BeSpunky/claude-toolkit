@@ -41,8 +41,8 @@ export function supabaseFragment(): DevFragment {
         ports: { ...SUPABASE_PORTS },
         avoidPorts: [SUPABASE_ALLOCATES_FROM],
         dependency: true,
-        // A first start downloads the stack: about a minute alone, three when four trees start at once.
-        ready: { cmd: 'test -f "${STACK_DIR}/postgres.ready"', timeout: 600 },
+        // The download has its own time (holdWhile), whatever the link. The rest is a boot.
+        ready: { cmd: 'test -f "${STACK_DIR}/postgres.ready"', timeout: 600, holdWhile: '${STACK_DIR}/postgres.installing' },
         exports: supabaseExports(),
       },
     ],

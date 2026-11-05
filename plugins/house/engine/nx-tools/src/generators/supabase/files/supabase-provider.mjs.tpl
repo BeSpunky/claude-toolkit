@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path';
 import { DEPLOY_URL_VAR, ROOT, ROLE, Refusal } from './layout.mjs';
 import { writeNextMigration } from './schema.mjs';
-import { ALLOCATES_FROM, MIGRATIONS, PORTS, SUPABASE_DIR, assertNoEnvFileOverride, assertPinnedVersion, checkMigrations, cli, genTypes, seedPatterns } from './supabase-cli.mjs';
+import { ALLOCATES_FROM, MIGRATIONS, PORTS, SUPABASE_DIR, assertNoEnvFileOverride, assertPinnedVersion, checkMigrations, cli, genTypes, seedPatterns, vaultSecrets } from './supabase-cli.mjs';
 import { assertStackIdentity, resetToCompletion, serve } from './supabase-keeper.mjs';
 import { psqlArgs, run, scrubbedEnv } from './tools.mjs';
 
@@ -56,6 +56,12 @@ function refOf(flags, verb) {
   if (!/^[a-z]{20}$/.test(ref)) throw new Refusal(`--project-ref is a project's ref, or a branch's: exactly 20 lower-case letters, from its dashboard URL. Any other word the CLI would read through this tree's link. Got: ${/^[\w.-]{0,40}$/.test(ref) ? ref : 'not that'}.`);
   return ref;
 }
+
+/** What a push writes besides migrations, in words. `db push` does it unasked, when the project has opted in by `[db.vault]`. */
+const vaultSaid = () => {
+  const names = vaultSecrets();
+  return names.length ? `, writes Vault secrets ${names.join(', ')} from config.toml's [db.vault]` : '';
+};
 
 /** The project a database URL itself shows: its host's or its session pooler's user's. A custom domain shows none. */
 export function refOfUrl({ host, user }) {
@@ -226,11 +232,11 @@ export const provider = {
     return files.length;
   },
   /** Whatever happens to this process, the reset finishes: it is not this process's child in any way a signal could reach. */
-  async reset() {
+  async reset(stack) {
     assertNoEnvFileOverride();
     checkMigrations();
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(name, () => console.error('[postgres] a reset runs to completion: interrupting one can wedge the stack. Stopping when it ends.'));
-    if ((await resetToCompletion()) !== 0) throw new Refusal('The reset failed, above.');
+    if ((await resetToCompletion(stack?.stateDir)) !== 0) throw new Refusal('The reset failed, above.');
   },
   client: (stack) => ({ args: ['-h', '127.0.0.1', '-p', String(stack.port), '-U', ROLE, '-d', DATABASE], env: clientEnv() }),
   newMigration(name) {
@@ -247,7 +253,7 @@ export const provider = {
   /** On Supabase every database is called `postgres`, so its name proves nothing: the host, and where the functions go. */
   confirmation(target, flags = {}) {
     const functions = functionNames();
-    return { says: `migrates ${target.display}${functions.length ? ` and ships ${functions.join(', ')} to project ${flags['project-ref']}` : ''}`, label: 'its host', word: target.host };
+    return { says: `migrates ${target.display}${vaultSaid()}${functions.length ? ` and ships ${functions.join(', ')} to project ${flags['project-ref']}` : ''}`, label: 'its host', word: target.host };
   },
   /**
    * `db push`, into the hosted database's own ledger, then every function: schema before the code that needs it. The password reaches
@@ -263,6 +269,7 @@ export const provider = {
     // The CLI is in a session of its own, so a signal cannot stop what it is pushing: dying here would only leave the password on disk.
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(name, () => console.error('[postgres] a deploy runs to its end: a migration underway does not stop for this. Waiting for it.'));
     if (functions.length && !process.env.SUPABASE_ACCESS_TOKEN && process.env.CI) throw new Refusal(`Deploying ${functions.join(', ')} needs SUPABASE_ACCESS_TOKEN, and it is not set. CI sets it from the environment's secret, SUPABASE_ACCESS_TOKEN_<ENVIRONMENT>. Nothing was pushed.`);
+    if (vaultSaid()) console.log(`[postgres] this push${vaultSaid()}.`);
     const { bare, password } = withoutPassword(url);
     const dir = mkdtempSync(join(tmpdir(), 'bespunky-supabase-'));
     chmodSync(dir, 0o700);

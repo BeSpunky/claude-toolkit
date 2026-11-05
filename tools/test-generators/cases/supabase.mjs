@@ -131,6 +131,7 @@ export default {
     ...[
       ['the same migration in both folders', (tree) => { tree.write('postgres/migrations/1_a.sql', 'x'); tree.write('supabase/migrations/1_a.sql', 'y'); }, /1_a\.sql in postgres\/migrations share a version/],
       ['a config on a major the stack does not run', (tree) => tree.write('supabase/config.toml', '[db]\nmajor_version = 16\n'), /major_version = 16/],
+      ['a config on 15, which this layer has never run', (tree) => tree.write('supabase/config.toml', '[db]\nmajor_version = 15\n'), /major_version = 15.*the one it has been run on/],
       ['a v2 config the pinned CLI cannot load', (tree) => tree.write('supabase/config.toml', '[inbucket]\nenabled = true\n'), /\[inbucket\]/],
     ].map(([what, plant, says]) => ({
       name: `refused before anything is written: ${what}`,
@@ -283,6 +284,8 @@ export default {
         t.ok(shapes('[experimental]\nstack = true\n[experimental]\nx = 1\n') === '[experimental] twice', 'a section twice');
         t.ok(shapes('[experimental]\nstack = true\n[db]\nmajor_version = 17\n[db.seed]\nsql_paths = []\n[other.stack]\nstack = 1\n') === '', 'the plain shape, and others\' keys, are fine');
         t.ok(shapes(readFileSync(join(GENERATORS, 'supabase/seed/config.toml.tpl'), 'utf8')) === '', 'what `init` writes is the plain shape');
+        t.ok(/multi-line string/.test(shapes('[auth]\nnote = """\n[experimental]\nstack = false\n"""\n')), 'a multi-line string holding an owned line is named');
+        t.ok(shapes('[auth]\nnote = """\nhello\n"""\n') === '', 'one holding anything else is not');
       },
     },
     {
@@ -367,16 +370,17 @@ export default {
       },
     },
     {
-      name: 'a config saying 15 gets no lock pinning 17, which would be stale from the start; 17 gets the seeded one',
-      setup: () => {
-        const tree = wearingAgent();
-        tree.write('supabase/config.toml', '[db]\nmajor_version = 15\n');
-        return tree;
-      },
-      run: ensureBoth,
-      expect: (tree, t, ctx) => {
-        t.ok(!tree.exists('supabase/supabase.lock'), 'none seeded');
-        t.ok(/none is seeded/.test(ctx.logs.join('\n')), `and it says so, with what to do: ${ctx.logs.join('\n')}`);
+      name: 'the owner process\'s name, the marker that holds the ready bound: each said in two places, and the same',
+      once: 'reads sources',
+      setup: () => workspace(),
+      run: () => {},
+      expect: (_tree, t, ctx) => {
+        const cli = readFileSync(join(GENERATORS, 'supabase/files/supabase-cli.mjs.tpl'), 'utf8');
+        const { OWNER_PROCESS_MATCH } = ctx.load('layers/supabase');
+        t.ok(cli.includes(`includes('${OWNER_PROCESS_MATCH}')`), `the launcher asks /proc for what the layer's portsAttributes match: ${OWNER_PROCESS_MATCH}`);
+        const [process] = ctx.load('generators/supabase/dev-fragment').supabaseFragment().processes;
+        const marker = /INSTALLING_MARKER = '([^']+)'/.exec(readFileSync(join(GENERATORS, 'supabase/files/supabase-keeper.mjs.tpl'), 'utf8'))?.[1];
+        t.ok(marker && process.ready.holdWhile === `\${STACK_DIR}/${marker}`, `the keeper's marker is what the declaration holds on: ${marker} ${process.ready.holdWhile}`);
       },
     },
     {

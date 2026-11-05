@@ -12,7 +12,7 @@ const POLL_MS = 100;
 const SAID_MS = 10_000;
 
 /** A running process's kernel start time. A zombie has none: where PID 1 reaps nothing (a container with no init), a dead holder stays in the table for good. */
-const processStart = (pid) => {
+export const processStart = (pid) => {
   if (!/^\d+$/.test(pid)) return undefined;
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'latin1');

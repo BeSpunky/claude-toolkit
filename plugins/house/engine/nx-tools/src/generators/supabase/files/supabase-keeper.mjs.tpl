@@ -10,15 +10,19 @@
 // ONE STACK PER TREE. That is the CLI's model: the stack belongs to the worktree. Two dev stacks in one tree (a serve and a `postgres:start`)
 // would be one database under two claims, so the second is refused.
 import { spawn } from 'node:child_process';
-import { existsSync, fstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, fstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
 import { ROOT, READY_MARKER, Refusal, treeHome, verbCommand } from './layout.mjs';
 import { assertNotHeldElsewhere, holdOwnership } from './server.mjs';
 import { runningStacks } from './stack.mjs';
-import { ALLOCATES_FROM, allStacks, assertNoEnvFileOverride, assertPinnedVersion, checkMigrations, cli, dbQuery, destroyStack, hasMigrations, migrationsEnabled, ownerRunning, portGap, requestedPorts, startStack, stackStatus, stopStack, supabaseHome } from './supabase-cli.mjs';
+import { ALLOCATES_FROM, allStacks, assertNoEnvFileOverride, assertPinnedVersion, checkMigrations, cli, dbQuery, destroyStack, endCliCall, hasMigrations, installArtifacts, migrationsEnabled, ownerRunning, portGap, requestedPorts, startStack, stackStatus, stopStack, supabaseHome } from './supabase-cli.mjs';
 import { withStackLock as lockedBy } from './supabase-lock.mjs';
 
 const OWNER_POLL_MS = 250;
+/** The engine's ready bound does not run while this exists (`holdWhile`, generators/supabase/dev-fragment.ts): a download has its own time. */
+const INSTALLING_MARKER = 'postgres.installing';
+/** How long a stop waits on a CLI call before ending it: the engine's own knob, and its `dev stop` waits a minute past this. A reset is not a CLI call of this process. */
+const stopDeadlineMs = () => (Number(process.env.DEV_STOP_TIMEOUT) || 180) * 1000;
 const log = (line) => console.log(`[postgres] ${line}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** The per-stack lock (supabase-lock.mjs), saying so when it has to wait. */
@@ -27,9 +31,9 @@ export const withStackLock = (body, options = {}) => lockedBy(body, { say: log, 
 /** What a failed `start` says after a reset was interrupted: nothing but a rebuild recovers these. */
 const WEDGED = /\.supabase-postgres-init-pending|postmaster\.opts|partial lifecycle state|no recorded identity/;
 
-/** A reset in a session of its own (supabase-reset.mjs), which outlives this process. Resolves to its status. */
-export function resetToCompletion() {
-  const child = spawn(process.execPath, [join(ROOT, 'tools/postgres/supabase-reset.mjs')], { cwd: ROOT, detached: true, stdio: ['ignore', 'inherit', 'inherit'] });
+/** A reset in a session of its own (supabase-reset.mjs), which outlives this process and declares itself in `stackDir`. Resolves to its status. */
+export function resetToCompletion(stackDir = process.env.DEV_STACK_DIR) {
+  const child = spawn(process.execPath, [join(ROOT, 'tools/postgres/supabase-reset.mjs')], { cwd: ROOT, env: { ...process.env, DEV_STACK_DIR: stackDir ?? '' }, detached: true, stdio: ['ignore', 'inherit', 'inherit'] });
   return new Promise((resolve) => {
     child.on('error', () => resolve(1));
     child.on('exit', (code) => resolve(code ?? 1));
@@ -101,27 +105,20 @@ async function reportLeftovers() {
   }
 }
 
-/** Rows that are someone's, where a stack keeps them: read by name, since a half-built stack may not have the table. */
-const rowsIn = (table) => `case when to_regclass('${table}') is null then 0 else (xpath('/row/c/text()', query_to_xml('select count(*) c from ${table}', false, true, '')))[1]::text::int end`;
-/** The schemas a stack makes for itself. One missing here only means a rebuild does not happen: that is the safe way to be wrong. */
-const STACK_SCHEMAS = ['pg_catalog', 'information_schema', 'auth', 'storage', 'realtime', '_realtime', 'extensions', 'graphql', 'graphql_public', 'pgbouncer', 'vault', 'net', 'supabase_functions', 'supabase_migrations', '_analytics', '_supavisor', 'pgsodium', 'pgsodium_masks'];
-const LEDGER_QUERY = `select to_regclass('supabase_migrations.schema_migrations')::text ledger, (select count(*)::int from pg_tables where schemaname not in (${STACK_SCHEMAS.map((name) => `'${name}'`).join(', ')})) tables, ${rowsIn('auth.users')} + ${rowsIn('storage.objects')} kept`;
-
 /**
- * Throw unless the database is really there, on a new connection. An interrupted reset leaves a stack that says it is healthy, with no
- * ledger and nothing of anyone's: rebuilt, once. A reset destroys, so it asks for proof that nothing is lost: an answer of the expected
- * shape, no table in any schema but the stack's own, no user, no stored object. No ledger is not proof by itself. The CLI makes one only
- * when it first has a migration to record, so a project with none has none, and one that has just written its first has rows to keep.
+ * Everything pending, forward: `db push` against this stack is the CLI's own road, and it destroys nothing whatever the database holds.
+ * It applies what its ledger lacks, and runs each seed file its `seed_files` table has not seen, which a first start and a reset also
+ * record, so a stack seeded once is not seeded again and one that has only just got its migrations and seeds gets them now. Vault is a
+ * hosted concern: a start already handles the local one. What it cannot apply (a conflict, a half-built database) is a refusal, with the
+ * error above it and the reset named: only `postgres:reset` destroys.
  */
-async function assertLedger() {
+async function applyPending(key) {
+  const pending = await cli(['db', 'push', '--include-seed', '--skip-vault', '--yes'], { echo: true });
+  if (pending.code !== 0) throw new Refusal(`Migrating or seeding failed, above, and nothing was dropped. If the migration is wrong, fix it and start again. If the database itself is what is wrong, rebuild it from its migrations (this drops its data): ${verbCommand('reset', `--stack=${key}`)}`);
   if (!hasMigrations() || !migrationsEnabled()) return;
-  const [row] = await dbQuery(LEDGER_QUERY);
-  if (typeof row?.tables !== 'number' || typeof row?.kept !== 'number' || !('ledger' in row)) throw new Refusal(`The check for this stack's ledger came back as ${JSON.stringify(row)}, not as this CLI's rows are. Refusing to guess: ${verbCommand('reset')} rebuilds it, and drops its data.`);
-  if (row.ledger || row.tables || row.kept) return;
-  log('this stack answers and says it is healthy, and it has no migration ledger, no tables of anyone\'s, no users and no stored objects: nothing here to keep, which is what an interrupted reset leaves. Rebuilding it from its migrations.');
-  if ((await resetToCompletion()) !== 0) throw new Refusal(`The reset that should have rebuilt it failed, above. ${verbCommand('reset')} tries again.`);
-  const [{ ledger: rebuilt } = {}] = await dbQuery("select to_regclass('supabase_migrations.schema_migrations')::text ledger");
-  if (!rebuilt) throw new Refusal('After a reset this stack still has no migration ledger.');
+  // On a new connection: `status` says healthy with a half-built database.
+  const [row] = await dbQuery("select to_regclass('supabase_migrations.schema_migrations')::text ledger");
+  if (!row?.ledger) throw new Refusal(`This stack has migrations, and after applying them it has no ledger (${JSON.stringify(row)}). Refusing to call it ready. Rebuild it from its migrations (this drops its data): ${verbCommand('reset', `--stack=${key}`)}`);
 }
 
 export async function serve({ resetThenStop = false } = {}) {
@@ -151,8 +148,23 @@ export async function serve({ resetThenStop = false } = {}) {
   // Signals never interrupt what is underway: the CLI is in its own session, and they only say what to do next.
   let stopAsked = false;
   let wake = () => {};
+  let installing = false;
+  let cut = false;
+  const endCall = () => {
+    if (endCliCall()) {
+      cut = true;
+      log('ending the CLI call underway: a stop has its deadline.');
+    }
+  };
+  let deadline;
   for (const name of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
     process.on(name, () => {
+      // A download is safe to cut: the next one resumes, as `tools/test-supabase` shows. Anything else gets its time.
+      if (installing) endCliCall();
+      else if (!deadline) {
+        deadline = setTimeout(endCall, stopDeadlineMs());
+        deadline.unref();
+      }
       stopAsked = true;
       wake();
     });
@@ -170,10 +182,31 @@ export async function serve({ resetThenStop = false } = {}) {
       letGo();
     }
   };
+  // The download, as a step of its own, outside the lock (the cache is shared and the CLI takes turns) and outside the ready bound.
+  const installMark = join(stackDir, INSTALLING_MARKER);
+  writeFileSync(installMark, '');
+  installing = true;
+  let installed;
+  try {
+    installed = await installArtifacts();
+  } finally {
+    installing = false;
+    rmSync(installMark, { force: true });
+  }
+  if (stopAsked) {
+    letGo();
+    return 0;
+  }
+  if (installed.code !== 0) {
+    letGo();
+    throw new Refusal(`supabase stack install failed (exit ${installed.code}), above: this stack's artifacts did not download. Nothing was started. Starting again resumes it.`);
+  }
   let startedStack;
   try {
     startedStack = await withStackLock(() => startOnBlock(requested, { rebuildIfWedged: resetThenStop }), { giveUp: () => stopAsked });
   } catch (error) {
+    // A start cut short may have left its stack half up, with no keeper to stop it.
+    if (cut) await withStackLock(stopStack).catch((failure) => log(`and it could not be stopped: ${failure.message}`));
     letGo();
     throw error;
   }
@@ -190,9 +223,7 @@ export async function serve({ resetThenStop = false } = {}) {
       log(`${key} is reset: migrated and seeded from nothing. Its stack was started for this, and stopped.`);
       return 0;
     }
-    await assertLedger();
-    const pending = await cli(['migration', 'up'], { echo: true });
-    if (pending.code !== 0) throw new Refusal(`Migrating failed. If the database itself is what is wrong, rebuild it from its migrations (this drops its data): ${verbCommand('reset')}`);
+    await applyPending(key);
     if (!stopAsked) writeFileSync(join(stackDir, READY_MARKER), `${new Date().toISOString()}\n`);
   } catch (error) {
     // The first error is the cause: a stop failing after it is an addition, never a replacement.

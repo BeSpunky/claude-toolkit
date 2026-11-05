@@ -274,6 +274,8 @@ scenario('a start keeps what is someone\'s: no ledger is not proof, and a filled
   const dir = fixture({ migrations: false });
   const stack = await start(dir);
   check(!stack.failed, `started: ${JSON.stringify(stack.failed)}`);
+  const installed = sb(dir, ['stack', 'install', '--runtime', 'native', '--output-format', 'json']);
+  check(installed.status === 0 && JSON.parse(installed.stdout).runtime === 'native' && JSON.parse(installed.stdout).lock?.written === false, `the download step, warm, leaves the lock alone: ${installed.status} ${installed.stderr.slice(-200)}`);
   sb(dir, ['db', 'query', 'create schema app']);
   sb(dir, ['db', 'query', 'create table app.keep(v text)']);
   sb(dir, ['db', 'query', "insert into app.keep values ('kept')"]);
@@ -287,6 +289,17 @@ scenario('a start keeps what is someone\'s: no ledger is not proof, and a filled
   check(rows(dir, "select to_regclass('public.first')::text r")[0].r === 'first', 'and the migration ran');
   await stop(again);
 
+  // A conflicting migration: refused with the CLI's error and the reset, data intact, and fixing it is the whole road back.
+  writeFileSync(join(dir, 'supabase/migrations/20260101500000_clash.sql'), 'create table app.keep(v text);\n');
+  const clash = await start(dir, { offset: stack.offset, timeoutMs: 120_000 });
+  check(clash.failed && clash.failed.code !== 0 && /already exists/.test(readFileSync(clash.log, 'utf8')) && /reset --stack=postgres@/.test(clash.failed.said), `a conflict stops the start, with its error and the reset: ${JSON.stringify(clash.failed)}`);
+  check(!listening(stack.port), 'and leaves nothing up');
+  rmSync(join(dir, 'supabase/migrations/20260101500000_clash.sql'));
+  const fixed = await start(dir, { offset: stack.offset });
+  check(!fixed.failed, `with it fixed, it starts: ${JSON.stringify(fixed.failed)}`);
+  check(rows(dir, 'select count(*)::int n from app.keep')[0].n === 1, 'the data is intact');
+  await stop(fixed);
+
   writeFileSync(join(dir, 'supabase/migrations/20260102000000_bad.sql'), '-- migrate:up\nselect 1;\n\n-- migrate:down\ndrop table public.first;\n');
   const refused = await start(dir, { offset: stack.offset, timeoutMs: 30_000 });
   check(refused.failed && refused.failed.code !== 0 && /forward-only/.test(refused.failed.said), `a filled-in down stops a start: ${JSON.stringify(refused.failed)}`);
@@ -295,9 +308,36 @@ scenario('a start keeps what is someone\'s: no ledger is not proof, and a filled
   // A migration that fails at boot: the keeper says so, and leaves nothing up.
   writeFileSync(join(dir, 'supabase/migrations/20260103000000_broken.sql'), 'this is not sql;\n');
   const broken = await start(dir, { offset: stack.offset });
-  check(broken.failed && broken.failed.code !== 0 && /Migrating failed/.test(broken.failed.said), `a broken migration ends the start: ${JSON.stringify(broken.failed)}`);
+  check(broken.failed && broken.failed.code !== 0 && /Migrating or seeding failed/.test(broken.failed.said), `a broken migration ends the start: ${JSON.stringify(broken.failed)}`);
   check(!listening(stack.port), 'and the stack is stopped');
   rmSync(join(dir, 'supabase/migrations/20260103000000_broken.sql'));
+});
+
+scenario('an empty stack gets its first migration and seed after a restart, seeded once; a stack seeded at its first start is not seeded again', async () => {
+  const dir = fixture({ migrations: false });
+  const stack = await start(dir);
+  check(!stack.failed, `started empty: ${JSON.stringify(stack.failed)}`);
+  await stop(stack);
+  writeFileSync(join(dir, 'supabase/migrations/20260101000000_base.sql'), 'create table public.thing(v text);\n');
+  writeFileSync(join(dir, 'postgres/seed/world/01.sql'), "insert into public.thing values ('seeded');\n");
+  const second = await start(dir, { offset: stack.offset });
+  check(!second.failed, `the restart keeps working: ${JSON.stringify(second.failed)}`);
+  const count = () => rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n;
+  check(count() === 1, 'migrated, and seeded before it said ready');
+  await stop(second);
+  const third = await start(dir, { offset: stack.offset });
+  check(!third.failed && count() === 1, `another restart seeds nothing again: ${JSON.stringify(third.failed)}`);
+  await stop(third);
+
+  const seededAtBirth = fixture();
+  const born = await start(seededAtBirth, { offset: stack.offset });
+  check(!born.failed, `started: ${JSON.stringify(born.failed)}`);
+  const inBorn = () => rows(seededAtBirth, "select count(*)::int n from public.thing where v = 'seeded'")[0].n;
+  check(inBorn() === 1, 'the CLI\'s first start seeded it');
+  await stop(born);
+  const reborn = await start(seededAtBirth, { offset: stack.offset });
+  check(!reborn.failed && inBorn() === 1, `a restart does not seed what the first start did: ${JSON.stringify(reborn.failed)}`);
+  await stop(reborn);
 });
 
 scenario('the range is the runtime\'s own rule: the CLI refuses a public port in it, whatever the launcher says', async () => {
@@ -408,13 +448,37 @@ scenario('a reset runs to completion: a stop waits, a signal at its caller does 
   check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'migrated and seeded: the reset finished');
   check(rows(dir, "select to_regclass('supabase_migrations.schema_migrations')::text r")[0].r !== null, 'the ledger is there');
 
-  // The silent half-state: healthy, and no ledger. Dropped by hand here, which is what an interrupted reset leaves.
-  sb(dir, ['db', 'query', 'drop schema supabase_migrations cascade; drop table public.thing;']);
+  // The silent half-state: healthy, and no ledger. Dropped by hand here, which is what an interrupted reset leaves. A start refuses it; only the verb destroys.
+  sb(dir, ['db', 'query', 'drop schema supabase_migrations cascade']);
+  sb(dir, ['db', 'query', 'drop table public.thing']);
   await stop(again);
-  const third = await start(dir, { offset: stack.offset });
-  check(!third.failed, `restart: ${JSON.stringify(third.failed)}`);
-  check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'the ledger check rebuilt it: migrations and seeds are back');
-  await stop(third);
+  const fourth = await start(dir, { offset: stack.offset });
+  check(!fourth.failed, `a start applies forward over it: ${JSON.stringify(fourth.failed)}`);
+  check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'migrations and seeds are back, with no reset');
+  await stop(fourth);
+
+  // A claimer killed mid-reset: its stack is `finishing`, and `dev stop` waits for the reset instead of signalling every descendant.
+  const caller2 = spawn(process.execPath, ['tools/postgres/postgres.mjs', 'reset', `--stack=postgres@${stack.offset}`], { cwd: dir, env: baseEnv(), detached: true, stdio: 'ignore' });
+  let claimer;
+  const until2 = Date.now() + 120_000;
+  while (!claimer && Date.now() < until2) {
+    const row = ps(dir).find((entry) => entry.offset === stack.offset);
+    const entry = row?.stateDir && existsSync(join(row.stateDir, 'detached/reset.json')) ? JSON.parse(readFileSync(join(row.stateDir, 'detached/reset.json'), 'utf8')) : undefined;
+    if (entry?.status === 'running') claimer = row.pid;
+    else await sleep(50);
+  }
+  check(claimer, 'the reset declared itself');
+  if (claimer) {
+    process.kill(claimer, 'SIGKILL');
+    await sleep(200);
+    const waited = dev(dir, 'stop', 'postgres', `--offset=${stack.offset}`);
+    check(waited.status === 0, `the stop of an orphan waited: ${waited.stdout}${waited.stderr}`);
+  }
+  await new Promise((done) => (caller2.exitCode === null ? caller2.once('exit', done) : done()));
+  const fifth = await start(dir, { offset: stack.offset });
+  check(!fifth.failed, `no wedge after it: ${JSON.stringify(fifth.failed)}`);
+  check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'and the reset finished');
+  await stop(fifth);
 });
 
 scenario('a reset with nothing running boots, resets and stops; and it is the road back from whatever an interrupted reset left', async () => {

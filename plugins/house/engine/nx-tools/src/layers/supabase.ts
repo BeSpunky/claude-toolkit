@@ -17,7 +17,7 @@ import { SUPABASE_PORTS } from '../generators/supabase/dev-fragment';
 import { SUPABASE_CLI_DOWNLOADS, SUPABASE_CLI_VERSION } from '../generators/_utils/versions';
 
 /** What every stack's connection-holding process is called: it proxies every port of the stack. */
-const OWNER_PROCESS_MATCH = '__supabase_stack_host__';
+export const OWNER_PROCESS_MATCH = '__supabase_stack_host__';
 
 const devcontainer: DevcontainerFragment = {
   // The stack's superuser password is the same well-known one everywhere, so nothing of it is forwarded on its own: a stack's ports

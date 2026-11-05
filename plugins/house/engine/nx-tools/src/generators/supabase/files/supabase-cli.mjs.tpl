@@ -62,7 +62,7 @@ const cliEnv = (pins = {}, extra = {}) => ({ ...scrubbedEnv(extra), SUPABASE_HOM
  * wedges a stack. Output captured; `echo` also passes stderr on as it comes, since a first start downloads for a minute. Never
  * rejects on an exit code.
  */
-export function cli(args, { pins, env, echo = false, input } = {}) {
+export function cli(args, { pins, env, echo = false, input, onSpawn } = {}) {
   return new Promise((resolve, reject) => {
     const argv = [tool('supabase'), ...args, '--workdir', ROOT, '--agent', 'no'];
     // With input, through `cat`: Node's child stdin is a socket, and the CLI cannot open /dev/stdin on one ("PermissionDenied").
@@ -76,10 +76,41 @@ export function cli(args, { pins, env, echo = false, input } = {}) {
       stderr += chunk;
       if (echo) process.stderr.write(chunk);
     });
-    if (child.pid) holdFor(child.pid);
+    if (child.pid) {
+      holdFor(child.pid);
+      onSpawn?.(child.pid);
+      current = child.pid;
+    }
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code, stdout, stderr }));
+    child.on('close', (code) => {
+      current = undefined;
+      resolve({ code, stdout, stderr });
+    });
   });
+}
+
+/** This process's CLI call underway. A reset is never one: it runs in supabase-reset.mjs, a process of its own, which nothing here reaches. */
+let current;
+
+/** End the CLI call underway, its whole session: what a download or a stalled start needs, and what nothing else may do. */
+export function endCliCall() {
+  const pid = current;
+  if (!pid) return false;
+  const signal = (name) => {
+    try {
+      process.kill(-pid, name);
+    } catch {
+      // gone
+    }
+  };
+  signal('SIGTERM');
+  setTimeout(() => signal('SIGKILL'), 5000).unref();
+  return true;
+}
+
+/** The artifacts this CLI needs, for a first start: a download (1.7 GB), with nothing started or created. At once when they are there. */
+export function installArtifacts() {
+  return cli(['stack', 'install', '--runtime', 'native', '--output-format', 'json'], { echo: true });
 }
 
 const said = ({ stderr, stdout }) => (stderr.trim() || stdout.trim()).split('\n').slice(-12).join('\n');
@@ -231,6 +262,20 @@ export async function genTypes({ lang, schema }) {
   const result = await cli(['gen', 'types', '--lang', lang, ...(schema ? ['--schema', schema] : [])]);
   if (result.code !== 0 || !result.stdout.trim()) throw new Refusal(`supabase gen types failed: ${said(result)}`);
   return result.stdout;
+}
+
+/** The names `[db.vault]` holds. `db push` writes these into the hosted vault before it migrates, resolved from the environment here. */
+export function vaultSecrets() {
+  const lines = readFileSync(CONFIG, 'utf8').split('\n');
+  const start = lines.findIndex((line) => /^\s*\[db\.vault\]/.test(line));
+  if (start < 0) return [];
+  const names = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\s*\[/.test(line)) break;
+    const name = /^\s*"?([\w.-]+)"?\s*=/.exec(line)?.[1];
+    if (name) names.push(name);
+  }
+  return names;
 }
 
 /** Does `[db.migrations] enabled = false` say this stack keeps no ledger? A line-level read. */

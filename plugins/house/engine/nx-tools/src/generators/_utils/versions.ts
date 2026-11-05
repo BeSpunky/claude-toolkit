@@ -107,7 +107,7 @@ export const SUPABASE_CLI_DOWNLOADS = {
   },
 } as const;
 /** The majors the stack backend runs: `[db] major_version` of supabase/config.toml says which. Its default, and what a seeded config says, is the last. */
-export const SUPABASE_MAJORS = ['15', '17'] as const;
+export const SUPABASE_MAJORS = ['17'] as const;
 
 /** The Cloud Functions runtime SDKs — the workspace root AND the deploy manifest (functions/package.json) read these. */
 export const FIREBASE_ADMIN_VERSION = '^13.6.0';

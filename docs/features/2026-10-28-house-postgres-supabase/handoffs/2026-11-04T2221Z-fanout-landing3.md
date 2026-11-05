@@ -19,7 +19,7 @@ Budget 12 (default): core 1+2, wire 1, reviewer 1+5, correctness pass 1 = 11, re
 | core | feat/hps3-core | yes, its own branch | returned |
 | wire | tripwire, dogfood, image job, docs; feat/hps3-wire | yes | returned |
 | docs | with wire | yes | returned |
-| review | sanity review | yes | returned, decisions being applied |
+| review | sanity review | yes | returned |
 | gate | push + PR green, upgrade --local, dogfood, rebuild, real hosted project | yes | pending |
 
 ## Results
@@ -46,3 +46,7 @@ Fixes committed. Worst: a normal start silently wiped real data when a first mig
 6. No TOML parser; `"""` is a stated gap, and refused where the line reader can tell.
 7. Narrow to 17: nothing advertised that never ran.
 8. The weekly tripwire boots cold. A newer CLI stays a notice. Same-push pin and version bump: guarded by the rule that development's CI passes before main.
+
+### review decisions applied
+All eight, then amended on the reviewer's doubt: with no ledger a start applies forward by `db push --include-seed --skip-vault --yes` on the local stack; a conflict refuses with the error and reset command, data intact. Only `postgres:reset` destroys. An edited seed does not rerun until a reset. New additive engine key `ready.holdWhile`, declared only by this layer. Supabase 137; generators 462, 35 skipped; layers 113; migrations 417.
+Next: correctness pass, last of this landing's reviewers. Budget: core, wire, reviewer + 5, this = 9 of 12.

@@ -42,7 +42,7 @@ export function whatCannotMove({ declaration, config, native, supabase, majors, 
     });
   }
   if (config) {
-    if (config.major !== undefined && !majors.includes(config.major)) refusals.push({ code: 'supabase-major-mismatch', text: `supabase/config.toml says major_version = ${config.major}, and the stack runs ${majors.join(' or ')}. Set one of them, then re-run.` });
+    if (config.major !== undefined && !majors.includes(config.major)) refusals.push({ code: 'supabase-major-mismatch', text: `supabase/config.toml says major_version = ${config.major}, and this layer runs ${majors.join(' or ')}: the CLI may offer others, and this is the one it has been run on. Set it, then re-run.` });
     if (config.inbucket) refusals.push({ code: 'supabase-config-outdated', text: `supabase/config.toml has an [inbucket] section, which CLI ${cliVersion} cannot load. Rename it to [local_smtp], then re-run.` });
     if (config.unedited.length) refusals.push({ code: 'supabase-config-shape', text: `supabase/config.toml spells ${config.unedited.join(', ')} in a form this layer cannot edit by the line. Write each as a plain key under one [section], then re-run.` });
   }

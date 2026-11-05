@@ -15,7 +15,7 @@ export const DECLARATION_PATH = '.bespunky/dev.json';
 export type DevCmd = string | string[];
 
 /** What "up" means: exactly one kind; `timeout` (seconds) only on a dependency. */
-export type DevReady = ({ http: string } | { tcp: string } | { cmd: string }) & { timeout?: number };
+export type DevReady = ({ http: string } | { tcp: string } | { cmd: string }) & { timeout?: number; holdWhile?: string };
 
 export interface DevProcess {
   id: string;

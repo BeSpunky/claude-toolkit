@@ -47,3 +47,11 @@ L4.11b volume mount on the image probe: tried and reverted, a bare `docker run` 
 
 ## Verification
 After the fixes, in sequence: test-supabase 121 checks, test-postgres, test-scaffold (CI=true), test-generators 461 passed 35 skipped, test-layers 113, test-migrations 417, check-runner-image/test.sh, check-descriptions, check-script-modes, all pass. supabase-cli/check.mjs passes on the network. No second-round reviewer: budget spent, and the fixes were large.
+
+## Decisions applied (uncommitted, on top of ce624caa)
+1 assertLedger refuses, printing `reset --stack=<key>`; ARCHITECTURE note. 2 supabase-reset.mjs declares the CLI's pid as detached work; real kill of the claimer mid-reset, then `dev stop`, waits. 3 `stack install --runtime native` observed: 40 s cold, under 1 s warm, resumes after a kill, lock untouched. A new additive `ready.holdWhile` suspends the bound; only this layer declares it. A stop ends a download at once and any other CLI call at DEV_STOP_TIMEOUT; never a reset. 4 stated in HOUSE.md. 5 named in prompt and log. 6 multi-line string holding an owned line refused; gap stated. 7 SUPABASE_MAJORS is 17 alone; 15 refused with the reason. 8 no cache on schedule. Owner name tied by a test.
+Limits: a reset on a RUNNING stack whose claimer is killed: `dev stop` waits, then says ports still held; a second stop takes the orphan road. An empty stack that just got its first migration is refused once too; the reset loses nothing.
+Verification: test-supabase 129, test-postgres, test-scaffold, test-generators 462/35 skipped, test-layers 113, test-migrations 417, image test, descriptions, script modes: all pass.
+
+## Decision 1, changed by the orchestrator (uncommitted)
+A start no longer refuses a stack with no ledger: it applies forward by `db push --include-seed --skip-vault --yes`, the CLI's non-destructive road (`migration up` is local by default, has no `--local`, and never seeds). Seeds run by the CLI's own `seed_files` record, once. What cannot be applied refuses, with the error and the exact reset; data intact. Real scenarios: an empty stack's first migration and seed after a restart, rows kept with a first migration, a conflict, a half-built stack repaired forward, no double seed. An edited seed file does not rerun until a reset, as the CLI records its new hash.

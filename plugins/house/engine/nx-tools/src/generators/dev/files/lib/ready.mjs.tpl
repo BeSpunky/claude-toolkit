@@ -10,6 +10,7 @@
 // kind a process uses says nothing about what it is: a port that accepts a connection is not always a server that is
 // ready (a database accepts them before its migrations ran), and a command can ask the real question.
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { get } from 'node:http';
 import { connect } from 'node:net';
 
@@ -92,7 +93,12 @@ export function probeOnce(probe, { cwd, env, signal } = {}) {
  */
 export async function waitUntilReady(probe, { cwd, env, signal, timeoutMs }) {
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), timeoutMs);
+  // `holdWhile`: a file whose presence says the process is at work that has its own time, a first download. The bound starts over after it.
+  let timer;
+  const arm = () => {
+    timer = setTimeout(() => (probe.holdWhile && existsSync(probe.holdWhile) ? arm() : deadline.abort()), timeoutMs);
+  };
+  arm();
   const either = AbortSignal.any([deadline.signal, ...(signal ? [signal] : [])]);
   let said;
   try {

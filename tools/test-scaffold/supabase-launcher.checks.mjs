@@ -215,6 +215,16 @@ try {
   refused = run('deploy', [`--project-ref=${REF_B}`], { ...noAgent, POSTGRES_DEPLOY_URL: `postgresql://postgres.${REF_A}:pw@aws-0-eu.pooler.supabase.com:5432/postgres` });
   check('…and through a session pooler\'s user', refused.status !== 0 && refused.stderr.includes(REF_A) && !allCalls().length, refused.stderr);
   clearCalls();
+  writeFileSync(join(tree, 'supabase/config.toml'), `${readFileSync(join(tree, 'supabase/config.toml'), 'utf8')}\n[db.vault]\nstripe_key = "env(STRIPE_KEY)"\n\n[other]\nx = 1\n`);
+  const vaulted = run('deploy', [`--project-ref=${REF_A}`], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) });
+  check('[db.vault] is named in the log, before the push', vaulted.status === 0 && /writes Vault secrets stripe_key/.test(vaulted.stdout) && !/x from/.test(vaulted.stdout), vaulted.stdout);
+  {
+    const { provider: vaultProvider } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-provider.mjs')));
+    const { parseDeployUrl: parse } = await import(pathToFileURL(join(tree, 'tools/postgres/url.mjs')));
+    check('and in the prompt', /writes Vault secrets stripe_key/.test(vaultProvider.confirmation(parse(direct(REF_A))).says));
+  }
+  writeFileSync(join(tree, 'supabase/config.toml'), readFileSync(join(tree, 'supabase/config.toml'), 'utf8').replace(/\n\[db\.vault\][\s\S]*$/, ''));
+  clearCalls();
   check('the same project goes through', run('deploy', [`--project-ref=${REF_A}`], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) }).status === 0);
   const { provider: theProvider } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-provider.mjs')));
   const { parseDeployUrl } = await import(pathToFileURL(join(tree, 'tools/postgres/url.mjs')));
@@ -268,7 +278,7 @@ try {
   check('it reaches ready', await until(k.ready), k.said());
   const started = callsOf('start')[0] ?? '';
   check('start: native, never eager, every port pinned', started.includes('--runtime\nnative\n') && !started.includes('--eager') && Object.entries({ SUPABASE_DB_PORT: 'postgres', SUPABASE_DB_SHADOW_PORT: 'db-shadow', SUPABASE_DB_POOLER_PORT: 'db-pooler', SUPABASE_API_PORT: 'supabase-api', SUPABASE_STUDIO_PORT: 'studio', SUPABASE_ANALYTICS_PORT: 'analytics', SUPABASE_LOCAL_SMTP_PORT: 'mail', SUPABASE_LOCAL_SMTP_SMTP_PORT: 'mail-smtp', SUPABASE_LOCAL_SMTP_POP3_PORT: 'mail-pop3', SUPABASE_EDGE_RUNTIME_INSPECTOR_PORT: 'functions-inspector' }).every(([pin, name]) => started.includes(`${pin}=${PORTS[name] + OFFSET}\n`)), started);
-  check('a start migrates what is pending', callsOf('migration').length === 1);
+  check('a start applies what is pending forward, seeds included, by the CLI\'s own non-destructive road', (callsOf('db').find((call) => call.startsWith('db\npush\n')) ?? '').includes('--include-seed\n') && !callsOf('db').some((call) => call.startsWith('db\nreset\n')));
   check('it names the local MCP, not a hosted one', /claude mcp add --transport http --scope local supabase-local http:\/\/127\.0\.0\.1/.test(k.said()) && !/mcp\.supabase\.com/.test(k.said()), k.said());
   clearCalls();
   k.child.kill('SIGTERM');
@@ -291,60 +301,36 @@ try {
   k = keeper();
   check('ports that will not move are a refusal, with the stack stopped', (await k.ended) !== 0 && /did not take the ports/.test(k.said()) && callsOf('stop').length === 2, k.said());
 
-  // A half-built stack, and what is not one.
+  // After applying forward, a stack with migrations has a ledger, or is not ready. A start never resets.
   respondsWell();
   clearCalls();
-  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) if [ -f "${scratch}/was-reset" ]; then echo '[{"ledger":"x","tables":1,"kept":0}]'; else echo '[{"ledger":null,"tables":0,"kept":0}]'; fi ;; esac\n`);
-  answer('db-reset', `touch "${scratch}/was-reset"\n`);
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null}]' ;; esac\n`);
   k = keeper();
-  check('migrations, no ledger, no tables: rebuilt by a reset, before ready', await until(k.ready) && callsOf('db').some((call) => call.startsWith('db\nreset\n')) && /interrupted/.test(k.said()), k.said());
-  k.child.kill('SIGTERM');
-  await k.ended;
-  rmSync(join(scratch, 'was-reset'));
-
-  respondsWell();
-  clearCalls();
-  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null,"tables":3,"kept":0}]' ;; esac\n`);
-  k = keeper();
-  check('tables and no ledger is a first migration arriving, and keeps its rows', await until(k.ready) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), k.said());
-  k.child.kill('SIGTERM');
-  await k.ended;
-
-  respondsWell();
-  clearCalls();
-  const onlySql = readdirSync(join(tree, 'supabase/migrations')).filter((name) => name.endsWith('.sql'));
-  onlySql.forEach((name) => rmSync(join(tree, 'supabase/migrations', name)));
-  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null,"tables":0,"kept":0}]' ;; esac\n`);
-  k = keeper();
-  check('no migrations, no ledger: there is nothing to rebuild', await until(k.ready) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), k.said());
-  k.child.kill('SIGTERM');
-  await k.ended;
-  onlySql.forEach((name) => writeFileSync(join(tree, 'supabase/migrations', name), '-- migrate:up\nselect 1;\n\n-- migrate:down\n'));
-
-  // A reset destroys: it takes proof, not the absence of a ledger.
-  for (const [row, what] of [['{"ledger":null,"tables":1,"kept":0}', 'a table outside the stack\'s schemas'], ['{"ledger":null,"tables":0,"kept":2}', 'users or stored objects']]) {
-    respondsWell();
-    clearCalls();
-    answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[${row}]' ;; esac\n`);
-    k = keeper();
-    check(`no ledger, with ${what}: no reset`, await until(k.ready) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), k.said());
-    k.child.kill('SIGTERM');
-    await k.ended;
-  }
-  for (const body of ['[{}]', '[]', '[{"ledger":null,"tables":"0","kept":0}]']) {
+  check('no ledger after it: refused, with the exact reset, no reset run, and stopped', (await k.ended) !== 0 && !k.ready() && !callsOf('db').some((call) => call.startsWith('db\nreset\n')) && callsOf('stop').length === 1 && /reset --stack=postgres@30000/.test(k.said()), k.said());
+  for (const body of ['[{}]', '[]']) {
     respondsWell();
     clearCalls();
     answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '${body}' ;; esac\n`);
     k = keeper();
-    check(`a ledger check answering ${body} is a refusal with the stack stopped, never a reset`, (await k.ended) !== 0 && !callsOf('db').some((call) => call.startsWith('db\nreset\n')) && callsOf('stop').length === 1 && !k.ready(), k.said());
+    check(`the check answering ${body} is a refusal, never ready`, (await k.ended) !== 0 && !k.ready() && callsOf('stop').length === 1, k.said());
   }
+  respondsWell();
+  clearCalls();
+  const onlySql = readdirSync(join(tree, 'supabase/migrations')).filter((name) => name.endsWith('.sql'));
+  onlySql.forEach((name) => rmSync(join(tree, 'supabase/migrations', name)));
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null}]' ;; esac\n`);
+  k = keeper();
+  check('no migrations, no ledger: nothing is missing', await until(k.ready), k.said());
+  k.child.kill('SIGTERM');
+  await k.ended;
+  onlySql.forEach((name) => writeFileSync(join(tree, 'supabase/migrations', name), '-- migrate:up\nselect 1;\n\n-- migrate:down\n'));
   const withEnabled = readFileSync(join(tree, 'supabase/config.toml'), 'utf8');
   writeFileSync(join(tree, 'supabase/config.toml'), `${withEnabled}\n[db.migrations]\nenabled = false\n`);
   respondsWell();
   clearCalls();
-  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null,"tables":0,"kept":0}]' ;; esac\n`);
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null}]' ;; esac\n`);
   k = keeper();
-  check('migrations disabled: no ledger is expected, and nothing is rebuilt', await until(k.ready) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), k.said());
+  check('migrations disabled: no ledger is expected', await until(k.ready), k.said());
   k.child.kill('SIGTERM');
   await k.ended;
   writeFileSync(join(tree, 'supabase/config.toml'), withEnabled);
@@ -364,9 +350,10 @@ try {
   // What a start can fail at, with the stack up: stopped, once, the cause kept.
   respondsWell();
   clearCalls();
-  answer('migration-up', 'echo boom >&2; exit 1\n');
+  answer('db-push', 'echo boom >&2; exit 1\n');
   k = keeper();
-  check('a failed boot migration: a refusal, no ready mark, one stop', (await k.ended) !== 0 && /Migrating failed/.test(k.said()) && !k.ready() && callsOf('stop').length === 1, k.said());
+  check('what cannot be applied: a refusal with the reset named, no reset run, no ready mark, one stop', (await k.ended) !== 0 && /Migrating or seeding failed/.test(k.said()) && /reset --stack=postgres@30000/.test(k.said()) && /boom/.test(k.said()) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')) && !k.ready() && callsOf('stop').length === 1, k.said());
+  answer('db-push', 'echo pushed\n');
   respondsWell();
   clearCalls();
   answer('start', `cat <<'J'\n${startJson().replace('"runtime":"native"', '"runtime":"docker"')}\nJ\n`);
@@ -384,12 +371,12 @@ try {
   check('a foreign data directory on serve: refused, and stopped', (await k.ended) !== 0 && /not in this stack/.test(k.said()) && callsOf('stop').length === 1 && !k.ready(), k.said());
   respondsWell();
   clearCalls();
-  answer('migration-up', 'echo boom >&2; exit 1\n');
+  answer('db-push', 'echo boom >&2; exit 1\n');
   answer('stop', 'echo stuck >&2; exit 1\n');
   k = keeper();
-  check('a stop failing after that adds to the cause, and does not replace it', (await k.ended) !== 0 && /Migrating failed/.test(k.said()) && /could not be stopped/.test(k.said()), k.said());
+  check('a stop failing after that adds to the cause, and does not replace it', (await k.ended) !== 0 && /Migrating or seeding failed/.test(k.said()) && /could not be stopped/.test(k.said()), k.said());
   rmSync(join(answers, 'stop'));
-  rmSync(join(answers, 'migration-up'));
+  answer('db-push', 'echo pushed\n');
   respondsWell();
   clearCalls();
   answer('start', `sleep 1; cat <<'J'\n${startJson()}\nJ\n`);
@@ -398,12 +385,58 @@ try {
   k.child.kill('SIGTERM');
   check('a signal during a start: it runs out, no ready mark, and the stack stops', (await k.ended) === 0 && !k.ready() && callsOf('stop').length === 1, k.said());
 
+  // The download: its own step, holding the ready bound, ended at once by a stop.
+  respondsWell();
+  clearCalls();
+  answer('stack-install', `ls ${scratch}/run-*/postgres@*/postgres.installing > "${scratch}/held" 2>/dev/null\n`);
+  k = keeper();
+  check('a start downloads first, native, holding the ready bound while it does', await until(k.ready) && (callsOf('stack').find((call) => call.startsWith('stack\ninstall\n')) ?? '').includes('--runtime\nnative\n') && readFileSync(join(scratch, 'held'), 'utf8').includes('postgres.installing'), k.said());
+  check('and lets go of it after', !existsSync(join(k.stackDir, 'postgres.installing')));
+  k.child.kill('SIGTERM');
+  await k.ended;
+  respondsWell();
+  clearCalls();
+  answer('stack-install', 'exit 3\n');
+  k = keeper();
+  check('a failed download: refused, nothing started', (await k.ended) !== 0 && /stack install failed/.test(k.said()) && !callsOf('start').length, k.said());
+  respondsWell();
+  clearCalls();
+  answer('stack-install', 'sleep 30\n');
+  k = keeper();
+  await until(() => callsOf('stack').length === 1);
+  const signalled = Date.now();
+  k.child.kill('SIGTERM');
+  check('a stop ends a download at once, and nothing starts', (await k.ended) === 0 && Date.now() - signalled < 10_000 && !callsOf('start').length && !existsSync(join(k.stackDir, 'postgres.installing')), k.said());
+  rmSync(join(answers, 'stack-install'));
+
+  // A stop's deadline: ends a stalled CLI call, and stops what it may have left.
+  respondsWell();
+  clearCalls();
+  answer('start', 'sleep 60\n');
+  k = keeper({ env: { DEV_STOP_TIMEOUT: '1' } });
+  await until(() => callsOf('start').length === 1);
+  const stopAskedAt = Date.now();
+  k.child.kill('SIGTERM');
+  check('a stalled start is ended at the deadline, said, and stopped', (await k.ended) !== 0 && Date.now() - stopAskedAt < 15_000 && /deadline/.test(k.said()) && callsOf('stop').length === 1, k.said());
+  // Never a reset: it outlives the deadline, runs out, and only then does the keeper stop.
+  respondsWell();
+  clearCalls();
+  answer('db-reset', `sleep 3; touch "${scratch}/reset-finished"\n`);
+  k = keeper({ verb: 'serve-reset', env: { DEV_STOP_TIMEOUT: '1' } });
+  await until(() => callsOf('db').some((call) => call.startsWith('db\nreset\n')));
+  const declared = JSON.parse(readFileSync(join(k.stackDir, 'detached/reset.json'), 'utf8'));
+  check('a running reset is declared as the stack\'s detached work, by the CLI\'s own pid', declared.status === 'running' && Number.isInteger(declared.pid) && Boolean(declared.procStart), JSON.stringify(declared));
+  k.child.kill('SIGTERM');
+  await k.ended;
+  check('and a stop\'s deadline does not reach it: it finished', existsSync(join(scratch, 'reset-finished')) && !/deadline/.test(k.said()), k.said());
+  rmSync(join(scratch, 'reset-finished'), { force: true });
+
   // A wedged stack: named, with the road; a reset takes the road.
   respondsWell();
   clearCalls();
   answer('start', `echo 'partial lifecycle state: .supabase-postgres-init-pending' >&2; exit 1\n`);
   k = keeper();
-  check('a start that cannot recover names postgres:reset', (await k.ended) !== 0 && /left half-built/.test(k.said()) && /reset/.test(k.said()) && !callsOf('stack').length, k.said());
+  check('a start that cannot recover names postgres:reset', (await k.ended) !== 0 && /left half-built/.test(k.said()) && /reset/.test(k.said()) && !callsOf('stack').some((call) => call.startsWith('stack\ndestroy\n')), k.said());
   writeFileSync(join(scratch, 'destroyed'), '');
   rmSync(join(scratch, 'destroyed'));
   answer('stack-destroy', `touch "${scratch}/destroyed"\n`);
@@ -559,6 +592,8 @@ try {
   check('a comment with a quote is a comment', !/major_version/.test(twins), twins);
   check('one version under two names is one migration twice: the ledger keys on the version', /^supabase-migrations-twice\t.*1_b\.sql/m.test(twins), twins);
   rmSync(join(project, 'postgres/migrations/1_b.sql'));
+  writeFileSync(join(project, 'supabase/config.toml'), '[db]\nmajor_version = 15\n');
+  check('15 is refused, with why: nothing is advertised that never ran', /^supabase-major-mismatch\t.*major_version = 15.*the one it has been run on/m.test(probe(project, '--evident=postgres,supabase').stdout), probe(project, '--evident=postgres,supabase').stdout);
   writeFileSync(join(project, 'supabase/config.toml'), 'experimental.stack = false\n');
   check('a dotted owned key is refused by name', /^supabase-config-shape\t.*experimental\.stack/m.test(probe(project, '--evident=postgres,supabase').stdout), probe(project, '--evident=postgres,supabase').stdout);
   rmSync(join(project, 'supabase/config.toml'));
