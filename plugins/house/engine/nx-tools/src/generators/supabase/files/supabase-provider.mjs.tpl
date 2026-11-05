@@ -6,26 +6,14 @@
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path';
-import { ROOT, ROLE, Refusal } from './layout.mjs';
+import { DEPLOY_URL_VAR, ROOT, ROLE, Refusal } from './layout.mjs';
 import { writeNextMigration } from './schema.mjs';
-import { ALLOCATES_FROM, MIGRATIONS, PORTS, SUPABASE_DIR, assertNoEnvFileOverride, assertPinnedVersion, cli, genTypes, seedPatterns } from './supabase-cli.mjs';
+import { ALLOCATES_FROM, MIGRATIONS, PORTS, SUPABASE_DIR, assertNoEnvFileOverride, assertPinnedVersion, checkMigrations, cli, genTypes, seedPatterns } from './supabase-cli.mjs';
 import { assertStackIdentity, resetToCompletion, serve } from './supabase-keeper.mjs';
 import { psqlArgs, run, scrubbedEnv } from './tools.mjs';
 
 const DATABASE = 'postgres';
 const clientEnv = () => scrubbedEnv({ PGPASSWORD: 'postgres' });
-
-/** A file the CLI's own pattern misses is skipped with a message and an exit of 0. A non-empty down runs AS PART of the migration. */
-function checkMigrations() {
-  if (!existsSync(MIGRATIONS)) return;
-  for (const name of readdirSync(MIGRATIONS).filter((file) => file.endsWith('.sql'))) {
-    const where = `supabase/migrations/${name}`;
-    if (!/^\d+_.*\.sql$/.test(name)) throw new Refusal(`${where}: the CLI runs only <digits>_<name>.sql, and would skip this one without failing.`);
-    const body = readFileSync(join(MIGRATIONS, name), 'utf8');
-    const down = /^-- migrate:down\b.*$/m.exec(body);
-    if (down && body.slice(down.index + down[0].length).trim()) throw new Refusal(`${where}: migrations are forward-only, and the CLI would run what follows \`-- migrate:down\` as part of this migration, reporting no error. To undo a migration, write the next one.`);
-  }
-}
 
 /** What config.toml's seed patterns match now, relative to supabase/, in the order a reset runs them. Only a last segment may be a glob. */
 function seedFiles() {
@@ -57,12 +45,23 @@ const DECLARATION = join(ROOT, '.bespunky/supabase.json');
 /** What `functions deploy` would ship: a folder with an entrypoint. `_shared` and friends are not functions. */
 export const functionNames = () => (existsSync(FUNCTIONS) ? readdirSync(FUNCTIONS).filter((name) => !name.startsWith('_') && !name.startsWith('.') && statSync(join(FUNCTIONS, name)).isDirectory()) : []);
 
-/** A project or branch ref, never a URL or a word with an `=` that the CLI would read as something else. */
+/**
+ * A ref, by the CLI's own shape, the one form of `--remote` that names a project whatever this tree is linked to. Any other word it reads
+ * as a branch of the linked project (`main`), or as the link itself (`yes`, `1`), and a verb would act on a project nobody named. A
+ * branch has a ref of its own, so nothing is lost.
+ */
 function refOf(flags, verb) {
   const ref = flags['project-ref'];
   if (!ref) throw new Refusal(`${verb} needs --project-ref=<ref>: nothing here chooses a hosted project for you.`);
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(ref)) throw new Refusal(`--project-ref is a project or branch ref, lower-case letters, digits and dashes: ${/^[\w.-]{0,40}$/.test(ref) ? ref : 'not that'}.`);
+  if (!/^[a-z]{20}$/.test(ref)) throw new Refusal(`--project-ref is a project's ref, or a branch's: exactly 20 lower-case letters, from its dashboard URL. Any other word the CLI would read through this tree's link. Got: ${/^[\w.-]{0,40}$/.test(ref) ? ref : 'not that'}.`);
   return ref;
+}
+
+/** The project a database URL itself shows: its host's or its session pooler's user's. A custom domain shows none. */
+export function refOfUrl({ host, user }) {
+  const direct = /^db\.([a-z]{20})\.supabase\.(?:co|com)$/.exec(host)?.[1];
+  if (direct) return direct;
+  return /\.pooler\.supabase\.(?:co|com)$/.test(host) ? /^[^.]+\.([a-z]{20})$/.exec(user ?? '')?.[1] : undefined;
 }
 
 /** The shell's own token, or none, when the CLI falls back to the login under SUPABASE_HOME. Env files were refused before this. */
@@ -73,13 +72,32 @@ const refuseUnderAgent = (what) => {
 
 /**
  * A line of the env file the CLI reads, by its own grammar, observed (tools/test-supabase sends it these and reads what it would post):
- * inside any of its quotes a character is itself, with no escapes, so a value needs a quote it does not hold. All three: refused.
+ * inside its quotes a character is itself, so a value needs a quote it does not hold. All three: refused. Two things are not themselves:
+ * a backslash before the closing quote escapes it, and swallows the next line; inside double quotes `\n` and `\r` become line breaks.
  */
 export function secretLine(name, value) {
   if (/[\r\n]/.test(value)) throw new Refusal(`${name}'s value holds a line break, which this verb does not carry. Encode it, or use the dashboard.`);
   const quote = ["'", '`', '"'].find((candidate) => !value.includes(candidate));
   if (!quote) throw new Refusal(`${name}'s value holds all three quote characters, which the CLI's env file cannot carry. Encode it, or use the dashboard.`);
+  if (value.endsWith('\\') || (quote === '"' && /\\[nr]/.test(value))) throw new Refusal(`${name}'s value holds a backslash where the CLI's env file would read it as an escape. Encode it, or use the dashboard.`);
   return `${name}=${quote}${value}${quote}\n`;
+}
+
+/**
+ * What a chunk from the terminal does to a value being typed. A line break with more after it is a paste of several lines, which would
+ * otherwise send the first line alone and report it set: refused. One line break, however spelled, ends a line.
+ */
+export function hiddenInput(value, chunk) {
+  let typed = value;
+  const chars = [...chunk];
+  for (let i = 0; i < chars.length; i++) {
+    const char = chars[i];
+    if (char === '\r' || char === '\n') return { value: typed, state: chars.slice(i + 1).join('').replace(/^[\r\n]+/, '') ? 'pasted' : 'line' };
+    if (char === '\u0003' || char === '\u0004') return { value: typed, state: 'cancelled' };
+    if (char === '\u007f') typed = typed.slice(0, -1);
+    else typed += char;
+  }
+  return { value: typed, state: 'typing' };
 }
 
 /** One line from the terminal, never echoed. Ctrl+C or Ctrl+D ends the verb having sent nothing. */
@@ -95,12 +113,11 @@ function readHidden(prompt) {
       settle();
     };
     const onData = (chunk) => {
-      for (const char of chunk.toString('utf8')) {
-        if (char === '\r' || char === '\n') return finish(() => resolve(value));
-        if (char === '\u0003' || char === '\u0004') return finish(() => reject(new Refusal('Not sent; nothing changed.')));
-        if (char === '\u007f') value = value.slice(0, -1);
-        else value += char;
-      }
+      const { value: typed, state } = hiddenInput(value, chunk.toString('utf8'));
+      value = typed;
+      if (state === 'line') finish(() => resolve(value));
+      if (state === 'cancelled') finish(() => reject(new Refusal('Not sent; nothing changed.')));
+      if (state === 'pasted') finish(() => reject(new Refusal('That was several lines, and this verb carries one value of one line. Not sent; nothing changed. Encode it, or use the dashboard.')));
     };
     process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -186,10 +203,13 @@ export const provider = {
   deployFlags: ['project-ref'],
   ports: PORTS,
   avoidPorts: [ALLOCATES_FROM],
+  /** The stack is the tree's, so a key has nothing to choose. */
+  onePerTree: true,
+  /** What a hosted project's migrations can reach from anywhere: the direct host is IPv6 unless you bought the add-on. */
+  deployUrlHint: 'session pooler URL',
   seedsLabel: 'config.toml\'s [db.seed] sql_paths',
   serve,
   assertIdentity: assertStackIdentity,
-  /** One stack per tree: no key to ask which. */
   stacksWithData: () => [],
   async migrate() {
     assertNoEnvFileOverride();
@@ -217,6 +237,18 @@ export const provider = {
     mkdirSync(MIGRATIONS, { recursive: true });
     return writeNextMigration(MIGRATIONS, name, '-- Forward-only: to undo a migration, write the next one.\n\n');
   },
+  /** Before anything runs, and before anyone is asked: the database and the functions are one project, or nobody meant this. */
+  assertDeployTarget(target, flags = {}) {
+    if (flags['project-ref'] === undefined) return;
+    const ref = refOf(flags, 'A deploy');
+    const shown = refOfUrl(target);
+    if (shown && shown !== ref) throw new Refusal(`${DEPLOY_URL_VAR} is project ${shown}, and --project-ref says ${ref}: the schema and the functions would land on two projects. Nothing ran.`);
+  },
+  /** On Supabase every database is called `postgres`, so its name proves nothing: the host, and where the functions go. */
+  confirmation(target, flags = {}) {
+    const functions = functionNames();
+    return { says: `migrates ${target.display}${functions.length ? ` and ships ${functions.join(', ')} to project ${flags['project-ref']}` : ''}`, label: 'its host', word: target.host };
+  },
   /**
    * `db push`, into the hosted database's own ledger, then every function: schema before the code that needs it. The password reaches
    * the CLI through a private passfile, never argv. A project with functions and no way to ship them is refused BEFORE the push: half
@@ -228,6 +260,8 @@ export const provider = {
     checkMigrations();
     const functions = functionNames();
     const ref = functions.length ? refOf(flags, `Deploying ${functions.join(', ')}`) : undefined;
+    // The CLI is in a session of its own, so a signal cannot stop what it is pushing: dying here would only leave the password on disk.
+    for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(name, () => console.error('[postgres] a deploy runs to its end: a migration underway does not stop for this. Waiting for it.'));
     if (functions.length && !process.env.SUPABASE_ACCESS_TOKEN && process.env.CI) throw new Refusal(`Deploying ${functions.join(', ')} needs SUPABASE_ACCESS_TOKEN, and it is not set. CI sets it from the environment's secret, SUPABASE_ACCESS_TOKEN_<ENVIRONMENT>. Nothing was pushed.`);
     const { bare, password } = withoutPassword(url);
     const dir = mkdtempSync(join(tmpdir(), 'bespunky-supabase-'));

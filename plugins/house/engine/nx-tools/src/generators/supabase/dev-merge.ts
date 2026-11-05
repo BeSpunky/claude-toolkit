@@ -1,12 +1,13 @@
-// A served app's process, the day its project chooses Supabase. `.bespunky/dev.json` is the project's, and seeding never rewrites it,
-// but this process cannot run with one port: the keeper pins them all. So what the layer needs is added, and what the project set is
-// kept: its own ports and exports stay, and a URL is replaced only if it is still the native server's, by the letter.
+// The keeper's process, in a project wearing Supabase. `.bespunky/dev.json` is the project's, and seeding never rewrites it, but this
+// process cannot run with one port: the keeper pins them all. So every run adds what the layer needs, and keeps what the project set:
+// its own ports and exports stay, and a URL is replaced only if it is still the native server's, by the letter.
 import { type Tree, logger } from '@nx/devkit';
 import { DECLARATION_PATH, type DevProcess, readDeclaration } from '../dev/declaration';
 import { postgresFragment } from '../postgres/dev-fragment';
 import { SUPABASE_ALLOCATES_FROM, SUPABASE_PORTS, supabaseExports, supabaseFragment } from './dev-fragment';
 
-const KEEPER = 'postgres.mjs';
+/** The process that serves the database. A project's own process calling another verb of the launcher (`seed`, `migrate`) is not it. */
+const KEEPER = /\bpostgres\.mjs\s+(?:serve|start)\b/;
 
 function reshape(process: DevProcess): boolean {
   const before = JSON.stringify(process);
@@ -29,7 +30,7 @@ export function mergeServedApps(tree: Tree): void {
   let changed = false;
   for (const [app, entry] of Object.entries(declaration.apps)) {
     for (const process of entry.processes ?? []) {
-      if (!(Array.isArray(process.cmd) ? process.cmd.join(' ') : process.cmd).includes(KEEPER)) continue;
+      if (!KEEPER.test(Array.isArray(process.cmd) ? process.cmd.join(' ') : process.cmd)) continue;
       if (reshape(process)) {
         changed = true;
         logger.info(`[supabase] ${app}: the "${process.id}" process in ${DECLARATION_PATH} now declares the stack's ports.`);

@@ -115,7 +115,7 @@ async function seed(argv) {
 function stackToReset(asked, offset) {
   const here = provider.stacksWithData();
   if (asked) {
-    if (here.includes(asked)) return asked;
+    if (provider.onePerTree || here.includes(asked)) return asked;
     throw new Refusal(`${asked} has no data in this tree.${here.length ? ` These do: ${here.join(', ')}.` : ''}`);
   }
   const matching = here.filter((key) => offset === undefined || key.endsWith(`@${offset}`));
@@ -178,37 +178,40 @@ function envFileSetting(variable) {
   return undefined;
 }
 
-async function humanConfirms(target) {
+async function humanConfirms(target, flags) {
   // What runners set, and from nowhere else: the prompt is the only thing a stray `CI=false` or a project file could remove.
   if (process.env.CI === 'true' || process.env.CI === '1') return;
   if (!process.stdin.isTTY) {
     throw new Refusal(`Outside CI, a deploy asks a human, and there is no terminal to ask on. Run it yourself in a terminal, or let CI run it.`);
   }
+  const { says, label, word } = provider.confirmation?.(target, flags) ?? { says: `migrates ${target.display}`, label: 'the database\'s name', word: target.database };
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await prompt.question(`This migrates ${target.display}. Type the database's name (${target.database}) to go on: `);
+  const answer = await prompt.question(`This ${says}. Type ${label} (${word}) to go on: `);
   prompt.close();
-  if (answer.trim() !== target.database) throw new Refusal('Not confirmed; nothing ran.');
+  if (answer.trim() !== word) throw new Refusal('Not confirmed; nothing ran.');
 }
 
 async function deploy(argv) {
   const { flags } = parse(argv, provider.deployFlags ?? []);
+  const urlHint = provider.deployUrlHint ?? 'direct URL';
   // First, and whatever CI says: an agent can set CI itself, and it reaches a database nobody asked it to migrate.
-  if (process.env.CLAUDECODE === '1') throw new Refusal(`A deploy is not an agent's to run: a human runs it, or CI does. Hand the user this command to run in a terminal: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
+  if (process.env.CLAUDECODE === '1') throw new Refusal(`A deploy is not an agent's to run: a human runs it, or CI does. Hand the user this command to run in a terminal: ${DEPLOY_URL_VAR}=<${urlHint}> ${NX} run postgres:deploy`);
   const file = envFileSetting(DEPLOY_URL_VAR);
   if (file) throw new Refusal(`${DEPLOY_URL_VAR} is set in ${file}. A deploy's URL comes from CI or from a variable you set yourself, never from a file: remove it.`);
   const skipsThePrompt = envFileSetting('CI');
   if (skipsThePrompt) throw new Refusal(`CI is set in ${skipsThePrompt}, and it would skip a deploy's confirmation. Only the runner says it is CI: remove it.`);
   const url = process.env[DEPLOY_URL_VAR];
-  if (!url) throw new Refusal(`${DEPLOY_URL_VAR} is not set. CI sets it from the environment's secret, ${DEPLOY_URL_VAR}_<ENVIRONMENT>; by hand: ${DEPLOY_URL_VAR}=<direct URL> ${NX} run postgres:deploy`);
+  if (!url) throw new Refusal(`${DEPLOY_URL_VAR} is not set. CI sets it from the environment's secret, ${DEPLOY_URL_VAR}_<ENVIRONMENT>; by hand: ${DEPLOY_URL_VAR}=<${urlHint}> ${NX} run postgres:deploy`);
   let target;
   try {
     target = parseDeployUrl(url);
   } catch (error) {
     throw new Refusal(`${DEPLOY_URL_VAR} is refused: ${error.message}`);
   }
-  if (target.pooled) throw new Refusal(`${DEPLOY_URL_VAR} names a transaction pooler (${target.display}). Migrations need a direct connection: use the host's direct URL.`);
+  if (target.pooled) throw new Refusal(`${DEPLOY_URL_VAR} names a transaction pooler (${target.display}). Migrations need a direct connection: use the host's ${urlHint}.`);
+  provider.assertDeployTarget?.(target, flags);
   console.log(`[postgres] deploying migrations to ${target.display}${target.sslmode ? ` (sslmode=${target.sslmode})` : ''}`);
-  await humanConfirms(target);
+  await humanConfirms(target, flags);
   const hide = (text) => {
     const withoutUrl = text.split(url).join('***');
     return target.password ? withoutUrl.split(target.password).join('***') : withoutUrl;

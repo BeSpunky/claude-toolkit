@@ -9,7 +9,7 @@
 // outside 10000-32767, never a base port, stopped by its handle. Nothing here reaches a hosted project or logs in. It leaves CLAUDECODE
 // as it finds it: an agent's run is a run a generated project sees too. `~/.supabase` follows the passwd home, which no variable moves.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -31,6 +31,7 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const { load, dispose } = compilePayload('bespunky-test-supabase');
 const { SUPABASE_CLI_VERSION: PIN } = load('generators/_utils/versions');
 const FRAGMENT = { supabaseFragment: load('generators/supabase/dev-fragment').supabaseFragment().processes };
+const STACK_PORTS = load('generators/supabase/dev-fragment').SUPABASE_PORTS;
 dispose();
 const { bin: toolsBin } = ensureCli({ cache });
 const xdg = join(cache, 'xdg');
@@ -99,7 +100,7 @@ const ps = (dir) => JSON.parse(dev(dir, 'ps', '--json').stdout);
 const sb = (dir, args, extra = {}) => spawnSync(join(toolsBin, 'supabase'), [...args, '--agent', 'no'], { cwd: dir, env: { ...cliEnv(), ...extra }, encoding: 'utf8', timeout: TIMEOUT });
 const rows = (dir, sql) => {
   const result = sb(dir, ['db', 'query', sql, '--output-format', 'json']);
-  if (result.status !== 0) throw new Error(`db query ${sql}: ${result.stderr}`);
+  if (result.status !== 0) throw new Error(`db query ${sql}: ${result.stderr}${result.stdout}`);
   return JSON.parse(result.stdout);
 };
 const stackIdOf = (dir) => JSON.parse(sb(dir, ['status', '--output-format', 'json']).stdout).identity?.id;
@@ -138,6 +139,20 @@ const isRunning = (pid) => {
   } catch {
     return false;
   }
+};
+/** What a process listens on, from the kernel. 0100007F is 127.0.0.1 in /proc's byte order; IPv6 loopback is all zeros and a one. */
+const socketsOf = (pid) => {
+  const inodes = new Set(readdirSync(`/proc/${pid}/fd`).map((fd) => {
+    try {
+      return /^socket:\[(\d+)\]$/.exec(readlinkSync(`/proc/${pid}/fd/${fd}`))?.[1];
+    } catch {
+      return undefined;
+    }
+  }).filter(Boolean));
+  return ['tcp', 'tcp6'].flatMap((table) => readFileSync(`/proc/${pid}/net/${table}`, 'latin1').split('\n').slice(1).map((line) => line.trim().split(/\s+/)).filter((fields) => fields[3] === '0A' && inodes.has(fields[9])).map((fields) => {
+    const [address, port] = fields[1].split(':');
+    return { port: parseInt(port, 16), address, loopback: address === '0100007F' || address === '00000000000000000000000001000000' };
+  }));
 };
 const ownerPid = (id) => JSON.parse(readFileSync(join(HOME_, 'stacks', id, 'owner.json'), 'utf8')).pid;
 
@@ -180,6 +195,13 @@ scenario('start: the real keeper under the real engine; status JSON, owner.json,
   const owner = JSON.parse(readFileSync(join(HOME_, 'stacks', status.identity.id, 'owner.json'), 'utf8'));
   check(owner.lifetime === 'detached' && readFileSync(`/proc/${owner.pid}/cmdline`, 'latin1').includes('__supabase_stack_host__'), 'owner.json names a live owner by that process name');
   check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'the migration and the ../ seed ran');
+  // Observed, not said: the stack holds a well-known password and an unauthenticated Studio, and only loopback keeps them to this machine.
+  // Ports it allocates itself must stay in the range it declares, or the block's ports could lose a race to them.
+  const sockets = socketsOf(owner.pid);
+  check(sockets.length > 3 && sockets.some((socket) => socket.port === stack.port), `the stack's owner listens, on the block's postgres among others: ${JSON.stringify(sockets)}`);
+  check(sockets.every((socket) => socket.loopback), `every port of the stack binds loopback: ${JSON.stringify(sockets.filter((socket) => !socket.loopback))}`);
+  const declared = new Set(Object.values(STACK_PORTS).map((port) => port + stack.offset));
+  check(sockets.filter((socket) => !declared.has(socket.port)).every((socket) => socket.port >= 20000), `what it allocates for itself stays above the public range: ${JSON.stringify(sockets)}`);
   const row = ps(dir).find((entry) => entry.offset === stack.offset);
   check(row?.ports?.postgres === stack.port && row.state === 'live', `dev ps: ${JSON.stringify(row)}`);
 
@@ -246,6 +268,67 @@ scenario('a fresh project with no migrations has a ledger, or is not reset at ev
   check(!again.failed, `restarted: ${JSON.stringify(again.failed)}`);
   check(rows(dir, "select to_regclass('public.marker')::text r")[0].r === 'marker', 'a second start kept its rows: an absent ledger must not cost a reset each time');
   await stop(again);
+});
+
+scenario('a start keeps what is someone\'s: no ledger is not proof, and a filled-in down never runs', async () => {
+  const dir = fixture({ migrations: false });
+  const stack = await start(dir);
+  check(!stack.failed, `started: ${JSON.stringify(stack.failed)}`);
+  sb(dir, ['db', 'query', 'create schema app']);
+  sb(dir, ['db', 'query', 'create table app.keep(v text)']);
+  sb(dir, ['db', 'query', "insert into app.keep values ('kept')"]);
+  check(rows(dir, 'select count(*)::int n from app.keep')[0].n === 1, 'the rows are there before it stops');
+  await stop(stack);
+  // A first migration arrives, and the database has no ledger and nothing in `public`.
+  writeFileSync(join(dir, 'supabase/migrations/20260101000000_first.sql'), 'create table public.first(v text);\n');
+  const again = await start(dir, { offset: stack.offset });
+  check(!again.failed, `restarted: ${JSON.stringify(again.failed)}`);
+  check(rows(dir, 'select count(*)::int n from app.keep')[0].n === 1, 'the rows outside `public` are still there');
+  check(rows(dir, "select to_regclass('public.first')::text r")[0].r === 'first', 'and the migration ran');
+  await stop(again);
+
+  writeFileSync(join(dir, 'supabase/migrations/20260102000000_bad.sql'), '-- migrate:up\nselect 1;\n\n-- migrate:down\ndrop table public.first;\n');
+  const refused = await start(dir, { offset: stack.offset, timeoutMs: 30_000 });
+  check(refused.failed && refused.failed.code !== 0 && /forward-only/.test(refused.failed.said), `a filled-in down stops a start: ${JSON.stringify(refused.failed)}`);
+  rmSync(join(dir, 'supabase/migrations/20260102000000_bad.sql'));
+
+  // A migration that fails at boot: the keeper says so, and leaves nothing up.
+  writeFileSync(join(dir, 'supabase/migrations/20260103000000_broken.sql'), 'this is not sql;\n');
+  const broken = await start(dir, { offset: stack.offset });
+  check(broken.failed && broken.failed.code !== 0 && /Migrating failed/.test(broken.failed.said), `a broken migration ends the start: ${JSON.stringify(broken.failed)}`);
+  check(!listening(stack.port), 'and the stack is stopped');
+  rmSync(join(dir, 'supabase/migrations/20260103000000_broken.sql'));
+});
+
+scenario('the range is the runtime\'s own rule: the CLI refuses a public port in it, whatever the launcher says', async () => {
+  const dir = fixture();
+  // Every other port on a free block: if the CLI has stopped refusing, this boots, and must not boot on a base port.
+  const offset = await freeOffset();
+  const pins = { SUPABASE_DB_PORT: 5432, SUPABASE_DB_SHADOW_PORT: 5433, SUPABASE_DB_POOLER_PORT: 5434, SUPABASE_STUDIO_PORT: 5436, SUPABASE_ANALYTICS_PORT: 5437, SUPABASE_LOCAL_SMTP_PORT: 5438, SUPABASE_LOCAL_SMTP_SMTP_PORT: 5439, SUPABASE_LOCAL_SMTP_POP3_PORT: 5440, SUPABASE_EDGE_RUNTIME_INSPECTOR_PORT: 5441 };
+  const env = Object.fromEntries(Object.entries(pins).map(([name, port]) => [name, String(port + offset)]));
+  const refused = sb(dir, ['start', '--runtime', 'native', '--output-format', 'json'], { ...env, SUPABASE_API_PORT: '15435' });
+  check(refused.status !== 0 && /15435|10000|19999/.test(`${refused.stderr}${refused.stdout}`), `the CLI itself refuses a public port in 10000-19999: ${refused.status} ${refused.stderr.slice(-300)}`);
+  sb(dir, ['stop']);
+});
+
+scenario('under CI: `CI` with a lock is frozen, and the seeded lock passes', async () => {
+  const dir = fixture();
+  const log = join(scratch, 'ci.log');
+  const offset = await freeOffset();
+  const child = spawn(process.execPath, ['tools/postgres/postgres.mjs', 'start', `--port-offset=${offset}`], { cwd: dir, env: { ...baseEnv(), CI: 'true' }, detached: true, stdio: ['ignore', openSync(log, 'a'), openSync(log, 'a')] });
+  const handle = { dir, child, offset, log, exit: new Promise((done) => child.on('exit', (code, signal) => done({ code, signal }))) };
+  running.push(handle);
+  const deadline = Date.now() + 300_000;
+  let row;
+  while (Date.now() < deadline && child.exitCode === null) {
+    row = ps(dir).find((entry) => entry.offset === offset);
+    if (row?.stateDir && existsSync(join(row.stateDir, 'postgres.ready'))) break;
+    await sleep(250);
+  }
+  check(row && existsSync(join(row.stateDir, 'postgres.ready')), `a start under CI: ${readFileSync(log, 'utf8').slice(-600)}`);
+  check(rows(dir, "select count(*)::int n from public.thing where v = 'seeded'")[0].n === 1, 'migrated and seeded');
+  check(execFileSync('git', ['status', '--porcelain', 'supabase/supabase.lock'], { cwd: dir, encoding: 'utf8' }) === '', 'the lock is as seeded');
+  await stop({ ...handle, row });
 });
 
 scenario('keeper signals: TERM stops the stack; kill -9 of the owner ends the keeper; kill -9 of the keeper is adopted', async () => {
@@ -395,7 +478,8 @@ scenario('a real serve: the keeper as a dependency, its exports reach a sibling,
   mkdirSync(join(dir, '.bespunky'), { recursive: true });
   writeFileSync(join(dir, '.bespunky/dev.json'), JSON.stringify(declaration, null, 2));
   const log = join(scratch, 'serve.log');
-  const serve = spawn(process.execPath, ['tools/dev/dev.mjs', 'serve', 'site', '--no-shared-browser'], { cwd: dir, env: baseEnv(), detached: true, stdio: ['ignore', openSync(log, 'a'), openSync(log, 'a')] });
+  // As an agent, whoever runs this: off a main tree, `auto` offers a human offset 0 first, and CI has no CLAUDECODE. The road through the range is the agent's.
+  const serve = spawn(process.execPath, ['tools/dev/dev.mjs', 'serve', 'site', '--no-shared-browser'], { cwd: dir, env: { ...baseEnv(), CLAUDECODE: '1' }, detached: true, stdio: ['ignore', openSync(log, 'a'), openSync(log, 'a')] });
   running.push({ dir, child: serve });
   const served = new Promise((done) => serve.on('exit', (code) => done({ code })));
   const deadline = Date.now() + 240_000;
@@ -538,21 +622,9 @@ scenario('refusals: an env file, a block in the CLI\'s range, a second stack in 
   await stop(stack);
 });
 
-let exit = 0;
-try {
-  for (const [name, body] of scenarios) {
-    if (only && !name.includes(only)) continue;
-    console.log(name);
-    const before = failures;
-    const started = Date.now();
-    await body();
-    console.log(`  ${failures === before ? 'ok' : 'FAILED'} (${((Date.now() - started) / 1000).toFixed(0)}s)`);
-  }
-} catch (error) {
-  failures += 1;
-  console.error(`  FAIL ${error.stack ?? error}`);
-} finally {
-  for (const { dir, child } of running) {
+/** Everything a scenario left, so the next one starts with one stack at most. */
+async function clearStacks() {
+  for (const { dir, child } of running.splice(0)) {
     if (child?.exitCode === null && child.signalCode === null) {
       try {
         process.kill(child.pid, 'SIGTERM');
@@ -562,6 +634,33 @@ try {
     spawnSync(join(toolsBin, 'supabase'), ['stop'], { cwd: dir, env: cliEnv(), stdio: 'ignore', timeout: 60_000 });
     spawnSync(join(toolsBin, 'supabase'), ['stack', 'destroy', '--yes'], { cwd: dir, env: cliEnv(), stdio: 'ignore', timeout: 60_000 });
   }
+}
+
+let exit = 0;
+let ran = 0;
+try {
+  for (const [name, body] of scenarios) {
+    if (only && !name.includes(only)) continue;
+    console.log(name);
+    ran += 1;
+    const before = failures;
+    const started = Date.now();
+    // A throw ends its scenario, not the run: on a pinned CLI's move, one round trip should show everything it broke.
+    try {
+      await body();
+    } catch (error) {
+      failures += 1;
+      console.error(`  FAIL ${error.stack ?? error}`);
+      await clearStacks();
+    }
+    console.log(`  ${failures === before ? 'ok' : 'FAILED'} (${((Date.now() - started) / 1000).toFixed(0)}s)`);
+  }
+  if (!ran) {
+    failures += 1;
+    console.error(`  FAIL --only=${only} matches no scenario, and a run of nothing is no pass`);
+  }
+} finally {
+  await clearStacks();
   rmSync(scratch, { recursive: true, force: true });
   for (const dir of outside) rmSync(dir, { recursive: true, force: true });
   rmSync(join(xdg, 'bespunky'), { recursive: true, force: true });

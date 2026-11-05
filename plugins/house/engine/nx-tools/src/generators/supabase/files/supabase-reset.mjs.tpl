@@ -2,11 +2,11 @@
 //
 // INTERRUPTING A RESET IS THE ONE REAL HAZARD OF THIS STACK: between about 0.6 s and 2.5 s in, a stop or a kill leaves it wedged, or
 // worse, reporting healthy with no migrations. So nothing reaches this: no terminal's Ctrl+C, no group signal, and its caller's death
-// does not end it. The per-stack lock is this process's own, so a stop waits. Only a SIGKILL of everything (a container stop) gets
+// does not end it. The per-stack lock names this process and the CLI under it, so a stop waits, even if this process is killed. Only a SIGKILL of everything (a container stop) gets
 // through, and the ledger check after the next start is what catches that.
 import { Refusal } from './layout.mjs';
 import { cli } from './supabase-cli.mjs';
-import { withStackLock } from './supabase-keeper.mjs';
+import { withStackLock } from './supabase-lock.mjs';
 
 process.stdout.on('error', () => {});
 process.stderr.on('error', () => {});

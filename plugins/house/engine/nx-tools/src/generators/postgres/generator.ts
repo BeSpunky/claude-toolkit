@@ -11,6 +11,7 @@
 //
 // A running server is declared in `.bespunky/dev.json` for every served app (`postgres.devFragment`); with nothing served,
 // `postgres:start` is a stack of its own through `tools/dev/dev run`. Which of the two is not decided here.
+import { refuseWhatCannotMove } from '../supabase/preflight';
 import { type Tree, addProjectConfiguration, formatFiles, logger } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -102,6 +103,8 @@ function refuseOldNode(tree: Tree): void {
 export default async function postgresGenerator(tree: Tree, options: { provider?: LocalServerProvider } = {}): Promise<void> {
   requireLayer(tree, 'agent', 'postgres');
   const provider = providerOf(tree, options.provider);
+  // This step's writes are final before the Supabase step runs, so what that step would refuse is refused here too.
+  if (provider === 'supabase') refuseWhatCannotMove(tree);
   // Before anything is written: a declaration this toolkit cannot honour stops the run here, naming what it can.
   if (provider === 'native') postgresMajor(tree);
   refuseOldNode(tree);

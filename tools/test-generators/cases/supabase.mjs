@@ -48,7 +48,7 @@ const inEveryCell = MATRIX.map(({ layout, link, label }) => ({
     t.ok(isPresent(tree, 'supabase') && isPresent(tree, 'postgres'), 'both layers read as worn');
     t.ok(!isPresent(tree, 'web'), 'the project does not start wearing web');
     t.ok(tree.read('tools/postgres/provider.mjs', 'utf8').includes('supabase-provider.mjs'), 'the launcher runs on the Supabase provider');
-    for (const file of ['supabase-cli.mjs', 'supabase-keeper.mjs', 'supabase-provider.mjs', 'supabase-reset.mjs']) t.ok(tree.exists(`tools/postgres/${file}`), file);
+    for (const file of ['supabase-cli.mjs', 'supabase-keeper.mjs', 'supabase-lock.mjs', 'supabase-provider.mjs', 'supabase-reset.mjs']) t.ok(tree.exists(`tools/postgres/${file}`), file);
     const cli = tree.read('tools/postgres/supabase-cli.mjs', 'utf8');
     t.ok(cli.includes(`PINNED_VERSION = '${ctx.load('generators/_utils/versions').SUPABASE_CLI_VERSION}'`) && !cli.includes('{{'), 'the launcher knows the pin');
     t.ok(!tree.exists('.bespunky/postgres.json'), 'no major of its own: config.toml says');
@@ -129,7 +129,7 @@ export default {
       },
     },
     ...[
-      ['the same migration in both folders', (tree) => { tree.write('postgres/migrations/1_a.sql', 'x'); tree.write('supabase/migrations/1_a.sql', 'y'); }, /1_a\.sql exist in both/],
+      ['the same migration in both folders', (tree) => { tree.write('postgres/migrations/1_a.sql', 'x'); tree.write('supabase/migrations/1_a.sql', 'y'); }, /1_a\.sql in postgres\/migrations share a version/],
       ['a config on a major the stack does not run', (tree) => tree.write('supabase/config.toml', '[db]\nmajor_version = 16\n'), /major_version = 16/],
       ['a v2 config the pinned CLI cannot load', (tree) => tree.write('supabase/config.toml', '[inbucket]\nenabled = true\n'), /\[inbucket\]/],
     ].map(([what, plant, says]) => ({
@@ -260,6 +260,163 @@ export default {
         t.ok(tomlValue('[a]\nk = "x#y" # z\n', 'a', 'k') === '"x#y"', 'a value without its comment, a # in a string kept');
         t.ok(tomlValue('[a]\nk = 1\n', 'b', 'k') === undefined && tomlValue('[a]\n', 'a', 'k') === undefined, 'absent');
         t.ok(hasTomlSection('[[a]]\n', 'a') && !hasTomlSection('# [a]\n', 'a'), 'sections');
+      },
+    },
+    {
+      name: 'config.toml: a comment is found by the file\'s grammar, and a shape a line edit would break is named, never edited',
+      once: 'pure functions',
+      setup: () => workspace(),
+      run: () => {},
+      expect: (_tree, t, ctx) => {
+        const { configFacts, setTomlValue, tomlValue } = ctx.load('generators/supabase/toml-lines');
+        t.ok(tomlValue("[db]\nmajor_version = 17 # we don't use 15\n", 'db', 'major_version') === '17', 'a comment with a quote');
+        t.ok(tomlValue('[db]\nmajor_version = 17 # see [docs]\n', 'db', 'major_version') === '17', 'a comment with a bracket');
+        t.ok(tomlValue('[db]\nmajor_version = 17# tight\n', 'db', 'major_version') === '17', 'a comment with no space');
+        t.ok(tomlValue('[a]\nk = "x # y" # z\n', 'a', 'k') === '"x # y"', 'a # in a string stays');
+        t.ok(tomlValue('[a]\nk = ["./seed.sql"] # it\'s default\n', 'a', 'k') === '["./seed.sql"]', 'an array keeps its comma-free self');
+        t.ok(setTomlValue("[e]\nstack = false # don't flip\n", 'e', 'stack', 'true') === "[e]\nstack = true # don't flip\n", 'byte for byte: the comment stays');
+        const shapes = (text) => configFacts(text).unedited.join();
+        t.ok(shapes('experimental.stack = false\n') === 'experimental.stack', 'dotted at the root');
+        t.ok(shapes('[db]\nseed.sql_paths = []\n') === 'db.seed.sql_paths', 'dotted in a section');
+        t.ok(shapes('[experimental]\n"stack" = false\n') === 'experimental.stack', 'a quoted key');
+        t.ok(shapes('[db]\nseed = { enabled = true }\n') === 'db.seed', 'an inline table');
+        t.ok(shapes('[experimental]\nstack = true\n[experimental]\nx = 1\n') === '[experimental] twice', 'a section twice');
+        t.ok(shapes('[experimental]\nstack = true\n[db]\nmajor_version = 17\n[db.seed]\nsql_paths = []\n[other.stack]\nstack = 1\n') === '', 'the plain shape, and others\' keys, are fine');
+        t.ok(shapes(readFileSync(join(GENERATORS, 'supabase/seed/config.toml.tpl'), 'utf8')) === '', 'what `init` writes is the plain shape');
+      },
+    },
+    {
+      name: 'a retarget happens once, on the move, and only of the path itself',
+      setup: () => wearingAgent(),
+      run: async (tree, ctx) => {
+        if (!(await nativeFirst(tree, ctx))) return addToPostgres(tree, ctx);
+        tree.write('postgres/migrations/20260101000000_first.sql', '-- migrate:up\ncreate table t(v text);\n\n-- migrate:down\n');
+        tree.write('services/billing/project.json', '{ "cmd": "flyway -locations=services/billing/postgres/migrations", "other": "my-postgres/migrations" }\n');
+        tree.write('tools/x/cfg.json', '{ "a": "./postgres/migrations", "b": "../postgres/migrations", "c": "{workspaceRoot}/postgres/migrations/**" }\n');
+        await addToPostgres(tree, ctx);
+        // A later mention is the project's own: the harness runs this again, and it must survive that.
+        if (!tree.exists('docs/adr/007.md')) tree.write('docs/adr/007.md', 'We moved from postgres/migrations to supabase/migrations.\n');
+      },
+      expect: (tree, t) => {
+        t.ok(tree.read('services/billing/project.json', 'utf8').includes('services/billing/postgres/migrations') && tree.read('services/billing/project.json', 'utf8').includes('my-postgres/migrations'), 'another project\'s path is not this one');
+        const cfg = tree.read('tools/x/cfg.json', 'utf8');
+        t.ok(cfg.includes('"./supabase/migrations"') && cfg.includes('"../supabase/migrations"') && cfg.includes('{workspaceRoot}/supabase/migrations/**'), `this one's, however it is reached: ${cfg}`);
+        t.ok(tree.read('docs/adr/007.md', 'utf8').startsWith('We moved from postgres/migrations'), 'a mention written after the move stays, on every later upgrade');
+      },
+    },
+    {
+      name: 'the move says what it left, and what dbmate asked of a file that the CLI will not read',
+      setup: () => wearingAgent(),
+      run: async (tree, ctx) => {
+        if (!(await nativeFirst(tree, ctx))) return addToPostgres(tree, ctx);
+        tree.write('postgres/migrations/20260101000000_first.sql', '-- migrate:up transaction:false\ncreate index concurrently i on t(v);\n\n-- migrate:down\n');
+        tree.write('postgres/migrations/archive/old.sql', 'select 1;\n');
+        await addToPostgres(tree, ctx);
+      },
+      expect: (tree, t, ctx) => {
+        const logs = ctx.logs.join('\n');
+        t.ok(/keeps archive/.test(logs), `a folder left is named: ${logs}`);
+        t.ok(tree.exists('postgres/migrations/archive/old.sql'), 'and left');
+        t.ok(/20260101000000_first\.sql say transaction:false/.test(logs), `its transaction option is named: ${logs}`);
+      },
+    },
+    {
+      name: 'one version under two names is refused, before the postgres step has changed anything',
+      once: 'a refusal, and the second run must not get past it',
+      setup: () => wearingAgent(),
+      run: async (tree, ctx) => {
+        await ctx.load('generators/postgres/generator').default(tree);
+        tree.write('.bespunky/postgres.json', '{ "major": 17 }\n');
+        tree.write('postgres/migrations/20260101000000_a.sql', '');
+        tree.write('supabase/migrations/20260101000000_b.sql', '');
+        await refused(tree, ctx, (t, c) => c.load('generators/postgres/generator').default(t, { provider: 'supabase' }));
+      },
+      expect: (tree, t, ctx) => {
+        t.ok(/share a version/.test(ctx.error ?? '') && /Nothing was written/.test(ctx.error ?? ''), `refused by the first step: ${ctx.error}`);
+        t.ok(tree.read('tools/postgres/provider.mjs', 'utf8').includes('native.mjs'), 'still native');
+        t.ok(!tree.read('postgres/project.json', 'utf8').includes('gen-types'), 'and no target of a provider it does not have');
+      },
+    },
+    ...[
+      ['{ not json\n', /not valid JSON/],
+    ].map(([body, says]) => ({
+      name: `a declaration of ${JSON.stringify(body)} is refused by the first step`,
+      once: 'a refusal',
+      setup: () => wearingAgent(),
+      run: async (tree, ctx) => {
+        await ctx.load('generators/postgres/generator').default(tree);
+        tree.write('.bespunky/postgres.json', body);
+        await refused(tree, ctx, (t, c) => c.load('generators/postgres/generator').default(t, { provider: 'supabase' }));
+        tree.delete('.bespunky/postgres.json'); // the harness refuses a tree holding a JSON file that does not parse
+      },
+      expect: (_tree, t, ctx) => t.ok(says.test(ctx.error ?? ''), `refused: ${ctx.error}`),
+    })),
+    {
+      name: 'only the process that serves is the keeper: a project\'s own call of another verb stays as it wrote it',
+      setup: () => {
+        const tree = wearingAgent();
+        const apps = { web: { processes: [{ id: 'seedit', cmd: 'node tools/postgres/postgres.mjs seed', ports: { seedit: 7000 } }, { id: 'postgres', cmd: ['node', 'tools/postgres/postgres.mjs', 'serve'], ports: { postgres: 5432 } }] } };
+        tree.write('.bespunky/dev.json', `${JSON.stringify({ apps }, null, 2)}\n`);
+        return tree;
+      },
+      run: ensureBoth,
+      expect: (tree, t) => {
+        const [seedit, keeper] = JSON.parse(tree.read('.bespunky/dev.json', 'utf8')).apps.web.processes;
+        t.ok(JSON.stringify(seedit.ports) === '{"seedit":7000}' && !seedit.avoidPorts && !seedit.ready, `untouched: ${JSON.stringify(seedit)}`);
+        t.ok(keeper.ports['supabase-api'] && keeper.avoidPorts?.length, `the keeper has what it needs: ${JSON.stringify(keeper)}`);
+      },
+    },
+    {
+      name: 'a config saying 15 gets no lock pinning 17, which would be stale from the start; 17 gets the seeded one',
+      setup: () => {
+        const tree = wearingAgent();
+        tree.write('supabase/config.toml', '[db]\nmajor_version = 15\n');
+        return tree;
+      },
+      run: ensureBoth,
+      expect: (tree, t, ctx) => {
+        t.ok(!tree.exists('supabase/supabase.lock'), 'none seeded');
+        t.ok(/none is seeded/.test(ctx.logs.join('\n')), `and it says so, with what to do: ${ctx.logs.join('\n')}`);
+      },
+    },
+    {
+      name: 'an env file every verb will refuse is named when the layer arrives; the launcher\'s list and this one are the same',
+      setup: () => {
+        const tree = wearingAgent();
+        tree.write('.env.local', 'SUPABASE_URL=https://x.supabase.co\n');
+        tree.write('supabase/.env', 'export PGPORT=1\n');
+        tree.write('.env.example', 'SUPABASE_URL=\n');
+        return tree;
+      },
+      run: ensureBoth,
+      expect: (_tree, t, ctx) => {
+        const logs = ctx.logs.join('\n');
+        t.ok(/HUMAN_STEP: \.env\.local sets SUPABASE_URL/.test(logs) && /HUMAN_STEP: supabase\/\.env sets PGPORT/.test(logs), `named: ${logs}`);
+        t.ok(!/\.env\.example/.test(logs), 'and what the CLI never opens is not');
+        const launcher = readFileSync(join(GENERATORS, 'supabase/files/supabase-cli.mjs.tpl'), 'utf8');
+        const { CLI_ENV_FILES } = ctx.load('generators/supabase/env-doors');
+        t.ok(launcher.includes(`ENV_FILES = [${CLI_ENV_FILES.map((name) => `'${name}'`).join(', ')}]`), 'the same files');
+        t.ok(launcher.includes(String.raw`(SUPABASE_\w+|PG[A-Z]+)`) && readFileSync(join(GENERATORS, 'supabase/env-doors.ts'), 'utf8').includes(String.raw`(SUPABASE_\w+|PG[A-Z]+)`), 'the same names');
+      },
+    },
+    {
+      name: 'the house docs tell a project wearing Supabase its own facts, and one wearing postgres alone what it always was told',
+      setup: () => workspace(),
+      run: async (tree, ctx) => {
+        await ctx.load('generators/house-doc/generator').default(tree, { layers: ['nx', 'agent', 'postgres', 'supabase', 'ci'], nxToolsVersion: '9.9.9', pluginVersion: '1.0.0' });
+        tree.write('.keep/supabase-rules.md', tree.read('HOUSE.rules.md', 'utf8'));
+        tree.write('.keep/supabase-house.md', tree.read('HOUSE.md', 'utf8'));
+        await ctx.load('generators/house-doc/generator').default(tree, { layers: ['nx', 'agent', 'postgres', 'ci'], nxToolsVersion: '9.9.9', pluginVersion: '1.0.0' });
+      },
+      expect: (tree, t) => {
+        const rules = tree.read('.keep/supabase-rules.md', 'utf8');
+        const house = tree.read('.keep/supabase-house.md', 'utf8');
+        t.ok(rules.includes('forward-only migrations in `supabase/migrations`') && !rules.includes('`postgres/migrations`'), 'the always-on rule names the folder the CLI runs');
+        t.ok(!/pinned dbmate/.test(house), 'no dbmate on the runner');
+        t.ok(!/host's direct URL/.test(house) && /session pooler URL/.test(house), 'the URL a runner can reach');
+        t.ok(!/stop --all`/.test(house.replace('(`--all` stops every other tree\'s stack as well.)', '')), 'the stop that touches only this tree');
+        t.ok(tree.read('HOUSE.rules.md', 'utf8').includes('forward-only migrations in `postgres/migrations`'), 'postgres alone: its folder');
+        t.ok(/pinned dbmate/.test(tree.read('HOUSE.md', 'utf8')) && /host's direct URL/.test(tree.read('HOUSE.md', 'utf8')), 'postgres alone: dbmate, and the direct URL');
       },
     },
     {

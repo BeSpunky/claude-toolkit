@@ -29,7 +29,7 @@ export function portBlock(ports) {
   const max = Math.max(...ports);
   const step = Math.ceil((max - min + 1) / STEP_GRAIN) * STEP_GRAIN;
   const blocks = Math.max(0, Math.floor((MAX_PORT - max) / step));
-  return { min, max, step, blocks };
+  return { ports: [...ports], min, max, step, blocks };
 }
 
 /** Stable small hash of a string → a block index in [1, blocks]. Same tree → same block across restarts. */
@@ -84,7 +84,7 @@ export async function allFree(ports, offset, probe) {
  */
 export function offsetCandidates(spec, { key, isMain = false, block, avoid = [] }) {
   const s = String(spec ?? '').trim().toLowerCase();
-  const landsIn = (offset) => avoid.find(([low, high]) => block.min + offset <= high && block.max + offset >= low);
+  const landsIn = (offset) => avoid.find(([low, high]) => block.ports.some((port) => port + offset >= low && port + offset <= high));
 
   if (s !== 'auto') {
     const n = s === '' ? NaN : Number(s);
@@ -93,7 +93,7 @@ export function offsetCandidates(spec, { key, isMain = false, block, avoid = [] 
     }
     if (block.max + n > MAX_PORT) throw new PortError(`--port-offset=${n} pushes declared port ${block.max} past ${MAX_PORT}`);
     const range = landsIn(n);
-    if (range) throw new PortError(`--port-offset=${n} puts declared ports ${block.min + n}..${block.max + n} inside ${range[0]}-${range[1]}, which this stack's tools allocate from. Use --port-offset=auto, or an offset clear of it.`);
+    if (range) throw new PortError(`--port-offset=${n} puts a declared port inside ${range[0]}-${range[1]}, which this stack's tools allocate from. Use --port-offset=auto, or an offset clear of it.`);
     return { pinned: true, offsets: [n] };
   }
 

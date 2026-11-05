@@ -71,11 +71,12 @@ jobs:
       SUPABASE_TOOLS_CACHE: /var/cache/bespunky-supabase-tools
     steps:
       - uses: actions/checkout@v5
-      # The CLI installs into a directory named by its version, and the artifacts by their digests, so what the key adds is only when to look again.
+      # The CLI installs into a directory named by its version, and the artifacts by their digests, so what the key adds is only when to look
+      # again. The installer is in it because this job triggers on it: a cache hit skips the install, and would stay green over a break.
       - uses: actions/cache@v4
         with:
           path: /var/cache/bespunky-supabase-tools
-          key: supabase-tools-${{ hashFiles('plugins/house/engine/nx-tools/src/generators/_utils/versions.ts', 'plugins/house/engine/nx-tools/src/generators/supabase/seed/supabase.lock.tpl', 'tools/test-supabase/tools.mjs') }}
+          key: supabase-tools-${{ hashFiles('plugins/house/engine/nx-tools/src/generators/_utils/versions.ts', 'plugins/house/engine/nx-tools/src/generators/supabase/seed/supabase.lock.tpl', 'plugins/house/engine/nx-tools/src/generators/devcontainer/house.packages.sh.tpl', 'plugins/house/engine/nx-tools/src/generators/devcontainer/compose.ts', 'tools/test-supabase/tools.mjs') }}
       # What the layer's fragment asks of the image. The driver's installer stubs apt-get, so these come from here, the real way.
       - name: The OS packages the layer brings
         run: |

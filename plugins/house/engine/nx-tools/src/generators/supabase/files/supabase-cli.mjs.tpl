@@ -5,13 +5,16 @@
 // the agent. The shape must not depend on who is running it.
 //
 // THE DOORS. Precedence is flag > shell > project `.env*` > config, so a SUPABASE_* in a project's `.env` overrides config, and moves a
-// stack or a target. Scrubbing the shell's does not reach those files, so `assertNoEnvFileOverride` refuses them. SUPABASE_HOME is a
+// stack or a target; a PG* there does the same to a URL that does not name it, a port or an sslmode, whatever a deploy printed and
+// confirmed. Scrubbing the shell's does not reach those files, and running elsewhere does not either (`--workdir` is what it reads
+// them from), so `assertNoEnvFileOverride` refuses them. SUPABASE_HOME is a
 // literal path computed here, never read from anywhere: an unexpanded `~` would make a directory of that name in the tree.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative } from 'node:path';
 import { ROOT, Refusal } from './layout.mjs';
+import { holdFor } from './supabase-lock.mjs';
 import { scrubbedEnv, tool } from './tools.mjs';
 
 export const PINNED_VERSION = '{{SUPABASE_CLI_VERSION}}';
@@ -73,6 +76,7 @@ export function cli(args, { pins, env, echo = false, input } = {}) {
       stderr += chunk;
       if (echo) process.stderr.write(chunk);
     });
+    if (child.pid) holdFor(child.pid);
     child.on('error', reject);
     child.on('close', (code) => resolve({ code, stdout, stderr }));
   });
@@ -100,23 +104,45 @@ export function assertPinnedVersion() {
   if (version !== PINNED_VERSION) throw new Refusal(`The Supabase CLI on PATH is ${version || 'unreadable'}, and this project runs ${PINNED_VERSION}: its local stack is alpha, so exactly that one. Rebuild the devcontainer (.devcontainer/house.packages.sh on an image of your own).`);
 }
 
-/** What the CLI would read in place of config: any SUPABASE_* assignment in a project env file. */
+/**
+ * The env files this CLI reads, from `supabase/` then the root, as its source has them with SUPABASE_ENV at its default, which is the
+ * only one here: the launcher scrubs that from the shell. `.env.example` and its like it never opens. generators/supabase/env-doors.ts
+ * reports the same, at the moment a project adds the layer; tools/test-generators holds the two together.
+ */
+const ENV_FILES = ['.env.development.local', '.env.local', '.env.development', '.env'];
+const ENV_DOOR = /^\s*(?:export\s+)?(SUPABASE_\w+|PG[A-Z]+)\s*(?:=|:\s)/m;
+
+/** What the CLI would read in place of config, or of what a deploy's URL leaves unsaid: a SUPABASE_* or PG* assignment in a file it opens. */
 export function assertNoEnvFileOverride() {
-  for (const dir of [ROOT, SUPABASE_DIR]) {
-    if (!existsSync(dir)) continue;
-    for (const name of readdirSync(dir)) {
-      if (!/^\.env($|\.)/.test(name)) continue;
+  for (const dir of [SUPABASE_DIR, ROOT]) {
+    for (const name of ENV_FILES) {
       let body;
       try {
         body = readFileSync(join(dir, name), 'utf8');
       } catch {
         continue;
       }
-      const found = /^\s*(?:export\s+)?(SUPABASE_\w+)\s*(?:=|:\s)/m.exec(body)?.[1];
+      const found = ENV_DOOR.exec(body)?.[1];
       if (found) {
-        throw new Refusal(`${relative(ROOT, join(dir, name))} sets ${found}. The CLI lets a project's env file override config.toml, so a value there can move this stack, or a command's target. Refusing. Rename it: config.toml's env() takes any name.`);
+        throw new Refusal(`${relative(ROOT, join(dir, name))} sets ${found}. The CLI lets a project's env file override config.toml and what a URL leaves unsaid, so a value there can move this stack, a command's target or how a deploy connects. Refusing. Rename it: config.toml's env() takes any name.`);
       }
     }
+  }
+}
+
+/** A migration's file name, by the CLI's own pattern. Any other it skips, with a message and an exit of 0. */
+const MIGRATION_NAME = /^\d+_.*\.sql$/;
+export const hasMigrations = () => existsSync(MIGRATIONS) && readdirSync(MIGRATIONS).some((name) => MIGRATION_NAME.test(name));
+
+/** What the CLI does not guard, on every road that runs a migration: a file it would skip in silence, and a non-empty down, which runs AS PART of the migration. */
+export function checkMigrations() {
+  if (!existsSync(MIGRATIONS)) return;
+  for (const name of readdirSync(MIGRATIONS).filter((file) => file.endsWith('.sql'))) {
+    const where = `supabase/migrations/${name}`;
+    if (!MIGRATION_NAME.test(name)) throw new Refusal(`${where}: the CLI runs only <digits>_<name>.sql, and would skip this one without failing.`);
+    const body = readFileSync(join(MIGRATIONS, name), 'utf8');
+    const down = /^-- migrate:down\b.*$/m.exec(body);
+    if (down && body.slice(down.index + down[0].length).trim()) throw new Refusal(`${where}: migrations are forward-only, and the CLI would run what follows \`-- migrate:down\` as part of this migration, reporting no error. To undo a migration, write the next one.`);
   }
 }
 
@@ -205,6 +231,18 @@ export async function genTypes({ lang, schema }) {
   const result = await cli(['gen', 'types', '--lang', lang, ...(schema ? ['--schema', schema] : [])]);
   if (result.code !== 0 || !result.stdout.trim()) throw new Refusal(`supabase gen types failed: ${said(result)}`);
   return result.stdout;
+}
+
+/** Does `[db.migrations] enabled = false` say this stack keeps no ledger? A line-level read. */
+export function migrationsEnabled() {
+  const lines = readFileSync(CONFIG, 'utf8').split('\n');
+  const start = lines.findIndex((line) => /^\s*\[db\.migrations\]/.test(line));
+  if (start < 0) return true;
+  for (const line of lines.slice(start + 1)) {
+    if (/^\s*\[/.test(line)) return true;
+    if (/^\s*enabled\s*=\s*false\b/.test(line)) return false;
+  }
+  return true;
 }
 
 /** The `[db.seed] sql_paths` patterns of config.toml, in order, as a line-level read. */

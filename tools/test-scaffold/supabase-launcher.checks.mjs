@@ -53,7 +53,7 @@ const respondsWell = () => {
   answer('start', `cat <<'J'\n${startJson()}\nJ\n`);
   answer('status', `cat <<'J'\n${JSON.stringify({ identity: { id: ID }, owner: 'reachable', lifecycle: 'running', env: { DB_URL: `postgresql://postgres:postgres@127.0.0.1:${5432 + OFFSET}/postgres` } })}\nJ\n`);
   answer('stack-list', `echo '{"stacks":[]}'\n`);
-  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *to_regclass*) echo '[{"ledger":"supabase_migrations.schema_migrations","tables":1}]' ;; *) echo '[]' ;; esac\n`);
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *to_regclass*) echo '[{"ledger":"supabase_migrations.schema_migrations","tables":1,"kept":0}]' ;; *) echo '[]' ;; esac\n`);
 };
 
 writeFileSync(join(tree, 'tools/dev/dev.mjs'), `process.stdout.write(process.env.FAKE_PS ?? '[]');\n`);
@@ -62,7 +62,9 @@ const readyDir = join(scratch, 'ready');
 mkdirSync(readyDir);
 writeFileSync(join(readyDir, 'postgres.ready'), '');
 
-const baseEnv = (env = {}) => ({ PATH: `${bin}:${process.env.PATH}`, XDG_DATA_HOME: xdg, HOME: scratch, ...env });
+const tmp = join(scratch, 'tmp');
+mkdirSync(tmp);
+const baseEnv = (env = {}) => ({ PATH: `${bin}:${process.env.PATH}`, XDG_DATA_HOME: xdg, HOME: scratch, TMPDIR: tmp, ...env });
 const run = (verb, args = [], env = {}) => spawnSync(process.execPath, [join(tree, 'tools/postgres/postgres.mjs'), verb, ...args], { cwd: tree, encoding: 'utf8', env: baseEnv(env), timeout: 30_000 });
 const runningStack = () => JSON.stringify([row()]);
 
@@ -73,10 +75,12 @@ const check = (name, condition, detail = '') => {
 };
 
 /** A keeper in a process of its own, fd 3 open, as the engine hands it. Stopped by `stopWith`, or left to end. */
+const keepers = [];
 function keeper({ env = {}, verb = 'serve' } = {}) {
   const stackDir = join(scratch, `run-${Math.random().toString(16).slice(2)}`, `postgres@${OFFSET}`);
   mkdirSync(stackDir, { recursive: true });
   const child = spawn(process.execPath, [join(tree, 'tools/postgres/postgres.mjs'), verb], { cwd: tree, env: baseEnv({ DEV_STACK_DIR: stackDir, DEV_STACK_TMP: scratch, ...shifted, ...env }), stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
+  keepers.push(child);
   let said = '';
   child.stdout.on('data', (chunk) => (said += chunk));
   child.stderr.on('data', (chunk) => (said += chunk));
@@ -183,7 +187,7 @@ try {
   check('the password is not in argv', !push.includes('p%40ss') && !push.includes('p@ss'), push);
   check('a private passfile, the password decoded and escaped', readFileSync(join(calls, 'passfile'), 'utf8') === '*:*:*:*:p@ss\\:w\n' && readFileSync(join(calls, 'passmode'), 'utf8').trim() === '600', readFileSync(join(calls, 'passfile'), 'utf8'));
   check('what it says back is masked', !deployed.stdout.includes('p%40ss'), deployed.stdout);
-  check('the passfile is gone', !readdirSync(tmpdir()).some((name) => name.startsWith('bespunky-supabase-') && existsSync(join(tmpdir(), name, 'pgpass')) && readFileSync(join(tmpdir(), name, 'pgpass'), 'utf8').includes('p@ss')));
+  check('the passfile is gone', !readdirSync(tmp).length, readdirSync(tmp).join());
   refused = run('deploy', [], { ...noAgent, CLAUDECODE: '1', POSTGRES_DEPLOY_URL: URL_ });
   check('an agent cannot, whatever CI says', refused.status !== 0 && /not an agent/.test(refused.stderr), refused.stderr);
   refused = run('deploy', [], { ...noAgent, POSTGRES_DEPLOY_URL: 'postgresql://u:p@host.pooler.supabase.com:6543/postgres' });
@@ -193,6 +197,59 @@ try {
   answer('db-push', 'exit 1\n');
   refused = run('deploy', [], { ...noAgent, POSTGRES_DEPLOY_URL: URL_ });
   check('a failed push fails the deploy', refused.status !== 0 && /failed/.test(refused.stderr), refused.stderr);
+
+  console.log('what a deploy and a reset refuse before any CLI call');
+  const direct = (ref) => `postgresql://postgres:pw@db.${ref}.supabase.co:5432/postgres?sslmode=require`;
+  const REF_A = 'abcdefghijklmnopqrst';
+  const REF_B = 'tsrqponmlkjihgfedcba';
+  answer('db-push', 'echo pushed\n');
+  for (const [word, why] of [['main', 'a branch of the link'], ['yes', 'the link itself'], ['1', 'the link itself']]) {
+    clearCalls();
+    refused = run('deploy', [`--project-ref=${word}`], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) });
+    check(`--project-ref=${word} is refused: the CLI reads it as ${why}`, refused.status !== 0 && /20 lower-case/.test(refused.stderr) && !allCalls().length, refused.stderr);
+  }
+  clearCalls();
+  refused = run('deploy', [`--project-ref=${REF_B}`], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) });
+  check('a URL showing another project than --project-ref is refused, naming both', refused.status !== 0 && refused.stderr.includes(REF_A) && refused.stderr.includes(REF_B) && !allCalls().length, refused.stderr);
+  clearCalls();
+  refused = run('deploy', [`--project-ref=${REF_B}`], { ...noAgent, POSTGRES_DEPLOY_URL: `postgresql://postgres.${REF_A}:pw@aws-0-eu.pooler.supabase.com:5432/postgres` });
+  check('…and through a session pooler\'s user', refused.status !== 0 && refused.stderr.includes(REF_A) && !allCalls().length, refused.stderr);
+  clearCalls();
+  check('the same project goes through', run('deploy', [`--project-ref=${REF_A}`], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) }).status === 0);
+  const { provider: theProvider } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-provider.mjs')));
+  const { parseDeployUrl } = await import(pathToFileURL(join(tree, 'tools/postgres/url.mjs')));
+  const asked = theProvider.confirmation(parseDeployUrl(direct(REF_A)));
+  check('the prompt asks for the host, since every database here is called postgres', asked.word === `db.${REF_A}.supabase.co` && asked.says.includes(`db.${REF_A}.supabase.co`), JSON.stringify(asked));
+  check('a custom domain shows no project, so nothing to compare', theProvider.assertDeployTarget(parseDeployUrl('postgresql://u:p@db.example.com:5432/postgres'), { 'project-ref': REF_B }) === undefined);
+  writeFileSync(join(tree, 'supabase/migrations/20990101000000_bad.sql'), '-- migrate:up\nselect 1;\n\n-- migrate:down\ndrop table public.thing;\n');
+  clearCalls();
+  refused = run('deploy', [], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) });
+  check('a deploy refuses a filled-in down, before any push', refused.status !== 0 && /forward-only/.test(refused.stderr) && !callsOf('db').length, refused.stderr);
+  clearCalls();
+  refused = run('reset', [], { FAKE_PS: runningStack() });
+  check('a reset refuses it too, with no reset run', refused.status !== 0 && /forward-only/.test(refused.stderr) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), refused.stderr);
+  rmSync(join(tree, 'supabase/migrations/20990101000000_bad.sql'));
+  for (const [file, line] of [['.env', 'PGPORT=1'], ['.env', 'PGSSLMODE=disable'], ['supabase/.env', 'export PGHOST=evil'], ['.env.development.local', 'PGPASSWORD: x']]) {
+    writeFileSync(join(tree, file), `${line}\n`);
+    clearCalls();
+    refused = run('deploy', [], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) });
+    check(`${file} with ${line} is refused: the CLI would read it over what the URL leaves unsaid`, refused.status !== 0 && refused.stderr.includes(file) && !callsOf('db').length, refused.stderr);
+    rmSync(join(tree, file));
+  }
+  writeFileSync(join(tree, '.env.example'), 'SUPABASE_URL=\nPGPORT=1\n');
+  clearCalls();
+  check('.env.example is the project\'s: the CLI never opens it', run('deploy', [], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) }).status === 0);
+  rmSync(join(tree, '.env.example'));
+  writeFileSync(join(tree, 'supabase/.env'), 'SUPABASE_DB_PORT=1\n');
+  clearCalls();
+  refused = run('seed', [], { FAKE_PS: runningStack() });
+  check('every addressed verb has the refusal, before the identity check reaches the CLI', refused.status !== 0 && /supabase\/\.env/.test(refused.stderr) && !allCalls().length, refused.stderr);
+  rmSync(join(tree, 'supabase/.env'));
+  // What the CLI says back can hold what was typed.
+  answer('db-push', `echo "pushed with pw and ${direct(REF_A)}"\n`);
+  const masked = run('deploy', [], { ...noAgent, POSTGRES_DEPLOY_URL: direct(REF_A) });
+  check('the push\'s own words are masked, the whole URL with them', masked.status === 0 && !masked.stdout.includes('pw') && !masked.stdout.includes(direct(REF_A)), masked.stdout);
+  answer('db-push', 'echo pushed\n');
 
   console.log('the keeper');
   const owner = ownerStandIn();
@@ -237,7 +294,7 @@ try {
   // A half-built stack, and what is not one.
   respondsWell();
   clearCalls();
-  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) if [ -f "${scratch}/was-reset" ]; then echo '[{"ledger":"x","tables":1}]'; else echo '[{"ledger":null,"tables":0}]'; fi ;; esac\n`);
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) if [ -f "${scratch}/was-reset" ]; then echo '[{"ledger":"x","tables":1,"kept":0}]'; else echo '[{"ledger":null,"tables":0,"kept":0}]'; fi ;; esac\n`);
   answer('db-reset', `touch "${scratch}/was-reset"\n`);
   k = keeper();
   check('migrations, no ledger, no tables: rebuilt by a reset, before ready', await until(k.ready) && callsOf('db').some((call) => call.startsWith('db\nreset\n')) && /interrupted/.test(k.said()), k.said());
@@ -247,7 +304,7 @@ try {
 
   respondsWell();
   clearCalls();
-  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null,"tables":3}]' ;; esac\n`);
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null,"tables":3,"kept":0}]' ;; esac\n`);
   k = keeper();
   check('tables and no ledger is a first migration arriving, and keeps its rows', await until(k.ready) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), k.said());
   k.child.kill('SIGTERM');
@@ -257,12 +314,89 @@ try {
   clearCalls();
   const onlySql = readdirSync(join(tree, 'supabase/migrations')).filter((name) => name.endsWith('.sql'));
   onlySql.forEach((name) => rmSync(join(tree, 'supabase/migrations', name)));
-  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null,"tables":0}]' ;; esac\n`);
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null,"tables":0,"kept":0}]' ;; esac\n`);
   k = keeper();
   check('no migrations, no ledger: there is nothing to rebuild', await until(k.ready) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), k.said());
   k.child.kill('SIGTERM');
   await k.ended;
   onlySql.forEach((name) => writeFileSync(join(tree, 'supabase/migrations', name), '-- migrate:up\nselect 1;\n\n-- migrate:down\n'));
+
+  // A reset destroys: it takes proof, not the absence of a ledger.
+  for (const [row, what] of [['{"ledger":null,"tables":1,"kept":0}', 'a table outside the stack\'s schemas'], ['{"ledger":null,"tables":0,"kept":2}', 'users or stored objects']]) {
+    respondsWell();
+    clearCalls();
+    answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[${row}]' ;; esac\n`);
+    k = keeper();
+    check(`no ledger, with ${what}: no reset`, await until(k.ready) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), k.said());
+    k.child.kill('SIGTERM');
+    await k.ended;
+  }
+  for (const body of ['[{}]', '[]', '[{"ledger":null,"tables":"0","kept":0}]']) {
+    respondsWell();
+    clearCalls();
+    answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '${body}' ;; esac\n`);
+    k = keeper();
+    check(`a ledger check answering ${body} is a refusal with the stack stopped, never a reset`, (await k.ended) !== 0 && !callsOf('db').some((call) => call.startsWith('db\nreset\n')) && callsOf('stop').length === 1 && !k.ready(), k.said());
+  }
+  const withEnabled = readFileSync(join(tree, 'supabase/config.toml'), 'utf8');
+  writeFileSync(join(tree, 'supabase/config.toml'), `${withEnabled}\n[db.migrations]\nenabled = false\n`);
+  respondsWell();
+  clearCalls();
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"${home}/stacks/${ID}/data/m/data"}]' ;; *) echo '[{"ledger":null,"tables":0,"kept":0}]' ;; esac\n`);
+  k = keeper();
+  check('migrations disabled: no ledger is expected, and nothing is rebuilt', await until(k.ready) && !callsOf('db').some((call) => call.startsWith('db\nreset\n')), k.said());
+  k.child.kill('SIGTERM');
+  await k.ended;
+  writeFileSync(join(tree, 'supabase/config.toml'), withEnabled);
+
+  // Every road that runs a migration has the guards, the commonest first.
+  for (const [file, body, word] of [['20990101000000_bad.sql', '-- migrate:up\nselect 1;\n\n-- migrate:down\ndrop table public.thing;\n', 'forward-only'], ['init.sql', 'select 1;\n', 'init.sql']]) {
+    writeFileSync(join(tree, 'supabase/migrations', file), body);
+    for (const verb of ['serve', 'serve-reset']) {
+      respondsWell();
+      clearCalls();
+      k = keeper({ verb });
+      check(`${verb} refuses ${file} before the CLI starts anything`, (await k.ended) !== 0 && k.said().includes(word) && !callsOf('start').length, k.said());
+    }
+    rmSync(join(tree, 'supabase/migrations', file));
+  }
+
+  // What a start can fail at, with the stack up: stopped, once, the cause kept.
+  respondsWell();
+  clearCalls();
+  answer('migration-up', 'echo boom >&2; exit 1\n');
+  k = keeper();
+  check('a failed boot migration: a refusal, no ready mark, one stop', (await k.ended) !== 0 && /Migrating failed/.test(k.said()) && !k.ready() && callsOf('stop').length === 1, k.said());
+  respondsWell();
+  clearCalls();
+  answer('start', `cat <<'J'\n${startJson().replace('"runtime":"native"', '"runtime":"docker"')}\nJ\n`);
+  k = keeper();
+  check('a stack on another runtime is refused, and stopped', (await k.ended) !== 0 && /docker/.test(k.said()) && callsOf('stop').length === 1 && !k.ready(), k.said());
+  respondsWell();
+  clearCalls();
+  answer('start', 'echo not json\n');
+  k = keeper();
+  check('a start that exited 0 and cannot be read: refused, and stopped, since no keeper would be left to', (await k.ended) !== 0 && /did not print JSON/.test(k.said()) && callsOf('stop').length === 1, k.said());
+  respondsWell();
+  clearCalls();
+  answer('db-query', `case "$3" in *data_directory*) echo '[{"dir":"/somewhere/else/data"}]' ;; *) echo '[]' ;; esac\n`);
+  k = keeper();
+  check('a foreign data directory on serve: refused, and stopped', (await k.ended) !== 0 && /not in this stack/.test(k.said()) && callsOf('stop').length === 1 && !k.ready(), k.said());
+  respondsWell();
+  clearCalls();
+  answer('migration-up', 'echo boom >&2; exit 1\n');
+  answer('stop', 'echo stuck >&2; exit 1\n');
+  k = keeper();
+  check('a stop failing after that adds to the cause, and does not replace it', (await k.ended) !== 0 && /Migrating failed/.test(k.said()) && /could not be stopped/.test(k.said()), k.said());
+  rmSync(join(answers, 'stop'));
+  rmSync(join(answers, 'migration-up'));
+  respondsWell();
+  clearCalls();
+  answer('start', `sleep 1; cat <<'J'\n${startJson()}\nJ\n`);
+  k = keeper();
+  await until(() => callsOf('start').length === 1);
+  k.child.kill('SIGTERM');
+  check('a signal during a start: it runs out, no ready mark, and the stack stops', (await k.ended) === 0 && !k.ready() && callsOf('stop').length === 1, k.said());
 
   // A wedged stack: named, with the road; a reset takes the road.
   respondsWell();
@@ -364,6 +498,19 @@ try {
   const { secretLine, functionNames } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-provider.mjs')));
   check('a value with all three quotes is refused: the CLI\'s env file has no escape', (() => { try { secretLine('A', `'"\``); return false; } catch { return true; } })());
   check('a value with a line break is refused', (() => { try { secretLine('A', 'x\ny'); return false; } catch { return true; } })());
+  check('a value ending in a backslash is refused: it would escape the closing quote', (() => { try { secretLine('A', 'abc\\'); return false; } catch { return true; } })());
+  check('a backslash under double quotes is refused: `\\n` would become a line break', (() => { try { secretLine('A', "it's `x`\\nfoo"); return false; } catch { return true; } })());
+  check('a backslash mid-value under single quotes is itself', secretLine('A', 'a\\b') === "A='a\\b'\n", secretLine('A', 'a\\b'));
+  const { hiddenInput } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-provider.mjs')));
+  check('a typed line ends at its break', hiddenInput('ab', 'c\r').state === 'line' && hiddenInput('ab', 'c\r').value === 'abc');
+  check('a pasted line with its own break is one line', hiddenInput('', 'abc\r\n').state === 'line');
+  check('several lines at once are refused, not cut to the first', hiddenInput('', '-----BEGIN KEY-----\nabc\n').state === 'pasted');
+  check('Ctrl+C cancels, and backspace edits', hiddenInput('a', '\u0003').state === 'cancelled' && hiddenInput('ab', '\u007f').value === 'a');
+  answer('secrets', `cat > /dev/null; echo "refused: TOPSECRETVALUE" >&2; exit 1\n`);
+  const failedSet = spawnSync('sh', ['-c', `(sleep 1; printf 'TOPSECRETVALUE\\r'; sleep 2) | script -qec '${process.execPath} ${launcherPath} secrets-set --project-ref=${REF} --name=MY_KEY' /dev/null`], { cwd: tree, encoding: 'utf8', env: baseEnv({ SUPABASE_ACCESS_TOKEN: 'sbp_x' }), timeout: 20_000 });
+  check('a failed set says so, and masks the value', /failed/.test(failedSet.stdout) && !failedSet.stdout.includes('TOPSECRETVALUE'), failedSet.stdout);
+  said2 = run('secrets-set', ['--project-ref=main', '--name=A'], {});
+  check('…refuses a word the CLI would read through the link', said2.status !== 0 && /20 lower-case/.test(said2.stderr), said2.stderr);
 
   console.log('a deploy with functions');
   mkdirSync(join(tree, 'supabase/functions/hello'), { recursive: true });
@@ -371,7 +518,7 @@ try {
   check('_shared is not a function', functionNames().join() === 'hello', functionNames().join());
   const URL2 = 'postgresql://postgres.ref:pw@aws-0-eu.pooler.supabase.com:5432/postgres?sslmode=require';
   answer('db-push', 'echo pushed\n');
-  answer('functions', 'echo shipped\n');
+  answer('functions', 'echo shipped with p%40ss\n');
   clearCalls();
   said2 = run('deploy', [], { CI: 'true', POSTGRES_DEPLOY_URL: URL2, SUPABASE_ACCESS_TOKEN: 'sbp_x' });
   check('no ref: refused before anything is pushed', said2.status !== 0 && /project-ref/.test(said2.stderr) && !allCalls().length, said2.stderr);
@@ -384,6 +531,9 @@ try {
   const shipped = callsOf('functions')[0] ?? '';
   check('the schema, then the functions, bundled on Supabase\'s side', said2.status === 0 && Boolean(pushedAt) && shipped.startsWith('functions\ndeploy\n--use-api\n') && shipped.includes(`--remote=${REF}\n`) && shipped.includes('--yes\n') && said2.stdout.indexOf('pushed') < said2.stdout.indexOf('shipped'), `${said2.stderr}\n${shipped}`);
   check('the database credential does not go with the functions, nor the token with the push', !shipped.includes('PGPASSFILE') && !pushedAt.includes('SUPABASE_ACCESS_TOKEN'), `${shipped}\n${pushedAt}`);
+  answer('functions', `echo "shipped from ${URL_}"; exit 1\n`);
+  said2 = run('deploy', [`--project-ref=${REF}`], { CI: 'true', POSTGRES_DEPLOY_URL: URL_, SUPABASE_ACCESS_TOKEN: 'sbp_x' });
+  check('the functions\' words are masked too, and a failure says the schema landed', said2.status !== 0 && !said2.stdout.includes('p%40ss') && /schema is deployed/.test(said2.stderr), said2.stdout);
   rmSync(join(tree, 'supabase/functions'), { recursive: true });
 
   console.log('the preflight');
@@ -402,10 +552,26 @@ try {
   writeFileSync(join(project, 'supabase/migrations/1_a.sql'), '');
   const said = probe(project, '--evident=postgres,supabase').stdout;
   check('a config it cannot run, a v2 config, and two folders are refused before anything is written', /^supabase-major-mismatch\t/m.test(said) && /^supabase-config-outdated\t/m.test(said) && /^supabase-migrations-twice\t/m.test(said), said);
+  writeFileSync(join(project, 'supabase/config.toml'), '[db]\nmajor_version = 17 # we don\'t use 15\n');
+  rmSync(join(project, 'postgres/migrations/1_a.sql'));
+  writeFileSync(join(project, 'postgres/migrations/1_b.sql'), '');
+  const twins = probe(project, '--evident=postgres,supabase').stdout;
+  check('a comment with a quote is a comment', !/major_version/.test(twins), twins);
+  check('one version under two names is one migration twice: the ledger keys on the version', /^supabase-migrations-twice\t.*1_b\.sql/m.test(twins), twins);
+  rmSync(join(project, 'postgres/migrations/1_b.sql'));
+  writeFileSync(join(project, 'supabase/config.toml'), 'experimental.stack = false\n');
+  check('a dotted owned key is refused by name', /^supabase-config-shape\t.*experimental\.stack/m.test(probe(project, '--evident=postgres,supabase').stdout), probe(project, '--evident=postgres,supabase').stdout);
+  rmSync(join(project, 'supabase/config.toml'));
+  for (const body of ['{}\n']) {
+    writeFileSync(join(project, '.bespunky/postgres.json'), body);
+    check(`a declaration of ${body.trim()} says nothing, and passes`, probe(project, '--ensure=supabase').stdout === '', probe(project, '--ensure=supabase').stdout);
+  }
+  writeFileSync(join(project, '.bespunky/postgres.json'), '{ not json\n');
+  check('broken JSON is refused here, as the generators would', /^supabase-major-mismatch\t.*not valid JSON/m.test(probe(project, '--ensure=supabase').stdout), probe(project, '--ensure=supabase').stdout);
 
   // The lock.
   console.log('the lock');
-  const { withStackLock } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-keeper.mjs')));
+  const { holdFor, withStackLock } = await import(pathToFileURL(join(tree, 'tools/postgres/supabase-lock.mjs')));
   process.env.XDG_DATA_HOME = xdg;
   const order = [];
   await Promise.all([
@@ -424,6 +590,16 @@ try {
   const stat = readFileSync(`/proc/${holder.pid}/stat`, 'latin1');
   writeFileSync(join(treeHome, 'supabase.lock'), `${holder.pid} ${stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]}\n`);
   check('a live holder does, and `giveUp` is how to stop waiting', (await withStackLock(async () => 'ran', { giveUp: () => true })) === undefined);
+  // The CLI outlives whoever asked for it: a dead asker's line beside a live child's still holds, which is what a stop must wait for.
+  writeFileSync(join(treeHome, 'supabase.lock'), `1 not-its-start-time\n${holder.pid} ${stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]}\n`);
+  check('a dead holder\'s lock is still held while its CLI runs', (await withStackLock(async () => 'ran', { giveUp: () => true })) === undefined);
+  rmSync(join(treeHome, 'supabase.lock'), { force: true });
+  await withStackLock(async () => {
+    holdFor(holder.pid);
+    check('a child run under the lock is written into it', readFileSync(join(treeHome, 'supabase.lock'), 'utf8').split('\n').filter(Boolean).length === 2);
+  });
+  holdFor(holder.pid);
+  check('outside the lock it writes nothing', !existsSync(join(treeHome, 'supabase.lock')));
   holder.kill('SIGKILL');
   rmSync(join(treeHome, 'supabase.lock'), { force: true });
   // Where PID 1 reaps nothing (a container with no init, a CI job's), a holder killed as an orphan stays in the table for good, its start time and all.
@@ -442,6 +618,8 @@ try {
   failed += 1;
   console.error(`FAIL ${error.stack ?? error}`);
 } finally {
+  // A check that threw leaves its keeper up, on nobody's watch: a keeper never ends by itself.
+  for (const child of keepers) if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
   rmSync(scratch, { recursive: true, force: true });
 }
 console.log(failed ? `FAILED: ${failed}` : 'ok');

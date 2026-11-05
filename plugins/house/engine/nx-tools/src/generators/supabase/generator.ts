@@ -3,17 +3,17 @@
 //
 // Writes, by class (CLAUDE.md):
 //   A  tools/postgres/supabase-*.mjs and provider.mjs, rewritten every run. In supabase/config.toml, `[experimental] stack`.
-//   B  the layer's tag on the postgres project; a served app's process in .bespunky/dev.json, reshaped the once (dev-merge.ts).
+//   B  the layer's tag on the postgres project; the keeper's process in .bespunky/dev.json, given what the stack needs (dev-merge.ts).
 //   C  supabase/config.toml, .gitignore, supabase.lock and .bespunky/supabase.json, seeded when absent. The migrations, supabase/functions.
 //      One line of supabase/.gitignore is re-asserted: functions/.env.
 //
 // THE FOLDER MOVE IS A STEP OF THIS GENERATOR, NOT A MIGRATION. A migration carries every project across a version, unasked; this
 // happens because one project chose this layer, in the run that ensures it, and a project that never does keeps postgres/migrations
-// for good. No shape any existing project has changes by this release, so there is no rung. The move is idempotent for the same
-// reason everything here is: nothing left to move is the whole of the second run.
+// for good. No shape any existing project has changes by this release, so there is no rung. Nothing left to move is the whole of a
+// second run: a mention of the old path after that is a project's own, and stays.
 import { type Tree, formatFiles, logger, readProjectConfiguration, updateProjectConfiguration, visitNotIgnoredFiles } from '@nx/devkit';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
 import { postgresHome } from '../postgres/home';
 import { LAUNCHER_ROOT } from '../postgres/generator';
@@ -22,57 +22,35 @@ import { MIGRATIONS_OF, SUPABASE_TAG } from '../postgres/provider';
 import { readDeclaration } from '../dev/declaration';
 import { SUPABASE_CLI_VERSION, SUPABASE_MAJORS } from '../_utils/versions';
 import { mergeServedApps } from './dev-merge';
-import { hasTomlSection, setTomlValue, tomlValue } from './toml-lines';
+import { envFilesRefused } from './env-doors';
+import { refuseWhatCannotMove } from './preflight';
+import { setTomlValue, tomlValue } from './toml-lines';
 
-export const SUPABASE_LAUNCHER_FILES = ['supabase-cli.mjs', 'supabase-keeper.mjs', 'supabase-provider.mjs', 'supabase-reset.mjs'] as const;
+export const SUPABASE_LAUNCHER_FILES = ['supabase-cli.mjs', 'supabase-keeper.mjs', 'supabase-lock.mjs', 'supabase-provider.mjs', 'supabase-reset.mjs'] as const;
 export const SUPABASE_CONFIG = 'supabase/config.toml';
 const SEEDED_SQL_PATHS = '["../postgres/seed/world/*.sql"]';
 const INIT_SQL_PATHS = '["./seed.sql"]';
-const SUPPORTED_MAJOR = SUPABASE_MAJORS.at(-1)!;
+/** The major the seeded `supabase.lock` pins. */
+const LOCKED_MAJOR = SUPABASE_MAJORS.at(-1)!;
 const FUNCTION_SECRETS = 'functions/.env';
 /** Class C: where `postgres:gen-types` writes, and in what language. The project's from the day it is seeded. */
 const SUPABASE_DECLARATION = '.bespunky/supabase.json';
 
 const seed = (name: string) => readFileSync(join(__dirname, 'seed', `${name}.tpl`), 'utf8');
 
-/** A config.toml's `project_id`: the CLI takes any string, and names things after it. */
+/** A config.toml's `project_id`: the CLI takes any string, and names things after it. A repo with no package.json is named by its folder. */
 const projectId = (tree: Tree): string => {
+  const safe = (name: string): string => name.replace(/^@[^/]+\//, '').replace(/[^\w.-]/g, '-');
   try {
-    return (JSON.parse(tree.read('package.json', 'utf8') ?? '{}') as { name?: string }).name?.replace(/^@[^/]+\//, '').replace(/[^\w.-]/g, '-') || 'app';
+    const declared = (JSON.parse(tree.read('package.json', 'utf8') ?? '{}') as { name?: string }).name;
+    if (declared) return safe(declared);
   } catch {
-    return 'app';
+    // not a name, then
   }
+  return safe(basename(tree.root)) || 'app';
 };
 
 const migrationFilesIn = (tree: Tree, dir: string): string[] => (tree.exists(dir) ? tree.children(dir).filter((name) => tree.isFile(`${dir}/${name}`)) : []);
-
-/**
- * The backstop of `house-probe.mts`, which refuses these before anything is written. A generator run straight, or a project that
- * changed between the two, still stops here, before this generator has written.
- */
-function refuseWhatCannotMove(tree: Tree): void {
-  if (tree.exists(POSTGRES_DECLARATION)) {
-    const { major } = JSON.parse(tree.read(POSTGRES_DECLARATION, 'utf8') ?? '{}') as { major?: unknown };
-    if (String(major) !== SUPPORTED_MAJOR) {
-      throw new Error(
-        `[supabase] ${POSTGRES_DECLARATION} declares Postgres ${major}, and the Supabase stack runs ${SUPPORTED_MAJOR}. uuidv7() and virtual generated columns, for two, do not exist there. Nothing was written.\n` +
-          `  If your migrations use nothing newer: set { "major": ${SUPPORTED_MAJOR} } in ${POSTGRES_DECLARATION}, check them against it (house.sh upgrade, rebuild, postgres:reset), and add the layer again.`,
-      );
-    }
-  }
-  if (tree.exists(SUPABASE_CONFIG)) {
-    const text = tree.read(SUPABASE_CONFIG, 'utf8') ?? '';
-    const major = tomlValue(text, 'db', 'major_version');
-    if (major !== undefined && !(SUPABASE_MAJORS as readonly string[]).includes(major)) {
-      throw new Error(`[supabase] ${SUPABASE_CONFIG} says major_version = ${major}, and the stack runs ${SUPABASE_MAJORS.join(' or ')}. Nothing was written. Set one of them.`);
-    }
-    if (hasTomlSection(text, 'inbucket')) throw new Error(`[supabase] ${SUPABASE_CONFIG} has an [inbucket] section, which CLI ${SUPABASE_CLI_VERSION} cannot load. Nothing was written. Rename it to [local_smtp].`);
-  }
-  const twins = migrationFilesIn(tree, MIGRATIONS_OF.native).filter((name) => name.endsWith('.sql') && tree.exists(`${MIGRATIONS_OF.supabase}/${name}`));
-  if (twins.length) {
-    throw new Error(`[supabase] ${twins.join(', ')} exist in both ${MIGRATIONS_OF.native} and ${MIGRATIONS_OF.supabase}, and a project has one folder. Nothing was written. Keep one of each and run this again.`);
-  }
-}
 
 function ensureConfig(tree: Tree): void {
   if (!tree.exists(SUPABASE_CONFIG)) {
@@ -90,6 +68,9 @@ function ensureConfig(tree: Tree): void {
   tree.write(SUPABASE_CONFIG, text);
 }
 
+/** Only the path itself, at a path's start: `services/billing/postgres/migrations` is another project's. `./`, `../` and `{workspaceRoot}/` are still this one. */
+const REFERENCE = new RegExp(`(?<![\\w.-])(?<!(?:^|[^}.])/)${MIGRATIONS_OF.native.replace('/', '\\/')}`, 'gm');
+
 /** A rename: every other occurrence of the old path is a reference to what moved. Skips what is not the project's prose or config to rewrite. */
 function retargetReferences(tree: Tree): string[] {
   const rewritten: string[] = [];
@@ -98,8 +79,9 @@ function retargetReferences(tree: Tree): string[] {
     const buffer = tree.read(path);
     if (!buffer || buffer.length > 2_000_000 || buffer.includes(0)) return;
     const text = buffer.toString('utf8');
-    if (!text.includes(MIGRATIONS_OF.native)) return;
-    tree.write(path, text.split(MIGRATIONS_OF.native).join(MIGRATIONS_OF.supabase));
+    const retargeted = text.replace(REFERENCE, MIGRATIONS_OF.supabase);
+    if (retargeted === text) return;
+    tree.write(path, retargeted);
     rewritten.push(path);
   });
   return rewritten;
@@ -108,13 +90,19 @@ function retargetReferences(tree: Tree): string[] {
 function moveMigrations(tree: Tree): void {
   const from = MIGRATIONS_OF.native;
   const to = MIGRATIONS_OF.supabase;
+  const left = tree.exists(from) ? tree.children(from).filter((name) => !tree.isFile(`${from}/${name}`)) : [];
+  if (left.length) logger.info(`[supabase] ${from}/ keeps ${left.join(', ')}: the CLI runs only the files directly in ${to}, so a folder under it would never run. No folder was moved. Decide what each is, and move or remove it.`);
   const files = migrationFilesIn(tree, from);
+  if (!files.length) return;
   const sql = files.filter((name) => name.endsWith('.sql'));
+  // Read before the move: the CLI does not know dbmate's option, so what it asked for is the human's to decide.
+  const untransacted = sql.filter((name) => /^-- migrate:up\b.*\btransaction:false\b/m.test(tree.read(`${from}/${name}`, 'utf8') ?? ''));
   for (const name of files) {
     if (name !== '.gitkeep') tree.rename(`${from}/${name}`, `${to}/${name}`);
     else tree.delete(`${from}/${name}`);
   }
   const rewritten = retargetReferences(tree);
+  if (untransacted.length) logger.info(`[supabase] ${untransacted.join(', ')} say transaction:false, which is dbmate's and which the CLI does not read. If a statement in one cannot run in a transaction (create index concurrently), split it into a migration of that one statement, and try it with a reset.`);
   if (sql.length) logger.info(`[supabase] moved ${sql.length} migration(s) from ${from} to ${to}: the CLI hard-codes that path, and a project has one folder.`);
   if (rewritten.length) logger.info(`[supabase] retargeted ${from} to ${to} in: ${rewritten.join(', ')}`);
   if (sql.length) {
@@ -148,7 +136,15 @@ export default async function supabaseGenerator(tree: Tree): Promise<void> {
   const ignored = tree.read('supabase/.gitignore', 'utf8') ?? '';
   if (!ignored.split('\n').some((line) => line.trim() === FUNCTION_SECRETS)) tree.write('supabase/.gitignore', `${ignored.replace(/\n?$/, '\n')}\n# A function's local secrets\n${FUNCTION_SECRETS}\n`);
   if (!tree.exists(SUPABASE_DECLARATION)) tree.write(SUPABASE_DECLARATION, `${JSON.stringify({ types: { out: 'supabase/types/database.ts', lang: 'typescript' } }, null, 2)}\n`);
-  if (!tree.exists('supabase/supabase.lock')) tree.write('supabase/supabase.lock', seed('supabase.lock'));
+  // The seeded lock pins one major. For a config saying another it would be stale from the start, and CI refuses a stale lock: none, then, and the first local start writes its own.
+  const major = tomlValue(tree.read(SUPABASE_CONFIG, 'utf8') ?? '', 'db', 'major_version');
+  if (!tree.exists('supabase/supabase.lock')) {
+    if (major === undefined || major === LOCKED_MAJOR) tree.write('supabase/supabase.lock', seed('supabase.lock'));
+    else logger.info(`[supabase] ${SUPABASE_CONFIG} says major_version = ${major}, and the lock this layer seeds pins ${LOCKED_MAJOR}, so none is seeded. Start the stack once and commit the supabase/supabase.lock it writes, or CI will have none to hold it to.`);
+  }
+  for (const { file, name } of envFilesRefused(tree)) {
+    logger.info(`HUMAN_STEP: ${file} sets ${name}, and the Supabase CLI reads that file, so every postgres:* verb will refuse until it is renamed. config.toml's env() takes any name, and an app can read it under its own.`);
+  }
 
   moveMigrations(tree);
   // The major now lives in config.toml. Two places that can say it are two that can disagree.

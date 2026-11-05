@@ -84,6 +84,8 @@ try {
   ok('avoidPorts: a block is out from where it first touches the range to where it last does', offsets.includes(14000) && !offsets.includes(15000) && !offsets.includes(27000) && offsets.includes(28000));
   ok('avoidPorts: an explicit offset inside is refused, by name', await throws(() => Promise.resolve().then(() => offsetCandidates('20000', avoided))));
   ok('avoidPorts: an explicit offset clear of it is honoured', offsetCandidates('6000', avoided).offsets[0] === 6000);
+  const astride = { key: 'k', isMain: true, block: portBlock([3000, 40000]), avoid: [parsePortRange('10000-32767')] };
+  ok('avoidPorts: it is the ports that must stay out, not the span between them', offsetCandidates('0', astride).offsets[0] === 0 && offsetCandidates('auto', astride).offsets[0] === 0);
   ok('avoidPorts: a range is <low>-<high>, in order, of ports', parsePortRange('32767-20000') === null && parsePortRange('nope') === null && parsePortRange('1-70000') === null);
   ok('avoidPorts: the declaration holds it to that', await throws(() => Promise.resolve().then(() => validate({ apps: { a: { processes: [{ id: 'x', cmd: 'x', primary: true, ports: { x: 1000 }, ready: { http: '/' }, avoidPorts: ['nope'] }] } } }))));
   ok('avoidPorts: the flag on `dev run`', parseArgs(['run', 'a', '--ports=x=1', '--avoid-ports=20000-32767', '--', 'c']).avoidPorts?.[0]?.[1] === 32767);

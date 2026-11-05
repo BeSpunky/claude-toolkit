@@ -1,5 +1,6 @@
 // Line-level edits of `supabase/config.toml`, which is the project's: its comments, order and every key this file does not name stay
-// byte for byte. Nothing here parses TOML, deliberately: no comment-preserving merger exists, and a few owned keys do not need one.
+// byte for byte. Nothing here parses TOML, deliberately: no comment-preserving merger exists. So it edits only the shape it knows, a plain
+// key under one `[section]`, and `configFacts` names any other spelling of a key this layer owns, which the layer refuses.
 // PURE AND IMPORT-FREE: `engine/house-probe.mts` loads it by type stripping.
 
 const HEADER = /^\s*\[{1,2}([^\]]+)\]{1,2}\s*(#.*)?$/;
@@ -19,6 +20,20 @@ function locate(text: string, section: string): Located {
   let end = header + 1;
   while (end < lines.length && !HEADER.test(lines[end].replace(/\r$/, ''))) end++;
   return { lines, header, end };
+}
+
+/** A line up to its comment, if it has one. A `#` inside a string is not one. */
+function withoutComment(line: string): string {
+  let quote = '';
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (quote) {
+      if (char === '\\' && quote === '"') i += 1;
+      else if (char === quote) quote = '';
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === '#') return line.slice(0, i);
+  }
+  return line;
 }
 
 /** The first and last line of an assignment, which an array may spread over several. Undefined: not assigned in this section (a comment is not an assignment). */
@@ -47,12 +62,44 @@ export function tomlValue(text: string, section: string, key: string): string | 
   if (header < 0) return undefined;
   const found = assignment(lines, header, end, key);
   if (!found) return undefined;
-  const raw = lines.slice(found[0], found[1] + 1).join('\n').replace(/\r/g, '');
-  return raw.slice(raw.indexOf('=') + 1).replace(/\s+#[^"'\]]*$/, '').trim();
+  const raw = lines.slice(found[0], found[1] + 1).map((line) => withoutComment(line.replace(/\r$/, ''))).join('\n');
+  return raw.slice(raw.indexOf('=') + 1).trim();
 }
 
 /** Is there such a section, whatever it holds? */
 export const hasTomlSection = (text: string, section: string): boolean => locate(text, section).header >= 0;
+
+/** What this layer reads or writes in the file, by its full name. */
+const OWNED_KEYS = ['db.major_version', 'db.seed.sql_paths', 'experimental.stack'];
+const OWNED_TABLES = ['db', 'db.seed', 'experimental'];
+
+/** Each owned key or table spelled so that a line edit would miss it or break the file: dotted, quoted, inline, or in a section written twice. */
+function uneditedShapes(text: string): string[] {
+  const found = new Set<string>();
+  const seen = new Set<string>();
+  let section = '';
+  for (const raw of text.split('\n')) {
+    const line = withoutComment(raw.replace(/\r$/, ''));
+    const header = HEADER.exec(line)?.[1]?.trim();
+    if (header !== undefined) {
+      section = header.replace(/["'\s]/g, '');
+      if (OWNED_TABLES.includes(section) && seen.has(section)) found.add(`[${section}] twice`);
+      seen.add(section);
+      continue;
+    }
+    const assigned = /^\s*([\w."'-]+)\s*=\s*(.*)$/.exec(line);
+    if (!assigned) continue;
+    const key = assigned[1].replace(/["']/g, '');
+    const full = section ? `${section}.${key}` : key;
+    const plain = !assigned[1].includes('.') && !/["']/.test(assigned[1]);
+    if (OWNED_KEYS.includes(full) && !plain) found.add(full);
+    if (OWNED_TABLES.includes(full) && assigned[2].startsWith('{')) found.add(full);
+  }
+  return [...found];
+}
+
+/** What the layer's refusals ask of a config.toml. */
+export const configFacts = (text: string): { major?: string; inbucket: boolean; unedited: string[] } => ({ major: tomlValue(text, 'db', 'major_version'), inbucket: hasTomlSection(text, 'inbucket'), unedited: uneditedShapes(text) });
 
 /** `text` with `key = value` in `[section]`: replaced where it is, keeping a comment on its line; else first in the section; else in a new section at the end. */
 export function setTomlValue(text: string, section: string, key: string, value: string): string {
@@ -68,7 +115,8 @@ export function setTomlValue(text: string, section: string, key: string, value: 
     lines.splice(header + 1, 0, line);
     return lines.join('\n');
   }
-  const comment = found[0] === found[1] ? /\s+#[^"'\]]*$/.exec(lines[found[0]].replace(/\r$/, ''))?.[0] ?? '' : '';
+  const single = lines[found[0]].replace(/\r$/, '');
+  const comment = found[0] === found[1] ? single.slice(withoutComment(single).trimEnd().length) : '';
   lines.splice(found[0], found[1] - found[0] + 1, `${key} = ${value}${comment}${eol}`);
   return lines.join('\n');
 }

@@ -57,7 +57,7 @@
  * target is a throwaway fixture this run created seconds earlier, and running this tool IS the human's consent.
  *
  * Steps (--only, comma-separated; prerequisites are pulled in): released, seed, upgrade, add-layer-postgres, new-agent,
- * new-node, new-angular, new-angular-firebase, new-postgres, new-postgres-node, add-layer-supabase, new-supabase; aliases `consumer`
+ * new-node, new-angular, new-angular-firebase, new-postgres, new-postgres-node, add-layer-supabase, new-supabase, new-supabase-node; aliases `consumer`
  * (= released,seed,upgrade), `new` (= every new-*), `postgres` (= every step above that wears that layer, but not its `supabase` ones)
  * and `supabase` (= the two wearing that one). ONE REAL STACK AT A TIME, always: the steps run in series.
  *
@@ -190,6 +190,7 @@ const POSTGRES_ROADS = {
   'new-postgres': { flags: ['--add-layer=postgres'], layers: ['nx', 'agent', 'postgres'], host: 'wrapper' },
   'new-postgres-node': { flags: ['--preset=node', '--add-layer=postgres'], layers: ['nx', 'agent', 'node', 'postgres'], host: 'node' },
   'new-supabase': { flags: ['--add-layer=supabase'], layers: ['nx', 'agent', 'postgres', 'supabase'], host: 'wrapper', provider: 'supabase', outsideTmp: true },
+  'new-supabase-node': { flags: ['--preset=node', '--add-layer=supabase'], layers: ['nx', 'agent', 'node', 'postgres', 'supabase'], host: 'node', provider: 'supabase', outsideTmp: true },
 };
 const STEP_ORDER = ['released', 'seed', 'upgrade', 'add-layer-postgres', 'add-layer-supabase', ...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)];
 const REQUIRES = { seed: ['released'], upgrade: ['seed'], 'add-layer-postgres': ['upgrade'], 'add-layer-supabase': ['add-layer-postgres'] };
@@ -197,7 +198,7 @@ const ALIASES = {
   consumer: ['released', 'seed', 'upgrade'],
   new: [...Object.keys(PRESETS), ...Object.keys(POSTGRES_ROADS)],
   postgres: ['add-layer-postgres', 'new-postgres', 'new-postgres-node'],
-  supabase: ['add-layer-supabase', 'new-supabase'],
+  supabase: ['add-layer-supabase', 'new-supabase', 'new-supabase-node'],
 };
 
 function selectSteps(only) {
@@ -1136,6 +1137,7 @@ async function stepAddLayerSupabase() {
   record(step, 'the moved migration and the seed applied', row.stdout.trim() === 'seeded', { detail: row.status === 0 ? row.stdout.trim() : row.stderr.trim().slice(0, 140) });
   const stamped = psqlIn(client, url, `SELECT version FROM ${local.ledger}`);
   record(step, 'in the CLI\'s ledger', stamped.stdout.trim() === migration.split('_')[0], { detail: stamped.stdout.trim().slice(0, 40) });
+  record(step, 'its daemon is in sight, so "nothing left" below means something', stackProcesses().length > 0);
   await assertStops(step, c.dir, tools, 'postgres', offset, bases.map((base) => base + offset), start);
 }
 

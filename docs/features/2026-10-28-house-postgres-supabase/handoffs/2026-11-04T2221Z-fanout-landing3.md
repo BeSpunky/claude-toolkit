@@ -19,7 +19,7 @@ Budget 12 (default): core 1+2, wire 1, reviewer 1+5, correctness pass 1 = 11, re
 | core | feat/hps3-core | yes, its own branch | returned |
 | wire | tripwire, dogfood, image job, docs; feat/hps3-wire | yes | returned |
 | docs | with wire | yes | returned |
-| review | sanity review | yes | dispatched |
+| review | sanity review | yes | returned, decisions being applied |
 | gate | push + PR green, upgrade --local, dogfood, rebuild, real hosted project | yes | pending |
 
 ## Results
@@ -35,3 +35,14 @@ Wire must rebase on c03873a3.
 
 ### wire and docs (returned; c03873a3..00099713, trace handoffs/seam3-wire.md)
 Tripwire workflow; a non-reaping parent showed a real bug, a zombie holding the stack lock forever, fixed. Image job against fake docker, with the real probes run here. Upstream check tools/supabase-cli/check.mjs. Dogfood roads green, with gen-types and a real function: 146 passed. Docs and tips. Never run: CI workflows, real images, bookworm, arm64; real account flows. Limit: SUPABASE_HOME is always XDG_DATA_HOME/supabase; a project setting XDG_DATA_HOME gets a hand-run CLI on another home. Stated in HOUSE.md by the review if not already.
+
+### review (returned; spent 5 of 5; reviews/2026-11-05-landing3-sanity-review.md)
+Fixes committed. Worst: a normal start silently wiped real data when a first migration arrived, reproduced; a filled-in `-- migrate:down` ran on start; the lock freed under a running reset; `PG*` in `.env` changed what deploy connected to. ORCHESTRATOR DECISIONS, resumed to the reviewer:
+1. No auto-reset. Refuse and print the command; only `postgres:reset` destroys. Amends ARCHITECTURE 6b ("reset if not"): a silent wipe was reproduced under the narrower rule's predecessor.
+2. The keeper declares a running reset as detached work, so a stop waits; the engine is not changed for released layers.
+3. A cold download is its own step, exempt from the ready bound; a stop has a deadline outside a reset. Verify the CLI's command by --help.
+4. Custom domain: stated limit, ref not compared, no override.
+5. Vault: named in the prompt and the log.
+6. No TOML parser; `"""` is a stated gap, and refused where the line reader can tell.
+7. Narrow to 17: nothing advertised that never ran.
+8. The weekly tripwire boots cold. A newer CLI stays a notice. Same-push pin and version bump: guarded by the rule that development's CI passes before main.

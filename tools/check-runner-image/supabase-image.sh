@@ -137,8 +137,8 @@ run_case() {
     echo "  the launcher, as $user"
     # bash -c, so `tar` reads the copy from stdin: a bind mount of this runner's temp directory is not readable by the remote user.
     # Under $HOME: the Edge Runtime has its own /tmp, and a function under the real one answers 404.
-    tar -C "$stage" -cf - . | docker run -i --rm --user "$user" "${env[@]}" "$tag" bash -c 'd="$(mktemp -d -p "$HOME")" && tar -xf - -C "$d" && exec bash "$d/probe.sh" "$d" "$1"' _ "$path" > "$running" 2>&1 || lrc=$?
-    sed 's/^/    /' "$running"
+    # Live, and bounded inside the job's own limit: a hang would otherwise reach that limit with nothing printed, and the trap removes the file.
+    tar -C "$stage" -cf - . | timeout 1500 docker run -i --rm --user "$user" "${env[@]}" "$tag" bash -c 'd="$(mktemp -d -p "$HOME")" && tar -xf - -C "$d" && exec bash "$d/probe.sh" "$d" "$1"' _ "$path" 2>&1 | tee "$running" | sed 's/^/    /' || lrc=$?
     if [ "$lrc" -ne 0 ] || ! grep -q '^probe=done$' "$running"; then
       could_not "docker run exited $lrc before the launcher's probe ended"
     else

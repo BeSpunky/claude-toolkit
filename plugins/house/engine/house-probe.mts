@@ -15,7 +15,8 @@ import * as NODE_FACTS from './nx-tools/src/generators/_utils/node-facts.ts';
 import { devcontainerNode, factsOf, imageGap, resolveProjectNode, stripJsonc } from './nx-tools/src/generators/_utils/node-spec.ts';
 import * as FIREBASE_COMPAT from './nx-tools/src/generators/_utils/firebase-compat.ts';
 import { coherentPair, firebaseToolsAdvice, majorOf, renderAdvice, tableOf } from './nx-tools/src/adapters/angular/angularfire-judge.ts';
-import { hasTomlSection, tomlValue } from './nx-tools/src/generators/supabase/toml-lines.ts';
+import { configFacts } from './nx-tools/src/generators/supabase/toml-lines.ts';
+import { type MoveFacts, whatCannotMove } from './nx-tools/src/generators/supabase/refusals.ts';
 
 const arg = (name: string) => (process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1] ?? '').split(',').filter(Boolean);
 const layers = new Set([...arg('ensure'), ...arg('evident')]);
@@ -129,27 +130,22 @@ if (layers.has('firebase') && layers.has('angular')) {
 }
 
 // ---- Supabase: the stack runs its own major, and the CLI has one migrations folder -------------------------------
-// Same sentences as the generator's backstop (generators/supabase/generator.ts). Reads the project; a project already wearing the
-// layer has neither a declaration nor a second folder, so these say nothing to it.
+// The generators' backstop asks the same function (generators/supabase/refusals.ts). A project already wearing the layer has neither a
+// declaration nor a second folder, so this says nothing to it.
 if (layers.has('supabase')) {
-  const supported = ['15', '17'];
-  const declared = json('.bespunky/postgres.json')?.major;
-  if (declared !== undefined && String(declared) !== '17') {
-    refuse(
-      'supabase-major-mismatch',
-      `.bespunky/postgres.json declares Postgres ${declared}, and the Supabase stack runs 17. uuidv7() and virtual generated columns, for two, do not exist there.\n` +
-        `           If your migrations use nothing newer: set { "major": 17 } there, check them against it (house.sh upgrade, rebuild, postgres:reset), then add the layer again.`,
-    );
+  const filesIn = (dir: string) => (existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name) : []);
+  const declared = read('.bespunky/postgres.json');
+  let declaration: MoveFacts['declaration'] = { state: 'absent' };
+  if (declared !== undefined) {
+    try {
+      declaration = { state: 'read', major: JSON.parse(declared).major };
+    } catch {
+      declaration = { state: 'broken' };
+    }
   }
   const config = read('supabase/config.toml');
-  if (config !== undefined) {
-    const major = tomlValue(config, 'db', 'major_version');
-    if (major !== undefined && !supported.includes(major)) refuse('supabase-major-mismatch', `supabase/config.toml says major_version = ${major}, and the stack runs ${supported.join(' or ')}. Set one of them, then re-run.`);
-    if (hasTomlSection(config, 'inbucket')) refuse('supabase-config-outdated', `supabase/config.toml has an [inbucket] section, which CLI ${constant('SUPABASE_CLI_VERSION')} cannot load. Rename it to [local_smtp], then re-run.`);
-  }
-  const sqlIn = (dir: string) => (existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.sql')) : []);
-  const inBoth = sqlIn('postgres/migrations').filter((name) => existsSync(`supabase/migrations/${name}`));
-  if (inBoth.length) refuse('supabase-migrations-twice', `${inBoth.join(', ')} exist in both postgres/migrations and supabase/migrations, and a project has one folder. Keep one of each, then re-run.`);
+  const majors = /SUPABASE_MAJORS = \[([^\]]+)\]/.exec(versionsTs)?.[1].match(/\d+/g) ?? [];
+  for (const { code, text } of whatCannotMove({ declaration, config: config === undefined ? undefined : configFacts(config), native: filesIn('postgres/migrations'), supabase: filesIn('supabase/migrations'), majors, cliVersion: constant('SUPABASE_CLI_VERSION') })) refuse(code, text);
 }
 
 for (const [code, text] of refusals) process.stdout.write(`${code}\t${text.replace(/\\/g, '\\\\').replace(/\n/g, '\\n')}\n`);
