@@ -28,6 +28,12 @@ HOUSE_PACKAGES='
 tmux
 # General utilities the house tooling shells out to.
 curl
+# The HOST clipboard, for every CLI that copies or pastes: gh'\''s one-time login code, Claude Code'\''s copy and its
+# Ctrl+V of a screenshot, editors, pyperclip. Only the clients are missing: VS Code Dev Containers bind-mounts
+# the host'\''s own Wayland socket ($WAYLAND_DISPLAY), so wl-copy/wl-paste ARE the host clipboard, and forwards
+# X11 ($DISPLAY) for an X host. All three are the names those tools probe for, in their order (Wayland first,
+# then xclip, then xsel). Nothing is configured and nothing is kept: no state survives or needs to.
+wl-clipboard xclip xsel
 # Voice (bespunky-voice): `paplay` reaches the host audio socket, espeak-ng is the free speech floor. Installed
 # on the voice INTENT, not on a socket being present: a host fact cannot key a cached image layer, and both are small.
 pulseaudio-utils espeak-ng
