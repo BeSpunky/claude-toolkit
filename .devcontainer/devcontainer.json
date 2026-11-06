@@ -11,7 +11,7 @@
   "build": { "dockerfile": "house.Dockerfile", "context": "." },
 
   "features": {
-    "ghcr.io/devcontainers/features/github-cli": {},
+    "ghcr.io/devcontainers/features/github-cli:1.1.3": {},
     // A LOCAL feature — a `./`-prefixed id is a path resolved from this file's own folder, not a registry
     // reference, so nothing is published, versioned separately, or downloaded. It installs nothing: its
     // whole content is a `postCreateCommand` that runs `.devcontainer/post-create.bespunky.sh` IF that file
