@@ -136,6 +136,15 @@ export const agent: LayerDescriptor = {
           're-attach to an exec). No config is written on purpose: presence on PATH is the whole contract.',
       },
       { packages: ['curl'], why: 'General utilities the house tooling shells out to.' },
+      {
+        packages: ['wl-clipboard', 'xclip', 'xsel'],
+        why:
+          "The HOST clipboard, for every CLI that copies or pastes: gh's one-time login code, Claude Code's copy and its\n" +
+          'Ctrl+V of a screenshot, editors, pyperclip. Only the clients are missing: VS Code Dev Containers bind-mounts\n' +
+          "the host's own Wayland socket ($WAYLAND_DISPLAY), so wl-copy/wl-paste ARE the host clipboard, and forwards\n" +
+          'X11 ($DISPLAY) for an X host. All three are the names those tools probe for, in their order (Wayland first,\n' +
+          'then xclip, then xsel). Nothing is configured and nothing is kept: no state survives or needs to.',
+      },
     ],
     // Claude Code installs in `install` — after the OS packages (it needs curl), before `plugins` (which runs it).
     // With ~/.local persisted, only the FIRST create of a project downloads it; every rebuild finds it installed.

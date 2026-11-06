@@ -867,13 +867,14 @@ checkAsync('image: built from house.Dockerfile — one cached package layer; the
   const everything = runInstaller(a.osScript, { projectList: '# ours\npostgresql-client\n' });
   ok(everything.status === 0 && everything.installs.length === 1, `nothing present: ONE install transaction, got ${JSON.stringify(everything.calls)}`);
   const wanted = everything.installs[0] ?? '';
-  for (const name of ['tmux', 'curl', 'pulseaudio-utils', 'espeak-ng', 'postgresql-client']) ok(wanted.split(' ').includes(name), `the install lacks ${name}`);
+  const clipboard = ['wl-clipboard', 'xclip', 'xsel'];
+  for (const name of ['tmux', 'curl', ...clipboard, 'pulseaudio-utils', 'espeak-ng', 'postgresql-client']) ok(wanted.split(' ').includes(name), `the install lacks ${name}`);
 
-  const present = ['tmux', 'curl', 'pulseaudio-utils', 'espeak-ng', 'postgresql-client'];
+  const present = ['tmux', 'curl', ...clipboard, 'pulseaudio-utils', 'espeak-ng', 'postgresql-client'];
   const none = runInstaller(a.osScript, { present, projectList: 'postgresql-client\n' });
   ok(none.status === 0 && none.calls.length === 0, `all present (a house-built image): apt was still called: ${JSON.stringify(none.calls)}`);
 
-  const some = runInstaller(a.osScript, { present: ['tmux', 'curl'], projectList: 'sox sox   # twice, one line\n' });
+  const some = runInstaller(a.osScript, { present: ['tmux', 'curl', ...clipboard], projectList: 'sox sox   # twice, one line\n' });
   ok(some.installs.length === 1 && some.installs[0].trim() === 'install -y pulseaudio-utils espeak-ng sox', `only the missing, de-duplicated: ${JSON.stringify(some.installs)}`);
 
   const hostile = runInstaller(a.osScript, { present, projectList: 'bad;rm -rf /\n$(id)\nUpper\n' });
@@ -1386,7 +1387,7 @@ checkAsync('image: LF in every checkout, CRLF lists still read, a quote in a why
   await artifacts(tree, ['nx', 'agent']);
   ok(tree.read('.devcontainer/.gitattributes', 'utf8') === attributes, 'gitattributes grew on a second run');
 
-  const crlf = runInstaller(a.osScript, { present: ['tmux', 'curl'], projectList: 'sox\r\nalsa-utils\r\n' });
+  const crlf = runInstaller(a.osScript, { present: ['tmux', 'curl', 'wl-clipboard', 'xclip', 'xsel'], projectList: 'sox\r\nalsa-utils\r\n' });
   ok(crlf.installs.length === 1 && crlf.installs[0].trim() === 'install -y sox alsa-utils', `a CRLF list lost its packages: ${JSON.stringify(crlf.calls)} ${crlf.output}`);
 
   const { compose, renderOsPackagesScript } = require_(join(BUILD, 'src/generators/devcontainer/compose'));
