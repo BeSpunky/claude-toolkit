@@ -42,3 +42,4 @@ Hosted Supabase function secrets: run node tools/postgres/postgres.mjs secrets-s
 Every local Supabase stack has the same keys: the URL is the whole isolation, and it is local only
 Without Supabase, the Postgres major is .bespunky/postgres.json: match it to your production host, run the house upgrade, then rebuild the container. A new major starts empty
 tools/dev/dev ps --json is the public shape for a script: every running stack, its state and its ports
+The devcontainer reaches your host clipboard: gh auth login copies its code, and Ctrl+V pastes a screenshot into Claude Code
