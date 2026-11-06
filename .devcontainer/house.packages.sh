@@ -37,7 +37,8 @@ pulseaudio-utils espeak-ng
 # order; CR stripped, so a list saved with Windows line endings still reads. A token that is not a Debian package NAME
 # is refused here, before it can reach a root apt-get command line.
 wanted() {
-  { printf '%s\n' "$HOUSE_PACKAGES"; for list in "$@"; do [ -f "$list" ] && cat "$list"; done; } |
+  { printf '%s\n' "$HOUSE_PACKAGES"
+    for list in "$@"; do [ -f "$list" ] && cat "$list"; done; } |
     tr -d '\r' | sed 's/#.*//' | tr -s ' \t' '\n\n' | sed '/^$/d' | awk '!seen[$0]++' |
     while read -r name; do
       case "$name" in
@@ -51,33 +52,45 @@ missing=""
 for name in $(wanted "$@"); do
   dpkg-query -W -f='${Status}' "$name" 2>/dev/null | grep -q ' installed$' || missing="$missing $name"
 done
-if [ -z "$missing" ]; then
+pending=""
+if [ -z "$missing$pending" ]; then
   echo "[os-packages] all present — nothing to install"
   exit 0
 fi
 
 as_root=""
 [ "$(id -u)" = 0 ] || as_root="sudo"
-echo "[os-packages] installing:$missing"
-for attempt in 1 2 3; do
-  # $missing is deliberately UNQUOTED: one argument per package. Safe — every member passed the name check above.
-  # shellcheck disable=SC2086
-  if $as_root apt-get update && $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $missing; then
-    echo "[os-packages] installed"
-    exit 0
-  fi
-  if [ "$attempt" -lt 3 ]; then
-    echo "[os-packages] attempt $attempt/3 failed (apt mirrors are occasionally flaky over Docker DNS); retrying in $((attempt * 10))s..."
-    sleep $((attempt * 10))
-  fi
-done
-# One unknown or broken name fails the whole transaction above — and with it every package that was fine. So install
-# what CAN be installed, one by one, and name exactly what could not: a typo in os-packages.txt must not take the
-# house's packages (or the rest of the project's) down with it. Still non-zero: the image build fails loudly.
-echo "[os-packages] the batch failed 3 times — installing one by one to find the package at fault"
-failed=""
-for name in $missing; do
-  $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$name" > /dev/null 2>&1 || failed="$failed $name"
-done
-echo "[os-packages] FAILED:$failed" >&2
-exit 1
+
+# The apt packages: ONE transaction, retried (apt mirrors are occasionally flaky over Docker DNS).
+install_packages() {
+  echo "[os-packages] installing:$missing"
+  for attempt in 1 2 3; do
+    # $missing is deliberately UNQUOTED: one argument per package. Safe — every member passed the name check above.
+    # shellcheck disable=SC2086
+    if $as_root apt-get update && $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $missing; then
+      echo "[os-packages] installed"
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "[os-packages] attempt $attempt/3 failed (apt mirrors are occasionally flaky over Docker DNS); retrying in $((attempt * 10))s..."
+      sleep $((attempt * 10))
+    fi
+  done
+  # One unknown or broken name fails the whole transaction above — and with it every package that was fine. So install
+  # what CAN be installed, one by one, and name exactly what could not: a typo in os-packages.txt must not take the
+  # house's packages (or the rest of the project's) down with it.
+  echo "[os-packages] the batch failed 3 times — installing one by one to find the package at fault"
+  failed=""
+  for name in $missing; do
+    $as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$name" > /dev/null 2>&1 || failed="$failed $name"
+  done
+  echo "[os-packages] FAILED:$failed" >&2
+  return 1
+}
+
+status=0
+if [ -n "$missing" ]; then
+  install_packages || status=1
+fi
+# Non-zero when anything failed: the image build fails loudly; post-create reports it and carries on.
+exit $status

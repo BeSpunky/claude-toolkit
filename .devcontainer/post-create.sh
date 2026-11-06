@@ -143,10 +143,11 @@ export PATH="$HOME/.local/bin:$PATH"
 # behind. The detection below is RENDERED from the one rule (generators/_utils/package-manager.ts), so it cannot
 # disagree with the generators; house.sh keeps the same order.
 if [ -f "$WS/package.json" ]; then
-  case "$(grep -m1 '"packageManager"' "$WS/package.json" 2>/dev/null | tr -d ' ')" in
-    *'"pnpm@'*) PM=pnpm; PM_INSTALL="pnpm install"; PM_EXEC="pnpm exec" ;;
-    *'"yarn@'*) PM=yarn; PM_INSTALL="yarn install"; PM_EXEC="yarn" ;;
-    *'"npm@'*) PM=npm; PM_INSTALL="npm install"; PM_EXEC="npx --no-install" ;;
+  PM_DECLARED="$({ grep -Eo '"packageManager"[[:space:]]*:[[:space:]]*"[^"+]*' "$WS/package.json" || true; } | head -n 1 | sed 's/.*"//')"
+  case "$PM_DECLARED" in
+    pnpm@*) PM=pnpm; PM_INSTALL="pnpm install"; PM_EXEC="pnpm exec" ;;
+    yarn@*) PM=yarn; PM_INSTALL="yarn install"; PM_EXEC="yarn" ;;
+    npm@*) PM=npm; PM_INSTALL="npm install"; PM_EXEC="npx --no-install" ;;
     *)
       if [ -f "$WS/pnpm-lock.yaml" ]; then PM=pnpm; PM_INSTALL="pnpm install"; PM_EXEC="pnpm exec"
       elif [ -f "$WS/yarn.lock" ]; then PM=yarn; PM_INSTALL="yarn install"; PM_EXEC="yarn"
@@ -155,7 +156,20 @@ if [ -f "$WS/package.json" ]; then
       fi
       ;;
   esac
+  PM_SPEC="$PM"
+  if [ "$PM" = yarn ] && grep -Eqs '^["'\'']?yarnPath["'\'']?[ 	]*:[ 	]*[^ 	#]|^"?yarn-path"?:?[ 	]+[^ 	#]' "$WS/.yarnrc.yml" "$WS/.yarnrc"; then
+    :
+  elif [ "${PM_DECLARED%%@*}" = "$PM" ] && [ "$PM_DECLARED" != "$PM" ]; then
+    if printf '%s' "${PM_DECLARED#*@}" | grep -Eq '^[0-9]+([.][0-9]+)?$|^[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?$'; then PM_SPEC="$PM_DECLARED"; fi
+  elif [ "$PM" = yarn ] && { [ -f "$WS/.yarnrc.yml" ] || grep -Eqs '^__metadata:' "$WS/yarn.lock"; }; then
+    PM_SPEC=yarn@berry
+  fi
   echo "[post-create] package manager: $PM"
+  # The image decides which package managers exist, not the project, and an unguarded install dies on one it lacks. The
+  # same script the image build ran, now with what package.json says today: nothing to do in a current house image.
+  # Not fatal here: if it could not help, it said why, and the install below decides whether that matters.
+  sh "$WS/.devcontainer/house.package-manager.sh" "$PM_SPEC" || echo "[post-create] WARNING: could not provide $PM_SPEC (see above)."
+  hash -r
   # Unattended: yarn 1 PROMPTS when a pinned version cannot be resolved — and with no input attached (this script
   # runs with stdin at /dev/null) it draws the prompt, reads nothing and exits 0 with nothing installed. Its own flag
   # makes it fail instead. Only yarn 1 has (and needs) the flag: yarn 2+ refuses it; npm and pnpm never wait on input.

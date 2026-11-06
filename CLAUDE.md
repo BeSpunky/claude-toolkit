@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 <!-- @bespunky/house-tooling:start (generated pointer — do not edit between these markers; `house.sh upgrade` regenerates it) -->
 ## House rules & tooling
 
-The house **directives** that govern every change in this project — architect mentality, **architecture-first**, the **branch & release rules**, and **a feature is a package** — are imported on the line below, so they are **always in context**. They are **mandatory, not optional reference.**
+The house **directives** that govern every change in this project — architect mentality, **architecture-first**, the **branch & release rules**, **a feature is a package**, **generator-first** — are imported on the line below, so they are **always in context**. They are **mandatory, not optional reference.**
 
 @HOUSE.rules.md
 
