@@ -208,10 +208,11 @@ export type ProxyWiring =
  * is a publishable library like any other; this port only adds what makes it the design system.
  */
 export interface DesignSystemPort {
-  /** Directory of this binding's seeded runtime + docs templates (merged over the neutral core's styles). */
+  /**
+   * Directory of this binding's runtime + docs templates (merged over the neutral core's styles). Seeded when absent; a
+   * template that declares a house region (STRUCTURE.md, the barrel) has that region rewritten every run as well.
+   */
   readonly templates: string;
-  /** Files in `templates` that are the CONTRACT (rewritten every run) rather than seeded. */
-  readonly alwaysRewrite: readonly string[];
   /** The provider an app installs the runtime binding with. */
   readonly provider: string;
   /** Open the sass channel INSIDE the library, so its own component styles resolve `<dir>/styles`. */

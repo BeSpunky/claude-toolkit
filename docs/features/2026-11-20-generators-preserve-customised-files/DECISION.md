@@ -24,3 +24,7 @@ All three were declared generator-OWNED and rewritten on every run (`alwaysRewri
 - Generator rule: file absent → seed whole template with its region; region present → rewrite the region only; file present with no region → the project's, never touched.
 - Tab label: mechanism in the region; `badgeColors()` below it is the project's seam (tokens go there).
 - Migration for existing projects: a file matching ANY historical stock text (all revisions frozen from git) → replaced by the new region-bearing template; the barrel additionally recognises house export statements one by one; anything else is the project's — left, the false "do not hand-edit" line removed, reported.
+
+## Correction (sanity review, 2026-11-20)
+
+The tab label's project seam is `badgeStyle()`, not `badgeColors()` as written above: it carries the badge's whole look (fill, text colour, font), not only its colours. The review's findings and fixes are in `reviews/`.

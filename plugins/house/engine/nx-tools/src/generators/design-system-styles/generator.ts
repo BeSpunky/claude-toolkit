@@ -44,6 +44,7 @@ import {
 } from '@nx/devkit';
 import { updateProjectConfigurationInPlace } from '../_utils/project-files';
 import { dirname, basename } from 'node:path';
+import { markerLine, replaceRegion } from '../_utils/house-region';
 import { findDesignSystem } from '../_utils/design-system';
 import { adapterOf, isApplication, portOf } from '../../adapters/registry';
 import { workspaceLinking } from '../_utils/linking';
@@ -55,10 +56,12 @@ interface DesignSystemStylesSchema {
   skipFormat?: boolean;
 }
 
-const USE_START = '/* @bespunky/design-system:use:start — generator-owned. */';
-const USE_END = '/* @bespunky/design-system:use:end */';
-export const THEME_START = '/* @bespunky/design-system:theme:start — generator-owned. */';
-export const THEME_END = '/* @bespunky/design-system:theme:end */';
+const USE_REGION = 'design-system:use';
+const USE_START = `/* @bespunky/${USE_REGION}:start — generator-owned. */`;
+const USE_END = `/* @bespunky/${USE_REGION}:end */`;
+export const THEME_REGION = 'design-system:theme';
+export const THEME_START = `/* @bespunky/${THEME_REGION}:start — generator-owned. */`;
+export const THEME_END = `/* @bespunky/${THEME_REGION}:end */`;
 
 /**
  * The app shell's skip link and its target — the link's look is the design system's mechanism (`ds.skip-link()`),
@@ -234,10 +237,10 @@ function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: 
   // The FIRST wiring of this app (no `@use` block yet: a new app, or an existing one meeting the design system) is
   // also when its shell's skip link gets its look — seeded once after the theme, then the app's to keep or edit.
   // Never on a later sync: an app wired before carries its own shell, which a rule it never asked for could clash with.
-  const firstWiring = !current.includes(USE_START) && !current.includes(USE_END);
+  const firstWiring = !markerLine(current, USE_REGION, 'start') && !markerLine(current, USE_REGION, 'end');
 
-  let next = upsert(current, USE_START, USE_END, useBlock, 'prepend');
-  next = upsert(next, THEME_START, THEME_END, themeBlock, 'append');
+  let next = upsert(current, USE_REGION, useBlock, 'prepend');
+  next = upsert(next, THEME_REGION, themeBlock, 'append');
   if (firstWiring && !/\.skip-link\b/.test(next)) next = `${next.trimEnd()}\n\n${SKIP_LINK_BLOCK}\n`;
 
   if (next !== current) tree.write(stylesPath, next);
@@ -245,25 +248,33 @@ function wireGlobalStylesheet(tree: Tree, stylesPath: string | null, specifier: 
 }
 
 /**
- * Replace the text between `start` and `end` markers with `block`; if the markers aren't there yet,
- * insert the block at the top or the bottom of the file (per `placement`). The house-doc pointer idiom.
+ * Replace the house region `name` with `block` (../_utils/house-region); if it isn't there yet, insert the block at the
+ * top or the bottom of the file (per `placement`).
  *
  * ORPHAN GUARD: if exactly one marker survives (a developer half-deleted the block while editing), the
  * naive "both present?" check would take the insert branch and prepend a SECOND `@use` while the first
- * lingers — sass then hard-errors on the duplicate. When we see a lone marker we treat the block as
- * present-but-damaged and rewrite from the surviving marker, rather than duplicating.
+ * lingers — sass then hard-errors on the duplicate. When we see a marker with no whole region (a lone one, or the two
+ * out of order) we treat the block as present-but-damaged and rewrite from the first surviving marker, rather than
+ * duplicating.
  */
-function upsert(source: string, start: string, end: string, block: string, placement: 'prepend' | 'append'): string {
-  const from = source.indexOf(start);
-  const to = source.indexOf(end);
+function upsert(source: string, name: string, block: string, placement: 'prepend' | 'append'): string {
+  const replaced = replaceRegion(source, name, block);
+  if (replaced !== null) return replaced;
 
-  if (from !== -1 && to !== -1 && to > from) {
-    return source.slice(0, from) + block + source.slice(to + end.length);
+  // A marker with no whole region around it (a lone one, or an end before its start) → the block was damaged. Splice
+  // the block in at the first surviving marker and drop the other, rather than inserting a second block.
+  const start = markerLine(source, name, 'start');
+  const end = markerLine(source, name, 'end');
+  const at = start && end ? (start.from < end.from ? start : end) : (start ?? end);
+  if (at) {
+    const other = start && end ? (at === start ? end : start) : null;
+    const spliced = source.slice(0, at.from) + block + source.slice(at.to);
+    if (!other) return spliced;
+    const shift = block.length - (at.to - at.from);
+    const from = other.from + shift;
+    const to = other.to + shift;
+    return spliced.slice(0, from) + spliced.slice(spliced[to] === '\n' ? to + 1 : to);
   }
-
-  // Exactly one marker present → the block was damaged. Splice from whichever marker we have.
-  if (from !== -1 && to === -1) return source.slice(0, from) + block + source.slice(from + start.length);
-  if (from === -1 && to !== -1) return source.slice(0, to) + block + source.slice(to + end.length);
 
   if (placement === 'prepend') return `${block}\n\n${source.trimStart()}`;
   return `${source.trimEnd()}\n\n${block}\n`;

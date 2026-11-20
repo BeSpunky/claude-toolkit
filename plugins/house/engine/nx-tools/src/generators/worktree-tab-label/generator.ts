@@ -10,7 +10,9 @@
 // layer's per-app step, and the house `app` generator for a new app).
 //
 // Two writes, two classes:
-//   - worktree-tab-label.ts — generator-owned glue, rewritten every run.
+//   - worktree-tab-label.ts — the project's file with a HOUSE REGION (../_utils/house-region): the mechanism inside
+//     it is rewritten every run; `badgeStyle()` below it, the badge's look, is the project's (a design system's
+//     tokens go there). Seeded whole when absent; a file carrying no region is the project's and is left alone.
 //   - the provider in app.config.ts — app.config.ts is SEEDED, never owned: wired only with --wireProviders
 //     (when the layer is being created), never on a detect-only sync.
 // No app.config.ts (not an Angular application) → nothing to do.
@@ -19,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { requireLayer } from '../../layers/registry';
 import { wireProvider } from '../_utils/wire-provider';
+import { DAMAGED_REGION, regionNames, syncHouseRegions } from '../_utils/house-region';
 import { workspaceIdentity } from '../_utils/workspace-identity';
 import { toDnsLabel } from '../_utils/dns-label';
 
@@ -37,10 +40,9 @@ export default async function worktreeTabLabelGenerator(tree: Tree, options: Wor
   const appConfigPath = `${appRoot}/src/app/app.config.ts`;
   if (!tree.exists(appConfigPath)) return;
 
-  tree.write(
-    `${appRoot}/src/app/worktree-tab-label.ts`,
-    readFileSync(join(__dirname, 'files', 'worktree-tab-label.ts.tpl'), 'utf8').split('{{mainTreeSlug}}').join(toDnsLabel(workspaceName)),
-  );
+  const labelPath = `${appRoot}/src/app/worktree-tab-label.ts`;
+  const rendered = readFileSync(join(__dirname, 'files', 'worktree-tab-label.ts.tpl'), 'utf8').split('{{mainTreeSlug}}').join(toDnsLabel(workspaceName));
+  if (syncHouseRegions(tree, labelPath, rendered) === 'damaged') logger.warn(DAMAGED_REGION(labelPath, regionNames(rendered)));
 
   const current = tree.read(appConfigPath, 'utf8') ?? '';
   const wired = wireProvider(current, appConfigPath, {

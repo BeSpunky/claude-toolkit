@@ -1,3 +1,4 @@
+// @bespunky/worktree-tab-label:start — the mechanism, rewritten by every house upgrade. How the badge LOOKS is yours: badgeStyle(), below the end marker.
 // Dev-only worktree tab label.
 //
 // When several worktrees are served at once they share the noVNC viewer and open as look-alike tabs.
@@ -9,7 +10,6 @@
 // Purely runtime — it derives everything from `location.hostname`, so there is NO build-time coupling to
 // which worktree is being served. Dev-only: the whole payload is gated on `ngDevMode`, which the Angular
 // optimizer folds to a literal `false` in production builds, so this module tree-shakes out of prod.
-// Generator-owned (nx-tools worktree-tab-label generator) — do not edit by hand.
 import { makeEnvironmentProviders, provideEnvironmentInitializer, type EnvironmentProviders } from '@angular/core';
 
 // The MAIN tree's slug, baked in as the base-host sentinel: a hostname whose sub-label equals this is the main
@@ -48,7 +48,7 @@ function applyWorktreeTabLabel(): void {
   tintFavicon(label);
 }
 
-/** Replace the favicon with a small colored dot — hue hashed from `label`, the slug's initial in white. */
+/** Replace the favicon with a small colored dot — hue hashed from `label`, the slug's initial on it — drawn in `badgeStyle`. */
 function tintFavicon(label: string): void {
   const size = 32;
   const canvas = document.createElement('canvas');
@@ -61,11 +61,12 @@ function tintFavicon(label: string): void {
   ctx.clearRect(0, 0, size, size);
   ctx.beginPath();
   ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2);
-  ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+  const style = badgeStyle(hue);
+  ctx.fillStyle = style.fill;
   ctx.fill();
 
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 20px sans-serif';
+  ctx.fillStyle = style.text;
+  ctx.font = style.font;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label.charAt(0).toUpperCase(), size / 2, size / 2 + 1);
@@ -90,4 +91,15 @@ function setFaviconHref(href: string): void {
   }
   link.type = 'image/png';
   link.href = href;
+}
+// @bespunky/worktree-tab-label:end
+
+/**
+ * How the favicon badge LOOKS — yours: the house never rewrites anything below its region. `hue` (0–360) is hashed
+ * from the worktree's slug, so each worktree keeps its own colour across restarts; keep the fill distinct per hue or
+ * the tabs stop being told apart. A canvas does not resolve `var(--…)`, so to draw in the design system's tokens read
+ * them with `getComputedStyle(document.documentElement).getPropertyValue('--…')`.
+ */
+function badgeStyle(hue: number): { fill: string; text: string; font: string } {
+  return { fill: `hsl(${hue}, 70%, 50%)`, text: '#ffffff', font: 'bold 20px sans-serif' };
 }

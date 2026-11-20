@@ -9,8 +9,13 @@
 // (`{{importPath}}/button`, `{{importPath}}/card`, …). What lives here is only the part of the theming
 // mechanism that cannot be expressed in CSS: the thing that writes the mode attribute.
 //
+// THE HOUSE REGION below holds the exports of the mechanism the house ships: an upgrade rewrites it, and nothing
+// else in this file. Publish your own below its end marker — a token, a motion API, a promoted primitive — and they
+// stay yours.
+//
 // Resist growing this. An icon registry, a breakpoint service, an overlay manager, component base
 // classes — none of those are the design system. Each is its own concern with its own home.
+// @bespunky/design-system-api:start — the house's runtime exports, rewritten by every house upgrade. Yours go below the end marker.
 export { provideDesignSystem } from './lib/design-system.providers';
 
 // Mode: light / dark / follow-the-OS. The built-in axis, switchable instantly.
@@ -20,3 +25,4 @@ export { DsTheme, type DsMode } from './lib/ds-theme.service';
 // `ds.theme-overrides()` and linked) — `use()` just repoints the <link>. `setTokens()` is the narrow
 // exception, for values that don't exist until runtime (a colour picker).
 export { DsRuntimeTheme, type DsTokenOverrides } from './lib/ds-runtime-theme.service';
+// @bespunky/design-system-api:end

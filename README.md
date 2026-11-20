@@ -657,6 +657,8 @@ Three classes of generator output live side by side, and which one a file is dec
 | **Project state** | `project.json` targets, deps, `firebase.json`, env files | **Created at baseline, then evolved only by migrations** |
 | **Seeded, never owned** | design tokens, `environment.ts`, `ds-theme`, `post-create.local.sh` | **Written once** — these are what the project is expected to replace |
 
+A file the house **shares** with the project — the design system's `src/index.ts` and `STRUCTURE.md`, an Angular app's `worktree-tab-label.ts`, the pointer block in `CLAUDE.md` — carries a **house region** between `@bespunky/<name>:start` and `:end` comment lines: the region is regenerated every upgrade, everything outside it is the project's and never touched, and a file whose markers the project removed is wholly the project's.
+
 ### The upgrade announces itself (you don't have to remember it)
 
 Claude Code has **no plugin-update hook event**, so `/plugin marketplace update` upgrades the toolkit silently and a project quietly drifts a version behind. `house` closes that gap itself:
