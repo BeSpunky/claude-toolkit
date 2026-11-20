@@ -341,6 +341,12 @@
       "layer": "supabase",
       "description": "A seeded Supabase `project_id` of `source`, under create-nx-workspace's `@<workspace>/source` package name, becomes the workspace's identity: 0.54.2 named every node-host project `source`, and config.toml is seeded once. An id anyone chose stays. A stack's data is not keyed by it.",
       "implementation": "./src/migrations/0.54.3/project-id-from-identity"
+    },
+    "mark-house-regions": {
+      "version": "0.56.0",
+      "layer": "design-system",
+      "description": "The design system's src/index.ts barrel and STRUCTURE.md, and every Angular app's worktree-tab-label.ts (the angular layer's, migrated here too, with or without a design system), were rewritten whole by every upgrade, deleting a project's own exports, docs and tokens. The generators now rewrite only a house region (`@bespunky/<name>:start` … `:end`). A file still in a stock shape gets the 0.56.0 shape; a changed barrel has the house's own export statements moved into a region; anything else is the project's, left as it is but for the header that said otherwise, and reported.",
+      "implementation": "./src/migrations/0.56.0/mark-house-regions"
     }
   }
 }

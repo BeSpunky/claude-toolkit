@@ -39,8 +39,12 @@
 //     project's real design and restore the placeholders.
 //   - The binding's `creationTemplates` are seeded on CREATION and never again: a project that deleted one keeps it
 //     deleted, where a deleted `src/` file above comes back.
-//   - Everything else (STRUCTURE.md, the src/index.ts barrel, the packaging patches, the tags, the app wiring)
-//     is GENERATOR-OWNED and re-asserted on every run, so an upgrade heals drift.
+//   - STRUCTURE.md and the src/index.ts barrel are the PROJECT'S files with a HOUSE REGION (../_utils/house-region):
+//     the house's conventions and the house's exports, rewritten every run, beside the project's own sections and
+//     exports, never touched. A template that declares a region is synced that way; one with no region is seeded.
+//     They were wholly owned until 0.56.0, which rewrote a project's own exports and docs away on every upgrade.
+//   - Everything else (the packaging patches, the tags, the app wiring) is GENERATOR-OWNED and re-asserted on every
+//     run, so an upgrade heals drift.
 import {
   type Tree,
   type GeneratorCallback,
@@ -67,6 +71,7 @@ import type { StackAdapter } from '../../adapters/stack-adapter';
 import { platformTag } from '../../platform/platform';
 import { pluginPointerValues } from '../_utils/plugin-pointers';
 import { DESIGN_SYSTEM_SKILL_POINTERS } from './skill-pointers';
+import { DAMAGED_REGION, regionNames, syncHouseRegions } from '../_utils/house-region';
 
 interface DesignSystemSchema {
   /** See wireProviders in schema.json — wiring is a BASELINE act, never a sync-time one. */
@@ -89,7 +94,7 @@ interface DesignSystemSchema {
 const noop: GeneratorCallback = () => {};
 
 /** The neutral binding: what a design system carries when no framework binds it. */
-const NEUTRAL_BINDING = { templates: join(__dirname, 'neutral'), alwaysRewrite: ['STRUCTURE.md', 'src/index.ts'] };
+const NEUTRAL_BINDING = { templates: join(__dirname, 'neutral') };
 
 export default async function designSystemGenerator(
   tree: Tree,
@@ -142,11 +147,10 @@ export default async function designSystemGenerator(
   // 4) Seed the neutral core (the sass layer), then the binding's runtime + docs over it, then what only a new library gets.
   //    The skill pointers in the seeded comments and STRUCTURE.md render only where their plugin is enabled.
   const substitutions = { tokenPrefix, importPath, specifier, root, name, prefix, ...pluginPointerValues(tree, DESIGN_SYSTEM_SKILL_POINTERS) };
-  seedTemplates(tree, join(__dirname, 'files'), root, substitutions, []);
-  const runtime = binding ?? NEUTRAL_BINDING;
-  seedTemplates(tree, runtime.templates, root, substitutions, [...runtime.alwaysRewrite]);
+  seedTemplates(tree, join(__dirname, 'files'), root, substitutions);
+  seedTemplates(tree, (binding ?? NEUTRAL_BINDING).templates, root, substitutions);
   const creationTemplates = existing ? undefined : binding?.creationTemplates?.(project);
-  if (creationTemplates) seedTemplates(tree, creationTemplates, root, substitutions, []);
+  if (creationTemplates) seedTemplates(tree, creationTemplates, root, substitutions);
 
   // 5) Channel (2): the library's OWN component styles — the binding's packager, when it has one.
   binding?.openLibraryStyles(tree, root, specifier);
@@ -271,17 +275,11 @@ function warnIfDesignSystemMayAlreadyExist(tree: Tree): void {
  * suffix (the suffix exists because nx-tools' package.json `files` array only ships .tpl/.template/.json/.js
  * — a plain .scss under src/ would never reach a consumer's node_modules).
  *
- * SEED semantics: a file is written only if it does NOT exist, EXCEPT for the paths in `alwaysRewrite`.
- * See the file header for why this matters — an upgrade must never restore placeholder tokens over the
- * project's real design.
+ * SEED semantics: a file is written only if it does NOT exist — see the file header for why: an upgrade must never
+ * restore placeholder tokens over the project's real design. A template that declares a HOUSE REGION is the exception
+ * in one respect only: its region is rewritten in place on every run, and the rest of the file is still the project's.
  */
-function seedTemplates(
-  tree: Tree,
-  templateDir: string,
-  destRoot: string,
-  substitutions: Record<string, string>,
-  alwaysRewrite: string[]
-): void {
+function seedTemplates(tree: Tree, templateDir: string, destRoot: string, substitutions: Record<string, string>): void {
   const walk = (dir: string, relative: string): void => {
     for (const entry of readdirSync(dir)) {
       const absolute = join(dir, entry);
@@ -293,14 +291,15 @@ function seedTemplates(
       }
 
       const destPath = `${destRoot}/${relativePath.replace(/\.tpl$/, '')}`;
-      const destRelative = relativePath.replace(/\.tpl$/, '');
-      if (tree.exists(destPath) && !alwaysRewrite.includes(destRelative)) continue;
-
       let content = readFileSync(absolute, 'utf8');
       for (const [key, value] of Object.entries(substitutions)) {
         content = content.split(`{{${key}}}`).join(value);
       }
-      tree.write(destPath, content);
+      if (regionNames(content).length === 0) {
+        if (!tree.exists(destPath)) tree.write(destPath, content);
+      } else if (syncHouseRegions(tree, destPath, content) === 'damaged') {
+        logger.warn(DAMAGED_REGION(destPath, regionNames(content)));
+      }
     }
   };
 

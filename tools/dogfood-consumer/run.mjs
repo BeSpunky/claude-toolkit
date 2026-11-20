@@ -549,6 +549,40 @@ export const onInquiryCreated = onDocumentCreated(
     ],
   },
   {
+    id: 'customised-shared-files',
+    message: 'feat(design-system): our own exports, docs and a tokenised tab label',
+    async apply(c) {
+      // The 0.56.0 reporter's shape: the three files the house used to rewrite whole, each extended the way a project is
+      // told to — exports published from the barrel, a section of its own in STRUCTURE.md, the tab label's colours on tokens.
+      const ds = join(c.dir, 'packages/design-system');
+      const barrel = join(ds, 'src/index.ts');
+      must(existsSync(barrel), `${barrel} is missing — the released consumer has no design system where expected`);
+      writeFileSync(join(ds, 'src/lib/ds-motion.ts'), "export const DsMotion = { fast: 'var(--ds-duration-fast)' } as const;\n");
+      writeFileSync(join(ds, 'src/lib/ds-token.ts'), 'export function dsToken(name: string): string {\n  return `var(--ds-${name})`;\n}\n');
+      appendFileSync(barrel, "\nexport { DsMotion } from './lib/ds-motion';\nexport { dsToken } from './lib/ds-token';\n");
+      appendFileSync(join(ds, 'STRUCTURE.md'), '\n## Motion\n\nOur motion API: `DsMotion`, and `dsToken()` for any token by name.\n');
+      const tab = join(c.dir, `apps/${c.app}/src/app/worktree-tab-label.ts`);
+      const src = readFileSync(tab, 'utf8');
+      must(src.includes("ctx.fillStyle = '#ffffff';"), `${tab} has no '#ffffff' to tokenise`);
+      writeFileSync(tab, src.replace("ctx.fillStyle = '#ffffff';", "ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ds-color-on-primary').trim();"));
+    },
+    survives: (c) => {
+      const barrel = readFileSync(join(c.dir, 'packages/design-system/src/index.ts'), 'utf8');
+      const structure = readFileSync(join(c.dir, 'packages/design-system/STRUCTURE.md'), 'utf8');
+      const tab = readFileSync(join(c.dir, `apps/${c.app}/src/app/worktree-tab-label.ts`), 'utf8');
+      // The barrel was stock plus the project's exports, so the house's statements moved into a region above them —
+      // the house keeps maintaining its half, and its comments are not left behind twice.
+      const end = barrel.indexOf('@bespunky/design-system-api:end');
+      return [
+        /export \{ DsMotion \}/.test(barrel) && /export \{ dsToken \}/.test(barrel) && (barrel.match(/\bDsTheme\b/g) ?? []).length === 1
+          && barrel.includes('@bespunky/design-system-api:start') && end !== -1 && barrel.indexOf('export { DsMotion }') > end
+          && (barrel.match(/\/\/ Mode:/g) ?? []).length === 1
+          && structure.includes('## Motion') && tab.includes("getPropertyValue('--ds-color-on-primary')"),
+        "the barrel's own exports sit below its new house region (DsTheme exported once, the house's comments once), STRUCTURE.md's own section and the tokenised tab label survive",
+      ];
+    },
+  },
+  {
     id: 'web-e2e-compact',
     message: 'test(web-e2e): an e2e target that needs the running app',
     apply(c) {

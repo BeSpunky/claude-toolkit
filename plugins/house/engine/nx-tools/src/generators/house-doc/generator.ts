@@ -33,6 +33,7 @@
 // whether this is even a house project. One file, one truth, no new gitignore surface.
 import { FIREWALL_CONFIG, hasPlatformFirewall } from '../../platform';
 import { nxInvocation } from '../_utils/nx-host';
+import { findRegion } from '../_utils/house-region';
 import { type Tree, formatFiles } from '@nx/devkit';
 import { retireInlineHouseSections } from '../_utils/inline-house-sections';
 import { findDesignSystem } from '../_utils/design-system';
@@ -77,10 +78,9 @@ interface HouseDocSchema {
   branchProjection?: string;
 }
 
-// The pointer block's bounds. START matches the opening marker's stable prefix (the marker line carries a
-// human note after it); END is the exact closing marker. Everything from START to END is the owned block.
-const START = '<!-- @bespunky/house-tooling:start';
-const END = '<!-- @bespunky/house-tooling:end -->';
+// The pointer block is the house region `house-tooling` (../_utils/house-region): its marker lines, and everything
+// between them, are the owned block.
+const POINTER_REGION = 'house-tooling';
 
 // What an unknown version records as. A version is only unknown when a generator is invoked directly
 // (`nx g …:house-doc`) rather than through house.sh; the hook treats it as "can't compare" and — like a
@@ -313,7 +313,7 @@ function ignoreSnoozeFile(tree: Tree): void {
 
 /**
  * Insert or replace the whole marker-delimited pointer block (markers included) in CLAUDE.md.
- *   - both markers present, OUTSIDE any foreign region → replace the entire old block (START…END) in place.
+ *   - both markers present, OUTSIDE any foreign region → replace the whole region (both marker lines and between) in place.
  *   - otherwise (absent, or sitting inside a foreign region from an earlier sync) → insert it right before the
  *     first `## ` heading that is outside every foreign region (prominent, deterministic), falling back to
  *     appending at the end.
@@ -326,12 +326,11 @@ function ignoreSnoozeFile(tree: Tree): void {
  * people to run) then deleted it — and with it the `@HOUSE.rules.md` import — until the next sync.
  */
 function upsertPointer(source: string, pointer: string): string {
-  const startIdx = source.indexOf(START);
-  const endMarkerIdx = source.indexOf(END);
-  if (startIdx !== -1 && endMarkerIdx !== -1 && endMarkerIdx > startIdx) {
-    const before = source.slice(0, startIdx);
-    const after = source.slice(endMarkerIdx + END.length);
-    if (!insideForeignRegion(source, startIdx)) return `${before}${pointer}${after}`;
+  const region = findRegion(source, POINTER_REGION);
+  if (region) {
+    const before = source.slice(0, region.from);
+    const after = source.slice(region.to);
+    if (!insideForeignRegion(source, region.from)) return `${before}${pointer}${after}`;
     // Inside someone else's block: take it out, then place it as if it were new.
     source = `${before.replace(/\n+$/, '\n')}${after.replace(/^\n+/, '\n')}`;
   }

@@ -4,7 +4,8 @@
 //   - the LIBRARY SHAPE: a publishable @nx/angular library, built by ng-packagr (created by publishable-lib
 //     through this adapter's `libs` port — the DS is a publishable library like any other);
 //   - the RUNTIME BINDING: DsTheme (writes the mode attribute), DsRuntimeTheme, provideDesignSystem() —
-//     seeded from ./design-system-files, with STRUCTURE.md and the src/index.ts barrel as the owned contract;
+//     seeded from ./design-system-files; STRUCTURE.md and the src/index.ts barrel carry a house region (the house's
+//     conventions and exports, rewritten every run) beside the project's own;
 //   - the LIBRARY'S OWN sass channel: ng-packagr does not read an app's stylePreprocessorOptions, it has its
 //     own `lib.styleIncludePaths` (relative to ng-package.json) — and `assets` ships the raw .scss to dist;
 //   - the FIRST SPEC: a library that ships no components still has a runtime to test, and its test target needs one
@@ -22,7 +23,6 @@ const RUNTIME_FILES = new Set(['design-system.providers.ts', 'ds-theme.service.t
 
 export const angularDesignSystem: DesignSystemPort = {
   templates: join(__dirname, 'design-system-files'),
-  alwaysRewrite: ['STRUCTURE.md', 'src/index.ts'],
   provider: 'provideDesignSystem',
 
   openLibraryStyles(tree: Tree, root: string, specifier: string) {
@@ -50,6 +50,11 @@ export const angularDesignSystem: DesignSystemPort = {
    * peers again: the library port judged them with the demo still there, and whatever only the demo imported goes with it.
    */
   pruneGenerated(tree: Tree, root: string) {
+    // @nx/angular's barrel re-exports its demo component. It is not the project's — the library was born this run — and
+    // the design system's barrel is seeded only when absent (the house owns just its region), so it must go before the
+    // seed, or the library is left exporting a deleted file.
+    const barrel = `${root}/src/index.ts`;
+    if (tree.exists(barrel)) tree.delete(barrel);
     const libDir = `${root}/src/lib`;
     if (!tree.exists(libDir)) return;
     for (const child of tree.children(libDir)) {

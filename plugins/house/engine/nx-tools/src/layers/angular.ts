@@ -31,8 +31,8 @@ export const angular: LayerDescriptor = {
   nxPlugin: '@nx/angular',
   brings: 'the Angular editor extensions, the dev-server leaf, the Angular CLI MCP + agent skills',
   generators: {
-    // The Angular adapter's half of the worktree dev loop: the dev-only tab label (glue rewritten every sync; the
-    // app.config.ts provider only when this run CREATES the layer). Quietly skipped when the sync's app is not a
+    // The Angular adapter's half of the worktree dev loop: the dev-only tab label (its house region rewritten every sync,
+    // its badgeStyle() and a file without the region the project's; the app.config.ts provider only when this run CREATES the layer). Quietly skipped when the sync's app is not a
     // project — the web layer's own per-app steps already report that.
     app: [
       {

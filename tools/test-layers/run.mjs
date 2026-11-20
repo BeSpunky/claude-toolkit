@@ -721,7 +721,10 @@ checkAsync('house docs name only toolkit skills and agents whose plugin the proj
     readdirSync(root, { withFileTypes: true, recursive: true })
       .filter((e) => e.isFile() && e.name.endsWith('.tpl'))
       .map((e) => join(e.parentPath ?? e.path, e.name));
-  for (const file of templates(join(PAYLOAD, 'src')).filter((f) => !f.startsWith(dir))) {
+  // A rung's `stock/` shapes are not rendered into a project: they are frozen copies of what a past release WROTE,
+  // which the rung only recognises, so they say what those releases said, pointers and all.
+  const recognisedOnly = (f) => /[\\/]migrations[\\/][^\\/]+[\\/].*[\\/]stock[\\/]/.test(f);
+  for (const file of templates(join(PAYLOAD, 'src')).filter((f) => !f.startsWith(dir) && !recognisedOnly(f))) {
     const hit = readFileSync(file, 'utf8').match(/\/?bespunky-[a-z0-9-]+:[a-z]/);
     ok(!hit, `${file.slice(PAYLOAD.length + 1)} names ${hit?.[0]} directly — route it through a plugin-pointers token`);
   }
