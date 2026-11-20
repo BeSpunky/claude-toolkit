@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pinnedDownloads } from '../postgres-debs/closure.mjs';
-import { brokenDownloads } from '../postgres-debs/downloads.mjs';
+import { brokenDownloads, CouldNotTell } from '../postgres-debs/downloads.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const { isGreater } = createRequire(import.meta.url)('../check-release-invariants/rules.cjs');
@@ -84,7 +84,14 @@ const text = async (url) => {
 
 async function main() {
   const { version: pin, pins } = pinnedDownloads(readFileSync(join(ROOT, 'plugins/house/engine/nx-tools/src/generators/_utils/versions.ts'), 'utf8'), 'SUPABASE_CLI');
-  const faults = await brokenDownloads(pins);
+  let faults;
+  try {
+    faults = await brokenDownloads(pins);
+  } catch (error) {
+    if (!(error instanceof CouldNotTell)) throw error;
+    console.error(`COULD NOT TELL: ${error.message}. That is the network, not the pin. Run it again.`);
+    process.exit(2);
+  }
   const artifacts = lockedArtifacts(JSON.parse(readFileSync(join(ROOT, 'plugins/house/engine/nx-tools/src/generators/supabase/seed/supabase.lock.tpl'), 'utf8')));
   if (!artifacts.length) {
     console.error('supabase.lock.tpl names no linux native artifact, so its shape has moved and this check says nothing: read it again.');

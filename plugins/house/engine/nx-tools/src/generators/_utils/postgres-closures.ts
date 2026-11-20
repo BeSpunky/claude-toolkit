@@ -4,86 +4,86 @@
 //
 // Import-free on purpose, like the other projected tables. See DebClosureTool (layers/descriptor.ts) for what each field means.
 
-export const POSTGRES_CLOSURES_AS_OF = '2026-11-04';
+export const POSTGRES_CLOSURES_AS_OF = '2026-11-20';
 
 /** Per Postgres major, per Debian codename: the closure an `archives` entry of format `deb` installs. */
 export const POSTGRES_CLOSURES = {
   '18': {
     trixie: {
-      version: '18.6-f7ec91e2',
+      version: '18.7-c5781f20',
       systemDepends:
         'libc6 (>= 2.38), libgssapi-krb5-2 (>= 1.17), libicu76 (>= 76.1-1~), libldap2 (>= 2.6.2), liblz4-1 (>= 0.0~r130), libnuma1 (>= 2.0.11), libpam0g (>= 0.99.7.1), libreadline8t64 (>= 6.0), libselinux1 (>= 3.1~), libssl3t64 (>= 3.4.0), libsystemd0, liburing2 (>= 2.5), libuuid1 (>= 2.16), libxml2 (>= 2.7.4), libxslt1.1 (>= 1.1.25), libzstd1 (>= 1.5.5), tzdata, zlib1g (>= 1:1.1.4)',
       packages: {
         amd64: [
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-18_18.6-1.pgdg13+2_amd64.deb', sha256: 'bf4062a44757c3f7a207a1b9e20c2bf93f9847257516c2ce0befc1257d3dcf8e' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-client-18_18.6-1.pgdg13+2_amd64.deb', sha256: '9af40c99f7074f8ff3798155af2f07f1a4e1e3bd4edce44ef928c1e03aea620e' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/libpq5_18.6-1.pgdg13+2_amd64.deb', sha256: 'c6cc459bb499db4697686533e50bf5943f7e7d6929c04ef55eec184d5436859b' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-18-pgvector_0.8.7-1.pgdg13+1_amd64.deb', sha256: 'd9923b9ea81375604d88bfcfa167d58bfaf3de5689372c9e4504244f1671f596' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-18_18.7-1.pgdg13+5_amd64.deb', sha256: 'c3c67b3eff04872768ba8f001dfd1c71486ec0f0c77d67afc0fe7943930ce3c7' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-client-18_18.7-1.pgdg13+5_amd64.deb', sha256: '7fe43472fc8eb12f7d3f376fcb2c809f659c3d5722e4d13dd8834066cd6a289b' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/18/p/postgresql-18/libpq5_18.7-1.pgdg13+5_amd64.deb', sha256: '16a6fd5edc7b2365a291cd527514025eae5b39cc2360bd2042616d9448eb1170' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-18-pgvector_0.8.7-1.pgdg13+2_amd64.deb', sha256: 'fac325c06ae05a05679dee990a4cfa8926191778963cafba8af1e9283a044ce2' },
         ],
         arm64: [
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-18_18.6-1.pgdg13+2_arm64.deb', sha256: '16d1f20450bfdc13118c317a86745ca1a0d56fe192c3d8f8091a7f2d9868c4d9' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-client-18_18.6-1.pgdg13+2_arm64.deb', sha256: '098492efc9f576ffee23e1871d31682b332a3c6582072d3ef8f99b6b72573bc7' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/libpq5_18.6-1.pgdg13+2_arm64.deb', sha256: '26d0c9de6c3939432d94d4ad74db1bd2899c87698e1f96f3ee9396054f44d5dc' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-18-pgvector_0.8.7-1.pgdg13+1_arm64.deb', sha256: '87e5dfbd40adcf0fca2b08bfaa422b88fca37672a1f4fd48e64249d303f52fe3' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-18_18.7-1.pgdg13+5_arm64.deb', sha256: '79d0ac26c6fdf39e1bb16d746109e8a94e78e09f4b8039beec596e27ab41652b' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-client-18_18.7-1.pgdg13+5_arm64.deb', sha256: '8f563ae7befe5075bab5599d46b6528b816c8f9aba3cae08dea29385348ee38a' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/18/p/postgresql-18/libpq5_18.7-1.pgdg13+5_arm64.deb', sha256: 'd8b30c6e7c2ef879798029e7f6208df4207ca14887e33aaebd502adb5b69817c' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-18-pgvector_0.8.7-1.pgdg13+2_arm64.deb', sha256: 'ef8b83b5f81606c36f035fc5f93f43c3cf41c218b571f52b8410c2070d641e6c' },
         ],
       },
     },
     bookworm: {
-      version: '18.6-221c2cfd',
+      version: '18.7-e30b35e6',
       systemDepends:
         'libc6 (>= 2.34), libgssapi-krb5-2 (>= 1.17), libicu72 (>= 72.1~rc-1~), libldap-2.5-0 (>= 2.5.4), liblz4-1 (>= 0.0~r130), libnuma1 (>= 2.0.11), libpam0g (>= 0.99.7.1), libreadline8 (>= 6.0), libselinux1 (>= 3.1~), libssl3 (>= 3.0.0), libsystemd0, liburing2 (>= 2.3), libuuid1 (>= 2.16), libxml2 (>= 2.7.4), libxslt1.1 (>= 1.1.25), libzstd1 (>= 1.5.2), tzdata, zlib1g (>= 1:1.1.4)',
       packages: {
         amd64: [
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-18_18.6-1.pgdg12+2_amd64.deb', sha256: '4af50c239aaee4a5f4a8d621356b42d2343f4a1ddb5ec710eb98b2d3737103d8' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-client-18_18.6-1.pgdg12+2_amd64.deb', sha256: '6105a64b8166ae06c2b6c681d7e600458c598151c08b0f10bf5fa25ac711d6b9' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/libpq5_18.6-1.pgdg12+2_amd64.deb', sha256: '9dc15f3f41090e632e0449693323f18c96bfd25794c439d8bcde06af6c5012f6' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-18-pgvector_0.8.7-1.pgdg12+1_amd64.deb', sha256: 'a47bf74b1b074ec9a2fad8acde8f7b1fe2b3e4c23028e866f7655965a41f4f25' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-18_18.7-1.pgdg12+5_amd64.deb', sha256: 'd95ffa509ffa677e20adb5c3adc23b3ee8e72e611e8ee158457c4f6155d8b397' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-client-18_18.7-1.pgdg12+5_amd64.deb', sha256: '196d499b4e965fe379bf7a51c7515c39e3553e839258b335d0ee6859e90742bb' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/18/p/postgresql-18/libpq5_18.7-1.pgdg12+5_amd64.deb', sha256: '50186473bcfa5c63d30a817191d4f3d04b961536ab261bcbe4b64adecda25413' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-18-pgvector_0.8.7-1.pgdg12+2_amd64.deb', sha256: '808e3bee2ca60b1919695133a6c8f887c209497b24c486212d46429f2b7dc555' },
         ],
         arm64: [
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-18_18.6-1.pgdg12+2_arm64.deb', sha256: 'bdf4f68edeb735cea46a40508549e65bfb9f661ec02b60580511c539e848ac37' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-client-18_18.6-1.pgdg12+2_arm64.deb', sha256: '56f1be46b6ba10056c2beda0404554b65171e21b13f5cc5044182d4eae53ce58' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/libpq5_18.6-1.pgdg12+2_arm64.deb', sha256: '1e2b364b93ff16293d6f4a409e49b0d8c0521b9f7ae3423007f443c31c0f6766' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-18-pgvector_0.8.7-1.pgdg12+1_arm64.deb', sha256: '5eda70cc45cec0d5a09961b1bba918512b7300fc6bcd104124c2417e60867d40' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-18_18.7-1.pgdg12+5_arm64.deb', sha256: '919903095df4a27684fbf3ee9a7d3e437082e87a67b1105b64d60ae3b1f7a3e1' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-18/postgresql-client-18_18.7-1.pgdg12+5_arm64.deb', sha256: '46ad57c2a86f8c7a66589b82f92c2f14bc6830df989edc62b9e1495a82bed4a9' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/18/p/postgresql-18/libpq5_18.7-1.pgdg12+5_arm64.deb', sha256: 'e4f268e63774b858a0a61337dcb1b44d07fa6091d2a7e751b28259e5cd8c2c11' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-18-pgvector_0.8.7-1.pgdg12+2_arm64.deb', sha256: '05d13d4a4efe7b76b9ba62af6bca8882e52339591f489cc969784a49fd0b782a' },
         ],
       },
     },
   },
   '17': {
     trixie: {
-      version: '17.11-3bd62753',
+      version: '17.12-3fa2d4f7',
       systemDepends:
         'libc6 (>= 2.38), libgcc-s1 (>= 3.0), libgssapi-krb5-2 (>= 1.17), libicu76 (>= 76.1-1~), libldap2 (>= 2.6.2), libllvm19 (>= 1:19.1.0), liblz4-1 (>= 0.0~r130), libpam0g (>= 0.99.7.1), libreadline8t64 (>= 6.0), libselinux1 (>= 3.1~), libssl3t64 (>= 3.4.0), libstdc++6 (>= 5.2), libsystemd0, libuuid1 (>= 2.16), libxml2 (>= 2.7.4), libxslt1.1 (>= 1.1.25), libzstd1 (>= 1.5.5), tzdata, zlib1g (>= 1:1.1.4)',
       packages: {
         amd64: [
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-17_17.11-1.pgdg13+2_amd64.deb', sha256: '4f8b42bd3202d24953996743afbc90b609d3337c90bb740568b52d06ebfdcb15' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-client-17_17.11-1.pgdg13+2_amd64.deb', sha256: 'c36408bb62178bc9193c113da65e30fc6a5237648de5e9db1ea594214df9ae4b' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/17/p/postgresql-17/libpq5_17.11-1.pgdg13+2_amd64.deb', sha256: '45f9a8b834be6721fe8c768b6516476ae795a8c0ca33c10d766bf203ea513ef1' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-17-pgvector_0.8.7-1.pgdg13+1_amd64.deb', sha256: '60420d97c25f1ca907d2d428167e3e3d2a596b183d0d6658099636245f2b98e2' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-17_17.12-1.pgdg13+1_amd64.deb', sha256: '659c0e1215850be6b2f02862acadbd0f0acb738ef26d16915d07a6de536bb020' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-client-17_17.12-1.pgdg13+1_amd64.deb', sha256: '4a8a530be4a549753bd82bec2a5032e91233c6a60ebeb1ca5311717866de4059' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/17/p/postgresql-17/libpq5_17.12-1.pgdg13+1_amd64.deb', sha256: 'd531be31fd03fc6c1b879fd5ab3e4e402d8190bd1f3074ad9f7d58d5b7612293' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-17-pgvector_0.8.7-1.pgdg13+2_amd64.deb', sha256: '3c7e54c87092c87a1070380553d39e23138ecc90cadcec744c1ec72e42552597' },
         ],
         arm64: [
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-17_17.11-1.pgdg13+2_arm64.deb', sha256: 'cc8e90fa4a98b593e34b1e04140e42ccaa4d0f63041f6a83011ecd33b454955b' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-client-17_17.11-1.pgdg13+2_arm64.deb', sha256: '706c9fde003d98ff423a3d73bd5ac1115379481cb86daabf251e02f240d660d3' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/17/p/postgresql-17/libpq5_17.11-1.pgdg13+2_arm64.deb', sha256: '03f3d7a327fffd51980b280cce484fe63d1bdda5b0ac2bac87d0cf39a30c5efa' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-17-pgvector_0.8.7-1.pgdg13+1_arm64.deb', sha256: '4c20eaf2490a0c28def3a557ca19f955b24c19d9799f1f8c416faf9f94941c3c' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-17_17.12-1.pgdg13+1_arm64.deb', sha256: '3381d13ec22ec2e7fdf13dc6cc6b6608e6314d3aa865b3d0374bb3dbb2f04f94' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-client-17_17.12-1.pgdg13+1_arm64.deb', sha256: 'b048ca8930a7e386ced747f2635ad950edcfc2e70b5584de66e1dc9e31e53636' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/17/p/postgresql-17/libpq5_17.12-1.pgdg13+1_arm64.deb', sha256: '046f6f711dae16f83a6c1440dcc724684cc549f5ea2c025510373be1b13ed4e1' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-17-pgvector_0.8.7-1.pgdg13+2_arm64.deb', sha256: 'a1000b8c12c6d2ae045a5365c4ad44a037fede05ba967675b0a247bfd91f7688' },
         ],
       },
     },
     bookworm: {
-      version: '17.11-0663b12a',
+      version: '17.12-fc62b90c',
       systemDepends:
         'libc6 (>= 2.34), libgcc-s1 (>= 3.0), libgssapi-krb5-2 (>= 1.17), libicu72 (>= 72.1~rc-1~), libldap-2.5-0 (>= 2.5.4), libllvm19, liblz4-1 (>= 0.0~r130), libpam0g (>= 0.99.7.1), libreadline8 (>= 6.0), libselinux1 (>= 3.1~), libssl3 (>= 3.0.0), libstdc++6 (>= 5.2), libsystemd0, libuuid1 (>= 2.16), libxml2 (>= 2.7.4), libxslt1.1 (>= 1.1.25), libzstd1 (>= 1.5.2), tzdata, zlib1g (>= 1:1.1.4)',
       packages: {
         amd64: [
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-17_17.11-1.pgdg12+2_amd64.deb', sha256: 'cb33e6465c2b8b223ceabedfc2009bdaf7d678729b8466b43011b7914e5213c8' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-client-17_17.11-1.pgdg12+2_amd64.deb', sha256: '1e286c060f8f9ab6485b1b02df6543ce38610bc828c63695528f0593658113ed' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/17/p/postgresql-17/libpq5_17.11-1.pgdg12+2_amd64.deb', sha256: '1862241d49dd0afe33ba3bfad14434975e5fbd15902b09215a04dc2796d76cd5' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-17-pgvector_0.8.7-1.pgdg12+1_amd64.deb', sha256: 'acb5569b6a5bb71d5968205a4da15911ff3b2a15a57a2a9d765560882f53e3ea' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-17_17.12-1.pgdg12+1_amd64.deb', sha256: '40b74e0b676bab321b3d41acf7d5bed9a34ade59ac640b3e24c2fa87905e2ffd' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-client-17_17.12-1.pgdg12+1_amd64.deb', sha256: '6c572106b1caedd8e8357ac932f52860f8f6dcec186579a56431ea964437ae32' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/17/p/postgresql-17/libpq5_17.12-1.pgdg12+1_amd64.deb', sha256: 'b2ad4b9e6f830af89726d1870af7acb0982a114697a1e23a8e818e172d8077f8' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-17-pgvector_0.8.7-1.pgdg12+2_amd64.deb', sha256: 'c512035ba6fd02357092ef3204d85abe486c9aaff21686660de8645812b6d2fb' },
         ],
         arm64: [
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-17_17.11-1.pgdg12+2_arm64.deb', sha256: 'a93463e4f4ef9e11acfc9c541e9ba59ccefccc9fc09a89c7d6f4989ae40ba020' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-client-17_17.11-1.pgdg12+2_arm64.deb', sha256: 'a9e43d4fabea44c52d7be60996e1447b857e1e78c844ca5beb8cd87f05f6fd57' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/17/p/postgresql-17/libpq5_17.11-1.pgdg12+2_arm64.deb', sha256: 'a36bdaf87b647db2dd4e7437269e4b82a4e698a7e5374bc56ba6b26ada3db104' },
-          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-17-pgvector_0.8.7-1.pgdg12+1_arm64.deb', sha256: 'fa2280ed2592c5de4d84287ec0183908112f07548cf226868349e92675eea8d7' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-17_17.12-1.pgdg12+1_arm64.deb', sha256: '08b1c0d5b300ad78ff82be6041f28bf26765da50a42b9152d82c394b2d8bf998' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/postgresql-17/postgresql-client-17_17.12-1.pgdg12+1_arm64.deb', sha256: 'db0da560b6720669e0f82282d53a90c2e5faf7585aa63a95d9fb9224c105e0e2' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/17/p/postgresql-17/libpq5_17.12-1.pgdg12+1_arm64.deb', sha256: '87733248d29419283ef0e4db5280978d94e44fc363b77fd63a4e94302be4fa89' },
+          { url: 'https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgvector/postgresql-17-pgvector_0.8.7-1.pgdg12+2_arm64.deb', sha256: '3ee39449ed2b141317c4855aabe43b7739bf348998a19e2b8281e458ab725ffd' },
         ],
       },
     },

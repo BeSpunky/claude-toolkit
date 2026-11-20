@@ -34,7 +34,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildClosure, debianSupplies, parsePackages, parseRelations, pinnedDownloads, pinnedList, render, selectPackages, signedBy } from './closure.mjs';
-import { brokenDownloads } from './downloads.mjs';
+import { brokenDownloads, CouldNotTell } from './downloads.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const UTILS = join(ROOT, 'plugins/house/engine/nx-tools/src/generators/_utils');
@@ -150,7 +150,14 @@ if (process.argv.includes('--write')) {
 } else {
   const { checked, gone } = await goneFrom(previous);
   const dbmate = pinnedDownloads(VERSIONS, 'DBMATE');
-  const dbmateFaults = await brokenDownloads(dbmate.pins);
+  let dbmateFaults;
+  try {
+    dbmateFaults = await brokenDownloads(dbmate.pins);
+  } catch (error) {
+    if (!(error instanceof CouldNotTell)) throw error;
+    console.error(`COULD NOT TELL: ${error.message}. That is the network, not the dbmate pin. Run it again.`);
+    process.exit(2);
+  }
   if (gone.length) {
     console.error(`GONE, as of ${previousDate}'s table: ${gone.length} of ${checked} pinned files no longer download — consumers' cache-miss image builds fail on these. Run with --write and release:\n  ${gone.join('\n  ')}`);
   }

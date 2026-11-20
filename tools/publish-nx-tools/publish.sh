@@ -133,15 +133,24 @@ fi
 # a stale one ships stale advice to every consumer for as long as they stay on it — so a publish re-asks upstream
 # first and stops on drift. (The per-push test job deliberately does NOT: an upstream release would turn every
 # unrelated PR red. A weekly schedule raises the alarm instead — .github/workflows/upstream-tables.yml.)
+# Exit 2 from a check is COULD NOT TELL (the network or a registry, not upstream having moved): stop, but say to re-run.
+could_not_tell() {
+  echo "ERROR: the $1 upstream check could not reach upstream — that is the network, not a finding. Run the publish again." >&2
+  exit 1
+}
 for table in firebase-compat node-facts postgres-debs; do
-  node "$REPO_ROOT/tools/$table/project.mjs" || {
+  status=0; node "$REPO_ROOT/tools/$table/project.mjs" || status=$?
+  [ "$status" -eq 2 ] && could_not_tell "$table"
+  [ "$status" -eq 0 ] || {
     echo "ERROR: the $table upstream check did not pass — its own message above says why (drift → run it with --write," >&2
     echo "       review, commit, re-run; a crash → fix the cause, e.g. run \`yarn install\` if a module is missing)." >&2
     exit 1
   }
 done
 # No table behind this one: the pinned Supabase CLI still downloads and matches. A newer release, or the native runtime leaving alpha, is said and stops nothing.
-node "$REPO_ROOT/tools/supabase-cli/check.mjs" || {
+status=0; node "$REPO_ROOT/tools/supabase-cli/check.mjs" || status=$?
+[ "$status" -eq 2 ] && could_not_tell supabase-cli
+[ "$status" -eq 0 ] || {
   echo "ERROR: the Supabase CLI pin is broken — its own message above says what to move." >&2
   exit 1
 }

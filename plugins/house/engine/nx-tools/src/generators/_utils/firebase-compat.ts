@@ -10,7 +10,7 @@
  * The date npm last said this — a project's installed toolkit carries a FROZEN copy, so every message that rests on
  * the table ("no stable @angular/fire for Angular 22") says "as of" this date, never "yet".
  */
-export const ANGULARFIRE_TABLE_AS_OF = '2026-11-03';
+export const ANGULARFIRE_TABLE_AS_OF = '2026-11-20';
 
 /**
  * What a firebase spec installs, and what that install needs of Node: the `engines.node` of firebase's WHOLE dependency
@@ -123,7 +123,7 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
           {
             "range": ">=20.0.0",
             "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
-            "packages": ["@firebase/ai@2.16.0", "@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/app-compat@0.5.18", "@firebase/app@0.16.2", "@firebase/auth-compat@0.6.11", "@firebase/auth@1.13.6", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/firestore-compat@0.4.14", "@firebase/firestore@4.17.2", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/storage-compat@0.4.5", "@firebase/storage@0.14.5", "@firebase/util@1.15.3", "re2js@2.9.1"]
+            "packages": ["@firebase/ai@2.16.0", "@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/app-compat@0.5.18", "@firebase/app@0.16.2", "@firebase/auth-compat@0.6.11", "@firebase/auth@1.13.6", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/firestore-compat@0.4.14", "@firebase/firestore@4.17.2", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/storage-compat@0.4.5", "@firebase/storage@0.14.5", "@firebase/util@1.15.3", "re2js@2.10.0"]
           }
         ]
       },
@@ -137,16 +137,26 @@ export const ANGULARFIRE_BY_ANGULAR_MAJOR: Readonly<Record<number, { stable: Ang
   22: {
     stable: null,
     prerelease: {
-      "angularfire": "22.0.0-rc.0",
-      "firebase": "^12.18.0",
+      "angularfire": "22.0.0-rc.1",
+      "firebase": "^12.18.0 || ^13.0.0",
       "firebaseResolves": {
-        "firebase": "12.19.0",
-        "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
+        "firebase": "13.4.0",
+        "nodeMajors": [24, 25, 26],
         "nodeNeeds": [
           {
             "range": ">=20.0.0",
             "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
-            "packages": ["@firebase/ai@2.16.0", "@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/app-compat@0.5.18", "@firebase/app@0.16.2", "@firebase/auth-compat@0.6.11", "@firebase/auth@1.13.6", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/firestore-compat@0.4.14", "@firebase/firestore@4.17.2", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/storage-compat@0.4.5", "@firebase/storage@0.14.5", "@firebase/util@1.15.3", "re2js@2.9.1"]
+            "packages": ["@firebase/component@0.7.5", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/util@1.15.3", "re2js@2.10.0"]
+          },
+          {
+            "range": ">=22.15.0",
+            "nodeMajors": [22, 23, 24, 25, 26],
+            "packages": ["@opentelemetry/core@3.1.1", "@opentelemetry/exporter-logs-otlp-http@0.301.2", "@opentelemetry/exporter-trace-otlp-proto@0.301.2", "@opentelemetry/instrumentation-document-load@0.70.1", "@opentelemetry/instrumentation-fetch@0.301.2", "@opentelemetry/instrumentation-xml-http-request@0.301.2", "@opentelemetry/instrumentation@0.301.2", "@opentelemetry/otlp-exporter-base@0.301.2", "@opentelemetry/otlp-transformer@0.301.2", "@opentelemetry/resources@3.1.1", "@opentelemetry/sdk-logs@3.1.1", "@opentelemetry/sdk-metrics@3.1.1", "@opentelemetry/sdk-trace@3.1.1", "@opentelemetry/web-common@0.301.2"]
+          },
+          {
+            "range": ">=24.12.0",
+            "nodeMajors": [24, 25, 26],
+            "packages": ["@firebase/ai@3.1.0", "@firebase/app-check-compat@0.4.8", "@firebase/app-check@0.13.2", "@firebase/app-compat@0.5.23", "@firebase/app@0.16.7", "@firebase/auth-compat@0.6.16", "@firebase/auth@1.13.11", "@firebase/database-compat@2.1.8", "@firebase/database@1.1.6", "@firebase/firestore-compat@0.4.18", "@firebase/firestore@4.20.0", "@firebase/storage-compat@0.4.6", "@firebase/storage@0.14.6"]
           }
         ]
       },
@@ -167,23 +177,23 @@ export const ANGULARFIRE_TABLE_NEWEST_ANGULAR = 22;
  */
 export const FIREBASE_BY_DIST_TAG: Readonly<Record<string, FirebaseResolution>> = {
   latest: {
-    "firebase": "13.2.0",
+    "firebase": "13.4.0",
     "nodeMajors": [24, 25, 26],
     "nodeNeeds": [
       {
         "range": ">=20.0.0",
         "nodeMajors": [20, 21, 22, 23, 24, 25, 26],
-        "packages": ["@firebase/app-check-compat@0.4.7", "@firebase/app-check@0.13.1", "@firebase/component@0.7.5", "@firebase/database-compat@2.1.7", "@firebase/database@1.1.5", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/util@1.15.3", "re2js@2.9.1"]
+        "packages": ["@firebase/component@0.7.5", "@firebase/functions-compat@0.5.0", "@firebase/functions@0.14.0", "@firebase/logger@0.5.2", "@firebase/util@1.15.3", "re2js@2.10.0"]
+      },
+      {
+        "range": ">=22.15.0",
+        "nodeMajors": [22, 23, 24, 25, 26],
+        "packages": ["@opentelemetry/core@3.1.1", "@opentelemetry/exporter-logs-otlp-http@0.301.2", "@opentelemetry/exporter-trace-otlp-proto@0.301.2", "@opentelemetry/instrumentation-document-load@0.70.1", "@opentelemetry/instrumentation-fetch@0.301.2", "@opentelemetry/instrumentation-xml-http-request@0.301.2", "@opentelemetry/instrumentation@0.301.2", "@opentelemetry/otlp-exporter-base@0.301.2", "@opentelemetry/otlp-transformer@0.301.2", "@opentelemetry/resources@3.1.1", "@opentelemetry/sdk-logs@3.1.1", "@opentelemetry/sdk-metrics@3.1.1", "@opentelemetry/sdk-trace@3.1.1", "@opentelemetry/web-common@0.301.2"]
       },
       {
         "range": ">=24.12.0",
         "nodeMajors": [24, 25, 26],
-        "packages": ["@firebase/ai@3.0.0", "@firebase/app-compat@0.5.21", "@firebase/app@0.16.5", "@firebase/auth-compat@0.6.14", "@firebase/auth@1.13.9", "@firebase/firestore-compat@0.4.17", "@firebase/firestore@4.19.1", "@firebase/storage-compat@0.4.6", "@firebase/storage@0.14.6"]
-      },
-      {
-        "range": "^18.19.0 || >=20.6.0",
-        "nodeMajors": [18, 20, 21, 22, 23, 24, 25, 26],
-        "packages": ["@opentelemetry/core@2.10.0", "@opentelemetry/core@2.12.0", "@opentelemetry/core@2.9.0", "@opentelemetry/exporter-logs-otlp-http@0.220.0", "@opentelemetry/exporter-trace-otlp-proto@0.220.0", "@opentelemetry/instrumentation-document-load@0.65.0", "@opentelemetry/instrumentation-fetch@0.220.0", "@opentelemetry/instrumentation-xml-http-request@0.220.0", "@opentelemetry/instrumentation@0.220.0", "@opentelemetry/otlp-exporter-base@0.220.0", "@opentelemetry/otlp-transformer@0.220.0", "@opentelemetry/resources@2.10.0", "@opentelemetry/resources@2.12.0", "@opentelemetry/resources@2.9.0", "@opentelemetry/sdk-logs@0.220.0", "@opentelemetry/sdk-metrics@2.9.0", "@opentelemetry/sdk-trace-base@2.10.0", "@opentelemetry/sdk-trace-base@2.12.0", "@opentelemetry/sdk-trace-base@2.9.0", "@opentelemetry/sdk-trace-web@2.10.0", "@opentelemetry/sdk-trace-web@2.12.0", "@opentelemetry/sdk-trace-web@2.9.0", "@opentelemetry/sdk-trace@2.10.0", "@opentelemetry/sdk-trace@2.12.0", "@opentelemetry/sdk-trace@2.9.0"]
+        "packages": ["@firebase/ai@3.1.0", "@firebase/app-check-compat@0.4.8", "@firebase/app-check@0.13.2", "@firebase/app-compat@0.5.23", "@firebase/app@0.16.7", "@firebase/auth-compat@0.6.16", "@firebase/auth@1.13.11", "@firebase/database-compat@2.1.8", "@firebase/database@1.1.6", "@firebase/firestore-compat@0.4.18", "@firebase/firestore@4.20.0", "@firebase/storage-compat@0.4.6", "@firebase/storage@0.14.6"]
       }
     ]
   }
