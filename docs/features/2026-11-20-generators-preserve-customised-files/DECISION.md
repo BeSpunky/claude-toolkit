@@ -1,6 +1,9 @@
 ---
 effort: generators-preserve-customised-files
-summary: Generators overwrote three files a consumer had customised (design-system index.ts, STRUCTURE.md, worktree-tab-label.ts) on upgrade; make them stop.
+status: concluded
+concluded: 2026-11-20
+summary: Files the house shares with a project (the design-system barrel and STRUCTURE.md, the Angular tab label) now carry a marked house region; an upgrade rewrites only that region, and a 0.56.0 migration gives existing files their region or leaves customised ones as the project's.
+tags: [house, nx-tools, generators, migrations, house-region, design-system, upgrade]
 ---
 
 # Generators overwrote files a project had customised
@@ -28,3 +31,9 @@ All three were declared generator-OWNED and rewritten on every run (`alwaysRewri
 ## Correction (sanity review, 2026-11-20)
 
 The tab label's project seam is `badgeStyle()`, not `badgeColors()` as written above: it carries the badge's whole look (fill, text colour, font), not only its colours. The review's findings and fixes are in `reviews/`.
+
+## Outcome
+
+Shipped as `@bespunky/nx-tools` 0.56.0 and `bespunky-house` 0.54.0. Verified: migration and generator fixtures (every stock revision and its prettier form, the reporter's three files), a self-upgrade of this repo, and the consumer dogfood (251/251 checks; the reporter's shape survived two upgrades and built). The sanity review fixed nine defects before landing; the dogfood caught one more (@nx/angular's demo barrel surviving creation), fixed in the Angular prune.
+
+Open questions the review raised, decided by the session: a barrel that dropped a house export gets it back (reported); a region-less shared file is reported once, by the migration, not on every upgrade; the rung stays one rung.
