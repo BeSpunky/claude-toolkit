@@ -27,3 +27,13 @@ Shy's later answer: "Bump the versions now" (patch: bespunky-house 0.54.2 to 0.5
 ## Record
 
 `runs/2026-11-26-yarn-test.txt`: the whole output of `yarn test` on 2026-11-26 against commit d0770ac7: exit 1, only `check-release-invariants` failed, test-firebase-tools, test-postgres, test-supabase and test-angular-ts-solution skipped for the network, the five Docker checks skipped for Docker.
+
+## Package 2: Nx `test` targets
+
+`tools/nx-test-suites/plugin.js` (registered in `nx.json` `plugins`) infers a `test` target for every project that owns a suite in `suites.json`; it runs `node tools/test-suites/run.mjs --project=<name>`. `cache: false`, and the old `targetDefaults.test.cache: true` was removed from nx.json because a target default would override the inferred value. `parallelism: false`, since the suites are not safe side by side. No project.json changed. Its test: `tools/nx-test-suites/test/run.mjs` (run by hand: declaring it in suites.json is outside this package's paths).
+
+Runs on 2026-11-26 against commit 4301209d (the plugin and the list entry; this docs commit follows it):
+- `yarn nx test bespunky-house`: exit 1, output in `runs/2026-11-26-nx-test-bespunky-house.txt`. Only check-release-invariants failed, and it also fails on its own (exit 1 from `node tools/check-release-invariants/check.mjs`). The item 4 check command exits 0.
+- `node tools/nx-test-suites/test/run.mjs`: exit 0, output in `runs/2026-11-26-nx-test-suites-test.txt`.
+
+Known failure: check-release-invariants, waiting for the version bump Shy approved. It is not excluded, skipped or weakened.

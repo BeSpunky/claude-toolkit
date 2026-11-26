@@ -1,0 +1,6 @@
+ok - nx run-many -t test selects the same suites as the root runner
+ok - the real list names only real Nx projects
+ok - adding a suite for a project gives it a test target with no other edit
+ok - owningProjects lists each owner once
+ok - a suite whose project is no real Nx project is reported by name with a non-zero exit
+all 5 passed
