@@ -1,7 +1,7 @@
 // The Supabase provider's decisions, with no stack: a fake `supabase` on PATH that records its argv and answers as a script says, and a
 // fake `tools/dev/dev.mjs`. Whatever would regress SILENTLY: the pins, a port comparison, what a child is handed, a lock, a refusal.
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -300,9 +300,12 @@ try {
   respondsWell();
   clearCalls();
   k = keeper({ stage: (stackDir) => spawnSync('mkfifo', [join(stackDir, 'postgres.ready')]) });
+  // Without the FIFO the marker is a plain file, its write never held, and the check below would pass proving nothing.
+  const held = join(k.stackDir, 'postgres.ready');
+  check('…its marker is held: a FIFO nobody reads', existsSync(held) && statSync(held).isFIFO(), 'mkfifo made no FIFO');
   const announcedFirst = await until(() => /supabase-local http:\/\/127\.0\.0\.1/.test(k.said()));
   check('what it says about the ready stack is said before it marks the stack ready', announcedFirst, k.said());
-  const marker = openSync(join(k.stackDir, 'postgres.ready'), constants.O_RDONLY | constants.O_NONBLOCK);   // lets the held write through
+  const marker = openSync(held, constants.O_RDONLY | constants.O_NONBLOCK);   // lets the held write through
   await until(() => /supabase-local http:\/\/127\.0\.0\.1/.test(k.said()) && /stop it with/.test(k.said()));
   k.child.kill('SIGTERM');
   await k.ended;
