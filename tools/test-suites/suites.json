@@ -1,0 +1,37 @@
+{
+  "$comment": "THE one declared list of the toolkit's suites. tools/test-suites/run.mjs derives everything from it (README.md says how). A suite is declared once: nothing else repeats its command.",
+  "needs": {
+    "none": { "probe": null },
+    "workspace": { "probe": ["node", "tools/test-suites/probes.mjs", "workspace"] },
+    "network": { "probe": ["node", "tools/test-suites/probes.mjs", "network"] },
+    "docker": { "probe": null, "never": "out of scope for the one-command runner: Docker cannot run where it is started" }
+  },
+  "suites": [
+    { "name": "test-angular-ts-solution", "dir": "tools/test-angular-ts-solution", "command": ["bash", "tools/test-angular-ts-solution/run.sh"], "project": "bespunky-house", "needs": ["network"] },
+    { "name": "test-branches", "dir": "tools/test-branches", "command": ["node", "tools/test-branches/run.mjs"], "project": "bespunky-workflow", "needs": ["none"] },
+    { "name": "test-firebase-tools", "dir": "tools/test-firebase-tools", "command": ["node", "tools/test-firebase-tools/run.mjs"], "project": "bespunky-house", "needs": ["network"] },
+    { "name": "test-generators", "dir": "tools/test-generators", "command": ["node", "tools/test-generators/run.mjs"], "project": "bespunky-house", "needs": ["workspace"] },
+    { "name": "test-layers", "dir": "tools/test-layers", "command": ["node", "tools/test-layers/run.mjs"], "project": "bespunky-house", "needs": ["workspace"] },
+    { "name": "test-migrations", "dir": "tools/test-migrations", "command": ["node", "tools/test-migrations/run.mjs"], "project": "bespunky-house", "needs": ["workspace"] },
+    { "name": "test-mod-brand", "dir": "tools/test-mod-brand", "command": ["node", "tools/test-mod-brand/run.mjs"], "project": "bespunky", "needs": ["none"] },
+    { "name": "test-postgres", "dir": "tools/test-postgres", "command": ["node", "tools/test-postgres/run.mjs"], "project": "bespunky-house", "needs": ["network"] },
+    { "name": "test-scaffold", "dir": "tools/test-scaffold", "command": ["bash", "tools/test-scaffold/run.sh"], "project": "bespunky-house", "needs": ["none"] },
+    { "name": "test-standing", "dir": "tools/test-standing", "command": ["node", "tools/test-standing/run.mjs"], "project": "bespunky-workflow", "needs": ["none"] },
+    { "name": "test-supabase", "dir": "tools/test-supabase", "command": ["node", "tools/test-supabase/run.mjs"], "project": "bespunky-house", "needs": ["network"] },
+    { "name": "test-tips", "dir": "tools/test-tips", "command": ["node", "tools/test-tips/run.mjs"], "project": "bespunky", "needs": ["none"] },
+    { "name": "test-voice", "dir": "tools/test-voice", "command": ["node", "tools/test-voice/run.mjs"], "project": "bespunky-voice", "needs": ["none"] },
+    { "name": "test-suites", "dir": "tools/test-suites", "command": ["node", "tools/test-suites/test/run.mjs"], "project": "bespunky-house", "needs": ["none"] },
+    { "name": "check-descriptions", "dir": "tools/check-descriptions", "command": ["node", "tools/check-descriptions/check.mjs"], "project": "bespunky-house", "needs": ["none"] },
+    { "name": "check-release-invariants", "dir": "tools/check-release-invariants", "command": ["node", "tools/check-release-invariants/check.mjs"], "project": "bespunky-house", "needs": ["none"] },
+    { "name": "check-script-modes", "dir": "tools/check-script-modes", "command": ["node", "tools/check-script-modes/check.mjs"], "project": "bespunky-house", "needs": ["none"] },
+    { "name": "check-runner-image-decisions", "dir": "tools/check-runner-image", "command": ["bash", "tools/check-runner-image/test.sh"], "project": "bespunky-house", "needs": ["none"] },
+    { "name": "check-runner-image", "dir": "tools/check-runner-image", "command": ["bash", "tools/check-runner-image/check.sh"], "project": "bespunky-house", "needs": ["docker"] },
+    { "name": "check-runner-image-e2e", "dir": "tools/check-runner-image", "command": ["bash", "tools/check-runner-image/e2e.sh", "local"], "project": "bespunky-house", "needs": ["docker"] },
+    { "name": "check-runner-image-devcontainer", "dir": "tools/check-runner-image", "command": ["bash", "tools/check-runner-image/devcontainer.sh"], "project": "bespunky-house", "needs": ["docker"] },
+    { "name": "check-runner-image-postgres", "dir": "tools/check-runner-image", "command": ["bash", "tools/check-runner-image/postgres-image.sh"], "project": "bespunky-house", "needs": ["docker"] },
+    { "name": "check-runner-image-supabase", "dir": "tools/check-runner-image", "command": ["bash", "tools/check-runner-image/supabase-image.sh"], "project": "bespunky-house", "needs": ["docker"] }
+  ],
+  "excluded": [
+    { "dir": "tools/test-support", "reason": "shared fixture and compile machinery for test-generators, test-migrations and test-layers (payload.mjs); it has no entry of its own to run" }
+  ]
+}
