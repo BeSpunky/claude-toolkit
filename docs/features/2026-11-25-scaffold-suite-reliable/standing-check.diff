@@ -1,0 +1,36 @@
+# project-standing --json: before and after the status change (task item 3)
+# before: standing.mjs --json at e80d1b3d, before the README row and the two statuses
+# after: the same command after them. The 'now' stamp moves; the two efforts moved to concluded (with the summary and closedAt fields that a concluded effort carries).
+# diff -u before after:
+4c4
+<   "now": 1795673244,
+---
+>   "now": 1795673275,
+1159,1161c1159,1161
+<       "status": "in-flight",
+<       "state": "dormant",
+<       "lastActivity": 1793623395,
+---
+>       "status": "concluded",
+>       "state": "concluded",
+>       "lastActivity": 1795673271,
+1163c1163,1165
+<       "about": "Re-measure the initial-bundle figures the Firebase templates quote, now that new projects are Angular 21, AngularFire 21.0.0, firebase…"
+---
+>       "about": "Re-measure the initial-bundle figures the Firebase templates quote, now that new projects are Angular 21, AngularFire 21.0.0, firebase…",
+>       "summary": "Re-measure the initial-bundle figures the Firebase templates quote, now that new projects are Angular 21, AngularFire 21.0.0, firebase 12.19 and zoneless.",
+>       "closedAt": 1795673271
+1205,1207c1207,1209
+<       "status": "in-flight",
+<       "state": "dormant",
+<       "lastActivity": 1793623483,
+---
+>       "status": "concluded",
+>       "state": "concluded",
+>       "lastActivity": 1795673271,
+1209c1211,1213
+<       "about": "Every Angular library the house creates peers only what it uses, so it passes its own lint from birth."
+---
+>       "about": "Every Angular library the house creates peers only what it uses, so it passes its own lint from birth.",
+>       "summary": "Every Angular library the house creates peers only what it uses, so it passes its own lint from birth.",
+>       "closedAt": 1795673271
