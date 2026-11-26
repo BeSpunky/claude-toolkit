@@ -114,6 +114,25 @@ gone() { for _ in $(seq 1 "${2:-100}"); do kill -0 "$1" 2>/dev/null || return 0;
 exported() { [ -f "$1/.emulator-data/firebase-export-metadata.json" ]; }
 signals() { grep -vx JVM-KILLED "$1/.fake-firebase-signals" | tr '\n' ' ' | sed 's/ $//'; }
 gone_dir() { for _ in $(seq 1 100); do [ -d "$1" ] || return 0; sleep 0.1; done; return 1; }
+# The keeper's pid, from the record it writes in its stack's state dir — WAITED FOR, never assumed. The record is the
+# keeper's own write; `ready` (the suite's line in out.log) only bounds how long the suite took to come up, and its
+# result was never checked, so a slow start went on to read a record that did not exist yet: the pid read was '', and
+# `kill ''` failed the case with "kill: '': not a pid", naming nothing. So: the record, then its pid, each within the
+# deadline every wait here uses, and past it a FAIL that says which of the two never came.
+keeper_pid() {   # keeper_pid <ws> <stack key> — sets KEEPER to the keeper's pid; at the deadline, a named FAIL and status 1
+  local entry="$1/.bespunky/run/$2/detached/emulators.json"
+  KEEPER=''
+  for _ in $(seq 1 100); do [ -f "$entry" ] && break; sleep 0.1; done
+  if [ ! -f "$entry" ]; then ok "$2: the keeper's record was never written ($entry)" 0; return 1; fi
+  for _ in $(seq 1 100); do
+    KEEPER="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid ?? ""))' "$entry" 2>/dev/null)"
+    [[ "$KEEPER" =~ ^[0-9]+$ ]] && return 0
+    sleep 0.1
+  done
+  ok "$2: the keeper's record never named its pid (last read: '$KEEPER', $entry)" 0
+  KEEPER=''
+  return 1
+}
 keeper_gone() {   # the detached keeper finished on its own — it records its result, and (run directly, with no script
   # left to read it) releases the state dir
   for _ in $(seq 1 100); do
@@ -223,8 +242,7 @@ gone "$P" 100
 ok "orphan: a JVM left by a crashed firebase-tools is ended by the keeper, and said so" "$(none_left "$W" && grep -qE 'left [0-9]+ process\(es\) running after firebase-tools exited' "$W/.bespunky/run/logs/firebase@0.emulators.log" && echo 1 || echo 0)"
 W="$(mkws keeperkill)"; P="$(start "$W")"; STARTED+=("$P")
 ready "$W" >/dev/null
-KEEPER="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$W/.bespunky/run/firebase@0/detached/emulators.json")"
-kill -KILL "$KEEPER"; gone "$P" 100
+keeper_pid "$W" firebase@0 && kill -KILL "$KEEPER"; gone "$P" 100
 PS="$(cd "$W" && DEV_OWNER=test node tools/dev/dev.mjs ps 2>&1)"
 ok "orphan: a keeper killed outright leaves the stack ORPHANED (its record the handle), not forgotten" "$(grep -q 'firebase@0 .*ORPHANED' <<<"$PS" && [ "$(fake_procs "$W")" -gt 0 ] && echo 1 || echo 0)"
 OUT="$(cd "$W" && DEV_OWNER=test timeout 30 node tools/dev/dev.mjs stop firebase --offset=0 2>&1)"
@@ -260,9 +278,9 @@ W="$(mkws spared)"; LOCK="$(serve_lock "$W")"
 bash -c 'exec 9<"$0"; flock -s 9; exec -a "node dev.mjs serve" sleep 300' "$LOCK" & LIVE=$!
 P="$(under_engine "$W" "$LIVE")"; STARTED+=("$P")
 ready "$W" >/dev/null
-KEEPER="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pid))' "$W/.bespunky/run/app@0/detached/emulators.json" 2>/dev/null)"
+keeper_pid "$W" app@0
 kill -KILL -- "-$P"
-gone "$KEEPER" 100   # the keeper's last act is its prune: once it is gone, whatever it was going to remove is removed
+[ -n "$KEEPER" ] && gone "$KEEPER" 100   # the keeper's last act is its prune: once it is gone, whatever it was going to remove is removed
 ok "serve live (or a new stack on the key): the keeper leaves its record and state dir" "$([ -f "$W/.bespunky/run/app@0.json" ] && [ -d "$W/.bespunky/run/app@0" ] && echo 1 || echo 0)"
 kill "$LIVE" 2>/dev/null
 

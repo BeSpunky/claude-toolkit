@@ -157,11 +157,16 @@ dirty "$MAIN/.emulator-data"
 reset "$MAIN" >/dev/null; rc=$?
 ok "a running suite of another tree stops nothing here" "$([ "$rc" = 0 ] && [ "$(is "$MAIN/.emulator-data" default-seed)" = 1 ] && echo 1 || echo 0)"
 
-node "$WT/tools/dev/dev.mjs" stop firebase --offset=6000 --worktree="$WT" >/dev/null 2>&1
+# The stop is checked, not assumed: a reset refused afterwards ("a running suite…") once read as a reset fault while the
+# stop's own report — the one thing that says why the stack was still there — went to /dev/null. Not reproduced since
+# (DECISION.md of docs/features/2026-11-25-scaffold-suite-reliable); if it comes back, this line says what the stop said.
+stopped="$(node "$WT/tools/dev/dev.mjs" stop firebase --offset=6000 --worktree="$WT" 2>&1)"; rc=$?
+ok 'dev stop stops the running suite (exit 0)' "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$stopped"
 for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
 ok 'the stopped suite exported, as a stop always does' "$(is "$WT/.emulator-data-6000" 'the session the running suite held')" "$(world "$WT/.emulator-data-6000")"
 out="$(reset "$WT")"; rc=$?
-ok 'once it has stopped, reset goes through, and the world is the seed' "$([ "$rc" = 0 ] && [ "$(is "$WT/.emulator-data-6000" default-seed)" = 1 ] && echo 1 || echo 0)" "$out"
+ok 'once it has stopped, reset goes through, and the world is the seed' "$([ "$rc" = 0 ] && [ "$(is "$WT/.emulator-data-6000" default-seed)" = 1 ] && echo 1 || echo 0)" "$out
+       (the stop before it said: $stopped)"
 
 # ── `ensure`, and the one place both ask where the data is ────────────────────────────────────────
 rm -rf "$WT/.emulator-data-8000"
