@@ -4,9 +4,6 @@
     "build": {
       "cache": true
     },
-    "test": {
-      "cache": true
-    },
     "lint": {
       "cache": true
     }
@@ -33,5 +30,8 @@
     "releaseTag": {
       "pattern": "{projectName}@{version}"
     }
-  }
+  },
+  "plugins": [
+    "./tools/nx-test-suites/plugin.js"
+  ]
 }

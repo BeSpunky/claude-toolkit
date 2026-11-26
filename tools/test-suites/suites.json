@@ -21,6 +21,7 @@
     { "name": "test-tips", "dir": "tools/test-tips", "command": ["node", "tools/test-tips/run.mjs"], "project": "bespunky", "needs": ["none"] },
     { "name": "test-voice", "dir": "tools/test-voice", "command": ["node", "tools/test-voice/run.mjs"], "project": "bespunky-voice", "needs": ["none"] },
     { "name": "test-suites", "dir": "tools/test-suites", "command": ["node", "tools/test-suites/test/run.mjs"], "project": "bespunky-house", "needs": ["none"] },
+    { "name": "test-nx-test-suites", "dir": "tools/nx-test-suites", "command": ["node", "tools/nx-test-suites/test/run.mjs"], "project": "bespunky-house", "needs": ["workspace"] },
     { "name": "check-descriptions", "dir": "tools/check-descriptions", "command": ["node", "tools/check-descriptions/check.mjs"], "project": "bespunky-house", "needs": ["none"] },
     { "name": "check-release-invariants", "dir": "tools/check-release-invariants", "command": ["node", "tools/check-release-invariants/check.mjs"], "project": "bespunky-house", "needs": ["none"] },
     { "name": "check-script-modes", "dir": "tools/check-script-modes", "command": ["node", "tools/check-script-modes/check.mjs"], "project": "bespunky-house", "needs": ["none"] },
