@@ -1,5 +1,6 @@
 ---
 summary: Re-measure the initial-bundle figures the Firebase templates quote, now that new projects are Angular 21, AngularFire 21.0.0, firebase 12.19 and zoneless.
+status: concluded
 ---
 
 # Firebase bundle numbers, re-measured

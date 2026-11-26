@@ -1,5 +1,6 @@
 ---
 summary: Every Angular library the house creates peers only what it uses, so it passes its own lint from birth.
+status: concluded
 ---
 
 # Angular libraries peer what they use
