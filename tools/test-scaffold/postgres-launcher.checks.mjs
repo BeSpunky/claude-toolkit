@@ -458,6 +458,11 @@ const staged = (host, seconds) => {
   writeFileSync(join(sweepHome, hash, 'tree'), `${realpathSync(tree)}\n`);
 };
 writeFileSync(join(bin, 'postgres'), `#!/bin/sh\ncase "$*" in --version) echo 'postgres (PostgreSQL) 18.6'; exit 0 ;; esac\ncat "${clusterAt}/owner" > "${calls}/owner-at-boot"; test -e "${clusterAt}/data/postmaster.pid" && touch "${calls}/pid-at-boot"; exit 3\n`, { mode: 0o755 });
+// …and the probe every start waits on, answering as for a server not up yet ("no response"), so the launcher waits for that
+// server to exit on its own, as it would for a real one. Without it the probe was a refusal (pg_isready is not on PATH) the
+// moment the server was spawned, and the stop that follows a refusal raced the fake to its first line: lost under load, the
+// owner it reads was never read, and the take-over checks failed though the launcher had done everything right.
+writeFileSync(join(bin, 'pg_isready'), `#!/bin/sh\necho '127.0.0.1:45432 - no response'\nexit 2\n`, { mode: 0o755 });
 staged('other-container', 5);
 clearCalls();
 result = serveVerb();
@@ -475,6 +480,7 @@ clearCalls();
 result = serveVerb();
 check('a fresh heartbeat of this very host: no refusal: a launcher killed outright here is recovered', existsSync(join(calls, 'owner-at-boot')), result.stderr);
 rmSync(bin + '/postgres');
+rmSync(bin + '/pg_isready');
 rmSync(sweepHome, { recursive: true, force: true });
 rmSync(join(tree, '.bespunky/run'), { recursive: true, force: true });
 

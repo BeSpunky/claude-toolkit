@@ -1,7 +1,7 @@
 // The Supabase provider's decisions, with no stack: a fake `supabase` on PATH that records its argv and answers as a script says, and a
 // fake `tools/dev/dev.mjs`. Whatever would regress SILENTLY: the pins, a port comparison, what a child is handed, a lock, a refusal.
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -74,18 +74,26 @@ const check = (name, condition, detail = '') => {
   console.log(`  ${condition ? 'ok  ' : 'FAIL'} ${name}${condition ? '' : `: ${detail}`}`);
 };
 
-/** A keeper in a process of its own, fd 3 open, as the engine hands it. Stopped by `stopWith`, or left to end. */
+/**
+ * A keeper in a process of its own, fd 3 open, as the engine hands it. Stopped by `stopWith`, or left to end. `stage` prepares
+ * its stack dir before it starts.
+ *
+ * WHAT IT SAID IS A FILE, NOT A PIPE. A child's write to a file is in the file when the write returns, so what the keeper said
+ * before it wrote its ready marker is readable here the moment the marker is seen. Through a pipe it arrived on this event
+ * loop's own schedule — possibly after the marker was seen — and a check of what was said at ready was a race.
+ */
 const keepers = [];
-function keeper({ env = {}, verb = 'serve' } = {}) {
+function keeper({ env = {}, verb = 'serve', stage = () => {} } = {}) {
   const stackDir = join(scratch, `run-${Math.random().toString(16).slice(2)}`, `postgres@${OFFSET}`);
   mkdirSync(stackDir, { recursive: true });
-  const child = spawn(process.execPath, [join(tree, 'tools/postgres/postgres.mjs'), verb], { cwd: tree, env: baseEnv({ DEV_STACK_DIR: stackDir, DEV_STACK_TMP: scratch, ...shifted, ...env }), stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
+  stage(stackDir);
+  const saidAt = join(dirname(stackDir), 'said.log');
+  const out = openSync(saidAt, 'a');
+  const child = spawn(process.execPath, [join(tree, 'tools/postgres/postgres.mjs'), verb], { cwd: tree, env: baseEnv({ DEV_STACK_DIR: stackDir, DEV_STACK_TMP: scratch, ...shifted, ...env }), stdio: ['ignore', out, out, 'pipe'] });
+  closeSync(out);
   keepers.push(child);
-  let said = '';
-  child.stdout.on('data', (chunk) => (said += chunk));
-  child.stderr.on('data', (chunk) => (said += chunk));
   const ended = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
-  return { child, ended, stackDir, said: () => said, ready: () => existsSync(join(stackDir, 'postgres.ready')) };
+  return { child, ended, stackDir, said: () => readFileSync(saidAt, 'utf8'), ready: () => existsSync(join(stackDir, 'postgres.ready')) };
 }
 const until = async (test, ms = 15_000) => {
   const deadline = Date.now() + ms;
@@ -285,6 +293,23 @@ try {
   k.child.kill('SIGTERM');
   check('a signal stops the stack, exit 0', (await k.ended) === 0 && callsOf('stop').length === 1, k.said());
   check('the lock is let go', !existsSync(join(xdg, 'bespunky/postgres', readdirSync(join(xdg, 'bespunky/postgres'))[0], 'supabase.lock')));
+
+  // What it says about the ready stack is said BEFORE the marker everything acts on. Deterministic, never timing: the marker
+  // is a FIFO nobody reads, so the keeper's write of it blocks until this side opens it — whatever was said by then was said
+  // first. Marked first, the announcement can never come while the write is held, and the check fails.
+  respondsWell();
+  clearCalls();
+  k = keeper({ stage: (stackDir) => spawnSync('mkfifo', [join(stackDir, 'postgres.ready')]) });
+  // Without the FIFO the marker is a plain file, its write never held, and the check below would pass proving nothing.
+  const held = join(k.stackDir, 'postgres.ready');
+  check('…its marker is held: a FIFO nobody reads', existsSync(held) && statSync(held).isFIFO(), 'mkfifo made no FIFO');
+  const announcedFirst = await until(() => /supabase-local http:\/\/127\.0\.0\.1/.test(k.said()));
+  check('what it says about the ready stack is said before it marks the stack ready', announcedFirst, k.said());
+  const marker = openSync(held, constants.O_RDONLY | constants.O_NONBLOCK);   // lets the held write through
+  await until(() => /supabase-local http:\/\/127\.0\.0\.1/.test(k.said()) && /stop it with/.test(k.said()));
+  k.child.kill('SIGTERM');
+  await k.ended;
+  closeSync(marker);
 
   // Reported ports other than asked: moved once, then refused, never believed.
   respondsWell();

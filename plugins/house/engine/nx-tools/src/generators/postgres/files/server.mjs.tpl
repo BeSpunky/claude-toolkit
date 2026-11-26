@@ -37,6 +37,17 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const log = (line) => console.log(`[postgres] ${line}`);
 
+/**
+ * Declare a stack ready: say what is ready and how to use it, THEN write the marker. The marker is the signal everything else
+ * acts on (the engine's ready bound, its dependents, whoever is watching the stack dir), so whatever the launcher has to say
+ * about the ready stack must already be said when it appears. Marked first, a reader of the marker could find the stack
+ * ready and its announcement not yet written: the race a check saw once as a missing "names the local MCP" line.
+ */
+export function declareReady(stackDir, lines) {
+  for (const line of lines) log(line);
+  writeFileSync(join(stackDir, READY_MARKER), `${new Date().toISOString()}\n`);
+}
+
 /** A live server's data directory is its cwd, a real path. Any other meaning of a pid (reused, or another stack's) is not this one. */
 function serverOf(data) {
   let pid;
@@ -363,9 +374,7 @@ export async function serve({ resetThenStop = false } = {}) {
         log(`${key} is reset: migrated and seeded from nothing. Its server was started for this, and stops now.`);
         stop();
       } else {
-        writeFileSync(join(stackDir, READY_MARKER), `${new Date().toISOString()}\n`);
-        log(`ready on 127.0.0.1:${port}: ${localUrl(port)}`);
-        log(`stop it with: tools/dev/dev stop ${key.split('@')[0]} --offset=${key.split('@')[1]}`);
+        declareReady(stackDir, [`ready on 127.0.0.1:${port}: ${localUrl(port)}`, `stop it with: tools/dev/dev stop ${key.split('@')[0]} --offset=${key.split('@')[1]}`]);
       }
     }
   } catch (error) {

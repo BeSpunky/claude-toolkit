@@ -12,8 +12,8 @@
 import { spawn } from 'node:child_process';
 import { existsSync, fstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
-import { ROOT, READY_MARKER, Refusal, treeHome, verbCommand } from './layout.mjs';
-import { assertNotHeldElsewhere, holdOwnership } from './server.mjs';
+import { ROOT, Refusal, treeHome, verbCommand } from './layout.mjs';
+import { assertNotHeldElsewhere, declareReady, holdOwnership } from './server.mjs';
 import { runningStacks } from './stack.mjs';
 import { ALLOCATES_FROM, allStacks, assertNoEnvFileOverride, assertPinnedVersion, checkMigrations, cli, dbQuery, destroyStack, endCliCall, hasMigrations, installArtifacts, migrationsEnabled, ownerRunning, portGap, reasonOf, requestedPorts, seedsEnabled, startStack, stackStatus, stopStack, supabaseHome } from './supabase-cli.mjs';
 import { withStackLock as lockedBy } from './supabase-lock.mjs';
@@ -227,7 +227,14 @@ export async function serve({ resetThenStop = false } = {}) {
       return 0;
     }
     await applyPending(key);
-    if (!stopAsked) writeFileSync(join(stackDir, READY_MARKER), `${new Date().toISOString()}\n`);
+    if (!stopAsked) {
+      declareReady(stackDir, [
+        `ready on 127.0.0.1:${requested.postgres}; API ${startedStack.apiUrl}. Keys: supabase status -o env.`,
+        ...(startedStack.mcpUrl ? [`this stack's own MCP, local only: claude mcp add --transport http --scope local supabase-local ${startedStack.mcpUrl}`] : []),
+        ...(realpathSync(ROOT).startsWith('/tmp/') ? ['this tree is under /tmp, where the Edge Runtime sees a filesystem of its own: every function here answers 404 "Function not found". Move the tree to serve them.'] : []),
+        `stop it with: tools/dev/dev stop ${key.split('@')[0]} --offset=${key.split('@')[1]}`,
+      ]);
+    }
   } catch (error) {
     // The first error is the cause: a stop failing after it is an addition, never a replacement.
     const notStopped = await stop().then(() => undefined, (failure) => failure);
@@ -236,12 +243,6 @@ export async function serve({ resetThenStop = false } = {}) {
     if (cause instanceof Refusal) cause.message += coda;
     else console.error(`[postgres]${coda}`);
     throw cause;
-  }
-  if (!stopAsked) {
-    log(`ready on 127.0.0.1:${requested.postgres}; API ${startedStack.apiUrl}. Keys: supabase status -o env.`);
-    if (startedStack.mcpUrl) log(`this stack's own MCP, local only: claude mcp add --transport http --scope local supabase-local ${startedStack.mcpUrl}`);
-    if (realpathSync(ROOT).startsWith('/tmp/')) log(`this tree is under /tmp, where the Edge Runtime sees a filesystem of its own: every function here answers 404 "Function not found". Move the tree to serve them.`);
-    log(`stop it with: tools/dev/dev stop ${key.split('@')[0]} --offset=${key.split('@')[1]}`);
   }
 
   const { id } = startedStack;
