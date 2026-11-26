@@ -16,3 +16,5 @@ evidence, not committed). Box: 4 cores. `+wip` = run on uncommitted changes to t
 | 9 | final | 0b8b5d93 | 2026-11-26T00:46:08Z | 339s (5m39s) | 0 | — |
 | 10 | final | 0b8b5d93 | 2026-11-26T00:51:47Z | 374s (6m14s) | 0 | — |
 | 11 | final | 0b8b5d93 | 2026-11-26T00:58:01Z | 337s (5m37s) | 0 | — |
+
+Runs 7–11 are at 0b8b5d93, the last commit to change code. The commits after it change only CLAUDE.md, tools/test-scaffold/README.md and this package (`git diff --stat 0b8b5d93 -- tools plugins` lists only the README).
