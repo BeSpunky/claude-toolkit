@@ -11,3 +11,8 @@ evidence, not committed). Box: 4 cores. `+wip` = run on uncommitted changes to t
 | 4 | baseline-597d1aa7 | 597d1aa7 | 2026-11-25T23:46:12Z | 343s (5m43s) | 0 | — |
 | 5 | baseline-597d1aa7 | 597d1aa7 | 2026-11-25T23:51:55Z | 333s (5m33s) | 0 | — |
 | 6 | baseline-597d1aa7 | 597d1aa7 | 2026-11-25T23:57:28Z | 341s (5m41s) | 0 | — |
+| 7 | final | 0b8b5d93 | 2026-11-26T00:34:42Z | 333s (5m33s) | 0 | — |
+| 8 | final | 0b8b5d93 | 2026-11-26T00:40:15Z | 353s (5m53s) | 0 | — |
+| 9 | final | 0b8b5d93 | 2026-11-26T00:46:08Z | 339s (5m39s) | 0 | — |
+| 10 | final | 0b8b5d93 | 2026-11-26T00:51:47Z | 374s (6m14s) | 0 | — |
+| 11 | final | 0b8b5d93 | 2026-11-26T00:58:01Z | 337s (5m37s) | 0 | — |
