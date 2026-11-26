@@ -4,7 +4,8 @@
 bash tools/test-scaffold/run.sh
 ```
 
-Runs in about a second, needs nothing installed (bash + git), and is safe to run anywhere — every fixture is
+Took 5 min 33 s – 6 min 14 s over five full runs on 2026-11-26 on a 4-core machine (it varies by machine), needs
+bash, git and node and nothing else installed, and is safe to run anywhere — every fixture is
 a throwaway repository under `mktemp -d`, and nothing touches this workspace.
 
 ## Why this exists

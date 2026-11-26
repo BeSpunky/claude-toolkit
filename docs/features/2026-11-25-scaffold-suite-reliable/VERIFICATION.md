@@ -16,3 +16,12 @@ All in the sealed box (4 cores), on the commit named. Full runs of the scaffold 
 
 The 35 generator cases skipped are skipped, not passed: they need `@nx/js` / `@nx/angular`, optional peers that are
 not installed. Every suite ran; none is counted that could not run.
+
+## Each changed test file alone (item 7) — at 0344b373, 2026-11-26T01:11:22Z
+
+| Command | Exit | Time | Checks |
+| --- | --- | --- | --- |
+| `bash tools/test-scaffold/emulators-stop.test.sh` | 0 | 84 s | 35 ok, 0 FAIL |
+| `bash tools/test-scaffold/emulator-reset.test.sh` | 0 | 6 s | 24 ok, 0 FAIL |
+| `bash tools/test-scaffold/postgres-launcher.test.sh` | 0 | 9 s | 134 ok, 0 FAIL |
+| `bash tools/test-scaffold/supabase-launcher.test.sh` | 0 | 30 s | 153 ok, 0 FAIL |

@@ -70,3 +70,15 @@ summary: The scaffold suite fails now and then for no real reason (emulator-stop
 
 - **The earlier reading of "cross-file leaked state" did not hold.** Both faults it was offered for are timing under
   load inside one file: postgres-launcher's (found and fixed, above) and emulator-reset's (seen once alone).
+
+## Outcome (2026-11-26)
+
+- Five consecutive full runs at 0b8b5d93 (runs 7–11 in EVIDENCE.md) all exited 0, in 333–374 s
+  (5 min 33 s – 6 min 14 s) on this 4-core box. CLAUDE.md and tools/test-scaffold/README.md now give that figure,
+  dated, and say it varies by machine; the README's "needs nothing installed (bash + git)" was wrong too (the suite
+  runs node throughout), and now says bash, git and node.
+- Fixed at the cause: emulators-stop (test), the supabase/postgres ready order (product + test), postgres-launcher's
+  take-over cases (test). Not fixed, because not found: emulator-reset's "stack left running" — the test now reports
+  the stop's own output if it comes back.
+- Nothing versioned or released; no CI workflow changed. The engine change is in generator-owned templates that an
+  upgrade rewrites, so it owes no migration. Shipping it needs a release, which is Shy's call.
