@@ -26,3 +26,15 @@ marker) and `supabase/files/supabase-keeper.mjs.tpl` (calls it instead of writin
 
 So no rung is owed. The root `package.json` pin (`@bespunky/nx-tools` 0.56.1) is this repo's own consumer install of the
 released payload and moves with its next self-upgrade, as at the 0.56.1 bump (`41d2aa3`).
+
+## Verification, 2026-11-27, on the host (Ubuntu 26.04 "resolute", not the devcontainer)
+
+- `node tools/check-release-invariants/check.mjs` → exit 0 (11 plugins, payload 0.56.2).
+- `yarn test` → exit 1. Passed: every suite but four. Failed, each on something this host lacks, not on the bump:
+  `test-postgres` (exit 2: no Postgres closure for this Debian-less host), `test-supabase` (3 of 160: `psql` not on PATH),
+  `test-angular-ts-solution` (`create-nx-workspace` could not resolve `@nx/workspace:preset` under npm 11.19),
+  `test-scaffold` (1 FAIL, "kill: the suite's own export lines streamed through"; a re-run alone passed all 30 files: flaky).
+- `yarn nx test bespunky-house`, `yarn nx run-many -t test` → exit 1 before running: Nx's lock file under the main checkout's
+  `.nx/workspace-data` is root-owned (EACCES). Their suites are the same ones as above.
+
+Not landed: the four commands were the condition. They need the devcontainer (or wherever `273e` runs) to go green.
