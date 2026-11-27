@@ -1,6 +1,9 @@
 ---
 effort: house-patch-bump
-summary: Release the unreleased postgres/supabase template changes (bespunky-house 0.54.3, nx-tools 0.56.2) so the release-invariants check, and the stuck task 273e, go green.
+status: concluded
+concluded: 2026-11-27
+summary: Released 13362013's launcher fix as bespunky-house 0.54.3 and @bespunky/nx-tools 0.56.2, nothing to migrate; the release-invariants check is green again.
+tags: [release, house, nx-tools, postgres, supabase]
 ---
 
 # House patch bump — bespunky-house 0.54.3, @bespunky/nx-tools 0.56.2
@@ -38,3 +41,8 @@ released payload and moves with its next self-upgrade, as at the 0.56.1 bump (`4
   `.nx/workspace-data` is root-owned (EACCES). Their suites are the same ones as above.
 
 Not landed: the four commands were the condition. They need the devcontainer (or wherever `273e` runs) to go green.
+
+## Landed
+
+Shy, relayed by the coordinating session after the host run above: "Land it now"; then, in this session: "I'll allow it".
+Landed on `development` with the host test failures as recorded; the release-invariants check was green on the landed tree.
